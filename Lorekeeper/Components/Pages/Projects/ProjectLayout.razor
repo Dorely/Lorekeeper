@@ -17,12 +17,9 @@ else if (Project is null)
 else
 {
     <div class="project-shell">
-        <div class="project-titlebar d-flex align-items-center justify-content-between mb-2">
-            <div>
-                <a href="/" class="text-muted small text-decoration-none">&larr; Projects</a>
-                <h4 class="mb-0">@Project.Name</h4>
-            </div>
-            <div class="text-muted small">/@Project.Slug</div>
+        <div class="project-titlebar d-flex align-items-center mb-2">
+            <a href="/" class="btn btn-sm btn-outline-secondary me-3">&larr; Projects</a>
+            <h4 class="mb-0">@Project.Name</h4>
         </div>
 
         <ul class="nav nav-tabs project-tabs mb-3">
