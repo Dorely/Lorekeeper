@@ -1,0 +1,108 @@
+.editor-grid {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr) minmax(220px, 1.5fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+        "graph editor context"
+        "console console actions";
+    gap: 0.75rem;
+    height: calc(100vh - 220px);
+    min-height: 480px;
+}
+
+.panel {
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.375rem;
+    padding: 0.75rem;
+    background: var(--bs-body-bg, #fff);
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.panel-title {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.panel-graph { grid-area: graph; }
+.panel-editor { grid-area: editor; }
+.panel-context { grid-area: context; }
+.panel-console { grid-area: console; }
+.panel-actions { grid-area: actions; }
+
+.drilldown-section + .drilldown-section { margin-top: 0.75rem; }
+
+.drilldown-heading {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--bs-emphasis-color, #212529);
+    margin-bottom: 0.25rem;
+}
+
+.drilldown-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.drilldown-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    padding: 0.15rem 0.4rem;
+    border-radius: 0.25rem;
+    color: inherit;
+    font-size: 0.875rem;
+}
+
+.drilldown-item:hover {
+    background: var(--bs-tertiary-bg, #f1f3f5);
+}
+
+.drilldown-item.active {
+    background: var(--bs-primary-bg-subtle, #cfe2ff);
+    color: var(--bs-primary-text-emphasis, #052c65);
+    font-weight: 600;
+}
+
+.chapter-title {
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+
+.chapter-body {
+    flex: 1 1 auto;
+    resize: none;
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.context-block + .context-block { margin-top: 0.75rem; }
+
+.context-heading {
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-bottom: 0.25rem;
+}
+
+.context-block ul {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.85rem;
+}
+
+.context-focus {
+    background: var(--bs-tertiary-bg, #f1f3f5);
+    border-radius: 0.25rem;
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.5rem;
+}

@@ -1,0 +1,151 @@
+@page "/projects/{Slug}/editor"
+@rendermode InteractiveServer
+
+<PageTitle>Editor</PageTitle>
+
+<ProjectLayout Slug="@Slug" Tab="editor">
+    <div class="editor-grid">
+        <aside class="panel panel-graph">
+            <h6 class="panel-title">Story Graph</h6>
+
+            @foreach (var group in _drilldown)
+            {
+                <div class="drilldown-section">
+                    <div class="drilldown-heading">@group.Title</div>
+                    <ul class="drilldown-list">
+                        @foreach (var item in group.Items)
+                        {
+                            <li>
+                                <button type="button"
+                                        class="drilldown-item @(IsSelected(group.Title, item) ? "active" : "")"
+                                        @onclick="() => Select(group.Title, item)">
+                                    @item
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        </aside>
+
+        <section class="panel panel-editor">
+            <input type="text" class="form-control chapter-title" @bind="_chapterTitle"
+                   @bind:event="oninput" placeholder="Chapter title" />
+            <textarea class="form-control chapter-body" @bind="_chapterBody"
+                      @bind:event="oninput"
+                      placeholder="Start writing your chapter…"></textarea>
+        </section>
+
+        <aside class="panel panel-context">
+            <h6 class="panel-title">Context Feed</h6>
+
+            @if (_selectedKind is not null && _selectedItem is not null)
+            {
+                <div class="context-focus">
+                    <div class="small text-muted">Focused</div>
+                    <div class="fw-semibold">@_selectedKind: @_selectedItem</div>
+                </div>
+            }
+
+            <div class="context-block">
+                <div class="context-heading">Character: Thrall</div>
+                <ul>
+                    <li>Honorable, conflicted</li>
+                    <li>Recently injured</li>
+                </ul>
+            </div>
+            <div class="context-block">
+                <div class="context-heading">Location: Orgrimmar</div>
+                <ul>
+                    <li>War-torn</li>
+                </ul>
+            </div>
+            <div class="context-block">
+                <div class="context-heading">Events</div>
+                <ul>
+                    <li>Siege of Razor Hill</li>
+                </ul>
+            </div>
+            <div class="context-block">
+                <div class="context-heading">Style</div>
+                <div class="small">User Sample Loaded &middot; Tone: Gritty / introspective</div>
+            </div>
+        </aside>
+
+        <section class="panel panel-console">
+            <h6 class="panel-title">AI Console</h6>
+            <div class="d-flex gap-2">
+                <input type="text" class="form-control" @bind="_consoleInput"
+                       @bind:event="oninput" placeholder="> Continue scene with tension between Thrall and Garrosh" />
+                <button type="button" class="btn btn-primary" @onclick="SendConsole">Send</button>
+            </div>
+            @if (!string.IsNullOrEmpty(_lastCommand))
+            {
+                <div class="small text-muted mt-2">Last (no-op): @_lastCommand</div>
+            }
+        </section>
+
+        <aside class="panel panel-actions">
+            <h6 class="panel-title">Actions</h6>
+            <div class="d-grid gap-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        @onclick='() => Action("Check Consistency")'>Check Consistency</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        @onclick='() => Action("Update Memory")'>Update Memory</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        @onclick='() => Action("Show Prompt")'>Show Prompt</button>
+            </div>
+            @if (!string.IsNullOrEmpty(_lastAction))
+            {
+                <div class="small text-muted mt-2">Last: @_lastAction</div>
+            }
+        </aside>
+    </div>
+</ProjectLayout>
+
+@code {
+    [Parameter] public string Slug { get; set; } = string.Empty;
+
+    private record DrilldownSection(string Title, string[] Items);
+
+    private readonly DrilldownSection[] _drilldown =
+    [
+        new("Characters", ["Thrall", "Jaina", "Garrosh"]),
+        new("Locations", ["Orgrimmar", "Durotar"]),
+        new("Events", ["Siege", "Betrayal"]),
+    ];
+
+    private string _chapterTitle = "Chapter 3: \"Broken Oaths\"";
+    private string _chapterBody = "Thrall stood at the gates...\n";
+    private string _consoleInput = string.Empty;
+    private string? _lastCommand;
+    private string? _lastAction;
+    private string? _selectedKind;
+    private string? _selectedItem;
+
+    private bool IsSelected(string kind, string item) =>
+        _selectedKind == kind && _selectedItem == item;
+
+    private void Select(string kind, string item)
+    {
+        if (IsSelected(kind, item))
+        {
+            _selectedKind = null;
+            _selectedItem = null;
+        }
+        else
+        {
+            _selectedKind = kind;
+            _selectedItem = item;
+        }
+    }
+
+    private void SendConsole()
+    {
+        if (string.IsNullOrWhiteSpace(_consoleInput)) return;
+        _lastCommand = _consoleInput.Trim();
+        _consoleInput = string.Empty;
+    }
+
+    private void Action(string name) => _lastAction = name;
+}

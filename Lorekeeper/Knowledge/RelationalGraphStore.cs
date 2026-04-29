@@ -12,7 +12,7 @@ namespace Lorekeeper.Knowledge;
 /// <para>
 /// Design constraints any future backend must honor:
 /// <list type="bullet">
-///   <item><c>UpsertNode</c> identity is <c>(NodeType, Key)</c>; properties merge-replace.</item>
+///   <item><c>UpsertNode</c> identity is <c>(ProjectId, NodeType, Key)</c>; properties merge-replace.</item>
 ///   <item><c>UpsertEdge</c> identity is <c>(FromNodeId, ToNodeId, EdgeType)</c>.</item>
 ///   <item>Removing a node cascades its edges.</item>
 ///   <item>Traversal honours direction + edge-type filters and stops at <c>Depth</c> hops.</item>
@@ -24,17 +24,19 @@ public class RelationalGraphStore(
     IGraphEdgeRepository edges) : IGraphStore
 {
     public async Task<GraphNode> UpsertNodeAsync(
+        Guid projectId,
         string nodeType,
         string key,
         string? label = null,
         IDictionary<string, object?>? properties = null,
         CancellationToken cancellationToken = default)
     {
-        var existing = await nodes.FindAsync(nodeType, key, cancellationToken);
+        var existing = await nodes.FindAsync(projectId, nodeType, key, cancellationToken);
         if (existing is null)
         {
             var node = new GraphNode
             {
+                ProjectId = projectId,
                 NodeType = nodeType,
                 Key = key,
                 Label = label,
@@ -102,8 +104,8 @@ public class RelationalGraphStore(
     public Task<GraphNode?> GetNodeAsync(long nodeId, CancellationToken cancellationToken = default) =>
         nodes.GetByIdAsync(nodeId, cancellationToken);
 
-    public Task<GraphNode?> FindNodeAsync(string nodeType, string key, CancellationToken cancellationToken = default) =>
-        nodes.FindAsync(nodeType, key, cancellationToken);
+    public Task<GraphNode?> FindNodeAsync(Guid projectId, string nodeType, string key, CancellationToken cancellationToken = default) =>
+        nodes.FindAsync(projectId, nodeType, key, cancellationToken);
 
     public async Task<IReadOnlyList<GraphNode>> GetNeighborsAsync(
         long nodeId,

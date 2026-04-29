@@ -8,8 +8,8 @@ public class GraphNodeRepository(AppDbContext db) : IGraphNodeRepository
     public Task<GraphNode?> GetByIdAsync(long id, CancellationToken cancellationToken = default) =>
         db.GraphNodes.FirstOrDefaultAsync(n => n.Id == id, cancellationToken);
 
-    public Task<GraphNode?> FindAsync(string nodeType, string key, CancellationToken cancellationToken = default) =>
-        db.GraphNodes.FirstOrDefaultAsync(n => n.NodeType == nodeType && n.Key == key, cancellationToken);
+    public Task<GraphNode?> FindAsync(Guid projectId, string nodeType, string key, CancellationToken cancellationToken = default) =>
+        db.GraphNodes.FirstOrDefaultAsync(n => n.ProjectId == projectId && n.NodeType == nodeType && n.Key == key, cancellationToken);
 
     public async Task<List<GraphNode>> GetByIdsAsync(IEnumerable<long> ids, CancellationToken cancellationToken = default)
     {

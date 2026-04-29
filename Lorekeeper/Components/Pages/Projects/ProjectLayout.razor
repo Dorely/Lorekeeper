@@ -1,0 +1,69 @@
+@using Lorekeeper.Models
+@using Lorekeeper.Projects
+@inject IProjectService Projects
+@inject NavigationManager Nav
+
+@if (_loading)
+{
+    <p class="text-muted"><em>Loading project…</em></p>
+}
+else if (Project is null)
+{
+    <div class="alert alert-warning">
+        <strong>Project not found.</strong>
+        <a href="/" class="alert-link ms-2">Back to projects</a>
+    </div>
+}
+else
+{
+    <div class="project-shell">
+        <div class="project-titlebar d-flex align-items-center justify-content-between mb-2">
+            <div>
+                <a href="/" class="text-muted small text-decoration-none">&larr; Projects</a>
+                <h4 class="mb-0">@Project.Name</h4>
+            </div>
+            <div class="text-muted small">/@Project.Slug</div>
+        </div>
+
+        <ul class="nav nav-tabs project-tabs mb-3">
+            @foreach (var t in Tabs)
+            {
+                <li class="nav-item">
+                    <a class="nav-link @(string.Equals(t.Key, Tab, StringComparison.OrdinalIgnoreCase) ? "active" : "")"
+                       href="/projects/@Project.Slug/@t.Key">@t.Label</a>
+                </li>
+            }
+        </ul>
+
+        <CascadingValue Value="Project">
+            @ChildContent
+        </CascadingValue>
+    </div>
+}
+
+@code {
+    private static readonly (string Key, string Label)[] Tabs =
+    [
+        ("editor", "Editor"),
+        ("graph", "Graph"),
+        ("ingest", "Ingest"),
+        ("outline", "Outline"),
+    ];
+
+    [Parameter] public string Slug { get; set; } = string.Empty;
+    [Parameter] public string Tab { get; set; } = "editor";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    public Project? Project { get; private set; }
+    private bool _loading = true;
+    private string? _loadedSlug;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedSlug == Slug) return;
+        _loading = true;
+        Project = await Projects.GetBySlugAsync(Slug);
+        _loadedSlug = Slug;
+        _loading = false;
+    }
+}

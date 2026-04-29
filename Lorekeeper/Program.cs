@@ -4,6 +4,7 @@ using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Projects;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,6 +19,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddLorekeeperPersistence(builder.Configuration);
 builder.Services.AddScoped<ILlmProviderRepository, LlmProviderRepository>();
 builder.Services.AddScoped<IOAuthTokenRepository, OAuthTokenRepository>();
+builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
 builder.Services.AddScoped<IGraphNodeRepository, GraphNodeRepository>();
 builder.Services.AddScoped<IGraphEdgeRepository, GraphEdgeRepository>();
 
@@ -29,6 +31,9 @@ builder.Services.AddScoped<IGraphStore, RelationalGraphStore>();
 builder.Services.AddScoped<IEmbeddingService, OllamaEmbeddingService>();
 builder.Services.AddScoped<ILlmProviderService, LlmProviderService>();
 builder.Services.AddScoped<ICodexAuthService, CodexAuthService>();
+
+// Projects
+builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
 
 var app = builder.Build();

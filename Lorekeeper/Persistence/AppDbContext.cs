@@ -10,11 +10,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 {
     public DbSet<LlmProvider> LlmProviders => Set<LlmProvider>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
+    public DbSet<Project> Projects => Set<Project>();
     public DbSet<GraphNode> GraphNodes => Set<GraphNode>();
     public DbSet<GraphEdge> GraphEdges => Set<GraphEdge>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Project>(entity =>
+        {
+            entity.HasIndex(e => e.Slug).IsUnique();
+        });
+
         modelBuilder.Entity<LlmProvider>(entity =>
         {
             entity.HasIndex(e => e.Name).IsUnique();
@@ -47,8 +53,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<GraphNode>(entity =>
         {
-            entity.HasIndex(e => new { e.NodeType, e.Key }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.NodeType, e.Key }).IsUnique();
             entity.HasIndex(e => e.NodeType);
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.Nodes)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             entity.Property(e => e.Properties)
                 .HasColumnType("TEXT")

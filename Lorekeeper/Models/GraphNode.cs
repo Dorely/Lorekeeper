@@ -8,10 +8,14 @@ public class GraphNode
 {
     public long Id { get; set; }
 
+    /// <summary>Owning project. Nodes are deleted when their project is deleted.</summary>
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
     /// <summary>Caller-defined node category (Character, Location, Event, Lore, ...).</summary>
     public required string NodeType { get; set; }
 
-    /// <summary>Stable identifier within <see cref="NodeType"/>. Unique together with <see cref="NodeType"/>.</summary>
+    /// <summary>Stable identifier within (<see cref="ProjectId"/>, <see cref="NodeType"/>).</summary>
     public required string Key { get; set; }
 
     public string? Label { get; set; }

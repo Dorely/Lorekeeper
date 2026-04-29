@@ -42,6 +42,7 @@ public sealed record GraphPathHop(GraphEdge Edge, GraphNode Node);
 public interface IGraphStore
 {
     Task<GraphNode> UpsertNodeAsync(
+        Guid projectId,
         string nodeType,
         string key,
         string? label = null,
@@ -59,7 +60,7 @@ public interface IGraphStore
     Task RemoveEdgeAsync(long edgeId, CancellationToken cancellationToken = default);
 
     Task<GraphNode?> GetNodeAsync(long nodeId, CancellationToken cancellationToken = default);
-    Task<GraphNode?> FindNodeAsync(string nodeType, string key, CancellationToken cancellationToken = default);
+    Task<GraphNode?> FindNodeAsync(Guid projectId, string nodeType, string key, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<GraphNode>> GetNeighborsAsync(
         long nodeId,

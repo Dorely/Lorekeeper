@@ -1,0 +1,15 @@
+@page "/projects/{Slug}/outline"
+@rendermode InteractiveServer
+
+<PageTitle>Outline</PageTitle>
+
+<ProjectLayout Slug="@Slug" Tab="outline">
+    <div class="alert alert-secondary">
+        <strong>Outline editor</strong>
+        <div class="small text-muted">Coming soon.</div>
+    </div>
+</ProjectLayout>
+
+@code {
+    [Parameter] public string Slug { get; set; } = string.Empty;
+}

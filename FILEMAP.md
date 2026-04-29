@@ -47,9 +47,19 @@
 
 | File | Description |
 |------|-------------|
-| `Home.razor` | Landing page at `/`. |
+| `Home.razor` | Project picker at `/` — lists projects, create/rename/delete-with-confirm; deletes cascade to graph + vector chunks via `IProjectService`. |
 | `Error.razor` | Error page rendered by exception handler middleware. |
 | `NotFound.razor` | 404 page wired through `UseStatusCodePagesWithReExecute`. |
+
+### Components/Pages/Projects/
+
+| File | Description |
+|------|-------------|
+| `ProjectLayout.razor` | Shared shell for project workspace pages: loads project by slug, renders title + horizontal tab strip (Editor / Graph / Ingest / Outline), exposes `Project` via `CascadingValue`. |
+| `EditorPage.razor` (+ `.razor.css`) | Editor tab at `/projects/{Slug}/editor`. CSS-grid 3-column layout: Story Graph drilldown (hardcoded Characters/Locations/Events), chapter title + textarea, Context Feed, plus bottom AI Console + Actions row. UI is non-functional. |
+| `GraphPage.razor` | Graph tab at `/projects/{Slug}/graph`. Placeholder. |
+| `IngestPage.razor` | Ingest tab at `/projects/{Slug}/ingest`. Placeholder. |
+| `OutlinePage.razor` | Outline tab at `/projects/{Slug}/outline`. Placeholder. |
 
 ### Components/Pages/Settings/
 
@@ -64,16 +74,17 @@
 | `AuthType.cs` | Enum: None, ApiKey, OAuth. |
 | `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing via `CredentialSourceId`. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
-| `GraphNode.cs` | Generic graph node: `(NodeType, Key)` unique, JSON properties bag. |
+| `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; static `ScopeKey(Guid)` produces the vector-store partition key (`project:{id:N}`). |
+| `GraphNode.cs` | Generic graph node: `(ProjectId, NodeType, Key)` unique, JSON properties bag. Cascade-deleted with its `Project`. |
 | `GraphEdge.cs` | Directed edge between graph nodes with type and JSON properties. |
 
 ### Persistence/
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context. `LlmProviders`, `OAuthTokens`, `GraphNodes`, `GraphEdges`. JSON value converter for property bags. |
+| `AppDbContext.cs` | EF Core context. `LlmProviders`, `OAuthTokens`, `Projects`, `GraphNodes`, `GraphEdges`. JSON value converter for property bags. Cascade `Project → GraphNode`. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future). |
-| `Migrations/` | EF Core migrations (initial: `InitialSchema`). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, `AddProjects`). |
 
 ### Persistence/Repositories/
 
@@ -81,7 +92,8 @@
 |------|-------------|
 | `ILlmProviderRepository.cs` / `LlmProviderRepository.cs` | CRUD + atomic `SetDefaultAsync` for `LlmProvider`. |
 | `IOAuthTokenRepository.cs` / `OAuthTokenRepository.cs` | Latest/valid token lookup + replace-for-provider. |
-| `IGraphNodeRepository.cs` / `GraphNodeRepository.cs` | Node CRUD plus `Find(nodeType, key)`. |
+| `IProjectRepository.cs` / `ProjectRepository.cs` | Project CRUD; slug uniqueness check; ordered list by `UpdatedAt`. |
+| `IGraphNodeRepository.cs` / `GraphNodeRepository.cs` | Node CRUD plus project-scoped `Find(projectId, nodeType, key)`. |
 | `IGraphEdgeRepository.cs` / `GraphEdgeRepository.cs` | Edge CRUD plus directional adjacency query. Defines `EdgeDirection` enum. |
 
 ### Knowledge/
@@ -110,6 +122,12 @@
 | File | Description |
 |------|-------------|
 | `CodexOAuthEndpoints.cs` | Minimal-API endpoints: `GET /auth/start/{providerId}` and `GET /auth/callback`. |
+
+### Projects/
+
+| File | Description |
+|------|-------------|
+| `IProjectService.cs` / `ProjectService.cs` | Project CRUD facade. `CreateAsync` slugifies the name (collision-free via `-2`/`-3` suffix). `DeleteAsync` wipes vector chunks (`IVectorStore.DeleteByScopeAsync`) before EF-cascading the project + child graph rows. Slug stable across renames. |
 
 ### wwwroot/
 

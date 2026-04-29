@@ -1,7 +1,215 @@
 ﻿@page "/"
+@using Lorekeeper.Models
+@using Lorekeeper.Projects
+@rendermode InteractiveServer
+@inject IProjectService Projects
+@inject NavigationManager Nav
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Projects</PageTitle>
 
-<h1>Hello, world!</h1>
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h3 class="mb-0">Projects</h3>
+    @if (!_creating)
+    {
+        <button type="button" class="btn btn-primary" @onclick="StartCreate">+ New Project</button>
+    }
+</div>
 
-Welcome to your new app.
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        @_error
+        <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+    </div>
+}
+
+@if (_creating)
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <h6 class="card-title">Create project</h6>
+            <div class="d-flex gap-2 align-items-end">
+                <div class="flex-grow-1">
+                    <label class="form-label form-label-sm">Name</label>
+                    <input class="form-control" @bind="_newName" @bind:event="oninput"
+                           @onkeyup="OnCreateKeyUp" placeholder="e.g. Ashes of the Horde" />
+                </div>
+                <button type="button" class="btn btn-success"
+                        disabled="@(string.IsNullOrWhiteSpace(_newName))"
+                        @onclick="CreateAsync">Create</button>
+                <button type="button" class="btn btn-outline-secondary" @onclick="CancelCreate">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_projects is null)
+{
+    <p class="text-muted"><em>Loading…</em></p>
+}
+else if (_projects.Count == 0)
+{
+    <div class="alert alert-info">
+        No projects yet. Click <strong>+ New Project</strong> to start one.
+    </div>
+}
+else
+{
+    <div class="list-group">
+        @foreach (var p in _projects)
+        {
+            <div class="list-group-item">
+                @if (_renamingId == p.Id)
+                {
+                    <div class="d-flex gap-2 align-items-center">
+                        <input class="form-control" @bind="_renameValue" @bind:event="oninput" />
+                        <button type="button" class="btn btn-sm btn-success"
+                                disabled="@(string.IsNullOrWhiteSpace(_renameValue))"
+                                @onclick="() => SaveRenameAsync(p)">Save</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                @onclick="CancelRename">Cancel</button>
+                    </div>
+                }
+                else if (_confirmDeleteId == p.Id)
+                {
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>Delete &ldquo;@p.Name&rdquo;?</strong>
+                            <div class="small text-muted">
+                                This permanently removes the project and cascades to all child entities,
+                                graph relationships, and vector chunks.
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-sm btn-danger"
+                                    @onclick="() => ConfirmDeleteAsync(p)">Delete</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    @onclick="() => _confirmDeleteId = null">Cancel</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="d-flex justify-content-between align-items-center">
+                        <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none"
+                                @onclick="() => Open(p)">
+                            <div class="fw-semibold">@p.Name</div>
+                            <div class="small text-muted">
+                                /@p.Slug &middot; updated @p.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                            </div>
+                        </button>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    @onclick="() => StartRename(p)" title="Rename">Rename</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger"
+                                    @onclick="() => _confirmDeleteId = p.Id" title="Delete">Delete</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<Project>? _projects;
+    private bool _creating;
+    private string _newName = string.Empty;
+    private Guid? _renamingId;
+    private string _renameValue = string.Empty;
+    private Guid? _confirmDeleteId;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _projects = (await Projects.ListAsync()).ToList();
+    }
+
+    private void StartCreate()
+    {
+        _creating = true;
+        _newName = string.Empty;
+        _error = null;
+    }
+
+    private void CancelCreate()
+    {
+        _creating = false;
+        _newName = string.Empty;
+    }
+
+    private async Task OnCreateKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_newName))
+        {
+            await CreateAsync();
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelCreate();
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            var project = await Projects.CreateAsync(_newName);
+            _creating = false;
+            _newName = string.Empty;
+            Nav.NavigateTo($"/projects/{project.Slug}/editor");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void StartRename(Project p)
+    {
+        _renamingId = p.Id;
+        _renameValue = p.Name;
+    }
+
+    private void CancelRename()
+    {
+        _renamingId = null;
+        _renameValue = string.Empty;
+    }
+
+    private async Task SaveRenameAsync(Project p)
+    {
+        try
+        {
+            await Projects.RenameAsync(p.Id, _renameValue);
+            _renamingId = null;
+            _renameValue = string.Empty;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task ConfirmDeleteAsync(Project p)
+    {
+        try
+        {
+            await Projects.DeleteAsync(p.Id);
+            _confirmDeleteId = null;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void Open(Project p) => Nav.NavigateTo($"/projects/{p.Slug}/editor");
+}
