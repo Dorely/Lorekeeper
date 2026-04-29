@@ -1,0 +1,518 @@
+@page "/settings/providers"
+@using Lorekeeper.Llm
+@using Lorekeeper.Models
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.WebUtilities
+@rendermode InteractiveServer
+@inject ILlmProviderService ProviderService
+@inject ICodexAuthService CodexAuth
+@inject IChatClientFactory ChatClientFactory
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>LLM Providers</PageTitle>
+
+<h3>LLM Providers</h3>
+<p class="text-muted">Configure LLM API endpoints. Supports any OpenAI-compatible API.</p>
+
+@if (!string.IsNullOrEmpty(_statusMessage))
+{
+    <div class="alert alert-@_statusKind alert-dismissible fade show mt-2" role="alert">
+        @_statusMessage
+        <button type="button" class="btn-close" @onclick="ClearStatus"></button>
+    </div>
+}
+
+<div class="card mb-4 border-dark">
+    <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between">
+            <div>
+                <h5 class="card-title mb-1">OpenAI Codex</h5>
+                <p class="card-text text-muted mb-0">
+                    Sign in with your OpenAI account &mdash; no API key needed.
+                </p>
+            </div>
+            <div class="text-end">
+                @if (_codexConnected)
+                {
+                    <span class="badge bg-success me-2">Connected</span>
+                    <button type="button" class="btn btn-outline-warning btn-sm" @onclick="DisconnectCodexAsync">Disconnect</button>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-success" @onclick="ConnectCodexAsync">
+                        Connect with OpenAI
+                    </button>
+                }
+            </div>
+        </div>
+        @if (_codexProvider is not null)
+        {
+            <div class="row g-2 align-items-end mt-3">
+                <div class="col-auto">
+                    <label class="form-label form-label-sm mb-0">Model</label>
+                    <input type="text" class="form-control form-control-sm" style="width:200px"
+                           @bind="_codexProvider.ModelId" />
+                </div>
+                <div class="col-auto">
+                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                            @onclick="() => SaveCodexModelAsync()">Save</button>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+<hr />
+
+<h5>Other Providers</h5>
+
+@if (_parents.Count == 0)
+{
+    <div class="alert alert-info">
+        No providers configured yet. Add one below or connect with OpenAI above.
+    </div>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Endpoint</th>
+                <th>Model</th>
+                <th>Auth</th>
+                <th>Default</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var p in _parents)
+            {
+                <tr>
+                    <td>@(p.DisplayName ?? p.Name)</td>
+                    <td class="text-truncate" style="max-width:200px;" title="@p.EndpointUrl">@p.EndpointUrl</td>
+                    <td>
+                        <div class="d-flex align-items-center gap-1">
+                            <input type="text" class="form-control form-control-sm" style="width:140px" @bind="p.ModelId" />
+                            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2"
+                                    @onclick="() => SaveProviderAsync(p)" title="Save and test">Save</button>
+                        </div>
+                    </td>
+                    <td>
+                        @if (p.AuthType == AuthType.OAuth)
+                        {
+                            <span class="badge bg-info">OAuth</span>
+                            @if (_oauthStatus.TryGetValue(p.Id, out var status) && status)
+                            {
+                                <span class="badge bg-success">Connected</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-warning">Disconnected</span>
+                            }
+                        }
+                        else if (p.AuthType == AuthType.ApiKey)
+                        {
+                            <span class="badge bg-secondary">API Key</span>
+                            @if (!string.IsNullOrEmpty(p.ApiKey))
+                            {
+                                <span class="badge bg-success">Set</span>
+                            }
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">None</span>
+                        }
+                    </td>
+                    <td>
+                        @if (p.IsDefault)
+                        {
+                            <span class="badge bg-primary">Default</span>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary"
+                                    @onclick="() => SetDefaultAsync(p.Id)">Set Default</button>
+                        }
+                    </td>
+                    <td>
+                        @if (p.AuthType == AuthType.OAuth)
+                        {
+                            if (_oauthStatus.TryGetValue(p.Id, out var connected) && connected)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-warning"
+                                        @onclick="() => RevokeOAuthAsync(p.Id)">Disconnect</button>
+                            }
+                            else
+                            {
+                                <a href="/auth/start/@p.Id" class="btn btn-sm btn-outline-success">Connect</a>
+                            }
+                        }
+                        <button type="button" class="btn btn-sm btn-outline-info"
+                                @onclick="() => ToggleAddChild(p.Id)"
+                                title="Add another model using this provider's credentials">+ Model</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger"
+                                @onclick="() => DeleteProviderAsync(p)">Delete</button>
+                    </td>
+                </tr>
+                @if (_children.TryGetValue(p.Id, out var kids))
+                {
+                    @foreach (var child in kids)
+                    {
+                        <tr>
+                            <td class="ps-4">&#8627; @(child.DisplayName ?? child.Name)</td>
+                            <td class="text-muted small">via @(p.DisplayName ?? p.Name)</td>
+                            <td>
+                                <div class="d-flex align-items-center gap-1">
+                                    <input type="text" class="form-control form-control-sm" style="width:140px" @bind="child.ModelId" />
+                                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2"
+                                            @onclick="() => SaveProviderAsync(child)" title="Save and test">Save</button>
+                                </div>
+                            </td>
+                            <td><span class="badge bg-light text-dark">inherited</span></td>
+                            <td>
+                                @if (child.IsDefault)
+                                {
+                                    <span class="badge bg-primary">Default</span>
+                                }
+                                else
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-primary"
+                                            @onclick="() => SetDefaultAsync(child.Id)">Set Default</button>
+                                }
+                            </td>
+                            <td>
+                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                        @onclick="() => DeleteProviderAsync(child)">Delete</button>
+                            </td>
+                        </tr>
+                    }
+                }
+                @if (_childForms.TryGetValue(p.Id, out var draft))
+                {
+                    <tr class="bg-body-secondary">
+                        <td colspan="6">
+                            <div class="d-flex align-items-end gap-2 p-2">
+                                <div>
+                                    <label class="form-label form-label-sm mb-0">Display Name</label>
+                                    <input type="text" class="form-control form-control-sm" style="width:160px"
+                                           placeholder="e.g. GPT-4o Mini" @bind="draft.DisplayName" />
+                                </div>
+                                <div>
+                                    <label class="form-label form-label-sm mb-0">Model ID</label>
+                                    <input type="text" class="form-control form-control-sm" style="width:160px"
+                                           placeholder="e.g. gpt-4o-mini" @bind="draft.ModelId" />
+                                </div>
+                                <button type="button" class="btn btn-sm btn-info"
+                                        @onclick="() => AddChildModelAsync(p, draft)">Add &amp; Test</button>
+                                <button type="button" class="btn btn-sm btn-link"
+                                        @onclick="() => _childForms.Remove(p.Id)">Cancel</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+}
+
+<h5 class="mt-4">Add Provider</h5>
+<div class="card">
+    <div class="card-body">
+        <div class="row g-2">
+            <div class="col-md-3">
+                <label class="form-label form-label-sm">Name (slug)</label>
+                <input type="text" class="form-control form-control-sm" @bind="_newProvider.Name"
+                       placeholder="e.g. ollama-local" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label form-label-sm">Display Name</label>
+                <input type="text" class="form-control form-control-sm" @bind="_newProvider.DisplayName"
+                       placeholder="e.g. Local Llama" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label form-label-sm">Endpoint URL</label>
+                <input type="text" class="form-control form-control-sm" @bind="_newProvider.EndpointUrl"
+                       placeholder="http://localhost:11434/v1" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label form-label-sm">Model ID</label>
+                <input type="text" class="form-control form-control-sm" @bind="_newProvider.ModelId"
+                       placeholder="llama3" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label form-label-sm">Auth</label>
+                <select class="form-select form-select-sm" @bind="_newProvider.AuthType">
+                    <option value="@AuthType.None">None</option>
+                    <option value="@AuthType.ApiKey">API Key</option>
+                </select>
+            </div>
+            @if (_newProvider.AuthType == AuthType.ApiKey)
+            {
+                <div class="col-md-4">
+                    <label class="form-label form-label-sm">API Key</label>
+                    <input type="password" class="form-control form-control-sm" @bind="_newProvider.ApiKey" />
+                </div>
+            }
+            <div class="col-md-2 form-check align-self-end ms-3">
+                <input type="checkbox" class="form-check-input" id="newIsDefault" @bind="_newProvider.IsDefault" />
+                <label for="newIsDefault" class="form-check-label">Default</label>
+            </div>
+            <div class="col-12">
+                <button type="button" class="btn btn-primary btn-sm" @onclick="CreateProviderAsync">Add Provider</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private const string CodexProviderName = "openai-codex";
+
+    private List<LlmProvider> _parents = [];
+    private Dictionary<int, List<LlmProvider>> _children = [];
+    private Dictionary<int, bool> _oauthStatus = [];
+    private LlmProvider? _codexProvider;
+    private bool _codexConnected;
+
+    private readonly Dictionary<int, ChildDraft> _childForms = [];
+    private NewProviderDraft _newProvider = new();
+
+    private string? _statusMessage;
+    private string _statusKind = "success";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        ConsumeStatusFromQuery();
+        await ReloadAsync();
+    }
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        ConsumeStatusFromQuery();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void ConsumeStatusFromQuery()
+    {
+        var uri = new Uri(Nav.Uri);
+        if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("message", out var msg))
+        {
+            _statusMessage = msg.ToString();
+            _statusKind = _statusMessage.Contains("fail", StringComparison.OrdinalIgnoreCase) ? "danger" : "success";
+        }
+    }
+
+    private void ClearStatus()
+    {
+        _statusMessage = null;
+    }
+
+    private async Task ReloadAsync()
+    {
+        var all = await ProviderService.GetAllAsync();
+        _parents = all.Where(p => p.CredentialSourceId is null).ToList();
+        _children = all
+            .Where(p => p.CredentialSourceId is int)
+            .GroupBy(p => p.CredentialSourceId!.Value)
+            .ToDictionary(g => g.Key, g => g.OrderBy(c => c.ModelId).ToList());
+
+        _oauthStatus = new Dictionary<int, bool>();
+        foreach (var p in _parents.Where(p => p.AuthType == AuthType.OAuth))
+        {
+            var token = await CodexAuth.GetValidTokenAsync(p.Id);
+            _oauthStatus[p.Id] = token is not null;
+        }
+
+        _codexProvider = _parents.FirstOrDefault(p => p.Name == CodexProviderName);
+        _codexConnected = _codexProvider is not null
+            && _oauthStatus.TryGetValue(_codexProvider.Id, out var c) && c;
+    }
+
+    private async Task CreateProviderAsync()
+    {
+        var name = (_newProvider.Name ?? string.Empty).Trim();
+        var endpoint = (_newProvider.EndpointUrl ?? string.Empty).Trim();
+        var model = (_newProvider.ModelId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(model))
+        {
+            SetStatus("Name, Endpoint URL, and Model ID are required.", "danger");
+            return;
+        }
+
+        var provider = new LlmProvider
+        {
+            Name = name,
+            DisplayName = string.IsNullOrWhiteSpace(_newProvider.DisplayName) ? null : _newProvider.DisplayName.Trim(),
+            EndpointUrl = endpoint,
+            ModelId = model,
+            AuthType = _newProvider.AuthType,
+            ApiKey = string.IsNullOrWhiteSpace(_newProvider.ApiKey) ? null : _newProvider.ApiKey,
+            IsDefault = _newProvider.IsDefault
+        };
+
+        try
+        {
+            await ProviderService.CreateAsync(provider);
+            if (provider.IsDefault)
+                await ProviderService.SetDefaultAsync(provider.Id);
+            SetStatus($"Provider '{provider.Name}' created.", "success");
+            _newProvider = new NewProviderDraft();
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Failed to create provider: {ex.Message}", "danger");
+        }
+    }
+
+    private async Task SaveProviderAsync(LlmProvider p)
+    {
+        try
+        {
+            await ProviderService.UpdateAsync(p);
+            try
+            {
+                await ChatClientFactory.TestModelAsync(p.Id);
+                SetStatus($"Provider '{p.DisplayName ?? p.Name}' updated and verified.", "success");
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Saved, but model test failed: {ex.Message}", "danger");
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Save failed: {ex.Message}", "danger");
+        }
+        await ReloadAsync();
+    }
+
+    private async Task SetDefaultAsync(int id)
+    {
+        await ProviderService.SetDefaultAsync(id);
+        SetStatus("Default provider updated.", "success");
+        await ReloadAsync();
+    }
+
+    private async Task DeleteProviderAsync(LlmProvider p)
+    {
+        await ProviderService.DeleteAsync(p.Id);
+        SetStatus($"Provider '{p.DisplayName ?? p.Name}' deleted.", "success");
+        await ReloadAsync();
+    }
+
+    private async Task RevokeOAuthAsync(int id)
+    {
+        await CodexAuth.RevokeTokenAsync(id);
+        SetStatus("OAuth token revoked.", "success");
+        await ReloadAsync();
+    }
+
+    private void ToggleAddChild(int parentId)
+    {
+        if (!_childForms.Remove(parentId))
+            _childForms[parentId] = new ChildDraft();
+    }
+
+    private async Task AddChildModelAsync(LlmProvider parent, ChildDraft draft)
+    {
+        var displayName = (draft.DisplayName ?? string.Empty).Trim();
+        var modelId = (draft.ModelId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(displayName) || string.IsNullOrWhiteSpace(modelId))
+        {
+            SetStatus("Display Name and Model ID are required.", "danger");
+            return;
+        }
+
+        var child = new LlmProvider
+        {
+            Name = $"{parent.Name}-{modelId.Replace("/", "-").Replace(":", "-")}",
+            DisplayName = displayName,
+            EndpointUrl = parent.EndpointUrl,
+            ModelId = modelId,
+            AuthType = parent.AuthType,
+            CredentialSourceId = parent.Id
+        };
+
+        try
+        {
+            await ProviderService.CreateAsync(child);
+            try
+            {
+                await ChatClientFactory.TestModelAsync(child.Id);
+                SetStatus($"Model '{displayName}' ({modelId}) added under {parent.DisplayName ?? parent.Name}.", "success");
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Model '{displayName}' added, but test failed: {ex.Message}", "danger");
+            }
+            _childForms.Remove(parent.Id);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Add failed: {ex.Message}", "danger");
+        }
+    }
+
+    private async Task ConnectCodexAsync()
+    {
+        var codex = _codexProvider;
+        if (codex is null)
+        {
+            codex = new LlmProvider
+            {
+                Name = CodexProviderName,
+                DisplayName = "OpenAI (Codex)",
+                EndpointUrl = "https://chatgpt.com/backend-api/codex/responses",
+                ModelId = "gpt-5.4-mini",
+                AuthType = AuthType.OAuth,
+                IsDefault = !_parents.Any(p => p.IsDefault)
+            };
+            await ProviderService.CreateAsync(codex);
+        }
+
+        Nav.NavigateTo($"/auth/start/{codex.Id}", forceLoad: true);
+    }
+
+    private async Task DisconnectCodexAsync()
+    {
+        if (_codexProvider is null) return;
+        await CodexAuth.RevokeTokenAsync(_codexProvider.Id);
+        SetStatus("Codex disconnected.", "success");
+        await ReloadAsync();
+    }
+
+    private async Task SaveCodexModelAsync()
+    {
+        if (_codexProvider is null) return;
+        await SaveProviderAsync(_codexProvider);
+    }
+
+    private void SetStatus(string message, string kind)
+    {
+        _statusMessage = message;
+        _statusKind = kind;
+    }
+
+    private sealed class NewProviderDraft
+    {
+        public string? Name { get; set; }
+        public string? DisplayName { get; set; }
+        public string? EndpointUrl { get; set; }
+        public string? ModelId { get; set; }
+        public AuthType AuthType { get; set; } = AuthType.None;
+        public string? ApiKey { get; set; }
+        public bool IsDefault { get; set; }
+    }
+
+    private sealed class ChildDraft
+    {
+        public string? DisplayName { get; set; }
+        public string? ModelId { get; set; }
+    }
+}

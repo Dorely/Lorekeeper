@@ -1,4 +1,10 @@
+using Lorekeeper.Auth;
 using Lorekeeper.Components;
+using Lorekeeper.Knowledge;
+using Lorekeeper.Llm;
+using Lorekeeper.Persistence;
+using Lorekeeper.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -6,7 +12,52 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+builder.Services.AddHttpClient();
+
+// Persistence
+builder.Services.AddLorekeeperPersistence(builder.Configuration);
+builder.Services.AddScoped<ILlmProviderRepository, LlmProviderRepository>();
+builder.Services.AddScoped<IOAuthTokenRepository, OAuthTokenRepository>();
+builder.Services.AddScoped<IGraphNodeRepository, GraphNodeRepository>();
+builder.Services.AddScoped<IGraphEdgeRepository, GraphEdgeRepository>();
+
+// Knowledge
+builder.Services.AddScoped<IVectorStore, SqliteVecVectorStore>();
+builder.Services.AddScoped<IGraphStore, RelationalGraphStore>();
+
+// LLM
+builder.Services.AddScoped<IEmbeddingService, OllamaEmbeddingService>();
+builder.Services.AddScoped<ILlmProviderService, LlmProviderService>();
+builder.Services.AddScoped<ICodexAuthService, CodexAuthService>();
+builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
+
 var app = builder.Build();
+
+// Apply EF Core migrations + initialise sqlite-vec tables.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var startupLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+
+    var pending = db.Database.GetPendingMigrations().ToList();
+    if (pending.Count > 0)
+    {
+        // Defensive: SQLite + single-instance dev means a stranded row in
+        // __EFMigrationsLock from a previously killed/crashed migration will cause
+        // Migrate() to spin forever waiting for the (non-existent) other instance.
+        try
+        {
+            db.Database.ExecuteSqlRaw("DELETE FROM \"__EFMigrationsLock\";");
+        }
+        catch
+        {
+            // Table may not exist yet on a fresh DB; ignore.
+        }
+        db.Database.Migrate();
+    }
+
+    VectorStoreInitializer.Initialize(builder.Configuration, startupLogger);
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
@@ -23,5 +74,7 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+app.MapCodexOAuth();
 
 app.Run();
