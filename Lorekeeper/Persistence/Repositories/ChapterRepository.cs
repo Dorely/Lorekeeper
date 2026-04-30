@@ -17,11 +17,12 @@ public class ChapterRepository(AppDbContext db) : IChapterRepository
     public Task<Chapter?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         db.Chapters.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
 
-    public async Task<int> GetMaxOrderAsync(Guid projectId, CancellationToken cancellationToken = default)
+    public async Task<int> GetMaxOrderAsync(Guid projectId, Guid? actId, CancellationToken cancellationToken = default)
     {
-        var any = await db.Chapters.AnyAsync(c => c.ProjectId == projectId, cancellationToken);
+        var bucket = db.Chapters.Where(c => c.ProjectId == projectId && c.ActId == actId);
+        var any = await bucket.AnyAsync(cancellationToken);
         if (!any) return -1;
-        return await db.Chapters.Where(c => c.ProjectId == projectId).MaxAsync(c => c.Order, cancellationToken);
+        return await bucket.MaxAsync(c => c.Order, cancellationToken);
     }
 
     public Task<int> CountByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
@@ -34,10 +35,10 @@ public class ChapterRepository(AppDbContext db) : IChapterRepository
 
     public void Remove(Chapter chapter) => db.Chapters.Remove(chapter);
 
-    public async Task ReorderAsync(Guid projectId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
+    public async Task ReorderAsync(Guid projectId, Guid? actId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
     {
         var chapters = await db.Chapters
-            .Where(c => c.ProjectId == projectId)
+            .Where(c => c.ProjectId == projectId && c.ActId == actId)
             .ToListAsync(cancellationToken);
 
         var byId = chapters.ToDictionary(c => c.Id);

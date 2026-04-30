@@ -1,0 +1,391 @@
+@using Lorekeeper.Chapters
+@using Lorekeeper.Models
+@using Lorekeeper.Outline
+@inject IActService ActsService
+@inject IChapterService ChaptersService
+
+<div class="outline-tree">
+    <div class="outline-toolbar d-flex align-items-center justify-content-between mb-3">
+        <h5 class="mb-0">Outline</h5>
+        <button type="button" class="btn btn-primary btn-sm" @onclick="CreateActAsync">+ New Act</button>
+    </div>
+
+    @if (Acts.Count == 0 && Unassigned.Count == 0)
+    {
+        <div class="alert alert-info d-flex align-items-center justify-content-between">
+            <span>No outline yet. Create your first act to get started.</span>
+            <button type="button" class="btn btn-primary btn-sm" @onclick="CreateActAsync">Create first act</button>
+        </div>
+    }
+    else
+    {
+        <div class="outline-acts">
+            @for (var i = 0; i < Acts.Count; i++)
+            {
+                var actIdx = i;
+                var act = Acts[actIdx];
+                var actChapters = ChaptersByAct.TryGetValue(act.Id, out var list) ? list : [];
+                <div class="outline-act @(_draggingActId == act.Id ? "dragging" : "")"
+                     draggable="true"
+                     @key="act.Id"
+                     @ondragstart="() => OnActDragStart(act.Id)"
+                     @ondragover:preventDefault="true"
+                     @ondragover="() => OnActDragOver(act.Id)"
+                     @ondrop="OnActDropAsync"
+                     @ondragend="OnActDragEnd">
+                    <div class="outline-act-header">
+                        <button type="button" class="outline-collapse"
+                                @onclick="() => ToggleAct(act.Id)">
+                            <span class="caret">@(IsCollapsed(act.Id) ? "▸" : "▾")</span>
+                        </button>
+                        <div class="outline-handle" title="Drag to reorder act">☰</div>
+                        <div class="outline-act-order">Act @(actIdx + 1)</div>
+                        <div class="outline-act-fields">
+                            <input class="form-control form-control-sm outline-act-title"
+                                   value="@act.Title"
+                                   @onchange="@(e => OnActTitleChangedAsync(act, (string?)e.Value))" />
+                            <textarea class="form-control form-control-sm outline-act-synopsis mt-1"
+                                      rows="1"
+                                      placeholder="Act synopsis…"
+                                      value="@act.Synopsis"
+                                      @onchange="@(e => OnActSynopsisChangedAsync(act, (string?)e.Value))"></textarea>
+                        </div>
+                        <div class="outline-act-actions">
+                            <button type="button" class="btn btn-sm btn-outline-primary"
+                                    @onclick="() => CreateChapterAsync(act.Id)">+ Chapter</button>
+                            @if (_confirmDeleteActId == act.Id)
+                            {
+                                <button type="button" class="btn btn-sm btn-danger"
+                                        @onclick="() => ConfirmDeleteActAsync(act)">Confirm</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        @onclick="() => _confirmDeleteActId = null">Cancel</button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                        title="Delete act (chapters move to Unassigned)"
+                                        @onclick="() => _confirmDeleteActId = act.Id">Delete</button>
+                            }
+                        </div>
+                    </div>
+
+                    @if (!IsCollapsed(act.Id))
+                    {
+                        <div class="outline-chapters">
+                            @if (actChapters.Count == 0)
+                            {
+                                <div class="outline-chapters-empty text-muted small">
+                                    No chapters in this act. <button type="button" class="btn btn-link btn-sm p-0"
+                                            @onclick="() => CreateChapterAsync(act.Id)">Add one</button>
+                                </div>
+                            }
+                            else
+                            {
+                                @ChapterRows(act.Id, actChapters)
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        @if (Unassigned.Count > 0)
+        {
+            <div class="outline-act outline-act-unassigned mt-3">
+                <div class="outline-act-header">
+                    <button type="button" class="outline-collapse" @onclick="() => ToggleAct(_unassignedKey)">
+                        <span class="caret">@(IsCollapsed(_unassignedKey) ? "▸" : "▾")</span>
+                    </button>
+                    <div class="outline-act-order">Unassigned</div>
+                    <div class="outline-act-fields text-muted small">
+                        Chapters not yet placed in an act.
+                    </div>
+                    <div class="outline-act-actions">
+                        <button type="button" class="btn btn-sm btn-outline-primary"
+                                @onclick="() => CreateChapterAsync(null)">+ Chapter</button>
+                    </div>
+                </div>
+                @if (!IsCollapsed(_unassignedKey))
+                {
+                    <div class="outline-chapters">
+                        @ChapterRows(null, Unassigned)
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="mt-3">
+                <button type="button" class="btn btn-sm btn-outline-secondary"
+                        @onclick="() => CreateChapterAsync(null)">+ Unassigned chapter</button>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Project Project { get; set; } = null!;
+    [Parameter, EditorRequired] public List<Act> Acts { get; set; } = [];
+    [Parameter, EditorRequired] public Dictionary<Guid, List<Chapter>> ChaptersByAct { get; set; } = [];
+    [Parameter, EditorRequired] public List<Chapter> Unassigned { get; set; } = [];
+    [Parameter] public Guid? Focus { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback<string> OnError { get; set; }
+
+    // Use Guid.Empty as the key for the synthetic "Unassigned" bucket in the collapse map.
+    private static readonly Guid _unassignedKey = Guid.Empty;
+
+    private readonly HashSet<Guid> _collapsed = [];
+    private Guid? _confirmDeleteActId;
+    private Guid? _confirmDeleteChapterId;
+
+    // Drag state
+    private Guid? _draggingActId;
+    private Guid? _draggingChapterId;
+    private Guid? _draggingChapterActId; // act bucket of the chapter being dragged (null = unassigned)
+
+    private bool IsCollapsed(Guid key) => _collapsed.Contains(key);
+    private void ToggleAct(Guid key)
+    {
+        if (!_collapsed.Add(key)) _collapsed.Remove(key);
+    }
+
+    // ---- Acts -----------------------------------------------------------
+
+    private async Task CreateActAsync()
+    {
+        try
+        {
+            await ActsService.CreateAsync(Project.Id);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
+    }
+
+    private async Task OnActTitleChangedAsync(Act act, string? value)
+    {
+        var t = (value ?? string.Empty).Trim();
+        if (t.Length == 0 || t == act.Title) return;
+        try
+        {
+            await ActsService.UpdateAsync(act.Id, title: t);
+            act.Title = t;
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
+    }
+
+    private async Task OnActSynopsisChangedAsync(Act act, string? value)
+    {
+        var s = value ?? string.Empty;
+        if (s == act.Synopsis) return;
+        try
+        {
+            await ActsService.UpdateAsync(act.Id, synopsis: s);
+            act.Synopsis = s;
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
+    }
+
+    private async Task ConfirmDeleteActAsync(Act act)
+    {
+        try
+        {
+            await ActsService.DeleteAsync(act.Id);
+            _confirmDeleteActId = null;
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
+    }
+
+    private void OnActDragStart(Guid id) => _draggingActId = id;
+    private void OnActDragEnd() => _draggingActId = null;
+
+    private void OnActDragOver(Guid overId)
+    {
+        if (_draggingActId is not { } dragId || dragId == overId) return;
+        var from = Acts.FindIndex(a => a.Id == dragId);
+        var to = Acts.FindIndex(a => a.Id == overId);
+        if (from < 0 || to < 0 || from == to) return;
+        var item = Acts[from];
+        Acts.RemoveAt(from);
+        Acts.Insert(to, item);
+    }
+
+    private async Task OnActDropAsync()
+    {
+        if (_draggingActId is null) return;
+        _draggingActId = null;
+        try
+        {
+            var ids = Acts.Select(a => a.Id).ToList();
+            await ActsService.ReorderAsync(Project.Id, ids);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
+    }
+
+    // ---- Chapters -------------------------------------------------------
+
+    private async Task CreateChapterAsync(Guid? actId)
+    {
+        try
+        {
+            await ChaptersService.CreateAsync(Project.Id, actId: actId);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
+    }
+
+    private async Task OnChapterTitleChangedAsync(Chapter ch, string? value)
+    {
+        var t = (value ?? string.Empty).Trim();
+        if (t.Length == 0 || t == ch.Title) return;
+        try
+        {
+            await ChaptersService.UpdateAsync(ch.Id, title: t);
+            ch.Title = t;
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
+    }
+
+    private async Task OnChapterSynopsisChangedAsync(Chapter ch, string? value)
+    {
+        var s = value ?? string.Empty;
+        if (s == ch.Synopsis) return;
+        try
+        {
+            await ChaptersService.UpdateAsync(ch.Id, synopsis: s);
+            ch.Synopsis = s;
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
+    }
+
+    private async Task OnChapterMovedAsync(Chapter ch, string? newActIdRaw)
+    {
+        // newActIdRaw is a string from the <select>: empty string = unassigned, otherwise a Guid.
+        Guid? target = string.IsNullOrEmpty(newActIdRaw) ? null : Guid.Parse(newActIdRaw);
+        if (target == ch.ActId) return;
+        try
+        {
+            await ChaptersService.UpdateAsync(ch.Id, actId: new ChapterActAssignment(target));
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
+    }
+
+    private async Task ConfirmDeleteChapterAsync(Chapter ch)
+    {
+        try
+        {
+            await ChaptersService.DeleteAsync(ch.Id);
+            _confirmDeleteChapterId = null;
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
+    }
+
+    private void OnChapterDragStart(Guid chapterId, Guid? actId)
+    {
+        _draggingChapterId = chapterId;
+        _draggingChapterActId = actId;
+    }
+    private void OnChapterDragEnd()
+    {
+        _draggingChapterId = null;
+        _draggingChapterActId = null;
+    }
+
+    private void OnChapterDragOver(Guid overId, Guid? overActId, List<Chapter> bucket)
+    {
+        if (_draggingChapterId is not { } dragId || dragId == overId) return;
+        if (_draggingChapterActId != overActId) return;
+        var from = bucket.FindIndex(c => c.Id == dragId);
+        var to = bucket.FindIndex(c => c.Id == overId);
+        if (from < 0 || to < 0 || from == to) return;
+        var item = bucket[from];
+        bucket.RemoveAt(from);
+        bucket.Insert(to, item);
+    }
+
+    private async Task OnChapterDropAsync(Guid? actId, List<Chapter> bucket)
+    {
+        if (_draggingChapterId is null) return;
+        var sameBucket = _draggingChapterActId == actId;
+        _draggingChapterId = null;
+        _draggingChapterActId = null;
+        if (!sameBucket) return;
+        try
+        {
+            var ids = bucket.Select(c => c.Id).ToList();
+            await ChaptersService.ReorderAsync(Project.Id, actId, ids);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
+    }
+
+    private RenderFragment ChapterRows(Guid? actId, List<Chapter> bucket) => __builder =>
+    {
+        for (var j = 0; j < bucket.Count; j++)
+        {
+            var ch = bucket[j];
+            var idx = j;
+            var isFocus = Focus == ch.Id;
+            var isDragging = _draggingChapterId == ch.Id;
+            <div class="outline-chapter @(isFocus ? "focus" : "") @(isDragging ? "dragging" : "")"
+                 draggable="true"
+                 @key="ch.Id"
+                 @ondragstart="() => OnChapterDragStart(ch.Id, actId)"
+                 @ondragover:preventDefault="true"
+                 @ondragover="() => OnChapterDragOver(ch.Id, actId, bucket)"
+                 @ondrop="() => OnChapterDropAsync(actId, bucket)"
+                 @ondragend="OnChapterDragEnd">
+                <div class="outline-handle" title="Drag to reorder">☰</div>
+                <div class="outline-chapter-order">@(idx + 1)</div>
+                <div class="outline-chapter-fields">
+                    <input class="form-control form-control-sm outline-chapter-title"
+                           value="@ch.Title"
+                           @onchange="@(e => OnChapterTitleChangedAsync(ch, (string?)e.Value))" />
+                    <textarea class="form-control form-control-sm outline-chapter-synopsis mt-1"
+                              rows="2"
+                              placeholder="Synopsis…"
+                              value="@ch.Synopsis"
+                              @onchange="@(e => OnChapterSynopsisChangedAsync(ch, (string?)e.Value))"></textarea>
+                    @if (ch.VectorIndexState == VectorIndexState.Stale)
+                    {
+                        <span class="badge text-bg-warning mt-1" title="Vector index is being rebuilt.">Indexing…</span>
+                    }
+                    else if (ch.VectorIndexState == VectorIndexState.Failed)
+                    {
+                        <span class="badge text-bg-danger mt-1" title="@ch.VectorIndexError">Index failed — retrying</span>
+                    }
+                </div>
+                <div class="outline-chapter-actions">
+                    <select class="form-select form-select-sm outline-act-picker"
+                            value="@(ch.ActId?.ToString() ?? string.Empty)"
+                            @onchange="@(e => OnChapterMovedAsync(ch, (string?)e.Value))"
+                            title="Move to act">
+                        <option value="">Unassigned</option>
+                        @foreach (var a in Acts)
+                        {
+                            <option value="@a.Id">@a.Title</option>
+                        }
+                    </select>
+                    <a class="btn btn-sm btn-outline-secondary"
+                       href="/projects/@Project.Slug/editor/@ch.Id">Open</a>
+                    @if (_confirmDeleteChapterId == ch.Id)
+                    {
+                        <button type="button" class="btn btn-sm btn-danger"
+                                @onclick="() => ConfirmDeleteChapterAsync(ch)">Confirm</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                @onclick="() => _confirmDeleteChapterId = null">Cancel</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-danger"
+                                @onclick="() => _confirmDeleteChapterId = ch.Id">Delete</button>
+                    }
+                </div>
+            </div>
+        }
+    };
+}

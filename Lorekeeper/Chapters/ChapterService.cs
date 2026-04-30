@@ -20,12 +20,12 @@ public class ChapterService(
     public Task<Chapter?> GetAsync(Guid chapterId, CancellationToken cancellationToken = default) =>
         repo.GetByIdAsync(chapterId, cancellationToken);
 
-    public async Task<Chapter> CreateAsync(Guid projectId, string? title = null, CancellationToken cancellationToken = default)
+    public async Task<Chapter> CreateAsync(Guid projectId, Guid? actId = null, string? title = null, string? synopsis = null, CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
-        var nextOrder = await repo.GetMaxOrderAsync(projectId, cancellationToken) + 1;
+        var nextOrder = await repo.GetMaxOrderAsync(projectId, actId, cancellationToken) + 1;
         var resolvedTitle = string.IsNullOrWhiteSpace(title)
             ? $"Chapter {nextOrder + 1}"
             : title.Trim();
@@ -33,7 +33,9 @@ public class ChapterService(
         var chapter = new Chapter
         {
             ProjectId = projectId,
+            ActId = actId,
             Title = resolvedTitle,
+            Synopsis = synopsis ?? string.Empty,
             Order = nextOrder,
             VectorIndexState = VectorIndexState.UpToDate, // empty body == nothing to index
         };
@@ -45,7 +47,13 @@ public class ChapterService(
         return chapter;
     }
 
-    public async Task<Chapter> UpdateAsync(Guid chapterId, string? title = null, string? body = null, string? synopsis = null, CancellationToken cancellationToken = default)
+    public async Task<Chapter> UpdateAsync(
+        Guid chapterId,
+        string? title = null,
+        string? body = null,
+        string? synopsis = null,
+        ChapterActAssignment? actId = null,
+        CancellationToken cancellationToken = default)
     {
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
@@ -58,6 +66,12 @@ public class ChapterService(
             chapter.Body = body;
             bodyChanged = true;
             chapter.VectorIndexState = VectorIndexState.Stale;
+        }
+        if (actId is { } assignment && assignment.Value != chapter.ActId)
+        {
+            chapter.ActId = assignment.Value;
+            // Append to the end of the destination bucket so we don't collide with existing orders.
+            chapter.Order = await repo.GetMaxOrderAsync(chapter.ProjectId, assignment.Value, cancellationToken) + 1;
         }
 
         chapter.UpdatedAt = DateTime.UtcNow;
@@ -96,9 +110,9 @@ public class ChapterService(
         await repo.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task ReorderAsync(Guid projectId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
+    public async Task ReorderAsync(Guid projectId, Guid? actId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
     {
-        await repo.ReorderAsync(projectId, orderedIds, cancellationToken);
+        await repo.ReorderAsync(projectId, actId, orderedIds, cancellationToken);
 
         var project = await projects.GetByIdAsync(projectId, cancellationToken);
         if (project is not null)

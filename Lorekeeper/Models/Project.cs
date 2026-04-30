@@ -29,7 +29,16 @@ public class Project
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    /// <summary>
+    /// Free-form metadata bag used by the Outline tab to persist wizard inputs
+    /// (premise, tone, scope, characters, conflict, setting, ...). Schema-less by design;
+    /// new keys can be added without migrations.
+    /// </summary>
+    public Dictionary<string, object?> Metadata { get; set; } = new();
+
     public ICollection<GraphNode> Nodes { get; set; } = [];
+
+    public ICollection<Act> Acts { get; set; } = [];
 
     public ICollection<Chapter> Chapters { get; set; } = [];
 

@@ -11,6 +11,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<LlmProvider> LlmProviders => Set<LlmProvider>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<Act> Acts => Set<Act>();
     public DbSet<Chapter> Chapters => Set<Chapter>();
     public DbSet<GraphNode> GraphNodes => Set<GraphNode>();
     public DbSet<GraphEdge> GraphEdges => Set<GraphEdge>();
@@ -18,20 +19,49 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        var jsonDictConverter = new ValueConverter<Dictionary<string, object?>, string>(
+            v => JsonSerializer.Serialize(v, JsonSerializerOptions.Default),
+            v => JsonSerializer.Deserialize<Dictionary<string, object?>>(v, JsonSerializerOptions.Default) ?? new Dictionary<string, object?>());
+
+        var jsonDictComparer = new ValueComparer<Dictionary<string, object?>>(
+            (a, b) => JsonSerializer.Serialize(a, JsonSerializerOptions.Default) == JsonSerializer.Serialize(b, JsonSerializerOptions.Default),
+            v => JsonSerializer.Serialize(v, JsonSerializerOptions.Default).GetHashCode(),
+            v => JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(v, JsonSerializerOptions.Default), JsonSerializerOptions.Default) ?? new Dictionary<string, object?>());
+
         modelBuilder.Entity<Project>(entity =>
         {
             entity.HasIndex(e => e.Slug).IsUnique();
+
+            entity.Property(e => e.Metadata)
+                .HasColumnType("TEXT")
+                .HasConversion(jsonDictConverter, jsonDictComparer);
+        });
+
+        modelBuilder.Entity<Act>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Order });
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.Acts)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Chapter>(entity =>
         {
             entity.HasIndex(e => new { e.ProjectId, e.Order });
+            entity.HasIndex(e => new { e.ActId, e.Order });
             entity.Property(e => e.VectorIndexState).HasConversion<string>();
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.Chapters)
                 .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Act)
+                .WithMany(a => a.Chapters)
+                .HasForeignKey(e => e.ActId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<AiConsoleEntry>(entity =>
@@ -65,15 +95,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.HasIndex(e => e.ProviderId);
         });
-
-        var jsonDictConverter = new ValueConverter<Dictionary<string, object?>, string>(
-            v => JsonSerializer.Serialize(v, JsonSerializerOptions.Default),
-            v => JsonSerializer.Deserialize<Dictionary<string, object?>>(v, JsonSerializerOptions.Default) ?? new Dictionary<string, object?>());
-
-        var jsonDictComparer = new ValueComparer<Dictionary<string, object?>>(
-            (a, b) => JsonSerializer.Serialize(a, JsonSerializerOptions.Default) == JsonSerializer.Serialize(b, JsonSerializerOptions.Default),
-            v => JsonSerializer.Serialize(v, JsonSerializerOptions.Default).GetHashCode(),
-            v => JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(v, JsonSerializerOptions.Default), JsonSerializerOptions.Default) ?? new Dictionary<string, object?>());
 
         modelBuilder.Entity<GraphNode>(entity =>
         {

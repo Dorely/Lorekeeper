@@ -5,6 +5,7 @@ using Lorekeeper.Components;
 using Lorekeeper.Context;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
+using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
@@ -26,6 +27,7 @@ builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
 builder.Services.AddScoped<IGraphNodeRepository, GraphNodeRepository>();
 builder.Services.AddScoped<IGraphEdgeRepository, GraphEdgeRepository>();
 builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
+builder.Services.AddScoped<IActRepository, ActRepository>();
 
 // Knowledge
 builder.Services.AddScoped<IVectorStore, SqliteVecVectorStore>();
@@ -45,6 +47,10 @@ builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
 builder.Services.AddScoped<IChapterService, ChapterService>();
 builder.Services.AddSingleton<IStaleChapterNotifier, StaleChapterNotifier>();
 builder.Services.AddHostedService<StaleChapterReindexer>();
+
+// Outline
+builder.Services.AddScoped<IActService, ActService>();
+builder.Services.AddScoped<IOutlineGenerator, OutlineGenerator>();
 
 // Context + AI Console
 builder.Services.AddSingleton<IContextBuilder, ContextBuilder>();

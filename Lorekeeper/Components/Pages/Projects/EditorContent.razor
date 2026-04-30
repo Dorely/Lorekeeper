@@ -1,9 +1,11 @@
 @using Lorekeeper.Chapters
 @using Lorekeeper.Models
+@using Lorekeeper.Outline
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IChapterService Chapters
+@inject IActService Acts
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
@@ -51,11 +53,15 @@ else
                     @if (_menuOpen)
                     {
                         <div class="chapter-menu" @onclick:stopPropagation="true">
-                            @foreach (var c in _chapters)
+                            @foreach (var grp in GroupedChapters())
                             {
-                                <a class="chapter-menu-item @(c.Id == _current.Id ? "active" : "")"
-                                   href="/projects/@Project.Slug/editor/@c.Id"
-                                   @onclick="CloseMenu">@(_chapters.IndexOf(c) + 1). @c.Title</a>
+                                <div class="chapter-menu-group-label">@grp.label</div>
+                                @foreach (var c in grp.chapters)
+                                {
+                                    <a class="chapter-menu-item @(c.Id == _current.Id ? "active" : "")"
+                                       href="/projects/@Project.Slug/editor/@c.Id"
+                                       @onclick="CloseMenu">@c.Title</a>
+                                }
                             }
                         </div>
                     }
@@ -106,6 +112,7 @@ else
     private readonly DotNetObjectReference<EditorContent> _selfRef;
 
     private List<Chapter> _chapters = [];
+    private List<Act> _acts = [];
     private Chapter? _current;
     private bool _loading = true;
     private Guid? _loadedProjectId;
@@ -146,6 +153,7 @@ else
             _loadedProjectId = Project.Id;
             _loading = true;
             _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
+            _acts = (await Acts.ListAsync(Project.Id)).ToList();
             _loading = false;
         }
 
@@ -339,6 +347,20 @@ else
         var ch = await Chapters.CreateAsync(Project.Id);
         _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
         Nav.NavigateTo($"/projects/{Project.Slug}/editor/{ch.Id}");
+    }
+
+    private IEnumerable<(string label, IEnumerable<Chapter> chapters)> GroupedChapters()
+    {
+        foreach (var act in _acts)
+        {
+            var inAct = _chapters.Where(c => c.ActId == act.Id).OrderBy(c => c.Order);
+            yield return (act.Title, inAct);
+        }
+        var unassigned = _chapters.Where(c => c.ActId is null).OrderBy(c => c.Order).ToList();
+        if (unassigned.Count > 0)
+        {
+            yield return ("Unassigned", unassigned);
+        }
     }
 
     private string SaveStatusText() => _saveState switch

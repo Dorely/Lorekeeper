@@ -1,0 +1,211 @@
+@using Lorekeeper.Chapters
+@using Lorekeeper.Models
+@using Lorekeeper.Outline
+@using Lorekeeper.Projects
+@inject IActService Acts
+@inject IChapterService Chapters
+@inject IProjectService Projects
+@inject IOutlineGenerator Generator
+@inject NavigationManager Nav
+@inject ILogger<OutlineContent> Logger
+
+@if (Project is null)
+{
+    <p class="text-muted"><em>Loading…</em></p>
+}
+else if (_loading)
+{
+    <p class="text-muted"><em>Loading outline…</em></p>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @_error
+            <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+        </div>
+    }
+
+    @switch (_mode)
+    {
+        case Mode.Blank:
+            <OutlineBlankState OnChoose="OnEntryChosen" />
+            break;
+
+        case Mode.Guided:
+            <GuidedSetupWizard OnGenerate="GenerateFromBriefAsync" OnCancel="GoBackToList" />
+            break;
+
+        case Mode.Quick:
+            <QuickGeneratePrompt OnGenerate="GenerateFromBriefAsync" OnCancel="GoBackToList" />
+            break;
+
+        case Mode.Generating:
+            <div class="outline-generating">
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+                <span>Generating outline…</span>
+            </div>
+            break;
+
+        case Mode.Preview:
+            <OutlinePreview Outline="_pendingOutline"
+                            OnAccept="AcceptOutlineAsync"
+                            OnRegenerate="RegenerateAsync"
+                            OnDiscard="DiscardOutline" />
+            break;
+
+        default:
+            <div class="d-flex justify-content-end mb-2">
+                <button type="button" class="btn btn-sm btn-outline-primary"
+                        @onclick="() => _mode = Mode.Guided">+ Generate with AI</button>
+            </div>
+            <OutlineTree Project="Project"
+                         Acts="_acts"
+                         ChaptersByAct="_chaptersByAct"
+                         Unassigned="_unassigned"
+                         Focus="Focus"
+                         OnChanged="ReloadAsync"
+                         OnError="HandleError" />
+            break;
+    }
+}
+
+@code {
+    [CascadingParameter] public Project? Project { get; set; }
+    [Parameter] public Guid? Focus { get; set; }
+
+    private enum Mode { Blank, List, Guided, Quick, Generating, Preview }
+
+    private const string MetadataBriefKey = "outline.brief";
+
+    private List<Act> _acts = [];
+    private Dictionary<Guid, List<Chapter>> _chaptersByAct = [];
+    private List<Chapter> _unassigned = [];
+    private bool _loading = true;
+    private string? _error;
+    private Guid? _loadedProjectId;
+
+    private Mode _mode = Mode.List;
+    private OutlineBrief? _lastBrief;
+    private GeneratedOutline? _pendingOutline;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Project is null) return;
+        if (_loadedProjectId == Project.Id) return;
+        _loadedProjectId = Project.Id;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (Project is null) return;
+        _loading = true;
+        try
+        {
+            _acts = (await Acts.ListAsync(Project.Id)).ToList();
+            var allChapters = (await Chapters.ListAsync(Project.Id)).ToList();
+            _chaptersByAct = _acts.ToDictionary(
+                a => a.Id,
+                a => allChapters.Where(c => c.ActId == a.Id).OrderBy(c => c.Order).ToList());
+            _unassigned = allChapters.Where(c => c.ActId is null).OrderBy(c => c.Order).ToList();
+
+            // Only fall back to the blank state on first load — once the user has dismissed it
+            // (Manual / preview / etc.) we stay in List mode even if everything is empty.
+            if (_mode == Mode.List && ShouldShowBlank())
+                _mode = Mode.Blank;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private bool ShouldShowBlank()
+        => Project is not null
+           && _acts.Count == 0
+           && _unassigned.Count == 0
+           && _chaptersByAct.Values.All(v => v.Count == 0)
+           && Project.Metadata.Count == 0;
+
+    private void OnEntryChosen(OutlineEntry entry)
+    {
+        _mode = entry switch
+        {
+            OutlineEntry.Guided => Mode.Guided,
+            OutlineEntry.Quick => Mode.Quick,
+            OutlineEntry.Manual => Mode.List,
+            _ => Mode.List,
+        };
+    }
+
+    private void GoBackToList() => _mode = Mode.List;
+
+    private async Task GenerateFromBriefAsync(OutlineBrief brief)
+    {
+        if (Project is null) return;
+        _lastBrief = brief;
+        _mode = Mode.Generating;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            _pendingOutline = await Generator.GenerateAsync(Project.Id, brief);
+            _mode = Mode.Preview;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Outline generation failed");
+            _error = $"Generation failed: {ex.Message}";
+            _mode = Mode.List;
+        }
+    }
+
+    private async Task RegenerateAsync()
+    {
+        if (_lastBrief is null) return;
+        await GenerateFromBriefAsync(_lastBrief);
+    }
+
+    private async Task AcceptOutlineAsync()
+    {
+        if (Project is null || _pendingOutline is null) return;
+        _mode = Mode.Generating;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            await Generator.ApplyAsync(Project.Id, _pendingOutline);
+            if (_lastBrief is not null)
+            {
+                await Projects.UpdateMetadataAsync(Project.Id, new Dictionary<string, object?>
+                {
+                    [MetadataBriefKey] = _lastBrief,
+                });
+            }
+            _pendingOutline = null;
+            _lastBrief = null;
+            await ReloadAsync();
+            _mode = Mode.List;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Outline apply failed");
+            _error = $"Could not save outline: {ex.Message}";
+            _mode = Mode.Preview;
+        }
+    }
+
+    private void DiscardOutline()
+    {
+        _pendingOutline = null;
+        _mode = Mode.List;
+    }
+
+    private void HandleError(string message)
+    {
+        _error = message;
+        StateHasChanged();
+    }
+}

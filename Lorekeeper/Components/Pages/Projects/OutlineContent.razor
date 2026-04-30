@@ -182,7 +182,7 @@ else
         try
         {
             var ids = _chapters.Select(c => c.Id).ToList();
-            await Chapters.ReorderAsync(Project.Id, ids);
+            await Chapters.ReorderAsync(Project.Id, null, ids);
             await LoadAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
