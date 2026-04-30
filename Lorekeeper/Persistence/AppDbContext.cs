@@ -16,6 +16,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<GraphNode> GraphNodes => Set<GraphNode>();
     public DbSet<GraphEdge> GraphEdges => Set<GraphEdge>();
     public DbSet<AiConsoleEntry> AiConsoleEntries => Set<AiConsoleEntry>();
+    public DbSet<OutlineConversation> OutlineConversations => Set<OutlineConversation>();
+    public DbSet<OutlineMessage> OutlineMessages => Set<OutlineMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -72,6 +74,28 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.AiConsoleEntries)
                 .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<OutlineConversation>(entity =>
+        {
+            entity.HasIndex(e => e.ProjectId).IsUnique();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.OutlineConversations)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<OutlineMessage>(entity =>
+        {
+            entity.HasIndex(e => new { e.ConversationId, e.Order });
+            entity.Property(e => e.Role).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Conversation)
+                .WithMany(c => c.Messages)
+                .HasForeignKey(e => e.ConversationId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

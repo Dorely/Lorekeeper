@@ -68,13 +68,9 @@
 
 | File | Description |
 |------|-------------|
-| `OutlineContent.razor` | Top-level Outline tab orchestrator. Loads acts + chapters, partitions into per-act buckets and an Unassigned bucket. Drives a small state machine: `Blank` (empty project + no metadata) → `Guided`/`Quick`/`Manual`; AI flows go `Generating` → `Preview` → Accept (persists via `IOutlineGenerator.ApplyAsync` + `IProjectService.UpdateMetadataAsync`) / Regenerate / Discard. Manual / List shows `OutlineTree` plus a `+ Generate with AI` button. |
+| `OutlineContent.razor` (+ `.razor.css`) | Top-level Outline tab orchestrator. Two-pane CSS-grid layout (collapses to one column under 992px): left pane hosts `OutlineChatPanel`, right pane hosts `OutlineTree`. Loads acts + chapters per project, partitions into per-act buckets and an Unassigned bucket; `OnOutlineChanged` from the chat panel triggers a reload so tree mutations made by the LLM appear live. |
 | `OutlineTree.razor` (+ `.razor.css`) | Hierarchical Acts → Chapters tree. Acts are collapsible, drag-reorderable groups with inline-editable title/synopsis and `+ Chapter` / Delete (chapters fall back to Unassigned via `OnDelete.SetNull`). Chapters are inline-editable rows with stale/failed vector-index badge, drag-reorder within their act bucket, an act-picker `<select>` for cross-act moves, Open link to the editor, and delete-with-confirm. Synthetic "Unassigned" bucket renders chapters with `ActId == null`. |
-| `OutlineBlankState.razor` (+ `.razor.css`) | Empty-state choice screen: three buttons → Guided Setup / Quick Generate / Build Manually. Emits `OnChoose(OutlineEntry)`. |
-| `OutlineEntry.cs` | Enum (`Guided`/`Quick`/`Manual`) used by `OutlineBlankState` to signal the chosen entry path. |
-| `GuidedSetupWizard.razor` | 3-step inline wizard: (1) Premise textarea + Tone chips/freeform + Scope radio; (2) Main characters chip input + Core conflict + Setting; (3) Confirm + Generate. Builds an `OutlineBrief` and emits `OnGenerate`. |
-| `QuickGeneratePrompt.razor` | One-textarea prompt → `OutlineBrief(Premise: text)`. Emits `OnGenerate`/`OnCancel`. |
-| `OutlinePreview.razor` | Read-only render of a `GeneratedOutline` (acts + chapters with synopses). Buttons: Accept / Regenerate / Discard. |
+| `OutlineChatPanel.razor` (+ `.razor.css`, `.razor.js`) | Multi-turn collaborative chat UI for Outline. Loads/creates the project's `OutlineConversation` via `IOutlineCollaborationService`, renders user/assistant bubbles with tool-call chips folded inline (expandable args/result/error), streams text via `IAsyncEnumerable<OutlineTurnUpdate>` with a typing cursor, and forwards `OutlineMutated` updates to `OnOutlineChanged`. Composer with Send/Stop, auto-scroll-only-if-near-bottom JS interop, and a Reset button that clears history and reseeds the greeting. |
 
 ### Components/Pages/Settings/
 
@@ -93,6 +89,8 @@
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF entity for a chapter (Title/Body/Synopsis/Order) under a `Project`, optionally assigned to an `Act` via nullable `ActId`. `Order` is scoped to the chapter's act bucket (or the project-level Unassigned bucket when `ActId` is null). Tracks `VectorIndexState` (UpToDate/Stale/Failed) + `VectorIndexedAt` + `VectorIndexError`; `VectorSourceId` returns the stable vector-store source id (`Id.ToString("N")`). |
 | `AiConsoleEntry.cs` | EF entity for one AI Console turn: command, system-prompt snapshot, JSON tool-call timeline, response text, status (`Pending`/`Completed`/`Failed`/`Cancelled`). Cascade-deleted with its `Project`. |
+| `OutlineConversation.cs` | EF entity — one persistent multi-turn collaborative chat per `Project` (unique on `ProjectId`). Owns ordered `OutlineMessage`s; cascade-deleted with the project. |
+| `OutlineMessage.cs` | EF entity for a single chat row in an `OutlineConversation`: monotonic `Order`, `OutlineMessageRole` (System/User/Assistant/Tool), text `Content`, JSON `ToolCallsJson` for assistant function-calls, `ToolCallId` + `ToolName` for tool results, `OutlineMessageStatus` (Pending/Completed/Failed/Cancelled), optional `ErrorMessage`. |
 | `GraphNode.cs` | Generic graph node: `(ProjectId, NodeType, Key)` unique, JSON properties bag. Cascade-deleted with its `Project`. |
 | `GraphEdge.cs` | Directed edge between graph nodes with type and JSON properties. |
 
@@ -100,9 +98,9 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context: `LlmProviders`, `OAuthTokens`, `Projects`, `Acts`, `Chapters`, `GraphNodes`, `GraphEdges`, `AiConsoleEntries`. JSON value converter shared by `Project.Metadata`, `GraphNode.Properties`, `GraphEdge.Properties`. Cascade `Project → {Act, Chapter, GraphNode, AiConsoleEntry}`; `Chapter.ActId` FK uses `OnDelete.SetNull`. |
+| `AppDbContext.cs` | EF Core context: `LlmProviders`, `OAuthTokens`, `Projects`, `Acts`, `Chapters`, `GraphNodes`, `GraphEdges`, `AiConsoleEntries`, `OutlineConversations`, `OutlineMessages`. JSON value converter shared by `Project.Metadata`, `GraphNode.Properties`, `GraphEdge.Properties`. Enum-to-string conversions for `OutlineMessage.Role`/`Status`. Cascade `Project → {Act, Chapter, GraphNode, AiConsoleEntry, OutlineConversation → OutlineMessage}`; `Chapter.ActId` FK uses `OnDelete.SetNull`. Unique index on `OutlineConversation.ProjectId`; composite index on `(OutlineMessage.ConversationId, Order)`. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future). |
-| `Migrations/` | EF Core migrations (`InitialSchema`, `AddProjects`, `AddChapters`, `AddSystemPromptAndAiConsole`, `AddOutline`). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, `AddProjects`, `AddChapters`, `AddSystemPromptAndAiConsole`, `AddOutline`, `AddOutlineConversations`). |
 
 ### Persistence/Repositories/
 
@@ -115,6 +113,7 @@
 | `IGraphEdgeRepository.cs` / `GraphEdgeRepository.cs` | Edge CRUD plus directional adjacency query. Defines `EdgeDirection` enum. |
 | `IChapterRepository.cs` / `ChapterRepository.cs` | Chapter CRUD ordered by `Order`; `ListStaleAsync` for background reindex sweep; `GetMaxOrderAsync(projectId, actId)` and `ReorderAsync(projectId, actId, ids)` are scoped to a single act bucket (pass `actId == null` for the unassigned bucket). |
 | `IActRepository.cs` / `ActRepository.cs` | Act CRUD ordered by `Order` per project; `ReorderAsync` rewrites the act ordering in one save. |
+| `IOutlineConversationRepository.cs` / `OutlineConversationRepository.cs` | Persistence for `OutlineConversation` + ordered `OutlineMessage`s: `GetByProjectIdAsync`, `LoadMessagesAsync`, `GetMaxOrderAsync`, `AddConversationAsync`, `AddMessageAsync`, `UpdateMessage`, `RemoveConversation`. |
 
 ### Knowledge/
 
@@ -172,7 +171,9 @@
 | File | Description |
 |------|-------------|
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt` on every mutation. |
-| `IOutlineGenerator.cs` / `OutlineGenerator.cs` | AI-driven outline generation. `GenerateAsync(projectId, OutlineBrief)` builds a strict-JSON system prompt, calls the project's default `IChatClient`, defensively parses (strips fences) into a transient `GeneratedOutline`, and does a single repair retry on parse failure. `ApplyAsync(projectId, GeneratedOutline)` persists by calling `IActService.CreateAsync` then `IChapterService.CreateAsync` per chapter (appends to existing outline). |
+| `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Multi-turn collaborative outline chat. `GetOrCreateAsync` ensures a project conversation seeded with system prompt + assistant greeting. `SendAsync` returns an `IAsyncEnumerable<OutlineTurnUpdate>` driving a streaming tool-call loop: persists user turn, replays full history into the project's default `IChatClient` with `OutlineCollaborationTools` registered, accumulates streamed text into a pre-created Pending assistant row, invokes any function calls (persisting Tool rows + emitting `ToolCallStarted/Completed/OutlineMutated`), and loops up to `AiConsoleOptions.MaxToolIterations`. `ResetAsync` wipes history and reseeds. |
+| `OutlineCollaborationTools.cs` | `AIFunction` definitions exposed to the outline LLM (closures capture `OutlineCollaborationContext(ProjectId, OnMutated)`): `list_outline`, `create_act`, `update_act`, `delete_act`, `create_chapter`, `update_chapter`, `delete_chapter`, `reorder_acts`, `reorder_chapters`, `set_project_metadata`, `vector_search`. Helper `ResolveActAsync` parses `string?` act ids accepting an `"unassigned"` sentinel and validates project ownership. Mutating tools fire `OnMutated()` to surface `OutlineMutated` updates upstream. |
+| `OutlineTurnUpdate.cs` | `[JsonDerivedType]`-decorated abstract record for streaming chat updates: `TextDelta`, `ToolCallStarted`, `ToolCallCompleted`, `AssistantMessageCompleted`, `OutlineMutated`, `TurnError`. |
 
 ### Chapters/
 

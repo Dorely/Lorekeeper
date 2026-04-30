@@ -1,0 +1,25 @@
+using Lorekeeper.Models;
+
+namespace Lorekeeper.Persistence.Repositories;
+
+public interface IOutlineConversationRepository
+{
+    /// <summary>Returns the project's conversation row, or null if it has not been created yet.</summary>
+    Task<OutlineConversation?> GetByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default);
+
+    /// <summary>Loads all messages for a conversation in <see cref="OutlineMessage.Order"/> ascending order.</summary>
+    Task<List<OutlineMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Returns the highest <see cref="OutlineMessage.Order"/> in the conversation, or -1 if empty.</summary>
+    Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default);
+
+    Task AddConversationAsync(OutlineConversation conversation, CancellationToken cancellationToken = default);
+
+    Task AddMessageAsync(OutlineMessage message, CancellationToken cancellationToken = default);
+
+    void UpdateMessage(OutlineMessage message);
+
+    void RemoveConversation(OutlineConversation conversation);
+
+    Task SaveChangesAsync(CancellationToken cancellationToken = default);
+}

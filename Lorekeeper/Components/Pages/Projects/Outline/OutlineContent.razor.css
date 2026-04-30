@@ -1,0 +1,29 @@
+.outline-pane {
+    display: grid;
+    grid-template-columns: minmax(20rem, 1fr) minmax(0, 2fr);
+    gap: 1rem;
+    height: calc(100vh - 11rem);
+    min-height: 30rem;
+}
+
+.outline-pane-chat {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.outline-pane-tree {
+    min-width: 0;
+    overflow: auto;
+}
+
+@media (max-width: 992px) {
+    .outline-pane {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+
+    .outline-pane-chat {
+        height: 28rem;
+    }
+}

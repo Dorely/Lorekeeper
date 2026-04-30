@@ -1,0 +1,418 @@
+@using System.Text
+@using System.Text.Json
+@using Lorekeeper.Models
+@using Lorekeeper.Outline
+@implements IAsyncDisposable
+@inject IOutlineCollaborationService Collab
+@inject IJSRuntime JS
+
+<div class="outline-chat">
+    <div class="outline-chat-header">
+        <span class="outline-chat-title">Outline Chat</span>
+        <button type="button" class="btn btn-link btn-sm outline-chat-reset" title="Start over"
+                disabled="@_running" @onclick="ResetAsync">Reset</button>
+    </div>
+
+    <div class="outline-chat-scroll" @ref="_scrollEl">
+        @if (_loading)
+        {
+            <div class="outline-chat-empty"><em>Loading…</em></div>
+        }
+        else
+        {
+            @foreach (var msg in _renderable)
+            {
+                @RenderMessage(msg)
+            }
+            @if (_live is not null)
+            {
+                @RenderLive(_live)
+            }
+        }
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="outline-chat-error">
+            <span>@_error</span>
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _error = null"></button>
+        </div>
+    }
+
+    <div class="outline-chat-composer">
+        <textarea class="form-control" rows="2" placeholder="Type a message…"
+                  disabled="@_running"
+                  @bind="_input" @bind:event="oninput"
+                  @onkeydown="OnKeyDown"></textarea>
+        @if (_running)
+        {
+            <button type="button" class="btn btn-outline-danger" @onclick="CancelAsync">Stop</button>
+        }
+        else
+        {
+            <button type="button" class="btn btn-primary"
+                    disabled="@string.IsNullOrWhiteSpace(_input)"
+                    @onclick="SendAsync">Send</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public EventCallback OnOutlineChanged { get; set; }
+
+    private ElementReference _scrollEl;
+    private IJSObjectReference? _scroller;
+
+    private OutlineConversation? _conversation;
+    private List<OutlineMessage> _messages = [];
+    private List<RenderableMessage> _renderable = [];
+    private LiveTurn? _live;
+
+    private string _input = string.Empty;
+    private bool _running;
+    private bool _loading = true;
+    private string? _error;
+    private CancellationTokenSource? _cts;
+    private Guid? _loadedProjectId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _scroller = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./Components/Pages/Projects/Outline/OutlineChatPanel.razor.js");
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ProjectId == Guid.Empty) return;
+        if (_loadedProjectId == ProjectId) return;
+        _loadedProjectId = ProjectId;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _conversation = await Collab.GetOrCreateAsync(ProjectId);
+            _messages = (await Collab.LoadMessagesAsync(_conversation.Id)).ToList();
+            RebuildRenderable();
+        }
+        finally
+        {
+            _loading = false;
+        }
+        await Task.Yield();
+        await ScrollToBottomAsync(force: true);
+    }
+
+    private async Task SendAsync()
+    {
+        var text = _input?.Trim();
+        if (string.IsNullOrEmpty(text) || _running) return;
+
+        _input = string.Empty;
+        _running = true;
+        _error = null;
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+
+        // Optimistically append the user's message; the service will persist its own copy.
+        _renderable.Add(new RenderableMessage(
+            Id: Guid.NewGuid(),
+            Role: OutlineMessageRole.User,
+            Text: text,
+            Status: OutlineMessageStatus.Completed,
+            ToolChips: []));
+        _live = new LiveTurn();
+        StateHasChanged();
+        await ScrollToBottomAsync(force: true);
+
+        try
+        {
+            await foreach (var update in Collab.SendAsync(ProjectId, text, _cts.Token))
+            {
+                switch (update)
+                {
+                    case TextDelta td:
+                        _live!.Text.Append(td.Text);
+                        StateHasChanged();
+                        await ScrollToBottomAsync();
+                        break;
+
+                    case ToolCallStarted ts:
+                        _live!.Tools.Add(new LiveToolCall
+                        {
+                            CallId = ts.CallId,
+                            Name = ts.ToolName,
+                            ArgumentsJson = ts.ArgumentsJson,
+                        });
+                        StateHasChanged();
+                        await ScrollToBottomAsync();
+                        break;
+
+                    case ToolCallCompleted tc:
+                        var live = _live!.Tools.FirstOrDefault(t => t.CallId == tc.CallId);
+                        if (live is not null)
+                        {
+                            live.Result = tc.Result;
+                            live.Error = tc.Error;
+                            live.DurationMs = tc.DurationMs;
+                            live.Completed = true;
+                        }
+                        StateHasChanged();
+                        break;
+
+                    case OutlineMutated:
+                        if (OnOutlineChanged.HasDelegate)
+                            await OnOutlineChanged.InvokeAsync();
+                        break;
+
+                    case AssistantMessageCompleted:
+                        // Reload from DB so we render the canonical persisted state.
+                        await ReloadFromDbAsync();
+                        // Don't break out — the service may emit more rounds; LiveTurn was already
+                        // folded into the persisted history. Reset for the next round.
+                        _live = new LiveTurn();
+                        StateHasChanged();
+                        await ScrollToBottomAsync();
+                        break;
+
+                    case TurnError err:
+                        _error = err.Cancelled ? null : err.Message;
+                        await ReloadFromDbAsync();
+                        break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _running = false;
+            _live = null;
+            _cts?.Dispose();
+            _cts = null;
+            StateHasChanged();
+            await ScrollToBottomAsync();
+        }
+    }
+
+    private void CancelAsync() => _cts?.Cancel();
+
+    private async Task ResetAsync()
+    {
+        if (_running) return;
+        await Collab.ResetAsync(ProjectId);
+        _loadedProjectId = null; // force reload
+        await LoadAsync();
+        if (OnOutlineChanged.HasDelegate)
+            await OnOutlineChanged.InvokeAsync();
+    }
+
+    private async Task ReloadFromDbAsync()
+    {
+        if (_conversation is null) return;
+        _messages = (await Collab.LoadMessagesAsync(_conversation.Id)).ToList();
+        RebuildRenderable();
+    }
+
+    private void RebuildRenderable()
+    {
+        // Group: user messages and assistant messages render as bubbles. Tool messages render
+        // as result attachments to the chip in the assistant bubble that emitted the call.
+        var byCallId = _messages
+            .Where(m => m.Role == OutlineMessageRole.Tool && m.ToolCallId is not null)
+            .ToDictionary(m => m.ToolCallId!, m => m);
+
+        _renderable = new List<RenderableMessage>(_messages.Count);
+        foreach (var m in _messages)
+        {
+            if (m.Role == OutlineMessageRole.Tool) continue; // attached, not rendered standalone
+            if (m.Role == OutlineMessageRole.System) continue;
+
+            var chips = new List<ToolChip>();
+            if (m.Role == OutlineMessageRole.Assistant
+                && !string.IsNullOrWhiteSpace(m.ToolCallsJson)
+                && m.ToolCallsJson != "[]")
+            {
+                try
+                {
+                    var calls = JsonSerializer.Deserialize<List<PersistedCall>>(m.ToolCallsJson);
+                    if (calls is not null)
+                    {
+                        foreach (var c in calls)
+                        {
+                            byCallId.TryGetValue(c.CallId, out var resultMsg);
+                            chips.Add(new ToolChip(
+                                CallId: c.CallId,
+                                Name: c.Name,
+                                ArgumentsJson: c.ArgumentsJson,
+                                Result: resultMsg?.Status == OutlineMessageStatus.Completed ? resultMsg.Content : null,
+                                Error: resultMsg?.Status == OutlineMessageStatus.Failed ? (resultMsg.ErrorMessage ?? resultMsg.Content) : null,
+                                Completed: resultMsg is not null));
+                        }
+                    }
+                }
+                catch { /* corrupt manifest — render bubble without chips */ }
+            }
+
+            _renderable.Add(new RenderableMessage(
+                Id: m.Id,
+                Role: m.Role,
+                Text: m.Content,
+                Status: m.Status,
+                ToolChips: chips));
+        }
+    }
+
+    private RenderFragment RenderChip(ToolChip chip) => __builder =>
+    {
+        var stateClass = chip.Error is not null
+            ? "outline-chip-error"
+            : (chip.Completed ? "outline-chip-ok" : "outline-chip-pending");
+        <details class="outline-chip @stateClass">
+            <summary>
+                <span class="outline-chip-icon">@(chip.Error is not null ? "✕" : (chip.Completed ? "✓" : "…"))</span>
+                <span class="outline-chip-name">@chip.Name</span>
+                @if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
+                {
+                    <span class="outline-chip-args">@TruncateInline(chip.ArgumentsJson, 80)</span>
+                }
+            </summary>
+            <div class="outline-chip-body">
+                @if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
+                {
+                    <div class="outline-chip-section">args</div>
+                    <pre class="outline-chip-pre">@chip.ArgumentsJson</pre>
+                }
+                @if (chip.Error is not null)
+                {
+                    <div class="outline-chip-section">error</div>
+                    <pre class="outline-chip-pre outline-chip-pre-error">@chip.Error</pre>
+                }
+                else if (chip.Result is not null)
+                {
+                    <div class="outline-chip-section">result</div>
+                    <pre class="outline-chip-pre">@chip.Result</pre>
+                }
+                else
+                {
+                    <div class="outline-chip-section text-muted"><em>running…</em></div>
+                }
+            </div>
+        </details>
+    };
+
+    private static string TruncateInline(string s, int max)
+    {
+        s = s.Replace('\n', ' ').Replace('\r', ' ');
+        return s.Length <= max ? s : s[..max] + "…";
+    }
+
+    private RenderFragment RenderMessage(RenderableMessage msg) => __builder =>
+    {
+        var bubbleClass = msg.Role == OutlineMessageRole.User ? "outline-msg outline-msg-user" : "outline-msg outline-msg-asst";
+        <div class="@bubbleClass">
+            @if (!string.IsNullOrEmpty(msg.Text))
+            {
+                <div class="outline-msg-text">@msg.Text</div>
+            }
+            @foreach (var chip in msg.ToolChips)
+            {
+                @RenderChip(chip)
+            }
+            @if (msg.Status == OutlineMessageStatus.Failed)
+            {
+                <div class="outline-msg-status outline-msg-failed">Failed</div>
+            }
+            else if (msg.Status == OutlineMessageStatus.Cancelled)
+            {
+                <div class="outline-msg-status outline-msg-cancelled">Cancelled</div>
+            }
+        </div>
+    };
+
+    private RenderFragment RenderLive(LiveTurn live) => __builder =>
+    {
+        var hasContent = live.Text.Length > 0 || live.Tools.Count > 0;
+        if (!hasContent)
+        {
+            <div class="outline-msg outline-msg-asst outline-msg-streaming">
+                <span class="outline-typing"><span></span><span></span><span></span></span>
+            </div>
+            return;
+        }
+        <div class="outline-msg outline-msg-asst outline-msg-streaming">
+            @if (live.Text.Length > 0)
+            {
+                <div class="outline-msg-text">@live.Text.ToString()<span class="outline-cursor">▍</span></div>
+            }
+            @foreach (var t in live.Tools)
+            {
+                @RenderChip(new ToolChip(t.CallId, t.Name, t.ArgumentsJson, t.Result, t.Error, t.Completed))
+            }
+        </div>
+    };
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await SendAsync();
+        }
+    }
+
+    private async Task ScrollToBottomAsync(bool force = false)
+    {
+        if (_scroller is null) return;
+        try { await _scroller.InvokeVoidAsync("scrollToBottom", _scrollEl, force); }
+        catch { /* element gone or circuit terminating */ }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        if (_scroller is not null)
+        {
+            try { await _scroller.DisposeAsync(); } catch { }
+        }
+    }
+
+    // -- view models ----
+
+    private sealed record RenderableMessage(
+        Guid Id,
+        OutlineMessageRole Role,
+        string Text,
+        OutlineMessageStatus Status,
+        List<ToolChip> ToolChips);
+
+    public sealed record ToolChip(string CallId, string Name, string ArgumentsJson, string? Result, string? Error, bool Completed);
+
+    private sealed class LiveTurn
+    {
+        public StringBuilder Text { get; } = new();
+        public List<LiveToolCall> Tools { get; } = [];
+    }
+
+    private sealed class LiveToolCall
+    {
+        public required string CallId { get; init; }
+        public required string Name { get; init; }
+        public required string ArgumentsJson { get; init; }
+        public string? Result { get; set; }
+        public string? Error { get; set; }
+        public double DurationMs { get; set; }
+        public bool Completed { get; set; }
+    }
+
+    private sealed record PersistedCall(string CallId, string Name, string ArgumentsJson);
+}

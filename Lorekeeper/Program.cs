@@ -28,6 +28,7 @@ builder.Services.AddScoped<IGraphNodeRepository, GraphNodeRepository>();
 builder.Services.AddScoped<IGraphEdgeRepository, GraphEdgeRepository>();
 builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
 builder.Services.AddScoped<IActRepository, ActRepository>();
+builder.Services.AddScoped<IOutlineConversationRepository, OutlineConversationRepository>();
 
 // Knowledge
 builder.Services.AddScoped<IVectorStore, SqliteVecVectorStore>();
@@ -50,7 +51,8 @@ builder.Services.AddHostedService<StaleChapterReindexer>();
 
 // Outline
 builder.Services.AddScoped<IActService, ActService>();
-builder.Services.AddScoped<IOutlineGenerator, OutlineGenerator>();
+builder.Services.AddScoped<OutlineCollaborationTools>();
+builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationService>();
 
 // Context + AI Console
 builder.Services.AddSingleton<IContextBuilder, ContextBuilder>();

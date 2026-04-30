@@ -44,6 +44,8 @@ public class Project
 
     public ICollection<AiConsoleEntry> AiConsoleEntries { get; set; } = [];
 
+    public ICollection<OutlineConversation> OutlineConversations { get; set; } = [];
+
     /// <summary>Single source of truth for the vector-store scope key for a project.</summary>
     public static string ScopeKey(Guid id) => $"project:{id:N}";
 
