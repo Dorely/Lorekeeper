@@ -11,6 +11,16 @@ public class GraphNodeRepository(AppDbContext db) : IGraphNodeRepository
     public Task<GraphNode?> FindAsync(Guid projectId, string nodeType, string key, CancellationToken cancellationToken = default) =>
         db.GraphNodes.FirstOrDefaultAsync(n => n.ProjectId == projectId && n.NodeType == nodeType && n.Key == key, cancellationToken);
 
+    public Task<GraphNode?> FindByKeyAsync(Guid projectId, string key, CancellationToken cancellationToken = default) =>
+        db.GraphNodes.SingleOrDefaultAsync(n => n.ProjectId == projectId && n.Key == key, cancellationToken);
+
+    public async Task<List<GraphNode>> ListByTypeAsync(Guid projectId, string nodeType, CancellationToken cancellationToken = default) =>
+        await db.GraphNodes
+            .Where(n => n.ProjectId == projectId && n.NodeType == nodeType)
+            .OrderBy(n => n.Label ?? n.Key)
+            .ThenBy(n => n.Key)
+            .ToListAsync(cancellationToken);
+
     public async Task<List<GraphNode>> GetByIdsAsync(IEnumerable<long> ids, CancellationToken cancellationToken = default)
     {
         var idList = ids.ToList();

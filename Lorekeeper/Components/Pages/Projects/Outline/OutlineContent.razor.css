@@ -1,29 +1,58 @@
 .outline-pane {
     display: grid;
-    grid-template-columns: minmax(20rem, 1fr) minmax(0, 2fr);
+    grid-template-columns: minmax(16rem, 1fr) minmax(20rem, 1.4fr) minmax(0, 2fr);
     gap: 1rem;
-    height: calc(100vh - 11rem);
-    min-height: 30rem;
+    align-items: start;
+}
+
+.outline-pane-entities {
+    min-width: 0;
+    /* Pin the entities column so it stays visible while the user scrolls. */
+    position: sticky;
+    top: 1rem;
+    align-self: start;
+    max-height: calc(100vh - 6.5rem);
+    overflow-y: auto;
 }
 
 .outline-pane-chat {
     min-width: 0;
+    /* Pin the chat column so it stays visible while the user scrolls the page
+       through a long outline. The 6.5rem offset matches the project header +
+       tab strip above this pane. */
+    position: sticky;
+    top: 1rem;
+    align-self: start;
+    height: calc(100vh - 6.5rem);
+    min-height: 24rem;
     display: flex;
     flex-direction: column;
 }
 
 .outline-pane-tree {
     min-width: 0;
-    overflow: auto;
+}
+
+@media (max-width: 1200px) {
+    .outline-pane {
+        grid-template-columns: minmax(20rem, 1fr) minmax(0, 2fr);
+    }
+
+    .outline-pane-entities {
+        grid-column: 1 / -1;
+        position: static;
+        max-height: none;
+    }
 }
 
 @media (max-width: 992px) {
     .outline-pane {
         grid-template-columns: 1fr;
-        height: auto;
     }
 
     .outline-pane-chat {
+        position: static;
         height: 28rem;
+        min-height: 0;
     }
 }

@@ -3,6 +3,7 @@
 @using Lorekeeper.Outline
 @inject IActService ActsService
 @inject IChapterService ChaptersService
+@inject IEntityService EntitiesService
 
 <div class="outline-tree">
     <div class="outline-toolbar d-flex align-items-center justify-content-between mb-3">
@@ -129,6 +130,7 @@
     [Parameter, EditorRequired] public Dictionary<Guid, List<Chapter>> ChaptersByAct { get; set; } = [];
     [Parameter, EditorRequired] public List<Chapter> Unassigned { get; set; } = [];
     [Parameter] public Guid? Focus { get; set; }
+    [Parameter] public int RefreshSignal { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
     [Parameter] public EventCallback<string> OnError { get; set; }
 
@@ -136,6 +138,8 @@
     private static readonly Guid _unassignedKey = Guid.Empty;
 
     private readonly HashSet<Guid> _collapsed = [];
+    private readonly HashSet<Guid> _beatsOpen = [];
+    private readonly Dictionary<Guid, int> _beatCounts = [];
     private Guid? _confirmDeleteActId;
     private Guid? _confirmDeleteChapterId;
 
@@ -148,6 +152,34 @@
     private void ToggleAct(Guid key)
     {
         if (!_collapsed.Add(key)) _collapsed.Remove(key);
+    }
+
+    private bool IsBeatsOpen(Guid chapterId) => _beatsOpen.Contains(chapterId);
+    private void ToggleBeats(Guid chapterId)
+    {
+        if (!_beatsOpen.Add(chapterId)) _beatsOpen.Remove(chapterId);
+    }
+
+    private int _lastSignal = -1;
+    protected override async Task OnParametersSetAsync()
+    {
+        if (RefreshSignal != _lastSignal)
+        {
+            _lastSignal = RefreshSignal;
+            await RefreshBeatCountsAsync();
+        }
+    }
+
+    private async Task RefreshBeatCountsAsync()
+    {
+        try
+        {
+            _beatCounts.Clear();
+            var all = ChaptersByAct.Values.SelectMany(v => v).Concat(Unassigned);
+            foreach (var c in all)
+                _beatCounts[c.Id] = await EntitiesService.CountChildrenAsync(Project.Id, c.Id, "Event");
+        }
+        catch (Exception ex) { await OnError.InvokeAsync(ex.Message); }
     }
 
     // ---- Acts -----------------------------------------------------------
@@ -331,14 +363,25 @@
             var idx = j;
             var isFocus = Focus == ch.Id;
             var isDragging = _draggingChapterId == ch.Id;
+            var beatCount = _beatCounts.TryGetValue(ch.Id, out var n) ? n : 0;
+            var beatsOpen = IsBeatsOpen(ch.Id);
+            <div class="outline-chapter-wrap" @key="ch.Id">
             <div class="outline-chapter @(isFocus ? "focus" : "") @(isDragging ? "dragging" : "")"
                  draggable="true"
-                 @key="ch.Id"
                  @ondragstart="() => OnChapterDragStart(ch.Id, actId)"
                  @ondragover:preventDefault="true"
                  @ondragover="() => OnChapterDragOver(ch.Id, actId, bucket)"
                  @ondrop="() => OnChapterDropAsync(actId, bucket)"
                  @ondragend="OnChapterDragEnd">
+                <button type="button" class="outline-collapse outline-chapter-beats-toggle"
+                        title="@(beatsOpen ? "Hide beats" : "Show beats")"
+                        @onclick="() => ToggleBeats(ch.Id)">
+                    <span class="caret">@(beatsOpen ? "▾" : "▸")</span>
+                    @if (beatCount > 0)
+                    {
+                        <span class="outline-chapter-beat-count" title="@beatCount beat(s)">@beatCount</span>
+                    }
+                </button>
                 <div class="outline-handle" title="Drag to reorder">☰</div>
                 <div class="outline-chapter-order">@(idx + 1)</div>
                 <div class="outline-chapter-fields">
@@ -385,6 +428,14 @@
                                 @onclick="() => _confirmDeleteChapterId = ch.Id">Delete</button>
                     }
                 </div>
+            </div>
+            @if (beatsOpen)
+            {
+                <ChapterBeats ProjectId="Project.Id"
+                              ChapterId="ch.Id"
+                              RefreshSignal="RefreshSignal"
+                              OnChanged="OnChanged" />
+            }
             </div>
         }
     };

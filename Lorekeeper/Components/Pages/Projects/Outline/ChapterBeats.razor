@@ -1,0 +1,290 @@
+@using Lorekeeper.Models
+@using Lorekeeper.Outline
+@inject IEntityService Entities
+
+<div class="chapter-beats">
+    @if (_loading)
+    {
+        <div class="text-muted small"><em>Loading beats…</em></div>
+    }
+    else
+    {
+        @if (_beats.Count == 0 && !_creating)
+        {
+            <div class="text-muted small chapter-beats-empty">
+                <em>No beats yet.</em>
+                <button type="button" class="btn btn-sm btn-link" @onclick="StartCreate">+ Add beat</button>
+            </div>
+        }
+        else
+        {
+            <ol class="chapter-beats-list">
+                @for (var i = 0; i < _beats.Count; i++)
+                {
+                    var idx = i;
+                    var b = _beats[idx];
+                    var isEditing = _editingId == b.Id;
+                    var isDragging = _draggingId == b.Id;
+                    <li class="chapter-beat @(isDragging ? "dragging" : "") @(isEditing ? "editing" : "")"
+                        draggable="true"
+                        @key="b.Id"
+                        @ondragstart="() => OnDragStart(b.Id)"
+                        @ondragover:preventDefault="true"
+                        @ondragover="() => OnDragOver(b.Id)"
+                        @ondrop="OnDropAsync"
+                        @ondragend="OnDragEnd">
+                        <div class="chapter-beat-handle" title="Drag to reorder">☰</div>
+                        <div class="chapter-beat-order">@(idx + 1)</div>
+                        <div class="chapter-beat-body">
+                            @if (isEditing)
+                            {
+                                <input type="text" class="form-control form-control-sm"
+                                       placeholder="Beat name"
+                                       @bind="_editName" @bind:event="oninput" />
+                                <textarea class="form-control form-control-sm mt-1"
+                                          rows="2"
+                                          placeholder="Beat summary…"
+                                          @bind="_editSummary" @bind:event="oninput"></textarea>
+                                <div class="chapter-beat-actions mt-1">
+                                    <button type="button" class="btn btn-sm btn-primary"
+                                            @onclick="() => SaveEditAsync(b)">Save</button>
+                                    <button type="button" class="btn btn-sm btn-link"
+                                            @onclick="CancelEdit">Cancel</button>
+                                    @if (_confirmDeleteId == b.Id)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-danger ms-auto"
+                                                @onclick="() => ConfirmDeleteAsync(b)">Confirm delete</button>
+                                        <button type="button" class="btn btn-sm btn-link"
+                                                @onclick="() => _confirmDeleteId = null">Cancel</button>
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="btn btn-sm btn-link text-danger ms-auto"
+                                                @onclick="() => _confirmDeleteId = b.Id">Delete</button>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <button type="button" class="chapter-beat-name"
+                                        @onclick="() => StartEdit(b)">@b.Name</button>
+                                @if (b.Properties.TryGetValue("summary", out var s) && !string.IsNullOrWhiteSpace(s))
+                                {
+                                    <div class="chapter-beat-summary text-muted small">@s</div>
+                                }
+                            }
+                        </div>
+                    </li>
+                }
+            </ol>
+        }
+
+        @if (_creating)
+        {
+            <div class="chapter-beat chapter-beat-new">
+                <input type="text" class="form-control form-control-sm"
+                       placeholder="New beat name"
+                       @bind="_newName" @bind:event="oninput"
+                       @onkeydown="OnNewKeyDownAsync" />
+                <textarea class="form-control form-control-sm mt-1"
+                          rows="2"
+                          placeholder="Optional summary…"
+                          @bind="_newSummary" @bind:event="oninput"></textarea>
+                <div class="chapter-beat-actions mt-1">
+                    <button type="button" class="btn btn-sm btn-primary"
+                            disabled="@(string.IsNullOrWhiteSpace(_newName))"
+                            @onclick="ConfirmCreateAsync">Create</button>
+                    <button type="button" class="btn btn-sm btn-link" @onclick="CancelCreate">Cancel</button>
+                </div>
+            </div>
+        }
+        else if (_beats.Count > 0)
+        {
+            <div class="chapter-beats-add">
+                <button type="button" class="btn btn-sm btn-link" @onclick="StartCreate">+ Add beat</button>
+            </div>
+        }
+
+        @if (_error is not null)
+        {
+            <div class="alert alert-danger alert-dismissible mt-2">
+                @_error
+                <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter, EditorRequired] public Guid ChapterId { get; set; }
+    /// <summary>Bumped by the parent every time the outline mutates so this panel re-reads.</summary>
+    [Parameter] public int RefreshSignal { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private const string EventNodeType = "Event";
+
+    private List<StoryEntity> _beats = [];
+    private bool _loading = true;
+    private Guid? _editingId;
+    private string _editName = string.Empty;
+    private string _editSummary = string.Empty;
+    private bool _creating;
+    private string _newName = string.Empty;
+    private string _newSummary = string.Empty;
+    private Guid? _confirmDeleteId;
+    private Guid? _draggingId;
+    private string? _error;
+
+    private Guid _lastChapterId;
+    private int _lastSignal = -1;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ChapterId != _lastChapterId || RefreshSignal != _lastSignal)
+        {
+            _lastChapterId = ChapterId;
+            _lastSignal = RefreshSignal;
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = _beats.Count == 0;
+        try
+        {
+            var items = await Entities.ListAsync(ProjectId, EventNodeType, ChapterId);
+            _beats = items.OrderBy(b => b.Order ?? int.MaxValue).ThenBy(b => b.Name).ToList();
+            if (_editingId is { } id && !_beats.Any(b => b.Id == id)) CancelEdit();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    // ---- create ---------------------------------------------------------
+
+    private void StartCreate()
+    {
+        _creating = true;
+        _newName = string.Empty;
+        _newSummary = string.Empty;
+    }
+
+    private void CancelCreate() { _creating = false; _newName = string.Empty; _newSummary = string.Empty; }
+
+    private async Task OnNewKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey) await ConfirmCreateAsync();
+        else if (e.Key == "Escape") CancelCreate();
+    }
+
+    private async Task ConfirmCreateAsync()
+    {
+        var name = _newName.Trim();
+        if (name.Length == 0) return;
+        try
+        {
+            var props = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(_newSummary)) props["summary"] = _newSummary;
+            await Entities.CreateAsync(ProjectId, EventNodeType, name,
+                properties: props.Count > 0 ? props : null,
+                parentId: ChapterId);
+            CancelCreate();
+            await ReloadAsync();
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    // ---- edit -----------------------------------------------------------
+
+    private void StartEdit(StoryEntity b)
+    {
+        _editingId = b.Id;
+        _editName = b.Name;
+        _editSummary = b.Properties.TryGetValue("summary", out var s) ? (s ?? string.Empty) : string.Empty;
+        _confirmDeleteId = null;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        _editName = string.Empty;
+        _editSummary = string.Empty;
+        _confirmDeleteId = null;
+    }
+
+    private async Task SaveEditAsync(StoryEntity b)
+    {
+        try
+        {
+            var newName = _editName.Trim();
+            var oldSummary = b.Properties.TryGetValue("summary", out var s) ? (s ?? string.Empty) : string.Empty;
+            var newSummary = _editSummary ?? string.Empty;
+
+            Dictionary<string, string?>? toSet = null;
+            List<string>? toRemove = null;
+            if (newSummary != oldSummary)
+            {
+                if (string.IsNullOrWhiteSpace(newSummary)) (toRemove ??= []).Add("summary");
+                else (toSet ??= new(StringComparer.OrdinalIgnoreCase))["summary"] = newSummary;
+            }
+
+            await Entities.UpdateAsync(
+                ProjectId, b.Id,
+                name: newName.Length > 0 && newName != b.Name ? newName : null,
+                propertiesToSet: toSet,
+                propertiesToRemove: toRemove);
+            CancelEdit();
+            await ReloadAsync();
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task ConfirmDeleteAsync(StoryEntity b)
+    {
+        try
+        {
+            await Entities.DeleteAsync(ProjectId, b.Id);
+            CancelEdit();
+            await ReloadAsync();
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    // ---- drag-reorder ---------------------------------------------------
+
+    private void OnDragStart(Guid id) => _draggingId = id;
+    private void OnDragEnd() => _draggingId = null;
+
+    private void OnDragOver(Guid overId)
+    {
+        if (_draggingId is not { } dragId || dragId == overId) return;
+        var from = _beats.FindIndex(b => b.Id == dragId);
+        var to = _beats.FindIndex(b => b.Id == overId);
+        if (from < 0 || to < 0 || from == to) return;
+        var item = _beats[from];
+        _beats.RemoveAt(from);
+        _beats.Insert(to, item);
+    }
+
+    private async Task OnDropAsync()
+    {
+        if (_draggingId is null) return;
+        _draggingId = null;
+        try
+        {
+            var ids = _beats.Select(b => b.Id).ToList();
+            await Entities.ReorderAsync(ProjectId, EventNodeType, ChapterId, ids);
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            await ReloadAsync();
+        }
+    }
+}

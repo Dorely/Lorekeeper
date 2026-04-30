@@ -1,0 +1,298 @@
+@using Lorekeeper.Models
+@using Lorekeeper.Outline
+@inject IEntityService Entities
+
+<div class="entities-panel">
+    @foreach (var sec in _sections)
+    {
+        <div class="entities-section">
+            <div class="entities-section-header">
+                <button type="button" class="entities-collapse"
+                        @onclick="() => ToggleSection(sec.Type)">
+                    <span class="caret">@(IsCollapsed(sec.Type) ? "▸" : "▾")</span>
+                </button>
+                <span class="entities-section-title">@sec.Plural</span>
+                <span class="entities-section-count">@sec.Items.Count</span>
+                <button type="button" class="btn btn-sm btn-link"
+                        @onclick="() => StartCreateAsync(sec.Type)">+ Add</button>
+            </div>
+
+            @if (!IsCollapsed(sec.Type))
+            {
+                <div class="entities-list">
+                    @if (sec.Items.Count == 0 && _creatingType != sec.Type)
+                    {
+                        <div class="text-muted small entities-empty">
+                            <em>No @sec.Singular.ToLowerInvariant() yet.</em>
+                        </div>
+                    }
+
+                    @if (_creatingType == sec.Type)
+                    {
+                        <div class="entities-item entities-item-new">
+                            <input type="text" class="form-control form-control-sm"
+                                   placeholder="@($"New {sec.Singular.ToLowerInvariant()} name")"
+                                   @bind="_newName" @bind:event="oninput"
+                                   @onkeydown="@(e => OnNewKeyDownAsync(e, sec.Type))" />
+                            <div class="entities-actions mt-1">
+                                <button type="button" class="btn btn-sm btn-primary"
+                                        disabled="@(string.IsNullOrWhiteSpace(_newName))"
+                                        @onclick="() => ConfirmCreateAsync(sec.Type)">Create</button>
+                                <button type="button" class="btn btn-sm btn-link"
+                                        @onclick="CancelCreate">Cancel</button>
+                            </div>
+                        </div>
+                    }
+
+                    @foreach (var e in sec.Items)
+                    {
+                        var isEditing = _editingId == e.Id;
+                        <div class="entities-item @(isEditing ? "editing" : "")" @key="e.Id">
+                            @if (isEditing)
+                            {
+                                <input type="text" class="form-control form-control-sm"
+                                       @bind="_editName" @bind:event="oninput" />
+                                <div class="entities-props mt-2">
+                                    @for (var i = 0; i < _editProps.Count; i++)
+                                    {
+                                        var idx = i;
+                                        <div class="entities-prop-row">
+                                            <input type="text" class="form-control form-control-sm entities-prop-key"
+                                                   placeholder="key"
+                                                   value="@_editProps[idx].Key"
+                                                   @onchange="@(ev => UpdatePropKey(idx, (string?)ev.Value))" />
+                                            <input type="text" class="form-control form-control-sm entities-prop-val"
+                                                   placeholder="value"
+                                                   value="@_editProps[idx].Value"
+                                                   @onchange="@(ev => UpdatePropVal(idx, (string?)ev.Value))" />
+                                            <button type="button" class="btn btn-sm btn-link text-danger"
+                                                    @onclick="() => RemoveProp(idx)" title="Remove">×</button>
+                                        </div>
+                                    }
+                                    <button type="button" class="btn btn-sm btn-link"
+                                            @onclick="AddPropRow">+ property</button>
+                                </div>
+                                <div class="entities-actions mt-2">
+                                    <button type="button" class="btn btn-sm btn-primary"
+                                            @onclick="() => SaveEditAsync(e)">Save</button>
+                                    <button type="button" class="btn btn-sm btn-link"
+                                            @onclick="CancelEdit">Cancel</button>
+                                    @if (_confirmDeleteId == e.Id)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-danger ms-auto"
+                                                @onclick="() => ConfirmDeleteAsync(e)">Confirm delete</button>
+                                        <button type="button" class="btn btn-sm btn-link"
+                                                @onclick="() => _confirmDeleteId = null">Cancel</button>
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="btn btn-sm btn-link text-danger ms-auto"
+                                                @onclick="() => _confirmDeleteId = e.Id">Delete</button>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <button type="button" class="entities-item-name"
+                                        @onclick="() => StartEdit(e)">@e.Name</button>
+                                @if (e.Properties.TryGetValue("description", out var desc) && !string.IsNullOrWhiteSpace(desc))
+                                {
+                                    <div class="entities-item-sub text-muted small">@desc</div>
+                                }
+                                else if (e.Properties.TryGetValue("role", out var role) && !string.IsNullOrWhiteSpace(role))
+                                {
+                                    <div class="entities-item-sub text-muted small">@role</div>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (_error is not null)
+    {
+        <div class="entities-error alert alert-danger alert-dismissible mt-2">
+            @_error
+            <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    /// <summary>Bumped by the parent every time the outline mutates so this panel re-reads.</summary>
+    [Parameter] public int RefreshSignal { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private sealed class Section
+    {
+        public required string Type { get; init; }
+        public required string Singular { get; init; }
+        public required string Plural { get; init; }
+        public List<StoryEntity> Items { get; set; } = [];
+    }
+
+    private readonly List<Section> _sections =
+    [
+        new() { Type = "Character", Singular = "Character", Plural = "Characters" },
+        new() { Type = "Location",  Singular = "Location",  Plural = "Locations"  },
+    ];
+
+    private readonly HashSet<string> _collapsed = [];
+    private Guid? _editingId;
+    private string _editName = string.Empty;
+    private List<KeyValuePair<string, string>> _editProps = [];
+    private IReadOnlyDictionary<string, string?> _editOriginalProps = new Dictionary<string, string?>();
+    private string? _creatingType;
+    private string _newName = string.Empty;
+    private Guid? _confirmDeleteId;
+    private string? _error;
+
+    private Guid _lastProjectId;
+    private int _lastSignal = -1;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ProjectId != _lastProjectId || RefreshSignal != _lastSignal)
+        {
+            _lastProjectId = ProjectId;
+            _lastSignal = RefreshSignal;
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            foreach (var s in _sections)
+            {
+                var items = await Entities.ListAsync(ProjectId, s.Type);
+                s.Items = items.OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            // Drop any in-flight edit if the underlying entity disappeared.
+            if (_editingId is { } id && !_sections.SelectMany(s => s.Items).Any(i => i.Id == id))
+            {
+                CancelEdit();
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private bool IsCollapsed(string type) => _collapsed.Contains(type);
+    private void ToggleSection(string type)
+    {
+        if (!_collapsed.Add(type)) _collapsed.Remove(type);
+    }
+
+    // ---- create ---------------------------------------------------------
+
+    private void StartCreateAsync(string type)
+    {
+        _creatingType = type;
+        _newName = string.Empty;
+        _collapsed.Remove(type);
+    }
+
+    private void CancelCreate() { _creatingType = null; _newName = string.Empty; }
+
+    private async Task OnNewKeyDownAsync(KeyboardEventArgs e, string type)
+    {
+        if (e.Key == "Enter") await ConfirmCreateAsync(type);
+        else if (e.Key == "Escape") CancelCreate();
+    }
+
+    private async Task ConfirmCreateAsync(string type)
+    {
+        var name = _newName.Trim();
+        if (name.Length == 0) return;
+        try
+        {
+            await Entities.CreateAsync(ProjectId, type, name);
+            CancelCreate();
+            await ReloadAsync();
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    // ---- edit -----------------------------------------------------------
+
+    private void StartEdit(StoryEntity e)
+    {
+        _editingId = e.Id;
+        _editName = e.Name;
+        _editOriginalProps = e.Properties;
+        _editProps = e.Properties
+            .Select(kv => new KeyValuePair<string, string>(kv.Key, kv.Value ?? string.Empty))
+            .ToList();
+        _confirmDeleteId = null;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        _editName = string.Empty;
+        _editProps = [];
+        _confirmDeleteId = null;
+    }
+
+    private void AddPropRow() => _editProps.Add(new KeyValuePair<string, string>(string.Empty, string.Empty));
+    private void RemoveProp(int idx) { if (idx >= 0 && idx < _editProps.Count) _editProps.RemoveAt(idx); }
+
+    private void UpdatePropKey(int idx, string? value) =>
+        _editProps[idx] = new KeyValuePair<string, string>(value ?? string.Empty, _editProps[idx].Value);
+    private void UpdatePropVal(int idx, string? value) =>
+        _editProps[idx] = new KeyValuePair<string, string>(_editProps[idx].Key, value ?? string.Empty);
+
+    private async Task SaveEditAsync(StoryEntity e)
+    {
+        try
+        {
+            // Build the new prop bag (skip blank keys).
+            var next = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in _editProps)
+            {
+                var k = kv.Key.Trim();
+                if (k.Length == 0) continue;
+                next[k] = kv.Value;
+            }
+
+            // propertiesToSet = entries that are new or changed.
+            var toSet = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (k, v) in next)
+            {
+                if (!_editOriginalProps.TryGetValue(k, out var old) || (old ?? string.Empty) != (v ?? string.Empty))
+                    toSet[k] = v;
+            }
+            // propertiesToRemove = original keys missing from next.
+            var toRemove = _editOriginalProps.Keys.Where(k => !next.ContainsKey(k)).ToList();
+
+            var newName = _editName.Trim();
+            await Entities.UpdateAsync(
+                ProjectId,
+                e.Id,
+                name: newName.Length > 0 && newName != e.Name ? newName : null,
+                propertiesToSet: toSet.Count > 0 ? toSet : null,
+                propertiesToRemove: toRemove.Count > 0 ? toRemove : null);
+            CancelEdit();
+            await ReloadAsync();
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task ConfirmDeleteAsync(StoryEntity e)
+    {
+        try
+        {
+            await Entities.DeleteAsync(ProjectId, e.Id);
+            CancelEdit();
+            await ReloadAsync();
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+}

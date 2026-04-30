@@ -1,0 +1,94 @@
+.chapter-beats {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.4rem;
+}
+
+.chapter-beats-empty {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.chapter-beats-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.chapter-beat {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    gap: 0.5rem;
+    align-items: start;
+    padding: 0.4rem 0.5rem;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.4rem;
+}
+
+.chapter-beat.dragging {
+    opacity: 0.6;
+}
+
+.chapter-beat-handle {
+    cursor: grab;
+    color: var(--bs-secondary-color);
+    user-select: none;
+    line-height: 1.6;
+}
+
+.chapter-beat-order {
+    color: var(--bs-secondary-color);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.6;
+    min-width: 1.2rem;
+    text-align: right;
+}
+
+.chapter-beat-body {
+    min-width: 0;
+}
+
+.chapter-beat-name {
+    background: none;
+    border: none;
+    padding: 0;
+    text-align: left;
+    width: 100%;
+    font-weight: 500;
+    color: var(--bs-body-color);
+    cursor: pointer;
+}
+
+.chapter-beat-name:hover {
+    text-decoration: underline;
+}
+
+.chapter-beat-summary {
+    margin-top: 0.15rem;
+}
+
+.chapter-beat-actions {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.chapter-beat-new {
+    margin-top: 0.4rem;
+    padding: 0.5rem;
+    background: var(--bs-body-bg);
+    border: 1px dashed var(--bs-border-color);
+    border-radius: 0.4rem;
+}
+
+.chapter-beats-add {
+    margin-top: 0.4rem;
+}

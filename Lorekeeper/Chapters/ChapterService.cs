@@ -12,6 +12,9 @@ public class ChapterService(
     IEmbeddingService embeddings,
     ITextChunker chunker,
     IStaleChapterNotifier staleNotifier,
+    IGraphStore graph,
+    IGraphNodeRepository graphNodes,
+    IGraphEdgeRepository graphEdges,
     ILogger<ChapterService> logger) : IChapterService
 {
     public async Task<IReadOnlyList<Chapter>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
@@ -106,8 +109,46 @@ public class ChapterService(
             logger.LogWarning(ex, "Failed to delete vector chunks for chapter {ChapterId}", chapter.Id);
         }
 
+        // Wipe the chapter's graph footprint (its lazily-upserted Chapter node + any HasChild
+        // beat children) so the entity layer doesn't leak orphans. Tolerate failures.
+        try
+        {
+            await RemoveChapterGraphAsync(chapter.ProjectId, chapter.Id, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to clean graph entries for chapter {ChapterId}", chapter.Id);
+        }
+
         repo.Remove(chapter);
         await repo.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task RemoveChapterGraphAsync(Guid projectId, Guid chapterId, CancellationToken cancellationToken)
+    {
+        const string ChapterNodeType = "Chapter";
+        const string HasChildEdgeType = "HasChild";
+
+        var chapterNode = await graph.FindNodeAsync(projectId, ChapterNodeType, chapterId.ToString("N"), cancellationToken);
+        if (chapterNode is null) return;
+
+        var outgoing = await graphEdges.GetAdjacentAsync(
+            chapterNode.Id,
+            EdgeDirection.Outgoing,
+            new[] { HasChildEdgeType },
+            maxResults: null,
+            cancellationToken);
+
+        if (outgoing.Count > 0)
+        {
+            var childNodes = await graphNodes.GetByIdsAsync(outgoing.Select(e => e.ToNodeId).ToList(), cancellationToken);
+            foreach (var child in childNodes)
+            {
+                await graph.RemoveNodeAsync(child.Id, cancellationToken);
+            }
+        }
+
+        await graph.RemoveNodeAsync(chapterNode.Id, cancellationToken);
     }
 
     public async Task ReorderAsync(Guid projectId, Guid? actId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)

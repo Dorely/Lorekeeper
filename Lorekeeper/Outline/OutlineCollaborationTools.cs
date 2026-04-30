@@ -27,10 +27,13 @@ public sealed class OutlineCollaborationTools(
     IActService acts,
     IChapterService chapters,
     IProjectService projects,
+    IEntityService entities,
     IVectorStore vectors,
     IEmbeddingService embeddings)
 {
     private const string UnassignedSentinel = "unassigned";
+    /// <summary>Canonical entity type for chapter-scoped beats.</summary>
+    private const string EventNodeType = "Event";
 
     public IList<AITool> Build(OutlineCollaborationContext context)
     {
@@ -86,6 +89,42 @@ public sealed class OutlineCollaborationTools(
                 name: "set_project_metadata",
                 description: "Persist a free-form value into the project's metadata bag. Use the 'outline.' namespace for outline-related facts (e.g. outline.premise, outline.tone, outline.scope, outline.characters, outline.conflict, outline.setting). Overwrites any existing value at the same key."),
 
+            // ---- generic entity tools (Characters, Locations, Events/beats, ...) ----
+
+            AIFunctionFactory.Create(
+                method: (string type, string? parentId) => ListEntitiesAsync(context, type, parentId),
+                name: "list_entities",
+                description: "List entities of a given type. type is one of 'Character', 'Location', 'Event' (others allowed but discouraged). For chapter-scoped beats pass type='Event' and parentId=<chapter id>. For project-scoped types omit parentId. Results are alphabetical for project-scoped types, or by order for chapter-scoped types."),
+
+            AIFunctionFactory.Create(
+                method: (string type, string name, string? propertiesJson, string? parentId, int? order) =>
+                    CreateEntityAsync(context, type, name, propertiesJson, parentId, order),
+                name: "create_entity",
+                description: "Create a new story entity. type is the entity category ('Character', 'Location', 'Event' for beats, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). Returns the new entity's id."),
+
+            AIFunctionFactory.Create(
+                method: (string entityId, string? name, string? propertiesToSetJson, string? propertiesToRemoveJson) =>
+                    UpdateEntityAsync(context, entityId, name, propertiesToSetJson, propertiesToRemoveJson),
+                name: "update_entity",
+                description: "Update an entity's name and/or properties. Pass null for fields to leave unchanged. propertiesToSetJson is a JSON object string of keys to merge into the existing bag (e.g. '{\"role\":\"protagonist\"}'). propertiesToRemoveJson is a JSON array string of keys to delete (e.g. '[\"role\"]')."),
+
+            AIFunctionFactory.Create(
+                method: (string entityId) => DeleteEntityAsync(context, entityId),
+                name: "delete_entity",
+                description: "Delete an entity and any edges connected to it."),
+
+            AIFunctionFactory.Create(
+                method: (string type, string parentId, string orderedIdsJson) =>
+                    ReorderEntitiesAsync(context, type, parentId, orderedIdsJson),
+                name: "reorder_entities",
+                description: "Replace the ordering of a parent's children of a given type. orderedIdsJson is a JSON array string of entity ids (e.g. '[\"<guid1>\", \"<guid2>\"]') and must contain exactly the parent's current children of that type. Used primarily to reorder beats within a chapter."),
+
+            AIFunctionFactory.Create(
+                method: (string fromId, string toId, string edgeType, string? propertiesJson) =>
+                    LinkEntitiesAsync(context, fromId, toId, edgeType, propertiesJson),
+                name: "link_entities",
+                description: "Create a typed edge between two entities. propertiesJson is an optional JSON object string of edge metadata. Conventional edge types: 'AppearsIn' (Character -> Event/Chapter), 'LocatedAt' (Event -> Location), 'KnownTo' (Character -> Character). Other types are allowed; use camel-case verbs."),
+
             AIFunctionFactory.Create(
                 method: (string query, int topK) => VectorSearchAsync(context, query, topK),
                 name: "vector_search",
@@ -104,6 +143,22 @@ public sealed class OutlineCollaborationTools(
                                .ToDictionary(g => g.Key, g => g.OrderBy(c => c.Order).ToList());
         var unassigned = allChapters.Where(c => c.ActId is null).OrderBy(c => c.Order).ToList();
 
+        // Pre-resolve beat counts per chapter so the assistant can decide whether it needs to
+        // call list_entities; cheap because CountChildrenAsync short-circuits when the chapter
+        // has no graph node yet.
+        var beatCounts = new Dictionary<Guid, int>();
+        foreach (var c in allChapters)
+            beatCounts[c.Id] = await entities.CountChildrenAsync(ctx.ProjectId, c.Id, EventNodeType);
+
+        object ProjectChapter(Chapter c) => new
+        {
+            id = c.Id,
+            order = c.Order,
+            title = c.Title,
+            synopsis = c.Synopsis,
+            beatCount = beatCounts.TryGetValue(c.Id, out var n) ? n : 0,
+        };
+
         var payload = new
         {
             acts = actList.Select(a => new
@@ -112,21 +167,9 @@ public sealed class OutlineCollaborationTools(
                 order = a.Order,
                 title = a.Title,
                 synopsis = a.Synopsis,
-                chapters = (byAct.TryGetValue(a.Id, out var list) ? list : []).Select(c => new
-                {
-                    id = c.Id,
-                    order = c.Order,
-                    title = c.Title,
-                    synopsis = c.Synopsis,
-                }),
+                chapters = (byAct.TryGetValue(a.Id, out var list) ? list : []).Select(ProjectChapter),
             }),
-            unassigned = unassigned.Select(c => new
-            {
-                id = c.Id,
-                order = c.Order,
-                title = c.Title,
-                synopsis = c.Synopsis,
-            }),
+            unassigned = unassigned.Select(ProjectChapter),
         };
         return JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = false });
     }
@@ -299,6 +342,226 @@ public sealed class OutlineCollaborationTools(
             sb.Append(r.Content).Append("\n\n");
         }
         return sb.ToString().TrimEnd();
+    }
+
+    // ---- entity tools ----------------------------------------------------
+
+    private async Task<string> ListEntitiesAsync(OutlineCollaborationContext ctx, string type, string? parentId)
+    {
+        if (string.IsNullOrWhiteSpace(type)) return "Error: type is required.";
+        Guid? parent = null;
+        if (!string.IsNullOrWhiteSpace(parentId))
+        {
+            if (!Guid.TryParse(parentId, out var p)) return $"Error: parentId '{parentId}' is not a valid Guid.";
+            parent = p;
+        }
+
+        var list = await entities.ListAsync(ctx.ProjectId, type.Trim(), parent);
+        return JsonSerializer.Serialize(list.Select(e => new
+        {
+            id = e.Id,
+            type = e.Type,
+            name = e.Name,
+            order = e.Order,
+            parentId = e.ParentId,
+            properties = e.Properties,
+        }));
+    }
+
+    private async Task<string> CreateEntityAsync(
+        OutlineCollaborationContext ctx,
+        string type,
+        string name,
+        string? propertiesJson,
+        string? parentId,
+        int? order)
+    {
+        if (string.IsNullOrWhiteSpace(type)) return "Error: type is required.";
+        if (string.IsNullOrWhiteSpace(name)) return "Error: name is required.";
+
+        Dictionary<string, string?>? properties;
+        try { properties = ParsePropertiesJson(propertiesJson); }
+        catch (Exception ex) { return $"Error: propertiesJson is not a valid JSON object: {ex.Message}"; }
+
+        Guid? parent = null;
+        if (!string.IsNullOrWhiteSpace(parentId))
+        {
+            if (!Guid.TryParse(parentId, out var p)) return $"Error: parentId '{parentId}' is not a valid Guid.";
+            // For Event (beats) the parent must be a chapter we know about. Validate up front so
+            // the chat surface gets a clear error instead of lazily upserting a phantom node.
+            if (string.Equals(type.Trim(), EventNodeType, StringComparison.OrdinalIgnoreCase))
+            {
+                var chapter = await chapters.GetAsync(p);
+                if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+                    return $"Error: chapter {p} not found in this project. Beats (type='Event') require a chapter parentId.";
+            }
+            parent = p;
+        }
+
+        try
+        {
+            var created = await entities.CreateAsync(ctx.ProjectId, type.Trim(), name.Trim(), properties, parent, order);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                id = created.Id,
+                type = created.Type,
+                name = created.Name,
+                order = created.Order,
+                parentId = created.ParentId,
+                properties = created.Properties,
+            });
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<string> UpdateEntityAsync(
+        OutlineCollaborationContext ctx,
+        string entityId,
+        string? name,
+        string? propertiesToSetJson,
+        string? propertiesToRemoveJson)
+    {
+        if (!Guid.TryParse(entityId, out var id)) return $"Error: entityId '{entityId}' is not a valid Guid.";
+
+        Dictionary<string, string?>? propertiesToSet;
+        try { propertiesToSet = ParsePropertiesJson(propertiesToSetJson); }
+        catch (Exception ex) { return $"Error: propertiesToSetJson is not a valid JSON object: {ex.Message}"; }
+
+        string[]? propertiesToRemove;
+        try { propertiesToRemove = ParseStringArrayJson(propertiesToRemoveJson); }
+        catch (Exception ex) { return $"Error: propertiesToRemoveJson is not a valid JSON array of strings: {ex.Message}"; }
+
+        try
+        {
+            var updated = await entities.UpdateAsync(ctx.ProjectId, id, name?.Trim(), propertiesToSet, propertiesToRemove);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                id = updated.Id,
+                type = updated.Type,
+                name = updated.Name,
+                order = updated.Order,
+                parentId = updated.ParentId,
+                properties = updated.Properties,
+            });
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<string> DeleteEntityAsync(OutlineCollaborationContext ctx, string entityId)
+    {
+        if (!Guid.TryParse(entityId, out var id)) return $"Error: entityId '{entityId}' is not a valid Guid.";
+        await entities.DeleteAsync(ctx.ProjectId, id);
+        ctx.OnMutated();
+        return $"Deleted entity {id}.";
+    }
+
+    private async Task<string> ReorderEntitiesAsync(
+        OutlineCollaborationContext ctx,
+        string type,
+        string parentId,
+        string orderedIdsJson)
+    {
+        if (string.IsNullOrWhiteSpace(type)) return "Error: type is required.";
+        if (!Guid.TryParse(parentId, out var parent)) return $"Error: parentId '{parentId}' is not a valid Guid.";
+
+        string[]? orderedIds;
+        try { orderedIds = ParseStringArrayJson(orderedIdsJson); }
+        catch (Exception ex) { return $"Error: orderedIdsJson is not a valid JSON array of strings: {ex.Message}"; }
+        if (orderedIds is null || orderedIds.Length == 0) return "Error: orderedIdsJson is required.";
+
+        var parsed = new List<Guid>(orderedIds.Length);
+        foreach (var s in orderedIds)
+        {
+            if (!Guid.TryParse(s, out var g)) return $"Error: orderedIdsJson contains invalid Guid '{s}'.";
+            parsed.Add(g);
+        }
+
+        try
+        {
+            await entities.ReorderAsync(ctx.ProjectId, type.Trim(), parent, parsed);
+            ctx.OnMutated();
+            return $"Reordered {parsed.Count} {type} entities under parent {parent}.";
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<string> LinkEntitiesAsync(
+        OutlineCollaborationContext ctx,
+        string fromId,
+        string toId,
+        string edgeType,
+        string? propertiesJson)
+    {
+        if (!Guid.TryParse(fromId, out var from)) return $"Error: fromId '{fromId}' is not a valid Guid.";
+        if (!Guid.TryParse(toId, out var to)) return $"Error: toId '{toId}' is not a valid Guid.";
+        if (string.IsNullOrWhiteSpace(edgeType)) return "Error: edgeType is required.";
+
+        Dictionary<string, string?>? properties;
+        try { properties = ParsePropertiesJson(propertiesJson); }
+        catch (Exception ex) { return $"Error: propertiesJson is not a valid JSON object: {ex.Message}"; }
+
+        try
+        {
+            await entities.LinkAsync(ctx.ProjectId, from, to, edgeType.Trim(), properties);
+            ctx.OnMutated();
+            return $"Linked {from} -[{edgeType.Trim()}]-> {to}.";
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Parses a JSON object string like <c>{"k":"v","k2":null}</c> into a string?-valued dict.
+    /// Returns null when the input is null/blank. Throws on malformed JSON or non-object roots.
+    /// </summary>
+    private static Dictionary<string, string?>? ParsePropertiesJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("expected a JSON object at the root.");
+        var dict = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var prop in doc.RootElement.EnumerateObject())
+        {
+            dict[prop.Name] = prop.Value.ValueKind switch
+            {
+                JsonValueKind.Null => null,
+                JsonValueKind.String => prop.Value.GetString(),
+                _ => prop.Value.GetRawText(),
+            };
+        }
+        return dict;
+    }
+
+    /// <summary>
+    /// Parses a JSON array string of strings like <c>["a","b"]</c>. Returns null when input is
+    /// null/blank. Throws on malformed JSON or non-array roots.
+    /// </summary>
+    private static string[]? ParseStringArrayJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("expected a JSON array at the root.");
+        var list = new List<string>();
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            list.Add(el.ValueKind == JsonValueKind.String ? (el.GetString() ?? string.Empty) : el.GetRawText());
+        }
+        return list.ToArray();
     }
 
     // ---- helpers ---------------------------------------------------------

@@ -51,6 +51,7 @@ builder.Services.AddHostedService<StaleChapterReindexer>();
 
 // Outline
 builder.Services.AddScoped<IActService, ActService>();
+builder.Services.AddScoped<IEntityService, EntityService>();
 builder.Services.AddScoped<OutlineCollaborationTools>();
 builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationService>();
 

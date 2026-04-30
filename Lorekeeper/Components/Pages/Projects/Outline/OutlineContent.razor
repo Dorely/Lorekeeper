@@ -1,8 +1,10 @@
 @using Lorekeeper.Chapters
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
+@using Lorekeeper.Persistence.Repositories
 @inject IActService Acts
 @inject IChapterService Chapters
+@inject IProjectRepository ProjectRepo
 
 @if (Project is null)
 {
@@ -15,10 +17,16 @@ else if (_loading)
 else
 {
     <div class="outline-pane">
+        <div class="outline-pane-entities">
+            <EntitiesPanel ProjectId="@_workingProject!.Id"
+                           RefreshSignal="@_refreshSignal"
+                           OnChanged="ReloadAsync" />
+        </div>
         <div class="outline-pane-chat">
-            <OutlineChatPanel ProjectId="Project.Id" OnOutlineChanged="ReloadAsync" />
+            <OutlineChatPanel ProjectId="@_workingProject!.Id" OnOutlineChanged="ReloadAsync" />
         </div>
         <div class="outline-pane-tree">
+            <OutlineMetadataPanel Project="_workingProject" OnChanged="ReloadAsync" />
             @if (!string.IsNullOrEmpty(_error))
             {
                 <div class="alert alert-danger alert-dismissible fade show" role="alert">
@@ -26,11 +34,12 @@ else
                     <button type="button" class="btn-close" @onclick="() => _error = null"></button>
                 </div>
             }
-            <OutlineTree Project="Project"
+            <OutlineTree Project="_workingProject"
                          Acts="_acts"
                          ChaptersByAct="_chaptersByAct"
                          Unassigned="_unassigned"
                          Focus="Focus"
+                         RefreshSignal="@_refreshSignal"
                          OnChanged="ReloadAsync"
                          OnError="HandleError" />
         </div>
@@ -41,12 +50,15 @@ else
     [CascadingParameter] public Project? Project { get; set; }
     [Parameter] public Guid? Focus { get; set; }
 
+    private Project? _workingProject;
     private List<Act> _acts = [];
     private Dictionary<Guid, List<Chapter>> _chaptersByAct = [];
     private List<Chapter> _unassigned = [];
     private bool _loading = true;
     private string? _error;
     private Guid? _loadedProjectId;
+    /// <summary>Bumped on every successful reload so child panels (entities, beats) re-read.</summary>
+    private int _refreshSignal;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -59,15 +71,19 @@ else
     private async Task ReloadAsync()
     {
         if (Project is null) return;
-        _loading = true;
+        _loading = _workingProject is null;
         try
         {
+            // Re-fetch the project so metadata edits performed by tool calls (which mutate the
+            // DB but not the cascading instance) are reflected here.
+            _workingProject = await ProjectRepo.GetByIdAsync(Project.Id) ?? Project;
             _acts = (await Acts.ListAsync(Project.Id)).ToList();
             var allChapters = (await Chapters.ListAsync(Project.Id)).ToList();
             _chaptersByAct = _acts.ToDictionary(
                 a => a.Id,
                 a => allChapters.Where(c => c.ActId == a.Id).OrderBy(c => c.Order).ToList());
             _unassigned = allChapters.Where(c => c.ActId is null).OrderBy(c => c.Order).ToList();
+            _refreshSignal++;
         }
         finally
         {
