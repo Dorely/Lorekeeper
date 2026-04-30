@@ -212,6 +212,11 @@
 .outline-chat-composer textarea {
     resize: none;
     flex: 1;
+    min-height: 2.25rem;
+    /* JS sets max-height dynamically; this is a safety floor in case JS doesn't run. */
+    max-height: 50vh;
+    overflow-y: hidden;
+    line-height: 1.4;
 }
 
 .outline-chat-error {

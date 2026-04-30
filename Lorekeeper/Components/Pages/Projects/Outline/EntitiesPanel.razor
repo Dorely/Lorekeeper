@@ -46,63 +46,16 @@
 
                     @foreach (var e in sec.Items)
                     {
-                        var isEditing = _editingId == e.Id;
-                        <div class="entities-item @(isEditing ? "editing" : "")" @key="e.Id">
-                            @if (isEditing)
+                        <div class="entities-item" @key="e.Id">
+                            <button type="button" class="entities-item-name"
+                                    @onclick="() => OpenModalAsync(e)">@e.Name</button>
+                            @if (e.Properties.TryGetValue("description", out var desc) && !string.IsNullOrWhiteSpace(desc))
                             {
-                                <input type="text" class="form-control form-control-sm"
-                                       @bind="_editName" @bind:event="oninput" />
-                                <div class="entities-props mt-2">
-                                    @for (var i = 0; i < _editProps.Count; i++)
-                                    {
-                                        var idx = i;
-                                        <div class="entities-prop-row">
-                                            <input type="text" class="form-control form-control-sm entities-prop-key"
-                                                   placeholder="key"
-                                                   value="@_editProps[idx].Key"
-                                                   @onchange="@(ev => UpdatePropKey(idx, (string?)ev.Value))" />
-                                            <input type="text" class="form-control form-control-sm entities-prop-val"
-                                                   placeholder="value"
-                                                   value="@_editProps[idx].Value"
-                                                   @onchange="@(ev => UpdatePropVal(idx, (string?)ev.Value))" />
-                                            <button type="button" class="btn btn-sm btn-link text-danger"
-                                                    @onclick="() => RemoveProp(idx)" title="Remove">×</button>
-                                        </div>
-                                    }
-                                    <button type="button" class="btn btn-sm btn-link"
-                                            @onclick="AddPropRow">+ property</button>
-                                </div>
-                                <div class="entities-actions mt-2">
-                                    <button type="button" class="btn btn-sm btn-primary"
-                                            @onclick="() => SaveEditAsync(e)">Save</button>
-                                    <button type="button" class="btn btn-sm btn-link"
-                                            @onclick="CancelEdit">Cancel</button>
-                                    @if (_confirmDeleteId == e.Id)
-                                    {
-                                        <button type="button" class="btn btn-sm btn-danger ms-auto"
-                                                @onclick="() => ConfirmDeleteAsync(e)">Confirm delete</button>
-                                        <button type="button" class="btn btn-sm btn-link"
-                                                @onclick="() => _confirmDeleteId = null">Cancel</button>
-                                    }
-                                    else
-                                    {
-                                        <button type="button" class="btn btn-sm btn-link text-danger ms-auto"
-                                                @onclick="() => _confirmDeleteId = e.Id">Delete</button>
-                                    }
-                                </div>
+                                <div class="entities-item-sub text-muted small">@desc</div>
                             }
-                            else
+                            else if (e.Properties.TryGetValue("role", out var role) && !string.IsNullOrWhiteSpace(role))
                             {
-                                <button type="button" class="entities-item-name"
-                                        @onclick="() => StartEdit(e)">@e.Name</button>
-                                @if (e.Properties.TryGetValue("description", out var desc) && !string.IsNullOrWhiteSpace(desc))
-                                {
-                                    <div class="entities-item-sub text-muted small">@desc</div>
-                                }
-                                else if (e.Properties.TryGetValue("role", out var role) && !string.IsNullOrWhiteSpace(role))
-                                {
-                                    <div class="entities-item-sub text-muted small">@role</div>
-                                }
+                                <div class="entities-item-sub text-muted small">@role</div>
                             }
                         </div>
                     }
@@ -119,6 +72,91 @@
         </div>
     }
 </div>
+
+@if (_modalEntity is not null)
+{
+    <div class="modal-backdrop fade show" @onclick="CloseModal"></div>
+    <div class="modal d-block" tabindex="-1" role="dialog" @onclick="CloseModal">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document"
+             @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <div class="text-muted small entities-modal-type">@_modalEntity.Type</div>
+                        <h5 class="modal-title">@_modalEntity.Name</h5>
+                    </div>
+                    <button type="button" class="btn-close" @onclick="CloseModal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">Name</label>
+                        <input type="text" class="form-control" @bind="_editName" @bind:event="oninput" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">Properties</label>
+                        <div class="entities-modal-props">
+                            @for (var i = 0; i < _editProps.Count; i++)
+                            {
+                                var idx = i;
+                                <div class="entities-modal-prop-row">
+                                    <input type="text" class="form-control form-control-sm entities-modal-prop-key"
+                                           placeholder="key"
+                                           value="@_editProps[idx].Key"
+                                           @onchange="@(ev => UpdatePropKey(idx, (string?)ev.Value))" />
+                                    <textarea class="form-control form-control-sm entities-modal-prop-val"
+                                              placeholder="value"
+                                              rows="@RowsFor(_editProps[idx].Value)"
+                                              @onchange="@(ev => UpdatePropVal(idx, (string?)ev.Value))">@_editProps[idx].Value</textarea>
+                                    <button type="button" class="btn btn-sm btn-link text-danger entities-modal-prop-remove"
+                                            @onclick="() => RemoveProp(idx)" title="Remove">×</button>
+                                </div>
+                            }
+                            <button type="button" class="btn btn-sm btn-link" @onclick="AddPropRow">+ property</button>
+                        </div>
+                    </div>
+
+                    <div class="mb-0">
+                        <label class="form-label small text-muted">Links</label>
+                        @if (_modalLinks.Count == 0)
+                        {
+                            <div class="text-muted small"><em>No graph links.</em></div>
+                        }
+                        else
+                        {
+                            <ul class="entities-modal-links list-unstyled mb-0">
+                                @foreach (var link in _modalLinks)
+                                {
+                                    <li class="entities-modal-link">
+                                        <span class="entities-modal-link-dir">
+                                            @(link.Direction == EntityLinkDirection.Outgoing ? "→" : "←")
+                                        </span>
+                                        <span class="entities-modal-link-edge">@link.EdgeType</span>
+                                        <span class="entities-modal-link-other">@link.OtherEntityName</span>
+                                        <span class="entities-modal-link-type text-muted small">@link.OtherEntityType</span>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    @if (_modalConfirmDelete)
+                    {
+                        <button type="button" class="btn btn-danger me-auto" @onclick="() => ConfirmDeleteAsync(_modalEntity)">Confirm delete</button>
+                        <button type="button" class="btn btn-link" @onclick="() => _modalConfirmDelete = false">Cancel delete</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-link text-danger me-auto" @onclick="() => _modalConfirmDelete = true">Delete</button>
+                    }
+                    <button type="button" class="btn btn-link" @onclick="CloseModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="() => SaveEditAsync(_modalEntity)">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
@@ -141,14 +179,17 @@
     ];
 
     private readonly HashSet<string> _collapsed = [];
-    private Guid? _editingId;
+    private string? _creatingType;
+    private string _newName = string.Empty;
+    private string? _error;
+
+    // Modal state
+    private StoryEntity? _modalEntity;
     private string _editName = string.Empty;
     private List<KeyValuePair<string, string>> _editProps = [];
     private IReadOnlyDictionary<string, string?> _editOriginalProps = new Dictionary<string, string?>();
-    private string? _creatingType;
-    private string _newName = string.Empty;
-    private Guid? _confirmDeleteId;
-    private string? _error;
+    private List<EntityLink> _modalLinks = [];
+    private bool _modalConfirmDelete;
 
     private Guid _lastProjectId;
     private int _lastSignal = -1;
@@ -172,10 +213,10 @@
                 var items = await Entities.ListAsync(ProjectId, s.Type);
                 s.Items = items.OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase).ToList();
             }
-            // Drop any in-flight edit if the underlying entity disappeared.
-            if (_editingId is { } id && !_sections.SelectMany(s => s.Items).Any(i => i.Id == id))
+            // Drop the modal if the entity disappeared.
+            if (_modalEntity is { } cur && !_sections.SelectMany(s => s.Items).Any(i => i.Id == cur.Id))
             {
-                CancelEdit();
+                CloseModal();
             }
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -218,25 +259,33 @@
         catch (Exception ex) { _error = ex.Message; }
     }
 
-    // ---- edit -----------------------------------------------------------
+    // ---- modal ----------------------------------------------------------
 
-    private void StartEdit(StoryEntity e)
+    private async Task OpenModalAsync(StoryEntity e)
     {
-        _editingId = e.Id;
+        _modalEntity = e;
         _editName = e.Name;
         _editOriginalProps = e.Properties;
         _editProps = e.Properties
             .Select(kv => new KeyValuePair<string, string>(kv.Key, kv.Value ?? string.Empty))
             .ToList();
-        _confirmDeleteId = null;
+        _modalConfirmDelete = false;
+        _modalLinks = [];
+        try
+        {
+            var links = await Entities.ListLinksAsync(ProjectId, e.Id);
+            _modalLinks = links.ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
     }
 
-    private void CancelEdit()
+    private void CloseModal()
     {
-        _editingId = null;
+        _modalEntity = null;
         _editName = string.Empty;
         _editProps = [];
-        _confirmDeleteId = null;
+        _modalLinks = [];
+        _modalConfirmDelete = false;
     }
 
     private void AddPropRow() => _editProps.Add(new KeyValuePair<string, string>(string.Empty, string.Empty));
@@ -246,6 +295,9 @@
         _editProps[idx] = new KeyValuePair<string, string>(value ?? string.Empty, _editProps[idx].Value);
     private void UpdatePropVal(int idx, string? value) =>
         _editProps[idx] = new KeyValuePair<string, string>(_editProps[idx].Key, value ?? string.Empty);
+
+    private static int RowsFor(string value) =>
+        Math.Clamp(1 + value.Count(c => c == '\n'), 2, 10);
 
     private async Task SaveEditAsync(StoryEntity e)
     {
@@ -277,7 +329,7 @@
                 name: newName.Length > 0 && newName != e.Name ? newName : null,
                 propertiesToSet: toSet.Count > 0 ? toSet : null,
                 propertiesToRemove: toRemove.Count > 0 ? toRemove : null);
-            CancelEdit();
+            CloseModal();
             await ReloadAsync();
             if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
         }
@@ -289,7 +341,7 @@
         try
         {
             await Entities.DeleteAsync(ProjectId, e.Id);
-            CancelEdit();
+            CloseModal();
             await ReloadAsync();
             if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
         }

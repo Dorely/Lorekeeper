@@ -40,7 +40,8 @@
     }
 
     <div class="outline-chat-composer">
-        <textarea class="form-control" rows="2" placeholder="Type a message…"
+        <textarea class="form-control outline-chat-input" rows="1" placeholder="Type a message…"
+                  @ref="_composerEl"
                   disabled="@_running"
                   @bind="_input" @bind:event="oninput"
                   @onkeydown="OnKeyDown"></textarea>
@@ -62,7 +63,9 @@
     [Parameter] public EventCallback OnOutlineChanged { get; set; }
 
     private ElementReference _scrollEl;
+    private ElementReference _composerEl;
     private IJSObjectReference? _scroller;
+    private bool _autoSizeAttached;
 
     private OutlineConversation? _conversation;
     private List<OutlineMessage> _messages = [];
@@ -82,6 +85,11 @@
         {
             _scroller = await JS.InvokeAsync<IJSObjectReference>(
                 "import", "./Components/Pages/Projects/Outline/OutlineChatPanel.razor.js");
+        }
+        if (_scroller is not null && !_autoSizeAttached)
+        {
+            try { await _scroller.InvokeVoidAsync("attachAutoSize", _composerEl); _autoSizeAttached = true; }
+            catch { /* element gone or circuit terminating */ }
         }
     }
 
@@ -120,6 +128,7 @@
         _error = null;
         _cts?.Dispose();
         _cts = new CancellationTokenSource();
+        await ResetComposerSizeAsync();
 
         // Optimistically append the user's message; the service will persist its own copy.
         _renderable.Add(new RenderableMessage(
@@ -373,6 +382,13 @@
     {
         if (_scroller is null) return;
         try { await _scroller.InvokeVoidAsync("scrollToBottom", _scrollEl, force); }
+        catch { /* element gone or circuit terminating */ }
+    }
+
+    private async Task ResetComposerSizeAsync()
+    {
+        if (_scroller is null) return;
+        try { await _scroller.InvokeVoidAsync("resetAutoSize", _composerEl); }
         catch { /* element gone or circuit terminating */ }
     }
 

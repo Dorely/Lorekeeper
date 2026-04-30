@@ -13,65 +13,87 @@ else
 {
     <div class="outline-meta">
         <div class="outline-meta-header">
-            <span class="outline-meta-title">Project metadata</span>
+            <button type="button" class="outline-meta-toggle" title="@(_blockCollapsed ? "Expand" : "Collapse")"
+                    @onclick="() => _blockCollapsed = !_blockCollapsed">
+                <span class="caret">@(_blockCollapsed ? "▸" : "▾")</span>
+                <span class="outline-meta-title">Project metadata</span>
+                <span class="outline-meta-count">@_fields.Count</span>
+            </button>
             <button type="button" class="btn btn-sm btn-link" @onclick="StartAdd" disabled="@_addingNew">+ Add field</button>
         </div>
-        <dl class="outline-meta-list">
-            @foreach (var f in _fields)
-            {
-                <div class="outline-meta-row">
-                    <dt>@PrettyKey(f.Key)</dt>
-                    <dd>
-                        @if (_editing == f.Key)
+        @if (!_blockCollapsed)
+        {
+            <div class="outline-meta-list">
+                @foreach (var f in _fields)
+                {
+                    var collapsed = _rowCollapsed.Contains(f.Key);
+                    <div class="outline-meta-row @(collapsed ? "collapsed" : "")">
+                        <div class="outline-meta-row-header">
+                            <button type="button" class="outline-meta-row-toggle"
+                                    @onclick="() => ToggleRow(f.Key)">
+                                <span class="caret">@(collapsed ? "▸" : "▾")</span>
+                                <span class="outline-meta-key">@PrettyKey(f.Key)</span>
+                            </button>
+                            @if (collapsed && !string.IsNullOrWhiteSpace(f.Value))
+                            {
+                                <span class="outline-meta-preview text-muted">@Preview(f.Value)</span>
+                            }
+                        </div>
+                        @if (!collapsed)
                         {
-                            <textarea class="form-control form-control-sm"
-                                      rows="@RowsFor(_editValue)"
-                                      @bind="_editValue"
-                                      @bind:event="oninput"></textarea>
-                            <div class="outline-meta-actions">
-                                <button type="button" class="btn btn-sm btn-primary" @onclick="() => SaveAsync(f.Key)">Save</button>
-                                <button type="button" class="btn btn-sm btn-link" @onclick="CancelEdit">Cancel</button>
-                                <button type="button" class="btn btn-sm btn-link text-danger ms-auto" @onclick="() => DeleteAsync(f.Key)">Delete</button>
-                            </div>
-                        }
-                        else
-                        {
-                            <button type="button" class="outline-meta-value" @onclick="() => StartEdit(f.Key, f.Value)">
-                                @if (string.IsNullOrWhiteSpace(f.Value))
+                            <div class="outline-meta-row-body">
+                                @if (_editing == f.Key)
                                 {
-                                    <span class="text-muted"><em>(empty — click to edit)</em></span>
+                                    <textarea class="form-control form-control-sm"
+                                              rows="@RowsFor(_editValue)"
+                                              @bind="_editValue"
+                                              @bind:event="oninput"></textarea>
+                                    <div class="outline-meta-actions">
+                                        <button type="button" class="btn btn-sm btn-primary" @onclick="() => SaveAsync(f.Key)">Save</button>
+                                        <button type="button" class="btn btn-sm btn-link" @onclick="CancelEdit">Cancel</button>
+                                        <button type="button" class="btn btn-sm btn-link text-danger ms-auto" @onclick="() => DeleteAsync(f.Key)">Delete</button>
+                                    </div>
                                 }
                                 else
                                 {
-                                    @f.Value
+                                    <button type="button" class="outline-meta-value" @onclick="() => StartEdit(f.Key, f.Value)">
+                                        @if (string.IsNullOrWhiteSpace(f.Value))
+                                        {
+                                            <span class="text-muted"><em>(empty — click to edit)</em></span>
+                                        }
+                                        else
+                                        {
+                                            @f.Value
+                                        }
+                                    </button>
                                 }
-                            </button>
+                            </div>
                         }
-                    </dd>
-                </div>
-            }
-            @if (_addingNew)
-            {
-                <div class="outline-meta-row outline-meta-row-new">
-                    <dt>
-                        <input type="text" class="form-control form-control-sm"
-                               placeholder="key (e.g. outline.tone)"
-                               @bind="_newKey" @bind:event="oninput" />
-                    </dt>
-                    <dd>
-                        <textarea class="form-control form-control-sm" rows="2"
-                                  placeholder="value"
-                                  @bind="_newValue" @bind:event="oninput"></textarea>
-                        <div class="outline-meta-actions">
-                            <button type="button" class="btn btn-sm btn-primary"
-                                    disabled="@(string.IsNullOrWhiteSpace(_newKey))"
-                                    @onclick="AddNewAsync">Add</button>
-                            <button type="button" class="btn btn-sm btn-link" @onclick="CancelAdd">Cancel</button>
+                    </div>
+                }
+                @if (_addingNew)
+                {
+                    <div class="outline-meta-row outline-meta-row-new">
+                        <div class="outline-meta-row-header">
+                            <input type="text" class="form-control form-control-sm"
+                                   placeholder="key (e.g. outline.tone)"
+                                   @bind="_newKey" @bind:event="oninput" />
                         </div>
-                    </dd>
-                </div>
-            }
-        </dl>
+                        <div class="outline-meta-row-body">
+                            <textarea class="form-control form-control-sm" rows="2"
+                                      placeholder="value"
+                                      @bind="_newValue" @bind:event="oninput"></textarea>
+                            <div class="outline-meta-actions">
+                                <button type="button" class="btn btn-sm btn-primary"
+                                        disabled="@(string.IsNullOrWhiteSpace(_newKey))"
+                                        @onclick="AddNewAsync">Add</button>
+                                <button type="button" class="btn btn-sm btn-link" @onclick="CancelAdd">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
         @if (_error is not null)
         {
             <div class="outline-meta-error">@_error</div>
@@ -92,6 +114,8 @@ else
     private string? _error;
     private Guid _lastProjectId;
     private int _lastMetaSig;
+    private bool _blockCollapsed;
+    private readonly HashSet<string> _rowCollapsed = new(StringComparer.OrdinalIgnoreCase);
 
     protected override void OnParametersSet()
     {
@@ -140,6 +164,17 @@ else
 
     private static int RowsFor(string value) =>
         Math.Clamp(1 + value.Count(c => c == '\n'), 2, 8);
+
+    private static string Preview(string value)
+    {
+        var s = value.Replace('\n', ' ').Replace('\r', ' ').Trim();
+        return s.Length <= 80 ? s : s[..80] + "…";
+    }
+
+    private void ToggleRow(string key)
+    {
+        if (!_rowCollapsed.Add(key)) _rowCollapsed.Remove(key);
+    }
 
     private void StartEdit(string key, string value)
     {

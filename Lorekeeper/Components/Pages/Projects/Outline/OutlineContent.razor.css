@@ -1,58 +1,47 @@
+/* Three-column layout: chat | outline tree | (metadata + entities)
+   The pane fills the available space inside the project-shell (which is itself
+   constrained to the viewport via the layout chain). Each column scrolls
+   independently; the page itself never grows past the viewport. */
 .outline-pane {
     display: grid;
-    grid-template-columns: minmax(16rem, 1fr) minmax(20rem, 1.4fr) minmax(0, 2fr);
+    grid-template-columns: minmax(16rem, 1.1fr) minmax(22rem, 1.7fr) minmax(16rem, 1.1fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-auto-rows: minmax(0, 1fr);
     gap: 1rem;
-    align-items: start;
+    flex: 1;
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+    align-items: stretch;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
-.outline-pane-entities {
+.outline-pane > div {
     min-width: 0;
-    /* Pin the entities column so it stays visible while the user scrolls. */
-    position: sticky;
-    top: 1rem;
-    align-self: start;
-    max-height: calc(100vh - 6.5rem);
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
 }
 
 .outline-pane-chat {
-    min-width: 0;
-    /* Pin the chat column so it stays visible while the user scrolls the page
-       through a long outline. The 6.5rem offset matches the project header +
-       tab strip above this pane. */
-    position: sticky;
-    top: 1rem;
-    align-self: start;
-    height: calc(100vh - 6.5rem);
-    min-height: 24rem;
-    display: flex;
-    flex-direction: column;
+    padding-right: 0.25rem;
 }
 
 .outline-pane-tree {
-    min-width: 0;
+    overflow-y: auto;
+    padding-right: 0.25rem;
 }
 
-@media (max-width: 1200px) {
-    .outline-pane {
-        grid-template-columns: minmax(20rem, 1fr) minmax(0, 2fr);
-    }
-
-    .outline-pane-entities {
-        grid-column: 1 / -1;
-        position: static;
-        max-height: none;
-    }
+.outline-pane-side {
+    overflow-y: auto;
+    gap: 1rem;
+    padding-right: 0.25rem;
 }
 
-@media (max-width: 992px) {
-    .outline-pane {
-        grid-template-columns: 1fr;
-    }
 
-    .outline-pane-chat {
-        position: static;
-        height: 28rem;
-        min-height: 0;
-    }
-}

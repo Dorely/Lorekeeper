@@ -1,0 +1,20 @@
+/* Make the project workspace fill the article so child pages (Outline) can use
+   flex-based 100% height instead of fragile viewport math. The titlebar + tabs
+   take their natural height; the routed page body fills the remainder. */
+.project-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Stretch the routed-page wrapper to fill the remaining vertical space. The
+   page itself decides whether to scroll internally or let the article scroll. */
+.project-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}

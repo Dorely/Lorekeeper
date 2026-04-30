@@ -223,6 +223,46 @@ public sealed class EntityService(
         return children.Count(n => n.NodeType == childNodeType);
     }
 
+    public async Task<IReadOnlyList<EntityLink>> ListLinksAsync(
+        Guid projectId,
+        Guid entityId,
+        CancellationToken cancellationToken = default)
+    {
+        var node = await ResolveEntityNodeAsync(projectId, entityId, cancellationToken);
+        if (node is null) return [];
+
+        var adjacent = await edges.GetAdjacentAsync(
+            node.Id,
+            EdgeDirection.Both,
+            edgeTypes: null,
+            maxResults: null,
+            cancellationToken);
+        if (adjacent.Count == 0) return [];
+
+        var otherIds = adjacent
+            .Select(e => e.FromNodeId == node.Id ? e.ToNodeId : e.FromNodeId)
+            .Distinct()
+            .ToList();
+        var others = (await nodes.GetByIdsAsync(otherIds, cancellationToken))
+            .ToDictionary(n => n.Id);
+
+        var result = new List<EntityLink>(adjacent.Count);
+        foreach (var edge in adjacent)
+        {
+            var isOutgoing = edge.FromNodeId == node.Id;
+            var otherId = isOutgoing ? edge.ToNodeId : edge.FromNodeId;
+            if (!others.TryGetValue(otherId, out var other)) continue;
+            var otherGuid = Guid.TryParseExact(other.Key, "N", out var g) ? g : Guid.Empty;
+            result.Add(new EntityLink(
+                EdgeType: edge.EdgeType,
+                Direction: isOutgoing ? EntityLinkDirection.Outgoing : EntityLinkDirection.Incoming,
+                OtherEntityId: otherGuid,
+                OtherEntityName: other.Label ?? other.Key,
+                OtherEntityType: other.NodeType));
+        }
+        return result;
+    }
+
     // ---- helpers ---------------------------------------------------------
 
     /// <summary>

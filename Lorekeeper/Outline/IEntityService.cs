@@ -67,7 +67,37 @@ public interface IEntityService
         Guid parentId,
         string childNodeType,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists all graph edges adjacent to the entity (both directions, all edge types — including
+    /// structural <c>HasChild</c>). Read-only; returns the other endpoint's id, name, and type.
+    /// </summary>
+    Task<IReadOnlyList<EntityLink>> ListLinksAsync(
+        Guid projectId,
+        Guid entityId,
+        CancellationToken cancellationToken = default);
 }
+
+public enum EntityLinkDirection
+{
+    Outgoing,
+    Incoming,
+}
+
+/// <summary>
+/// One edge attached to an entity, projected for read-only display.
+/// </summary>
+/// <param name="EdgeType">The graph edge type (e.g. <c>"HasChild"</c>).</param>
+/// <param name="Direction">Outgoing = this entity is the source; Incoming = this entity is the target.</param>
+/// <param name="OtherEntityId">Stable entity id of the other endpoint (parsed from <see cref="GraphNode.Key"/>).</param>
+/// <param name="OtherEntityName">Display name (falls back to key) of the other endpoint.</param>
+/// <param name="OtherEntityType">Node type of the other endpoint.</param>
+public sealed record EntityLink(
+    string EdgeType,
+    EntityLinkDirection Direction,
+    Guid OtherEntityId,
+    string OtherEntityName,
+    string OtherEntityType);
 
 /// <summary>
 /// Project-scoped projection of a <see cref="GraphNode"/> exposed to UI + chat tools.

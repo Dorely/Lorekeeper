@@ -17,16 +17,10 @@ else if (_loading)
 else
 {
     <div class="outline-pane">
-        <div class="outline-pane-entities">
-            <EntitiesPanel ProjectId="@_workingProject!.Id"
-                           RefreshSignal="@_refreshSignal"
-                           OnChanged="ReloadAsync" />
-        </div>
         <div class="outline-pane-chat">
             <OutlineChatPanel ProjectId="@_workingProject!.Id" OnOutlineChanged="ReloadAsync" />
         </div>
         <div class="outline-pane-tree">
-            <OutlineMetadataPanel Project="_workingProject" OnChanged="ReloadAsync" />
             @if (!string.IsNullOrEmpty(_error))
             {
                 <div class="alert alert-danger alert-dismissible fade show" role="alert">
@@ -42,6 +36,12 @@ else
                          RefreshSignal="@_refreshSignal"
                          OnChanged="ReloadAsync"
                          OnError="HandleError" />
+        </div>
+        <div class="outline-pane-side">
+            <OutlineMetadataPanel Project="_workingProject" OnChanged="ReloadAsync" />
+            <EntitiesPanel ProjectId="@_workingProject!.Id"
+                           RefreshSignal="@_refreshSignal"
+                           OnChanged="ReloadAsync" />
         </div>
     </div>
 }
