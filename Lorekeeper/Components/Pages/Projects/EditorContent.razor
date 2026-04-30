@@ -29,29 +29,6 @@ else if (_current is null)
 else
 {
     <div class="editor-grid">
-        <aside class="panel panel-graph">
-            <h6 class="panel-title">Story Graph</h6>
-
-            @foreach (var group in _drilldown)
-            {
-                <div class="drilldown-section">
-                    <div class="drilldown-heading">@group.Title</div>
-                    <ul class="drilldown-list">
-                        @foreach (var item in group.Items)
-                        {
-                            <li>
-                                <button type="button"
-                                        class="drilldown-item @(IsSelected(group.Title, item) ? "active" : "")"
-                                        @onclick="() => Select(group.Title, item)">
-                                    @item
-                                </button>
-                            </li>
-                        }
-                    </ul>
-                </div>
-            }
-        </aside>
-
         <section class="panel panel-editor">
             <div class="chapter-header">
                 @if (_editingTitle)
@@ -94,75 +71,30 @@ else
                 </div>
             </div>
 
-            <textarea @ref="_bodyTextarea"
-                      class="form-control chapter-body"
-                      placeholder="Start writing your chapter…"></textarea>
+            <div class="chapter-editor @(_chapterLocked ? "chapter-editor--locked" : "")">
+                <div @ref="_gutterRef" class="line-gutter"></div>
+                <textarea @ref="_bodyTextarea"
+                          class="form-control chapter-body"
+                          readonly="@_chapterLocked"
+                          placeholder="Start writing your chapter…"></textarea>
+            </div>
         </section>
 
         <aside class="panel panel-context">
             <h6 class="panel-title">Context Feed</h6>
-
-            @if (_selectedKind is not null && _selectedItem is not null)
-            {
-                <div class="context-focus">
-                    <div class="small text-muted">Focused</div>
-                    <div class="fw-semibold">@_selectedKind: @_selectedItem</div>
-                </div>
-            }
-
-            <div class="context-block">
-                <div class="context-heading">Character: Thrall</div>
-                <ul>
-                    <li>Honorable, conflicted</li>
-                    <li>Recently injured</li>
-                </ul>
-            </div>
-            <div class="context-block">
-                <div class="context-heading">Location: Orgrimmar</div>
-                <ul>
-                    <li>War-torn</li>
-                </ul>
-            </div>
-            <div class="context-block">
-                <div class="context-heading">Events</div>
-                <ul>
-                    <li>Siege of Razor Hill</li>
-                </ul>
-            </div>
-            <div class="context-block">
-                <div class="context-heading">Style</div>
-                <div class="small">User Sample Loaded &middot; Tone: Gritty / introspective</div>
-            </div>
+            <ContextFeedPanel @ref="_contextPanel"
+                              Project="Project"
+                              CurrentChapter="_current"
+                              OnContextChanged="OnContextChanged" />
         </aside>
 
         <section class="panel panel-console">
             <h6 class="panel-title">AI Console</h6>
-            <div class="d-flex gap-2">
-                <input type="text" class="form-control" @bind="_consoleInput"
-                       @bind:event="oninput" placeholder="> Continue scene with tension between Thrall and Garrosh" />
-                <button type="button" class="btn btn-primary" @onclick="SendConsole">Send</button>
-            </div>
-            @if (!string.IsNullOrEmpty(_lastCommand))
-            {
-                <div class="small text-muted mt-2">Last (no-op): @_lastCommand</div>
-            }
+            <AiConsolePanel ProjectId="Project.Id"
+                            CurrentChapterId="_activeChapterId"
+                            OnAiTurnStarting="OnAiTurnStartingAsync"
+                            OnAiTurnCompleted="OnAiTurnCompletedAsync" />
         </section>
-
-        <aside class="panel panel-actions">
-            <h6 class="panel-title">Actions</h6>
-            <div class="d-grid gap-2">
-                <button type="button" class="btn btn-outline-secondary btn-sm"
-                        @onclick='() => Action("Check Consistency")'>Check Consistency</button>
-                <button type="button" class="btn btn-outline-secondary btn-sm"
-                        @onclick='() => Action("Update Memory")'>Update Memory</button>
-                <button type="button" class="btn btn-outline-secondary btn-sm"
-                        @onclick='() => Action("Show Prompt")'>Show Prompt</button>
-            </div>
-            @if (!string.IsNullOrEmpty(_lastAction))
-            {
-                <div class="small text-muted mt-2">Last: @_lastAction</div>
-            }
-        </aside>
     </div>
 }
 
@@ -187,6 +119,7 @@ else
     private bool _menuOpen;
 
     private ElementReference _bodyTextarea;
+    private ElementReference _gutterRef;
     private IJSObjectReference? _editorModule;
     private IJSObjectReference? _editorHandle;
 
@@ -196,19 +129,8 @@ else
 
     private IDisposable? _navHandlerRegistration;
 
-    private string _consoleInput = string.Empty;
-    private string? _lastCommand;
-    private string? _lastAction;
-    private string? _selectedKind;
-    private string? _selectedItem;
-
-    private record DrilldownSection(string Title, string[] Items);
-    private readonly DrilldownSection[] _drilldown =
-    [
-        new("Characters", ["Thrall", "Jaina", "Garrosh"]),
-        new("Locations", ["Orgrimmar", "Durotar"]),
-        new("Events", ["Siege", "Betrayal"]),
-    ];
+    private bool _chapterLocked;
+    private ContextFeedPanel? _contextPanel;
 
     public EditorContent()
     {
@@ -288,7 +210,9 @@ else
                 _editorModule = await JS.InvokeAsync<IJSObjectReference>("import",
                     "./Components/Pages/Projects/EditorContent.razor.js");
                 _editorHandle = await _editorModule.InvokeAsync<IJSObjectReference>(
-                    "attach", _bodyTextarea, _selfRef, 1000, _current.Body);
+                    "attach",
+                    new { textarea = _bodyTextarea, gutter = _gutterRef },
+                    _selfRef, 1000, _current.Body);
             }
             catch (JSDisconnectedException) { }
         }
@@ -426,23 +350,57 @@ else
         _ => string.Empty,
     };
 
-    private bool IsSelected(string kind, string item) =>
-        _selectedKind == kind && _selectedItem == item;
-
-    private void Select(string kind, string item)
+    /// <summary>
+    /// Called by AiConsolePanel before the LLM call begins. Flush any pending
+    /// debounced edits and lock the editor so the user cannot type during the turn.
+    /// </summary>
+    private async Task OnAiTurnStartingAsync()
     {
-        if (IsSelected(kind, item)) { _selectedKind = null; _selectedItem = null; }
-        else { _selectedKind = kind; _selectedItem = item; }
+        await FlushAsync();
+        // Wait for any in-flight save to complete.
+        await _saveGate.WaitAsync();
+        _saveGate.Release();
+
+        _chapterLocked = true;
+        if (_editorHandle is not null)
+        {
+            try { await _editorHandle.InvokeVoidAsync("setReadOnly", true); }
+            catch (JSDisconnectedException) { }
+        }
+        StateHasChanged();
     }
 
-    private void SendConsole()
+    /// <summary>
+    /// Called when the AI turn ends. Reload the chapter body (the AI may have edited
+    /// it via the edit_chapter tool) and unlock the editor.
+    /// </summary>
+    private async Task OnAiTurnCompletedAsync(Lorekeeper.Models.AiConsoleEntry entry)
     {
-        if (string.IsNullOrWhiteSpace(_consoleInput)) return;
-        _lastCommand = _consoleInput.Trim();
-        _consoleInput = string.Empty;
+        if (_activeChapterId is { } cid)
+        {
+            var fresh = await Chapters.GetAsync(cid);
+            if (fresh is not null)
+            {
+                _current = fresh;
+                if (_editorHandle is not null)
+                {
+                    try { await _editorHandle.InvokeVoidAsync("setValue", fresh.Body); }
+                    catch (JSDisconnectedException) { }
+                }
+                _contextPanel?.Refresh();
+            }
+        }
+
+        _chapterLocked = false;
+        if (_editorHandle is not null)
+        {
+            try { await _editorHandle.InvokeVoidAsync("setReadOnly", false); }
+            catch (JSDisconnectedException) { }
+        }
+        StateHasChanged();
     }
 
-    private void Action(string name) => _lastAction = name;
+    private void OnContextChanged() => StateHasChanged();
 
     public async ValueTask DisposeAsync()
     {

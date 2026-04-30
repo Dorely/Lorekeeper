@@ -1,5 +1,6 @@
 using System.Text;
 using Lorekeeper.Knowledge;
+using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 
@@ -24,6 +25,7 @@ public class ProjectService(IProjectRepository repo, IVectorStore vectors) : IPr
         {
             Name = trimmed,
             Slug = slug,
+            SystemPrompt = SeedSystemPrompt.Default,
         };
         await repo.AddAsync(project, cancellationToken);
         await repo.SaveChangesAsync(cancellationToken);
@@ -43,6 +45,36 @@ public class ProjectService(IProjectRepository repo, IVectorStore vectors) : IPr
         project.UpdatedAt = DateTime.UtcNow;
         repo.Update(project);
         await repo.SaveChangesAsync(cancellationToken);
+        return project;
+    }
+
+    public async Task<Project> UpdateSystemPromptAsync(Guid id, string systemPrompt, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(systemPrompt))
+            throw new ArgumentException("System prompt cannot be empty.", nameof(systemPrompt));
+
+        var project = await repo.GetByIdAsync(id, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {id} not found.");
+
+        project.SystemPrompt = systemPrompt;
+        project.UpdatedAt = DateTime.UtcNow;
+        repo.Update(project);
+        await repo.SaveChangesAsync(cancellationToken);
+        return project;
+    }
+
+    public async Task<Project> SetIncludeCurrentChapterAsync(Guid id, bool include, CancellationToken cancellationToken = default)
+    {
+        var project = await repo.GetByIdAsync(id, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {id} not found.");
+
+        if (project.IncludeCurrentChapterInContext != include)
+        {
+            project.IncludeCurrentChapterInContext = include;
+            project.UpdatedAt = DateTime.UtcNow;
+            repo.Update(project);
+            await repo.SaveChangesAsync(cancellationToken);
+        }
         return project;
     }
 

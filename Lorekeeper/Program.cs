@@ -1,6 +1,8 @@
+using Lorekeeper.AiConsole;
 using Lorekeeper.Auth;
 using Lorekeeper.Chapters;
 using Lorekeeper.Components;
+using Lorekeeper.Context;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Persistence;
@@ -43,6 +45,13 @@ builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
 builder.Services.AddScoped<IChapterService, ChapterService>();
 builder.Services.AddSingleton<IStaleChapterNotifier, StaleChapterNotifier>();
 builder.Services.AddHostedService<StaleChapterReindexer>();
+
+// Context + AI Console
+builder.Services.AddSingleton<IContextBuilder, ContextBuilder>();
+builder.Services.Configure<AiConsoleOptions>(builder.Configuration.GetSection("AiConsole"));
+builder.Services.AddScoped<AiConsoleTools>();
+builder.Services.AddScoped<IAiConsoleService, AiConsoleService>();
+builder.Services.AddScoped<IAiConsoleHistoryService, AiConsoleHistoryService>();
 
 var app = builder.Build();
 

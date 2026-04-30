@@ -1,0 +1,148 @@
+@using Lorekeeper.Context
+@using Lorekeeper.Models
+@using Lorekeeper.Projects
+@inject IProjectService Projects
+@inject IContextBuilder ContextBuilder
+
+@if (_assembly is null)
+{
+    <p class="text-muted small mb-0"><em>Loading…</em></p>
+}
+else
+{
+    @foreach (var item in _assembly.Items)
+    {
+        var collapsed = IsCollapsed(item.Kind);
+        <div class="ctx-card @(item.IsEnabled ? "" : "ctx-card--disabled")">
+            <div class="ctx-card-head">
+                <button type="button" class="ctx-caret" @onclick="() => ToggleCollapsed(item.Kind)">
+                    @(collapsed ? "▸" : "▾")
+                </button>
+                <input type="checkbox"
+                       class="form-check-input ctx-check"
+                       checked="@item.IsEnabled"
+                       disabled="@(!item.IsRemovable && item.Kind == ContextItemKind.SystemPrompt)"
+                       @onchange="@(e => OnToggleAsync(item.Kind, (bool)(e.Value ?? false)))" />
+                <span class="ctx-label">@item.Label</span>
+            </div>
+            @if (!collapsed)
+            {
+                <div class="ctx-body">
+                    @if (item.Kind == ContextItemKind.SystemPrompt)
+                    {
+                        <textarea class="form-control ctx-prompt-edit"
+                                  rows="10"
+                                  value="@_promptDraft"
+                                  @oninput="OnPromptInput"
+                                  @onblur="SavePromptAsync"></textarea>
+                        @if (!string.IsNullOrEmpty(_promptError))
+                        {
+                            <div class="text-danger small mt-1">@_promptError</div>
+                        }
+                        else if (_promptSaving)
+                        {
+                            <div class="text-muted small mt-1"><em>Saving…</em></div>
+                        }
+                        else if (_promptDirty)
+                        {
+                            <div class="text-muted small mt-1"><em>Unsaved — blur to save.</em></div>
+                        }
+                    }
+                    else
+                    {
+                        <pre class="ctx-text-block"><code>@(string.IsNullOrEmpty(item.Body) ? "(empty)" : item.Body)</code></pre>
+                    }
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public Project Project { get; set; } = null!;
+    [Parameter] public Chapter? CurrentChapter { get; set; }
+    [Parameter] public EventCallback OnContextChanged { get; set; }
+
+    private ContextAssembly? _assembly;
+    private readonly HashSet<ContextItemKind> _collapsed = [ContextItemKind.CurrentChapter];
+
+    private string _promptDraft = string.Empty;
+    private bool _promptDirty;
+    private bool _promptSaving;
+    private string? _promptError;
+    private string _lastChapterBody = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        Rebuild();
+        if (!_promptDirty) _promptDraft = Project.SystemPrompt;
+        _lastChapterBody = CurrentChapter?.Body ?? string.Empty;
+    }
+
+    /// <summary>Called by the editor when the chapter body changes so the preview stays current.</summary>
+    public void Refresh()
+    {
+        Rebuild();
+        StateHasChanged();
+    }
+
+    private void Rebuild()
+    {
+        _assembly = ContextBuilder.Build(Project, CurrentChapter);
+    }
+
+    private bool IsCollapsed(ContextItemKind kind) => _collapsed.Contains(kind);
+
+    private void ToggleCollapsed(ContextItemKind kind)
+    {
+        if (!_collapsed.Add(kind)) _collapsed.Remove(kind);
+    }
+
+    private async Task OnToggleAsync(ContextItemKind kind, bool include)
+    {
+        if (kind == ContextItemKind.CurrentChapter)
+        {
+            await Projects.SetIncludeCurrentChapterAsync(Project.Id, include);
+            Project.IncludeCurrentChapterInContext = include;
+            Rebuild();
+            await OnContextChanged.InvokeAsync();
+        }
+    }
+
+    private void OnPromptInput(ChangeEventArgs e)
+    {
+        _promptDraft = e.Value?.ToString() ?? string.Empty;
+        _promptDirty = true;
+        _promptError = null;
+    }
+
+    private async Task SavePromptAsync()
+    {
+        if (!_promptDirty) return;
+        if (string.IsNullOrWhiteSpace(_promptDraft))
+        {
+            _promptError = "System prompt cannot be empty.";
+            _promptDraft = Project.SystemPrompt;
+            _promptDirty = false;
+            return;
+        }
+
+        _promptSaving = true;
+        try
+        {
+            await Projects.UpdateSystemPromptAsync(Project.Id, _promptDraft);
+            Project.SystemPrompt = _promptDraft;
+            _promptDirty = false;
+            Rebuild();
+            await OnContextChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _promptError = ex.Message;
+        }
+        finally
+        {
+            _promptSaving = false;
+        }
+    }
+}

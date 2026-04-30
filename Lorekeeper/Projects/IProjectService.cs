@@ -9,6 +9,12 @@ public interface IProjectService
     Task<Project> CreateAsync(string name, CancellationToken cancellationToken = default);
     Task<Project> RenameAsync(Guid id, string newName, CancellationToken cancellationToken = default);
 
+    /// <summary>Replace the project's system prompt. Empty/whitespace is rejected.</summary>
+    Task<Project> UpdateSystemPromptAsync(Guid id, string systemPrompt, CancellationToken cancellationToken = default);
+
+    /// <summary>Toggle whether the currently-open chapter is included in the assembled context.</summary>
+    Task<Project> SetIncludeCurrentChapterAsync(Guid id, bool include, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Deletes the project and cascades to all child graph nodes (and their edges, transitively),
     /// and to all vector chunks stored under the project's scope key.
