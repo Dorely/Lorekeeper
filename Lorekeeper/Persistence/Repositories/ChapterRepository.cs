@@ -1,0 +1,56 @@
+using Lorekeeper.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace Lorekeeper.Persistence.Repositories;
+
+public class ChapterRepository(AppDbContext db) : IChapterRepository
+{
+    public Task<List<Chapter>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        db.Chapters.Where(c => c.ProjectId == projectId)
+                   .OrderBy(c => c.Order)
+                   .ToListAsync(cancellationToken);
+
+    public Task<List<Chapter>> ListStaleAsync(CancellationToken cancellationToken = default) =>
+        db.Chapters.Where(c => c.VectorIndexState != VectorIndexState.UpToDate)
+                   .ToListAsync(cancellationToken);
+
+    public Task<Chapter?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+        db.Chapters.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+
+    public async Task<int> GetMaxOrderAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var any = await db.Chapters.AnyAsync(c => c.ProjectId == projectId, cancellationToken);
+        if (!any) return -1;
+        return await db.Chapters.Where(c => c.ProjectId == projectId).MaxAsync(c => c.Order, cancellationToken);
+    }
+
+    public Task<int> CountByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        db.Chapters.CountAsync(c => c.ProjectId == projectId, cancellationToken);
+
+    public async Task AddAsync(Chapter chapter, CancellationToken cancellationToken = default) =>
+        await db.Chapters.AddAsync(chapter, cancellationToken);
+
+    public void Update(Chapter chapter) => db.Chapters.Update(chapter);
+
+    public void Remove(Chapter chapter) => db.Chapters.Remove(chapter);
+
+    public async Task ReorderAsync(Guid projectId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
+    {
+        var chapters = await db.Chapters
+            .Where(c => c.ProjectId == projectId)
+            .ToListAsync(cancellationToken);
+
+        var byId = chapters.ToDictionary(c => c.Id);
+        for (var i = 0; i < orderedIds.Count; i++)
+        {
+            if (byId.TryGetValue(orderedIds[i], out var ch) && ch.Order != i)
+            {
+                ch.Order = i;
+                ch.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+    }
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        db.SaveChangesAsync(cancellationToken);
+}

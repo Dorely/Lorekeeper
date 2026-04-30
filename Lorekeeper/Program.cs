@@ -1,4 +1,5 @@
 using Lorekeeper.Auth;
+using Lorekeeper.Chapters;
 using Lorekeeper.Components;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
@@ -22,10 +23,12 @@ builder.Services.AddScoped<IOAuthTokenRepository, OAuthTokenRepository>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
 builder.Services.AddScoped<IGraphNodeRepository, GraphNodeRepository>();
 builder.Services.AddScoped<IGraphEdgeRepository, GraphEdgeRepository>();
+builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
 
 // Knowledge
 builder.Services.AddScoped<IVectorStore, SqliteVecVectorStore>();
 builder.Services.AddScoped<IGraphStore, RelationalGraphStore>();
+builder.Services.AddSingleton<ITextChunker, OverlappingTextChunker>();
 
 // LLM
 builder.Services.AddScoped<IEmbeddingService, OllamaEmbeddingService>();
@@ -35,6 +38,11 @@ builder.Services.AddScoped<ICodexAuthService, CodexAuthService>();
 // Projects
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
+
+// Chapters
+builder.Services.AddScoped<IChapterService, ChapterService>();
+builder.Services.AddSingleton<IStaleChapterNotifier, StaleChapterNotifier>();
+builder.Services.AddHostedService<StaleChapterReindexer>();
 
 var app = builder.Build();
 

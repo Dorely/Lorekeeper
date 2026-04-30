@@ -1,15 +1,17 @@
 @page "/projects/{Slug}/outline"
 @rendermode InteractiveServer
+@using Lorekeeper.Chapters
+@using Lorekeeper.Models
+@inject IChapterService Chapters
+@inject NavigationManager Nav
 
 <PageTitle>Outline</PageTitle>
 
 <ProjectLayout Slug="@Slug" Tab="outline">
-    <div class="alert alert-secondary">
-        <strong>Outline editor</strong>
-        <div class="small text-muted">Coming soon.</div>
-    </div>
+    <OutlineContent Focus="@Focus" />
 </ProjectLayout>
 
 @code {
     [Parameter] public string Slug { get; set; } = string.Empty;
+    [SupplyParameterFromQuery] public Guid? Focus { get; set; }
 }

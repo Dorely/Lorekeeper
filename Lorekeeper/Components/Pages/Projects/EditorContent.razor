@@ -1,0 +1,465 @@
+@using Lorekeeper.Chapters
+@using Lorekeeper.Models
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IChapterService Chapters
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@if (Project is null)
+{
+    <p class="text-muted"><em>Loading project…</em></p>
+}
+else if (_loading)
+{
+    <p class="text-muted"><em>Loading chapters…</em></p>
+}
+else if (_chapters.Count == 0)
+{
+    <div class="alert alert-info d-flex align-items-center justify-content-between">
+        <span>No chapters yet.</span>
+        <button type="button" class="btn btn-primary btn-sm" @onclick="CreateFirstAsync">Create first chapter</button>
+    </div>
+}
+else if (_current is null)
+{
+    <p class="text-muted"><em>Loading chapter…</em></p>
+}
+else
+{
+    <div class="editor-grid">
+        <aside class="panel panel-graph">
+            <h6 class="panel-title">Story Graph</h6>
+
+            @foreach (var group in _drilldown)
+            {
+                <div class="drilldown-section">
+                    <div class="drilldown-heading">@group.Title</div>
+                    <ul class="drilldown-list">
+                        @foreach (var item in group.Items)
+                        {
+                            <li>
+                                <button type="button"
+                                        class="drilldown-item @(IsSelected(group.Title, item) ? "active" : "")"
+                                        @onclick="() => Select(group.Title, item)">
+                                    @item
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        </aside>
+
+        <section class="panel panel-editor">
+            <div class="chapter-header">
+                @if (_editingTitle)
+                {
+                    <input class="form-control chapter-title-input"
+                           value="@_titleDraft"
+                           @ref="_titleInput"
+                           @oninput="@(e => _titleDraft = e.Value?.ToString() ?? string.Empty)"
+                           @onkeydown="OnTitleKeyDown"
+                           @onblur="CommitTitleAsync" />
+                }
+                else
+                {
+                    <button type="button" class="chapter-title-btn"
+                            @onclick="ToggleMenu">
+                        <span>@_current.Title</span>
+                        <span class="caret">▾</span>
+                    </button>
+
+                    @if (_menuOpen)
+                    {
+                        <div class="chapter-menu" @onclick:stopPropagation="true">
+                            @foreach (var c in _chapters)
+                            {
+                                <a class="chapter-menu-item @(c.Id == _current.Id ? "active" : "")"
+                                   href="/projects/@Project.Slug/editor/@c.Id"
+                                   @onclick="CloseMenu">@(_chapters.IndexOf(c) + 1). @c.Title</a>
+                            }
+                        </div>
+                    }
+                }
+
+                <button type="button" class="btn btn-sm btn-outline-secondary chapter-icon-btn"
+                        title="Edit title" @onclick="StartEditTitle">✎</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary chapter-icon-btn"
+                        title="New chapter" @onclick="CreateAndGoToOutlineAsync">+</button>
+
+                <div class="ms-auto small index-status">
+                    @SaveStatusText()
+                </div>
+            </div>
+
+            <textarea @ref="_bodyTextarea"
+                      class="form-control chapter-body"
+                      placeholder="Start writing your chapter…"></textarea>
+        </section>
+
+        <aside class="panel panel-context">
+            <h6 class="panel-title">Context Feed</h6>
+
+            @if (_selectedKind is not null && _selectedItem is not null)
+            {
+                <div class="context-focus">
+                    <div class="small text-muted">Focused</div>
+                    <div class="fw-semibold">@_selectedKind: @_selectedItem</div>
+                </div>
+            }
+
+            <div class="context-block">
+                <div class="context-heading">Character: Thrall</div>
+                <ul>
+                    <li>Honorable, conflicted</li>
+                    <li>Recently injured</li>
+                </ul>
+            </div>
+            <div class="context-block">
+                <div class="context-heading">Location: Orgrimmar</div>
+                <ul>
+                    <li>War-torn</li>
+                </ul>
+            </div>
+            <div class="context-block">
+                <div class="context-heading">Events</div>
+                <ul>
+                    <li>Siege of Razor Hill</li>
+                </ul>
+            </div>
+            <div class="context-block">
+                <div class="context-heading">Style</div>
+                <div class="small">User Sample Loaded &middot; Tone: Gritty / introspective</div>
+            </div>
+        </aside>
+
+        <section class="panel panel-console">
+            <h6 class="panel-title">AI Console</h6>
+            <div class="d-flex gap-2">
+                <input type="text" class="form-control" @bind="_consoleInput"
+                       @bind:event="oninput" placeholder="> Continue scene with tension between Thrall and Garrosh" />
+                <button type="button" class="btn btn-primary" @onclick="SendConsole">Send</button>
+            </div>
+            @if (!string.IsNullOrEmpty(_lastCommand))
+            {
+                <div class="small text-muted mt-2">Last (no-op): @_lastCommand</div>
+            }
+        </section>
+
+        <aside class="panel panel-actions">
+            <h6 class="panel-title">Actions</h6>
+            <div class="d-grid gap-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        @onclick='() => Action("Check Consistency")'>Check Consistency</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        @onclick='() => Action("Update Memory")'>Update Memory</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        @onclick='() => Action("Show Prompt")'>Show Prompt</button>
+            </div>
+            @if (!string.IsNullOrEmpty(_lastAction))
+            {
+                <div class="small text-muted mt-2">Last: @_lastAction</div>
+            }
+        </aside>
+    </div>
+}
+
+@code {
+    [CascadingParameter] public Project? Project { get; set; }
+    [Parameter] public Guid? ChapterId { get; set; }
+
+    private readonly SemaphoreSlim _saveGate = new(1, 1);
+    private readonly DotNetObjectReference<EditorContent> _selfRef;
+
+    private List<Chapter> _chapters = [];
+    private Chapter? _current;
+    private bool _loading = true;
+    private Guid? _loadedProjectId;
+    private Guid? _activeChapterId;
+
+    private bool _editingTitle;
+    private string _titleDraft = string.Empty;
+    private ElementReference _titleInput;
+    private bool _focusTitleNext;
+
+    private bool _menuOpen;
+
+    private ElementReference _bodyTextarea;
+    private IJSObjectReference? _editorModule;
+    private IJSObjectReference? _editorHandle;
+
+    private SaveState _saveState = SaveState.Idle;
+    private DateTime? _lastSavedAt;
+    private string? _saveError;
+
+    private IDisposable? _navHandlerRegistration;
+
+    private string _consoleInput = string.Empty;
+    private string? _lastCommand;
+    private string? _lastAction;
+    private string? _selectedKind;
+    private string? _selectedItem;
+
+    private record DrilldownSection(string Title, string[] Items);
+    private readonly DrilldownSection[] _drilldown =
+    [
+        new("Characters", ["Thrall", "Jaina", "Garrosh"]),
+        new("Locations", ["Orgrimmar", "Durotar"]),
+        new("Events", ["Siege", "Betrayal"]),
+    ];
+
+    public EditorContent()
+    {
+        _selfRef = DotNetObjectReference.Create(this);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Project is null) return;
+
+        if (_loadedProjectId != Project.Id)
+        {
+            _loadedProjectId = Project.Id;
+            _loading = true;
+            _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
+            _loading = false;
+        }
+
+        if (_chapters.Count == 0)
+        {
+            _current = null;
+            _activeChapterId = null;
+            return;
+        }
+
+        Guid targetId;
+        if (ChapterId is { } cid && _chapters.Any(c => c.Id == cid))
+        {
+            targetId = cid;
+        }
+        else
+        {
+            // Redirect to first chapter; OnParametersSetAsync will fire again with the new id.
+            var first = _chapters[0];
+            Nav.NavigateTo($"/projects/{Project.Slug}/editor/{first.Id}", replace: true);
+            return;
+        }
+
+        if (_activeChapterId == targetId) return;
+
+        // Switching chapter: flush pending save for the previous chapter first.
+        if (_activeChapterId is not null)
+        {
+            await FlushAsync();
+        }
+
+        _activeChapterId = targetId;
+        _current = _chapters.First(c => c.Id == targetId);
+        _saveState = SaveState.Idle;
+        _saveError = null;
+
+        if (_editorHandle is not null)
+        {
+            try { await _editorHandle.InvokeVoidAsync("setValue", _current.Body); }
+            catch (JSDisconnectedException) { }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _navHandlerRegistration = Nav.RegisterLocationChangingHandler(OnLocationChangingAsync);
+        }
+
+        if (_focusTitleNext)
+        {
+            _focusTitleNext = false;
+            try { await _titleInput.FocusAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+
+        if (_current is not null && _editorModule is null)
+        {
+            try
+            {
+                _editorModule = await JS.InvokeAsync<IJSObjectReference>("import",
+                    "./Components/Pages/Projects/EditorContent.razor.js");
+                _editorHandle = await _editorModule.InvokeAsync<IJSObjectReference>(
+                    "attach", _bodyTextarea, _selfRef, 1000, _current.Body);
+            }
+            catch (JSDisconnectedException) { }
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnBodyDebounced(string body)
+    {
+        if (_current is null || _activeChapterId is null) return;
+        await SaveBodyAsync(_activeChapterId.Value, body);
+    }
+
+    private async Task SaveBodyAsync(Guid chapterId, string body)
+    {
+        await _saveGate.WaitAsync();
+        try
+        {
+            _saveState = SaveState.Saving;
+            _saveError = null;
+            await InvokeAsync(StateHasChanged);
+
+            await Chapters.UpdateAsync(chapterId, body: body);
+            if (_current is not null && _current.Id == chapterId)
+            {
+                _current.Body = body;
+            }
+
+            try
+            {
+                await Chapters.ReindexAsync(chapterId);
+                _saveState = SaveState.Saved;
+                _lastSavedAt = DateTime.Now;
+            }
+            catch (Exception ex)
+            {
+                // Update succeeded; reindex did not. Background service will retry.
+                _saveState = SaveState.IndexFailed;
+                _saveError = ex.Message;
+                _lastSavedAt = DateTime.Now;
+            }
+        }
+        catch (Exception ex)
+        {
+            _saveState = SaveState.SaveFailed;
+            _saveError = ex.Message;
+        }
+        finally
+        {
+            _saveGate.Release();
+            try { await InvokeAsync(StateHasChanged); }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    private async Task FlushAsync()
+    {
+        if (_editorHandle is null) return;
+        try
+        {
+            await _editorHandle.InvokeVoidAsync("flush");
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { }
+    }
+
+    private async ValueTask OnLocationChangingAsync(LocationChangingContext ctx)
+    {
+        await FlushAsync();
+    }
+
+    private void ToggleMenu() => _menuOpen = !_menuOpen;
+    private void CloseMenu() => _menuOpen = false;
+
+    private void StartEditTitle()
+    {
+        if (_current is null) return;
+        _menuOpen = false;
+        _titleDraft = _current.Title;
+        _editingTitle = true;
+        _focusTitleNext = true;
+    }
+
+    private async Task OnTitleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await CommitTitleAsync();
+        else if (e.Key == "Escape") CancelTitleEdit();
+    }
+
+    private void CancelTitleEdit()
+    {
+        _editingTitle = false;
+        _titleDraft = string.Empty;
+    }
+
+    private async Task CommitTitleAsync()
+    {
+        if (!_editingTitle || _current is null) return;
+        var newTitle = _titleDraft.Trim();
+        _editingTitle = false;
+        if (newTitle.Length == 0 || newTitle == _current.Title) return;
+        try
+        {
+            await Chapters.UpdateAsync(_current.Id, title: newTitle);
+            _current.Title = newTitle;
+        }
+        catch (Exception ex)
+        {
+            _saveError = ex.Message;
+            _saveState = SaveState.SaveFailed;
+        }
+    }
+
+    private async Task CreateAndGoToOutlineAsync()
+    {
+        if (Project is null) return;
+        await FlushAsync();
+        var ch = await Chapters.CreateAsync(Project.Id);
+        Nav.NavigateTo($"/projects/{Project.Slug}/outline?focus={ch.Id}");
+    }
+
+    private async Task CreateFirstAsync()
+    {
+        if (Project is null) return;
+        var ch = await Chapters.CreateAsync(Project.Id);
+        _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
+        Nav.NavigateTo($"/projects/{Project.Slug}/editor/{ch.Id}");
+    }
+
+    private string SaveStatusText() => _saveState switch
+    {
+        SaveState.Saving => "Saving…",
+        SaveState.Saved when _lastSavedAt is { } ts => $"Saved {ts:HH:mm:ss}",
+        SaveState.IndexFailed => "Saved — vector index out of date, will retry",
+        SaveState.SaveFailed => $"Save failed: {_saveError}",
+        _ => string.Empty,
+    };
+
+    private bool IsSelected(string kind, string item) =>
+        _selectedKind == kind && _selectedItem == item;
+
+    private void Select(string kind, string item)
+    {
+        if (IsSelected(kind, item)) { _selectedKind = null; _selectedItem = null; }
+        else { _selectedKind = kind; _selectedItem = item; }
+    }
+
+    private void SendConsole()
+    {
+        if (string.IsNullOrWhiteSpace(_consoleInput)) return;
+        _lastCommand = _consoleInput.Trim();
+        _consoleInput = string.Empty;
+    }
+
+    private void Action(string name) => _lastAction = name;
+
+    public async ValueTask DisposeAsync()
+    {
+        _navHandlerRegistration?.Dispose();
+        try { await FlushAsync(); } catch { }
+        if (_editorHandle is not null)
+        {
+            try { await _editorHandle.InvokeVoidAsync("dispose"); } catch { }
+            try { await _editorHandle.DisposeAsync(); } catch { }
+        }
+        if (_editorModule is not null)
+        {
+            try { await _editorModule.DisposeAsync(); } catch { }
+        }
+        _selfRef.Dispose();
+        _saveGate.Dispose();
+    }
+
+    private enum SaveState { Idle, Saving, Saved, IndexFailed, SaveFailed }
+}

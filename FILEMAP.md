@@ -56,10 +56,12 @@
 | File | Description |
 |------|-------------|
 | `ProjectLayout.razor` | Shared shell for project workspace pages: loads project by slug, renders title + horizontal tab strip (Editor / Graph / Ingest / Outline), exposes `Project` via `CascadingValue`. |
-| `EditorPage.razor` (+ `.razor.css`) | Editor tab at `/projects/{Slug}/editor`. CSS-grid 3-column layout: Story Graph drilldown (hardcoded Characters/Locations/Events), chapter title + textarea, Context Feed, plus bottom AI Console + Actions row. UI is non-functional. |
+| `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
+| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Functional chapter editor body: chapter-selector header (dropdown menu, edit-title pencil, +new-chapter button), JS-debounced (1s) auto-save textarea that persists via `IChapterService` and triggers `ReindexAsync`. Save/index status surfaced inline. Story Graph / Context Feed / AI Console panels remain placeholder. |
 | `GraphPage.razor` | Graph tab at `/projects/{Slug}/graph`. Placeholder. |
 | `IngestPage.razor` | Ingest tab at `/projects/{Slug}/ingest`. Placeholder. |
-| `OutlinePage.razor` | Outline tab at `/projects/{Slug}/outline`. Placeholder. |
+| `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `OutlineContent`. |
+| `OutlineContent.razor` (+ `.razor.css`) | Chapter list with create / inline-rename / synopsis / delete-with-confirm and HTML5 drag-reorder via `IChapterService.ReorderAsync`. Surfaces stale/failed vector-index badge. `?focus={id}` highlights a row. |
 
 ### Components/Pages/Settings/
 
@@ -75,6 +77,7 @@
 | `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing via `CredentialSourceId`. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
 | `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; static `ScopeKey(Guid)` produces the vector-store partition key (`project:{id:N}`). |
+| `Chapter.cs` | EF entity for a chapter (Title/Body/Synopsis/Order) under a `Project`. Tracks `VectorIndexState` (UpToDate/Stale/Failed) + `VectorIndexedAt` + `VectorIndexError`; `VectorSourceId` returns the stable vector-store source id (`Id.ToString("N")`). |
 | `GraphNode.cs` | Generic graph node: `(ProjectId, NodeType, Key)` unique, JSON properties bag. Cascade-deleted with its `Project`. |
 | `GraphEdge.cs` | Directed edge between graph nodes with type and JSON properties. |
 
@@ -82,9 +85,9 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context. `LlmProviders`, `OAuthTokens`, `Projects`, `GraphNodes`, `GraphEdges`. JSON value converter for property bags. Cascade `Project → GraphNode`. |
+| `AppDbContext.cs` | EF Core context. `LlmProviders`, `OAuthTokens`, `Projects`, `Chapters`, `GraphNodes`, `GraphEdges`. JSON value converter for property bags. Cascade `Project → GraphNode` and `Project → Chapter`. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future). |
-| `Migrations/` | EF Core migrations (`InitialSchema`, `AddProjects`). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, `AddProjects`, `AddChapters`). |
 
 ### Persistence/Repositories/
 
@@ -95,6 +98,7 @@
 | `IProjectRepository.cs` / `ProjectRepository.cs` | Project CRUD; slug uniqueness check; ordered list by `UpdatedAt`. |
 | `IGraphNodeRepository.cs` / `GraphNodeRepository.cs` | Node CRUD plus project-scoped `Find(projectId, nodeType, key)`. |
 | `IGraphEdgeRepository.cs` / `GraphEdgeRepository.cs` | Edge CRUD plus directional adjacency query. Defines `EdgeDirection` enum. |
+| `IChapterRepository.cs` / `ChapterRepository.cs` | Chapter CRUD ordered by `Order`; `ListStaleAsync` for background reindex sweep; `ReorderAsync(projectId, ids)` rewrites `Order` in one save. |
 
 ### Knowledge/
 
@@ -105,6 +109,7 @@
 | `VectorStoreInitializer.cs` | Creates `knowledge_chunks` + `vec_knowledge` virtual table outside EF migrations to keep abstraction portable. |
 | `IGraphStore.cs` | High-level graph API: upsert nodes/edges, neighbors (BFS, depth-bounded), path-finding. Defines `GraphDirection`, `GraphTraversalOptions`, `GraphPath`, `GraphPathHop`. |
 | `RelationalGraphStore.cs` | Relational-table implementation backed by node/edge repositories; doc-comments describe contract any future backend must honor. |
+| `ITextChunker.cs` / `OverlappingTextChunker.cs` | Sliding-window text chunker. Defaults `Embeddings:ChunkSize`=1200, `Embeddings:ChunkOverlap`=200. Prefers paragraph/sentence/whitespace boundaries within ±10% of target. |
 
 ### Llm/
 
@@ -127,7 +132,15 @@
 
 | File | Description |
 |------|-------------|
-| `IProjectService.cs` / `ProjectService.cs` | Project CRUD facade. `CreateAsync` slugifies the name (collision-free via `-2`/`-3` suffix). `DeleteAsync` wipes vector chunks (`IVectorStore.DeleteByScopeAsync`) before EF-cascading the project + child graph rows. Slug stable across renames. |
+| `IProjectService.cs` / `ProjectService.cs` | Project CRUD facade. `CreateAsync` slugifies the name (collision-free via `-2`/`-3` suffix). `DeleteAsync` wipes vector chunks (`IVectorStore.DeleteByScopeAsync`) before EF-cascading the project + child graph + chapter rows. Slug stable across renames. |
+
+### Chapters/
+
+| File | Description |
+|------|-------------|
+| `IChapterService.cs` / `ChapterService.cs` | Chapter CRUD facade. `UpdateAsync` marks `VectorIndexState=Stale` on body changes and notifies `IStaleChapterNotifier`. `ReindexAsync` deletes prior vector chunks (`source_type="chapter"`) and rewrites them via `ITextChunker` + `IEmbeddingService`; updates `VectorIndexState`/`VectorIndexedAt`/`VectorIndexError`. `DeleteAsync` removes vectors before EF delete. |
+| `IStaleChapterNotifier.cs` / `StaleChapterNotifier.cs` | In-process unbounded `Channel<Guid>` pub/sub of chapters needing reindex. |
+| `StaleChapterReindexer.cs` | `BackgroundService` that sweeps existing stale chapters at startup and drains `IStaleChapterNotifier` thereafter, calling `IChapterService.ReindexAsync` in a fresh DI scope per chapter. |
 
 ### wwwroot/
 

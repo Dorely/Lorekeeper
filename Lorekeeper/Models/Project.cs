@@ -19,6 +19,8 @@ public class Project
 
     public ICollection<GraphNode> Nodes { get; set; } = [];
 
+    public ICollection<Chapter> Chapters { get; set; } = [];
+
     /// <summary>Single source of truth for the vector-store scope key for a project.</summary>
     public static string ScopeKey(Guid id) => $"project:{id:N}";
 

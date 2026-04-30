@@ -11,6 +11,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<LlmProvider> LlmProviders => Set<LlmProvider>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<Chapter> Chapters => Set<Chapter>();
     public DbSet<GraphNode> GraphNodes => Set<GraphNode>();
     public DbSet<GraphEdge> GraphEdges => Set<GraphEdge>();
 
@@ -19,6 +20,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<Project>(entity =>
         {
             entity.HasIndex(e => e.Slug).IsUnique();
+        });
+
+        modelBuilder.Entity<Chapter>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Order });
+            entity.Property(e => e.VectorIndexState).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.Chapters)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<LlmProvider>(entity =>
