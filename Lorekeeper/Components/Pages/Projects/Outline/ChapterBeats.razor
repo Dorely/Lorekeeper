@@ -1,8 +1,10 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
+@implements IAsyncDisposable
 @inject IEntityService Entities
+@inject IJSRuntime JS
 
-<div class="chapter-beats">
+<div class="chapter-beats" @ref="_rootEl">
     @if (_loading)
     {
         <div class="text-muted small"><em>Loading beats…</em></div>
@@ -42,6 +44,7 @@
                                        placeholder="Beat name"
                                        @bind="_editName" @bind:event="oninput" />
                                 <textarea class="form-control form-control-sm mt-1"
+                                          data-autosize
                                           rows="2"
                                           placeholder="Beat summary…"
                                           @bind="_editSummary" @bind:event="oninput"></textarea>
@@ -87,6 +90,7 @@
                        @bind="_newName" @bind:event="oninput"
                        @onkeydown="OnNewKeyDownAsync" />
                 <textarea class="form-control form-control-sm mt-1"
+                          data-autosize
                           rows="2"
                           placeholder="Optional summary…"
                           @bind="_newSummary" @bind:event="oninput"></textarea>
@@ -135,9 +139,24 @@
     private Guid? _confirmDeleteId;
     private Guid? _draggingId;
     private string? _error;
+    private ElementReference _rootEl;
+    private IJSObjectReference? _autoSizer;
 
     private Guid _lastChapterId;
     private int _lastSignal = -1;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js");
+        }
+
+        if (_autoSizer is not null)
+        {
+            await _autoSizer.InvokeVoidAsync("refresh", _rootEl);
+        }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -285,6 +304,14 @@
         {
             _error = ex.Message;
             await ReloadAsync();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_autoSizer is not null)
+        {
+            try { await _autoSizer.DisposeAsync(); } catch { }
         }
     }
 }

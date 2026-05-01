@@ -66,6 +66,7 @@
     private ElementReference _composerEl;
     private IJSObjectReference? _scroller;
     private bool _autoSizeAttached;
+    private bool _resetComposerAfterRender;
 
     private OutlineConversation? _conversation;
     private List<OutlineMessage> _messages = [];
@@ -90,6 +91,11 @@
         {
             try { await _scroller.InvokeVoidAsync("attachAutoSize", _composerEl); _autoSizeAttached = true; }
             catch { /* element gone or circuit terminating */ }
+        }
+        if (_scroller is not null && _resetComposerAfterRender)
+        {
+            _resetComposerAfterRender = false;
+            await ResetComposerSizeAsync();
         }
     }
 
@@ -128,7 +134,7 @@
         _error = null;
         _cts?.Dispose();
         _cts = new CancellationTokenSource();
-        await ResetComposerSizeAsync();
+        _resetComposerAfterRender = true;
 
         // Optimistically append the user's message; the service will persist its own copy.
         _renderable.Add(new RenderableMessage(

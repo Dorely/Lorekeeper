@@ -1,11 +1,13 @@
 @using Lorekeeper.Chapters
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
+@implements IAsyncDisposable
 @inject IActService ActsService
 @inject IChapterService ChaptersService
 @inject IEntityService EntitiesService
+@inject IJSRuntime JS
 
-<div class="outline-tree">
+<div class="outline-tree" @ref="_rootEl">
     <div class="outline-toolbar d-flex align-items-center justify-content-between mb-3">
         <h5 class="mb-0">Outline</h5>
         <button type="button" class="btn btn-primary btn-sm" @onclick="CreateActAsync">+ New Act</button>
@@ -46,6 +48,7 @@
                                    value="@act.Title"
                                    @onchange="@(e => OnActTitleChangedAsync(act, (string?)e.Value))" />
                             <textarea class="form-control form-control-sm outline-act-synopsis mt-1"
+                                      data-autosize
                                       rows="1"
                                       placeholder="Act synopsis…"
                                       value="@act.Synopsis"
@@ -147,6 +150,21 @@
     private Guid? _draggingActId;
     private Guid? _draggingChapterId;
     private Guid? _draggingChapterActId; // act bucket of the chapter being dragged (null = unassigned)
+    private ElementReference _rootEl;
+    private IJSObjectReference? _autoSizer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js");
+        }
+
+        if (_autoSizer is not null)
+        {
+            await _autoSizer.InvokeVoidAsync("refresh", _rootEl);
+        }
+    }
 
     private bool IsCollapsed(Guid key) => _collapsed.Contains(key);
     private void ToggleAct(Guid key)
@@ -389,6 +407,7 @@
                            value="@ch.Title"
                            @onchange="@(e => OnChapterTitleChangedAsync(ch, (string?)e.Value))" />
                     <textarea class="form-control form-control-sm outline-chapter-synopsis mt-1"
+                              data-autosize
                               rows="2"
                               placeholder="Synopsis…"
                               value="@ch.Synopsis"
@@ -439,4 +458,12 @@
             </div>
         }
     };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_autoSizer is not null)
+        {
+            try { await _autoSizer.DisposeAsync(); } catch { }
+        }
+    }
 }

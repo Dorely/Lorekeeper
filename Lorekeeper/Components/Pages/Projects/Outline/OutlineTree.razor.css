@@ -27,7 +27,7 @@
 
 .outline-act-header {
     display: grid;
-    grid-template-columns: auto auto auto 1fr auto;
+    grid-template-columns: auto auto auto minmax(0, 1fr);
     align-items: start;
     gap: 0.5rem;
     padding: 0.6rem 0.75rem;
@@ -70,6 +70,7 @@
 
 .outline-act-fields {
     min-width: 0;
+    grid-column: 4;
 }
 
 .outline-act-title {
@@ -90,6 +91,11 @@
     flex-wrap: wrap;
 }
 
+.outline-act-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+}
+
 .outline-chapters {
     display: flex;
     flex-direction: column;
@@ -103,7 +109,7 @@
 
 .outline-chapter {
     display: grid;
-    grid-template-columns: auto auto auto 1fr auto;
+    grid-template-columns: auto auto auto minmax(0, 1fr);
     align-items: start;
     gap: 0.5rem;
     padding: 0.5rem;
@@ -153,6 +159,12 @@
 
 .outline-chapter-fields {
     min-width: 0;
+    grid-column: 4;
+}
+
+.outline-chapter-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
 }
 
 .outline-act-picker {

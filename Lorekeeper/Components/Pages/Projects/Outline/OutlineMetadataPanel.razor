@@ -1,17 +1,19 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Projects
+@implements IAsyncDisposable
 @inject IProjectService Projects
+@inject IJSRuntime JS
 
 @if (_fields.Count == 0 && !_addingNew)
 {
-    <div class="outline-meta outline-meta-empty">
+    <div class="outline-meta outline-meta-empty" @ref="_rootEl">
         <span class="text-muted"><em>No project metadata yet. As you talk, key facts will appear here.</em></span>
         <button type="button" class="btn btn-sm btn-link" @onclick="StartAdd">+ Add field</button>
     </div>
 }
 else
 {
-    <div class="outline-meta">
+    <div class="outline-meta" @ref="_rootEl">
         <div class="outline-meta-header">
             <button type="button" class="outline-meta-toggle" title="@(_blockCollapsed ? "Expand" : "Collapse")"
                     @onclick="() => _blockCollapsed = !_blockCollapsed">
@@ -45,6 +47,7 @@ else
                                 @if (_editing == f.Key)
                                 {
                                     <textarea class="form-control form-control-sm"
+                                              data-autosize
                                               rows="@RowsFor(_editValue)"
                                               @bind="_editValue"
                                               @bind:event="oninput"></textarea>
@@ -81,6 +84,7 @@ else
                         </div>
                         <div class="outline-meta-row-body">
                             <textarea class="form-control form-control-sm" rows="2"
+                                      data-autosize
                                       placeholder="value"
                                       @bind="_newValue" @bind:event="oninput"></textarea>
                             <div class="outline-meta-actions">
@@ -116,6 +120,21 @@ else
     private int _lastMetaSig;
     private bool _blockCollapsed;
     private readonly HashSet<string> _rowCollapsed = new(StringComparer.OrdinalIgnoreCase);
+    private ElementReference _rootEl;
+    private IJSObjectReference? _autoSizer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js");
+        }
+
+        if (_autoSizer is not null)
+        {
+            await _autoSizer.InvokeVoidAsync("refresh", _rootEl);
+        }
+    }
 
     protected override void OnParametersSet()
     {
@@ -233,5 +252,13 @@ else
             if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_autoSizer is not null)
+        {
+            try { await _autoSizer.DisposeAsync(); } catch { }
+        }
     }
 }

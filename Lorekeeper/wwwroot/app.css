@@ -26,6 +26,11 @@ a, .btn-link {
     padding-top: 1.1rem;
 }
 
+textarea[data-autosize] {
+    overflow-y: hidden;
+    resize: none;
+}
+
 h1:focus {
     outline: none;
 }

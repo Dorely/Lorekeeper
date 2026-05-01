@@ -1,8 +1,10 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
+@implements IAsyncDisposable
 @inject IEntityService Entities
+@inject IJSRuntime JS
 
-<div class="entities-panel">
+<div class="entities-panel" @ref="_rootEl">
     @foreach (var sec in _sections)
     {
         <div class="entities-section">
@@ -76,7 +78,7 @@
 @if (_modalEntity is not null)
 {
     <div class="modal-backdrop fade show" @onclick="CloseModal"></div>
-    <div class="modal d-block" tabindex="-1" role="dialog" @onclick="CloseModal">
+    <div class="modal d-block" tabindex="-1" role="dialog" @onclick="CloseModal" @ref="_modalRootEl">
         <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document"
              @onclick:stopPropagation="true">
             <div class="modal-content">
@@ -105,6 +107,7 @@
                                            value="@_editProps[idx].Key"
                                            @onchange="@(ev => UpdatePropKey(idx, (string?)ev.Value))" />
                                     <textarea class="form-control form-control-sm entities-modal-prop-val"
+                                              data-autosize
                                               placeholder="value"
                                               rows="@RowsFor(_editProps[idx].Value)"
                                               @onchange="@(ev => UpdatePropVal(idx, (string?)ev.Value))">@_editProps[idx].Value</textarea>
@@ -190,9 +193,29 @@
     private IReadOnlyDictionary<string, string?> _editOriginalProps = new Dictionary<string, string?>();
     private List<EntityLink> _modalLinks = [];
     private bool _modalConfirmDelete;
+    private ElementReference _rootEl;
+    private ElementReference _modalRootEl;
+    private IJSObjectReference? _autoSizer;
 
     private Guid _lastProjectId;
     private int _lastSignal = -1;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js");
+        }
+
+        if (_autoSizer is not null)
+        {
+            await _autoSizer.InvokeVoidAsync("refresh", _rootEl);
+            if (_modalEntity is not null)
+            {
+                await _autoSizer.InvokeVoidAsync("refresh", _modalRootEl);
+            }
+        }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -346,5 +369,13 @@
             if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_autoSizer is not null)
+        {
+            try { await _autoSizer.DisposeAsync(); } catch { }
+        }
     }
 }
