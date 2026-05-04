@@ -2,11 +2,15 @@ using System.Text;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Projects;
 
-public class ProjectService(IProjectRepository repo, IVectorStore vectors) : IProjectService
+public class ProjectService(
+    IProjectRepository repo,
+    IVectorStore vectors,
+    IOutlineGraphSync outlineGraphSync) : IProjectService
 {
     public async Task<IReadOnlyList<Project>> ListAsync(CancellationToken cancellationToken = default) =>
         await repo.ListAsync(cancellationToken);
@@ -29,6 +33,7 @@ public class ProjectService(IProjectRepository repo, IVectorStore vectors) : IPr
         };
         await repo.AddAsync(project, cancellationToken);
         await repo.SaveChangesAsync(cancellationToken);
+        await outlineGraphSync.EnsureProjectAsync(project, cancellationToken);
         return project;
     }
 
@@ -45,6 +50,7 @@ public class ProjectService(IProjectRepository repo, IVectorStore vectors) : IPr
         project.UpdatedAt = DateTime.UtcNow;
         repo.Update(project);
         await repo.SaveChangesAsync(cancellationToken);
+        await outlineGraphSync.EnsureProjectAsync(project, cancellationToken);
         return project;
     }
 

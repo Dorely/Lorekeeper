@@ -15,6 +15,8 @@ public interface IGraphNodeRepository
     Task<GraphNode?> FindByKeyAsync(Guid projectId, string key, CancellationToken cancellationToken = default);
     /// <summary>Returns every node in the project of the given type, ordered by <c>Label</c> then key.</summary>
     Task<List<GraphNode>> ListByTypeAsync(Guid projectId, string nodeType, CancellationToken cancellationToken = default);
+    /// <summary>Returns distinct node type keys currently used by nodes in the project.</summary>
+    Task<List<string>> ListTypesAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<List<GraphNode>> GetByIdsAsync(IEnumerable<long> ids, CancellationToken cancellationToken = default);
     Task AddAsync(GraphNode node, CancellationToken cancellationToken = default);
     void Update(GraphNode node);

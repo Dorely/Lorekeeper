@@ -26,6 +26,7 @@ builder.Services.AddScoped<IOAuthTokenRepository, OAuthTokenRepository>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
 builder.Services.AddScoped<IGraphNodeRepository, GraphNodeRepository>();
 builder.Services.AddScoped<IGraphEdgeRepository, GraphEdgeRepository>();
+builder.Services.AddScoped<IGraphEntityTypeRepository, GraphEntityTypeRepository>();
 builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
 builder.Services.AddScoped<IActRepository, ActRepository>();
 builder.Services.AddScoped<IOutlineConversationRepository, OutlineConversationRepository>();
@@ -52,6 +53,8 @@ builder.Services.AddHostedService<StaleChapterReindexer>();
 // Outline
 builder.Services.AddScoped<IActService, ActService>();
 builder.Services.AddScoped<IEntityService, EntityService>();
+builder.Services.AddScoped<IEntityTypeService, EntityTypeService>();
+builder.Services.AddScoped<IOutlineGraphSync, OutlineGraphSync>();
 builder.Services.AddScoped<OutlineCollaborationTools>();
 builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationService>();
 
@@ -88,6 +91,11 @@ using (var scope = app.Services.CreateScope())
     }
 
     VectorStoreInitializer.Initialize(builder.Configuration, startupLogger);
+
+    var projectRepository = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+    var outlineGraphSync = scope.ServiceProvider.GetRequiredService<IOutlineGraphSync>();
+    foreach (var project in await projectRepository.ListAsync())
+        await outlineGraphSync.RepairProjectAsync(project.Id);
 }
 
 // Configure the HTTP request pipeline.

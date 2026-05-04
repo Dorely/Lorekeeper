@@ -2,9 +2,28 @@
 @using Lorekeeper.Outline
 @implements IAsyncDisposable
 @inject IEntityService Entities
+@inject IEntityTypeService EntityTypes
 @inject IJSRuntime JS
 
 <div class="entities-panel" @ref="_rootEl">
+    <div class="entities-type-toolbar">
+        @if (_creatingTypeDefinition)
+        {
+            <input type="text" class="form-control form-control-sm"
+                   placeholder="New entity type"
+                   @bind="_newTypeName" @bind:event="oninput"
+                   @onkeydown="OnNewTypeKeyDownAsync" />
+            <button type="button" class="btn btn-sm btn-primary"
+                    disabled="@(string.IsNullOrWhiteSpace(_newTypeName))"
+                    @onclick="ConfirmCreateTypeAsync">Create type</button>
+            <button type="button" class="btn btn-sm btn-link" @onclick="CancelCreateType">Cancel</button>
+        }
+        else
+        {
+            <button type="button" class="btn btn-sm btn-link" @onclick="StartCreateType">+ Type</button>
+        }
+    </div>
+
     @foreach (var sec in _sections)
     {
         <div class="entities-section">
@@ -175,13 +194,11 @@
         public List<StoryEntity> Items { get; set; } = [];
     }
 
-    private readonly List<Section> _sections =
-    [
-        new() { Type = "Character", Singular = "Character", Plural = "Characters" },
-        new() { Type = "Location",  Singular = "Location",  Plural = "Locations"  },
-    ];
+    private List<Section> _sections = [];
 
     private readonly HashSet<string> _collapsed = [];
+    private bool _creatingTypeDefinition;
+    private string _newTypeName = string.Empty;
     private string? _creatingType;
     private string _newName = string.Empty;
     private string? _error;
@@ -231,6 +248,19 @@
     {
         try
         {
+            var definitions = await EntityTypes.ListAsync(ProjectId, includeStructural: false);
+            _sections = definitions
+                .Where(t => !t.IsChapterScoped)
+                .OrderBy(t => t.SortOrder)
+                .ThenBy(t => t.PluralLabel, StringComparer.OrdinalIgnoreCase)
+                .Select(t => new Section
+                {
+                    Type = t.Type,
+                    Singular = t.SingularLabel,
+                    Plural = t.PluralLabel,
+                })
+                .ToList();
+
             foreach (var s in _sections)
             {
                 var items = await Entities.ListAsync(ProjectId, s.Type);
@@ -249,6 +279,41 @@
     private void ToggleSection(string type)
     {
         if (!_collapsed.Add(type)) _collapsed.Remove(type);
+    }
+
+    // ---- type create ----------------------------------------------------
+
+    private void StartCreateType()
+    {
+        _creatingTypeDefinition = true;
+        _newTypeName = string.Empty;
+    }
+
+    private void CancelCreateType()
+    {
+        _creatingTypeDefinition = false;
+        _newTypeName = string.Empty;
+    }
+
+    private async Task OnNewTypeKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await ConfirmCreateTypeAsync();
+        else if (e.Key == "Escape") CancelCreateType();
+    }
+
+    private async Task ConfirmCreateTypeAsync()
+    {
+        var name = _newTypeName.Trim();
+        if (name.Length == 0) return;
+        try
+        {
+            var created = await EntityTypes.CreateAsync(ProjectId, name);
+            CancelCreateType();
+            _collapsed.Remove(created.Type);
+            await ReloadAsync();
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
     }
 
     // ---- create ---------------------------------------------------------

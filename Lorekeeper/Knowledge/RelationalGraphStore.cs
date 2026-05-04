@@ -61,6 +61,7 @@ public class RelationalGraphStore(
         long toNodeId,
         string edgeType,
         IDictionary<string, object?>? properties = null,
+        int? sortOrder = null,
         CancellationToken cancellationToken = default)
     {
         var existing = await edges.FindAsync(fromNodeId, toNodeId, edgeType, cancellationToken);
@@ -72,6 +73,7 @@ public class RelationalGraphStore(
                 ToNodeId = toNodeId,
                 EdgeType = edgeType,
                 Properties = properties is null ? new Dictionary<string, object?>() : new Dictionary<string, object?>(properties),
+                SortOrder = sortOrder,
             };
             await edges.AddAsync(edge, cancellationToken);
             await edges.SaveChangesAsync(cancellationToken);
@@ -80,6 +82,8 @@ public class RelationalGraphStore(
 
         if (properties is not null)
             existing.Properties = new Dictionary<string, object?>(properties);
+        existing.SortOrder = sortOrder ?? existing.SortOrder;
+        existing.UpdatedAt = DateTime.UtcNow;
         edges.Update(existing);
         await edges.SaveChangesAsync(cancellationToken);
         return existing;

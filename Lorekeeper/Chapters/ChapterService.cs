@@ -1,6 +1,7 @@
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Chapters;
@@ -12,9 +13,7 @@ public class ChapterService(
     IEmbeddingService embeddings,
     ITextChunker chunker,
     IStaleChapterNotifier staleNotifier,
-    IGraphStore graph,
-    IGraphNodeRepository graphNodes,
-    IGraphEdgeRepository graphEdges,
+    IOutlineGraphSync outlineGraphSync,
     ILogger<ChapterService> logger) : IChapterService
 {
     public async Task<IReadOnlyList<Chapter>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
@@ -47,6 +46,7 @@ public class ChapterService(
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
         await repo.SaveChangesAsync(cancellationToken);
+        await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
         return chapter;
     }
 
@@ -91,6 +91,8 @@ public class ChapterService(
 
         if (bodyChanged) staleNotifier.Notify(chapter.Id);
 
+        await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
+
         return chapter;
     }
 
@@ -113,7 +115,7 @@ public class ChapterService(
         // beat children) so the entity layer doesn't leak orphans. Tolerate failures.
         try
         {
-            await RemoveChapterGraphAsync(chapter.ProjectId, chapter.Id, cancellationToken);
+            await outlineGraphSync.RemoveChapterAsync(chapter.ProjectId, chapter.Id, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -122,33 +124,6 @@ public class ChapterService(
 
         repo.Remove(chapter);
         await repo.SaveChangesAsync(cancellationToken);
-    }
-
-    private async Task RemoveChapterGraphAsync(Guid projectId, Guid chapterId, CancellationToken cancellationToken)
-    {
-        const string ChapterNodeType = "Chapter";
-        const string HasChildEdgeType = "HasChild";
-
-        var chapterNode = await graph.FindNodeAsync(projectId, ChapterNodeType, chapterId.ToString("N"), cancellationToken);
-        if (chapterNode is null) return;
-
-        var outgoing = await graphEdges.GetAdjacentAsync(
-            chapterNode.Id,
-            EdgeDirection.Outgoing,
-            new[] { HasChildEdgeType },
-            maxResults: null,
-            cancellationToken);
-
-        if (outgoing.Count > 0)
-        {
-            var childNodes = await graphNodes.GetByIdsAsync(outgoing.Select(e => e.ToNodeId).ToList(), cancellationToken);
-            foreach (var child in childNodes)
-            {
-                await graph.RemoveNodeAsync(child.Id, cancellationToken);
-            }
-        }
-
-        await graph.RemoveNodeAsync(chapterNode.Id, cancellationToken);
     }
 
     public async Task ReorderAsync(Guid projectId, Guid? actId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
@@ -163,6 +138,7 @@ public class ChapterService(
         }
 
         await repo.SaveChangesAsync(cancellationToken);
+        await outlineGraphSync.RepairProjectAsync(projectId, cancellationToken);
     }
 
     public async Task ReindexAsync(Guid chapterId, CancellationToken cancellationToken = default)
@@ -204,6 +180,7 @@ public class ChapterService(
             chapter.VectorIndexError = null;
             repo.Update(chapter);
             await repo.SaveChangesAsync(cancellationToken);
+            await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
 
             logger.LogDebug("Reindexed chapter {ChapterId} with {Count} chunks", chapter.Id, chunks.Count);
         }

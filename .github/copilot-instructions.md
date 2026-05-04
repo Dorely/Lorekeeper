@@ -53,3 +53,4 @@ dotnet watch --project Lorekeeper
 - When you need to understand the current wiring, start with `VISION.md`, then `Program.cs`, then the relevant feature area
 - Trace each requested change through its full impact area before considering the work complete. Changes to models, contracts, or core concepts should include all affected layers such as persistence, services, queries, prompts, background jobs, and UI.
 - Remove superseded code and concepts when replacing them. Do not leave deprecated pages, components, handlers, prompts, queries, or other logic in place just because the new path works; clean out obsolete implementations and reduce unnecessary complexity.
+- Never start the app without a plan to also terminate it after verifying the change. Do not leave the app running.

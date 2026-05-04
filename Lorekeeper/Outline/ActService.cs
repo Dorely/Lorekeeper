@@ -5,7 +5,8 @@ namespace Lorekeeper.Outline;
 
 public class ActService(
     IActRepository repo,
-    IProjectRepository projects) : IActService
+    IProjectRepository projects,
+    IOutlineGraphSync outlineGraphSync) : IActService
 {
     public async Task<IReadOnlyList<Act>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await repo.ListByProjectAsync(projectId, cancellationToken);
@@ -35,6 +36,7 @@ public class ActService(
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
         await repo.SaveChangesAsync(cancellationToken);
+        await outlineGraphSync.EnsureActAsync(act, cancellationToken);
         return act;
     }
 
@@ -57,6 +59,7 @@ public class ActService(
         }
 
         await repo.SaveChangesAsync(cancellationToken);
+        await outlineGraphSync.EnsureActAsync(act, cancellationToken);
         return act;
     }
 
@@ -75,6 +78,8 @@ public class ActService(
         }
 
         await repo.SaveChangesAsync(cancellationToken);
+        await outlineGraphSync.RemoveActAsync(act.ProjectId, act.Id, cancellationToken);
+        await outlineGraphSync.RepairProjectAsync(act.ProjectId, cancellationToken);
     }
 
     public async Task ReorderAsync(Guid projectId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
@@ -89,5 +94,6 @@ public class ActService(
         }
 
         await repo.SaveChangesAsync(cancellationToken);
+        await outlineGraphSync.RepairProjectAsync(projectId, cancellationToken);
     }
 }

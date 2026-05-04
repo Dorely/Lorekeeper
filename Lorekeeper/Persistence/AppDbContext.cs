@@ -15,6 +15,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Chapter> Chapters => Set<Chapter>();
     public DbSet<GraphNode> GraphNodes => Set<GraphNode>();
     public DbSet<GraphEdge> GraphEdges => Set<GraphEdge>();
+    public DbSet<GraphEntityType> GraphEntityTypes => Set<GraphEntityType>();
     public DbSet<AiConsoleEntry> AiConsoleEntries => Set<AiConsoleEntry>();
     public DbSet<OutlineConversation> OutlineConversations => Set<OutlineConversation>();
     public DbSet<OutlineMessage> OutlineMessages => Set<OutlineMessage>();
@@ -151,6 +152,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(e => new { e.ToNodeId, e.EdgeType });
 
             entity.Property(e => e.Properties)
+                .HasColumnType("TEXT")
+                .HasConversion(jsonDictConverter, jsonDictComparer);
+        });
+
+        modelBuilder.Entity<GraphEntityType>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Type }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.SortOrder });
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.EntityTypes)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.DefaultProperties)
                 .HasColumnType("TEXT")
                 .HasConversion(jsonDictConverter, jsonDictComparer);
         });

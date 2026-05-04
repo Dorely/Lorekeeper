@@ -21,6 +21,14 @@ public class GraphNodeRepository(AppDbContext db) : IGraphNodeRepository
             .ThenBy(n => n.Key)
             .ToListAsync(cancellationToken);
 
+    public Task<List<string>> ListTypesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        db.GraphNodes
+            .Where(n => n.ProjectId == projectId)
+            .Select(n => n.NodeType)
+            .Distinct()
+            .OrderBy(t => t)
+            .ToListAsync(cancellationToken);
+
     public async Task<List<GraphNode>> GetByIdsAsync(IEnumerable<long> ids, CancellationToken cancellationToken = default)
     {
         var idList = ids.ToList();

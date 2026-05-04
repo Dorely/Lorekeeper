@@ -54,6 +54,7 @@ public interface IGraphStore
         long toNodeId,
         string edgeType,
         IDictionary<string, object?>? properties = null,
+        int? sortOrder = null,
         CancellationToken cancellationToken = default);
 
     Task RemoveNodeAsync(long nodeId, CancellationToken cancellationToken = default);

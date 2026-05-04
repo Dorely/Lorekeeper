@@ -28,6 +28,7 @@ public sealed class OutlineCollaborationTools(
     IChapterService chapters,
     IProjectService projects,
     IEntityService entities,
+    IEntityTypeService entityTypes,
     IVectorStore vectors,
     IEmbeddingService embeddings)
 {
@@ -92,9 +93,14 @@ public sealed class OutlineCollaborationTools(
             // ---- generic entity tools (Characters, Locations, Events/beats, ...) ----
 
             AIFunctionFactory.Create(
+                method: () => ListEntityTypesAsync(context),
+                name: "list_entity_types",
+                description: "List registered and discovered graph entity types for this project, including structural types such as Project, Act, Chapter, and Event/Beat."),
+
+            AIFunctionFactory.Create(
                 method: (string type, string? parentId) => ListEntitiesAsync(context, type, parentId),
                 name: "list_entities",
-                description: "List entities of a given type. type is one of 'Character', 'Location', 'Event' (others allowed but discouraged). For chapter-scoped beats pass type='Event' and parentId=<chapter id>. For project-scoped types omit parentId. Results are alphabetical for project-scoped types, or by order for chapter-scoped types."),
+                description: "List entities of a given graph type. Use list_entity_types when unsure which types exist. For chapter-scoped beats pass type='Event' and parentId=<chapter id>. For project-scoped types omit parentId. Results are alphabetical for project-scoped types, or by order for scoped child types."),
 
             AIFunctionFactory.Create(
                 method: (string type, string name, string? propertiesJson, string? parentId, int? order) =>
@@ -345,6 +351,20 @@ public sealed class OutlineCollaborationTools(
     }
 
     // ---- entity tools ----------------------------------------------------
+
+    private async Task<string> ListEntityTypesAsync(OutlineCollaborationContext ctx)
+    {
+        var list = await entityTypes.ListAsync(ctx.ProjectId, includeStructural: true);
+        return JsonSerializer.Serialize(list.Select(t => new
+        {
+            type = t.Type,
+            singular = t.SingularLabel,
+            plural = t.PluralLabel,
+            isStructural = t.IsStructural,
+            isChapterScoped = t.IsChapterScoped,
+            defaultProperties = t.DefaultProperties,
+        }));
+    }
 
     private async Task<string> ListEntitiesAsync(OutlineCollaborationContext ctx, string type, string? parentId)
     {

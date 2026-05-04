@@ -43,13 +43,14 @@ public sealed class EntityService(
         if (outgoing.Count == 0) return [];
 
         var childIds = outgoing.Select(e => e.ToNodeId).ToList();
+        var orderByChildId = outgoing.ToDictionary(e => e.ToNodeId, e => e.SortOrder);
         var children = await nodes.GetByIdsAsync(childIds, cancellationToken);
 
         return children
             .Where(n => n.NodeType == nodeType)
-            .OrderBy(GetOrder)
+            .OrderBy(n => orderByChildId.TryGetValue(n.Id, out var order) ? order ?? GetOrder(n) : GetOrder(n))
             .ThenBy(n => n.Label ?? n.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(n => Project(n, parentId))
+            .Select(n => Project(n, parentId, orderByChildId.TryGetValue(n.Id, out var order) ? order : null))
             .ToList();
     }
 
@@ -78,7 +79,6 @@ public sealed class EntityService(
                 var siblings = await ListAsync(projectId, nodeType, parentId, cancellationToken);
                 order = siblings.Count == 0 ? 0 : siblings.Max(s => s.Order ?? -1) + 1;
             }
-            props[OrderProperty] = order.Value;
         }
 
         var node = await graph.UpsertNodeAsync(projectId, nodeType, key, name.Trim(), props, cancellationToken);
@@ -87,7 +87,13 @@ public sealed class EntityService(
         {
             var parent = await EnsureParentNodeAsync(projectId, parentId.Value, cancellationToken)
                 ?? throw new InvalidOperationException($"Parent entity {parentId} not found in project {projectId}.");
-            await graph.UpsertEdgeAsync(parent.Id, node.Id, HasChildEdgeType, properties: null, cancellationToken);
+            await graph.UpsertEdgeAsync(
+                parent.Id,
+                node.Id,
+                HasChildEdgeType,
+                properties: null,
+                sortOrder: order,
+                cancellationToken: cancellationToken);
         }
 
         return Project(node, parentId);
@@ -161,6 +167,7 @@ public sealed class EntityService(
             cancellationToken);
         var children = await nodes.GetByIdsAsync(outgoing.Select(e => e.ToNodeId).ToList(), cancellationToken);
         var matchingChildren = children.Where(n => n.NodeType == nodeType).ToDictionary(n => n.Key);
+        var edgeByChildId = outgoing.ToDictionary(e => e.ToNodeId);
 
         // Validate the requested ordering covers exactly the parent's children of this type.
         var requestedKeys = orderedEntityIds.Select(g => g.ToString("N")).ToHashSet(StringComparer.Ordinal);
@@ -173,12 +180,13 @@ public sealed class EntityService(
         for (var i = 0; i < orderedEntityIds.Count; i++)
         {
             var child = matchingChildren[orderedEntityIds[i].ToString("N")];
-            child.Properties[OrderProperty] = i;
-            child.UpdatedAt = DateTime.UtcNow;
-            nodes.Update(child);
+            if (!edgeByChildId.TryGetValue(child.Id, out var edge)) continue;
+            edge.SortOrder = i;
+            edge.UpdatedAt = DateTime.UtcNow;
+            edges.Update(edge);
         }
 
-        await nodes.SaveChangesAsync(cancellationToken);
+        await edges.SaveChangesAsync(cancellationToken);
     }
 
     public async Task LinkAsync(
@@ -199,7 +207,12 @@ public sealed class EntityService(
         var toNode = await ResolveEntityNodeAsync(projectId, toEntityId, cancellationToken)
             ?? throw new InvalidOperationException($"Target entity {toEntityId} not found in project {projectId}.");
 
-        await graph.UpsertEdgeAsync(fromNode.Id, toNode.Id, edgeType.Trim(), ToObjectDict(properties), cancellationToken);
+        await graph.UpsertEdgeAsync(
+            fromNode.Id,
+            toNode.Id,
+            edgeType.Trim(),
+            properties: ToObjectDict(properties),
+            cancellationToken: cancellationToken);
     }
 
     public async Task<int> CountChildrenAsync(
@@ -254,11 +267,14 @@ public sealed class EntityService(
             if (!others.TryGetValue(otherId, out var other)) continue;
             var otherGuid = Guid.TryParseExact(other.Key, "N", out var g) ? g : Guid.Empty;
             result.Add(new EntityLink(
+                EdgeId: edge.Id,
                 EdgeType: edge.EdgeType,
                 Direction: isOutgoing ? EntityLinkDirection.Outgoing : EntityLinkDirection.Incoming,
                 OtherEntityId: otherGuid,
                 OtherEntityName: other.Label ?? other.Key,
-                OtherEntityType: other.NodeType));
+                OtherEntityType: other.NodeType,
+                SortOrder: edge.SortOrder,
+                Properties: ProjectProperties(edge.Properties)));
         }
         return result;
     }
@@ -314,15 +330,15 @@ public sealed class EntityService(
         return parentNode is null ? null : Guid.ParseExact(parentNode.Key, "N");
     }
 
-    private static StoryEntity Project(GraphNode node, Guid? parentId)
+    private static StoryEntity Project(GraphNode node, Guid? parentId, int? orderOverride = null)
     {
         var props = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        int? order = null;
+        int? order = orderOverride;
         foreach (var kv in node.Properties)
         {
             if (kv.Key == OrderProperty)
             {
-                order = TryReadInt(kv.Value);
+                order ??= TryReadInt(kv.Value);
                 continue;
             }
             props[kv.Key] = kv.Value?.ToString();
@@ -366,5 +382,13 @@ public sealed class EntityService(
             dict[kv.Key] = kv.Value;
         }
         return dict;
+    }
+
+    private static IReadOnlyDictionary<string, string?> ProjectProperties(IDictionary<string, object?> source)
+    {
+        var props = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in source)
+            props[kv.Key] = kv.Value?.ToString();
+        return props;
     }
 }

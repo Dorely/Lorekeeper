@@ -93,11 +93,14 @@ public enum EntityLinkDirection
 /// <param name="OtherEntityName">Display name (falls back to key) of the other endpoint.</param>
 /// <param name="OtherEntityType">Node type of the other endpoint.</param>
 public sealed record EntityLink(
+    long EdgeId,
     string EdgeType,
     EntityLinkDirection Direction,
     Guid OtherEntityId,
     string OtherEntityName,
-    string OtherEntityType);
+    string OtherEntityType,
+    int? SortOrder,
+    IReadOnlyDictionary<string, string?> Properties);
 
 /// <summary>
 /// Project-scoped projection of a <see cref="GraphNode"/> exposed to UI + chat tools.

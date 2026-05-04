@@ -16,7 +16,11 @@ public class GraphEdge
     /// <summary>Free-form properties serialised as JSON (TEXT column on SQLite).</summary>
     public Dictionary<string, object?> Properties { get; set; } = new();
 
+    /// <summary>Optional order for relationship-specific ordered lists, especially HasChild edges.</summary>
+    public int? SortOrder { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public GraphNode FromNode { get; set; } = null!;
     public GraphNode ToNode { get; set; } = null!;

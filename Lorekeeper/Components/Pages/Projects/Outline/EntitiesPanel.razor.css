@@ -5,6 +5,18 @@
     min-width: 0;
 }
 
+.entities-type-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.entities-type-toolbar input {
+    min-width: 10rem;
+    flex: 1 1 10rem;
+}
+
 .entities-section {
     border: 1px solid var(--bs-border-color);
     border-radius: 0.5rem;

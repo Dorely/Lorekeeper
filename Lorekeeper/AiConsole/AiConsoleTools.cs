@@ -1,10 +1,12 @@
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Outline;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.AiConsole;
@@ -16,6 +18,8 @@ namespace Lorekeeper.AiConsole;
 /// </summary>
 public sealed class AiConsoleTools(
     IChapterService chapters,
+    IEntityService entities,
+    IEntityTypeService entityTypes,
     IVectorStore vectors,
     IEmbeddingService embeddings)
 {
@@ -32,6 +36,21 @@ public sealed class AiConsoleTools(
                 method: () => ListChaptersAsync(context),
                 name: "list_chapters",
                 description: "List every chapter in the current project (id, order, title, synopsis)."),
+
+            AIFunctionFactory.Create(
+                method: () => ListEntityTypesAsync(context),
+                name: "list_entity_types",
+                description: "List graph entity types registered or discovered for the current project, including structural outline types."),
+
+            AIFunctionFactory.Create(
+                method: (string type, string? parentId) => ListEntitiesAsync(context, type, parentId),
+                name: "list_entities",
+                description: "List graph entities of a given type. For chapter-scoped beats use type='Event' and parentId=<chapter id>; otherwise omit parentId."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
+                name: "list_entity_links",
+                description: "List all graph links adjacent to an entity, including structural HasChild links and semantic story relationships."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId) => ReadChapterAsync(context, chapterId),
@@ -92,6 +111,60 @@ public sealed class AiConsoleTools(
             sb.Append('\n');
         }
         return sb.ToString().TrimEnd();
+    }
+
+    private async Task<string> ListEntityTypesAsync(AiConsoleContext ctx)
+    {
+        var list = await entityTypes.ListAsync(ctx.ProjectId, includeStructural: true);
+        return JsonSerializer.Serialize(list.Select(t => new
+        {
+            type = t.Type,
+            singular = t.SingularLabel,
+            plural = t.PluralLabel,
+            isStructural = t.IsStructural,
+            isChapterScoped = t.IsChapterScoped,
+            defaultProperties = t.DefaultProperties,
+        }));
+    }
+
+    private async Task<string> ListEntitiesAsync(AiConsoleContext ctx, string type, string? parentId)
+    {
+        if (string.IsNullOrWhiteSpace(type)) return "Error: type is required.";
+
+        Guid? parent = null;
+        if (!string.IsNullOrWhiteSpace(parentId))
+        {
+            if (!Guid.TryParse(parentId, out var parsed))
+                return $"Error: parentId '{parentId}' is not a valid Guid.";
+            parent = parsed;
+        }
+
+        var list = await entities.ListAsync(ctx.ProjectId, type.Trim(), parent);
+        return JsonSerializer.Serialize(list.Select(e => new
+        {
+            id = e.Id,
+            type = e.Type,
+            name = e.Name,
+            order = e.Order,
+            parentId = e.ParentId,
+            properties = e.Properties,
+        }));
+    }
+
+    private async Task<string> ListEntityLinksAsync(AiConsoleContext ctx, Guid entityId)
+    {
+        var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
+        return JsonSerializer.Serialize(links.Select(l => new
+        {
+            edgeId = l.EdgeId,
+            edgeType = l.EdgeType,
+            direction = l.Direction.ToString(),
+            otherEntityId = l.OtherEntityId,
+            otherEntityName = l.OtherEntityName,
+            otherEntityType = l.OtherEntityType,
+            sortOrder = l.SortOrder,
+            properties = l.Properties,
+        }));
     }
 
     private async Task<string> ReadChapterAsync(AiConsoleContext ctx, Guid chapterId)

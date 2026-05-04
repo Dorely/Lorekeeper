@@ -31,6 +31,11 @@ public class GraphEdgeRepository(AppDbContext db) : IGraphEdgeRepository
             query = query.Where(e => typeList.Contains(e.EdgeType));
         }
 
+        query = query
+            .OrderBy(e => e.SortOrder ?? int.MaxValue)
+            .ThenBy(e => e.CreatedAt)
+            .ThenBy(e => e.Id);
+
         if (maxResults is int max)
             query = query.Take(max);
 

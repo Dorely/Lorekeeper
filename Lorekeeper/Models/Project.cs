@@ -38,6 +38,8 @@ public class Project
 
     public ICollection<GraphNode> Nodes { get; set; } = [];
 
+    public ICollection<GraphEntityType> EntityTypes { get; set; } = [];
+
     public ICollection<Act> Acts { get; set; } = [];
 
     public ICollection<Chapter> Chapters { get; set; } = [];

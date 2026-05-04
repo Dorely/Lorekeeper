@@ -65,8 +65,12 @@ public sealed class OutlineCollaborationService(
           with overwrite-shaped intent.
 
         Entity conventions:
-        - Use create_entity / update_entity / delete_entity for all story
-          entities. Pass the type as a string. The canonical types are:
+                - The outline spine is also represented in the graph: Project -> Act ->
+                    Chapter -> Event/Beat through HasChild links. Use the outline tools for
+                    Act and Chapter edits because those rows have stricter editor behavior.
+                - Use list_entity_types when you need to inspect what graph types exist.
+                    Use create_entity / update_entity / delete_entity for story entities.
+                    Pass the type as a string. Common types are:
             * 'Character' — project-scoped people. Conventional properties:
               role, description.
             * 'Location' — project-scoped places. Conventional properties:
