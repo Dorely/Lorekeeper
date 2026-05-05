@@ -15,9 +15,6 @@ public sealed class EntityService(
     /// <summary>Canonical edge type linking a parent node to its ordered children.</summary>
     public const string HasChildEdgeType = "HasChild";
 
-    /// <summary>Property key on a child node holding its position within the parent's children.</summary>
-    private const string OrderProperty = "order";
-
     public async Task<IReadOnlyList<StoryEntity>> ListAsync(
         Guid projectId,
         string nodeType,
@@ -48,7 +45,7 @@ public sealed class EntityService(
 
         return children
             .Where(n => n.NodeType == nodeType)
-            .OrderBy(n => orderByChildId.TryGetValue(n.Id, out var order) ? order ?? GetOrder(n) : GetOrder(n))
+            .OrderBy(n => orderByChildId.TryGetValue(n.Id, out var order) ? order ?? int.MaxValue : int.MaxValue)
             .ThenBy(n => n.Label ?? n.Key, StringComparer.OrdinalIgnoreCase)
             .Select(n => Project(n, parentId, orderByChildId.TryGetValue(n.Id, out var order) ? order : null))
             .ToList();
@@ -121,7 +118,6 @@ public sealed class EntityService(
             foreach (var kv in propertiesToSet)
             {
                 if (string.IsNullOrWhiteSpace(kv.Key)) continue;
-                if (kv.Key == OrderProperty) continue; // ordering belongs to ReorderAsync
                 node.Properties[kv.Key] = kv.Value;
             }
         }
@@ -130,7 +126,6 @@ public sealed class EntityService(
         {
             foreach (var k in propertiesToRemove)
             {
-                if (k == OrderProperty) continue;
                 node.Properties.Remove(k);
             }
         }
@@ -334,16 +329,8 @@ public sealed class EntityService(
     private static StoryEntity Project(GraphNode node, Guid? parentId, int? orderOverride = null)
     {
         var props = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        int? order = orderOverride;
         foreach (var kv in node.Properties)
-        {
-            if (kv.Key == OrderProperty)
-            {
-                order ??= TryReadInt(kv.Value);
-                continue;
-            }
             props[kv.Key] = kv.Value?.ToString();
-        }
 
         // Entity id is the GUID we stored in Key. For lazily-created Chapter nodes the Key is
         // also a GUID (the ChapterId), so this round-trips cleanly.
@@ -352,26 +339,10 @@ public sealed class EntityService(
             Id: id,
             Type: node.NodeType,
             Name: node.Label ?? node.Key,
-            Order: order,
+            Order: orderOverride,
             ParentId: parentId,
             Properties: props);
     }
-
-    private static int GetOrder(GraphNode node)
-    {
-        return node.Properties.TryGetValue(OrderProperty, out var v) ? TryReadInt(v) ?? int.MaxValue : int.MaxValue;
-    }
-
-    private static int? TryReadInt(object? v) => v switch
-    {
-        null => null,
-        int i => i,
-        long l => (int)l,
-        double d => (int)d,
-        string s => int.TryParse(s, out var n) ? n : null,
-        System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.Number => je.GetInt32(),
-        _ => null,
-    };
 
     private static Dictionary<string, object?> ToObjectDict(IDictionary<string, string?>? src)
     {

@@ -36,10 +36,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<Project>(entity =>
         {
             entity.HasIndex(e => e.Slug).IsUnique();
-
-            entity.Property(e => e.Metadata)
-                .HasColumnType("TEXT")
-                .HasConversion(jsonDictConverter, jsonDictComparer);
         });
 
         modelBuilder.Entity<Act>(entity =>

@@ -6,7 +6,6 @@ using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
-using Lorekeeper.Projects;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.Outline;
@@ -27,9 +26,9 @@ public sealed record OutlineCollaborationContext(Guid ProjectId, Action OnMutate
 public sealed class OutlineCollaborationTools(
     IActService acts,
     IChapterService chapters,
-    IProjectService projects,
     IEntityService entities,
     IEntityTypeService entityTypes,
+    IProjectFactService projectFacts,
     IVectorStore vectors,
     IEmbeddingService embeddings,
     IAiChangeRepository changes,
@@ -49,7 +48,7 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: () => ListOutlineAsync(context),
                 name: "list_outline",
-                description: "Read the current outline as JSON: an ordered list of acts (each with id/title/synopsis and an ordered list of their chapters), plus an 'unassigned' bucket for chapters without an act."),
+                description: "Read the current outline as JSON: projectFacts, an ordered list of acts (each with id/title/synopsis and chapters), plus an 'unassigned' bucket for chapters without an act."),
 
             AIFunctionFactory.Create(
                 method: (string title, string synopsis) => CreateActAsync(context, title, synopsis),
@@ -91,11 +90,6 @@ public sealed class OutlineCollaborationTools(
                 name: "reorder_chapters",
                 description: "Replace chapter ordering within a single act bucket. Pass actId as a Guid for that act, or omit/null/'unassigned' for the unassigned bucket."),
 
-            AIFunctionFactory.Create(
-                method: (string key, string value) => SetProjectMetadataAsync(context, key, value),
-                name: "set_project_metadata",
-                description: "Persist a free-form value into the project's metadata bag. Use the 'outline.' namespace for outline-related facts (e.g. outline.premise, outline.tone, outline.scope, outline.characters, outline.conflict, outline.setting). Overwrites any existing value at the same key."),
-
             // ---- generic entity tools (Characters, Locations, Events/beats, ...) ----
 
             AIFunctionFactory.Create(
@@ -112,7 +106,7 @@ public sealed class OutlineCollaborationTools(
                 method: (string type, string name, string? propertiesJson, string? parentId, int? order) =>
                     CreateEntityAsync(context, type, name, propertiesJson, parentId, order),
                 name: "create_entity",
-                description: "Create a new story entity. type is the entity category ('Character', 'Location', 'Event' for beats, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). Returns the new entity's id."),
+                description: "Create a new graph entity. type is the entity category ('ProjectFact', 'Character', 'Location', 'Event' for beats, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. For ProjectFact include key/value properties; it will be parented to the Project automatically. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). Returns the new entity's id."),
 
             AIFunctionFactory.Create(
                 method: (string entityId, string? name, string? propertiesToSetJson, string? propertiesToRemoveJson) =>
@@ -164,6 +158,7 @@ public sealed class OutlineCollaborationTools(
         var beatCounts = new Dictionary<Guid, int>();
         foreach (var c in allChapters)
             beatCounts[c.Id] = await entities.CountChildrenAsync(ctx.ProjectId, c.Id, EventNodeType);
+        var facts = await projectFacts.ListAsync(ctx.ProjectId);
 
         object ProjectChapter(Chapter c) => new
         {
@@ -176,6 +171,7 @@ public sealed class OutlineCollaborationTools(
 
         var payload = new
         {
+            projectFacts = facts.Select(ProjectFactPayload),
             acts = actList.Select(a => new
             {
                 id = a.Id,
@@ -348,19 +344,7 @@ public sealed class OutlineCollaborationTools(
         return $"Reordered {final.Count} chapters in bucket {(bucket is null ? "unassigned" : bucket.ToString())}.";
     }
 
-    // ---- metadata + search -----------------------------------------------
-
-    private async Task<string> SetProjectMetadataAsync(OutlineCollaborationContext ctx, string key, string value)
-    {
-        if (string.IsNullOrWhiteSpace(key)) return "Error: key is required.";
-        if (ctx.Staging is not null)
-            return await ctx.Staging.SetProjectMetadataAsync(key, value);
-
-        await projects.UpdateMetadataAsync(ctx.ProjectId, new Dictionary<string, object?> { [key.Trim()] = value });
-        // Metadata is not part of the visible tree, but downstream context may show it; signal anyway.
-        ctx.OnMutated();
-        return $"Set {key.Trim()}.";
-    }
+    // ---- search ----------------------------------------------------------
 
     private async Task<string> VectorSearchAsync(
         OutlineCollaborationContext ctx,
@@ -440,6 +424,7 @@ public sealed class OutlineCollaborationTools(
     {
         if (string.IsNullOrWhiteSpace(type)) return "Error: type is required.";
         if (string.IsNullOrWhiteSpace(name)) return "Error: name is required.";
+        var trimmedType = type.Trim();
 
         Dictionary<string, string?>? properties;
         try { properties = ParsePropertiesJson(propertiesJson); }
@@ -464,12 +449,20 @@ public sealed class OutlineCollaborationTools(
             parent = p;
         }
 
+        if (string.Equals(trimmedType, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase))
+        {
+            parent ??= ctx.ProjectId;
+            properties ??= new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            properties.TryAdd("key", name.Trim());
+            properties.TryAdd("value", string.Empty);
+        }
+
         if (ctx.Staging is not null)
-            return await ctx.Staging.CreateEntityAsync(type, name, properties, parent, order);
+            return await ctx.Staging.CreateEntityAsync(trimmedType, name, properties, parent, order);
 
         try
         {
-            var created = await entities.CreateAsync(ctx.ProjectId, type.Trim(), name.Trim(), properties, parent, order);
+            var created = await entities.CreateAsync(ctx.ProjectId, trimmedType, name.Trim(), properties, parent, order);
             ctx.OnMutated();
             return JsonSerializer.Serialize(new
             {
@@ -486,6 +479,22 @@ public sealed class OutlineCollaborationTools(
             return $"Error: {ex.Message}";
         }
     }
+
+    private static object ProjectFactPayload(ProjectFact fact) => new
+    {
+        id = fact.Id,
+        key = fact.Key,
+        name = fact.Name,
+        value = fact.Value,
+        linkedEntities = fact.LinkedEntities.Select(link => new
+        {
+            edgeType = link.EdgeType,
+            direction = link.Direction.ToString(),
+            entityId = link.EntityId,
+            name = link.EntityName,
+            type = link.EntityType,
+        }),
+    };
 
     private async Task<string> UpdateEntityAsync(
         OutlineCollaborationContext ctx,

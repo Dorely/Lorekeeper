@@ -19,12 +19,6 @@ public interface IProjectService
     Task<Project> SetAiChangeApprovalAsync(Guid id, bool enabled, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Replaces (or merges, when <paramref name="merge"/> is true) the project's free-form
-    /// <see cref="Project.Metadata"/> bag. Used by the Outline tab to persist wizard inputs.
-    /// </summary>
-    Task<Project> UpdateMetadataAsync(Guid id, IDictionary<string, object?> metadata, bool merge = true, CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Deletes the project and cascades to all child graph nodes (and their edges, transitively),
     /// and to all vector chunks stored under the project's scope key.
     /// </summary>

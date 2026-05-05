@@ -1,0 +1,258 @@
+@using Lorekeeper.Outline
+@implements IAsyncDisposable
+@inject IProjectFactService Facts
+@inject IJSRuntime JS
+
+@if (_facts.Count == 0 && !_addingNew)
+{
+    <div class="project-facts project-facts-empty" @ref="_rootEl">
+        <span class="text-muted"><em>No project facts yet. As you talk, key facts will appear here.</em></span>
+        <button type="button" class="btn btn-sm btn-link" @onclick="StartAdd">+ Add fact</button>
+    </div>
+}
+else
+{
+    <div class="project-facts" @ref="_rootEl">
+        <div class="project-facts-header">
+            <button type="button" class="project-facts-toggle" title="@(_blockCollapsed ? "Expand" : "Collapse")"
+                    @onclick="() => _blockCollapsed = !_blockCollapsed">
+                <span class="caret">@(_blockCollapsed ? "▸" : "▾")</span>
+                <span class="project-facts-title">Project facts</span>
+                <span class="project-facts-count">@_facts.Count</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-link" @onclick="StartAdd" disabled="@_addingNew">+ Add fact</button>
+        </div>
+        @if (!_blockCollapsed)
+        {
+            <div class="project-facts-list">
+                @foreach (var fact in _facts)
+                {
+                    var collapsed = _rowCollapsed.Contains(fact.Id);
+                    <div class="project-facts-row @(collapsed ? "collapsed" : "")" @key="fact.Id">
+                        <div class="project-facts-row-header">
+                            <button type="button" class="project-facts-row-toggle"
+                                    @onclick="() => ToggleRow(fact.Id)">
+                                <span class="caret">@(collapsed ? "▸" : "▾")</span>
+                                <span class="project-facts-key">@fact.Name</span>
+                            </button>
+                            @if (collapsed && !string.IsNullOrWhiteSpace(fact.Value))
+                            {
+                                <span class="project-facts-preview text-muted">@Preview(fact.Value)</span>
+                            }
+                        </div>
+                        @if (!collapsed)
+                        {
+                            <div class="project-facts-row-body">
+                                <div class="project-facts-machine-key text-muted small">@fact.Key</div>
+                                @if (_editing == fact.Id)
+                                {
+                                    <textarea class="form-control form-control-sm"
+                                              data-autosize
+                                              rows="@RowsFor(_editValue)"
+                                              @bind="_editValue"
+                                              @bind:event="oninput"></textarea>
+                                    <div class="project-facts-actions">
+                                        <button type="button" class="btn btn-sm btn-primary" @onclick="() => SaveAsync(fact)">Save</button>
+                                        <button type="button" class="btn btn-sm btn-link" @onclick="CancelEdit">Cancel</button>
+                                        <button type="button" class="btn btn-sm btn-link text-danger ms-auto" @onclick="() => DeleteAsync(fact)">Delete</button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <button type="button" class="project-facts-value" @onclick="() => StartEdit(fact)">
+                                        @if (string.IsNullOrWhiteSpace(fact.Value))
+                                        {
+                                            <span class="text-muted"><em>(empty — click to edit)</em></span>
+                                        }
+                                        else
+                                        {
+                                            @fact.Value
+                                        }
+                                    </button>
+                                    @if (fact.LinkedEntities.Count > 0)
+                                    {
+                                        <div class="project-facts-links" aria-label="Linked graph entities">
+                                            @foreach (var link in fact.LinkedEntities)
+                                            {
+                                                <span class="project-facts-link">
+                                                    <span class="project-facts-link-edge">@link.EdgeType</span>
+                                                    <span class="project-facts-link-name">@link.EntityName</span>
+                                                    <span class="project-facts-link-type">@link.EntityType</span>
+                                                </span>
+                                            }
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+                @if (_addingNew)
+                {
+                    <div class="project-facts-row project-facts-row-new">
+                        <div class="project-facts-row-header">
+                            <input type="text" class="form-control form-control-sm"
+                                   placeholder="key (e.g. outline.tone)"
+                                   @bind="_newKey" @bind:event="oninput" />
+                        </div>
+                        <div class="project-facts-row-body">
+                            <textarea class="form-control form-control-sm" rows="2"
+                                      data-autosize
+                                      placeholder="value"
+                                      @bind="_newValue" @bind:event="oninput"></textarea>
+                            <div class="project-facts-actions">
+                                <button type="button" class="btn btn-sm btn-primary"
+                                        disabled="@(string.IsNullOrWhiteSpace(_newKey))"
+                                        @onclick="AddNewAsync">Add</button>
+                                <button type="button" class="btn btn-sm btn-link" @onclick="CancelAdd">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        @if (_error is not null)
+        {
+            <div class="project-facts-error">@_error</div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public int RefreshSignal { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private List<ProjectFact> _facts = [];
+    private Guid? _editing;
+    private string _editValue = string.Empty;
+    private bool _addingNew;
+    private string _newKey = string.Empty;
+    private string _newValue = string.Empty;
+    private string? _error;
+    private Guid _lastProjectId;
+    private int _lastSignal = -1;
+    private bool _blockCollapsed;
+    private readonly HashSet<Guid> _rowCollapsed = [];
+    private ElementReference _rootEl;
+    private IJSObjectReference? _autoSizer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js");
+        }
+
+        if (_autoSizer is not null)
+        {
+            await _autoSizer.InvokeVoidAsync("refresh", _rootEl);
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ProjectId != _lastProjectId || RefreshSignal != _lastSignal)
+        {
+            _lastProjectId = ProjectId;
+            _lastSignal = RefreshSignal;
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _facts = (await Facts.ListAsync(ProjectId)).ToList();
+            if (_editing is Guid editing && !_facts.Any(fact => fact.Id == editing))
+            {
+                _editing = null;
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private static int RowsFor(string value) =>
+        Math.Clamp(1 + value.Count(c => c == '\n'), 2, 8);
+
+    private static string Preview(string value)
+    {
+        var preview = value.Replace('\n', ' ').Replace('\r', ' ').Trim();
+        return preview.Length <= 80 ? preview : preview[..80] + "…";
+    }
+
+    private void ToggleRow(Guid id)
+    {
+        if (!_rowCollapsed.Add(id)) _rowCollapsed.Remove(id);
+    }
+
+    private void StartEdit(ProjectFact fact)
+    {
+        _editing = fact.Id;
+        _editValue = fact.Value;
+        _error = null;
+    }
+
+    private void CancelEdit()
+    {
+        _editing = null;
+        _editValue = string.Empty;
+    }
+
+    private void StartAdd()
+    {
+        _addingNew = true;
+        _newKey = string.Empty;
+        _newValue = string.Empty;
+        _error = null;
+    }
+
+    private void CancelAdd() => _addingNew = false;
+
+    private async Task SaveAsync(ProjectFact fact)
+    {
+        try
+        {
+            await Facts.UpsertAsync(ProjectId, fact.Key, _editValue, fact.Id);
+            _editing = null;
+            await ReloadAsync();
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task DeleteAsync(ProjectFact fact)
+    {
+        try
+        {
+            await Facts.DeleteAsync(ProjectId, fact.Id);
+            _editing = null;
+            await ReloadAsync();
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task AddNewAsync()
+    {
+        var key = _newKey.Trim();
+        if (key.Length == 0) return;
+        try
+        {
+            await Facts.UpsertAsync(ProjectId, key, _newValue);
+            _addingNew = false;
+            await ReloadAsync();
+            if (OnChanged.HasDelegate) await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_autoSizer is not null)
+        {
+            try { await _autoSizer.DisposeAsync(); } catch { }
+        }
+    }
+}

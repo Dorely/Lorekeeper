@@ -11,6 +11,7 @@ public sealed class EntityTypeService(
     public const string ActNodeType = "Act";
     public const string ChapterNodeType = "Chapter";
     public const string EventNodeType = "Event";
+    public const string ProjectFactNodeType = "ProjectFact";
 
     private static readonly EntityTypeSeed[] Defaults =
     [
@@ -19,6 +20,8 @@ public sealed class EntityTypeService(
             DefaultProperties: new Dictionary<string, object?> { ["synopsis"] = string.Empty }),
         new(ChapterNodeType, "Chapter", "Chapters", true, false, -200,
             DefaultProperties: new Dictionary<string, object?> { ["synopsis"] = string.Empty }),
+        new(ProjectFactNodeType, "Project fact", "Project facts", true, false, -150,
+            DefaultProperties: new Dictionary<string, object?> { ["key"] = string.Empty, ["value"] = string.Empty }),
         new(EventNodeType, "Beat", "Beats", true, true, -100,
             DefaultProperties: new Dictionary<string, object?> { ["summary"] = string.Empty }),
         new("Character", "Character", "Characters", false, false, 100,

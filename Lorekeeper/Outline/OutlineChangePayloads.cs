@@ -4,8 +4,6 @@ public sealed record OutlineActChange(Guid Id, int Order, string Title, string S
 
 public sealed record OutlineChapterChange(Guid Id, Guid? ActId, int Order, string Title, string Synopsis);
 
-public sealed record OutlineMetadataChange(string Key, string? Value);
-
 public sealed record OutlineEntityChange(
     Guid Id,
     string Type,

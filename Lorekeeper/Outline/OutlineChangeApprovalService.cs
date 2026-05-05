@@ -3,7 +3,6 @@ using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
-using Lorekeeper.Projects;
 
 namespace Lorekeeper.Outline;
 
@@ -12,7 +11,6 @@ public sealed class OutlineChangeApprovalService(
     IOutlineConversationRepository conversations,
     IActService acts,
     IChapterService chapters,
-    IProjectService projects,
     IEntityService entities,
     ILogger<OutlineChangeApprovalService> logger) : IOutlineChangeApprovalService
 {
@@ -170,12 +168,6 @@ public sealed class OutlineChangeApprovalService(
                 await chapters.ReorderAsync(projectId, after.ParentId, after.OrderedIds, cancellationToken);
                 break;
             }
-            case "set_project_metadata":
-            {
-                var after = ReadRequired<OutlineMetadataChange>(change.AfterJson);
-                await projects.UpdateMetadataAsync(projectId, new Dictionary<string, object?> { [after.Key] = after.Value }, merge: true, cancellationToken);
-                break;
-            }
             case "create_entity":
             {
                 var after = ReadRequired<OutlineEntityChange>(change.AfterJson);
@@ -311,4 +303,5 @@ public sealed class OutlineChangeApprovalService(
         string.IsNullOrWhiteSpace(json) || json == "[]"
             ? []
             : JsonSerializer.Deserialize<List<Guid>>(json, JsonSerializerOptions.Default) ?? [];
+
 }

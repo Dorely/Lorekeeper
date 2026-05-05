@@ -55,6 +55,7 @@ builder.Services.AddHostedService<StaleChapterReindexer>();
 builder.Services.AddScoped<IActService, ActService>();
 builder.Services.AddScoped<IEntityService, EntityService>();
 builder.Services.AddScoped<IEntityTypeService, EntityTypeService>();
+builder.Services.AddScoped<IProjectFactService, ProjectFactService>();
 builder.Services.AddScoped<IOutlineGraphSync, OutlineGraphSync>();
 builder.Services.AddScoped<OutlineCollaborationTools>();
 builder.Services.AddScoped<IOutlineChangeApprovalService, OutlineChangeApprovalService>();

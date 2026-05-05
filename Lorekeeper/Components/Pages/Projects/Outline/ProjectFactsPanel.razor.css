@@ -1,11 +1,11 @@
-.outline-meta {
+.project-facts {
     border: 1px solid var(--bs-border-color, #dee2e6);
     border-radius: 0.5rem;
     background: var(--bs-tertiary-bg, #f8f9fa);
     padding: 0.5rem 0.75rem 0.75rem;
 }
 
-.outline-meta-empty {
+.project-facts-empty {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -17,7 +17,7 @@
     background: transparent;
 }
 
-.outline-meta-header {
+.project-facts-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -25,7 +25,7 @@
     gap: 0.5rem;
 }
 
-.outline-meta-toggle {
+.project-facts-toggle {
     background: none;
     border: none;
     padding: 0;
@@ -39,32 +39,36 @@
     text-align: left;
 }
 
-.outline-meta-toggle .caret {
+.project-facts-toggle .caret,
+.project-facts-row-toggle .caret {
     display: inline-block;
-    width: 0.9rem;
-    text-align: center;
     color: var(--bs-secondary-color, #6c757d);
-    font-size: 0.85rem;
     line-height: 1;
+    text-align: center;
 }
 
-.outline-meta-title {
+.project-facts-toggle .caret {
+    width: 0.9rem;
+    font-size: 0.85rem;
+}
+
+.project-facts-title {
     font-weight: 600;
     font-size: 0.9rem;
 }
 
-.outline-meta-count {
+.project-facts-count {
     color: var(--bs-secondary-color, #6c757d);
     font-size: 0.8rem;
 }
 
-.outline-meta-list {
+.project-facts-list {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
 }
 
-.outline-meta-row {
+.project-facts-row {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
@@ -74,18 +78,18 @@
     border: 1px solid transparent;
 }
 
-.outline-meta-row:hover {
+.project-facts-row:hover {
     border-color: var(--bs-border-color, #dee2e6);
 }
 
-.outline-meta-row-header {
+.project-facts-row-header {
     display: flex;
     align-items: center;
     gap: 0.4rem;
     min-width: 0;
 }
 
-.outline-meta-row-toggle {
+.project-facts-row-toggle {
     background: none;
     border: none;
     padding: 0;
@@ -98,22 +102,18 @@
     text-align: left;
 }
 
-.outline-meta-row-toggle .caret {
-    display: inline-block;
+.project-facts-row-toggle .caret {
     width: 0.8rem;
-    text-align: center;
-    color: var(--bs-secondary-color, #6c757d);
     font-size: 0.8rem;
-    line-height: 1;
 }
 
-.outline-meta-key {
+.project-facts-key {
     font-weight: 500;
     font-size: 0.85rem;
     color: var(--bs-secondary-color, #6c757d);
 }
 
-.outline-meta-preview {
+.project-facts-preview {
     font-size: 0.82rem;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -122,11 +122,16 @@
     flex: 1;
 }
 
-.outline-meta-row-body {
+.project-facts-row-body {
     padding-left: 1.2rem;
 }
 
-.outline-meta-value {
+.project-facts-machine-key {
+    font-family: var(--bs-font-monospace, monospace);
+    margin-bottom: 0.2rem;
+}
+
+.project-facts-value {
     background: transparent;
     border: none;
     padding: 0.15rem 0.25rem;
@@ -138,23 +143,57 @@
     white-space: pre-wrap;
 }
 
-.outline-meta-value:hover {
+.project-facts-value:hover {
     background: rgba(0, 0, 0, 0.05);
 }
 
-.outline-meta-actions {
+.project-facts-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.35rem;
+}
+
+.project-facts-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    max-width: 100%;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.35rem;
+    padding: 0.1rem 0.35rem;
+    font-size: 0.78rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.project-facts-link-edge {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.project-facts-link-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-facts-link-type {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.project-facts-actions {
     display: flex;
     gap: 0.25rem;
     align-items: center;
     margin-top: 0.25rem;
 }
 
-.outline-meta-row-new .form-control {
+.project-facts-row-new .form-control {
     font-family: var(--bs-font-monospace, monospace);
     font-size: 0.82rem;
 }
 
-.outline-meta-error {
+.project-facts-error {
     color: var(--bs-danger, #dc3545);
     font-size: 0.85rem;
     margin-top: 0.4rem;

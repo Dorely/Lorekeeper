@@ -38,7 +38,9 @@ else
                          OnError="HandleError" />
         </div>
         <div class="outline-pane-side">
-            <OutlineMetadataPanel Project="_workingProject" OnChanged="ReloadAsync" />
+            <ProjectFactsPanel ProjectId="@_workingProject!.Id"
+                               RefreshSignal="@_refreshSignal"
+                               OnChanged="ReloadAsync" />
             <EntitiesPanel ProjectId="@_workingProject!.Id"
                            RefreshSignal="@_refreshSignal"
                            OnChanged="ReloadAsync" />
@@ -74,8 +76,7 @@ else
         _loading = _workingProject is null;
         try
         {
-            // Re-fetch the project so metadata edits performed by tool calls (which mutate the
-            // DB but not the cascading instance) are reflected here.
+            // Re-fetch the project so tool-driven mutations that touch project state are reflected here.
             _workingProject = await ProjectRepo.GetByIdAsync(Project.Id) ?? Project;
             _acts = (await Acts.ListAsync(Project.Id)).ToList();
             var allChapters = (await Chapters.ListAsync(Project.Id)).ToList();

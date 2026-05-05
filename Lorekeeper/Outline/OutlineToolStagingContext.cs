@@ -20,7 +20,6 @@ public sealed class OutlineToolStagingContext(
     private readonly Dictionary<Guid, ActState> _acts = [];
     private readonly Dictionary<Guid, ChapterState> _chapters = [];
     private readonly Dictionary<Guid, EntityState> _entities = [];
-    private readonly Dictionary<string, object?> _metadata = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, EntityTypeDefinition> _entityTypes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Guid> _createdResourceProducers = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<AiChange> _newChanges = [];
@@ -76,6 +75,20 @@ public sealed class OutlineToolStagingContext(
 
         var payload = new
         {
+            projectFacts = _entities.Values
+                .Where(entity =>
+                    !entity.Deleted
+                    && string.Equals(entity.Type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(entity => ReadProperty(entity.Properties, "key")?.StartsWith("outline.", StringComparison.OrdinalIgnoreCase) == true ? 0 : 1)
+                .ThenBy(entity => ReadProperty(entity.Properties, "key") ?? entity.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(entity => new
+                {
+                    id = entity.Id,
+                    key = ReadProperty(entity.Properties, "key") ?? entity.Name,
+                    name = entity.Name,
+                    value = ReadProperty(entity.Properties, "value") ?? string.Empty,
+                    linkedEntities = Array.Empty<object>(),
+                }),
             acts = _acts.Values
                 .Where(act => !act.Deleted)
                 .OrderBy(act => act.Order)
@@ -350,39 +363,22 @@ public sealed class OutlineToolStagingContext(
         return result;
     }
 
-    public async Task<string> SetProjectMetadataAsync(string key, string? value, CancellationToken cancellationToken = default)
-    {
-        await EnsureLoadedAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(key)) return "Error: key is required.";
-
-        var trimmedKey = key.Trim();
-        _metadata.TryGetValue(trimmedKey, out var beforeValue);
-        _metadata[trimmedKey] = value;
-
-        var before = new OutlineMetadataChange(trimmedKey, beforeValue?.ToString());
-        var after = new OutlineMetadataChange(trimmedKey, value);
-        var result = $"Set {trimmedKey}.";
-        await StageChangeAsync(
-            summary: $"Set metadata '{trimmedKey}'",
-            before: before,
-            after: after,
-            resultJson: result,
-            resourceKind: "ProjectMetadata",
-            resourceId: $"ProjectMetadata:{trimmedKey}",
-            createdResources: [],
-            referencedResources: [],
-            cancellationToken);
-        return result;
-    }
-
     public async Task<string> CreateEntityAsync(string type, string name, Dictionary<string, string?>? properties, Guid? parentId, int? order, CancellationToken cancellationToken = default)
     {
         await EnsureLoadedAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(type)) return "Error: type is required.";
         if (string.IsNullOrWhiteSpace(name)) return "Error: name is required.";
-        if (parentId is not null && !CanResolveEntityOrChapter(parentId.Value)) return $"Error: parent entity {parentId} not found in this project.";
 
         var trimmedType = type.Trim();
+        if (string.Equals(trimmedType, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase))
+        {
+            parentId ??= ProjectId;
+            properties ??= new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            properties.TryAdd("key", name.Trim());
+            properties.TryAdd("value", string.Empty);
+        }
+        if (parentId is not null && !CanResolveEntityOrChapter(parentId.Value)) return $"Error: parent entity {parentId} not found in this project.";
+
         EnsureType(trimmedType, parentId is not null);
         var resolvedOrder = parentId is null ? order : order ?? NextEntityOrder(trimmedType, parentId.Value);
         var entity = new EntityState(
@@ -533,10 +529,8 @@ public sealed class OutlineToolStagingContext(
     {
         if (_loaded) return;
 
-        var project = await projects.GetByIdAsync(ProjectId, cancellationToken)
+        _ = await projects.GetByIdAsync(ProjectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {ProjectId} not found.");
-        foreach (var metadataItem in project.Metadata)
-            _metadata[metadataItem.Key] = metadataItem.Value;
 
         foreach (var act in await acts.ListAsync(ProjectId, cancellationToken))
             _acts[act.Id] = new ActState(act.Id, act.Order, act.Title, act.Synopsis, Deleted: false);
@@ -663,11 +657,14 @@ public sealed class OutlineToolStagingContext(
     }
 
     private bool CanResolveEntityOrChapter(Guid id) =>
+        id == ProjectId
+        ||
         (_entities.TryGetValue(id, out var entity) && !entity.Deleted)
         || (_chapters.TryGetValue(id, out var chapter) && !chapter.Deleted);
 
     private string ResourceForExisting(Guid id)
     {
+        if (id == ProjectId) return Resource("Project", id);
         if (_entities.ContainsKey(id)) return Resource("Entity", id);
         if (_chapters.ContainsKey(id)) return Resource("Chapter", id);
         if (_acts.ContainsKey(id)) return Resource("Act", id);
@@ -702,6 +699,9 @@ public sealed class OutlineToolStagingContext(
     }
 
     private static string Resource(string kind, Guid id) => $"{kind}:{id:N}";
+
+    private static string? ReadProperty(Dictionary<string, string?> properties, string key) =>
+        properties.TryGetValue(key, out var value) ? value : null;
 
     private static string Serialize(object? value) => JsonSerializer.Serialize(value, JsonSerializerOptions.Default);
 

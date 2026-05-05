@@ -99,27 +99,6 @@ public class ProjectService(
         return project;
     }
 
-    public async Task<Project> UpdateMetadataAsync(Guid id, IDictionary<string, object?> metadata, bool merge = true, CancellationToken cancellationToken = default)
-    {
-        var project = await repo.GetByIdAsync(id, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {id} not found.");
-
-        if (merge)
-        {
-            foreach (var kvp in metadata)
-                project.Metadata[kvp.Key] = kvp.Value;
-        }
-        else
-        {
-            project.Metadata = new Dictionary<string, object?>(metadata);
-        }
-
-        project.UpdatedAt = DateTime.UtcNow;
-        repo.Update(project);
-        await repo.SaveChangesAsync(cancellationToken);
-        return project;
-    }
-
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var project = await repo.GetByIdAsync(id, cancellationToken);
