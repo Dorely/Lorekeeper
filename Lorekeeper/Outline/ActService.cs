@@ -14,7 +14,7 @@ public class ActService(
     public Task<Act?> GetAsync(Guid actId, CancellationToken cancellationToken = default) =>
         repo.GetByIdAsync(actId, cancellationToken);
 
-    public async Task<Act> CreateAsync(Guid projectId, string? title = null, string? synopsis = null, CancellationToken cancellationToken = default)
+    public async Task<Act> CreateAsync(Guid projectId, string? title = null, string? synopsis = null, Guid? id = null, CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
@@ -26,6 +26,7 @@ public class ActService(
 
         var act = new Act
         {
+            Id = id ?? Guid.NewGuid(),
             ProjectId = projectId,
             Title = resolvedTitle,
             Synopsis = synopsis ?? string.Empty,

@@ -26,6 +26,12 @@ public class Project
     /// </summary>
     public bool IncludeCurrentChapterInContext { get; set; } = true;
 
+    /// <summary>
+    /// When true, mutating AI tool calls are staged for user approval before they are
+    /// applied to the project's durable outline state.
+    /// </summary>
+    public bool AiChangeApprovalEnabled { get; set; } = true;
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
@@ -47,6 +53,8 @@ public class Project
     public ICollection<AiConsoleEntry> AiConsoleEntries { get; set; } = [];
 
     public ICollection<OutlineConversation> OutlineConversations { get; set; } = [];
+
+    public ICollection<AiChangeBatch> AiChangeBatches { get; set; } = [];
 
     /// <summary>Single source of truth for the vector-store scope key for a project.</summary>
     public static string ScopeKey(Guid id) => $"project:{id:N}";

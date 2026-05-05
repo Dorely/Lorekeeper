@@ -84,6 +84,21 @@ public class ProjectService(
         return project;
     }
 
+    public async Task<Project> SetAiChangeApprovalAsync(Guid id, bool enabled, CancellationToken cancellationToken = default)
+    {
+        var project = await repo.GetByIdAsync(id, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {id} not found.");
+
+        if (project.AiChangeApprovalEnabled != enabled)
+        {
+            project.AiChangeApprovalEnabled = enabled;
+            project.UpdatedAt = DateTime.UtcNow;
+            repo.Update(project);
+            await repo.SaveChangesAsync(cancellationToken);
+        }
+        return project;
+    }
+
     public async Task<Project> UpdateMetadataAsync(Guid id, IDictionary<string, object?> metadata, bool merge = true, CancellationToken cancellationToken = default)
     {
         var project = await repo.GetByIdAsync(id, cancellationToken)

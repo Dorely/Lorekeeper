@@ -20,7 +20,7 @@ public interface IChapterService
     /// or <c>null</c> to land in the project's "Unassigned" bucket. <see cref="Models.Chapter.Order"/>
     /// is auto-assigned to the end of the chosen bucket.
     /// </summary>
-    Task<Chapter> CreateAsync(Guid projectId, Guid? actId = null, string? title = null, string? synopsis = null, CancellationToken cancellationToken = default);
+    Task<Chapter> CreateAsync(Guid projectId, Guid? actId = null, string? title = null, string? synopsis = null, Guid? id = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Updates one or more fields on a chapter. Pass <paramref name="actId"/> as a wrapper

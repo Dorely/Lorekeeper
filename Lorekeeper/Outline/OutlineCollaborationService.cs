@@ -17,6 +17,7 @@ public sealed class OutlineCollaborationService(
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     OutlineCollaborationTools tools,
+    IOutlineChangeApprovalService changeApproval,
     IOptions<AiConsoleOptions> options,
     ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
 {
@@ -48,6 +49,10 @@ public sealed class OutlineCollaborationService(
           new act, chapter, character, location, beat, or relationship, create
           it with the appropriate tool right away — don't ask first. Then
           mention what you did and ask what's next.
+                - EDITING, DELETING, REORDERING, or LINKING existing outline items and
+                    entities: once you have enough information to infer the user's intent,
+                    make the change with the appropriate tool. Ask only when the target or
+                    desired outcome is genuinely ambiguous.
         - Persist key facts the user tells you (premise, tone, scope, main
           characters, core conflict, setting) via set_project_metadata under
           the 'outline.' namespace (outline.premise, outline.tone, outline.scope,
@@ -56,13 +61,8 @@ public sealed class OutlineCollaborationService(
         - Whenever the user names a character or place in passing, create the
           corresponding Character or Location entity proactively, using
           create_entity. Do not ask for permission for these proactive creates.
-        - For new chapters, suggest 3–5 beats by default but wait for
-          confirmation before bulk-creating beats on a chapter that already has
-          some — that's an edit-shaped operation.
-        - EDITING or DELETING existing acts, chapters, beats, entities, or
-          metadata: confirm with the user first. Read back what you intend to
-          change before calling update_*, delete_*, reorder_*, or link_entities
-          with overwrite-shaped intent.
+                - For chapters, create or revise beats when the user's direction gives
+                    you enough information to do so usefully.
 
         Entity conventions:
                 - The outline spine is also represented in the graph: Project -> Act ->
@@ -118,6 +118,39 @@ public sealed class OutlineCollaborationService(
     public async Task<IReadOnlyList<OutlineMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
         await conversations.LoadMessagesAsync(conversationId, cancellationToken);
 
+    public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+        return project.AiChangeApprovalEnabled;
+    }
+
+    public async Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default)
+    {
+        var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+        if (project.AiChangeApprovalEnabled == enabled) return;
+        project.AiChangeApprovalEnabled = enabled;
+        project.UpdatedAt = DateTime.UtcNow;
+        projects.Update(project);
+        await projects.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
+
+    public Task ApplyAiChangeAsync(Guid changeId, CancellationToken cancellationToken = default) =>
+        changeApproval.ApplyChangeAsync(changeId, cancellationToken);
+
+    public Task RejectAiChangeAsync(Guid changeId, string? message, CancellationToken cancellationToken = default) =>
+        changeApproval.RejectChangeAsync(changeId, message, cancellationToken);
+
+    public Task ApplyAiChangeBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>
+        changeApproval.ApplyBatchAsync(batchId, cancellationToken);
+
+    public Task RejectAiChangeBatchAsync(Guid batchId, string? message, CancellationToken cancellationToken = default) =>
+        changeApproval.RejectBatchAsync(batchId, message, cancellationToken);
+
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
@@ -136,6 +169,13 @@ public sealed class OutlineCollaborationService(
 
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
 
+        var unresolvedChanges = await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
+        if (unresolvedChanges.Count > 0)
+        {
+            yield return new TurnError("Review the pending AI changes before sending another outline chat message.", Cancelled: false);
+            yield break;
+        }
+
         // Persist the user message immediately so it appears in history even if the LLM call fails.
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
         var userMsg = new OutlineMessage
@@ -153,15 +193,21 @@ public sealed class OutlineCollaborationService(
         // Resolve the chat client + tools up front so any wiring failure surfaces before we start streaming.
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
+        OutlineToolStagingContext? staging = null;
         string? setupError = null;
         try
         {
+            var project = await projects.GetByIdAsync(projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} not found.");
             var defaultProvider = await providerService.GetDefaultAsync(cancellationToken)
                 ?? throw new InvalidOperationException("No default LLM provider configured.");
             chat = await chatClientFactory.CreateChatClientAsync(defaultProvider.Id, cancellationToken);
 
+            if (project.AiChangeApprovalEnabled)
+                staging = tools.CreateStagingContext(projectId, conversation.Id);
+
             // OnMutated is captured by every mutating tool; we drain it via _mutatedSinceYield.
-            aiTools = tools.Build(new OutlineCollaborationContext(projectId, OnToolMutated));
+            aiTools = tools.Build(new OutlineCollaborationContext(projectId, OnToolMutated, staging));
         }
         catch (Exception ex)
         {
@@ -321,6 +367,7 @@ public sealed class OutlineCollaborationService(
                 var argsJson = fc.Arguments is null ? "{}" : JsonSerializer.Serialize(fc.Arguments);
                 var callId = fc.CallId ?? fc.Name;
                 yield return new ToolCallStarted(callId, fc.Name, argsJson);
+                staging?.BeginToolCall(activeAssistant.Id, callId, fc.Name, argsJson);
 
                 var sw = Stopwatch.StartNew();
                 string? toolResult = null;
@@ -367,6 +414,18 @@ public sealed class OutlineCollaborationService(
                 await conversations.SaveChangesAsync(CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(callId, toolResult ?? string.Empty));
+                if (staging is not null)
+                {
+                    foreach (var pendingChange in staging.DrainNewChanges())
+                    {
+                        yield return new PendingAiChangeCreated(
+                            pendingChange.BatchId,
+                            pendingChange.Id,
+                            pendingChange.ToolCallId,
+                            pendingChange.ToolName,
+                            pendingChange.Summary);
+                    }
+                }
                 yield return new ToolCallCompleted(callId, fc.Name, toolError is null ? toolResult : null, toolError, sw.Elapsed.TotalMilliseconds);
 
                 if (DrainMutated())

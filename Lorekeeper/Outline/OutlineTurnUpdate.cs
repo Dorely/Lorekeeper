@@ -9,6 +9,7 @@ namespace Lorekeeper.Outline;
 [JsonDerivedType(typeof(TextDelta), typeDiscriminator: "text")]
 [JsonDerivedType(typeof(ToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(ToolCallCompleted), typeDiscriminator: "tool-end")]
+[JsonDerivedType(typeof(PendingAiChangeCreated), typeDiscriminator: "pending-change")]
 [JsonDerivedType(typeof(AssistantMessageCompleted), typeDiscriminator: "assistant-end")]
 [JsonDerivedType(typeof(OutlineMutated), typeDiscriminator: "outline-mutated")]
 [JsonDerivedType(typeof(TurnError), typeDiscriminator: "error")]
@@ -22,6 +23,9 @@ public sealed record ToolCallStarted(string CallId, string ToolName, string Argu
 
 /// <summary>A function call has finished. <paramref name="Error"/> is null on success.</summary>
 public sealed record ToolCallCompleted(string CallId, string ToolName, string? Result, string? Error, double DurationMs) : OutlineTurnUpdate;
+
+/// <summary>A mutating tool call was queued for approval instead of being applied immediately.</summary>
+public sealed record PendingAiChangeCreated(Guid BatchId, Guid ChangeId, string ToolCallId, string ToolName, string Summary) : OutlineTurnUpdate;
 
 /// <summary>The assistant turn has fully concluded (no more tool round-trips).</summary>
 public sealed record AssistantMessageCompleted(Guid MessageId) : OutlineTurnUpdate;

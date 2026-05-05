@@ -34,6 +34,7 @@ public interface IEntityService
         IDictionary<string, string?>? properties = null,
         Guid? parentId = null,
         int? order = null,
+        Guid? id = null,
         CancellationToken cancellationToken = default);
 
     Task<StoryEntity> UpdateAsync(

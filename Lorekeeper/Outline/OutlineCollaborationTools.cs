@@ -5,6 +5,7 @@ using Lorekeeper.Chapters;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
 using Microsoft.Extensions.AI;
 
@@ -15,7 +16,7 @@ namespace Lorekeeper.Outline;
 /// is invoked after every successful mutating tool call so the streaming service can emit
 /// an <see cref="OutlineMutated"/> event to refresh the live tree in the UI.
 /// </summary>
-public sealed record OutlineCollaborationContext(Guid ProjectId, Action OnMutated);
+public sealed record OutlineCollaborationContext(Guid ProjectId, Action OnMutated, OutlineToolStagingContext? Staging = null);
 
 /// <summary>
 /// Builds the set of <see cref="AITool"/>s exposed to the LLM during an Outline
@@ -30,11 +31,16 @@ public sealed class OutlineCollaborationTools(
     IEntityService entities,
     IEntityTypeService entityTypes,
     IVectorStore vectors,
-    IEmbeddingService embeddings)
+    IEmbeddingService embeddings,
+    IAiChangeRepository changes,
+    IProjectRepository projectRepository)
 {
     private const string UnassignedSentinel = "unassigned";
     /// <summary>Canonical entity type for chapter-scoped beats.</summary>
     private const string EventNodeType = "Event";
+
+    public OutlineToolStagingContext CreateStagingContext(Guid projectId, Guid conversationId) =>
+        new(projectId, conversationId, changes, projectRepository, acts, chapters, entities, entityTypes);
 
     public IList<AITool> Build(OutlineCollaborationContext context)
     {
@@ -142,6 +148,9 @@ public sealed class OutlineCollaborationTools(
 
     private async Task<string> ListOutlineAsync(OutlineCollaborationContext ctx)
     {
+        if (ctx.Staging is not null)
+            return await ctx.Staging.ListOutlineAsync();
+
         var actList = await acts.ListAsync(ctx.ProjectId);
         var allChapters = await chapters.ListAsync(ctx.ProjectId);
         var byAct = allChapters.Where(c => c.ActId is not null)
@@ -188,6 +197,9 @@ public sealed class OutlineCollaborationTools(
         [Description("1–2 sentence summary of what this act covers.")] string synopsis)
     {
         if (string.IsNullOrWhiteSpace(title)) return "Error: title is required.";
+        if (ctx.Staging is not null)
+            return await ctx.Staging.CreateActAsync(title, synopsis);
+
         var act = await acts.CreateAsync(ctx.ProjectId, title.Trim(), synopsis?.Trim());
         ctx.OnMutated();
         return JsonSerializer.Serialize(new { id = act.Id, order = act.Order, title = act.Title, synopsis = act.Synopsis });
@@ -199,6 +211,9 @@ public sealed class OutlineCollaborationTools(
         string? title,
         string? synopsis)
     {
+        if (ctx.Staging is not null)
+            return await ctx.Staging.UpdateActAsync(actId, title, synopsis);
+
         var existing = await acts.GetAsync(actId);
         if (existing is null || existing.ProjectId != ctx.ProjectId)
             return $"Error: act {actId} not found in this project.";
@@ -210,6 +225,9 @@ public sealed class OutlineCollaborationTools(
 
     private async Task<string> DeleteActAsync(OutlineCollaborationContext ctx, Guid actId)
     {
+        if (ctx.Staging is not null)
+            return await ctx.Staging.DeleteActAsync(actId);
+
         var existing = await acts.GetAsync(actId);
         if (existing is null || existing.ProjectId != ctx.ProjectId)
             return $"Error: act {actId} not found in this project.";
@@ -231,6 +249,9 @@ public sealed class OutlineCollaborationTools(
         var (resolvedActId, error) = await ResolveActAsync(ctx, actId, allowUnassigned: true);
         if (error is not null) return error;
 
+        if (ctx.Staging is not null)
+            return await ctx.Staging.CreateChapterAsync(resolvedActId, title, synopsis);
+
         var ch = await chapters.CreateAsync(ctx.ProjectId, resolvedActId, title.Trim(), synopsis?.Trim());
         ctx.OnMutated();
         return JsonSerializer.Serialize(new { id = ch.Id, order = ch.Order, actId = ch.ActId, title = ch.Title, synopsis = ch.Synopsis });
@@ -243,10 +264,6 @@ public sealed class OutlineCollaborationTools(
         string? synopsis,
         string? actId)
     {
-        var existing = await chapters.GetAsync(chapterId);
-        if (existing is null || existing.ProjectId != ctx.ProjectId)
-            return $"Error: chapter {chapterId} not found in this project.";
-
         ChapterActAssignment? assignment = null;
         if (actId is not null)
         {
@@ -255,6 +272,13 @@ public sealed class OutlineCollaborationTools(
             assignment = new ChapterActAssignment(resolved);
         }
 
+        if (ctx.Staging is not null)
+            return await ctx.Staging.UpdateChapterAsync(chapterId, title, synopsis, assignment?.Value, moveChapter: actId is not null);
+
+        var existing = await chapters.GetAsync(chapterId);
+        if (existing is null || existing.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId} not found in this project.";
+
         var updated = await chapters.UpdateAsync(chapterId, title?.Trim(), body: null, synopsis?.Trim(), assignment);
         ctx.OnMutated();
         return JsonSerializer.Serialize(new { id = updated.Id, actId = updated.ActId, order = updated.Order, title = updated.Title, synopsis = updated.Synopsis });
@@ -262,6 +286,9 @@ public sealed class OutlineCollaborationTools(
 
     private async Task<string> DeleteChapterAsync(OutlineCollaborationContext ctx, Guid chapterId)
     {
+        if (ctx.Staging is not null)
+            return await ctx.Staging.DeleteChapterAsync(chapterId);
+
         var existing = await chapters.GetAsync(chapterId);
         if (existing is null || existing.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
@@ -276,6 +303,9 @@ public sealed class OutlineCollaborationTools(
     private async Task<string> ReorderActsAsync(OutlineCollaborationContext ctx, Guid[] orderedIds)
     {
         if (orderedIds is null || orderedIds.Length == 0) return "Error: orderedIds is required.";
+
+        if (ctx.Staging is not null)
+            return await ctx.Staging.ReorderActsAsync(orderedIds);
 
         var existing = await acts.ListAsync(ctx.ProjectId);
         var existingIds = existing.Select(a => a.Id).ToHashSet();
@@ -299,6 +329,9 @@ public sealed class OutlineCollaborationTools(
         var (bucket, error) = await ResolveActAsync(ctx, actId, allowUnassigned: true);
         if (error is not null) return error;
 
+        if (ctx.Staging is not null)
+            return await ctx.Staging.ReorderChaptersAsync(bucket, orderedIds);
+
         var bucketChapters = (await chapters.ListAsync(ctx.ProjectId))
             .Where(c => c.ActId == bucket)
             .ToList();
@@ -320,6 +353,9 @@ public sealed class OutlineCollaborationTools(
     private async Task<string> SetProjectMetadataAsync(OutlineCollaborationContext ctx, string key, string value)
     {
         if (string.IsNullOrWhiteSpace(key)) return "Error: key is required.";
+        if (ctx.Staging is not null)
+            return await ctx.Staging.SetProjectMetadataAsync(key, value);
+
         await projects.UpdateMetadataAsync(ctx.ProjectId, new Dictionary<string, object?> { [key.Trim()] = value });
         // Metadata is not part of the visible tree, but downstream context may show it; signal anyway.
         ctx.OnMutated();
@@ -354,6 +390,9 @@ public sealed class OutlineCollaborationTools(
 
     private async Task<string> ListEntityTypesAsync(OutlineCollaborationContext ctx)
     {
+        if (ctx.Staging is not null)
+            return await ctx.Staging.ListEntityTypesAsync();
+
         var list = await entityTypes.ListAsync(ctx.ProjectId, includeStructural: true);
         return JsonSerializer.Serialize(list.Select(t => new
         {
@@ -375,6 +414,9 @@ public sealed class OutlineCollaborationTools(
             if (!Guid.TryParse(parentId, out var p)) return $"Error: parentId '{parentId}' is not a valid Guid.";
             parent = p;
         }
+
+        if (ctx.Staging is not null)
+            return await ctx.Staging.ListEntitiesAsync(type.Trim(), parent);
 
         var list = await entities.ListAsync(ctx.ProjectId, type.Trim(), parent);
         return JsonSerializer.Serialize(list.Select(e => new
@@ -407,9 +449,13 @@ public sealed class OutlineCollaborationTools(
         if (!string.IsNullOrWhiteSpace(parentId))
         {
             if (!Guid.TryParse(parentId, out var p)) return $"Error: parentId '{parentId}' is not a valid Guid.";
+            if (ctx.Staging is not null)
+            {
+                parent = p;
+            }
             // For Event (beats) the parent must be a chapter we know about. Validate up front so
             // the chat surface gets a clear error instead of lazily upserting a phantom node.
-            if (string.Equals(type.Trim(), EventNodeType, StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(type.Trim(), EventNodeType, StringComparison.OrdinalIgnoreCase))
             {
                 var chapter = await chapters.GetAsync(p);
                 if (chapter is null || chapter.ProjectId != ctx.ProjectId)
@@ -417,6 +463,9 @@ public sealed class OutlineCollaborationTools(
             }
             parent = p;
         }
+
+        if (ctx.Staging is not null)
+            return await ctx.Staging.CreateEntityAsync(type, name, properties, parent, order);
 
         try
         {
@@ -455,6 +504,9 @@ public sealed class OutlineCollaborationTools(
         try { propertiesToRemove = ParseStringArrayJson(propertiesToRemoveJson); }
         catch (Exception ex) { return $"Error: propertiesToRemoveJson is not a valid JSON array of strings: {ex.Message}"; }
 
+        if (ctx.Staging is not null)
+            return await ctx.Staging.UpdateEntityAsync(id, name, propertiesToSet, propertiesToRemove);
+
         try
         {
             var updated = await entities.UpdateAsync(ctx.ProjectId, id, name?.Trim(), propertiesToSet, propertiesToRemove);
@@ -478,6 +530,9 @@ public sealed class OutlineCollaborationTools(
     private async Task<string> DeleteEntityAsync(OutlineCollaborationContext ctx, string entityId)
     {
         if (!Guid.TryParse(entityId, out var id)) return $"Error: entityId '{entityId}' is not a valid Guid.";
+        if (ctx.Staging is not null)
+            return await ctx.Staging.DeleteEntityAsync(id);
+
         await entities.DeleteAsync(ctx.ProjectId, id);
         ctx.OnMutated();
         return $"Deleted entity {id}.";
@@ -503,6 +558,9 @@ public sealed class OutlineCollaborationTools(
             if (!Guid.TryParse(s, out var g)) return $"Error: orderedIdsJson contains invalid Guid '{s}'.";
             parsed.Add(g);
         }
+
+        if (ctx.Staging is not null)
+            return await ctx.Staging.ReorderEntitiesAsync(type, parent, parsed);
 
         try
         {
@@ -530,6 +588,9 @@ public sealed class OutlineCollaborationTools(
         Dictionary<string, string?>? properties;
         try { properties = ParsePropertiesJson(propertiesJson); }
         catch (Exception ex) { return $"Error: propertiesJson is not a valid JSON object: {ex.Message}"; }
+
+        if (ctx.Staging is not null)
+            return await ctx.Staging.LinkEntitiesAsync(from, to, edgeType, properties);
 
         try
         {
@@ -604,6 +665,9 @@ public sealed class OutlineCollaborationTools(
 
         if (!Guid.TryParse(actId, out var parsed))
             return (null, $"Error: actId '{actId}' is not a valid Guid or 'unassigned'.");
+
+        if (ctx.Staging is not null)
+            return (parsed, null);
 
         var act = await acts.GetAsync(parsed);
         if (act is null || act.ProjectId != ctx.ProjectId)

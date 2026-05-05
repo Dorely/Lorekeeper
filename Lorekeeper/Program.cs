@@ -30,6 +30,7 @@ builder.Services.AddScoped<IGraphEntityTypeRepository, GraphEntityTypeRepository
 builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
 builder.Services.AddScoped<IActRepository, ActRepository>();
 builder.Services.AddScoped<IOutlineConversationRepository, OutlineConversationRepository>();
+builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
 
 // Knowledge
 builder.Services.AddScoped<IVectorStore, SqliteVecVectorStore>();
@@ -56,6 +57,7 @@ builder.Services.AddScoped<IEntityService, EntityService>();
 builder.Services.AddScoped<IEntityTypeService, EntityTypeService>();
 builder.Services.AddScoped<IOutlineGraphSync, OutlineGraphSync>();
 builder.Services.AddScoped<OutlineCollaborationTools>();
+builder.Services.AddScoped<IOutlineChangeApprovalService, OutlineChangeApprovalService>();
 builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationService>();
 
 // Context + AI Console

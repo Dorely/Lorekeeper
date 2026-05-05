@@ -61,6 +61,7 @@ public sealed class EntityService(
         IDictionary<string, string?>? properties = null,
         Guid? parentId = null,
         int? order = null,
+        Guid? id = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -68,7 +69,7 @@ public sealed class EntityService(
         if (string.IsNullOrWhiteSpace(nodeType))
             throw new ArgumentException("Entity type is required.", nameof(nodeType));
 
-        var key = Guid.NewGuid().ToString("N");
+        var key = (id ?? Guid.NewGuid()).ToString("N");
         var props = ToObjectDict(properties);
 
         if (parentId is not null)

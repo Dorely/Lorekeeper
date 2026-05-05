@@ -20,6 +20,14 @@ public interface IOutlineCollaborationService
     /// </summary>
     Task<IReadOnlyList<OutlineMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
+    Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task ApplyAiChangeAsync(Guid changeId, CancellationToken cancellationToken = default);
+    Task RejectAiChangeAsync(Guid changeId, string? message, CancellationToken cancellationToken = default);
+    Task ApplyAiChangeBatchAsync(Guid batchId, CancellationToken cancellationToken = default);
+    Task RejectAiChangeBatchAsync(Guid batchId, string? message, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Sends a user message and yields incremental updates as the assistant responds and
     /// invokes tools. Persists user / assistant / tool messages as the turn progresses.

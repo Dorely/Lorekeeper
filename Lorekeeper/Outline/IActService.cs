@@ -6,7 +6,7 @@ public interface IActService
 {
     Task<IReadOnlyList<Act>> ListAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<Act?> GetAsync(Guid actId, CancellationToken cancellationToken = default);
-    Task<Act> CreateAsync(Guid projectId, string? title = null, string? synopsis = null, CancellationToken cancellationToken = default);
+    Task<Act> CreateAsync(Guid projectId, string? title = null, string? synopsis = null, Guid? id = null, CancellationToken cancellationToken = default);
     Task<Act> UpdateAsync(Guid actId, string? title = null, string? synopsis = null, CancellationToken cancellationToken = default);
 
     /// <summary>

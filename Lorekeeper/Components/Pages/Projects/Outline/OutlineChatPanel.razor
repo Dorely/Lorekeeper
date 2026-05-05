@@ -9,8 +9,16 @@
 <div class="outline-chat">
     <div class="outline-chat-header">
         <span class="outline-chat-title">Outline Chat</span>
-        <button type="button" class="btn btn-link btn-sm outline-chat-reset" title="Start over"
-                disabled="@_running" @onclick="ResetAsync">Reset</button>
+        <div class="outline-chat-header-actions">
+            @if (PendingChangeCount > 0)
+            {
+                <button type="button" class="btn btn-link btn-sm outline-chat-review" @onclick="OpenPendingChanges">
+                    Review @PendingChangeCount
+                </button>
+            }
+            <button type="button" class="btn btn-link btn-sm outline-chat-reset" title="Start over"
+                    disabled="@(_running || PendingChangeCount > 0)" @onclick="ResetAsync">Reset</button>
+        </div>
     </div>
 
     <div class="outline-chat-scroll" @ref="_scrollEl">
@@ -42,9 +50,14 @@
     <div class="outline-chat-composer">
         <textarea class="form-control outline-chat-input" rows="1" placeholder="Type a message…"
                   @ref="_composerEl"
-                  disabled="@_running"
+                  disabled="@(_running || PendingChangeCount > 0)"
                   @bind="_input" @bind:event="oninput"
                   @onkeydown="OnKeyDown"></textarea>
+        <label class="outline-chat-approval" title="Queue AI tool edits for review before applying them">
+            <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
+                   disabled="@_running" @onchange="OnApprovalChangedAsync" />
+            <span>Review edits</span>
+        </label>
         @if (_running)
         {
             <button type="button" class="btn btn-outline-danger" @onclick="CancelAsync">Stop</button>
@@ -52,11 +65,17 @@
         else
         {
             <button type="button" class="btn btn-primary"
-                    disabled="@string.IsNullOrWhiteSpace(_input)"
+                    disabled="@(string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)"
                     @onclick="SendAsync">Send</button>
         }
     </div>
 </div>
+
+<PendingAiChangesModal ProjectId="@ProjectId"
+                       Batches="@_pendingBatches"
+                       IsOpen="@_showPendingChanges"
+                       OnClose="ClosePendingChanges"
+                       OnChanged="HandlePendingChangesChangedAsync" />
 
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
@@ -76,9 +95,14 @@
     private string _input = string.Empty;
     private bool _running;
     private bool _loading = true;
+    private bool _approvalEnabled = true;
+    private bool _showPendingChanges;
     private string? _error;
     private CancellationTokenSource? _cts;
     private Guid? _loadedProjectId;
+    private List<AiChangeBatch> _pendingBatches = [];
+
+    private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -114,6 +138,8 @@
         {
             _conversation = await Collab.GetOrCreateAsync(ProjectId);
             _messages = (await Collab.LoadMessagesAsync(_conversation.Id)).ToList();
+            _approvalEnabled = await Collab.GetAiChangeApprovalEnabledAsync(ProjectId);
+            await LoadPendingChangesAsync(openIfPending: false);
             RebuildRenderable();
         }
         finally
@@ -128,6 +154,11 @@
     {
         var text = _input?.Trim();
         if (string.IsNullOrEmpty(text) || _running) return;
+        if (PendingChangeCount > 0)
+        {
+            _showPendingChanges = true;
+            return;
+        }
 
         _input = string.Empty;
         _running = true;
@@ -187,9 +218,15 @@
                             await OnOutlineChanged.InvokeAsync();
                         break;
 
+                    case PendingAiChangeCreated:
+                        await LoadPendingChangesAsync(openIfPending: true);
+                        StateHasChanged();
+                        break;
+
                     case AssistantMessageCompleted:
                         // Reload from DB so we render the canonical persisted state.
                         await ReloadFromDbAsync();
+                        await LoadPendingChangesAsync(openIfPending: true);
                         // Don't break out — the service may emit more rounds; LiveTurn was already
                         // folded into the persisted history. Reset for the next round.
                         _live = new LiveTurn();
@@ -200,6 +237,7 @@
                     case TurnError err:
                         _error = err.Cancelled ? null : err.Message;
                         await ReloadFromDbAsync();
+                        await LoadPendingChangesAsync(openIfPending: false);
                         break;
                 }
             }
@@ -236,6 +274,37 @@
         if (_conversation is null) return;
         _messages = (await Collab.LoadMessagesAsync(_conversation.Id)).ToList();
         RebuildRenderable();
+    }
+
+    private async Task LoadPendingChangesAsync(bool openIfPending)
+    {
+        _pendingBatches = (await Collab.ListPendingChangesAsync(ProjectId)).ToList();
+        if (openIfPending && PendingChangeCount > 0)
+            _showPendingChanges = true;
+        if (PendingChangeCount == 0)
+            _showPendingChanges = false;
+    }
+
+    private async Task OnApprovalChangedAsync(ChangeEventArgs args)
+    {
+        var enabled = args.Value is bool boolValue
+            ? boolValue
+            : bool.TryParse(args.Value?.ToString(), out var parsed) && parsed;
+        _approvalEnabled = enabled;
+        await Collab.SetAiChangeApprovalEnabledAsync(ProjectId, enabled);
+    }
+
+    private void OpenPendingChanges() => _showPendingChanges = true;
+
+    private void ClosePendingChanges() => _showPendingChanges = false;
+
+    private async Task HandlePendingChangesChangedAsync()
+    {
+        await LoadPendingChangesAsync(openIfPending: false);
+        await ReloadFromDbAsync();
+        if (OnOutlineChanged.HasDelegate)
+            await OnOutlineChanged.InvokeAsync();
+        StateHasChanged();
     }
 
     private void RebuildRenderable()

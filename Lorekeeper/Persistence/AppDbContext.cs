@@ -19,6 +19,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AiConsoleEntry> AiConsoleEntries => Set<AiConsoleEntry>();
     public DbSet<OutlineConversation> OutlineConversations => Set<OutlineConversation>();
     public DbSet<OutlineMessage> OutlineMessages => Set<OutlineMessage>();
+    public DbSet<AiChangeBatch> AiChangeBatches => Set<AiChangeBatch>();
+    public DbSet<AiChange> AiChanges => Set<AiChange>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -97,6 +99,34 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasOne(e => e.Conversation)
                 .WithMany(c => c.Messages)
                 .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AiChangeBatch>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.AiChangeBatches)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Conversation)
+                .WithMany()
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AiChange>(entity =>
+        {
+            entity.HasIndex(e => new { e.BatchId, e.Order });
+            entity.HasIndex(e => e.Status);
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Batch)
+                .WithMany(b => b.Changes)
+                .HasForeignKey(e => e.BatchId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

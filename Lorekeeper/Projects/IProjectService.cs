@@ -15,6 +15,9 @@ public interface IProjectService
     /// <summary>Toggle whether the currently-open chapter is included in the assembled context.</summary>
     Task<Project> SetIncludeCurrentChapterAsync(Guid id, bool include, CancellationToken cancellationToken = default);
 
+    /// <summary>Toggle whether AI tool mutations are queued for user approval.</summary>
+    Task<Project> SetAiChangeApprovalAsync(Guid id, bool enabled, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Replaces (or merges, when <paramref name="merge"/> is true) the project's free-form
     /// <see cref="Project.Metadata"/> bag. Used by the Outline tab to persist wizard inputs.

@@ -1,0 +1,265 @@
+@using System.Text.Json
+@using Lorekeeper.Models
+@using Lorekeeper.Outline
+@inject IOutlineCollaborationService Collab
+
+@if (IsOpen)
+{
+    <div class="pending-ai-backdrop" role="presentation" @onclick="CloseAsync"></div>
+    <section class="pending-ai-modal" role="dialog" aria-modal="true" aria-label="Pending AI changes">
+        <header class="pending-ai-header">
+            <div>
+                <div class="pending-ai-title">Pending AI Changes</div>
+                <div class="pending-ai-subtitle">Review queued tool changes before they update the outline.</div>
+            </div>
+            <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
+        </header>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="pending-ai-error">
+                <span>@_error</span>
+                <button type="button" class="btn-close btn-close-sm" @onclick="() => _error = null"></button>
+            </div>
+        }
+
+        @if (Flattened.Count == 0)
+        {
+            <div class="pending-ai-empty">No pending changes.</div>
+        }
+        else
+        {
+            <div class="pending-ai-actions">
+                <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="ApplySelectedBatchAsync">Keep batch</button>
+                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_busy" @onclick="RejectSelectedBatchAsync">Reject batch</button>
+            </div>
+
+            <div class="pending-ai-body">
+                <aside class="pending-ai-list">
+                    @foreach (var item in Flattened)
+                    {
+                        var selected = _selectedChangeId == item.Change.Id;
+                        var cascadeCount = CountDependentPendingChanges(item.Change.Id);
+                        <article class="pending-ai-card @(selected ? "selected" : null) @StatusClass(item.Change.Status)"
+                                 @onclick="() => SelectChange(item.Change.Id)">
+                            <div class="pending-ai-card-main">
+                                <span class="pending-ai-tool">@item.Change.ToolName</span>
+                                <span class="pending-ai-status">@item.Change.Status</span>
+                            </div>
+                            <div class="pending-ai-summary">@item.Change.Summary</div>
+                            @if (!string.IsNullOrWhiteSpace(item.Change.ArgumentsJson) && item.Change.ArgumentsJson != "{}")
+                            {
+                                <code class="pending-ai-args">@Truncate(item.Change.ArgumentsJson, 120)</code>
+                            }
+                            @if (item.Dependencies.Count > 0)
+                            {
+                                <div class="pending-ai-note">Depends on @item.Dependencies.Count earlier change@(item.Dependencies.Count == 1 ? string.Empty : "s").</div>
+                            }
+                            @if (cascadeCount > 0 && item.Change.Status == AiChangeStatus.Pending)
+                            {
+                                <div class="pending-ai-note warning">Rejecting this also rejects @cascadeCount dependent change@(cascadeCount == 1 ? string.Empty : "s").</div>
+                            }
+                            <div class="pending-ai-card-actions" @onclick:stopPropagation="true">
+                                <button type="button" class="btn btn-sm btn-outline-primary"
+                                        disabled="@(_busy || item.Change.Status != AiChangeStatus.Pending)"
+                                        @onclick="() => ApplyChangeAsync(item.Change.Id)">Keep</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                        disabled="@(_busy || item.Change.Status != AiChangeStatus.Pending)"
+                                        @onclick="() => RejectChangeAsync(item.Change.Id)">Reject</button>
+                            </div>
+                        </article>
+                    }
+                </aside>
+
+                <main class="pending-ai-detail">
+                    @if (Selected is null)
+                    {
+                        <div class="pending-ai-empty">Select a change to inspect the diff.</div>
+                    }
+                    else
+                    {
+                        <div class="pending-ai-detail-head">
+                            <div>
+                                <div class="pending-ai-tool large">@Selected.Change.ToolName</div>
+                                <div class="pending-ai-summary">@Selected.Change.Summary</div>
+                            </div>
+                            <span class="pending-ai-status">@Selected.Change.Status</span>
+                        </div>
+
+                        <div class="pending-ai-reject-note">
+                            <label for="pending-rejection-note">Rejection message</label>
+                            <textarea id="pending-rejection-note" class="form-control" rows="3"
+                                      placeholder="Tell the assistant what to correct next turn..."
+                                      @bind="_rejectionMessage" @bind:event="oninput"></textarea>
+                        </div>
+
+                        <div class="pending-ai-diff-grid">
+                            <section>
+                                <div class="pending-ai-section-label">Old</div>
+                                <pre>@FormatJson(Selected.Change.BeforeJson)</pre>
+                            </section>
+                            <section>
+                                <div class="pending-ai-section-label">New</div>
+                                <pre>@FormatJson(Selected.Change.AfterJson)</pre>
+                            </section>
+                        </div>
+
+                        <details class="pending-ai-raw">
+                            <summary>Tool call</summary>
+                            <pre>@FormatJson(Selected.Change.ArgumentsJson)</pre>
+                        </details>
+
+                        <div class="pending-ai-detail-actions">
+                            <button type="button" class="btn btn-primary"
+                                    disabled="@(_busy || Selected.Change.Status != AiChangeStatus.Pending)"
+                                    @onclick="() => ApplyChangeAsync(Selected.Change.Id)">Keep</button>
+                            <button type="button" class="btn btn-outline-danger"
+                                    disabled="@(_busy || Selected.Change.Status != AiChangeStatus.Pending)"
+                                    @onclick="() => RejectChangeAsync(Selected.Change.Id)">Reject</button>
+                        </div>
+                    }
+                </main>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public IReadOnlyList<AiChangeBatch> Batches { get; set; } = [];
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private Guid? _selectedChangeId;
+    private string _rejectionMessage = string.Empty;
+    private string? _error;
+    private bool _busy;
+
+    private List<PendingChangeItem> Flattened => Batches
+        .SelectMany(batch => batch.Changes.OrderBy(change => change.Order).Select(change => new PendingChangeItem(
+            batch,
+            change,
+            ReadGuidList(change.DependsOnChangeIdsJson))))
+        .OrderBy(item => item.Batch.CreatedAt)
+        .ThenBy(item => item.Change.Order)
+        .ToList();
+
+    private PendingChangeItem? Selected => Flattened.FirstOrDefault(item => item.Change.Id == _selectedChangeId) ?? Flattened.FirstOrDefault();
+
+    protected override void OnParametersSet()
+    {
+        if (Selected is null)
+        {
+            _selectedChangeId = Flattened.FirstOrDefault()?.Change.Id;
+        }
+        else
+        {
+            _selectedChangeId = Selected.Change.Id;
+        }
+    }
+
+    private void SelectChange(Guid changeId) => _selectedChangeId = changeId;
+
+    private async Task CloseAsync()
+    {
+        if (OnClose.HasDelegate)
+            await OnClose.InvokeAsync();
+    }
+
+    private async Task ApplySelectedBatchAsync()
+    {
+        var batchId = Selected?.Batch.Id;
+        if (batchId is null) return;
+        await RunAsync(() => Collab.ApplyAiChangeBatchAsync(batchId.Value));
+    }
+
+    private async Task RejectSelectedBatchAsync()
+    {
+        var batchId = Selected?.Batch.Id;
+        if (batchId is null) return;
+        await RunAsync(() => Collab.RejectAiChangeBatchAsync(batchId.Value, _rejectionMessage));
+    }
+
+    private async Task ApplyChangeAsync(Guid changeId) =>
+        await RunAsync(() => Collab.ApplyAiChangeAsync(changeId));
+
+    private async Task RejectChangeAsync(Guid changeId) =>
+        await RunAsync(() => Collab.RejectAiChangeAsync(changeId, _rejectionMessage));
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+            _rejectionMessage = string.Empty;
+            if (OnChanged.HasDelegate)
+                await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private int CountDependentPendingChanges(Guid changeId)
+    {
+        var rejectedIds = new HashSet<Guid> { changeId };
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var item in Flattened.Where(item => item.Change.Status == AiChangeStatus.Pending))
+            {
+                if (rejectedIds.Contains(item.Change.Id)) continue;
+                if (item.Dependencies.Any(rejectedIds.Contains))
+                {
+                    rejectedIds.Add(item.Change.Id);
+                    changed = true;
+                }
+            }
+        }
+        return rejectedIds.Count - 1;
+    }
+
+    private static string StatusClass(AiChangeStatus status) => status switch
+    {
+        AiChangeStatus.Applied => "applied",
+        AiChangeStatus.Rejected => "rejected",
+        AiChangeStatus.Conflict => "conflict",
+        _ => "pending",
+    };
+
+    private static IReadOnlyList<Guid> ReadGuidList(string json) =>
+        string.IsNullOrWhiteSpace(json) || json == "[]"
+            ? []
+            : JsonSerializer.Deserialize<List<Guid>>(json, JsonSerializerOptions.Default) ?? [];
+
+    private static string Truncate(string value, int max)
+    {
+        value = value.Replace('\n', ' ').Replace('\r', ' ');
+        return value.Length <= max ? value : value[..max] + "...";
+    }
+
+    private static string FormatJson(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return string.Empty;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return JsonSerializer.Serialize(document.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    private sealed record PendingChangeItem(AiChangeBatch Batch, AiChange Change, IReadOnlyList<Guid> Dependencies);
+}

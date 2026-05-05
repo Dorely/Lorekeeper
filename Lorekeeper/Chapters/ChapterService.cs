@@ -22,7 +22,7 @@ public class ChapterService(
     public Task<Chapter?> GetAsync(Guid chapterId, CancellationToken cancellationToken = default) =>
         repo.GetByIdAsync(chapterId, cancellationToken);
 
-    public async Task<Chapter> CreateAsync(Guid projectId, Guid? actId = null, string? title = null, string? synopsis = null, CancellationToken cancellationToken = default)
+    public async Task<Chapter> CreateAsync(Guid projectId, Guid? actId = null, string? title = null, string? synopsis = null, Guid? id = null, CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
@@ -34,6 +34,7 @@ public class ChapterService(
 
         var chapter = new Chapter
         {
+            Id = id ?? Guid.NewGuid(),
             ProjectId = projectId,
             ActId = actId,
             Title = resolvedTitle,
