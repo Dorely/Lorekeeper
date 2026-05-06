@@ -113,10 +113,13 @@ public sealed class IngestAgentTools(
         var searchTypes = allowedTypes;
         if (!string.IsNullOrWhiteSpace(requestedType))
         {
-            var matchedType = allowedTypes.FirstOrDefault(candidate => string.Equals(candidate, requestedType, StringComparison.OrdinalIgnoreCase));
-            if (matchedType is null)
-                return $"Error: entity type '{requestedType}' is not a non-structural story entity type.";
-            searchTypes = [matchedType];
+            if (IsDisallowedEntityType(requestedType))
+                return $"Error: entity type '{requestedType}' is structural and cannot be searched by ingest.";
+
+            var matchedType = await ResolveEntityTypeAsync(context.ProjectId, requestedType, allowNew: false);
+            searchTypes = matchedType is null
+                ? []
+                : (await GetEquivalentEntityTypeNamesAsync(context.ProjectId, matchedType.Type)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
         var terms = SplitTerms(query).ToList();
@@ -171,26 +174,17 @@ public sealed class IngestAgentTools(
         var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, parsed);
         if (node is null) return $"Error: entity {parsed} is not a non-structural project story entity.";
 
-        var assertionInput = BuildAssertionInput(context, BestSummary(observedProperties), observedProperties, aliases, evidence, notes);
-        var write = IngestSourceAssertions.UpsertEntityAssertion(node.Properties, assertionInput);
-        node.UpdatedAt = DateTime.UtcNow;
-        nodes.Update(node);
-        await nodes.SaveChangesAsync();
-        await AddExtractedFromAsync(context, node);
-
         var item = await FindActiveEntityReportItemAsync(context.JobId, parsed);
-        await UpsertEntityReportItemAsync(
+        await RecordEntityObservationAsync(
             context,
-            item,
             node,
             parsed,
+            item,
             IngestSourceAssertions.LinkedExistingEntityAction,
-            write,
             observedProperties,
             aliases,
             evidence,
             notes);
-        context.OnMutated();
 
         return JsonSerializer.Serialize(new
         {
@@ -213,7 +207,8 @@ public sealed class IngestAgentTools(
         string? notes)
     {
         if (string.IsNullOrWhiteSpace(type)) return "Error: type is required.";
-        if (IsDisallowedEntityType(type.Trim())) return $"Error: type '{type.Trim()}' is structural and cannot be created by ingest.";
+        var resolvedType = await ResolveEntityTypeAsync(context.ProjectId, type, allowNew: true);
+        if (resolvedType is null) return $"Error: type '{type.Trim()}' is structural or invalid and cannot be created by ingest.";
         if (string.IsNullOrWhiteSpace(name)) return "Error: name is required.";
 
         if (!TryParsePropertiesJson(propertiesJson, out var parsedProperties, out var propertiesError))
@@ -224,12 +219,44 @@ public sealed class IngestAgentTools(
             return $"Error: aliasesJson is not a valid JSON array: {aliasesError}";
         var aliases = parsedAliases ?? [];
 
+        var trimmedName = name.Trim();
+        var duplicateNode = await FindDuplicateEntityByNameAsync(context.ProjectId, resolvedType.Type, trimmedName);
+        if (duplicateNode is not null && Guid.TryParseExact(duplicateNode.Key, "N", out var duplicateId))
+        {
+            var duplicateItem = await FindActiveEntityReportItemAsync(context.JobId, duplicateId);
+            var action = duplicateItem is null
+                ? IngestSourceAssertions.LinkedExistingEntityAction
+                : IngestSourceAssertions.ReadEntityGraphAction(duplicateItem.PayloadJson) ?? IngestSourceAssertions.LinkedExistingEntityAction;
+            await RecordEntityObservationAsync(
+                context,
+                duplicateNode,
+                duplicateId,
+                duplicateItem,
+                action,
+                observedProperties,
+                aliases,
+                evidence,
+                notes);
+
+            return JsonSerializer.Serialize(new
+            {
+                id = duplicateId,
+                type = duplicateNode.NodeType,
+                name = duplicateNode.Label ?? duplicateNode.Key,
+                graphAction = action,
+                duplicateNameReused = true,
+                message = $"Reused existing {duplicateNode.NodeType} named '{duplicateNode.Label ?? duplicateNode.Key}' instead of creating a duplicate.",
+                canonicalProperties = VisibleProperties(duplicateNode.Properties),
+                sourceAssertions = IngestSourceAssertions.SummarizeEntityAssertions(duplicateNode.Properties),
+            });
+        }
+
         var entityProperties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         entityProperties[IngestSourceAssertions.GraphOriginProperty] = IngestSourceAssertions.GraphOriginIngestValue;
         var assertionInput = BuildAssertionInput(context, BestSummary(observedProperties), observedProperties, aliases, evidence, notes);
         var write = IngestSourceAssertions.UpsertEntityAssertion(entityProperties, assertionInput);
 
-        var created = await entities.CreateAsync(context.ProjectId, type.Trim(), name.Trim(), entityProperties);
+        var created = await entities.CreateAsync(context.ProjectId, resolvedType.Type, trimmedName, entityProperties);
         var node = await nodes.FindByKeyAsync(context.ProjectId, created.Id.ToString("N"));
         if (node is not null)
             await AddExtractedFromAsync(context, node);
@@ -254,7 +281,7 @@ public sealed class IngestAgentTools(
             name = created.Name,
             graphAction = IngestSourceAssertions.CreatedEntityAction,
             observedProperties,
-            sourceAssertions = node is null ? [] : IngestSourceAssertions.SummarizeEntityAssertions(node.Properties),
+            sourceAssertions = node is null ? Array.Empty<IngestSourceAssertionSummary>() : IngestSourceAssertions.SummarizeEntityAssertions(node.Properties),
         });
     }
 
@@ -288,28 +315,23 @@ public sealed class IngestAgentTools(
         if (string.Equals(action, IngestSourceAssertions.CreatedEntityAction, StringComparison.Ordinal)
             && !string.IsNullOrWhiteSpace(name))
         {
+            var duplicate = await FindDuplicateEntityByNameAsync(context.ProjectId, node.NodeType, name.Trim(), excludeNodeId: node.Id);
+            if (duplicate is not null)
+                return $"Error: another {node.NodeType} named '{duplicate.Label ?? duplicate.Key}' already exists. Use that entity instead of renaming this one.";
+
             node.Label = name.Trim();
         }
 
-        var assertionInput = BuildAssertionInput(context, BestSummary(observedProperties), observedProperties, aliases, evidence, notes);
-        var write = IngestSourceAssertions.UpsertEntityAssertion(node.Properties, assertionInput);
-        node.UpdatedAt = DateTime.UtcNow;
-        nodes.Update(node);
-        await nodes.SaveChangesAsync();
-        await AddExtractedFromAsync(context, node);
-
-        await UpsertEntityReportItemAsync(
+        await RecordEntityObservationAsync(
             context,
-            item,
             node,
             parsed,
+            item,
             action,
-            write,
             observedProperties,
             aliases,
             evidence,
             notes);
-        context.OnMutated();
 
         return JsonSerializer.Serialize(new
         {
@@ -433,6 +455,38 @@ public sealed class IngestAgentTools(
         await ingest.SaveChangesAsync();
         context.OnMutated();
         return JsonSerializer.Serialize(new { sourceChunkId = context.SourceChunkId, summary = sourceChunk.Summary, notes = sourceChunk.AgentNotes });
+    }
+
+    private async Task RecordEntityObservationAsync(
+        IngestAgentContext context,
+        GraphNode node,
+        Guid entityId,
+        IngestReportItem? existing,
+        string action,
+        IReadOnlyDictionary<string, string?> observedProperties,
+        IReadOnlyList<string> aliases,
+        string? evidence,
+        string? notes)
+    {
+        var assertionInput = BuildAssertionInput(context, BestSummary(observedProperties), observedProperties, aliases, evidence, notes);
+        var write = IngestSourceAssertions.UpsertEntityAssertion(node.Properties, assertionInput);
+        node.UpdatedAt = DateTime.UtcNow;
+        nodes.Update(node);
+        await nodes.SaveChangesAsync();
+        await AddExtractedFromAsync(context, node);
+
+        await UpsertEntityReportItemAsync(
+            context,
+            existing,
+            node,
+            entityId,
+            action,
+            write,
+            observedProperties,
+            aliases,
+            evidence,
+            notes);
+        context.OnMutated();
     }
 
     private async Task UpsertEntityReportItemAsync(
@@ -566,11 +620,87 @@ public sealed class IngestAgentTools(
 
     private async Task<HashSet<string>> GetAllowedEntityTypesAsync(Guid projectId)
     {
+        var definitions = await GetAllowedEntityTypeDefinitionsAsync(projectId);
+        return definitions
+            .Select(definition => definition.Type)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task<IReadOnlyList<EntityTypeDefinition>> GetAllowedEntityTypeDefinitionsAsync(Guid projectId)
+    {
         var definitions = await entityTypes.ListAsync(projectId, includeStructural: false);
         return definitions
             .Where(definition => !definition.IsStructural && !definition.IsChapterScoped && !IsDisallowedEntityType(definition.Type))
+            .ToList();
+    }
+
+    private async Task<EntityTypeResolution?> ResolveEntityTypeAsync(Guid projectId, string requestedType, bool allowNew)
+    {
+        var requested = (requestedType ?? string.Empty).Trim();
+        if (requested.Length == 0 || IsDisallowedEntityType(requested)) return null;
+
+        var requestedKey = NormalizeComparable(requested);
+        var definitions = await GetAllowedEntityTypeDefinitionsAsync(projectId);
+        var existing = definitions.FirstOrDefault(definition =>
+            string.Equals(NormalizeComparable(definition.Type), requestedKey, StringComparison.Ordinal)
+            || string.Equals(NormalizeComparable(definition.SingularLabel), requestedKey, StringComparison.Ordinal)
+            || string.Equals(NormalizeComparable(definition.PluralLabel), requestedKey, StringComparison.Ordinal));
+
+        if (existing is not null)
+            return new EntityTypeResolution(existing.Type, ExistingType: true);
+        if (!allowNew) return null;
+
+        var normalized = NormalizeTypeKey(SingularizeTypeLabel(requested));
+        if (normalized.Length == 0 || IsDisallowedEntityType(normalized)) return null;
+        return new EntityTypeResolution(normalized, ExistingType: false);
+    }
+
+    private async Task<GraphNode?> FindDuplicateEntityByNameAsync(
+        Guid projectId,
+        string nodeType,
+        string name,
+        long? excludeNodeId = null)
+    {
+        var normalizedName = NormalizeEntityName(name);
+        if (normalizedName.Length == 0) return null;
+
+        var nodeTypes = await GetEquivalentEntityTypeNamesAsync(projectId, nodeType);
+        foreach (var candidateType in nodeTypes)
+        {
+            var existing = await nodes.ListByTypeAsync(projectId, candidateType);
+            var duplicate = existing.FirstOrDefault(node =>
+                node.Id != excludeNodeId
+                && string.Equals(NormalizeEntityName(node.Label ?? node.Key), normalizedName, StringComparison.Ordinal));
+            if (duplicate is not null) return duplicate;
+        }
+
+        return null;
+    }
+
+    private async Task<IReadOnlyList<string>> GetEquivalentEntityTypeNamesAsync(Guid projectId, string canonicalType)
+    {
+        var definitions = await GetAllowedEntityTypeDefinitionsAsync(projectId);
+        var target = definitions.FirstOrDefault(definition => string.Equals(definition.Type, canonicalType, StringComparison.OrdinalIgnoreCase));
+        if (target is null) return [canonicalType];
+
+        var targetKeys = new HashSet<string>(StringComparer.Ordinal)
+        {
+            NormalizeComparable(target.Type),
+            NormalizeComparable(target.SingularLabel),
+            NormalizeComparable(target.PluralLabel),
+        };
+
+        return definitions
+            .Where(definition => new[]
+                {
+                    NormalizeComparable(definition.Type),
+                    NormalizeComparable(definition.SingularLabel),
+                    NormalizeComparable(definition.PluralLabel),
+                }
+                .Any(targetKeys.Contains))
             .Select(definition => definition.Type)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private async Task<GraphNode?> ResolveAllowedEntityNodeAsync(Guid projectId, Guid entityId)
@@ -779,6 +909,62 @@ public sealed class IngestAgentTools(
         || string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
         || string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
 
+    private static string NormalizeTypeKey(string input)
+    {
+        var parts = new List<string>();
+        var current = new List<char>();
+        foreach (var ch in input.Trim())
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                current.Add(ch);
+            }
+            else if (current.Count > 0)
+            {
+                parts.Add(new string(current.ToArray()));
+                current.Clear();
+            }
+        }
+
+        if (current.Count > 0)
+            parts.Add(new string(current.ToArray()));
+        return string.Concat(parts.Select(NormalizeTypePart));
+    }
+
+    private static string NormalizeTypePart(string part)
+    {
+        var rest = part.Length <= 1 ? string.Empty : part[1..];
+        if (part.All(char.IsUpper) || part.All(char.IsLower))
+            rest = rest.ToLowerInvariant();
+        return char.ToUpperInvariant(part[0]) + rest;
+    }
+
+    private static string SingularizeTypeLabel(string input)
+    {
+        var trimmed = input.Trim();
+        if (trimmed.EndsWith("ies", StringComparison.OrdinalIgnoreCase) && trimmed.Length > 3)
+            return trimmed[..^3] + "y";
+        if (trimmed.EndsWith("s", StringComparison.OrdinalIgnoreCase)
+            && !trimmed.EndsWith("ss", StringComparison.OrdinalIgnoreCase)
+            && !trimmed.EndsWith("is", StringComparison.OrdinalIgnoreCase)
+            && !trimmed.EndsWith("us", StringComparison.OrdinalIgnoreCase)
+            && trimmed.Length > 3)
+        {
+            return trimmed[..^1];
+        }
+        return trimmed;
+    }
+
+    private static string NormalizeComparable(string value) =>
+        new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static string NormalizeEntityName(string value)
+    {
+        var normalized = new string(value.Trim().Where(ch => !char.IsPunctuation(ch)).ToArray());
+        return string.Join(' ', normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .ToLowerInvariant();
+    }
+
     private static IReadOnlyDictionary<string, string?> VisibleProperties(IReadOnlyDictionary<string, object?> properties)
     {
         var result = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
@@ -932,4 +1118,6 @@ public sealed class IngestAgentTools(
         IReadOnlyDictionary<string, string?> CanonicalProperties,
         IReadOnlyList<IngestSourceAssertionSummary> SourceAssertions,
         int Score);
+
+    private sealed record EntityTypeResolution(string Type, bool ExistingType);
 }

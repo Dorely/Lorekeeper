@@ -4,6 +4,7 @@ using Lorekeeper.AiConsole;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -15,6 +16,7 @@ public sealed class IngestJobProcessor(
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     IngestAgentTools tools,
+    IEntityTypeService entityTypes,
     IVectorStore vectors,
     IEmbeddingService embeddings,
     ITextChunker chunker,
@@ -32,10 +34,12 @@ public sealed class IngestJobProcessor(
 
         Process rules:
         - Call list_job_entities before creating or linking entities.
-        - Call search_project_entities before creating a new entity when the source mention may already exist in the project graph.
+        - Before every create_ingest_entity call, first check list_job_entities and then call search_project_entities for the source mention.
+        - Do not create an entity when list_job_entities or search_project_entities returns the same name, an obvious alias, or the same real-world/story subject. Use update_ingest_entity or record_existing_entity_observation instead.
         - Use record_existing_entity_observation when a source mention matches an existing project entity.
         - Use update_ingest_entity when a source mention matches an entity already touched by this ingest job.
-        - Create a new entity only when no existing project entity or same-job entity matches.
+        - Create a new entity only when no existing project entity or same-job entity matches. The tool will reject duplicate names; treat that as instruction to reuse the returned/existing entity.
+        - Use canonical singular entity type keys from the known project entity types. Do not invent plural, lowercase, or near-duplicate categories such as "characters", "Characters", "locations", or "organisations" when Character, Location, or Organization/Faction-style categories are available.
         - Keep recurring source observations current. If a character appears again later with new history, status, aliases, relationships, or role details, update the source assertion for the existing entity.
         - Use evidence from the current source chunk. Do not invent facts.
         - Link only entities already touched by this ingest job using link_ingest_entities. If an endpoint is an existing project entity, record an observation on it first.
@@ -329,6 +333,7 @@ public sealed class IngestJobProcessor(
         var currentText = sourceText[start..end];
         var entityRoster = await BuildEntityRosterAsync(job.Id, cancellationToken);
         var previousSummaries = await BuildPreviousSummariesAsync(job, sourceChunk.Index, cancellationToken);
+        var knownEntityTypes = await BuildKnownEntityTypesAsync(job.ProjectId, cancellationToken);
 
         return $$"""
             Source title: {{job.Source.Title}}
@@ -350,7 +355,10 @@ public sealed class IngestJobProcessor(
             Entities already touched by this ingest job:
             {{entityRoster}}
 
-            If a source mention may already exist in the project graph, call search_project_entities before creating a new entity.
+            Known project entity types:
+            {{knownEntityTypes}}
+
+            Before creating anything, search using the canonical singular type and the exact source name. Reuse matching same-job or project entities instead of creating duplicate names or duplicate categories.
 
             Current source chunk text:
             ```text
@@ -371,6 +379,19 @@ public sealed class IngestJobProcessor(
             .ToList();
 
         return entities.Count == 0 ? "None yet." : string.Join("\n", entities);
+    }
+
+    private async Task<string> BuildKnownEntityTypesAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        var definitions = await entityTypes.ListAsync(projectId, includeStructural: false, cancellationToken);
+        var lines = definitions
+            .Where(definition => !definition.IsStructural && !definition.IsChapterScoped)
+            .OrderBy(definition => definition.SortOrder)
+            .ThenBy(definition => definition.Type, StringComparer.OrdinalIgnoreCase)
+            .Select(definition => $"- {definition.Type} (singular: {definition.SingularLabel}; plural label: {definition.PluralLabel})")
+            .ToList();
+
+        return lines.Count == 0 ? "None registered yet." : string.Join("\n", lines);
     }
 
     private async Task<string> BuildPreviousSummariesAsync(IngestJob job, int currentIndex, CancellationToken cancellationToken)

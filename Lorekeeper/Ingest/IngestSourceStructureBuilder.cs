@@ -86,7 +86,58 @@ public sealed partial class IngestSourceStructureBuilder(
         if (currentStart >= 0 && currentEnd > currentStart)
             AddDraft(drafts, sourceText, currentStart, currentEnd, currentTitle, currentHeadingPath, request.TokenCountRequest);
 
-        return drafts;
+        return MergeAdjacentDrafts(drafts, sourceText, targetTokens, request.TokenCountRequest);
+    }
+
+    private IReadOnlyList<IngestSourceChunkDraft> MergeAdjacentDrafts(
+        IReadOnlyList<IngestSourceChunkDraft> drafts,
+        string sourceText,
+        int targetTokens,
+        TokenCountRequest tokenCountRequest)
+    {
+        if (drafts.Count <= 1) return drafts;
+
+        var merged = new List<IngestSourceChunkDraft>();
+        var pending = new List<IngestSourceChunkDraft> { drafts[0] };
+
+        foreach (var next in drafts.Skip(1))
+        {
+            var candidateStart = pending[0].StartChar;
+            var candidateEnd = next.EndChar;
+            var candidateTokens = tokenCounter.Count(sourceText[candidateStart..candidateEnd], tokenCountRequest).TokenCount;
+            if (candidateTokens <= targetTokens)
+            {
+                pending.Add(next);
+                continue;
+            }
+
+            FlushPending();
+            pending.Add(next);
+        }
+
+        FlushPending();
+        return merged;
+
+        void FlushPending()
+        {
+            if (pending.Count == 0) return;
+
+            var first = pending[0];
+            var last = pending[^1];
+            var start = first.StartChar;
+            var end = last.EndChar;
+            var title = pending.Count == 1 ? first.Title : $"{first.Title} + {pending.Count - 1} sections";
+            var headingPath = pending.Count == 1 ? first.HeadingPath : $"{first.HeadingPath} ... {last.HeadingPath}";
+
+            merged.Add(new IngestSourceChunkDraft(
+                merged.Count,
+                title,
+                headingPath,
+                start,
+                end,
+                tokenCounter.Count(sourceText[start..end], tokenCountRequest)));
+            pending.Clear();
+        }
     }
 
     private void AddDraft(

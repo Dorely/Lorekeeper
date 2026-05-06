@@ -23,8 +23,8 @@
 | File | Description |
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors. EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI 2.8, sqlite-vec, Microsoft.ML.Tokenizers, and patched Microsoft.Bcl.Memory. |
-| `Program.cs` | Host setup, DI for persistence/knowledge/LLM/token/ingest services, EF migrate at startup, sqlite-vec init, repairs the outline graph projection for existing projects, Codex OAuth endpoints. |
-| `appsettings.json` / `appsettings.Development.json` | Configuration: `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Embeddings:*`. |
+| `Program.cs` | Host setup, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/token/ingest services, EF migrate at startup, sqlite-vec init, outline graph repair, Codex OAuth endpoints. |
+| `appsettings.json` / `appsettings.Development.json` | Configuration: `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Embeddings:*`. |
 | `Properties/launchSettings.json` | Local launch profiles (HTTP pinned to `localhost:1455` for Codex OAuth redirect). |
 
 ### Components/
@@ -70,7 +70,7 @@
 
 | File | Description |
 |------|-------------|
-| `IngestContent.razor` (+ `.razor.css`) | Functional Ingest tab workspace: creates text/file ingest jobs with configured-model selection, subscribes to live ingest job updates, shows async progress/source chunks/events/report items, and supports stop/resume-with-model-change/restart/delete. |
+| `IngestContent.razor` (+ `.razor.css`) | Functional Ingest tab workspace: creates text/file ingest jobs with configured-model selection and optional instructions, shows start-readiness feedback, subscribes to live job updates, and supports stop/resume-with-model-change/restart/delete. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -199,7 +199,7 @@
 | File | Description |
 |------|-------------|
 | `IIngestService.cs` / `IngestService.cs` | Application service for ingest job lifecycle/UI reads/provider resolution/queueing/notifications; restart/delete subtracts source-scoped graph assertions and only removes ingest-owned orphan graph output. |
-| `IIngestSourceStructureBuilder.cs` / `IngestSourceStructureBuilder.cs` | Splits raw source text into large logical source chunks using headings/scene breaks and reusable token budgets; source chunks are independent from vector fragments. |
+| `IIngestSourceStructureBuilder.cs` / `IngestSourceStructureBuilder.cs` | Splits raw source text into logical source chunks using headings/scene breaks, then merges adjacent small sections up to the reusable token budget; source chunks are independent from vector fragments. |
 | `IIngestGraphSync.cs` / `IngestGraphSync.cs` | Projects ingest sources and source chunks into structural graph nodes and ordered `HasChild` edges. |
 | `IIngestJobQueue.cs` / `IngestJobQueue.cs` | In-process queue plus cancellation registry for durable ingest jobs. |
 | `IIngestJobNotifier.cs` / `IngestJobNotifier.cs` | In-process pub/sub for live ingest job update signals consumed by Blazor Server components over the existing SignalR circuit. |

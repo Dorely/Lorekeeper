@@ -40,7 +40,7 @@ else
                 <textarea class="form-control form-control-sm" rows="2" @bind="_description" @bind:event="oninput"></textarea>
             </div>
             <div class="mb-2">
-                <label class="form-label small text-muted">Extraction instructions</label>
+                <label class="form-label small text-muted">Extraction instructions (optional)</label>
                 <textarea class="form-control form-control-sm" rows="4" @bind="_instructions" @bind:event="oninput"></textarea>
             </div>
             <div class="mb-2">
@@ -57,8 +57,12 @@ else
                 <div class="alert alert-warning py-2 small">No configured models.</div>
             }
             <button type="button" class="btn btn-primary btn-sm" disabled="@(!CanCreate || _creating)" @onclick="CreateAsync">
-                @(_creating ? "Starting..." : "Start ingest")
+                @StartIngestButtonText
             </button>
+            @if (!_creating && CreateBlockedReason is { Length: > 0 } createBlockedReason)
+            {
+                <div class="form-text small text-muted">@createBlockedReason</div>
+            }
 
             <div class="ingest-section-title mt-4">Jobs</div>
             @if (_loadingJobs)
@@ -300,6 +304,7 @@ else
     private bool _loadingJobs;
     private bool _loadingReport;
     private bool _creating;
+    private bool _readingFile;
     private bool _followCurrentChunk = true;
     private string? _formError;
     private string? _reportActionError;
@@ -326,10 +331,22 @@ else
     private string _editNotes = string.Empty;
     private string _editEvidence = string.Empty;
 
-    private bool CanCreate => _providerId is not null
-        && !string.IsNullOrWhiteSpace(_title)
-        && !string.IsNullOrWhiteSpace(_instructions)
-        && !string.IsNullOrWhiteSpace(_sourceText);
+    private bool CanCreate => CreateBlockedReason is null;
+
+    private string StartIngestButtonText =>
+        _readingFile ? "Reading file..." : _creating ? "Starting..." : "Start ingest";
+
+    private string? CreateBlockedReason
+    {
+        get
+        {
+            if (_readingFile) return "Reading the selected source file.";
+            if (_providerId is null) return _providers.Count == 0 ? "Configure a model before starting ingest." : "Select a model.";
+            if (string.IsNullOrWhiteSpace(_title)) return "Add a source title.";
+            if (string.IsNullOrWhiteSpace(_sourceText)) return "Add source text or choose a source file.";
+            return null;
+        }
+    }
 
     private IngestJobChunkProgress? SelectedSourceChunk => _selectedJob?.Chunks
         .FirstOrDefault(chunk => chunk.SourceChunkId == _selectedChunkId)
@@ -448,7 +465,14 @@ else
 
     private async Task CreateAsync()
     {
-        if (Project is null || !CanCreate) return;
+        if (Project is null) return;
+        var createBlockedReason = CreateBlockedReason;
+        if (createBlockedReason is not null)
+        {
+            _formError = createBlockedReason;
+            return;
+        }
+
         _creating = true;
         _formError = null;
         try
@@ -658,11 +682,24 @@ else
 
     private async Task OnFileSelectedAsync(InputFileChangeEventArgs e)
     {
-        var file = e.File;
-        await using var stream = file.OpenReadStream(maxAllowedSize: 25 * 1024 * 1024);
-        using var reader = new StreamReader(stream);
-        _sourceText = await reader.ReadToEndAsync();
-        if (string.IsNullOrWhiteSpace(_title)) _title = Path.GetFileNameWithoutExtension(file.Name);
+        _readingFile = true;
+        _formError = null;
+        try
+        {
+            var file = e.File;
+            await using var stream = file.OpenReadStream(maxAllowedSize: 25 * 1024 * 1024);
+            using var reader = new StreamReader(stream);
+            _sourceText = await reader.ReadToEndAsync();
+            if (string.IsNullOrWhiteSpace(_title)) _title = Path.GetFileNameWithoutExtension(file.Name);
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.Message;
+        }
+        finally
+        {
+            _readingFile = false;
+        }
     }
 
     private void OnProviderChanged(ChangeEventArgs args) =>

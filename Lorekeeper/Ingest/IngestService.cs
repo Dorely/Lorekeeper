@@ -52,7 +52,6 @@ public sealed class IngestService(
         if (string.IsNullOrWhiteSpace(sourceText)) throw new ArgumentException("Source text is required.", nameof(request));
 
         var instructions = (request.UserInstructions ?? string.Empty).Trim();
-        if (instructions.Length == 0) throw new ArgumentException("Ingest instructions are required.", nameof(request));
 
         var provider = await ResolveProviderAsync(request.ProviderId, requireProvider: true, cancellationToken);
 
