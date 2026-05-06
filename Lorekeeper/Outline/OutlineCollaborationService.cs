@@ -43,6 +43,10 @@ public sealed class OutlineCollaborationService(
           beats already exist.
         - Keep replies short. No headings, no bullet lists unless the user asked
           for them, no emojis. Plain conversational prose.
+                - Narrate tool work briefly. Before a tool call, say what you are checking
+                    or changing in one short clause. After tool results, briefly say what
+                    changed or what still needs the user's input. Do not expose raw JSON
+                    unless the user asks.
 
         When to use tools (be aggressive):
                 - CREATING new things: just do it. If the user gives you a premise,
@@ -258,7 +262,7 @@ public sealed class OutlineCollaborationService(
             await conversations.SaveChangesAsync(cancellationToken);
 
             var textBuilder = new StringBuilder();
-            var pendingCalls = new List<FunctionCallContent>();
+            var pendingCalls = new List<PendingToolCall>();
             var streamFailed = false;
             string? streamError = null;
             var cancelled = false;
@@ -298,9 +302,20 @@ public sealed class OutlineCollaborationService(
                             textBuilder.Append(tc.Text);
                             yield return new TextDelta(tc.Text);
                         }
-                        else if (content is FunctionCallContent fc)
+                        else if (content is FunctionCallContent functionCall)
                         {
-                            pendingCalls.Add(fc);
+                            var callId = functionCall.CallId ?? functionCall.Name;
+                            var argumentsJson = functionCall.Arguments is null
+                                ? "{}"
+                                : JsonSerializer.Serialize(functionCall.Arguments);
+                            var pendingCall = new PendingToolCall(
+                                functionCall,
+                                callId,
+                                functionCall.Name,
+                                argumentsJson,
+                                textBuilder.Length);
+                            pendingCalls.Add(pendingCall);
+                            yield return new ToolCallStarted(callId, functionCall.Name, argumentsJson);
                         }
                     }
                 }
@@ -347,10 +362,11 @@ public sealed class OutlineCollaborationService(
 
             // Tool round: persist this assistant row with text + tool-call manifest, then invoke each.
             var manifest = pendingCalls
-                .Select(c => new PersistedToolCall(
-                    c.CallId ?? c.Name,
-                    c.Name,
-                    c.Arguments is null ? "{}" : JsonSerializer.Serialize(c.Arguments)))
+                .Select(pendingCall => new PersistedToolCall(
+                    pendingCall.CallId,
+                    pendingCall.Name,
+                    pendingCall.ArgumentsJson,
+                    pendingCall.TextOffset))
                 .ToList();
             activeAssistant.Content = textBuilder.ToString();
             activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
@@ -359,13 +375,10 @@ public sealed class OutlineCollaborationService(
 
             // Append to in-memory message list as a single assistant message with tool calls,
             // matching what the model emitted (text + FunctionCallContent[]).
-            var assistantContents = new List<AIContent>();
-            if (textBuilder.Length > 0) assistantContents.Add(new TextContent(textBuilder.ToString()));
-            foreach (var c in pendingCalls) assistantContents.Add(c);
-            messages.Add(new ChatMessage(ChatRole.Assistant, assistantContents));
+            messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantContents(textBuilder.ToString(), manifest)));
 
             var resultContents = new List<AIContent>();
-            foreach (var fc in pendingCalls)
+            foreach (var pendingCall in pendingCalls)
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
@@ -373,10 +386,8 @@ public sealed class OutlineCollaborationService(
                     yield break;
                 }
 
-                var argsJson = fc.Arguments is null ? "{}" : JsonSerializer.Serialize(fc.Arguments);
-                var callId = fc.CallId ?? fc.Name;
-                yield return new ToolCallStarted(callId, fc.Name, argsJson);
-                staging?.BeginToolCall(activeAssistant.Id, callId, fc.Name, argsJson);
+                var functionCall = pendingCall.Content;
+                staging?.BeginToolCall(activeAssistant.Id, pendingCall.CallId, pendingCall.Name, pendingCall.ArgumentsJson);
 
                 var sw = Stopwatch.StartNew();
                 string? toolResult = null;
@@ -384,9 +395,9 @@ public sealed class OutlineCollaborationService(
                 var toolCancelled = false;
                 try
                 {
-                    var aiFn = aiTools.OfType<AIFunction>().FirstOrDefault(f => f.Name == fc.Name)
-                        ?? throw new InvalidOperationException($"Unknown tool '{fc.Name}'.");
-                    var argsDict = fc.Arguments ?? new Dictionary<string, object?>();
+                    var aiFn = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name)
+                        ?? throw new InvalidOperationException($"Unknown tool '{pendingCall.Name}'.");
+                    var argsDict = functionCall.Arguments ?? new Dictionary<string, object?>();
                     var invokeResult = await aiFn.InvokeAsync(new AIFunctionArguments(argsDict), cancellationToken);
                     toolResult = invokeResult?.ToString() ?? string.Empty;
                 }
@@ -396,7 +407,7 @@ public sealed class OutlineCollaborationService(
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "Outline tool '{Tool}' failed", fc.Name);
+                    logger.LogWarning(ex, "Outline tool '{Tool}' failed", pendingCall.Name);
                     toolError = ex.Message;
                     toolResult = $"Error: {ex.Message}";
                 }
@@ -414,15 +425,15 @@ public sealed class OutlineCollaborationService(
                     Order = nextOrder++,
                     Role = OutlineMessageRole.Tool,
                     Content = toolResult ?? string.Empty,
-                    ToolCallId = callId,
-                    ToolName = fc.Name,
+                    ToolCallId = pendingCall.CallId,
+                    ToolName = pendingCall.Name,
                     Status = toolError is null ? OutlineMessageStatus.Completed : OutlineMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
                 await conversations.AddMessageAsync(toolMsg, CancellationToken.None);
                 await conversations.SaveChangesAsync(CancellationToken.None);
 
-                resultContents.Add(new FunctionResultContent(callId, toolResult ?? string.Empty));
+                resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
                 if (staging is not null)
                 {
                     foreach (var pendingChange in staging.DrainNewChanges())
@@ -435,7 +446,7 @@ public sealed class OutlineCollaborationService(
                             pendingChange.Summary);
                     }
                 }
-                yield return new ToolCallCompleted(callId, fc.Name, toolError is null ? toolResult : null, toolError, sw.Elapsed.TotalMilliseconds);
+                yield return new ToolCallCompleted(pendingCall.CallId, pendingCall.Name, toolError is null ? toolResult : null, toolError, sw.Elapsed.TotalMilliseconds);
 
                 if (DrainMutated())
                     yield return new OutlineMutated();
@@ -488,37 +499,90 @@ public sealed class OutlineCollaborationService(
 
     private static ChatMessage BuildAssistantReplay(OutlineMessage m)
     {
-        var contents = new List<AIContent>();
-        if (!string.IsNullOrEmpty(m.Content)) contents.Add(new TextContent(m.Content));
+        var calls = ReadPersistedToolCalls(m.ToolCallsJson);
+        var contents = calls.Count == 0
+            ? BuildTextOnlyAssistantContents(m.Content)
+            : BuildAssistantContents(m.Content, calls);
 
-        if (!string.IsNullOrWhiteSpace(m.ToolCallsJson) && m.ToolCallsJson != "[]")
-        {
-            try
-            {
-                var calls = JsonSerializer.Deserialize<List<PersistedToolCall>>(m.ToolCallsJson);
-                if (calls is not null)
-                {
-                    foreach (var c in calls)
-                    {
-                        IDictionary<string, object?>? args = null;
-                        if (!string.IsNullOrWhiteSpace(c.ArgumentsJson) && c.ArgumentsJson != "{}")
-                        {
-                            try { args = JsonSerializer.Deserialize<Dictionary<string, object?>>(c.ArgumentsJson); }
-                            catch { args = new Dictionary<string, object?> { ["raw"] = c.ArgumentsJson }; }
-                        }
-                        contents.Add(new FunctionCallContent(c.CallId, c.Name, args));
-                    }
-                }
-            }
-            catch
-            {
-                // Corrupt manifest — best-effort, skip.
-            }
-        }
-        if (contents.Count == 0) contents.Add(new TextContent(string.Empty));
         return new ChatMessage(ChatRole.Assistant, contents);
     }
 
+    private static List<AIContent> BuildTextOnlyAssistantContents(string text)
+    {
+        var contents = new List<AIContent>();
+        if (!string.IsNullOrEmpty(text)) contents.Add(new TextContent(text));
+        if (contents.Count == 0) contents.Add(new TextContent(string.Empty));
+        return contents;
+    }
+
+    private static List<AIContent> BuildAssistantContents(string text, IReadOnlyList<PersistedToolCall> calls)
+    {
+        if (calls.Count == 0) return BuildTextOnlyAssistantContents(text);
+
+        if (calls.Any(call => call.TextOffset is null))
+        {
+            var fallbackContents = BuildTextOnlyAssistantContents(text);
+            foreach (var call in calls)
+                fallbackContents.Add(ToFunctionCallContent(call));
+            return fallbackContents;
+        }
+
+        var contents = new List<AIContent>();
+        var cursor = 0;
+        foreach (var item in calls
+            .Select((call, index) => new { Call = call, Index = index })
+            .OrderBy(item => item.Call.TextOffset!.Value)
+            .ThenBy(item => item.Index))
+        {
+            var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, text.Length);
+            if (offset > cursor)
+            {
+                contents.Add(new TextContent(text[cursor..offset]));
+                cursor = offset;
+            }
+            contents.Add(ToFunctionCallContent(item.Call));
+        }
+
+        if (cursor < text.Length)
+            contents.Add(new TextContent(text[cursor..]));
+
+        if (contents.Count == 0) contents.Add(new TextContent(string.Empty));
+        return contents;
+    }
+
+    private static List<PersistedToolCall> ReadPersistedToolCalls(string toolCallsJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolCallsJson) || toolCallsJson == "[]") return [];
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<PersistedToolCall>>(toolCallsJson) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static FunctionCallContent ToFunctionCallContent(PersistedToolCall call)
+    {
+        IDictionary<string, object?>? args = null;
+        if (!string.IsNullOrWhiteSpace(call.ArgumentsJson) && call.ArgumentsJson != "{}")
+        {
+            try { args = JsonSerializer.Deserialize<Dictionary<string, object?>>(call.ArgumentsJson); }
+            catch { args = new Dictionary<string, object?> { ["raw"] = call.ArgumentsJson }; }
+        }
+
+        return new FunctionCallContent(call.CallId, call.Name, args);
+    }
+
+    private sealed record PendingToolCall(
+        FunctionCallContent Content,
+        string CallId,
+        string Name,
+        string ArgumentsJson,
+        int TextOffset);
+
     /// <summary>JSON shape stored in <see cref="OutlineMessage.ToolCallsJson"/>.</summary>
-    private sealed record PersistedToolCall(string CallId, string Name, string ArgumentsJson);
+    private sealed record PersistedToolCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
 }
