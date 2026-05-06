@@ -3,6 +3,7 @@ using Lorekeeper.Auth;
 using Lorekeeper.Chapters;
 using Lorekeeper.Components;
 using Lorekeeper.Context;
+using Lorekeeper.Graph;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Outline;
@@ -35,6 +36,7 @@ builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
 // Knowledge
 builder.Services.AddScoped<IVectorStore, SqliteVecVectorStore>();
 builder.Services.AddScoped<IGraphStore, RelationalGraphStore>();
+builder.Services.AddScoped<IProjectGraphService, ProjectGraphService>();
 builder.Services.AddSingleton<ITextChunker, OverlappingTextChunker>();
 
 // LLM

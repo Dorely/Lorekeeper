@@ -1,0 +1,127 @@
+.graph-workspace {
+    display: grid;
+    grid-template-columns: minmax(34rem, 1fr) minmax(20rem, 24rem);
+    gap: 1rem;
+    flex: 1;
+    height: 100%;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.graph-main {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.graph-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.45rem;
+    background: var(--bs-body-bg, #fff);
+}
+
+.graph-toolbar-group {
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+.graph-search {
+    flex: 1 1 16rem;
+}
+
+.graph-type-filter {
+    width: 11rem;
+}
+
+.graph-toggle {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 1.9rem;
+    margin: 0;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+
+.graph-toolbar-spacer {
+    flex: 1 1 auto;
+}
+
+.graph-stage-shell {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid rgba(105, 118, 140, 0.55);
+    border-radius: 0.5rem;
+    background:
+        radial-gradient(circle at 20% 12%, rgba(138, 180, 248, 0.14), transparent 24rem),
+        radial-gradient(circle at 82% 72%, rgba(129, 201, 149, 0.12), transparent 22rem),
+        #101216;
+}
+
+.graph-stage {
+    position: absolute;
+    inset: 0;
+}
+
+.graph-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    color: #eef2f7;
+    text-align: center;
+    background: rgba(16, 18, 22, 0.72);
+    z-index: 2;
+}
+
+.graph-overlay-error {
+    color: #ffd6d1;
+}
+
+.graph-stats {
+    position: absolute;
+    left: 0.7rem;
+    bottom: 0.65rem;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.25rem 0.45rem;
+    border: 1px solid rgba(222, 226, 230, 0.24);
+    border-radius: 0.35rem;
+    color: rgba(244, 247, 251, 0.78);
+    background: rgba(20, 24, 31, 0.72);
+    font-size: 0.78rem;
+    pointer-events: none;
+}
+
+@media (max-width: 920px) {
+    .graph-workspace {
+        grid-template-columns: minmax(34rem, 1fr) minmax(18rem, 20rem);
+    }
+
+    .graph-toolbar {
+        flex-wrap: wrap;
+    }
+
+    .graph-toolbar-spacer {
+        display: none;
+    }
+}

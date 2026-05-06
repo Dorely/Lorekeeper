@@ -42,6 +42,15 @@ public class GraphEdgeRepository(AppDbContext db) : IGraphEdgeRepository
         return await query.ToListAsync(cancellationToken);
     }
 
+    public async Task<List<GraphEdge>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        await db.GraphEdges
+            .Where(e => e.FromNode.ProjectId == projectId && e.ToNode.ProjectId == projectId)
+            .OrderBy(e => e.EdgeType)
+            .ThenBy(e => e.SortOrder ?? int.MaxValue)
+            .ThenBy(e => e.CreatedAt)
+            .ThenBy(e => e.Id)
+            .ToListAsync(cancellationToken);
+
     public Task<GraphEdge?> FindAsync(long fromId, long toId, string edgeType, CancellationToken cancellationToken = default) =>
         db.GraphEdges.FirstOrDefaultAsync(
             e => e.FromNodeId == fromId && e.ToNodeId == toId && e.EdgeType == edgeType,

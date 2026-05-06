@@ -60,7 +60,9 @@
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Functional chapter editor body: chapter-selector header (dropdown menu, edit-title pencil, +new-chapter button), JS-debounced (1s) auto-save textarea with line-number gutter that persists via `IChapterService` and triggers `ReindexAsync`. Save/index status surfaced inline. Hosts `ContextFeedPanel` and `AiConsolePanel`; locks/dims the textarea while an AI turn is running and refreshes the body when the AI completes. |
 | `ContextFeedPanel.razor` (+ `.razor.css`) | Editable Context Feed: collapsible cards per `ContextItem` (system prompt, current chapter). Inline textarea edits the project's system prompt (rejects empty); checkbox toggles `Project.IncludeCurrentChapterInContext`. Calls `IProjectService` for persistence. |
 | `AiConsolePanel.razor` (+ `.razor.css`) | Stateless AI command console: input + Send/Cancel button; raises `OnAiTurnStarting`/`OnAiTurnCompleted` so the editor can flush + lock + refresh. Shows last response below the input and a History modal listing persisted `AiConsoleEntry` rows with full system prompt snapshot, tool-call timeline, and final response. |
-| `GraphPage.razor` | Graph tab at `/projects/{Slug}/graph`. Placeholder. |
+| `GraphPage.razor` | Graph tab at `/projects/{Slug}/graph`; wraps the project shell and hosts the interactive graph workspace. |
+| `GraphContent.razor` (+ `.razor.css`, `.razor.js`) | Obsidian-inspired full-project graph workspace: loads graph snapshots, filters/searches nodes, bridges to the local `vis-network` renderer for pan/zoom/drag/select, and coordinates graph refreshes. |
+| `GraphDetailsPanel.razor` (+ `.razor.css`) | Selected-node graph editor side panel: create/edit/delete nodes, edit safe parent assignments, and create/edit/delete custom relationships while managed links stay protected. |
 | `IngestPage.razor` | Ingest tab at `/projects/{Slug}/ingest`. Placeholder. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 
@@ -166,6 +168,14 @@
 | `IContextBuilder.cs` / `ContextBuilder.cs` | Builds `ContextAssembly` (ordered `ContextItem`s + `Assemble()` concatenator) for the Context Feed. The Feed *is* the preview — `Assemble()` joins every checked block with labeled section headers and is the literal system message sent to the LLM. |
 | `ChapterFormatting.cs` | `WithLineNumbers` / `SplitLines` / `JoinLines` helpers shared by the editor gutter, Context Feed preview, and AI tool reads so user and LLM see identical line numbers. |
 
+### Graph/
+
+| File | Description |
+|------|-------------|
+| `IProjectGraphService.cs` | Graph UI application service contract for project-wide snapshots plus guarded node, parent, type, and relationship mutations. |
+| `ProjectGraphModels.cs` | DTOs and request records used by the Graph tab service/component boundary. |
+| `ProjectGraphService.cs` | Graph UI facade over repositories and domain services; exports whole-project graph snapshots and routes structural edits through Project/Act/Chapter/ProjectFact services. |
+
 ### AiConsole/
 
 | File | Description |
@@ -207,4 +217,5 @@
 | `js/autosizeTextareas.js` | Small shared JS module that attaches to `textarea[data-autosize]`, grows each textarea to its `scrollHeight`, refreshes on input/change and width changes, and prevents nested textarea scrollbars. |
 | `favicon.png` | Site icon. |
 | `lib/bootstrap/` | Vendored Bootstrap distribution. |
+| `lib/vis-network/` | Vendored `vis-network` browser graph renderer assets and license files used by the Graph tab. |
 

@@ -13,6 +13,8 @@ public interface IGraphNodeRepository
     /// project-wide unique keys, e.g. by generating GUIDs).
     /// </summary>
     Task<GraphNode?> FindByKeyAsync(Guid projectId, string key, CancellationToken cancellationToken = default);
+    /// <summary>Returns every graph node in the project, ordered for stable UI snapshots.</summary>
+    Task<List<GraphNode>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
     /// <summary>Returns every node in the project of the given type, ordered by <c>Label</c> then key.</summary>
     Task<List<GraphNode>> ListByTypeAsync(Guid projectId, string nodeType, CancellationToken cancellationToken = default);
     /// <summary>Returns distinct node type keys currently used by nodes in the project.</summary>

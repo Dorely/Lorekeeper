@@ -16,6 +16,9 @@ public interface IGraphEdgeRepository
         int? maxResults,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Returns every edge whose endpoints both belong to the project.</summary>
+    Task<List<GraphEdge>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
+
     Task<GraphEdge?> FindAsync(long fromId, long toId, string edgeType, CancellationToken cancellationToken = default);
     Task AddAsync(GraphEdge edge, CancellationToken cancellationToken = default);
     void Update(GraphEdge edge);
