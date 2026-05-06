@@ -1,0 +1,740 @@
+@using Lorekeeper.Ingest
+@using Lorekeeper.Llm
+@using Lorekeeper.Models
+@implements IAsyncDisposable
+@inject IIngestService Ingest
+@inject ILlmProviderService Providers
+@inject IIngestJobNotifier Notifier
+
+@if (Project is null)
+{
+    <p class="text-muted"><em>Loading...</em></p>
+}
+else
+{
+    <div class="ingest-pane">
+        <section class="ingest-column ingest-create">
+            <div class="ingest-section-title">New Source</div>
+            <div class="mb-2">
+                <label class="form-label small text-muted">Title</label>
+                <input class="form-control form-control-sm" @bind="_title" @bind:event="oninput" />
+            </div>
+            <div class="ingest-two">
+                <div>
+                    <label class="form-label small text-muted">Kind</label>
+                    <input class="form-control form-control-sm" placeholder="Book, wiki, paper..." @bind="_sourceKind" @bind:event="oninput" />
+                </div>
+                <div>
+                    <label class="form-label small text-muted">Model</label>
+                    <select class="form-select form-select-sm" value="@(_providerId?.ToString() ?? string.Empty)" @onchange="OnProviderChanged">
+                        <option value="">Select model</option>
+                        @foreach (var provider in _providers)
+                        {
+                            <option value="@provider.Id">@ProviderLabel(provider)</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            <div class="mb-2">
+                <label class="form-label small text-muted">Description</label>
+                <textarea class="form-control form-control-sm" rows="2" @bind="_description" @bind:event="oninput"></textarea>
+            </div>
+            <div class="mb-2">
+                <label class="form-label small text-muted">Extraction instructions</label>
+                <textarea class="form-control form-control-sm" rows="4" @bind="_instructions" @bind:event="oninput"></textarea>
+            </div>
+            <div class="mb-2">
+                <label class="form-label small text-muted">Source text</label>
+                <InputFile OnChange="OnFileSelectedAsync" class="form-control form-control-sm mb-2" />
+                <textarea class="form-control form-control-sm ingest-source-input" rows="12" @bind="_sourceText" @bind:event="oninput"></textarea>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_formError))
+            {
+                <div class="alert alert-danger py-2 small">@_formError</div>
+            }
+            @if (_providers.Count == 0)
+            {
+                <div class="alert alert-warning py-2 small">No configured models.</div>
+            }
+            <button type="button" class="btn btn-primary btn-sm" disabled="@(!CanCreate || _creating)" @onclick="CreateAsync">
+                @(_creating ? "Starting..." : "Start ingest")
+            </button>
+
+            <div class="ingest-section-title mt-4">Jobs</div>
+            @if (_loadingJobs)
+            {
+                <p class="text-muted small"><em>Loading jobs...</em></p>
+            }
+            else if (_jobs.Count == 0)
+            {
+                <p class="text-muted small">No ingest jobs yet.</p>
+            }
+            else
+            {
+                <div class="ingest-job-list">
+                    @foreach (var job in _jobs)
+                    {
+                        var selected = _selectedJob?.Id == job.Id;
+                        <button type="button" class="ingest-job-row @(selected ? "selected" : null)" @onclick="() => SelectJobAsync(job.Id)">
+                            <span class="ingest-job-title">@job.SourceTitle</span>
+                            <span class="ingest-job-meta">@job.Status - @job.CompletedSourceChunks/@job.TotalSourceChunks chunks</span>
+                        </button>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="ingest-column ingest-progress">
+            @if (_selectedJob is null)
+            {
+                <div class="text-muted small"><em>Select an ingest job to inspect progress.</em></div>
+            }
+            else
+            {
+                <div class="ingest-selected-head">
+                    <div>
+                        <div class="ingest-section-title mb-1">@_selectedJob.SourceTitle</div>
+                        <div class="small text-muted">@_selectedJob.Status - @_selectedJob.CurrentMessage</div>
+                        @if (!string.IsNullOrWhiteSpace(_selectedJob.ModelName))
+                        {
+                            <div class="small text-muted">@_selectedJob.ModelName</div>
+                        }
+                    </div>
+                    <div class="ingest-actions">
+                        @if (CanResume(_selectedJob))
+                        {
+                            <select class="form-select form-select-sm ingest-model-select" value="@(_resumeProviderId?.ToString() ?? string.Empty)" @onchange="OnResumeProviderChanged">
+                                <option value="">Select model</option>
+                                @foreach (var provider in _providers)
+                                {
+                                    <option value="@provider.Id">@ProviderLabel(provider)</option>
+                                }
+                            </select>
+                        }
+                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(!CanStop(_selectedJob))" @onclick="StopAsync">Stop</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!CanResume(_selectedJob) || _resumeProviderId is null)" @onclick="ResumeAsync">Resume</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@IsBusy(_selectedJob)" @onclick="RestartAsync">Restart</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@IsBusy(_selectedJob)" @onclick="DeleteAsync">Delete</button>
+                    </div>
+                </div>
+
+                <div class="ingest-progress-bar" aria-label="Ingest progress">
+                    <div style="width:@ProgressPercent(_selectedJob)%"></div>
+                </div>
+                <div class="ingest-counters">
+                    <span>@_selectedJob.CompletedSourceChunks / @_selectedJob.TotalSourceChunks source chunks</span>
+                    <span>@_selectedJob.CreatedEntityCount entities</span>
+                    <span>@_selectedJob.CreatedRelationshipCount links</span>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_selectedJob.ErrorMessage))
+                {
+                    <div class="alert alert-danger py-2 small">@_selectedJob.ErrorMessage</div>
+                }
+
+                <div class="ingest-section-title mt-3">Source Chunks</div>
+                <div class="ingest-chunk-list">
+                    @foreach (var chunk in _selectedJob.Chunks.OrderBy(chunk => chunk.SourceChunkIndex))
+                    {
+                        <button type="button" class="ingest-chunk-row @(_selectedChunkId == chunk.SourceChunkId ? "selected" : null)" @onclick="() => SelectChunkAsync(chunk.SourceChunkId)">
+                            <span class="ingest-chunk-main">
+                                <span>@(chunk.SourceChunkIndex + 1). @chunk.SourceChunkTitle</span>
+                                <span class="badge bg-@StatusColor(chunk.Status)">@chunk.Status</span>
+                            </span>
+                            <span class="ingest-job-meta">@chunk.EstimatedTokenCount tokens - @chunk.CreatedEntityCount entities - @chunk.CreatedRelationshipCount links</span>
+                            @if (!string.IsNullOrWhiteSpace(chunk.ErrorMessage))
+                            {
+                                <span class="text-danger small">@chunk.ErrorMessage</span>
+                            }
+                        </button>
+                    }
+                </div>
+
+                @if (!_followCurrentChunk && IsBusy(_selectedJob))
+                {
+                    <button type="button" class="btn btn-sm btn-outline-secondary mt-2" @onclick="FollowCurrentChunkAsync">Follow current</button>
+                }
+
+                @if (_selectedJob.Events.Count > 0)
+                {
+                    <div class="ingest-section-title mt-3">Events</div>
+                    <div class="ingest-event-list">
+                        @foreach (var jobEvent in _selectedJob.Events)
+                        {
+                            <details class="ingest-event-row @jobEvent.Level.ToString().ToLowerInvariant()">
+                                <summary>
+                                    <span>@jobEvent.Level</span>
+                                    <span>@jobEvent.EventType</span>
+                                    <span>@jobEvent.Message</span>
+                                </summary>
+                                <pre>@jobEvent.PayloadJson</pre>
+                            </details>
+                        }
+                    </div>
+                }
+            }
+        </section>
+
+        <section class="ingest-column ingest-report">
+            @if (_selectedJob is null)
+            {
+                <div class="text-muted small"><em>No report selected.</em></div>
+            }
+            else
+            {
+                var selectedChunk = SelectedSourceChunk;
+                <div class="ingest-section-title">Report</div>
+                @if (!string.IsNullOrWhiteSpace(_reportActionError))
+                {
+                    <div class="alert alert-danger py-2 small">@_reportActionError</div>
+                }
+                @if (selectedChunk is not null)
+                {
+                    <details class="ingest-source-preview" open>
+                        <summary>@selectedChunk.SourceChunkTitle</summary>
+                        <div class="small text-muted mb-2">
+                            chars @selectedChunk.StartChar-@selectedChunk.EndChar - @selectedChunk.EstimatedTokenCount tokens - @selectedChunk.TokenCountMethod
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(selectedChunk.SourceChunkSummary))
+                        {
+                            <p class="ingest-summary">@selectedChunk.SourceChunkSummary</p>
+                        }
+                        <pre>@SourceExcerpt()</pre>
+                    </details>
+                }
+
+                @if (_loadingReport)
+                {
+                    <p class="text-muted small"><em>Loading report...</em></p>
+                }
+                else if (_reportItems.Count == 0)
+                {
+                    <p class="text-muted small">No report items for this source chunk yet.</p>
+                }
+                else
+                {
+                    <div class="ingest-report-list">
+                        @foreach (var item in _reportItems)
+                        {
+                            <article class="ingest-report-item @item.Status.ToString().ToLowerInvariant()">
+                                @if (_editingReportItemId == item.Id)
+                                {
+                                    <div class="ingest-report-edit">
+                                        <div>
+                                            <label class="form-label small text-muted">Title</label>
+                                            <input class="form-control form-control-sm" @bind="_editTitle" @bind:event="oninput" />
+                                        </div>
+                                        @if (item.Kind == IngestReportItemKind.Relationship)
+                                        {
+                                            <div>
+                                                <label class="form-label small text-muted">Relationship type</label>
+                                                <input class="form-control form-control-sm" @bind="_editResourceType" @bind:event="oninput" />
+                                            </div>
+                                        }
+                                        <div>
+                                            <label class="form-label small text-muted">Summary</label>
+                                            <textarea class="form-control form-control-sm" rows="3" @bind="_editSummary" @bind:event="oninput"></textarea>
+                                        </div>
+                                        <div>
+                                            <label class="form-label small text-muted">Notes</label>
+                                            <textarea class="form-control form-control-sm" rows="3" @bind="_editNotes" @bind:event="oninput"></textarea>
+                                        </div>
+                                        <div>
+                                            <label class="form-label small text-muted">Evidence</label>
+                                            <textarea class="form-control form-control-sm" rows="3" @bind="_editEvidence" @bind:event="oninput"></textarea>
+                                        </div>
+                                        <div class="ingest-report-actions">
+                                            <button type="button" class="btn btn-sm btn-primary" disabled="@(_savingReportItemId == item.Id)" @onclick="SaveReportItemAsync">Save</button>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_savingReportItemId == item.Id)" @onclick="CancelEditReportItem">Cancel</button>
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="ingest-report-head">
+                                        <span>@item.Title</span>
+                                        <span class="badge bg-secondary">@item.Kind</span>
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(item.Summary))
+                                    {
+                                        <p>@item.Summary</p>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(item.Notes))
+                                    {
+                                        <div class="small"><strong>Notes:</strong> @item.Notes</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(item.Evidence))
+                                    {
+                                        <blockquote>@item.Evidence</blockquote>
+                                    }
+                                    <div class="ingest-report-foot">
+                                        <div class="small text-muted">@item.Status - @item.ResourceType</div>
+                                        <div class="ingest-report-actions">
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => StartEditReportItem(item)">Edit</button>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_deletingReportItemId == item.Id)" @onclick="() => DeleteReportItemAsync(item.Id)">Delete</button>
+                                        </div>
+                                    </div>
+                                }
+                            </article>
+                        }
+                    </div>
+                }
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [CascadingParameter] public Project? Project { get; set; }
+
+    private List<IngestJobListItem> _jobs = [];
+    private IngestJobDetailView? _selectedJob;
+    private List<IngestReportItemView> _reportItems = [];
+    private IngestSourceChunkExcerpt? _sourceExcerpt;
+    private List<LlmProvider> _providers = [];
+    private Guid? _selectedChunkId;
+    private Guid? _loadedProjectId;
+    private bool _loadingJobs;
+    private bool _loadingReport;
+    private bool _creating;
+    private bool _followCurrentChunk = true;
+    private string? _formError;
+    private string? _reportActionError;
+    private int? _providerId;
+    private int? _resumeProviderId;
+    private IIngestJobUpdateSubscription? _subscription;
+    private CancellationTokenSource? _subscriptionCts;
+    private Task? _subscriptionTask;
+    private CancellationTokenSource? _selectionCts;
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private bool _refreshAgain;
+    private Guid? _editingReportItemId;
+    private Guid? _savingReportItemId;
+    private Guid? _deletingReportItemId;
+
+    private string _title = string.Empty;
+    private string _sourceKind = string.Empty;
+    private string _description = string.Empty;
+    private string _instructions = string.Empty;
+    private string _sourceText = string.Empty;
+    private string _editTitle = string.Empty;
+    private string _editResourceType = string.Empty;
+    private string _editSummary = string.Empty;
+    private string _editNotes = string.Empty;
+    private string _editEvidence = string.Empty;
+
+    private bool CanCreate => _providerId is not null
+        && !string.IsNullOrWhiteSpace(_title)
+        && !string.IsNullOrWhiteSpace(_instructions)
+        && !string.IsNullOrWhiteSpace(_sourceText);
+
+    private IngestJobChunkProgress? SelectedSourceChunk => _selectedJob?.Chunks
+        .FirstOrDefault(chunk => chunk.SourceChunkId == _selectedChunkId)
+        ?? _selectedJob?.Chunks.OrderBy(chunk => chunk.SourceChunkIndex).FirstOrDefault();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Project is null || _loadedProjectId == Project.Id) return;
+        _loadedProjectId = Project.Id;
+        await StopSubscriptionAsync();
+        await LoadProvidersAsync();
+        StartSubscription(Project.Id);
+        await ReloadJobsAsync();
+    }
+
+    private async Task LoadProvidersAsync()
+    {
+        _providers = (await Providers.GetAllAsync()).ToList();
+        var defaultProvider = _providers.FirstOrDefault(provider => provider.IsDefault) ?? _providers.FirstOrDefault();
+        _providerId = defaultProvider?.Id;
+        _resumeProviderId = defaultProvider?.Id;
+    }
+
+    private void StartSubscription(Guid projectId)
+    {
+        _subscriptionCts = new CancellationTokenSource();
+        _subscription = Notifier.Subscribe(projectId);
+        _subscriptionTask = ListenForUpdatesAsync(_subscription, _subscriptionCts.Token);
+    }
+
+    private async Task ListenForUpdatesAsync(IIngestJobUpdateSubscription subscription, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var update in subscription.ReadAllAsync(cancellationToken))
+            {
+                await InvokeAsync(async () => await RefreshForUpdateAsync(update));
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RefreshForUpdateAsync(IngestJobUpdate update)
+    {
+        if (Project is null || update.ProjectId != Project.Id) return;
+        if (!await _refreshLock.WaitAsync(0))
+        {
+            _refreshAgain = true;
+            return;
+        }
+
+        try
+        {
+            do
+            {
+                _refreshAgain = false;
+                await RefreshJobListAsync();
+
+                if (_selectedJob?.Id == update.JobId)
+                {
+                    if (update.Kind == IngestJobUpdateKind.Deleted)
+                    {
+                        _selectedJob = null;
+                        _selectedChunkId = null;
+                        _reportItems = [];
+                        _sourceExcerpt = null;
+                        if (_jobs.Count > 0)
+                            await SelectJobAsync(_jobs[0].Id);
+                    }
+                    else
+                    {
+                        await RefreshSelectedJobAsync();
+                    }
+                }
+            } while (_refreshAgain);
+
+            StateHasChanged();
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+    }
+
+    private async Task ReloadJobsAsync()
+    {
+        if (Project is null) return;
+        _loadingJobs = true;
+        try
+        {
+            await RefreshJobListAsync();
+            var selectedId = _selectedJob?.Id;
+            if (selectedId is not null && _jobs.Any(job => job.Id == selectedId))
+                await RefreshSelectedJobAsync();
+            else if (_jobs.Count > 0)
+                await SelectJobAsync(_jobs[0].Id);
+            else
+            {
+                _selectedJob = null;
+                _selectedChunkId = null;
+                _reportItems = [];
+                _sourceExcerpt = null;
+            }
+        }
+        finally
+        {
+            _loadingJobs = false;
+        }
+    }
+
+    private async Task RefreshJobListAsync()
+    {
+        if (Project is null) return;
+        _jobs = (await Ingest.ListJobSummariesAsync(Project.Id)).ToList();
+    }
+
+    private async Task CreateAsync()
+    {
+        if (Project is null || !CanCreate) return;
+        _creating = true;
+        _formError = null;
+        try
+        {
+            var job = await Ingest.CreateJobAsync(Project.Id, new IngestCreateJobRequest(
+                _title,
+                _sourceText,
+                _instructions,
+                _sourceKind,
+                _description,
+                _providerId));
+            _title = string.Empty;
+            _sourceKind = string.Empty;
+            _description = string.Empty;
+            _instructions = string.Empty;
+            _sourceText = string.Empty;
+            await ReloadJobsAsync();
+            await SelectJobAsync(job.Id);
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.Message;
+        }
+        finally
+        {
+            _creating = false;
+        }
+    }
+
+    private async Task SelectJobAsync(Guid jobId)
+    {
+        _selectionCts?.Cancel();
+        _selectionCts?.Dispose();
+        _selectionCts = new CancellationTokenSource();
+        var cancellationToken = _selectionCts.Token;
+        _followCurrentChunk = true;
+        _reportActionError = null;
+        try
+        {
+            _selectedJob = await Ingest.GetJobViewAsync(jobId, cancellationToken);
+            if (_selectedJob is null) return;
+            _resumeProviderId = _selectedJob.ProviderId ?? DefaultProviderId;
+            _selectedChunkId = FollowChunkId(_selectedJob);
+            await LoadSelectedChunkDataAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RefreshSelectedJobAsync()
+    {
+        if (_selectedJob is null) return;
+        var selectedJobId = _selectedJob.Id;
+        var previousChunkId = _selectedChunkId;
+        var previousFollow = _followCurrentChunk;
+        var refreshed = await Ingest.GetJobViewAsync(selectedJobId);
+        if (refreshed is null)
+        {
+            _selectedJob = null;
+            _selectedChunkId = null;
+            _reportItems = [];
+            _sourceExcerpt = null;
+            if (_jobs.Count > 0)
+                await SelectJobAsync(_jobs[0].Id);
+            return;
+        }
+
+        _selectedJob = refreshed;
+        _selectedChunkId = previousFollow
+            ? FollowChunkId(refreshed)
+            : refreshed.Chunks.Any(chunk => chunk.SourceChunkId == previousChunkId)
+                ? previousChunkId
+                : FollowChunkId(refreshed);
+        await LoadSelectedChunkDataAsync(CancellationToken.None);
+    }
+
+    private async Task SelectChunkAsync(Guid sourceChunkId)
+    {
+        _followCurrentChunk = false;
+        _selectedChunkId = sourceChunkId;
+        await LoadSelectedChunkDataAsync(CancellationToken.None);
+    }
+
+    private async Task FollowCurrentChunkAsync()
+    {
+        if (_selectedJob is null) return;
+        _followCurrentChunk = true;
+        _selectedChunkId = FollowChunkId(_selectedJob);
+        await LoadSelectedChunkDataAsync(CancellationToken.None);
+    }
+
+    private async Task LoadSelectedChunkDataAsync(CancellationToken cancellationToken)
+    {
+        if (_selectedJob is null || _selectedChunkId is null)
+        {
+            _reportItems = [];
+            _sourceExcerpt = null;
+            return;
+        }
+
+        _loadingReport = true;
+        try
+        {
+            _reportItems = (await Ingest.ListReportItemViewsAsync(_selectedJob.Id, _selectedChunkId, cancellationToken)).ToList();
+            _sourceExcerpt = await Ingest.GetSourceChunkExcerptAsync(_selectedChunkId.Value, cancellationToken: cancellationToken);
+        }
+        finally
+        {
+            _loadingReport = false;
+        }
+    }
+
+    private void StartEditReportItem(IngestReportItemView item)
+    {
+        _reportActionError = null;
+        _editingReportItemId = item.Id;
+        _editTitle = item.Title;
+        _editResourceType = item.ResourceType;
+        _editSummary = item.Summary;
+        _editNotes = item.Notes;
+        _editEvidence = item.Evidence;
+    }
+
+    private void CancelEditReportItem()
+    {
+        _editingReportItemId = null;
+        _reportActionError = null;
+    }
+
+    private async Task SaveReportItemAsync()
+    {
+        if (_editingReportItemId is null) return;
+        var itemId = _editingReportItemId.Value;
+        _savingReportItemId = itemId;
+        _reportActionError = null;
+        try
+        {
+            await Ingest.UpdateReportItemAsync(itemId, new IngestReportItemUpdateRequest(
+                _editTitle,
+                _editSummary,
+                _editNotes,
+                _editEvidence,
+                _editResourceType));
+            _editingReportItemId = null;
+            await RefreshSelectedJobAsync();
+        }
+        catch (Exception ex)
+        {
+            _reportActionError = ex.Message;
+        }
+        finally
+        {
+            _savingReportItemId = null;
+        }
+    }
+
+    private async Task DeleteReportItemAsync(Guid itemId)
+    {
+        _deletingReportItemId = itemId;
+        _reportActionError = null;
+        try
+        {
+            await Ingest.DeleteReportItemAsync(itemId);
+            if (_editingReportItemId == itemId) _editingReportItemId = null;
+            await RefreshSelectedJobAsync();
+        }
+        catch (Exception ex)
+        {
+            _reportActionError = ex.Message;
+        }
+        finally
+        {
+            _deletingReportItemId = null;
+        }
+    }
+
+    private async Task StopAsync()
+    {
+        if (_selectedJob is null) return;
+        await Ingest.RequestStopAsync(_selectedJob.Id);
+        await RefreshSelectedJobAsync();
+    }
+
+    private async Task ResumeAsync()
+    {
+        if (_selectedJob is null) return;
+        await Ingest.ResumeAsync(_selectedJob.Id, new IngestResumeRequest(_resumeProviderId));
+        await RefreshSelectedJobAsync();
+    }
+
+    private async Task RestartAsync()
+    {
+        if (_selectedJob is null) return;
+        await Ingest.RestartAsync(_selectedJob.Id);
+        await RefreshSelectedJobAsync();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_selectedJob is null) return;
+        await Ingest.DeleteJobAsync(_selectedJob.Id);
+        _selectedJob = null;
+        _selectedChunkId = null;
+        _reportItems = [];
+        _sourceExcerpt = null;
+        await ReloadJobsAsync();
+    }
+
+    private async Task OnFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        await using var stream = file.OpenReadStream(maxAllowedSize: 25 * 1024 * 1024);
+        using var reader = new StreamReader(stream);
+        _sourceText = await reader.ReadToEndAsync();
+        if (string.IsNullOrWhiteSpace(_title)) _title = Path.GetFileNameWithoutExtension(file.Name);
+    }
+
+    private void OnProviderChanged(ChangeEventArgs args) =>
+        _providerId = ParseProviderId(args.Value);
+
+    private void OnResumeProviderChanged(ChangeEventArgs args) =>
+        _resumeProviderId = ParseProviderId(args.Value);
+
+    private int? DefaultProviderId =>
+        _providers.FirstOrDefault(provider => provider.IsDefault)?.Id ?? _providers.FirstOrDefault()?.Id;
+
+    private static int? ParseProviderId(object? value) =>
+        int.TryParse(value?.ToString(), out var providerId) ? providerId : null;
+
+    private static Guid? FollowChunkId(IngestJobDetailView job) =>
+        job.Chunks.FirstOrDefault(chunk => chunk.Status == IngestJobChunkStatus.Running)?.SourceChunkId
+        ?? job.Chunks.FirstOrDefault(chunk => chunk.Status is IngestJobChunkStatus.Pending or IngestJobChunkStatus.Stopped or IngestJobChunkStatus.Failed)?.SourceChunkId
+        ?? job.Chunks.OrderByDescending(chunk => chunk.SourceChunkIndex).FirstOrDefault(chunk => chunk.Status == IngestJobChunkStatus.Completed)?.SourceChunkId
+        ?? job.Chunks.OrderBy(chunk => chunk.SourceChunkIndex).FirstOrDefault()?.SourceChunkId;
+
+    private string SourceExcerpt()
+    {
+        if (_sourceExcerpt is null) return string.Empty;
+        return _sourceExcerpt.IsTruncated
+            ? _sourceExcerpt.Text + "\n..."
+            : _sourceExcerpt.Text;
+    }
+
+    private static string ProviderLabel(LlmProvider provider)
+    {
+        var label = string.IsNullOrWhiteSpace(provider.DisplayName)
+            ? provider.Name
+            : provider.DisplayName;
+        label = string.IsNullOrWhiteSpace(provider.ModelId) ? label : $"{label} - {provider.ModelId}";
+        return provider.IsDefault ? $"{label} (default)" : label;
+    }
+
+    private static bool IsBusy(IngestJobDetailView job) => job.Status is IngestJobStatus.Queued or IngestJobStatus.Running or IngestJobStatus.StopRequested;
+    private static bool CanStop(IngestJobDetailView job) => job.Status is IngestJobStatus.Queued or IngestJobStatus.Running;
+    private static bool CanResume(IngestJobDetailView job) => job.Status is IngestJobStatus.Stopped or IngestJobStatus.Failed;
+    private static int ProgressPercent(IngestJobDetailView job) => job.TotalSourceChunks <= 0 ? 0 : (int)Math.Round(job.CompletedSourceChunks * 100.0 / job.TotalSourceChunks);
+
+    private static string StatusColor(IngestJobChunkStatus status) => status switch
+    {
+        IngestJobChunkStatus.Completed => "success",
+        IngestJobChunkStatus.Running => "primary",
+        IngestJobChunkStatus.Failed => "danger",
+        IngestJobChunkStatus.Stopped => "secondary",
+        _ => "light text-dark",
+    };
+
+    private async Task StopSubscriptionAsync()
+    {
+        if (_subscriptionCts is not null)
+            await _subscriptionCts.CancelAsync();
+        if (_subscription is not null)
+            await _subscription.DisposeAsync();
+        if (_subscriptionTask is not null)
+        {
+            try { await _subscriptionTask; }
+            catch (OperationCanceledException) { }
+        }
+        _subscriptionCts?.Dispose();
+        _subscriptionCts = null;
+        _subscription = null;
+        _subscriptionTask = null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopSubscriptionAsync();
+        if (_selectionCts is not null)
+        {
+            await _selectionCts.CancelAsync();
+            _selectionCts.Dispose();
+        }
+        _refreshLock.Dispose();
+    }
+}

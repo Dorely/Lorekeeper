@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Lorekeeper.Models;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
@@ -8,6 +9,8 @@ namespace Lorekeeper.Persistence;
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
+    private const int MaxLockedSaveAttempts = 6;
+
     public DbSet<LlmProvider> LlmProviders => Set<LlmProvider>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
     public DbSet<Project> Projects => Set<Project>();
@@ -21,6 +24,47 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<OutlineMessage> OutlineMessages => Set<OutlineMessage>();
     public DbSet<AiChangeBatch> AiChangeBatches => Set<AiChangeBatch>();
     public DbSet<AiChange> AiChanges => Set<AiChange>();
+    public DbSet<IngestSource> IngestSources => Set<IngestSource>();
+    public DbSet<IngestSourceChunk> IngestSourceChunks => Set<IngestSourceChunk>();
+    public DbSet<IngestVectorFragment> IngestVectorFragments => Set<IngestVectorFragment>();
+    public DbSet<IngestJob> IngestJobs => Set<IngestJob>();
+    public DbSet<IngestJobChunk> IngestJobChunks => Set<IngestJobChunk>();
+    public DbSet<IngestReportItem> IngestReportItems => Set<IngestReportItem>();
+    public DbSet<IngestJobEvent> IngestJobEvents => Set<IngestJobEvent>();
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        SaveChangesWithLockRetryAsync(acceptAllChangesOnSuccess: true, cancellationToken);
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) =>
+        SaveChangesWithLockRetryAsync(acceptAllChangesOnSuccess, cancellationToken);
+
+    private async Task<int> SaveChangesWithLockRetryAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+    {
+        var delay = TimeSpan.FromMilliseconds(100);
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            }
+            catch (DbUpdateException ex) when (IsSqliteLocked(ex) && attempt < MaxLockedSaveAttempts && !cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(delay + TimeSpan.FromMilliseconds(Random.Shared.Next(0, 75)), cancellationToken);
+                delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 2_000));
+            }
+        }
+    }
+
+    private static bool IsSqliteLocked(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is SqliteException { SqliteErrorCode: 5 or 6 })
+                return true;
+        }
+
+        return false;
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -195,6 +239,109 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.Property(e => e.DefaultProperties)
                 .HasColumnType("TEXT")
                 .HasConversion(jsonDictConverter, jsonDictComparer);
+        });
+
+        modelBuilder.Entity<IngestSource>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.CreatedAt });
+            entity.Property(e => e.VectorIndexState).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.IngestSources)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<IngestSourceChunk>(entity =>
+        {
+            entity.HasIndex(e => new { e.SourceId, e.Index }).IsUnique();
+            entity.Property(e => e.StructureStatus).HasConversion<string>();
+
+            entity.HasOne(e => e.Source)
+                .WithMany(s => s.SourceChunks)
+                .HasForeignKey(e => e.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<IngestVectorFragment>(entity =>
+        {
+            entity.HasIndex(e => new { e.SourceId, e.Index }).IsUnique();
+            entity.HasIndex(e => e.VectorRowId);
+
+            entity.HasOne(e => e.Source)
+                .WithMany(s => s.VectorFragments)
+                .HasForeignKey(e => e.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<IngestJob>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
+            entity.HasIndex(e => new { e.SourceId, e.CreatedAt });
+            entity.HasIndex(e => e.ProviderId);
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.IngestJobs)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Source)
+                .WithMany(s => s.Jobs)
+                .HasForeignKey(e => e.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Provider)
+                .WithMany()
+                .HasForeignKey(e => e.ProviderId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<IngestJobChunk>(entity =>
+        {
+            entity.HasIndex(e => new { e.JobId, e.SourceChunkId }).IsUnique();
+            entity.HasIndex(e => new { e.JobId, e.SourceChunkIndex });
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Job)
+                .WithMany(j => j.Chunks)
+                .HasForeignKey(e => e.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SourceChunk)
+                .WithMany(c => c.JobChunks)
+                .HasForeignKey(e => e.SourceChunkId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<IngestReportItem>(entity =>
+        {
+            entity.HasIndex(e => new { e.JobId, e.Kind, e.Status, e.CreatedAt });
+            entity.HasIndex(e => e.GraphNodeId);
+            entity.HasIndex(e => e.GraphEdgeId);
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Job)
+                .WithMany(j => j.ReportItems)
+                .HasForeignKey(e => e.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SourceChunk)
+                .WithMany(c => c.ReportItems)
+                .HasForeignKey(e => e.SourceChunkId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<IngestJobEvent>(entity =>
+        {
+            entity.HasIndex(e => new { e.JobId, e.CreatedAt });
+            entity.Property(e => e.Level).HasConversion<string>();
+
+            entity.HasOne(e => e.Job)
+                .WithMany(j => j.Events)
+                .HasForeignKey(e => e.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

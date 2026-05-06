@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Lorekeeper.Persistence;
 
 namespace Lorekeeper.Knowledge;
 
@@ -11,12 +12,12 @@ public static class VectorStoreInitializer
 {
     public static void Initialize(IConfiguration configuration, ILogger logger)
     {
-        var connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? "Data Source=lorekeeper.db";
+        var connectionString = SqliteConnectionSettings.BuildConnectionString(configuration);
         var dimensions = configuration.GetValue("Embeddings:Dimensions", 768);
 
         using var connection = new SqliteConnection(connectionString);
         connection.Open();
+        SqliteConnectionSettings.ConfigureDatabase(connection);
         connection.LoadVector();
 
         using (var createMeta = connection.CreateCommand())

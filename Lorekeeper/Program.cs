@@ -4,12 +4,14 @@ using Lorekeeper.Chapters;
 using Lorekeeper.Components;
 using Lorekeeper.Context;
 using Lorekeeper.Graph;
+using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
+using Lorekeeper.Tokens;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -32,6 +34,7 @@ builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
 builder.Services.AddScoped<IActRepository, ActRepository>();
 builder.Services.AddScoped<IOutlineConversationRepository, OutlineConversationRepository>();
 builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
+builder.Services.AddScoped<IIngestRepository, IngestRepository>();
 
 // Knowledge
 builder.Services.AddScoped<IVectorStore, SqliteVecVectorStore>();
@@ -43,6 +46,14 @@ builder.Services.AddSingleton<ITextChunker, OverlappingTextChunker>();
 builder.Services.AddScoped<IEmbeddingService, OllamaEmbeddingService>();
 builder.Services.AddScoped<ILlmProviderService, LlmProviderService>();
 builder.Services.AddScoped<ICodexAuthService, CodexAuthService>();
+
+// Token counting + prompt budgets
+builder.Services.Configure<TokenCountingOptions>(builder.Configuration.GetSection(TokenCountingOptions.SectionName));
+builder.Services.Configure<TokenBudgetOptions>(builder.Configuration.GetSection(TokenBudgetOptions.SectionName));
+builder.Services.AddSingleton<TiktokenTokenCounter>();
+builder.Services.AddSingleton<CharEstimateTokenCounter>();
+builder.Services.AddSingleton<ITokenCounter, CompositeTokenCounter>();
+builder.Services.AddSingleton<ITokenBudgetPlanner, TokenBudgetPlanner>();
 
 // Projects
 builder.Services.AddScoped<IProjectService, ProjectService>();
@@ -62,6 +73,16 @@ builder.Services.AddScoped<IOutlineGraphSync, OutlineGraphSync>();
 builder.Services.AddScoped<OutlineCollaborationTools>();
 builder.Services.AddScoped<IOutlineChangeApprovalService, OutlineChangeApprovalService>();
 builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationService>();
+
+// Ingest
+builder.Services.AddSingleton<IIngestJobQueue, IngestJobQueue>();
+builder.Services.AddSingleton<IIngestJobNotifier, IngestJobNotifier>();
+builder.Services.AddScoped<IIngestSourceStructureBuilder, IngestSourceStructureBuilder>();
+builder.Services.AddScoped<IIngestGraphSync, IngestGraphSync>();
+builder.Services.AddScoped<IngestAgentTools>();
+builder.Services.AddScoped<IngestJobProcessor>();
+builder.Services.AddScoped<IIngestService, IngestService>();
+builder.Services.AddHostedService<IngestJobWorker>();
 
 // Context + AI Console
 builder.Services.AddSingleton<IContextBuilder, ContextBuilder>();

@@ -1,6 +1,13 @@
 namespace Lorekeeper.Knowledge;
 
-public record KnowledgeResult(string Content, double Distance, string SourceType, string? SourceId);
+public record KnowledgeResult(
+    string Content,
+    double Distance,
+    string SourceType,
+    string? SourceId,
+    long RowId,
+    string? Metadata,
+    int? ChunkIndex);
 
 /// <summary>
 /// Backend-agnostic vector storage. Today implemented over sqlite-vec; a Postgres impl

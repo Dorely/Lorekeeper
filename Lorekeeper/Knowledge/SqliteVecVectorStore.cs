@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Lorekeeper.Persistence;
 using Microsoft.Data.Sqlite;
 
 namespace Lorekeeper.Knowledge;
@@ -14,7 +15,7 @@ public class SqliteVecVectorStore(
     ILogger<SqliteVecVectorStore> logger) : IVectorStore
 {
     private string ConnectionString =>
-        configuration.GetConnectionString("DefaultConnection") ?? "Data Source=lorekeeper.db";
+        SqliteConnectionSettings.BuildConnectionString(configuration);
 
     public async Task<long> StoreAsync(string content, float[] embedding, string sourceType,
         string scopeKey, string? sourceId = null, string? metadata = null, int? chunkIndex = null,
@@ -68,7 +69,7 @@ public class SqliteVecVectorStore(
         var typeFilter = sourceTypeFilter is not null ? " AND k.source_type = @sourceType" : "";
         cmd.CommandText =
             $"""
-            SELECT v.rowid, v.distance, k.content, k.source_type, k.source_id
+            SELECT v.rowid, v.distance, k.content, k.source_type, k.source_id, k.metadata, k.chunk_index
             FROM (
                 SELECT rowid, distance
                 FROM vec_knowledge
@@ -114,7 +115,7 @@ public class SqliteVecVectorStore(
 
         cmd.CommandText =
             $"""
-            SELECT v.rowid, v.distance, k.content, k.source_type, k.source_id
+            SELECT v.rowid, v.distance, k.content, k.source_type, k.source_id, k.metadata, k.chunk_index
             FROM (
                 SELECT rowid, distance
                 FROM vec_knowledge
@@ -195,7 +196,10 @@ public class SqliteVecVectorStore(
                 Content: reader.GetString(2),
                 Distance: reader.GetDouble(1),
                 SourceType: reader.GetString(3),
-                SourceId: reader.IsDBNull(4) ? null : reader.GetString(4)
+                SourceId: reader.IsDBNull(4) ? null : reader.GetString(4),
+                RowId: reader.GetInt64(0),
+                Metadata: reader.IsDBNull(5) ? null : reader.GetString(5),
+                ChunkIndex: reader.IsDBNull(6) ? null : reader.GetInt32(6)
             ));
         }
         return results;

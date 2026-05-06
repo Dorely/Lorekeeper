@@ -13,15 +13,14 @@ public static class PersistenceServiceCollectionExtensions
         this IServiceCollection services, IConfiguration configuration)
     {
         var providerName = configuration["Persistence:Provider"] ?? "Sqlite";
-        var connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? "Data Source=lorekeeper.db";
+        var connectionString = SqliteConnectionSettings.BuildConnectionString(configuration);
 
         services.AddDbContext<AppDbContext>(options =>
         {
             switch (providerName)
             {
                 case "Sqlite":
-                    options.UseSqlite(connectionString);
+                    options.UseSqlite(connectionString, sqlite => sqlite.CommandTimeout(SqliteConnectionSettings.BusyTimeoutSeconds));
                     break;
                 // case "Postgres":
                 //     options.UseNpgsql(connectionString);

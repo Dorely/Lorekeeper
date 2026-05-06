@@ -3,6 +3,7 @@ using System;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Lorekeeper.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260506194225_AddIngest")]
+    partial class AddIngest
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.5");
@@ -445,9 +448,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<string>("ModelName")
                         .HasColumnType("TEXT");
 
-                    b.Property<int?>("ProviderId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("TEXT");
 
@@ -470,8 +470,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("SourceId", "CreatedAt");
-
-                    b.HasIndex("ProviderId");
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
@@ -1110,11 +1108,6 @@ namespace Lorekeeper.Persistence.Migrations
 
             modelBuilder.Entity("Lorekeeper.Models.IngestJob", b =>
                 {
-                    b.HasOne("Lorekeeper.Models.LlmProvider", "Provider")
-                        .WithMany()
-                        .HasForeignKey("ProviderId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Lorekeeper.Models.Project", "Project")
                         .WithMany("IngestJobs")
                         .HasForeignKey("ProjectId")
@@ -1128,8 +1121,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Project");
-
-                    b.Navigation("Provider");
 
                     b.Navigation("Source");
                 });

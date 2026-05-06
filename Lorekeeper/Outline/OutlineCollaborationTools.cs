@@ -364,7 +364,12 @@ public sealed class OutlineCollaborationTools(
             var r = results[i];
             sb.Append('[').Append(i + 1).Append("] ")
               .Append(r.SourceType).Append('/').Append(r.SourceId ?? "?")
-              .Append(" (distance ").Append(r.Distance.ToString("F4")).Append(")\n");
+              .Append(" row=").Append(r.RowId);
+            if (r.ChunkIndex is not null)
+                sb.Append(" fragment=").Append(r.ChunkIndex.Value + 1);
+            if (!string.IsNullOrWhiteSpace(r.Metadata))
+                sb.Append(" - ").Append(r.Metadata);
+            sb.Append(" (distance ").Append(r.Distance.ToString("F4")).Append(")\n");
             sb.Append(r.Content).Append("\n\n");
         }
         return sb.ToString().TrimEnd();
