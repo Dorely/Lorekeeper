@@ -198,15 +198,16 @@
 
 | File | Description |
 |------|-------------|
-| `IIngestService.cs` / `IngestService.cs` | Application service for creating/listing/loading/stopping/resuming/restarting/deleting ingest jobs; exposes lightweight UI reads, resolves selected providers, queues jobs, notifies live UI listeners, and cleans prior graph output on restart/delete. |
+| `IIngestService.cs` / `IngestService.cs` | Application service for ingest job lifecycle/UI reads/provider resolution/queueing/notifications; restart/delete subtracts source-scoped graph assertions and only removes ingest-owned orphan graph output. |
 | `IIngestSourceStructureBuilder.cs` / `IngestSourceStructureBuilder.cs` | Splits raw source text into large logical source chunks using headings/scene breaks and reusable token budgets; source chunks are independent from vector fragments. |
 | `IIngestGraphSync.cs` / `IngestGraphSync.cs` | Projects ingest sources and source chunks into structural graph nodes and ordered `HasChild` edges. |
 | `IIngestJobQueue.cs` / `IngestJobQueue.cs` | In-process queue plus cancellation registry for durable ingest jobs. |
 | `IIngestJobNotifier.cs` / `IngestJobNotifier.cs` | In-process pub/sub for live ingest job update signals consumed by Blazor Server components over the existing SignalR circuit. |
 | `IngestUiModels.cs` | Lightweight read-model records for the Ingest tab: job summaries, selected job detail, chunk progress, report items, events, and bounded source excerpts. |
+| `IngestSourceAssertions.cs` | Shared helper/model for protected source-scoped node/edge assertion JSON, ingest-created graph origin markers, report graph-action payloads, and source-subtraction operations. |
 | `IngestJobWorker.cs` | Hosted background worker that marks interrupted jobs stopped at startup and drains queued ingest jobs in scoped processors. |
 | `IngestJobProcessor.cs` | Runs one ingest job with the job-selected provider: vectorizes the full source into independent retrieval fragments, processes each source chunk with the LLM, invokes ingest tools, records progress/tool warning events, and notifies live UI listeners. |
-| `IngestAgentTools.cs` | Job-scoped LLM tools for listing same-job entities, creating/updating ingest entities, linking same-job entities, and recording source-chunk notes/provenance. |
+| `IngestAgentTools.cs` | Ingest LLM tools for project entity candidate search, source-scoped observations on new/existing entities, source-scoped relationship assertions, and source-chunk notes/provenance. |
 
 ### Graph/
 

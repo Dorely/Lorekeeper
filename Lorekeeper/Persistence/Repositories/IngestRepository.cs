@@ -211,6 +211,7 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
                 item.EntityId,
                 item.GraphNodeId,
                 item.GraphEdgeId,
+                item.PayloadJson,
                 item.CreatedAt,
                 item.UpdatedAt))
             .ToListAsync(cancellationToken);

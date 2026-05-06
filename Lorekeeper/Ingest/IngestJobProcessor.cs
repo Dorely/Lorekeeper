@@ -26,16 +26,19 @@ public sealed class IngestJobProcessor(
     private const string SystemPrompt = """
         You are an ingestion extraction agent for Lorekeeper.
 
-        Your job is to read the current large source chunk and create or update graph entities for the ingest job.
-        You may only work with entities created by this ingest job. Never link to existing project graph entities outside this job.
+        Your job is to read the current large source chunk and record source-scoped observations on the project graph.
+        You may link to existing non-structural project entities when the source clearly refers to the same thing.
+        Do not rewrite canonical project entity properties. Extracted facts, aliases, evidence, and notes belong in source-scoped assertions recorded by the ingest tools.
 
         Process rules:
-        - Call list_job_entities before creating entities.
-        - Prefer update_ingest_entity when a person, place, object, organization, concept, claim, or event matches a same-job entity already created in an earlier source chunk.
-        - Create a new entity only when no same-job entity matches.
-        - Keep recurring entities current. If a character appears again later with new history, status, aliases, relationships, or role details, update the existing entity.
+        - Call list_job_entities before creating or linking entities.
+        - Call search_project_entities before creating a new entity when the source mention may already exist in the project graph.
+        - Use record_existing_entity_observation when a source mention matches an existing project entity.
+        - Use update_ingest_entity when a source mention matches an entity already touched by this ingest job.
+        - Create a new entity only when no existing project entity or same-job entity matches.
+        - Keep recurring source observations current. If a character appears again later with new history, status, aliases, relationships, or role details, update the source assertion for the existing entity.
         - Use evidence from the current source chunk. Do not invent facts.
-        - Link only same-job entities using link_ingest_entities.
+        - Link only entities already touched by this ingest job using link_ingest_entities. If an endpoint is an existing project entity, record an observation on it first.
         - Finish each source chunk by calling record_source_chunk_notes with a concise summary.
         """;
 
@@ -144,6 +147,9 @@ public sealed class IngestJobProcessor(
         var context = new IngestAgentContext(
             job.ProjectId,
             job.Id,
+            job.SourceId,
+            job.Source.Title,
+            job.Source.SourceKind,
             sourceChunk.Id,
             sourceChunk.Index,
             sourceChunk.Title,
@@ -341,8 +347,10 @@ public sealed class IngestJobProcessor(
             Previous source chunk summaries:
             {{previousSummaries}}
 
-            Entities already created by this ingest job:
+            Entities already touched by this ingest job:
             {{entityRoster}}
+
+            If a source mention may already exist in the project graph, call search_project_entities before creating a new entity.
 
             Current source chunk text:
             ```text

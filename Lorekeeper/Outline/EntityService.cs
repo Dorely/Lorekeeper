@@ -1,3 +1,4 @@
+using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
@@ -117,7 +118,7 @@ public sealed class EntityService(
         {
             foreach (var kv in propertiesToSet)
             {
-                if (string.IsNullOrWhiteSpace(kv.Key)) continue;
+                if (string.IsNullOrWhiteSpace(kv.Key) || IngestSourceAssertions.IsProtectedProperty(kv.Key)) continue;
                 node.Properties[kv.Key] = kv.Value;
             }
         }
@@ -126,6 +127,7 @@ public sealed class EntityService(
         {
             foreach (var k in propertiesToRemove)
             {
+                if (IngestSourceAssertions.IsProtectedProperty(k)) continue;
                 node.Properties.Remove(k);
             }
         }
@@ -330,7 +332,10 @@ public sealed class EntityService(
     {
         var props = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in node.Properties)
+        {
+            if (IngestSourceAssertions.IsProtectedProperty(kv.Key)) continue;
             props[kv.Key] = kv.Value?.ToString();
+        }
 
         // Entity id is the GUID we stored in Key. For lazily-created Chapter nodes the Key is
         // also a GUID (the ChapterId), so this round-trips cleanly.
@@ -360,7 +365,10 @@ public sealed class EntityService(
     {
         var props = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in source)
+        {
+            if (IngestSourceAssertions.IsProtectedProperty(kv.Key)) continue;
             props[kv.Key] = kv.Value?.ToString();
+        }
         return props;
     }
 }

@@ -1,4 +1,5 @@
 using Lorekeeper.Chapters;
+using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -404,6 +405,7 @@ public sealed class ProjectGraphService(
         || string.Equals(key, "sourceId", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "structural", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "order", StringComparison.OrdinalIgnoreCase)
+        || IngestSourceAssertions.IsProtectedProperty(key)
         || key.StartsWith("vectorIndex", StringComparison.OrdinalIgnoreCase);
 
     private async Task<Guid?> ResolveParentGuidAsync(Guid projectId, long? parentNodeId, CancellationToken cancellationToken)
@@ -498,7 +500,10 @@ public sealed class ProjectGraphService(
     {
         var result = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in properties)
+        {
+            if (IngestSourceAssertions.IsProtectedProperty(kv.Key)) continue;
             result[kv.Key] = kv.Value?.ToString();
+        }
         return result;
     }
 

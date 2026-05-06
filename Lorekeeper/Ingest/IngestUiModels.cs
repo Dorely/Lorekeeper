@@ -76,6 +76,7 @@ public sealed record IngestReportItemView(
     Guid? EntityId,
     long? GraphNodeId,
     long? GraphEdgeId,
+    string PayloadJson,
     DateTime CreatedAt,
     DateTime UpdatedAt);
 

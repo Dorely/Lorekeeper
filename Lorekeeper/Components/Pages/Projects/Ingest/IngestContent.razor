@@ -253,6 +253,10 @@ else
                                     <div class="ingest-report-head">
                                         <span>@item.Title</span>
                                         <span class="badge bg-secondary">@item.Kind</span>
+                                        @if (ReportGraphActionLabel(item) is { Length: > 0 } actionLabel)
+                                        {
+                                            <span class="badge bg-info text-dark">@actionLabel</span>
+                                        }
                                     </div>
                                     @if (!string.IsNullOrWhiteSpace(item.Summary))
                                     {
@@ -697,6 +701,26 @@ else
     }
 
     private static bool IsBusy(IngestJobDetailView job) => job.Status is IngestJobStatus.Queued or IngestJobStatus.Running or IngestJobStatus.StopRequested;
+
+    private static string? ReportGraphActionLabel(IngestReportItemView item)
+    {
+        var action = item.Kind switch
+        {
+            IngestReportItemKind.Entity => IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson),
+            IngestReportItemKind.Relationship => IngestSourceAssertions.ReadRelationshipGraphAction(item.PayloadJson),
+            _ => null,
+        };
+
+        return action switch
+        {
+            IngestSourceAssertions.CreatedEntityAction => "created",
+            IngestSourceAssertions.LinkedExistingEntityAction => "linked existing",
+            IngestSourceAssertions.CreatedEdgeAction => "created",
+            IngestSourceAssertions.LinkedExistingEdgeAction => "linked existing",
+            _ => null,
+        };
+    }
+
     private static bool CanStop(IngestJobDetailView job) => job.Status is IngestJobStatus.Queued or IngestJobStatus.Running;
     private static bool CanResume(IngestJobDetailView job) => job.Status is IngestJobStatus.Stopped or IngestJobStatus.Failed;
     private static int ProgressPercent(IngestJobDetailView job) => job.TotalSourceChunks <= 0 ? 0 : (int)Math.Round(job.CompletedSourceChunks * 100.0 / job.TotalSourceChunks);

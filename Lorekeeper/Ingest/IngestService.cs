@@ -194,7 +194,7 @@ public sealed class IngestService(
 
         queue.RequestCancellation(job.Id);
 
-        await RemoveReportGraphItemsAsync(job.ReportItems, job.ProjectId, cancellationToken);
+        await RemoveReportGraphItemsAsync(job.ReportItems, job.ProjectId, job.SourceId, cancellationToken);
 
         foreach (var item in job.ReportItems.Where(item => item.Status != IngestReportItemStatus.Deleted))
         {
@@ -244,7 +244,7 @@ public sealed class IngestService(
 
         var projectId = job.ProjectId;
         queue.RequestCancellation(job.Id);
-        await RemoveReportGraphItemsAsync(job.ReportItems, job.ProjectId, cancellationToken);
+        await RemoveReportGraphItemsAsync(job.ReportItems, job.ProjectId, job.SourceId, cancellationToken);
         try
         {
             await vectors.DeleteBySourceAsync("ingest_source", job.Source.VectorSourceId, Project.ScopeKey(job.ProjectId), cancellationToken);
@@ -314,43 +314,17 @@ public sealed class IngestService(
         Notify(item.Job.ProjectId, item.JobId, IngestJobUpdateKind.Report);
     }
 
-    private async Task RemoveReportGraphItemsAsync(IEnumerable<IngestReportItem> reportItems, Guid projectId, CancellationToken cancellationToken)
+    private async Task RemoveReportGraphItemsAsync(IEnumerable<IngestReportItem> reportItems, Guid projectId, Guid fallbackSourceId, CancellationToken cancellationToken)
     {
         var activeItems = reportItems.Where(item => item.Status != IngestReportItemStatus.Deleted).ToList();
         foreach (var item in activeItems.Where(item => item.Kind == IngestReportItemKind.Relationship))
         {
-            var edgeId = item.GraphEdgeId;
-            if (edgeId is null) continue;
-
-            try
-            {
-                await graphStore.RemoveEdgeAsync(edgeId.Value, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to remove graph edge {GraphEdgeId} for ingest report item {ReportItemId}", edgeId, item.Id);
-            }
+            await RemoveRelationshipGraphEdgeAsync(item, fallbackSourceId, cancellationToken);
         }
 
         foreach (var item in activeItems.Where(item => item.Kind == IngestReportItemKind.Entity))
         {
-            try
-            {
-                if (item.GraphNodeId is not null)
-                {
-                    await graphStore.RemoveNodeAsync(item.GraphNodeId.Value, cancellationToken);
-                }
-                else if (item.EntityId is not null && !string.IsNullOrWhiteSpace(item.ResourceType))
-                {
-                    var node = await graphStore.FindNodeAsync(projectId, item.ResourceType, item.EntityId.Value.ToString("N"), cancellationToken);
-                    if (node is not null)
-                        await graphStore.RemoveNodeAsync(node.Id, cancellationToken);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to remove graph node {GraphNodeId} for ingest report item {ReportItemId}", item.GraphNodeId, item.Id);
-            }
+            await RemoveEntityGraphContributionAsync(item, projectId, fallbackSourceId, cancellationToken);
         }
     }
 
@@ -362,10 +336,10 @@ public sealed class IngestService(
                 var node = await FindReportNodeAsync(item, item.Job.ProjectId, cancellationToken);
                 if (node is null) return;
 
-                node.Label = item.Title;
-                node.Properties["description"] = item.Summary;
-                node.Properties["ingestReportNotes"] = item.Notes;
-                node.Properties["evidence"] = item.Evidence;
+                if (ResolveReportSourceId(item, item.Job.SourceId) is not Guid entitySourceId) return;
+                IngestSourceAssertions.UpsertEntityAssertion(
+                    node.Properties,
+                    BuildReportAssertionInput(item, entitySourceId, item.Summary, item.Evidence, item.Notes, replaceExistingText: true));
                 node.UpdatedAt = DateTime.UtcNow;
                 nodes.Update(node);
                 break;
@@ -375,10 +349,10 @@ public sealed class IngestService(
                 var edge = await edges.GetByIdAsync(item.GraphEdgeId.Value, cancellationToken);
                 if (edge is null) return;
 
-                edge.EdgeType = item.ResourceType;
-                edge.Properties["summary"] = item.Summary;
-                edge.Properties["notes"] = item.Notes;
-                edge.Properties["evidence"] = item.Evidence;
+                if (ResolveReportSourceId(item, item.Job.SourceId) is not Guid relationshipSourceId) return;
+                IngestSourceAssertions.UpsertRelationshipAssertion(
+                    edge.Properties,
+                    BuildReportAssertionInput(item, relationshipSourceId, item.Summary, item.Evidence, item.Notes, replaceExistingText: true));
                 edge.UpdatedAt = DateTime.UtcNow;
                 edges.Update(edge);
                 break;
@@ -409,19 +383,17 @@ public sealed class IngestService(
                         && candidate.Kind == IngestReportItemKind.Relationship
                         && IsRelationshipConnectedTo(candidate, item.EntityId.Value)))
                     {
-                        await RemoveRelationshipGraphEdgeAsync(relationship, cancellationToken);
+                        await RemoveRelationshipGraphEdgeAsync(relationship, item.Job.SourceId, cancellationToken);
                         MarkReportItemDeleted(relationship);
                         ingest.UpdateReportItem(relationship);
                     }
                 }
 
-                var node = await FindReportNodeAsync(item, item.Job.ProjectId, cancellationToken);
-                if (node is not null)
-                    await graphStore.RemoveNodeAsync(node.Id, cancellationToken);
+                await RemoveEntityGraphContributionAsync(item, item.Job.ProjectId, item.Job.SourceId, cancellationToken);
                 break;
 
             case IngestReportItemKind.Relationship:
-                await RemoveRelationshipGraphEdgeAsync(item, cancellationToken);
+                await RemoveRelationshipGraphEdgeAsync(item, item.Job.SourceId, cancellationToken);
                 break;
 
             case IngestReportItemKind.SourceChunkNote:
@@ -449,18 +421,194 @@ public sealed class IngestService(
         ingest.UpdateJob(job);
     }
 
-    private async Task RemoveRelationshipGraphEdgeAsync(IngestReportItem item, CancellationToken cancellationToken)
+    private async Task RemoveRelationshipGraphEdgeAsync(IngestReportItem item, Guid fallbackSourceId, CancellationToken cancellationToken)
     {
         if (item.GraphEdgeId is null) return;
         try
         {
-            await graphStore.RemoveEdgeAsync(item.GraphEdgeId.Value, cancellationToken);
+            var edge = await edges.GetByIdAsync(item.GraphEdgeId.Value, cancellationToken);
+            if (edge is null) return;
+
+            var sourceId = ResolveReportSourceId(item, fallbackSourceId);
+            if (sourceId is not null)
+                IngestSourceAssertions.RemoveRelationshipSource(edge.Properties, sourceId.Value);
+
+            var graphAction = IngestSourceAssertions.ReadRelationshipGraphAction(item.PayloadJson);
+            if (CanRemoveGraphEdgeAfterSourceSubtraction(edge, graphAction))
+            {
+                await graphStore.RemoveEdgeAsync(edge.Id, cancellationToken);
+            }
+            else
+            {
+                edge.UpdatedAt = DateTime.UtcNow;
+                edges.Update(edge);
+                await edges.SaveChangesAsync(cancellationToken);
+            }
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to remove graph edge {GraphEdgeId} for ingest report item {ReportItemId}", item.GraphEdgeId, item.Id);
         }
     }
+
+    private async Task RemoveEntityGraphContributionAsync(IngestReportItem item, Guid projectId, Guid fallbackSourceId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var node = await FindReportNodeAsync(item, projectId, cancellationToken);
+            if (node is null) return;
+
+            var sourceId = ResolveReportSourceId(item, fallbackSourceId);
+            if (sourceId is not null)
+            {
+                IngestSourceAssertions.RemoveEntitySource(node.Properties, sourceId.Value);
+                await RemoveExtractedFromEdgesForSourceAsync(node, sourceId.Value, cancellationToken);
+            }
+
+            var graphAction = IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson);
+            if (await CanRemoveGraphNodeAfterSourceSubtractionAsync(node, graphAction, cancellationToken))
+            {
+                await graphStore.RemoveNodeAsync(node.Id, cancellationToken);
+            }
+            else
+            {
+                node.UpdatedAt = DateTime.UtcNow;
+                nodes.Update(node);
+                await nodes.SaveChangesAsync(cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to remove graph node {GraphNodeId} for ingest report item {ReportItemId}", item.GraphNodeId, item.Id);
+        }
+    }
+
+    private async Task RemoveExtractedFromEdgesForSourceAsync(GraphNode node, Guid sourceId, CancellationToken cancellationToken)
+    {
+        var extractedFromEdges = await edges.GetAdjacentAsync(
+            node.Id,
+            EdgeDirection.Outgoing,
+            [IngestGraphSync.ExtractedFromEdgeType],
+            maxResults: null,
+            cancellationToken);
+
+        foreach (var edge in extractedFromEdges)
+        {
+            if (await EdgeTargetsSourceAsync(edge, sourceId, cancellationToken))
+                await graphStore.RemoveEdgeAsync(edge.Id, cancellationToken);
+        }
+    }
+
+    private async Task<bool> EdgeTargetsSourceAsync(GraphEdge edge, Guid sourceId, CancellationToken cancellationToken)
+    {
+        var sourceKey = sourceId.ToString("N");
+        if (edge.Properties.TryGetValue("sourceId", out var edgeSourceId)
+            && string.Equals(edgeSourceId?.ToString(), sourceKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var target = await nodes.GetByIdAsync(edge.ToNodeId, cancellationToken);
+        return target is not null
+            && target.Properties.TryGetValue("sourceId", out var targetSourceId)
+            && string.Equals(targetSourceId?.ToString(), sourceKey, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<bool> CanRemoveGraphNodeAfterSourceSubtractionAsync(GraphNode node, string? graphAction, CancellationToken cancellationToken)
+    {
+        if (!CanRemovePotentiallyIngestCreatedObject(node.Properties, graphAction, IngestSourceAssertions.CreatedEntityAction))
+            return false;
+        if (IngestSourceAssertions.CountEntitySources(node.Properties) > 0)
+            return false;
+        if (HasCanonicalProperties(node.Properties))
+            return false;
+
+        var adjacent = await edges.GetAdjacentAsync(node.Id, EdgeDirection.Both, edgeTypes: null, maxResults: null, cancellationToken);
+        return adjacent.Count == 0;
+    }
+
+    private static bool CanRemoveGraphEdgeAfterSourceSubtraction(GraphEdge edge, string? graphAction)
+    {
+        if (!CanRemovePotentiallyIngestCreatedObject(edge.Properties, graphAction, IngestSourceAssertions.CreatedEdgeAction))
+            return false;
+        if (IngestSourceAssertions.CountRelationshipSources(edge.Properties) > 0)
+            return false;
+        return !HasCanonicalProperties(edge.Properties);
+    }
+
+    private static bool CanRemovePotentiallyIngestCreatedObject(
+        IReadOnlyDictionary<string, object?> properties,
+        string? graphAction,
+        string createdAction) =>
+        IngestSourceAssertions.IsIngestCreatedGraphObject(properties)
+        || string.Equals(graphAction, createdAction, StringComparison.Ordinal)
+        || string.IsNullOrWhiteSpace(graphAction);
+
+    private static bool HasCanonicalProperties(IReadOnlyDictionary<string, object?> properties) =>
+        properties.Keys.Any(key => !IsInternalProperty(key)
+            && !IngestSourceAssertions.IsProtectedProperty(key)
+            && !IngestSourceAssertions.IsLegacyIngestProperty(key));
+
+    private static bool IsInternalProperty(string key) =>
+        string.Equals(key, "sourceType", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "sourceId", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "structural", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "order", StringComparison.OrdinalIgnoreCase)
+        || key.StartsWith("vectorIndex", StringComparison.OrdinalIgnoreCase);
+
+    private static Guid? ResolveReportSourceId(IngestReportItem item, Guid fallbackSourceId) =>
+        IngestSourceAssertions.ReadPayloadSourceId(item.PayloadJson) ?? fallbackSourceId;
+
+    private static IngestAssertionInput BuildReportAssertionInput(
+        IngestReportItem item,
+        Guid sourceId,
+        string? summary,
+        string? evidence,
+        string? notes,
+        bool replaceExistingText)
+    {
+        var sourceChunkId = item.SourceChunkId ?? Guid.Empty;
+        var sourceChunkIndex = ReadPayloadSourceChunkIndex(item.PayloadJson);
+        return new IngestAssertionInput(
+            item.JobId,
+            sourceId,
+            ReadPayloadString(item.PayloadJson, "sourceTitle") ?? item.Job.Source?.Title ?? string.Empty,
+            ReadPayloadString(item.PayloadJson, "sourceKind") ?? item.Job.Source?.SourceKind ?? string.Empty,
+            sourceChunkId,
+            sourceChunkIndex,
+            summary,
+            new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
+            [],
+            evidence,
+            notes,
+            replaceExistingText);
+    }
+
+    private static int ReadPayloadSourceChunkIndex(string payloadJson)
+    {
+        if (!payloadJson.TrimStart().StartsWith('{')) return 0;
+        try
+        {
+            using var doc = JsonDocument.Parse(payloadJson);
+            if (doc.RootElement.TryGetProperty("latestSeenSourceChunkIndex", out var latest)
+                && latest.ValueKind == JsonValueKind.Number
+                && latest.TryGetInt32(out var latestIndex))
+            {
+                return latestIndex;
+            }
+            if (doc.RootElement.TryGetProperty("sourceChunkIndex", out var chunkIndex)
+                && chunkIndex.ValueKind == JsonValueKind.Number
+                && chunkIndex.TryGetInt32(out var parsed))
+            {
+                return parsed;
+            }
+        }
+        catch (JsonException) { }
+        return 0;
+    }
+
+    private static string? ReadPayloadString(string payloadJson, string propertyName) =>
+        IngestSourceAssertions.TryReadPayloadString(payloadJson, propertyName, out var value) ? value : null;
 
     private async Task<GraphNode?> FindReportNodeAsync(IngestReportItem item, Guid projectId, CancellationToken cancellationToken)
     {
