@@ -1,3 +1,4 @@
+using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
@@ -101,7 +102,12 @@ public sealed record EntityLink(
     string OtherEntityName,
     string OtherEntityType,
     int? SortOrder,
-    IReadOnlyDictionary<string, string?> Properties);
+    IReadOnlyDictionary<string, string?> Properties,
+    bool IsIngestCreated,
+    int IngestSourceCount,
+    int IngestObservationCount,
+    IReadOnlyList<IngestSourceAssertionSummary> IngestSources,
+    IReadOnlyList<IngestSourceObservation> IngestObservations);
 
 /// <summary>
 /// Project-scoped projection of a <see cref="GraphNode"/> exposed to UI + chat tools.
@@ -118,4 +124,9 @@ public sealed record StoryEntity(
     string Name,
     int? Order,
     Guid? ParentId,
-    IReadOnlyDictionary<string, string?> Properties);
+    IReadOnlyDictionary<string, string?> Properties,
+    bool IsIngestCreated,
+    int IngestSourceCount,
+    int IngestObservationCount,
+    IReadOnlyList<IngestSourceAssertionSummary> IngestSources,
+    IReadOnlyList<IngestSourceObservation> IngestObservations);

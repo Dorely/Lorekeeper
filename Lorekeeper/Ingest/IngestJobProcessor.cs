@@ -28,7 +28,7 @@ public sealed class IngestJobProcessor(
     private const string SystemPrompt = """
         You are an ingestion extraction agent for Lorekeeper.
 
-        Your job is to read the current large source chunk and record source-scoped observations on the project graph.
+        Your job is to read the current source chunk, which may or may not be part of a larger document, and record source-scoped observations on the project graph.
         You may link to existing non-structural project entities when the source clearly refers to the same thing.
         Do not rewrite canonical project entity properties. Extracted facts, aliases, evidence, and notes belong in source-scoped assertions recorded by the ingest tools.
 
@@ -148,6 +148,7 @@ public sealed class IngestJobProcessor(
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
 
         var mutated = false;
+        var sourceGraphChanged = false;
         var context = new IngestAgentContext(
             job.ProjectId,
             job.Id,
@@ -205,6 +206,7 @@ public sealed class IngestJobProcessor(
             sourceChunk.Summary = Truncate(finalText, 800);
             sourceChunk.UpdatedAt = DateTime.UtcNow;
             ingest.UpdateSourceChunk(sourceChunk);
+            sourceGraphChanged = true;
         }
 
         var reportItems = await ingest.ListReportItemsAsync(job.Id, cancellationToken);
@@ -218,7 +220,7 @@ public sealed class IngestJobProcessor(
         await ingest.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
 
-        if (mutated)
+        if (mutated || sourceGraphChanged)
         {
             var sourceChunks = await ingest.ListSourceChunksAsync(job.SourceId, cancellationToken);
             await graphSync.EnsureSourceAsync(job.Source, sourceChunks, cancellationToken);

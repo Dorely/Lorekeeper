@@ -603,11 +603,13 @@ public sealed class IngestAgentTools(
     private async Task AddExtractedFromAsync(IngestAgentContext context, GraphNode entityNode)
     {
         var sourceChunkNode = await nodes.FindAsync(context.ProjectId, IngestGraphSync.SourceChunkNodeType, context.SourceChunkId.ToString("N"));
-        if (sourceChunkNode is null) return;
+        var targetNode = sourceChunkNode
+            ?? await nodes.FindAsync(context.ProjectId, IngestGraphSync.SourceNodeType, context.SourceId.ToString("N"));
+        if (targetNode is null) return;
 
         await graph.UpsertEdgeAsync(
             entityNode.Id,
-            sourceChunkNode.Id,
+            targetNode.Id,
             IngestGraphSync.ExtractedFromEdgeType,
             new Dictionary<string, object?>
             {
@@ -615,6 +617,7 @@ public sealed class IngestAgentTools(
                 ["sourceId"] = context.SourceId.ToString("N"),
                 ["sourceChunkId"] = context.SourceChunkId.ToString("N"),
                 ["sourceChunkIndex"] = context.SourceChunkIndex,
+                ["sourceGraphTargetType"] = targetNode.NodeType,
             });
     }
 

@@ -16,6 +16,7 @@ public sealed class IngestService(
     IIngestJobQueue queue,
     ILlmProviderService providers,
     IIngestJobNotifier notifier,
+    IIngestGraphCleanup graphCleanup,
     IGraphStore graphStore,
     IGraphNodeRepository nodes,
     IGraphEdgeRepository edges,
@@ -193,7 +194,7 @@ public sealed class IngestService(
 
         queue.RequestCancellation(job.Id);
 
-        await RemoveReportGraphItemsAsync(job.ReportItems, job.ProjectId, job.SourceId, cancellationToken);
+        await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.ReportItems, cancellationToken);
 
         foreach (var item in job.ReportItems.Where(item => item.Status != IngestReportItemStatus.Deleted))
         {
@@ -243,24 +244,9 @@ public sealed class IngestService(
 
         var projectId = job.ProjectId;
         queue.RequestCancellation(job.Id);
-        await RemoveReportGraphItemsAsync(job.ReportItems, job.ProjectId, job.SourceId, cancellationToken);
-        try
-        {
-            await vectors.DeleteBySourceAsync("ingest_source", job.Source.VectorSourceId, Project.ScopeKey(job.ProjectId), cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to delete vector fragments for ingest source {SourceId}", job.SourceId);
-        }
-
-        try
-        {
-            await graphSync.RemoveSourceAsync(job.ProjectId, job.SourceId, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to delete graph nodes for ingest source {SourceId}", job.SourceId);
-        }
+        await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.ReportItems, cancellationToken);
+        await vectors.DeleteBySourceAsync("ingest_source", job.Source.VectorSourceId, Project.ScopeKey(job.ProjectId), cancellationToken);
+        await graphSync.RemoveSourceAsync(job.ProjectId, job.SourceId, cancellationToken);
 
         ingest.RemoveSource(job.Source);
         await ingest.SaveChangesAsync(cancellationToken);
@@ -311,20 +297,6 @@ public sealed class IngestService(
         await RefreshJobCountsAsync(item.JobId, cancellationToken);
         await ingest.SaveChangesAsync(cancellationToken);
         Notify(item.Job.ProjectId, item.JobId, IngestJobUpdateKind.Report);
-    }
-
-    private async Task RemoveReportGraphItemsAsync(IEnumerable<IngestReportItem> reportItems, Guid projectId, Guid fallbackSourceId, CancellationToken cancellationToken)
-    {
-        var activeItems = reportItems.Where(item => item.Status != IngestReportItemStatus.Deleted).ToList();
-        foreach (var item in activeItems.Where(item => item.Kind == IngestReportItemKind.Relationship))
-        {
-            await RemoveRelationshipGraphEdgeAsync(item, fallbackSourceId, cancellationToken);
-        }
-
-        foreach (var item in activeItems.Where(item => item.Kind == IngestReportItemKind.Entity))
-        {
-            await RemoveEntityGraphContributionAsync(item, projectId, fallbackSourceId, cancellationToken);
-        }
     }
 
     private async Task SyncReportEditToGraphAsync(IngestReportItem item, CancellationToken cancellationToken)
@@ -447,6 +419,7 @@ public sealed class IngestService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to remove graph edge {GraphEdgeId} for ingest report item {ReportItemId}", item.GraphEdgeId, item.Id);
+            throw;
         }
     }
 
@@ -479,6 +452,7 @@ public sealed class IngestService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to remove graph node {GraphNodeId} for ingest report item {ReportItemId}", item.GraphNodeId, item.Id);
+            throw;
         }
     }
 
@@ -540,8 +514,7 @@ public sealed class IngestService(
         string? graphAction,
         string createdAction) =>
         IngestSourceAssertions.IsIngestCreatedGraphObject(properties)
-        || string.Equals(graphAction, createdAction, StringComparison.Ordinal)
-        || string.IsNullOrWhiteSpace(graphAction);
+        || string.Equals(graphAction, createdAction, StringComparison.Ordinal);
 
     private static bool HasCanonicalProperties(IReadOnlyDictionary<string, object?> properties) =>
         properties.Keys.Any(key => !IsInternalProperty(key)

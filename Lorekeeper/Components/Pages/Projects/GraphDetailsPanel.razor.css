@@ -222,6 +222,75 @@
     flex-wrap: wrap;
 }
 
+.graph-link-props {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    color: var(--bs-secondary-color, #6c757d);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.72rem;
+}
+
+.graph-ingest-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding-top: 0.25rem;
+}
+
+.graph-ingest-observation {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.5rem;
+    border: 1px solid rgba(13, 202, 240, 0.35);
+    border-radius: 0.4rem;
+    background: rgba(13, 202, 240, 0.06);
+    font-size: 0.82rem;
+}
+
+.graph-ingest-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.graph-ingest-head strong,
+.graph-ingest-line strong {
+    overflow-wrap: anywhere;
+}
+
+.graph-ingest-head span,
+.graph-ingest-line span,
+.graph-ingest-notes {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.graph-ingest-observation p,
+.graph-ingest-observation blockquote {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.graph-ingest-observation blockquote {
+    padding-left: 0.6rem;
+    border-left: 3px solid rgba(13, 202, 240, 0.45);
+    color: var(--bs-body-color, #212529);
+}
+
+.graph-ingest-line {
+    display: grid;
+    grid-template-columns: minmax(5rem, 8rem) minmax(0, 1fr);
+    gap: 0.35rem;
+}
+
+.graph-ingest-props {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
 .graph-relationship-grid {
     display: grid;
     grid-template-columns: minmax(7rem, 0.7fr) minmax(0, 1.3fr);

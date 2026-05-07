@@ -1,0 +1,19 @@
+using Lorekeeper.Models;
+
+namespace Lorekeeper.Ingest;
+
+public interface IIngestGraphCleanup
+{
+    Task<IngestGraphCleanupResult> RemoveSourceGraphContributionsAsync(
+        Guid projectId,
+        Guid sourceId,
+        IEnumerable<IngestReportItem> reportItems,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed record IngestGraphCleanupResult(
+    int NodesUpdated,
+    int NodesDeleted,
+    int EdgesUpdated,
+    int EdgesDeleted,
+    int ExtractedFromEdgesDeleted);

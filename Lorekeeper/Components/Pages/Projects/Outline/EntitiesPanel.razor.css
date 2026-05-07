@@ -92,6 +92,12 @@
     text-decoration: underline;
 }
 
+.entities-item-meta {
+    margin-top: 0.1rem;
+    color: var(--bs-info-text-emphasis, #087990);
+    font-weight: 600;
+}
+
 .entities-item-sub {
     margin-top: 0.15rem;
     overflow: hidden;
@@ -150,7 +156,7 @@
 
 .entities-modal-link {
     display: grid;
-    grid-template-columns: 1.25rem auto 1fr auto;
+    grid-template-columns: 1.25rem auto minmax(0, 1fr) auto auto;
     gap: 0.5rem;
     align-items: baseline;
     padding: 0.25rem 0.4rem;
@@ -175,4 +181,76 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
+}
+
+.entities-modal-link-badge {
+    padding: 0.08rem 0.35rem;
+    border-radius: 999px;
+    color: var(--bs-info-text-emphasis, #087990);
+    background: rgba(13, 202, 240, 0.12);
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.entities-modal-link-observations {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
+}
+
+.entities-modal-ingest-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.entities-modal-ingest-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.55rem;
+    border: 1px solid rgba(13, 202, 240, 0.35);
+    border-radius: 0.4rem;
+    background: rgba(13, 202, 240, 0.06);
+    font-size: 0.86rem;
+}
+
+.entities-modal-ingest-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.entities-modal-ingest-head span,
+.entities-modal-ingest-line span,
+.entities-modal-ingest-notes {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.entities-modal-ingest-item p,
+.entities-modal-ingest-item blockquote {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.entities-modal-ingest-item blockquote {
+    padding-left: 0.6rem;
+    border-left: 3px solid rgba(13, 202, 240, 0.45);
+}
+
+.entities-modal-ingest-line {
+    display: grid;
+    grid-template-columns: minmax(6rem, 9rem) minmax(0, 1fr);
+    gap: 0.35rem;
+}
+
+.entities-modal-ingest-line strong {
+    font-weight: 500;
+    overflow-wrap: anywhere;
 }

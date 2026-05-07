@@ -41,6 +41,8 @@ else
             <ProjectFactsPanel ProjectId="@_workingProject!.Id"
                                RefreshSignal="@_refreshSignal"
                                OnChanged="ReloadAsync" />
+            <IngestSourcesPanel ProjectId="@_workingProject!.Id"
+                                RefreshSignal="@_refreshSignal" />
             <EntitiesPanel ProjectId="@_workingProject!.Id"
                            RefreshSignal="@_refreshSignal"
                            OnChanged="ReloadAsync" />

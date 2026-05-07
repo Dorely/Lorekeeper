@@ -1,3 +1,5 @@
+using Lorekeeper.Ingest;
+
 namespace Lorekeeper.Graph;
 
 public sealed record ProjectGraphSnapshot(
@@ -21,7 +23,12 @@ public sealed record ProjectGraphNode(
     bool CanChangeParent,
     bool CanDelete,
     int Degree,
-    string Color);
+    string Color,
+    bool IsIngestCreated,
+    int IngestSourceCount,
+    int IngestObservationCount,
+    IReadOnlyList<IngestSourceAssertionSummary> IngestSources,
+    IReadOnlyList<IngestSourceObservation> IngestObservations);
 
 public sealed record ProjectGraphEdge(
     long EdgeId,
@@ -32,7 +39,12 @@ public sealed record ProjectGraphEdge(
     int? SortOrder,
     bool IsManaged,
     bool CanEdit,
-    bool CanDelete);
+    bool CanDelete,
+    bool IsIngestCreated,
+    int IngestSourceCount,
+    int IngestObservationCount,
+    IReadOnlyList<IngestSourceAssertionSummary> IngestSources,
+    IReadOnlyList<IngestSourceObservation> IngestObservations);
 
 public sealed record ProjectGraphNodeType(
     string Type,

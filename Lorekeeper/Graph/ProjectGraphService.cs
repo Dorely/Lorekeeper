@@ -347,12 +347,18 @@ public sealed class ProjectGraphService(
             isChapter || (!isProject && !isAct && !isProjectFact),
             !isProject,
             degree,
-            color);
+            color,
+            IngestSourceAssertions.IsIngestCreatedGraphObject(node.Properties),
+            IngestSourceAssertions.CountEntitySources(node.Properties),
+            IngestSourceAssertions.CountEntityObservations(node.Properties),
+            IngestSourceAssertions.SummarizeEntityAssertions(node.Properties),
+            IngestSourceAssertions.ListEntityObservations(node.Properties));
     }
 
     private static ProjectGraphEdge ProjectEdge(GraphEdge edge)
     {
         var isManaged = string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase);
+        var isExtractedFrom = string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
         return new ProjectGraphEdge(
             edge.Id,
             edge.FromNodeId,
@@ -361,8 +367,13 @@ public sealed class ProjectGraphService(
             ProjectProperties(edge.Properties),
             edge.SortOrder,
             isManaged,
-            !isManaged,
-            !isManaged);
+            !isManaged && !isExtractedFrom,
+            !isManaged && !isExtractedFrom,
+            IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties),
+            IngestSourceAssertions.CountRelationshipSources(edge.Properties),
+            IngestSourceAssertions.CountRelationshipObservations(edge.Properties),
+            IngestSourceAssertions.SummarizeRelationshipAssertions(edge.Properties),
+            IngestSourceAssertions.ListRelationshipObservations(edge.Properties));
     }
 
     private static ProjectGraphNodeType ProjectType(EntityTypeDefinition typeDefinition, string color) =>

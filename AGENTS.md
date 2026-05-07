@@ -54,4 +54,5 @@ dotnet watch --project Lorekeeper
 - Trace each requested change through its full impact area before considering the work complete. Changes to models, contracts, or core concepts should include all affected layers such as persistence, services, queries, prompts, background jobs, and UI.
 - Remove superseded code and concepts when replacing them. Do not leave deprecated pages, components, handlers, prompts, queries, or other logic in place just because the new path works; clean out obsolete implementations and reduce unnecessary complexity.
 - This is a local development project. When a requested change replaces a concept, remove the superseded implementation outright; do not add or retain compatibility shims, legacy handlers/fallbacks, deprecated tool aliases, or dual paths unless the user explicitly asks for a transition path.
+- Do not add test projects or automated tests to this repository; verify changes with `dotnet build Lorekeeper.sln` unless the user explicitly requests tests.
 - Never start the app without a plan to also terminate it after verifying the change. Do not leave the app running.

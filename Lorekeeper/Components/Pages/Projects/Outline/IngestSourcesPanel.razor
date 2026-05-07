@@ -1,0 +1,192 @@
+@using Lorekeeper.Ingest
+@using Lorekeeper.Outline
+@inject IEntityService Entities
+
+<div class="ingest-sources-panel">
+    <div class="ingest-sources-header">
+        <span>Sources</span>
+        <span class="ingest-sources-count">@_sections.Count</span>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-muted small"><em>Loading sources...</em></div>
+    }
+    else if (_sections.Count == 0)
+    {
+        <div class="text-muted small ingest-sources-empty"><em>No ingest sources yet.</em></div>
+    }
+    else
+    {
+        <div class="ingest-source-list">
+            @foreach (var sourceSection in _sections)
+            {
+                <details class="ingest-source-section" @key="sourceSection.Source.Id">
+                    <summary>
+                        <span class="ingest-source-name">@sourceSection.Source.Name</span>
+                        <span class="ingest-source-meta">@SourceKind(sourceSection.Source)</span>
+                        <span class="ingest-source-count">@sourceSection.Chunks.Count chunk@(PluralSuffix(sourceSection.Chunks.Count))</span>
+                    </summary>
+
+                    @if (sourceSection.Source.Properties.TryGetValue("description", out var description) && !string.IsNullOrWhiteSpace(description))
+                    {
+                        <p class="ingest-source-description">@description</p>
+                    }
+
+                    <div class="ingest-source-chunks">
+                        @foreach (var chunk in sourceSection.Chunks)
+                        {
+                            <details class="ingest-source-chunk" @key="chunk.Chunk.Id">
+                                <summary>
+                                    <span>@(ChunkIndex(chunk.Chunk) + 1). @chunk.Chunk.Name</span>
+                                    <span>@chunk.ExtractedLinks.Count extracted</span>
+                                </summary>
+
+                                @if (chunk.Chunk.Properties.TryGetValue("summary", out var summary) && !string.IsNullOrWhiteSpace(summary))
+                                {
+                                    <p>@summary</p>
+                                }
+                                @if (chunk.Chunk.Properties.TryGetValue("notes", out var notes) && !string.IsNullOrWhiteSpace(notes))
+                                {
+                                    <div class="ingest-source-notes"><strong>Notes:</strong> @notes</div>
+                                }
+
+                                @if (chunk.ExtractedLinks.Count > 0)
+                                {
+                                    <div class="ingest-source-extracted">
+                                        @foreach (var link in chunk.ExtractedLinks)
+                                        {
+                                            <span title="@link.OtherEntityType">@link.OtherEntityName</span>
+                                        }
+                                    </div>
+                                }
+                            </details>
+                        }
+                    </div>
+                </details>
+            }
+        </div>
+    }
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger alert-dismissible ingest-sources-error">
+            @_error
+            <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public int RefreshSignal { get; set; }
+
+    private sealed class SourceSection
+    {
+        public required StoryEntity Source { get; init; }
+        public List<ChunkSection> Chunks { get; set; } = [];
+    }
+
+    private sealed class ChunkSection
+    {
+        public required StoryEntity Chunk { get; init; }
+        public List<EntityLink> ExtractedLinks { get; set; } = [];
+    }
+
+    private List<SourceSection> _sections = [];
+    private Guid _lastProjectId;
+    private int _lastSignal = -1;
+    private bool _loading;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ProjectId != _lastProjectId || RefreshSignal != _lastSignal)
+        {
+            _lastProjectId = ProjectId;
+            _lastSignal = RefreshSignal;
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var sources = await Entities.ListAsync(ProjectId, EntityTypeService.SourceNodeType);
+            var sections = new List<SourceSection>();
+            foreach (var source in sources.OrderBy(source => source.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                var section = new SourceSection { Source = source };
+                var chunks = await Entities.ListAsync(ProjectId, EntityTypeService.SourceChunkNodeType, source.Id);
+                foreach (var chunk in chunks.OrderBy(ChunkIndex).ThenBy(chunk => chunk.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    section.Chunks.Add(new ChunkSection
+                    {
+                        Chunk = chunk,
+                        ExtractedLinks = await ListExtractedLinksAsync(chunk.Id),
+                    });
+                }
+
+                if (section.Chunks.Count == 0 && IsFoldedSingleChunkSource(source))
+                {
+                    section.Chunks.Add(new ChunkSection
+                    {
+                        Chunk = source,
+                        ExtractedLinks = await ListExtractedLinksAsync(source.Id),
+                    });
+                }
+
+                sections.Add(section);
+            }
+
+            _sections = sections;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task<List<EntityLink>> ListExtractedLinksAsync(Guid entityId)
+    {
+        var links = await Entities.ListLinksAsync(ProjectId, entityId);
+        return links
+            .Where(link => link.Direction == EntityLinkDirection.Incoming
+                && string.Equals(link.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(link => link.OtherEntityType, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(link => link.OtherEntityName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string SourceKind(StoryEntity source) =>
+        source.Properties.TryGetValue("kind", out var kind) && !string.IsNullOrWhiteSpace(kind)
+            ? kind
+            : source.Type;
+
+    private static bool IsFoldedSingleChunkSource(StoryEntity source) =>
+        source.Properties.TryGetValue("singleChunkSource", out var raw)
+        && bool.TryParse(raw, out var isSingleChunkSource)
+        && isSingleChunkSource;
+
+    private static int ChunkIndex(StoryEntity chunk)
+    {
+        if (TryReadInt(chunk.Properties, "index", out var index)) return index;
+        if (TryReadInt(chunk.Properties, "sourceChunkIndex", out var sourceChunkIndex)) return sourceChunkIndex;
+        return chunk.Order ?? 0;
+    }
+
+    private static bool TryReadInt(IReadOnlyDictionary<string, string?> properties, string key, out int value)
+    {
+        value = 0;
+        return properties.TryGetValue(key, out var raw) && int.TryParse(raw, out value);
+    }
+
+    private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
+}

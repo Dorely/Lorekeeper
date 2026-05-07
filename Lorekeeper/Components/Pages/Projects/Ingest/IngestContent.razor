@@ -134,6 +134,10 @@ else
                 {
                     <div class="alert alert-danger py-2 small">@_selectedJob.ErrorMessage</div>
                 }
+                @if (!string.IsNullOrWhiteSpace(_jobActionError))
+                {
+                    <div class="alert alert-danger py-2 small">@_jobActionError</div>
+                }
 
                 <div class="ingest-section-title mt-3">Source Chunks</div>
                 <div class="ingest-chunk-list">
@@ -307,6 +311,7 @@ else
     private bool _readingFile;
     private bool _followCurrentChunk = true;
     private string? _formError;
+    private string? _jobActionError;
     private string? _reportActionError;
     private int? _providerId;
     private int? _resumeProviderId;
@@ -509,6 +514,7 @@ else
         _selectionCts = new CancellationTokenSource();
         var cancellationToken = _selectionCts.Token;
         _followCurrentChunk = true;
+        _jobActionError = null;
         _reportActionError = null;
         try
         {
@@ -665,19 +671,36 @@ else
     private async Task RestartAsync()
     {
         if (_selectedJob is null) return;
-        await Ingest.RestartAsync(_selectedJob.Id);
-        await RefreshSelectedJobAsync();
+        _jobActionError = null;
+        try
+        {
+            await Ingest.RestartAsync(_selectedJob.Id);
+            await RefreshSelectedJobAsync();
+        }
+        catch (Exception ex)
+        {
+            _jobActionError = ex.Message;
+        }
     }
 
     private async Task DeleteAsync()
     {
         if (_selectedJob is null) return;
-        await Ingest.DeleteJobAsync(_selectedJob.Id);
-        _selectedJob = null;
-        _selectedChunkId = null;
-        _reportItems = [];
-        _sourceExcerpt = null;
-        await ReloadJobsAsync();
+        _jobActionError = null;
+        try
+        {
+            await Ingest.DeleteJobAsync(_selectedJob.Id);
+            _selectedJob = null;
+            _selectedChunkId = null;
+            _reportItems = [];
+            _sourceExcerpt = null;
+            await ReloadJobsAsync();
+        }
+        catch (Exception ex)
+        {
+            _jobActionError = ex.Message;
+            await RefreshSelectedJobAsync();
+        }
     }
 
     private async Task OnFileSelectedAsync(InputFileChangeEventArgs e)

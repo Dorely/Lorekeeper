@@ -1,4 +1,5 @@
 @using Lorekeeper.Graph
+@using Lorekeeper.Ingest
 @implements IAsyncDisposable
 @inject IProjectGraphService ProjectGraph
 @inject IJSRuntime JS
@@ -172,6 +173,14 @@
             <div class="graph-node-meta">
                 <span class="graph-node-type" style="border-color: @selected.Color">@selected.Type</span>
                 <span class="text-muted small">@selected.Key</span>
+                @if (selected.IngestSourceCount > 0)
+                {
+                    <span class="badge text-bg-info">@selected.IngestSourceCount source@(PluralSuffix(selected.IngestSourceCount))</span>
+                }
+                else if (selected.IsIngestCreated)
+                {
+                    <span class="badge text-bg-info">ingest</span>
+                }
             </div>
 
             @if (selected.CanRename)
@@ -231,6 +240,8 @@
             </div>
         </form>
 
+        @RenderIngestObservations(selected.IngestObservations, "Ingest observations")
+
         <div class="graph-links-section">
             <div class="graph-links-header">
                 <div class="graph-section-title">Relationships</div>
@@ -257,6 +268,14 @@
                         @if (edge.IsManaged)
                         {
                             <span class="badge text-bg-secondary">managed</span>
+                        }
+                        @if (edge.IngestSourceCount > 0)
+                        {
+                            <span class="badge text-bg-info">@edge.IngestSourceCount source@(PluralSuffix(edge.IngestSourceCount))</span>
+                        }
+                        else if (IsExtractedFrom(edge) || edge.IsIngestCreated)
+                        {
+                            <span class="badge text-bg-info">ingest</span>
                         }
                     </div>
 
@@ -285,9 +304,66 @@
                             }
                         </div>
                     }
+                    @RenderIngestObservations(edge.IngestObservations, "Relationship observations")
+                    @if (!edge.CanEdit && edge.Properties.Count > 0)
+                    {
+                        <div class="graph-link-props">
+                            @foreach (var prop in edge.Properties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+                            {
+                                <span>@prop.Key: @(string.IsNullOrWhiteSpace(prop.Value) ? "-" : prop.Value)</span>
+                            }
+                        </div>
+                    }
                 </div>
             }
         </div>
+    </div>;
+
+    private RenderFragment RenderIngestObservations(IReadOnlyList<IngestSourceObservation> observations, string title) => @<div>
+        @if (observations.Count > 0)
+        {
+            <div class="graph-ingest-section">
+                <div class="graph-section-title">@title</div>
+                @foreach (var observation in observations)
+                {
+                    <div class="graph-ingest-observation" @key="ObservationKey(observation)">
+                        <div class="graph-ingest-head">
+                            <strong>@observation.SourceTitle</strong>
+                            <span>@observation.SourceKind</span>
+                            <span>chunk @(observation.SourceChunkIndex + 1)</span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(observation.Summary))
+                        {
+                            <p>@observation.Summary</p>
+                        }
+                        @if (observation.Aliases.Count > 0)
+                        {
+                            <div class="graph-ingest-line"><span>Aliases</span><strong>@string.Join(", ", observation.Aliases)</strong></div>
+                        }
+                        @if (observation.ObservedProperties.Count > 0)
+                        {
+                            <div class="graph-ingest-props">
+                                @foreach (var prop in observation.ObservedProperties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    <div class="graph-ingest-line">
+                                        <span>@prop.Key</span>
+                                        <strong>@(string.IsNullOrWhiteSpace(prop.Value) ? "-" : prop.Value)</strong>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(observation.Evidence))
+                        {
+                            <blockquote>@observation.Evidence</blockquote>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(observation.Notes))
+                        {
+                            <div class="graph-ingest-notes"><strong>Notes:</strong> @observation.Notes</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
     </div>;
 
     private RenderFragment RenderPropertyEditor(List<PropertyRow> rows, bool allowCustomKeys, bool fixedKeys) => @<div class="graph-property-editor">
@@ -605,6 +681,14 @@
 
     private static int RowsFor(string value) =>
         Math.Clamp(1 + value.Count(ch => ch == '\n'), 2, 8);
+
+    private static bool IsExtractedFrom(ProjectGraphEdge edge) =>
+        string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
+
+    private static string ObservationKey(IngestSourceObservation observation) =>
+        $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
+
+    private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
 
     public async ValueTask DisposeAsync()
     {

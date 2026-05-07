@@ -88,6 +88,18 @@ public static class IngestSourceAssertions
     public static int CountRelationshipSources(IReadOnlyDictionary<string, object?> properties) =>
         CountSources(properties, RelationshipAssertionsProperty);
 
+    public static bool ContainsEntitySource(IReadOnlyDictionary<string, object?> properties, Guid sourceId) =>
+        ContainsSource(properties, EntityAssertionsProperty, sourceId);
+
+    public static bool ContainsRelationshipSource(IReadOnlyDictionary<string, object?> properties, Guid sourceId) =>
+        ContainsSource(properties, RelationshipAssertionsProperty, sourceId);
+
+    public static int CountEntityObservations(IReadOnlyDictionary<string, object?> properties) =>
+        CountObservations(properties, EntityAssertionsProperty);
+
+    public static int CountRelationshipObservations(IReadOnlyDictionary<string, object?> properties) =>
+        CountObservations(properties, RelationshipAssertionsProperty);
+
     public static IReadOnlyList<IngestSourceAssertionSummary> SummarizeEntityAssertions(
         IReadOnlyDictionary<string, object?> properties,
         int maxSources = 5) =>
@@ -97,6 +109,16 @@ public static class IngestSourceAssertions
         IReadOnlyDictionary<string, object?> properties,
         int maxSources = 5) =>
         SummarizeAssertions(properties, RelationshipAssertionsProperty, maxSources);
+
+    public static IReadOnlyList<IngestSourceObservation> ListEntityObservations(
+        IReadOnlyDictionary<string, object?> properties,
+        int maxObservations = 20) =>
+        ListObservations(properties, EntityAssertionsProperty, maxObservations);
+
+    public static IReadOnlyList<IngestSourceObservation> ListRelationshipObservations(
+        IReadOnlyDictionary<string, object?> properties,
+        int maxObservations = 20) =>
+        ListObservations(properties, RelationshipAssertionsProperty, maxObservations);
 
     public static bool TryReadPayloadString(string payloadJson, string propertyName, out string? value)
     {
@@ -222,6 +244,18 @@ public static class IngestSourceAssertions
         return document.Sources.Count;
     }
 
+    private static bool ContainsSource(IReadOnlyDictionary<string, object?> properties, string propertyKey, Guid sourceId)
+    {
+        var document = ReadDocument(ReadRaw(properties, propertyKey));
+        return document.Sources.ContainsKey(SourceKey(sourceId));
+    }
+
+    private static int CountObservations(IReadOnlyDictionary<string, object?> properties, string propertyKey)
+    {
+        var document = ReadDocument(ReadRaw(properties, propertyKey));
+        return document.Sources.Values.Sum(source => source.Chunks.Count);
+    }
+
     private static IReadOnlyList<IngestSourceAssertionSummary> SummarizeAssertions(
         IReadOnlyDictionary<string, object?> properties,
         string propertyKey,
@@ -246,6 +280,37 @@ public static class IngestSourceAssertions
                     .Select(chunk => chunk.Summary)
                     .FirstOrDefault(summary => !string.IsNullOrWhiteSpace(summary)) ?? string.Empty,
                 source.UpdatedAt))
+            .ToList();
+    }
+
+    private static IReadOnlyList<IngestSourceObservation> ListObservations(
+        IReadOnlyDictionary<string, object?> properties,
+        string propertyKey,
+        int maxObservations)
+    {
+        var document = ReadDocument(ReadRaw(properties, propertyKey));
+        return document.Sources.Values
+            .OrderBy(source => source.SourceTitle, StringComparer.OrdinalIgnoreCase)
+            .SelectMany(source => source.Chunks.Values
+                .OrderBy(chunk => chunk.SourceChunkIndex)
+                .Select(chunk => new IngestSourceObservation(
+                    source.SourceId,
+                    source.SourceTitle,
+                    source.SourceKind,
+                    chunk.JobId,
+                    chunk.SourceChunkId,
+                    chunk.SourceChunkIndex,
+                    chunk.Summary,
+                    new Dictionary<string, string?>(chunk.ObservedProperties, StringComparer.OrdinalIgnoreCase),
+                    chunk.Aliases
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
+                        .ToArray(),
+                    chunk.Evidence,
+                    chunk.Notes,
+                    chunk.RecordedAt,
+                    chunk.UpdatedAt)))
+            .Take(Math.Max(0, maxObservations))
             .ToList();
     }
 
@@ -388,4 +453,19 @@ public sealed record IngestSourceAssertionSummary(
     int ChunkCount,
     IReadOnlyList<string> Aliases,
     string Summary,
+    DateTime UpdatedAt);
+
+public sealed record IngestSourceObservation(
+    string SourceId,
+    string SourceTitle,
+    string SourceKind,
+    string JobId,
+    string SourceChunkId,
+    int SourceChunkIndex,
+    string Summary,
+    IReadOnlyDictionary<string, string?> ObservedProperties,
+    IReadOnlyList<string> Aliases,
+    string Evidence,
+    string Notes,
+    DateTime RecordedAt,
     DateTime UpdatedAt);

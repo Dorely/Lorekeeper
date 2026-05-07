@@ -272,7 +272,12 @@ public sealed class EntityService(
                 OtherEntityName: other.Label ?? other.Key,
                 OtherEntityType: other.NodeType,
                 SortOrder: edge.SortOrder,
-                Properties: ProjectProperties(edge.Properties)));
+                Properties: ProjectProperties(edge.Properties),
+                IsIngestCreated: IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties),
+                IngestSourceCount: IngestSourceAssertions.CountRelationshipSources(edge.Properties),
+                IngestObservationCount: IngestSourceAssertions.CountRelationshipObservations(edge.Properties),
+                IngestSources: IngestSourceAssertions.SummarizeRelationshipAssertions(edge.Properties),
+                IngestObservations: IngestSourceAssertions.ListRelationshipObservations(edge.Properties)));
         }
         return result;
     }
@@ -346,7 +351,12 @@ public sealed class EntityService(
             Name: node.Label ?? node.Key,
             Order: orderOverride,
             ParentId: parentId,
-            Properties: props);
+                Properties: props,
+                IsIngestCreated: IngestSourceAssertions.IsIngestCreatedGraphObject(node.Properties),
+                IngestSourceCount: IngestSourceAssertions.CountEntitySources(node.Properties),
+                IngestObservationCount: IngestSourceAssertions.CountEntityObservations(node.Properties),
+                IngestSources: IngestSourceAssertions.SummarizeEntityAssertions(node.Properties),
+                IngestObservations: IngestSourceAssertions.ListEntityObservations(node.Properties));
     }
 
     private static Dictionary<string, object?> ToObjectDict(IDictionary<string, string?>? src)

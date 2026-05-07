@@ -16,46 +16,33 @@ public sealed class IngestGraphSync(
 
     public async Task EnsureSourceAsync(IngestSource source, IReadOnlyList<IngestSourceChunk> sourceChunks, CancellationToken cancellationToken = default)
     {
+        var orderedChunks = sourceChunks.OrderBy(chunk => chunk.Index).ToList();
+        var isSingleChunkSource = orderedChunks.Count == 1;
         var sourceNode = await graph.UpsertNodeAsync(
             source.ProjectId,
             SourceNodeType,
             source.Id.ToString("N"),
             source.Title,
-            new Dictionary<string, object?>
-            {
-                ["sourceType"] = "ingest_source",
-                ["sourceId"] = source.Id.ToString("N"),
-                ["kind"] = source.SourceKind,
-                ["description"] = source.Description,
-                ["structural"] = true,
-                ["vectorIndexState"] = source.VectorIndexState.ToString(),
-                ["vectorIndexedAt"] = source.VectorIndexedAt?.ToString("o"),
-                ["vectorIndexError"] = source.VectorIndexError,
-            },
+            BuildSourceProperties(source, isSingleChunkSource ? orderedChunks[0] : null),
             cancellationToken);
 
-        foreach (var sourceChunk in sourceChunks.OrderBy(chunk => chunk.Index))
+        foreach (var sourceChunk in orderedChunks)
         {
+            var existingChunkNode = await nodes.FindAsync(
+                source.ProjectId,
+                SourceChunkNodeType,
+                sourceChunk.Id.ToString("N"),
+                cancellationToken);
+
+            if (isSingleChunkSource && existingChunkNode is null)
+                continue;
+
             var chunkNode = await graph.UpsertNodeAsync(
                 source.ProjectId,
                 SourceChunkNodeType,
                 sourceChunk.Id.ToString("N"),
-                sourceChunk.Title,
-                new Dictionary<string, object?>
-                {
-                    ["sourceType"] = "ingest_source_chunk",
-                    ["sourceId"] = source.Id.ToString("N"),
-                    ["sourceChunkId"] = sourceChunk.Id.ToString("N"),
-                    ["index"] = sourceChunk.Index,
-                    ["headingPath"] = sourceChunk.HeadingPath,
-                    ["startChar"] = sourceChunk.StartChar,
-                    ["endChar"] = sourceChunk.EndChar,
-                    ["estimatedTokenCount"] = sourceChunk.EstimatedTokenCount,
-                    ["tokenCountMethod"] = sourceChunk.TokenCountMethod,
-                    ["summary"] = sourceChunk.Summary,
-                    ["notes"] = sourceChunk.AgentNotes,
-                    ["structural"] = true,
-                },
+                existingChunkNode is null ? BuildChunkGraphLabel(source, sourceChunk) : existingChunkNode.Label,
+                BuildChunkProperties(source, sourceChunk),
                 cancellationToken);
 
             await graph.UpsertEdgeAsync(
@@ -94,4 +81,98 @@ public sealed class IngestGraphSync(
     private static bool HasSourceId(GraphNode node, string sourceKey) =>
         node.Properties.TryGetValue("sourceId", out var value)
         && string.Equals(value?.ToString(), sourceKey, StringComparison.OrdinalIgnoreCase);
+
+    private static Dictionary<string, object?> BuildSourceProperties(IngestSource source, IngestSourceChunk? singleChunk)
+    {
+        var properties = new Dictionary<string, object?>
+        {
+            [IngestSourceAssertions.GraphOriginProperty] = IngestSourceAssertions.GraphOriginIngestValue,
+            ["sourceType"] = "ingest_source",
+            ["sourceId"] = source.Id.ToString("N"),
+            ["kind"] = source.SourceKind,
+            ["description"] = source.Description,
+            ["structural"] = true,
+            ["singleChunkSource"] = singleChunk is not null,
+            ["vectorIndexState"] = source.VectorIndexState.ToString(),
+            ["vectorIndexedAt"] = source.VectorIndexedAt?.ToString("o"),
+            ["vectorIndexError"] = source.VectorIndexError,
+        };
+
+        if (singleChunk is not null)
+            AddChunkProperties(properties, source, singleChunk, sourceType: "ingest_source");
+
+        return properties;
+    }
+
+    private static Dictionary<string, object?> BuildChunkProperties(IngestSource source, IngestSourceChunk sourceChunk)
+    {
+        var properties = new Dictionary<string, object?>
+        {
+            [IngestSourceAssertions.GraphOriginProperty] = IngestSourceAssertions.GraphOriginIngestValue,
+            ["sourceType"] = "ingest_source_chunk",
+            ["structural"] = true,
+        };
+
+        AddChunkProperties(properties, source, sourceChunk, sourceType: "ingest_source_chunk");
+        return properties;
+    }
+
+    private static void AddChunkProperties(
+        Dictionary<string, object?> properties,
+        IngestSource source,
+        IngestSourceChunk sourceChunk,
+        string sourceType)
+    {
+        properties["sourceType"] = sourceType;
+        properties["sourceId"] = source.Id.ToString("N");
+        properties["sourceChunkId"] = sourceChunk.Id.ToString("N");
+        properties["sourceChunkIndex"] = sourceChunk.Index;
+        properties["index"] = sourceChunk.Index;
+        properties["headingPath"] = sourceChunk.HeadingPath;
+        properties["startChar"] = sourceChunk.StartChar;
+        properties["endChar"] = sourceChunk.EndChar;
+        properties["estimatedTokenCount"] = sourceChunk.EstimatedTokenCount;
+        properties["tokenCountMethod"] = sourceChunk.TokenCountMethod;
+        properties["tokenEncodingName"] = sourceChunk.TokenEncodingName;
+        properties["tokenCountIsExact"] = sourceChunk.TokenCountIsExact;
+        properties["summary"] = sourceChunk.Summary;
+        properties["notes"] = sourceChunk.AgentNotes;
+    }
+
+    private static string BuildChunkGraphLabel(IngestSource source, IngestSourceChunk sourceChunk)
+    {
+        var prefix = $"{source.Title.Trim()} Part {sourceChunk.Index + 1}".Trim();
+        var title = sourceChunk.Title.Trim();
+        return string.IsNullOrWhiteSpace(title) || IsGeneratedPartTitle(title)
+            ? prefix
+            : $"{prefix} / {title}";
+    }
+
+    private static bool IsGeneratedPartTitle(string title)
+    {
+        var normalized = title.Trim();
+        if (!normalized.StartsWith("Part ", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var remainder = normalized["Part ".Length..].Trim();
+        var numberLength = 0;
+        while (numberLength < remainder.Length && char.IsDigit(remainder[numberLength]))
+            numberLength++;
+
+        if (numberLength == 0)
+            return false;
+
+        remainder = remainder[numberLength..].Trim();
+        if (remainder.Length == 0)
+            return true;
+
+        if (!remainder.StartsWith("+", StringComparison.Ordinal))
+            return false;
+
+        var parts = remainder[1..].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 2
+            && int.TryParse(parts[0], out _)
+            && (string.Equals(parts[1], "section", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[1], "sections", StringComparison.OrdinalIgnoreCase));
+    }
 }

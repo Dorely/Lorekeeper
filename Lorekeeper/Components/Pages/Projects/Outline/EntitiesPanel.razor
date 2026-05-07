@@ -1,3 +1,4 @@
+@using Lorekeeper.Ingest
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
 @implements IAsyncDisposable
@@ -70,13 +71,13 @@
                         <div class="entities-item" @key="e.Id">
                             <button type="button" class="entities-item-name"
                                     @onclick="() => OpenModalAsync(e)">@e.Name</button>
-                            @if (e.Properties.TryGetValue("description", out var desc) && !string.IsNullOrWhiteSpace(desc))
+                            @if (e.IngestSourceCount > 0)
                             {
-                                <div class="entities-item-sub text-muted small">@desc</div>
+                                <div class="entities-item-meta small">@e.IngestSourceCount source@(PluralSuffix(e.IngestSourceCount)) - @e.IngestObservationCount observation@(PluralSuffix(e.IngestObservationCount))</div>
                             }
-                            else if (e.Properties.TryGetValue("role", out var role) && !string.IsNullOrWhiteSpace(role))
+                            @if (EntitySubtitle(e) is { Length: > 0 } subtitle)
                             {
-                                <div class="entities-item-sub text-muted small">@role</div>
+                                <div class="entities-item-sub text-muted small">@subtitle</div>
                             }
                         </div>
                     }
@@ -138,6 +139,8 @@
                         </div>
                     </div>
 
+                    @RenderIngestObservations(_modalEntity.IngestObservations, "Ingest observations")
+
                     <div class="mb-0">
                         <label class="form-label small text-muted">Links</label>
                         @if (_modalLinks.Count == 0)
@@ -156,6 +159,23 @@
                                         <span class="entities-modal-link-edge">@link.EdgeType</span>
                                         <span class="entities-modal-link-other">@link.OtherEntityName</span>
                                         <span class="entities-modal-link-type text-muted small">@link.OtherEntityType</span>
+                                        @if (link.IngestSourceCount > 0)
+                                        {
+                                            <span class="entities-modal-link-badge">@link.IngestSourceCount source@(PluralSuffix(link.IngestSourceCount))</span>
+                                        }
+                                        else if (link.IsIngestCreated)
+                                        {
+                                            <span class="entities-modal-link-badge">ingest</span>
+                                        }
+                                        @if (link.IngestObservations.Count > 0)
+                                        {
+                                            <div class="entities-modal-link-observations">
+                                                @foreach (var observation in link.IngestObservations.Take(3))
+                                                {
+                                                    <div><strong>@observation.SourceTitle:</strong> @ObservationPreview(observation)</div>
+                                                }
+                                            </div>
+                                        }
                                     </li>
                                 }
                             </ul>
@@ -386,6 +406,73 @@
 
     private static int RowsFor(string value) =>
         Math.Clamp(1 + value.Count(c => c == '\n'), 2, 10);
+
+    private RenderFragment RenderIngestObservations(IReadOnlyList<IngestSourceObservation> observations, string title) => @<div>
+        @if (observations.Count > 0)
+        {
+            <div class="entities-modal-ingest mb-3">
+                <label class="form-label small text-muted">@title</label>
+                <div class="entities-modal-ingest-list">
+                    @foreach (var observation in observations)
+                    {
+                        <div class="entities-modal-ingest-item" @key="ObservationKey(observation)">
+                            <div class="entities-modal-ingest-head">
+                                <strong>@observation.SourceTitle</strong>
+                                <span>@observation.SourceKind</span>
+                                <span>chunk @(observation.SourceChunkIndex + 1)</span>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(observation.Summary))
+                            {
+                                <p>@observation.Summary</p>
+                            }
+                            @if (observation.Aliases.Count > 0)
+                            {
+                                <div class="entities-modal-ingest-line"><span>Aliases</span><strong>@string.Join(", ", observation.Aliases)</strong></div>
+                            }
+                            @foreach (var prop in observation.ObservedProperties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+                            {
+                                <div class="entities-modal-ingest-line">
+                                    <span>@prop.Key</span>
+                                    <strong>@(string.IsNullOrWhiteSpace(prop.Value) ? "-" : prop.Value)</strong>
+                                </div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(observation.Evidence))
+                            {
+                                <blockquote>@observation.Evidence</blockquote>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(observation.Notes))
+                            {
+                                <div class="entities-modal-ingest-notes"><strong>Notes:</strong> @observation.Notes</div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>;
+
+    private static string EntitySubtitle(StoryEntity entity)
+    {
+        if (entity.Properties.TryGetValue("description", out var description) && !string.IsNullOrWhiteSpace(description))
+            return description;
+        if (entity.Properties.TryGetValue("role", out var role) && !string.IsNullOrWhiteSpace(role))
+            return role;
+
+        return entity.IngestObservations.Select(ObservationPreview).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+            ?? entity.IngestSources.Select(source => source.Summary).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+            ?? string.Empty;
+    }
+
+    private static string ObservationPreview(IngestSourceObservation observation) =>
+        !string.IsNullOrWhiteSpace(observation.Summary) ? observation.Summary
+        : !string.IsNullOrWhiteSpace(observation.Evidence) ? observation.Evidence
+        : !string.IsNullOrWhiteSpace(observation.Notes) ? observation.Notes
+        : observation.ObservedProperties.Values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
+    private static string ObservationKey(IngestSourceObservation observation) =>
+        $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
+
+    private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
 
     private async Task SaveEditAsync(StoryEntity e)
     {

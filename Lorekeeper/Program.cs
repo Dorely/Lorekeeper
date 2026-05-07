@@ -82,6 +82,7 @@ builder.Services.AddSingleton<IIngestJobQueue, IngestJobQueue>();
 builder.Services.AddSingleton<IIngestJobNotifier, IngestJobNotifier>();
 builder.Services.AddScoped<IIngestSourceStructureBuilder, IngestSourceStructureBuilder>();
 builder.Services.AddScoped<IIngestGraphSync, IngestGraphSync>();
+builder.Services.AddScoped<IIngestGraphCleanup, IngestGraphCleanup>();
 builder.Services.AddScoped<IngestAgentTools>();
 builder.Services.AddScoped<IngestJobProcessor>();
 builder.Services.AddScoped<IIngestService, IngestService>();

@@ -1,5 +1,7 @@
 @using Lorekeeper.Graph
+@using Lorekeeper.Ingest
 @using Lorekeeper.Models
+@using Lorekeeper.Outline
 @implements IAsyncDisposable
 @inject IProjectGraphService ProjectGraph
 @inject IJSRuntime JS
@@ -43,6 +45,11 @@ else
                 <label class="graph-toggle">
                     <input type="checkbox" checked="@_showManagedEdges" @onchange="OnShowManagedEdgesChangedAsync" />
                     <span>Managed links</span>
+                </label>
+
+                <label class="graph-toggle">
+                    <input type="checkbox" checked="@_showOnlyIngest" @onchange="OnShowOnlyIngestChangedAsync" />
+                    <span>Ingested</span>
                 </label>
 
                 <div class="graph-toolbar-spacer"></div>
@@ -120,6 +127,7 @@ else
     private string _typeFilter = string.Empty;
     private bool _showStructural = true;
     private bool _showManagedEdges = true;
+    private bool _showOnlyIngest;
     private bool _physicsEnabled = true;
     private bool _addingNode;
     private bool _loading = true;
@@ -199,13 +207,13 @@ else
         {
             id = n.NodeId.ToString(),
             label = n.Label,
-            title = $"{n.Type}: {n.Label}",
+            title = NodeTitle(n),
             type = n.Type,
             value = Math.Max(6, Math.Min(26, 8 + n.Degree * 2)),
             color = new
             {
                 background = n.Color,
-                border = n.IsStructural ? "#d9dde7" : "#f5f7fb",
+                border = IsIngestNode(n) ? "#fdd663" : n.IsStructural ? "#d9dde7" : "#f5f7fb",
                 highlight = new { background = "#ffffff", border = n.Color }
             },
             font = new { color = "#f4f7fb", size = n.IsStructural ? 15 : 13 },
@@ -218,9 +226,9 @@ else
             from = e.FromNodeId.ToString(),
             to = e.ToNodeId.ToString(),
             label = e.EdgeType,
-            title = e.EdgeType,
+            title = EdgeTitle(e),
             dashes = e.IsManaged,
-            color = new { color = e.IsManaged ? "rgba(190, 198, 214, 0.38)" : "rgba(137, 218, 240, 0.68)", highlight = "#ffffff" },
+            color = new { color = IsIngestEdge(e) ? "rgba(253, 214, 99, 0.82)" : e.IsManaged ? "rgba(190, 198, 214, 0.38)" : "rgba(137, 218, 240, 0.68)", highlight = "#ffffff" },
             arrows = new { to = new { enabled = true, scaleFactor = e.IsManaged ? 0.45 : 0.65 } },
             font = new { color = "rgba(238, 242, 247, 0.72)", size = 10, strokeWidth = 0 },
         }).ToList();
@@ -246,6 +254,7 @@ else
         return _snapshot.Nodes
             .Where(n => _showStructural || !n.IsStructural)
             .Where(n => string.IsNullOrWhiteSpace(_typeFilter) || string.Equals(n.Type, _typeFilter, StringComparison.Ordinal))
+            .Where(n => !_showOnlyIngest || IsIngestNode(n))
             .Where(n => SearchMatches(n, search))
             .ToList();
     }
@@ -256,6 +265,7 @@ else
         return _snapshot.Edges
             .Where(e => visibleNodeIds.Contains(e.FromNodeId) && visibleNodeIds.Contains(e.ToNodeId))
             .Where(e => _showManagedEdges || !e.IsManaged)
+            .Where(e => !_showOnlyIngest || IsIngestEdge(e))
             .ToList();
     }
 
@@ -264,9 +274,63 @@ else
         if (search.Length == 0) return true;
         if (node.Label.Contains(search, StringComparison.OrdinalIgnoreCase)) return true;
         if (node.Type.Contains(search, StringComparison.OrdinalIgnoreCase)) return true;
-        return node.Properties.Any(kv =>
+        if (node.Properties.Any(kv =>
+            kv.Key.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || (kv.Value?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)))
+        {
+            return true;
+        }
+
+        return node.IngestSources.Any(source => IngestSummaryMatches(source, search))
+            || node.IngestObservations.Any(observation => IngestObservationMatches(observation, search));
+    }
+
+    private static bool IngestSummaryMatches(IngestSourceAssertionSummary source, string search) =>
+        source.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || source.SourceKind.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || source.Summary.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || source.Aliases.Any(alias => alias.Contains(search, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IngestObservationMatches(IngestSourceObservation observation, string search) =>
+        observation.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || observation.SourceKind.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || observation.Summary.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || observation.Evidence.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || observation.Notes.Contains(search, StringComparison.OrdinalIgnoreCase)
+        || observation.Aliases.Any(alias => alias.Contains(search, StringComparison.OrdinalIgnoreCase))
+        || observation.ObservedProperties.Any(kv =>
             kv.Key.Contains(search, StringComparison.OrdinalIgnoreCase)
             || (kv.Value?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+
+    private static bool IsIngestNode(ProjectGraphNode node) =>
+        node.IsIngestCreated
+        || node.IngestSourceCount > 0
+        || string.Equals(node.Type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(node.Type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsIngestEdge(ProjectGraphEdge edge) =>
+        edge.IsIngestCreated
+        || edge.IngestSourceCount > 0
+        || string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
+
+    private static string NodeTitle(ProjectGraphNode node)
+    {
+        var title = $"{node.Type}: {node.Label}";
+        if (node.IngestSourceCount > 0)
+            title += $"\nIngest observations: {node.IngestObservationCount} from {node.IngestSourceCount} source{PluralSuffix(node.IngestSourceCount)}";
+        else if (node.IsIngestCreated)
+            title += "\nCreated by ingest";
+        return title;
+    }
+
+    private static string EdgeTitle(ProjectGraphEdge edge)
+    {
+        var title = edge.EdgeType;
+        if (edge.IngestSourceCount > 0)
+            title += $"\nIngest observations: {edge.IngestObservationCount} from {edge.IngestSourceCount} source{PluralSuffix(edge.IngestSourceCount)}";
+        else if (edge.IsIngestCreated || string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase))
+            title += "\nIngest provenance link";
+        return title;
     }
 
     private async Task OnSearchInputAsync(ChangeEventArgs e)
@@ -290,6 +354,12 @@ else
     private async Task OnShowManagedEdgesChangedAsync(ChangeEventArgs e)
     {
         _showManagedEdges = e.Value is bool value && value;
+        await RenderGraphAsync();
+    }
+
+    private async Task OnShowOnlyIngestChangedAsync(ChangeEventArgs e)
+    {
+        _showOnlyIngest = e.Value is bool value && value;
         await RenderGraphAsync();
     }
 
