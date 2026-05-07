@@ -1,0 +1,304 @@
+@using System.Text
+@using Lorekeeper.Models
+@using Lorekeeper.Writing
+@implements IAsyncDisposable
+@inject IWritingCoachService Coach
+@inject IJSRuntime JS
+
+<div class="writing-coach">
+    <div class="writing-coach-header">
+        <span class="writing-coach-title">Writing Coach</span>
+        <button type="button" class="btn btn-link btn-sm writing-coach-reset" title="Start over"
+                disabled="@_running" @onclick="ResetAsync">Reset</button>
+    </div>
+
+    <div class="writing-coach-scroll" @ref="_scrollEl">
+        @if (_loading)
+        {
+            <div class="writing-coach-empty"><em>Loading...</em></div>
+        }
+        else
+        {
+            @foreach (var message in RenderableMessages())
+            {
+                <div class="@MessageClass(message)">
+                    @if (!string.IsNullOrWhiteSpace(message.Content))
+                    {
+                        <div class="writing-coach-msg-text">@message.Content</div>
+                    }
+                    @if (message.Status == WritingCoachMessageStatus.Failed)
+                    {
+                        <div class="writing-coach-msg-status writing-coach-msg-failed">Failed</div>
+                    }
+                    else if (message.Status == WritingCoachMessageStatus.Cancelled)
+                    {
+                        <div class="writing-coach-msg-status writing-coach-msg-cancelled">Cancelled</div>
+                    }
+                </div>
+            }
+
+            @if (_running)
+            {
+                @if (_liveText.Length == 0)
+                {
+                    <div class="writing-coach-msg writing-coach-msg-asst writing-coach-msg-streaming">
+                        <span class="writing-coach-typing"><span></span><span></span><span></span></span>
+                    </div>
+                }
+                else
+                {
+                    <div class="writing-coach-msg writing-coach-msg-asst writing-coach-msg-streaming">
+                        <div class="writing-coach-msg-text">@_liveText.ToString()<span class="writing-coach-cursor">|</span></div>
+                    </div>
+                }
+            }
+        }
+        <div class="writing-coach-bottom-sentinel" aria-hidden="true"></div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="writing-coach-error">
+            <span>@_error</span>
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _error = null"></button>
+        </div>
+    }
+
+    <div class="writing-coach-composer">
+        <textarea class="form-control writing-coach-input" rows="1" placeholder="Ask for a prompt or feedback..."
+                  @ref="_composerEl"
+                  disabled="@_running"
+                  @bind="_input" @bind:event="oninput"
+                  @onkeydown="OnKeyDown"></textarea>
+        @if (_running)
+        {
+            <button type="button" class="btn btn-outline-danger" @onclick="CancelAsync">Stop</button>
+        }
+        else
+        {
+            <button type="button" class="btn btn-primary"
+                    disabled="@string.IsNullOrWhiteSpace(_input)"
+                    @onclick="SendAsync">Send</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public string? CurrentSampleTitle { get; set; }
+    [Parameter] public string? CurrentSampleBody { get; set; }
+    [Parameter] public Func<Task<(string? Title, string? Body)>>? GetCurrentDraft { get; set; }
+
+    private ElementReference _scrollEl;
+    private ElementReference _composerEl;
+    private IJSObjectReference? _scroller;
+    private bool _scrollerAttached;
+    private bool _autoSizeAttached;
+    private bool _resetComposerAfterRender;
+    private bool _scrollAfterRender;
+    private bool _forceScrollAfterRender;
+
+    private WritingCoachConversation? _conversation;
+    private List<WritingCoachMessage> _messages = [];
+    private readonly StringBuilder _liveText = new();
+
+    private string _input = string.Empty;
+    private bool _running;
+    private bool _loading = true;
+    private string? _error;
+    private CancellationTokenSource? _cts;
+    private Guid? _loadedProjectId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _scroller = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./Components/Pages/Projects/WritingSample/WritingCoachPanel.razor.js");
+        }
+        if (_scroller is not null && !_scrollerAttached)
+        {
+            try { await _scroller.InvokeVoidAsync("attachScroller", _scrollEl); _scrollerAttached = true; }
+            catch { }
+        }
+        if (_scroller is not null && !_autoSizeAttached)
+        {
+            try { await _scroller.InvokeVoidAsync("attachAutoSize", _composerEl); _autoSizeAttached = true; }
+            catch { }
+        }
+        if (_scroller is not null && _resetComposerAfterRender)
+        {
+            _resetComposerAfterRender = false;
+            await ResetComposerSizeAsync();
+        }
+        if (_scroller is not null && _scrollAfterRender)
+        {
+            var force = _forceScrollAfterRender;
+            _scrollAfterRender = false;
+            _forceScrollAfterRender = false;
+            await ScrollToBottomAsync(force);
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ProjectId == Guid.Empty) return;
+        if (_loadedProjectId == ProjectId) return;
+
+        _loadedProjectId = ProjectId;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _conversation = await Coach.GetOrCreateAsync(ProjectId);
+            _messages = (await Coach.LoadMessagesAsync(_conversation.Id)).ToList();
+        }
+        finally
+        {
+            _loading = false;
+        }
+        RequestScroll(force: true);
+    }
+
+    private async Task SendAsync()
+    {
+        var text = _input?.Trim();
+        if (_running || string.IsNullOrEmpty(text)) return;
+
+        (string? Title, string? Body) draft = GetCurrentDraft is null
+            ? (CurrentSampleTitle, CurrentSampleBody)
+            : await GetCurrentDraft.Invoke();
+
+        _input = string.Empty;
+        _running = true;
+        _error = null;
+        _liveText.Clear();
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        _resetComposerAfterRender = true;
+
+        _messages.Add(new WritingCoachMessage
+        {
+            ConversationId = _conversation?.Id ?? Guid.Empty,
+            Role = WritingCoachMessageRole.User,
+            Content = text,
+            Status = WritingCoachMessageStatus.Completed,
+        });
+        await ResumeAutoFollowAsync();
+        RequestScroll(force: true);
+        StateHasChanged();
+
+        try
+        {
+            await foreach (var update in Coach.SendAsync(ProjectId, text, draft.Title, draft.Body, _cts.Token))
+            {
+                switch (update)
+                {
+                    case WritingCoachTextDelta delta:
+                        _liveText.Append(delta.Text);
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+
+                    case WritingCoachAssistantMessageCompleted:
+                        await ReloadFromDbAsync();
+                        _liveText.Clear();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+
+                    case WritingCoachTurnError error:
+                        _error = error.Cancelled ? null : error.Message;
+                        await ReloadFromDbAsync();
+                        _liveText.Clear();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _running = false;
+            _liveText.Clear();
+            _cts?.Dispose();
+            _cts = null;
+            RequestScroll();
+            StateHasChanged();
+        }
+    }
+
+    private async Task ResetAsync()
+    {
+        if (_running) return;
+        await Coach.ResetAsync(ProjectId);
+        await LoadAsync();
+    }
+
+    private void CancelAsync() => _cts?.Cancel();
+
+    private async Task ReloadFromDbAsync()
+    {
+        if (_conversation is null) return;
+        _messages = (await Coach.LoadMessagesAsync(_conversation.Id)).ToList();
+    }
+
+    private IEnumerable<WritingCoachMessage> RenderableMessages() =>
+        _messages.Where(message => message.Role != WritingCoachMessageRole.System);
+
+    private static string MessageClass(WritingCoachMessage message) =>
+        message.Role == WritingCoachMessageRole.User
+            ? "writing-coach-msg writing-coach-msg-user"
+            : "writing-coach-msg writing-coach-msg-asst";
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+            await SendAsync();
+    }
+
+    private void RequestScroll(bool force = false)
+    {
+        _scrollAfterRender = true;
+        _forceScrollAfterRender = _forceScrollAfterRender || force;
+    }
+
+    private async Task ResumeAutoFollowAsync()
+    {
+        if (_scroller is null) return;
+        try { await _scroller.InvokeVoidAsync("resumeAutoFollow", _scrollEl); }
+        catch { }
+    }
+
+    private async Task ScrollToBottomAsync(bool force = false)
+    {
+        if (_scroller is null) return;
+        try { await _scroller.InvokeVoidAsync("scrollToBottom", _scrollEl, force); }
+        catch { }
+    }
+
+    private async Task ResetComposerSizeAsync()
+    {
+        if (_scroller is null) return;
+        try { await _scroller.InvokeVoidAsync("resetAutoSize", _composerEl); }
+        catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        if (_scroller is not null)
+        {
+            try { await _scroller.DisposeAsync(); } catch { }
+        }
+    }
+}

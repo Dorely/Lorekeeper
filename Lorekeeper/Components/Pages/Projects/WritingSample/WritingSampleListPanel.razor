@@ -1,0 +1,88 @@
+@using Lorekeeper.Models
+
+<aside class="writing-sample-list">
+    <div class="writing-sample-list-header">
+        <div>
+            <div class="writing-sample-list-title">Writing Samples</div>
+            <div class="writing-sample-list-count">@Samples.Count sample@(Samples.Count == 1 ? string.Empty : "s")</div>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" @onclick="CreateAsync">New</button>
+    </div>
+
+    @if (Samples.Count == 0)
+    {
+        <div class="writing-sample-list-empty">No samples yet.</div>
+    }
+    else
+    {
+        <div class="writing-sample-list-scroll">
+            @foreach (var sample in Samples)
+            {
+                var active = ActiveSampleId == sample.Id;
+                <div class="writing-sample-row @(active ? "active" : "")">
+                    <button type="button" class="writing-sample-row-main" @onclick="() => SelectAsync(sample.Id)">
+                        <span class="writing-sample-row-title">@sample.Title</span>
+                        <span class="writing-sample-row-time">Updated @sample.UpdatedAt.ToLocalTime().ToString("MMM d, HH:mm")</span>
+                        <span class="writing-sample-row-excerpt">@Excerpt(sample.Body)</span>
+                    </button>
+                    @if (_confirmDeleteId == sample.Id)
+                    {
+                        <div class="writing-sample-row-confirm">
+                            <span>Delete?</span>
+                            <button type="button" class="btn btn-sm btn-danger" @onclick="() => ConfirmDeleteAsync(sample.Id)">Yes</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelDelete">No</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-danger writing-sample-row-delete"
+                                title="Delete sample" @onclick="() => AskDelete(sample.Id)">Delete</button>
+                    }
+                </div>
+            }
+        </div>
+    }
+</aside>
+
+@code {
+    [Parameter] public IReadOnlyList<WritingSample> Samples { get; set; } = [];
+    [Parameter] public Guid? ActiveSampleId { get; set; }
+    [Parameter] public EventCallback<Guid> OnSelect { get; set; }
+    [Parameter] public EventCallback OnCreate { get; set; }
+    [Parameter] public EventCallback<Guid> OnDelete { get; set; }
+
+    private Guid? _confirmDeleteId;
+
+    private async Task SelectAsync(Guid sampleId)
+    {
+        _confirmDeleteId = null;
+        if (OnSelect.HasDelegate)
+            await OnSelect.InvokeAsync(sampleId);
+    }
+
+    private async Task CreateAsync()
+    {
+        _confirmDeleteId = null;
+        if (OnCreate.HasDelegate)
+            await OnCreate.InvokeAsync();
+    }
+
+    private void AskDelete(Guid sampleId) => _confirmDeleteId = sampleId;
+
+    private void CancelDelete() => _confirmDeleteId = null;
+
+    private async Task ConfirmDeleteAsync(Guid sampleId)
+    {
+        _confirmDeleteId = null;
+        if (OnDelete.HasDelegate)
+            await OnDelete.InvokeAsync(sampleId);
+    }
+
+    private static string Excerpt(string body)
+    {
+        var compact = string.Join(' ', (body ?? string.Empty)
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (compact.Length == 0) return "Empty draft";
+        return compact.Length <= 110 ? compact : compact[..110] + "...";
+    }
+}

@@ -47,6 +47,10 @@ public class Project
 
     public ICollection<OutlineConversation> OutlineConversations { get; set; } = [];
 
+    public ICollection<WritingSample> WritingSamples { get; set; } = [];
+
+    public ICollection<WritingCoachConversation> WritingCoachConversations { get; set; } = [];
+
     public ICollection<AiChangeBatch> AiChangeBatches { get; set; } = [];
 
     public ICollection<IngestSource> IngestSources { get; set; } = [];

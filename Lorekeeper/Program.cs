@@ -12,6 +12,7 @@ using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
 using Lorekeeper.Tokens;
+using Lorekeeper.Writing;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -36,6 +37,8 @@ builder.Services.AddScoped<IGraphEntityTypeRepository, GraphEntityTypeRepository
 builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
 builder.Services.AddScoped<IActRepository, ActRepository>();
 builder.Services.AddScoped<IOutlineConversationRepository, OutlineConversationRepository>();
+builder.Services.AddScoped<IWritingSampleRepository, WritingSampleRepository>();
+builder.Services.AddScoped<IWritingCoachConversationRepository, WritingCoachConversationRepository>();
 builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
 builder.Services.AddScoped<IIngestRepository, IngestRepository>();
 
@@ -76,6 +79,10 @@ builder.Services.AddScoped<IOutlineGraphSync, OutlineGraphSync>();
 builder.Services.AddScoped<OutlineCollaborationTools>();
 builder.Services.AddScoped<IOutlineChangeApprovalService, OutlineChangeApprovalService>();
 builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationService>();
+
+// Writing samples
+builder.Services.AddScoped<IWritingSampleService, WritingSampleService>();
+builder.Services.AddScoped<IWritingCoachService, WritingCoachService>();
 
 // Ingest
 builder.Services.AddSingleton<IIngestJobQueue, IngestJobQueue>();

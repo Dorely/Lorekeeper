@@ -1,0 +1,13 @@
+@page "/projects/{Slug}/writing-sample"
+@rendermode InteractiveServer
+@using Lorekeeper.Components.Pages.Projects.WritingSample
+
+<PageTitle>Writing Sample</PageTitle>
+
+<ProjectLayout Slug="@Slug" Tab="writing-sample">
+    <WritingSampleContent />
+</ProjectLayout>
+
+@code {
+    [Parameter] public string Slug { get; set; } = string.Empty;
+}

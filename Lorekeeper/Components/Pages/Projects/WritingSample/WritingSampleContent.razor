@@ -1,0 +1,381 @@
+@using Lorekeeper.Models
+@using Lorekeeper.Writing
+@using Microsoft.AspNetCore.Components.Routing
+@implements IAsyncDisposable
+@inject IWritingSampleService Samples
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@if (Project is null)
+{
+    <p class="text-muted"><em>Loading project...</em></p>
+}
+else if (_loading)
+{
+    <p class="text-muted"><em>Loading writing samples...</em></p>
+}
+else
+{
+    <div class="writing-sample-pane">
+        <div class="writing-sample-pane-chat">
+            <WritingCoachPanel ProjectId="Project.Id"
+                               CurrentSampleTitle="@_current?.Title"
+                               CurrentSampleBody="@_current?.Body"
+                               GetCurrentDraft="GetCurrentDraftAsync" />
+        </div>
+
+        <section class="writing-sample-editor-panel">
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    @_error
+                    <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+                </div>
+            }
+
+            @if (_current is null)
+            {
+                <div class="writing-sample-empty">
+                    <h5>No writing samples yet.</h5>
+                    <p class="text-muted">Create one to start gathering examples of your style.</p>
+                    <button type="button" class="btn btn-primary" @onclick="CreateSampleAsync">Create first sample</button>
+                </div>
+            }
+            else
+            {
+                <div class="writing-sample-editor-header">
+                    @if (_editingTitle)
+                    {
+                        <input class="form-control writing-sample-title-input"
+                               value="@_titleDraft"
+                               @ref="_titleInput"
+                               @oninput="@(e => _titleDraft = e.Value?.ToString() ?? string.Empty)"
+                               @onkeydown="OnTitleKeyDown"
+                               @onblur="CommitTitleAsync" />
+                    }
+                    else
+                    {
+                        <button type="button" class="writing-sample-title-button" @onclick="StartEditTitle">
+                            @_current.Title
+                        </button>
+                    }
+
+                    <button type="button" class="btn btn-sm btn-outline-secondary writing-sample-title-edit"
+                            title="Rename sample" @onclick="StartEditTitle">Edit</button>
+
+                    <div class="ms-auto small writing-sample-save-status">
+                        @SaveStatusText()
+                    </div>
+                </div>
+
+                <div class="writing-sample-body-editor">
+                    <div @ref="_gutterRef" class="writing-sample-line-gutter"></div>
+                    <textarea @ref="_bodyTextarea"
+                              class="form-control writing-sample-body"
+                              placeholder="Write a passage that sounds like you..."></textarea>
+                </div>
+            }
+        </section>
+
+        <div class="writing-sample-pane-list">
+            <WritingSampleListPanel Samples="_samples"
+                                    ActiveSampleId="@_current?.Id"
+                                    OnSelect="SelectSampleAsync"
+                                    OnCreate="CreateSampleAsync"
+                                    OnDelete="DeleteSampleAsync" />
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] public Project? Project { get; set; }
+
+    private readonly SemaphoreSlim _saveGate = new(1, 1);
+    private readonly DotNetObjectReference<WritingSampleContent> _selfRef;
+
+    private List<WritingSample> _samples = [];
+    private WritingSample? _current;
+    private bool _loading = true;
+    private Guid? _loadedProjectId;
+    private string? _error;
+
+    private bool _editingTitle;
+    private string _titleDraft = string.Empty;
+    private ElementReference _titleInput;
+    private bool _focusTitleNext;
+
+    private ElementReference _bodyTextarea;
+    private ElementReference _gutterRef;
+    private IJSObjectReference? _editorModule;
+    private IJSObjectReference? _editorHandle;
+
+    private SaveState _saveState = SaveState.Idle;
+    private DateTime? _lastSavedAt;
+    private string? _saveError;
+    private IDisposable? _navHandlerRegistration;
+
+    public WritingSampleContent()
+    {
+        _selfRef = DotNetObjectReference.Create(this);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Project is null) return;
+        if (_loadedProjectId == Project.Id) return;
+
+        _loadedProjectId = Project.Id;
+        _loading = true;
+        _error = null;
+        _samples = (await Samples.ListAsync(Project.Id)).ToList();
+        _current = _samples.FirstOrDefault();
+        _editingTitle = false;
+        _saveState = SaveState.Idle;
+        _saveError = null;
+        _loading = false;
+
+        if (_editorHandle is not null)
+            await SetEditorValueAsync(_current?.Body ?? string.Empty);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            _navHandlerRegistration = Nav.RegisterLocationChangingHandler(OnLocationChangingAsync);
+
+        if (_focusTitleNext)
+        {
+            _focusTitleNext = false;
+            try { await _titleInput.FocusAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+
+        if (_current is not null && _editorHandle is null)
+        {
+            try
+            {
+                _editorModule ??= await JS.InvokeAsync<IJSObjectReference>(
+                    "import", "./Components/Pages/Projects/EditorContent.razor.js");
+                _editorHandle = await _editorModule.InvokeAsync<IJSObjectReference>(
+                    "attach",
+                    new { textarea = _bodyTextarea, gutter = _gutterRef },
+                    _selfRef, 1000, _current.Body);
+            }
+            catch (JSDisconnectedException) { }
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnBodyDebounced(string body)
+    {
+        if (_current is null) return;
+        await SaveBodyAsync(_current.Id, body);
+    }
+
+    private async Task SaveBodyAsync(Guid sampleId, string body)
+    {
+        await _saveGate.WaitAsync();
+        try
+        {
+            _saveState = SaveState.Saving;
+            _saveError = null;
+            await InvokeAsync(StateHasChanged);
+
+            var updated = await Samples.UpdateAsync(sampleId, body: body);
+            ApplyUpdatedSample(updated);
+            _saveState = SaveState.Saved;
+            _lastSavedAt = DateTime.Now;
+        }
+        catch (Exception ex)
+        {
+            _saveState = SaveState.SaveFailed;
+            _saveError = ex.Message;
+        }
+        finally
+        {
+            _saveGate.Release();
+            try { await InvokeAsync(StateHasChanged); }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    private async Task CreateSampleAsync()
+    {
+        if (Project is null) return;
+
+        await FlushAndWaitAsync();
+        var sample = await Samples.CreateAsync(Project.Id);
+        _samples.Insert(0, sample);
+        await SelectSampleCoreAsync(sample, flush: false);
+        _editingTitle = true;
+        _titleDraft = sample.Title;
+        _focusTitleNext = true;
+    }
+
+    private async Task SelectSampleAsync(Guid sampleId)
+    {
+        if (_current?.Id == sampleId) return;
+        var sample = _samples.FirstOrDefault(candidate => candidate.Id == sampleId)
+            ?? await Samples.GetAsync(sampleId);
+        if (sample is null) return;
+
+        await SelectSampleCoreAsync(sample, flush: true);
+    }
+
+    private async Task SelectSampleCoreAsync(WritingSample? sample, bool flush)
+    {
+        if (flush)
+            await FlushAndWaitAsync();
+
+        _current = sample;
+        _editingTitle = false;
+        _titleDraft = sample?.Title ?? string.Empty;
+        _saveState = SaveState.Idle;
+        _saveError = null;
+
+        if (sample is null)
+        {
+            await DisposeEditorHandleAsync();
+        }
+        else if (_editorHandle is not null)
+        {
+            await SetEditorValueAsync(sample.Body);
+        }
+    }
+
+    private async Task DeleteSampleAsync(Guid sampleId)
+    {
+        await FlushAndWaitAsync();
+        await Samples.DeleteAsync(sampleId);
+
+        _samples.RemoveAll(sample => sample.Id == sampleId);
+        if (_current?.Id == sampleId)
+        {
+            var next = _samples.FirstOrDefault();
+            await SelectSampleCoreAsync(next, flush: false);
+        }
+    }
+
+    private void StartEditTitle()
+    {
+        if (_current is null) return;
+        _titleDraft = _current.Title;
+        _editingTitle = true;
+        _focusTitleNext = true;
+    }
+
+    private async Task OnTitleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await CommitTitleAsync();
+        else if (e.Key == "Escape") CancelTitleEdit();
+    }
+
+    private void CancelTitleEdit()
+    {
+        _editingTitle = false;
+        _titleDraft = string.Empty;
+    }
+
+    private async Task CommitTitleAsync()
+    {
+        if (!_editingTitle || _current is null) return;
+
+        var title = _titleDraft.Trim();
+        if (title.Length == 0)
+        {
+            _saveState = SaveState.SaveFailed;
+            _saveError = "Title is required.";
+            return;
+        }
+
+        _editingTitle = false;
+        if (title == _current.Title) return;
+
+        try
+        {
+            var updated = await Samples.UpdateAsync(_current.Id, title: title);
+            ApplyUpdatedSample(updated);
+            _saveState = SaveState.Saved;
+            _lastSavedAt = DateTime.Now;
+        }
+        catch (Exception ex)
+        {
+            _saveState = SaveState.SaveFailed;
+            _saveError = ex.Message;
+        }
+    }
+
+    private async Task<(string? Title, string? Body)> GetCurrentDraftAsync()
+    {
+        await FlushAndWaitAsync();
+        return (_current?.Title, _current?.Body);
+    }
+
+    private async Task FlushAndWaitAsync()
+    {
+        await FlushAsync();
+        await _saveGate.WaitAsync();
+        _saveGate.Release();
+    }
+
+    private async Task FlushAsync()
+    {
+        if (_editorHandle is null) return;
+        try { await _editorHandle.InvokeVoidAsync("flush"); }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { }
+    }
+
+    private async ValueTask OnLocationChangingAsync(LocationChangingContext ctx)
+    {
+        await FlushAndWaitAsync();
+    }
+
+    private async Task SetEditorValueAsync(string body)
+    {
+        if (_editorHandle is null) return;
+        try { await _editorHandle.InvokeVoidAsync("setValue", body); }
+        catch (JSDisconnectedException) { }
+    }
+
+    private async Task DisposeEditorHandleAsync()
+    {
+        if (_editorHandle is null) return;
+        try { await _editorHandle.InvokeVoidAsync("dispose"); } catch { }
+        try { await _editorHandle.DisposeAsync(); } catch { }
+        _editorHandle = null;
+    }
+
+    private void ApplyUpdatedSample(WritingSample updated)
+    {
+        if (_current?.Id == updated.Id)
+            _current = updated;
+
+        var index = _samples.FindIndex(sample => sample.Id == updated.Id);
+        if (index >= 0)
+            _samples[index] = updated;
+    }
+
+    private string SaveStatusText() => _saveState switch
+    {
+        SaveState.Saving => "Saving...",
+        SaveState.Saved when _lastSavedAt is { } ts => $"Saved {ts:HH:mm:ss}",
+        SaveState.SaveFailed => $"Save failed: {_saveError}",
+        _ => string.Empty,
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        _navHandlerRegistration?.Dispose();
+        try { await FlushAndWaitAsync(); } catch { }
+        await DisposeEditorHandleAsync();
+        if (_editorModule is not null)
+        {
+            try { await _editorModule.DisposeAsync(); } catch { }
+        }
+        _selfRef.Dispose();
+        _saveGate.Dispose();
+    }
+
+    private enum SaveState { Idle, Saving, Saved, SaveFailed }
+}

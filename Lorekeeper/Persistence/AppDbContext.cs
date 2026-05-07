@@ -22,6 +22,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AiConsoleEntry> AiConsoleEntries => Set<AiConsoleEntry>();
     public DbSet<OutlineConversation> OutlineConversations => Set<OutlineConversation>();
     public DbSet<OutlineMessage> OutlineMessages => Set<OutlineMessage>();
+    public DbSet<WritingSample> WritingSamples => Set<WritingSample>();
+    public DbSet<WritingCoachConversation> WritingCoachConversations => Set<WritingCoachConversation>();
+    public DbSet<WritingCoachMessage> WritingCoachMessages => Set<WritingCoachMessage>();
     public DbSet<AiChangeBatch> AiChangeBatches => Set<AiChangeBatch>();
     public DbSet<AiChange> AiChanges => Set<AiChange>();
     public DbSet<IngestSource> IngestSources => Set<IngestSource>();
@@ -131,6 +134,39 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         });
 
         modelBuilder.Entity<OutlineMessage>(entity =>
+        {
+            entity.HasIndex(e => new { e.ConversationId, e.Order });
+            entity.Property(e => e.Role).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Conversation)
+                .WithMany(c => c.Messages)
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WritingSample>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.UpdatedAt });
+            entity.HasIndex(e => new { e.ProjectId, e.Title });
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.WritingSamples)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WritingCoachConversation>(entity =>
+        {
+            entity.HasIndex(e => e.ProjectId).IsUnique();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.WritingCoachConversations)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WritingCoachMessage>(entity =>
         {
             entity.HasIndex(e => new { e.ConversationId, e.Order });
             entity.Property(e => e.Role).HasConversion<string>();
