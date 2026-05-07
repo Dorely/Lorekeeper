@@ -25,22 +25,26 @@ public sealed class IngestJobProcessor(
     IOptions<AiConsoleOptions> options,
     ILogger<IngestJobProcessor> logger)
 {
-    private const string SystemPrompt = """
+    private const string _systemPrompt = """
         You are an ingestion extraction agent for Lorekeeper.
 
         Your job is to read the current source chunk, which may or may not be part of a larger document, and record source-scoped observations on the project graph.
         You may link to existing non-structural project entities when the source clearly refers to the same thing.
         Do not rewrite canonical project entity properties. Extracted facts, aliases, evidence, and notes belong in source-scoped assertions recorded by the ingest tools.
+        Prefer fewer, stronger story entities over duplicate nodes for titles, aliases, partial names, or alternate spellings. Entity data should be useful for later retrieval and writing; it does not need to be highly normalized or split into many tiny fields.
 
         Process rules:
-        - Call list_job_entities before creating or linking entities.
-        - Before every create_ingest_entity call, first check list_job_entities and then call search_project_entities for the source mention.
-        - Do not create an entity when list_job_entities or search_project_entities returns the same name, an obvious alias, or the same real-world/story subject. Use update_ingest_entity or record_existing_entity_observation instead.
+        - Call list_job_entities before creating or linking entities, and compare each source mention against the same-job roster first.
+        - Before every create_ingest_entity call, call search_project_entities for the source mention and its likely variants.
+        - Search broadly, not just exactly: use the canonical singular type plus the exact mention, base name with titles/honorifics removed, known aliases, surnames, epithets, alternate spellings, and descriptive terms from the local context. For example, "Prince Kael'thas" should search both "Prince Kael'thas" and "Kael'thas".
+        - Treat title/honorific differences, punctuation/case differences, shortened names, aliases, and obvious same-subject references as the same entity when the source context supports it.
+        - Do not create an entity when list_job_entities or search_project_entities returns a plausible same subject. Use update_ingest_entity or record_existing_entity_observation instead.
         - Use record_existing_entity_observation when a source mention matches an existing project entity.
         - Use update_ingest_entity when a source mention matches an entity already touched by this ingest job.
-        - Create a new entity only when no existing project entity or same-job entity matches. The tool will reject duplicate names; treat that as instruction to reuse the returned/existing entity.
+        - Create a new entity only when no existing project entity or same-job entity matches after variant searches. The tool will reject duplicate names; treat that as instruction to reuse the returned/existing entity.
         - Use canonical singular entity type keys from the known project entity types. Do not invent plural, lowercase, or near-duplicate categories such as "characters", "Characters", "locations", or "organisations" when Character, Location, or Organization/Faction-style categories are available.
         - Keep recurring source observations current. If a character appears again later with new history, status, aliases, relationships, or role details, update the source assertion for the existing entity.
+        - Use propertiesJson for practical, readable observations such as summary, description, role, status, affiliation, history, motivation, or significance. Avoid empty schema-filling; prefer concise natural-language values that will help a writer understand and retrieve the entity later.
         - Use evidence from the current source chunk. Do not invent facts.
         - Link only entities already touched by this ingest job using link_ingest_entities. If an endpoint is an existing project entity, record an observation on it first.
         - Finish each source chunk by calling record_source_chunk_notes with a concise summary.
@@ -168,7 +172,7 @@ public sealed class IngestJobProcessor(
 
         var messages = new List<ChatMessage>
         {
-            new(ChatRole.System, SystemPrompt),
+            new(ChatRole.System, _systemPrompt),
             new(ChatRole.User, await BuildChunkPromptAsync(job, sourceChunk, cancellationToken)),
         };
 
@@ -360,7 +364,14 @@ public sealed class IngestJobProcessor(
             Known project entity types:
             {{knownEntityTypes}}
 
-            Before creating anything, search using the canonical singular type and the exact source name. Reuse matching same-job or project entities instead of creating duplicate names or duplicate categories.
+            Entity matching workflow for this chunk:
+            1. Start from the same-job roster above.
+            2. For each source mention that may be an entity, search existing project entities before creating anything.
+            3. Use the canonical singular type and multiple query variants: exact mention, base name without titles/honorifics, aliases, surnames, epithets, alternate spellings, and nearby descriptive terms.
+            4. Reuse a plausible same-job or project entity instead of creating duplicate names or duplicate categories. For example, link "Prince Kael'thas" observations to an existing "Kael'thas" Character when the context points to the same person.
+            5. Create only when the roster and project searches do not return a plausible same subject.
+
+            Write useful observations. propertiesJson may use broad natural-language fields such as summary, description, role, status, affiliation, history, motivation, or significance; it does not need to be highly structured when a readable note is more useful.
 
             Current source chunk text:
             ```text

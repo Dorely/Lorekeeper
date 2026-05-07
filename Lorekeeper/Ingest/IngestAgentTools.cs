@@ -31,7 +31,7 @@ public sealed class IngestAgentTools(
         AIFunctionFactory.Create(
             method: (string? type, string? query) => SearchProjectEntitiesAsync(context, type, query),
             name: "search_project_entities",
-            description: "Search existing non-structural story entities in the project graph before creating a new entity. Use type when known and query for names, aliases, or descriptive terms."),
+            description: "Search existing non-structural story entities in the project graph before creating a new entity. Use type when known; search exact names plus variants such as titles removed, aliases, alternate spellings, surnames, epithets, and descriptive terms."),
 
         AIFunctionFactory.Create(
             method: (string existingEntityId, string? propertiesJson, string? aliasesJson, string? evidence, string? notes) =>
@@ -43,7 +43,7 @@ public sealed class IngestAgentTools(
             method: (string type, string name, string? propertiesJson, string? aliasesJson, string? evidence, string? notes) =>
                 CreateEntityAsync(context, type, name, propertiesJson, aliasesJson, evidence, notes),
             name: "create_ingest_entity",
-            description: "Create a new graph entity with source-scoped observations. Only use after search_project_entities finds no match. propertiesJson is a JSON object, aliasesJson is a JSON array of strings."),
+            description: "Create a new graph entity with source-scoped observations. Only use after list_job_entities and variant search_project_entities calls find no plausible same subject. propertiesJson is a useful JSON object of readable observations, aliasesJson is a JSON array of strings."),
 
         AIFunctionFactory.Create(
             method: (string entityId, string? name, string? propertiesToSetJson, string? aliasesJson, string? evidence, string? notes) =>
@@ -122,7 +122,8 @@ public sealed class IngestAgentTools(
                 : (await GetEquivalentEntityTypeNamesAsync(context.ProjectId, matchedType.Type)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
-        var terms = SplitTerms(query).ToList();
+        var queryText = query?.Trim() ?? string.Empty;
+        var terms = SplitTerms(queryText).ToList();
         var results = new List<ProjectEntityCandidate>();
         foreach (var searchType in searchTypes.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
         {
@@ -132,7 +133,7 @@ public sealed class IngestAgentTools(
                 if (!Guid.TryParseExact(node.Key, "N", out var id)) continue;
                 var visibleProperties = VisibleProperties(node.Properties);
                 var assertionSummaries = IngestSourceAssertions.SummarizeEntityAssertions(node.Properties);
-                var score = ScoreCandidate(node, visibleProperties, assertionSummaries, terms);
+                var score = ScoreCandidate(node, visibleProperties, assertionSummaries, terms, queryText);
                 if (terms.Count > 0 && score == 0) continue;
 
                 results.Add(new ProjectEntityCandidate(
@@ -670,10 +671,12 @@ public sealed class IngestAgentTools(
         var nodeTypes = await GetEquivalentEntityTypeNamesAsync(projectId, nodeType);
         foreach (var candidateType in nodeTypes)
         {
+            var stripTitles = ShouldStripEntityTitles(candidateType);
+            var nameVariants = BuildEntityNameVariants(name, stripTitles);
             var existing = await nodes.ListByTypeAsync(projectId, candidateType);
             var duplicate = existing.FirstOrDefault(node =>
                 node.Id != excludeNodeId
-                && string.Equals(NormalizeEntityName(node.Label ?? node.Key), normalizedName, StringComparison.Ordinal));
+                && EntityNameVariantsOverlap(nameVariants, node.Label ?? node.Key, stripTitles));
             if (duplicate is not null) return duplicate;
         }
 
@@ -877,9 +880,16 @@ public sealed class IngestAgentTools(
         GraphNode node,
         IReadOnlyDictionary<string, string?> visibleProperties,
         IReadOnlyList<IngestSourceAssertionSummary> assertionSummaries,
-        IReadOnlyList<string> terms)
+        IReadOnlyList<string> terms,
+        string queryText)
     {
-        if (terms.Count == 0) return 1;
+        var queryVariants = BuildEntityNameVariants(queryText, ShouldStripEntityTitles(node.NodeType));
+        if (terms.Count == 0 && queryVariants.Count == 0) return 1;
+
+        var candidateVariants = CandidateNameInputs(node, visibleProperties, assertionSummaries)
+            .SelectMany(name => BuildEntityNameVariants(name, ShouldStripEntityTitles(node.NodeType)))
+            .ToHashSet(StringComparer.Ordinal);
+
         var haystack = string.Join("\n", new[]
         {
             node.Label ?? string.Empty,
@@ -887,14 +897,34 @@ public sealed class IngestAgentTools(
             string.Join("\n", visibleProperties.Select(kv => $"{kv.Key}: {kv.Value}")),
             string.Join("\n", assertionSummaries.Select(summary => $"{summary.SourceTitle} {summary.SourceKind} {summary.Summary} {string.Join(' ', summary.Aliases)}")),
         });
+        var normalizedHaystack = NormalizeComparable(haystack);
 
         var score = 0;
+        foreach (var queryVariant in queryVariants)
+        {
+            if (candidateVariants.Contains(queryVariant)) score += 25;
+            else if (candidateVariants.Any(candidate => candidate.Contains(queryVariant, StringComparison.Ordinal) || queryVariant.Contains(candidate, StringComparison.Ordinal))) score += 8;
+        }
+
         foreach (var term in terms)
         {
             if (string.Equals(node.Label, term, StringComparison.OrdinalIgnoreCase)) score += 10;
             else if (haystack.Contains(term, StringComparison.OrdinalIgnoreCase)) score += 2;
+            else if (normalizedHaystack.Contains(NormalizeComparable(term), StringComparison.Ordinal)) score += 1;
         }
         return score;
+    }
+
+    private static IEnumerable<string> CandidateNameInputs(
+        GraphNode node,
+        IReadOnlyDictionary<string, string?> visibleProperties,
+        IReadOnlyList<IngestSourceAssertionSummary> assertionSummaries)
+    {
+        yield return node.Label ?? node.Key;
+        foreach (var alias in assertionSummaries.SelectMany(summary => summary.Aliases))
+            yield return alias;
+        foreach (var kv in visibleProperties.Where(kv => kv.Key.Contains("alias", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(kv.Value)))
+            yield return kv.Value!;
     }
 
     private static IEnumerable<string> SplitTerms(string? query) =>
@@ -967,6 +997,81 @@ public sealed class IngestAgentTools(
         return string.Join(' ', normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             .ToLowerInvariant();
     }
+
+    private static IReadOnlySet<string> BuildEntityNameVariants(string? value, bool stripTitles)
+    {
+        var normalized = NormalizeEntityName(value ?? string.Empty);
+        if (normalized.Length == 0) return new HashSet<string>(StringComparer.Ordinal);
+
+        var variants = new HashSet<string>(StringComparer.Ordinal) { normalized };
+        var words = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var index = 0; index < words.Length - 1; index++)
+        {
+            if (!CanDropLeadingEntityNameWord(words[index], stripTitles)) break;
+            variants.Add(string.Join(' ', words[(index + 1)..]));
+        }
+
+        return variants;
+    }
+
+    private static bool EntityNameVariantsOverlap(IReadOnlySet<string> sourceVariants, string candidateName, bool stripTitles)
+    {
+        var candidateVariants = BuildEntityNameVariants(candidateName, stripTitles);
+        return sourceVariants.Overlaps(candidateVariants);
+    }
+
+    private static bool CanDropLeadingEntityNameWord(string word, bool stripTitles) =>
+        string.Equals(word, "the", StringComparison.Ordinal)
+        || string.Equals(word, "a", StringComparison.Ordinal)
+        || string.Equals(word, "an", StringComparison.Ordinal)
+        || (stripTitles && HonorificTitleWords.Contains(word));
+
+    private static bool ShouldStripEntityTitles(string nodeType)
+    {
+        var normalized = NormalizeComparable(nodeType);
+        return normalized.Contains("character", StringComparison.Ordinal)
+            || normalized.Contains("person", StringComparison.Ordinal)
+            || normalized.Contains("people", StringComparison.Ordinal)
+            || normalized.Contains("individual", StringComparison.Ordinal)
+            || normalized.Contains("figure", StringComparison.Ordinal)
+            || normalized.Contains("npc", StringComparison.Ordinal);
+    }
+
+    private static readonly HashSet<string> HonorificTitleWords =
+    [
+        "admiral",
+        "archmage",
+        "baron",
+        "baroness",
+        "captain",
+        "chief",
+        "chieftain",
+        "commander",
+        "dame",
+        "doctor",
+        "dr",
+        "duchess",
+        "duke",
+        "emperor",
+        "empress",
+        "general",
+        "high",
+        "highlord",
+        "king",
+        "lady",
+        "lord",
+        "magister",
+        "master",
+        "mistress",
+        "prince",
+        "princess",
+        "professor",
+        "queen",
+        "saint",
+        "sir",
+        "st",
+        "warchief",
+    ];
 
     private static IReadOnlyDictionary<string, string?> VisibleProperties(IReadOnlyDictionary<string, object?> properties)
     {
