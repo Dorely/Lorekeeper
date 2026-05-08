@@ -1,5 +1,6 @@
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
+using Lorekeeper.Context;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
@@ -14,6 +15,7 @@ public class ChapterService(
     ITextChunker chunker,
     IStaleChapterNotifier staleNotifier,
     IOutlineGraphSync outlineGraphSync,
+    IContextIndexingService contextIndexing,
     ILogger<ChapterService> logger) : IChapterService
 {
     public async Task<IReadOnlyList<Chapter>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
@@ -48,6 +50,9 @@ public class ChapterService(
         projects.Update(project);
         await repo.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
+        await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
+        if (chapter.ActId is Guid createdActId)
+            await contextIndexing.ReindexActAsync(createdActId, cancellationToken);
         return chapter;
     }
 
@@ -61,6 +66,7 @@ public class ChapterService(
     {
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
+        var previousActId = chapter.ActId;
 
         var bodyChanged = false;
         if (title is not null && title != chapter.Title) chapter.Title = title;
@@ -93,6 +99,11 @@ public class ChapterService(
         if (bodyChanged) staleNotifier.Notify(chapter.Id);
 
         await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
+        await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
+        if (previousActId is Guid oldActId)
+            await contextIndexing.ReindexActAsync(oldActId, cancellationToken);
+        if (chapter.ActId is Guid newActId && newActId != previousActId)
+            await contextIndexing.ReindexActAsync(newActId, cancellationToken);
 
         return chapter;
     }
@@ -101,6 +112,8 @@ public class ChapterService(
     {
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken);
         if (chapter is null) return;
+        var projectId = chapter.ProjectId;
+        var actId = chapter.ActId;
 
         try
         {
@@ -123,8 +136,12 @@ public class ChapterService(
             logger.LogWarning(ex, "Failed to clean graph entries for chapter {ChapterId}", chapter.Id);
         }
 
+        await contextIndexing.DeleteChapterAsync(projectId, chapter.Id, cancellationToken);
+
         repo.Remove(chapter);
         await repo.SaveChangesAsync(cancellationToken);
+        if (actId is Guid deletedFromActId)
+            await contextIndexing.ReindexActAsync(deletedFromActId, cancellationToken);
     }
 
     public async Task ReorderAsync(Guid projectId, Guid? actId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
@@ -140,6 +157,7 @@ public class ChapterService(
 
         await repo.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.RepairProjectAsync(projectId, cancellationToken);
+        await contextIndexing.ReindexProjectAsync(projectId, cancellationToken);
     }
 
     public async Task ReindexAsync(Guid chapterId, CancellationToken cancellationToken = default)
@@ -182,6 +200,7 @@ public class ChapterService(
             repo.Update(chapter);
             await repo.SaveChangesAsync(cancellationToken);
             await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
+            await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
 
             logger.LogDebug("Reindexed chapter {ChapterId} with {Count} chunks", chapter.Id, chunks.Count);
         }

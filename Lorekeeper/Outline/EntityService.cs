@@ -1,3 +1,4 @@
+using Lorekeeper.Context;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
@@ -8,7 +9,8 @@ namespace Lorekeeper.Outline;
 public sealed class EntityService(
     IGraphStore graph,
     IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges) : IEntityService
+    IGraphEdgeRepository edges,
+    IContextIndexingService contextIndexing) : IEntityService
 {
     /// <summary>Canonical chapter <see cref="GraphNode.NodeType"/> for parent links.</summary>
     public const string ChapterNodeType = "Chapter";
@@ -107,7 +109,9 @@ public sealed class EntityService(
                 cancellationToken: cancellationToken);
         }
 
-        return Project(node, parentId);
+        var entity = Project(node, parentId);
+        await contextIndexing.ReindexEntityAsync(projectId, entity.Id, cancellationToken);
+        return entity;
     }
 
     public async Task<StoryEntity> UpdateAsync(
@@ -149,13 +153,16 @@ public sealed class EntityService(
         await nodes.SaveChangesAsync(cancellationToken);
 
         var parent = await FindParentAsync(node.Id, cancellationToken);
-        return Project(node, parent);
+        var entity = Project(node, parent);
+        await contextIndexing.ReindexEntityAsync(projectId, entity.Id, cancellationToken);
+        return entity;
     }
 
     public async Task DeleteAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default)
     {
         var node = await ResolveEntityNodeAsync(projectId, entityId, cancellationToken);
         if (node is null) return;
+        await contextIndexing.DeleteEntityAsync(projectId, entityId, cancellationToken);
         await graph.RemoveNodeAsync(node.Id, cancellationToken);
     }
 
@@ -223,6 +230,9 @@ public sealed class EntityService(
             edgeType.Trim(),
             properties: ToObjectDict(properties),
             cancellationToken: cancellationToken);
+
+        await contextIndexing.ReindexEntityAsync(projectId, fromEntityId, cancellationToken);
+        await contextIndexing.ReindexEntityAsync(projectId, toEntityId, cancellationToken);
     }
 
     public async Task<int> CountChildrenAsync(

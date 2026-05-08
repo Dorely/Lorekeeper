@@ -1,3 +1,4 @@
+using Lorekeeper.Context;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 
@@ -6,7 +7,8 @@ namespace Lorekeeper.Outline;
 public class ActService(
     IActRepository repo,
     IProjectRepository projects,
-    IOutlineGraphSync outlineGraphSync) : IActService
+    IOutlineGraphSync outlineGraphSync,
+    IContextIndexingService contextIndexing) : IActService
 {
     public async Task<IReadOnlyList<Act>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await repo.ListByProjectAsync(projectId, cancellationToken);
@@ -38,6 +40,7 @@ public class ActService(
         projects.Update(project);
         await repo.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.EnsureActAsync(act, cancellationToken);
+        await contextIndexing.ReindexActAsync(act.Id, cancellationToken);
         return act;
     }
 
@@ -61,6 +64,7 @@ public class ActService(
 
         await repo.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.EnsureActAsync(act, cancellationToken);
+        await contextIndexing.ReindexActAsync(act.Id, cancellationToken);
         return act;
     }
 
@@ -68,10 +72,12 @@ public class ActService(
     {
         var act = await repo.GetByIdAsync(actId, cancellationToken);
         if (act is null) return;
+        var projectId = act.ProjectId;
 
+        await contextIndexing.DeleteActAsync(projectId, act.Id, cancellationToken);
         repo.Remove(act);
 
-        var project = await projects.GetByIdAsync(act.ProjectId, cancellationToken);
+        var project = await projects.GetByIdAsync(projectId, cancellationToken);
         if (project is not null)
         {
             project.UpdatedAt = DateTime.UtcNow;
@@ -79,8 +85,9 @@ public class ActService(
         }
 
         await repo.SaveChangesAsync(cancellationToken);
-        await outlineGraphSync.RemoveActAsync(act.ProjectId, act.Id, cancellationToken);
-        await outlineGraphSync.RepairProjectAsync(act.ProjectId, cancellationToken);
+        await outlineGraphSync.RemoveActAsync(projectId, act.Id, cancellationToken);
+        await outlineGraphSync.RepairProjectAsync(projectId, cancellationToken);
+        await contextIndexing.ReindexProjectAsync(projectId, cancellationToken);
     }
 
     public async Task ReorderAsync(Guid projectId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
@@ -96,5 +103,6 @@ public class ActService(
 
         await repo.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.RepairProjectAsync(projectId, cancellationToken);
+        await contextIndexing.ReindexProjectAsync(projectId, cancellationToken);
     }
 }

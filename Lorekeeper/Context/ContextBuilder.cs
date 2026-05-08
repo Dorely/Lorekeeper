@@ -1,5 +1,6 @@
 using System.Text;
 using Lorekeeper.Chapters;
+using Lorekeeper.Ingest;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
@@ -13,7 +14,8 @@ public sealed class ContextBuilder(
     IChapterService chapters,
     IProjectFactService projectFacts,
     IWritingSampleService writingSamples,
-    IEntityService entities) : IEditorContextService
+    IEntityService entities,
+    IIngestRepository ingest) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         Project project,
@@ -73,6 +75,11 @@ public sealed class ContextBuilder(
                     IsEnabled: IsIncluded(preferenceMap, ContextItemKind.WritingSample, key, defaultIncluded: true),
                     IsRemovable: true,
                     Badge: "Style"));
+            }
+
+            foreach (var item in await ListStructuralReferenceItemsAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken))
+            {
+                items.Add(item);
             }
 
             foreach (var entity in await ListContextEntitiesAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken))
@@ -165,6 +172,27 @@ public sealed class ContextBuilder(
         return entitiesForContext.Select(entity => entity.Id).ToHashSet();
     }
 
+    public async Task<IReadOnlyCollection<string>> ListIncludedContextKeysAsync(
+        Guid projectId,
+        Guid chapterId,
+        CancellationToken cancellationToken = default)
+    {
+        var preferenceMap = (await preferences.ListForChapterAsync(projectId, chapterId, cancellationToken))
+            .ToDictionary(preference => PreferenceKey(preference.Kind, preference.Key), StringComparer.Ordinal);
+        var keys = preferenceMap.Values
+            .Where(preference => preference.IsIncluded)
+            .Select(preference => preference.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entity in await ListContextEntitiesAsync(projectId, chapterId, preferenceMap, cancellationToken))
+            keys.Add(EditorContextKeys.Entity(entity.Id));
+
+        keys.Add(EditorContextKeys.CurrentChapter);
+        keys.Add(EditorContextKeys.ProjectOutline);
+        keys.Add(EditorContextKeys.ProjectFacts);
+        return keys;
+    }
+
     private async Task<IReadOnlyList<StoryEntity>> ListContextEntitiesAsync(
         Guid projectId,
         Guid chapterId,
@@ -215,6 +243,172 @@ public sealed class ContextBuilder(
     {
         if (!IsContextEntityType(entity.Type)) return;
         byId.TryAdd(entity.Id, entity);
+    }
+
+    private async Task<IReadOnlyList<ContextItem>> ListStructuralReferenceItemsAsync(
+        Guid projectId,
+        Guid currentChapterId,
+        IReadOnlyDictionary<string, EditorContextPreference> preferenceMap,
+        CancellationToken cancellationToken)
+    {
+        var items = new List<ContextItem>();
+        foreach (var preference in preferenceMap.Values.Where(preference => preference.IsIncluded))
+        {
+            if (string.Equals(preference.Kind, ContextItemKind.ChapterReference.ToString(), StringComparison.Ordinal)
+                && EditorContextKeys.TryParseChapterReference(preference.Key, out var chapterId))
+            {
+                var item = await BuildChapterReferenceItemAsync(projectId, currentChapterId, chapterId, cancellationToken);
+                if (item is not null) items.Add(item);
+            }
+            else if (string.Equals(preference.Kind, ContextItemKind.ActReference.ToString(), StringComparison.Ordinal)
+                && EditorContextKeys.TryParseActReference(preference.Key, out var actId))
+            {
+                var item = await BuildActReferenceItemAsync(projectId, actId, cancellationToken);
+                if (item is not null) items.Add(item);
+            }
+            else if (string.Equals(preference.Kind, ContextItemKind.IngestSourceReference.ToString(), StringComparison.Ordinal)
+                && EditorContextKeys.TryParseIngestSourceReference(preference.Key, out var sourceId))
+            {
+                var item = await BuildIngestSourceReferenceItemAsync(projectId, sourceId, cancellationToken);
+                if (item is not null) items.Add(item);
+            }
+            else if (string.Equals(preference.Kind, ContextItemKind.IngestSourceChunkReference.ToString(), StringComparison.Ordinal)
+                && EditorContextKeys.TryParseIngestSourceChunkReference(preference.Key, out var sourceChunkId))
+            {
+                var item = await BuildIngestSourceChunkReferenceItemAsync(projectId, sourceChunkId, cancellationToken);
+                if (item is not null) items.Add(item);
+            }
+        }
+
+        return items;
+    }
+
+    private async Task<ContextItem?> BuildChapterReferenceItemAsync(
+        Guid projectId,
+        Guid currentChapterId,
+        Guid chapterId,
+        CancellationToken cancellationToken)
+    {
+        if (chapterId == currentChapterId) return null;
+
+        var chapter = await chapters.GetAsync(chapterId, cancellationToken);
+        if (chapter is null || chapter.ProjectId != projectId) return null;
+
+        var body = new StringBuilder();
+        body.Append("Title: ").AppendLine(chapter.Title);
+        AppendOptionalIndented(body, "Synopsis", chapter.Synopsis, 0);
+        body.AppendLine("Body (line-numbered):");
+        body.AppendLine(string.IsNullOrWhiteSpace(chapter.Body) ? "(empty)" : ChapterFormatting.WithLineNumbers(chapter.Body));
+
+        return new ContextItem(
+            Key: EditorContextKeys.ChapterReference(chapter.Id),
+            Kind: ContextItemKind.ChapterReference,
+            Label: $"Chapter Reference — {chapter.Title}",
+            Body: body.ToString().TrimEnd(),
+            IsEnabled: true,
+            IsRemovable: true,
+            Badge: "Chapter",
+            Reason: "Selected chapter reference");
+    }
+
+    private async Task<ContextItem?> BuildActReferenceItemAsync(Guid projectId, Guid actId, CancellationToken cancellationToken)
+    {
+        var act = await acts.GetAsync(actId, cancellationToken);
+        if (act is null || act.ProjectId != projectId) return null;
+
+        var actChapters = (await chapters.ListAsync(projectId, cancellationToken))
+            .Where(chapter => chapter.ActId == act.Id)
+            .OrderBy(chapter => chapter.Order)
+            .ToList();
+
+        var body = new StringBuilder();
+        body.Append("Title: ").AppendLine(act.Title);
+        AppendOptionalIndented(body, "Synopsis", act.Synopsis, 0);
+        if (actChapters.Count > 0)
+        {
+            body.AppendLine("Chapters:");
+            foreach (var chapter in actChapters)
+            {
+                body.Append("- Chapter ").Append(chapter.Order + 1).Append(": ").AppendLine(chapter.Title);
+                AppendOptionalIndented(body, "Synopsis", chapter.Synopsis, 2);
+            }
+        }
+
+        return new ContextItem(
+            Key: EditorContextKeys.ActReference(act.Id),
+            Kind: ContextItemKind.ActReference,
+            Label: $"Act Reference — {act.Title}",
+            Body: body.ToString().TrimEnd(),
+            IsEnabled: true,
+            IsRemovable: true,
+            Badge: "Act",
+            Reason: "Selected act reference");
+    }
+
+    private async Task<ContextItem?> BuildIngestSourceReferenceItemAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken)
+    {
+        var source = await ingest.GetSourceAsync(sourceId, cancellationToken);
+        if (source is null || source.ProjectId != projectId) return null;
+
+        var sourceChunks = await ingest.ListSourceChunksAsync(source.Id, cancellationToken);
+        var body = new StringBuilder();
+        body.Append("Title: ").AppendLine(source.Title);
+        AppendOptionalIndented(body, "Kind", source.SourceKind, 0);
+        AppendOptionalIndented(body, "Description", source.Description, 0);
+        if (sourceChunks.Count > 0)
+        {
+            body.AppendLine("Source chunks:");
+            foreach (var chunk in sourceChunks)
+            {
+                body.Append("- Part ").Append(chunk.Index + 1).Append(": ").AppendLine(chunk.Title);
+                AppendOptionalIndented(body, "Heading", chunk.HeadingPath, 2);
+                AppendOptionalIndented(body, "Summary", chunk.Summary, 2);
+                AppendOptionalIndented(body, "Notes", chunk.AgentNotes, 2);
+            }
+        }
+
+        return new ContextItem(
+            Key: EditorContextKeys.IngestSourceReference(source.Id),
+            Kind: ContextItemKind.IngestSourceReference,
+            Label: $"Source Reference — {source.Title}",
+            Body: body.ToString().TrimEnd(),
+            IsEnabled: true,
+            IsRemovable: true,
+            Badge: "Source",
+            Reason: "Selected source reference");
+    }
+
+    private async Task<ContextItem?> BuildIngestSourceChunkReferenceItemAsync(Guid projectId, Guid sourceChunkId, CancellationToken cancellationToken)
+    {
+        var sourceChunk = await ingest.GetSourceChunkAsync(sourceChunkId, cancellationToken);
+        if (sourceChunk is null) return null;
+
+        var source = await ingest.GetSourceAsync(sourceChunk.SourceId, cancellationToken);
+        if (source is null || source.ProjectId != projectId) return null;
+
+        var excerpt = await ingest.GetSourceChunkExcerptAsync(sourceChunk.Id, maxChars: 8_000, cancellationToken);
+        var body = new StringBuilder();
+        body.Append("Source: ").AppendLine(source.Title);
+        body.Append("Part: ").Append(sourceChunk.Index + 1).AppendLine();
+        AppendOptionalIndented(body, "Title", sourceChunk.Title, 0);
+        AppendOptionalIndented(body, "Heading", sourceChunk.HeadingPath, 0);
+        AppendOptionalIndented(body, "Summary", sourceChunk.Summary, 0);
+        AppendOptionalIndented(body, "Notes", sourceChunk.AgentNotes, 0);
+        if (excerpt is not null)
+        {
+            body.Append(excerpt.IsTruncated ? "Excerpt (truncated):" : "Excerpt:").AppendLine();
+            body.AppendLine(excerpt.Text);
+        }
+
+        return new ContextItem(
+            Key: EditorContextKeys.IngestSourceChunkReference(sourceChunk.Id),
+            Kind: ContextItemKind.IngestSourceChunkReference,
+            Label: $"Source Chunk Reference — {source.Title} Part {sourceChunk.Index + 1}",
+            Body: body.ToString().TrimEnd(),
+            IsEnabled: true,
+            IsRemovable: true,
+            Badge: "Source chunk",
+            Reason: "Selected source chunk reference");
     }
 
     private async Task<string> BuildOutlineBlockAsync(Guid projectId, Guid currentChapterId, CancellationToken cancellationToken)

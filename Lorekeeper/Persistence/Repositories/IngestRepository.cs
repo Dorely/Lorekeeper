@@ -148,6 +148,13 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
     public Task<IngestSourceChunk?> GetSourceChunkAsync(Guid sourceChunkId, CancellationToken cancellationToken = default) =>
         db.IngestSourceChunks.FirstOrDefaultAsync(chunk => chunk.Id == sourceChunkId, cancellationToken);
 
+    public Task<List<IngestSource>> ListSourcesByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        db.IngestSources
+            .Where(source => source.ProjectId == projectId)
+            .OrderBy(source => source.Title)
+            .ThenBy(source => source.Id)
+            .ToListAsync(cancellationToken);
+
     public async Task<IngestSourceChunkExcerpt?> GetSourceChunkExcerptAsync(Guid sourceChunkId, int maxChars = 8_000, CancellationToken cancellationToken = default)
     {
         maxChars = Math.Clamp(maxChars, 1, 100_000);

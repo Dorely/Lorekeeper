@@ -32,6 +32,10 @@ public enum ContextItemKind
     ProjectFacts,
     WritingSample,
     Entity,
+    ChapterReference,
+    ActReference,
+    IngestSourceReference,
+    IngestSourceChunkReference,
 }
 
 public sealed record ContextAssembly(IReadOnlyList<ContextItem> Items)

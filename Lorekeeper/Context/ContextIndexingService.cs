@@ -1,0 +1,463 @@
+using System.Text;
+using Lorekeeper.Ingest;
+using Lorekeeper.Knowledge;
+using Lorekeeper.Llm;
+using Lorekeeper.Models;
+using Lorekeeper.Outline;
+using Lorekeeper.Persistence.Repositories;
+
+namespace Lorekeeper.Context;
+
+public sealed class ContextIndexingService(
+    IVectorStore vectors,
+    IEmbeddingService embeddings,
+    ITextChunker chunker,
+    IGraphNodeRepository nodes,
+    IGraphEdgeRepository edges,
+    IActRepository acts,
+    IChapterRepository chapters,
+    IIngestRepository ingest,
+    ILogger<ContextIndexingService> logger) : IContextIndexingService
+{
+    private const int MaxEntityObservations = 12;
+    private const int MaxEntityLinks = 30;
+    private const int MaxSourceChunkExcerptChars = 6_000;
+
+    public async Task ReindexProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var graphNodes = await nodes.ListByProjectAsync(projectId, cancellationToken);
+        foreach (var node in graphNodes.Where(IsContextEntityNode))
+            await ReindexEntityNodeAsync(node, cancellationToken);
+
+        foreach (var act in await acts.ListByProjectAsync(projectId, cancellationToken))
+            await TryReindexActCoreAsync(act, cancellationToken);
+
+        foreach (var chapter in await chapters.ListByProjectAsync(projectId, cancellationToken))
+            await TryReindexChapterCoreAsync(chapter, cancellationToken);
+
+        foreach (var source in await ingest.ListSourcesByProjectAsync(projectId, cancellationToken))
+            await TryReindexIngestSourceCoreAsync(source, cancellationToken);
+    }
+
+    public async Task ReindexEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var node = await nodes.FindByKeyAsync(projectId, entityId.ToString("N"), cancellationToken);
+            if (node is null || !IsContextEntityNode(node))
+            {
+                await DeleteEntityAsync(projectId, entityId, cancellationToken);
+                return;
+            }
+
+            await ReindexEntityNodeAsync(node, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to reindex context entity {EntityId}", entityId);
+        }
+    }
+
+    public Task DeleteEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default) =>
+        DeleteBySourceAsync(projectId, ContextVectorSourceTypes.Entity, entityId, cancellationToken);
+
+    public async Task ReindexChapterAsync(Guid chapterId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var chapter = await chapters.GetByIdAsync(chapterId, cancellationToken);
+            if (chapter is not null)
+                await ReindexChapterCoreAsync(chapter, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to reindex context chapter {ChapterId}", chapterId);
+        }
+    }
+
+    public Task DeleteChapterAsync(Guid projectId, Guid chapterId, CancellationToken cancellationToken = default) =>
+        DeleteBySourceAsync(projectId, ContextVectorSourceTypes.Chapter, chapterId, cancellationToken);
+
+    public async Task ReindexActAsync(Guid actId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var act = await acts.GetByIdAsync(actId, cancellationToken);
+            if (act is not null)
+                await ReindexActCoreAsync(act, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to reindex context act {ActId}", actId);
+        }
+    }
+
+    public Task DeleteActAsync(Guid projectId, Guid actId, CancellationToken cancellationToken = default) =>
+        DeleteBySourceAsync(projectId, ContextVectorSourceTypes.Act, actId, cancellationToken);
+
+    public async Task ReindexIngestSourceAsync(Guid sourceId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var source = await ingest.GetSourceAsync(sourceId, cancellationToken);
+            if (source is not null)
+                await ReindexIngestSourceCoreAsync(source, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to reindex context ingest source {SourceId}", sourceId);
+        }
+    }
+
+    public async Task DeleteIngestSourceAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            foreach (var sourceChunk in await ingest.ListSourceChunksAsync(sourceId, cancellationToken))
+                await DeleteIngestSourceChunkAsync(projectId, sourceChunk.Id, cancellationToken);
+
+            await DeleteBySourceAsync(projectId, ContextVectorSourceTypes.IngestSource, sourceId, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to delete context ingest source vectors for {SourceId}", sourceId);
+        }
+    }
+
+    public async Task ReindexIngestSourceChunkAsync(Guid sourceChunkId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var sourceChunk = await ingest.GetSourceChunkAsync(sourceChunkId, cancellationToken);
+            if (sourceChunk is null) return;
+
+            await ReindexIngestSourceChunkCoreAsync(sourceChunk, cancellationToken);
+            await ReindexIngestSourceAsync(sourceChunk.SourceId, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to reindex context ingest source chunk {SourceChunkId}", sourceChunkId);
+        }
+    }
+
+    public Task DeleteIngestSourceChunkAsync(Guid projectId, Guid sourceChunkId, CancellationToken cancellationToken = default) =>
+        DeleteBySourceAsync(projectId, ContextVectorSourceTypes.IngestSourceChunk, sourceChunkId, cancellationToken);
+
+    private async Task ReindexEntityNodeAsync(GraphNode node, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var text = await BuildEntityTextAsync(node, cancellationToken);
+            await StoreChunksAsync(
+                node.ProjectId,
+                ContextVectorSourceTypes.Entity,
+                Guid.ParseExact(node.Key, "N"),
+                $"{node.NodeType} {node.Label ?? node.Key}",
+                text,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to reindex context entity node {NodeType}/{NodeKey}", node.NodeType, node.Key);
+        }
+    }
+
+    private async Task ReindexChapterCoreAsync(Chapter chapter, CancellationToken cancellationToken)
+    {
+        var text = BuildChapterText(chapter);
+        await StoreChunksAsync(
+            chapter.ProjectId,
+            ContextVectorSourceTypes.Chapter,
+            chapter.Id,
+            $"Chapter {chapter.Order + 1} {chapter.Title}",
+            text,
+            cancellationToken);
+    }
+
+    private async Task TryReindexChapterCoreAsync(Chapter chapter, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ReindexChapterCoreAsync(chapter, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to reindex context chapter {ChapterId}", chapter.Id);
+        }
+    }
+
+    private async Task ReindexActCoreAsync(Act act, CancellationToken cancellationToken)
+    {
+        var text = await BuildActTextAsync(act, cancellationToken);
+        await StoreChunksAsync(
+            act.ProjectId,
+            ContextVectorSourceTypes.Act,
+            act.Id,
+            $"Act {act.Order + 1} {act.Title}",
+            text,
+            cancellationToken);
+    }
+
+    private async Task TryReindexActCoreAsync(Act act, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ReindexActCoreAsync(act, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to reindex context act {ActId}", act.Id);
+        }
+    }
+
+    private async Task ReindexIngestSourceCoreAsync(IngestSource source, CancellationToken cancellationToken)
+    {
+        var text = await BuildIngestSourceTextAsync(source, cancellationToken);
+        await StoreChunksAsync(
+            source.ProjectId,
+            ContextVectorSourceTypes.IngestSource,
+            source.Id,
+            $"Source {source.Title}",
+            text,
+            cancellationToken);
+
+        foreach (var sourceChunk in await ingest.ListSourceChunksAsync(source.Id, cancellationToken))
+            await ReindexIngestSourceChunkCoreAsync(sourceChunk, cancellationToken);
+    }
+
+    private async Task TryReindexIngestSourceCoreAsync(IngestSource source, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ReindexIngestSourceCoreAsync(source, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to reindex context ingest source {SourceId}", source.Id);
+        }
+    }
+
+    private async Task ReindexIngestSourceChunkCoreAsync(IngestSourceChunk sourceChunk, CancellationToken cancellationToken)
+    {
+        var source = await ingest.GetSourceAsync(sourceChunk.SourceId, cancellationToken);
+        if (source is null) return;
+
+        var text = await BuildIngestSourceChunkTextAsync(source, sourceChunk, cancellationToken);
+        await StoreChunksAsync(
+            source.ProjectId,
+            ContextVectorSourceTypes.IngestSourceChunk,
+            sourceChunk.Id,
+            $"Source chunk {source.Title} part {sourceChunk.Index + 1}",
+            text,
+            cancellationToken);
+    }
+
+    private async Task StoreChunksAsync(
+        Guid projectId,
+        string sourceType,
+        Guid sourceId,
+        string metadata,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var scopeKey = Project.ScopeKey(projectId);
+        var sourceKey = sourceId.ToString("N");
+        await vectors.DeleteBySourceAsync(sourceType, sourceKey, scopeKey, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(content)) return;
+
+        var chunks = chunker.Chunk(content);
+        if (chunks.Count == 0) return;
+
+        var contents = chunks.Select(chunk => chunk.Content).ToList();
+        var embeddingVectors = await embeddings.GenerateEmbeddingsAsync(contents, cancellationToken);
+        for (var index = 0; index < chunks.Count; index++)
+        {
+            await vectors.StoreAsync(
+                chunks[index].Content,
+                embeddingVectors[index],
+                sourceType,
+                scopeKey,
+                sourceKey,
+                chunks.Count == 1 ? metadata : $"{metadata} - Part {index + 1}/{chunks.Count}",
+                index,
+                cancellationToken);
+        }
+    }
+
+    private async Task DeleteBySourceAsync(Guid projectId, string sourceType, Guid sourceId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await vectors.DeleteBySourceAsync(sourceType, sourceId.ToString("N"), Project.ScopeKey(projectId), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to delete context vectors for {SourceType}/{SourceId}", sourceType, sourceId);
+        }
+    }
+
+    private async Task<string> BuildEntityTextAsync(GraphNode node, CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Type: ").AppendLine(node.NodeType);
+        sb.Append("Name: ").AppendLine(node.Label ?? node.Key);
+
+        AppendProperties(sb, node.Properties);
+
+        var observations = IngestSourceAssertions.ListEntityObservations(node.Properties, MaxEntityObservations);
+        if (observations.Count > 0)
+        {
+            sb.AppendLine("Ingest observations:");
+            foreach (var observation in observations)
+            {
+                sb.Append("- ").Append(observation.SourceTitle).Append(" chunk ").Append(observation.SourceChunkIndex + 1).AppendLine();
+                AppendOptional(sb, "  Summary", observation.Summary);
+                AppendObservedProperties(sb, observation.ObservedProperties, "  ");
+                AppendOptional(sb, "  Aliases", string.Join(", ", observation.Aliases));
+                AppendOptional(sb, "  Evidence", observation.Evidence);
+                AppendOptional(sb, "  Notes", observation.Notes);
+            }
+        }
+
+        var adjacent = await edges.GetAdjacentAsync(node.Id, EdgeDirection.Both, edgeTypes: null, MaxEntityLinks, cancellationToken);
+        if (adjacent.Count > 0)
+        {
+            var otherIds = adjacent.Select(edge => edge.FromNodeId == node.Id ? edge.ToNodeId : edge.FromNodeId).Distinct();
+            var otherNodes = (await nodes.GetByIdsAsync(otherIds, cancellationToken)).ToDictionary(other => other.Id);
+            sb.AppendLine("Links:");
+            foreach (var edge in adjacent)
+            {
+                var otherNodeId = edge.FromNodeId == node.Id ? edge.ToNodeId : edge.FromNodeId;
+                if (!otherNodes.TryGetValue(otherNodeId, out var other)) continue;
+                var direction = edge.FromNodeId == node.Id ? "->" : "<-";
+                sb.Append("- ").Append(direction).Append(' ').Append(edge.EdgeType).Append(' ')
+                    .Append(other.Label ?? other.Key).Append(" (").Append(other.NodeType).AppendLine(")");
+                AppendProperties(sb, edge.Properties, "  ");
+            }
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string BuildChapterText(Chapter chapter)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Type: Chapter\n");
+        sb.Append("Title: ").AppendLine(chapter.Title);
+        AppendOptional(sb, "Synopsis", chapter.Synopsis);
+        AppendOptional(sb, "Body", chapter.Body);
+        return sb.ToString().TrimEnd();
+    }
+
+    private async Task<string> BuildActTextAsync(Act act, CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Type: Act\n");
+        sb.Append("Title: ").AppendLine(act.Title);
+        AppendOptional(sb, "Synopsis", act.Synopsis);
+
+        var actChapters = (await chapters.ListByProjectAsync(act.ProjectId, cancellationToken))
+            .Where(chapter => chapter.ActId == act.Id)
+            .OrderBy(chapter => chapter.Order)
+            .ToList();
+        if (actChapters.Count > 0)
+        {
+            sb.AppendLine("Chapters:");
+            foreach (var chapter in actChapters)
+            {
+                sb.Append("- Chapter ").Append(chapter.Order + 1).Append(": ").AppendLine(chapter.Title);
+                AppendOptional(sb, "  Synopsis", chapter.Synopsis);
+            }
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private async Task<string> BuildIngestSourceTextAsync(IngestSource source, CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Type: Ingest source\n");
+        sb.Append("Title: ").AppendLine(source.Title);
+        AppendOptional(sb, "Kind", source.SourceKind);
+        AppendOptional(sb, "Description", source.Description);
+        AppendOptional(sb, "Instructions", source.UserInstructions);
+
+        var sourceChunks = await ingest.ListSourceChunksAsync(source.Id, cancellationToken);
+        if (sourceChunks.Count > 0)
+        {
+            sb.AppendLine("Source chunks:");
+            foreach (var sourceChunk in sourceChunks)
+            {
+                sb.Append("- Part ").Append(sourceChunk.Index + 1).Append(": ").AppendLine(sourceChunk.Title);
+                AppendOptional(sb, "  Heading", sourceChunk.HeadingPath);
+                AppendOptional(sb, "  Summary", sourceChunk.Summary);
+                AppendOptional(sb, "  Notes", sourceChunk.AgentNotes);
+            }
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private async Task<string> BuildIngestSourceChunkTextAsync(IngestSource source, IngestSourceChunk sourceChunk, CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Type: Ingest source chunk\n");
+        sb.Append("Source: ").AppendLine(source.Title);
+        AppendOptional(sb, "Source kind", source.SourceKind);
+        sb.Append("Part: ").Append(sourceChunk.Index + 1).AppendLine();
+        AppendOptional(sb, "Title", sourceChunk.Title);
+        AppendOptional(sb, "Heading path", sourceChunk.HeadingPath);
+        AppendOptional(sb, "Summary", sourceChunk.Summary);
+        AppendOptional(sb, "Notes", sourceChunk.AgentNotes);
+
+        var excerpt = await ingest.GetSourceChunkExcerptAsync(sourceChunk.Id, MaxSourceChunkExcerptChars, cancellationToken);
+        if (excerpt is not null)
+            AppendOptional(sb, excerpt.IsTruncated ? "Excerpt (truncated)" : "Excerpt", excerpt.Text);
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static void AppendProperties(StringBuilder sb, IReadOnlyDictionary<string, object?> properties, string prefix = "")
+    {
+        var visible = properties
+            .Where(property => !IngestSourceAssertions.IsProtectedProperty(property.Key)
+                && !IngestSourceAssertions.IsLegacyIngestProperty(property.Key)
+                && !string.IsNullOrWhiteSpace(property.Value?.ToString()))
+            .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (visible.Count == 0) return;
+
+        sb.Append(prefix).AppendLine("Properties:");
+        foreach (var property in visible)
+            sb.Append(prefix).Append("- ").Append(property.Key).Append(": ").AppendLine(property.Value?.ToString());
+    }
+
+    private static void AppendObservedProperties(StringBuilder sb, IReadOnlyDictionary<string, string?> properties, string prefix)
+    {
+        foreach (var property in properties
+            .Where(property => !string.IsNullOrWhiteSpace(property.Value))
+            .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            sb.Append(prefix).Append(property.Key).Append(": ").AppendLine(property.Value);
+        }
+    }
+
+    private static void AppendOptional(StringBuilder sb, string label, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        sb.Append(label).Append(": ").AppendLine(value.Trim());
+    }
+
+    private static bool IsContextEntityNode(GraphNode node) =>
+        Guid.TryParseExact(node.Key, "N", out _)
+        && IsContextEntityType(node.NodeType);
+
+    private static bool IsContextEntityType(string type) =>
+        !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+}

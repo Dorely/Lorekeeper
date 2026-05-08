@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using Lorekeeper.Context;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -14,7 +15,8 @@ public sealed class IngestAgentTools(
     IGraphStore graph,
     IGraphNodeRepository nodes,
     IGraphEdgeRepository edges,
-    IEntityTypeService entityTypes)
+    IEntityTypeService entityTypes,
+    IContextIndexingService contextIndexing)
 {
     public IList<AITool> Build(IngestAgentContext context) =>
     [
@@ -274,6 +276,7 @@ public sealed class IngestAgentTools(
             evidence,
             notes);
         context.OnMutated();
+        await contextIndexing.ReindexEntityAsync(context.ProjectId, created.Id);
 
         return JsonSerializer.Serialize(new
         {
@@ -413,6 +416,8 @@ public sealed class IngestAgentTools(
             evidence,
             notes);
         context.OnMutated();
+        await contextIndexing.ReindexEntityAsync(context.ProjectId, from);
+        await contextIndexing.ReindexEntityAsync(context.ProjectId, to);
 
         return JsonSerializer.Serialize(new
         {
@@ -455,6 +460,7 @@ public sealed class IngestAgentTools(
 
         await ingest.SaveChangesAsync();
         context.OnMutated();
+        await contextIndexing.ReindexIngestSourceChunkAsync(context.SourceChunkId);
         return JsonSerializer.Serialize(new { sourceChunkId = context.SourceChunkId, summary = sourceChunk.Summary, notes = sourceChunk.AgentNotes });
     }
 
@@ -488,6 +494,7 @@ public sealed class IngestAgentTools(
             evidence,
             notes);
         context.OnMutated();
+        await contextIndexing.ReindexEntityAsync(context.ProjectId, entityId);
     }
 
     private async Task UpsertEntityReportItemAsync(

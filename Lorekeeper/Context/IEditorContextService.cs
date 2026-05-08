@@ -22,6 +22,11 @@ public interface IEditorContextService : IContextBuilder
         Guid projectId,
         Guid chapterId,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyCollection<string>> ListIncludedContextKeysAsync(
+        Guid projectId,
+        Guid chapterId,
+        CancellationToken cancellationToken = default);
 }
 
 public static class EditorContextKeys
@@ -33,17 +38,44 @@ public static class EditorContextKeys
 
     public static string WritingSample(Guid sampleId) => $"writing-sample:{sampleId:N}";
     public static string Entity(Guid entityId) => $"entity:{entityId:N}";
+    public static string ChapterReference(Guid chapterId) => $"chapter:{chapterId:N}";
+    public static string ActReference(Guid actId) => $"act:{actId:N}";
+    public static string IngestSourceReference(Guid sourceId) => $"ingest-source:{sourceId:N}";
+    public static string IngestSourceChunkReference(Guid sourceChunkId) => $"ingest-source-chunk:{sourceChunkId:N}";
 
     public static bool TryParseEntity(string key, out Guid entityId)
     {
         const string prefix = "entity:";
-        if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            && Guid.TryParseExact(key[prefix.Length..], "N", out entityId))
+        if (TryParseGuidKey(key, prefix, out entityId))
         {
             return true;
         }
 
         entityId = Guid.Empty;
+        return false;
+    }
+
+    public static bool TryParseChapterReference(string key, out Guid chapterId) =>
+        TryParseGuidKey(key, "chapter:", out chapterId);
+
+    public static bool TryParseActReference(string key, out Guid actId) =>
+        TryParseGuidKey(key, "act:", out actId);
+
+    public static bool TryParseIngestSourceReference(string key, out Guid sourceId) =>
+        TryParseGuidKey(key, "ingest-source:", out sourceId);
+
+    public static bool TryParseIngestSourceChunkReference(string key, out Guid sourceChunkId) =>
+        TryParseGuidKey(key, "ingest-source-chunk:", out sourceChunkId);
+
+    private static bool TryParseGuidKey(string key, string prefix, out Guid id)
+    {
+        if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParseExact(key[prefix.Length..], "N", out id))
+        {
+            return true;
+        }
+
+        id = Guid.Empty;
         return false;
     }
 }

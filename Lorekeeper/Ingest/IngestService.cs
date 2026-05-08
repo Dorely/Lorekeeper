@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Context;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -21,6 +22,7 @@ public sealed class IngestService(
     IGraphNodeRepository nodes,
     IGraphEdgeRepository edges,
     IVectorStore vectors,
+    IContextIndexingService contextIndexing,
     ILogger<IngestService> logger) : IIngestService
 {
     public async Task<IReadOnlyList<IngestJob>> ListJobsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
@@ -125,6 +127,7 @@ public sealed class IngestService(
         projects.Update(project);
         await ingest.SaveChangesAsync(cancellationToken);
         await graphSync.EnsureSourceAsync(source, sourceChunks, cancellationToken);
+        await contextIndexing.ReindexIngestSourceAsync(source.Id, cancellationToken);
         queue.Enqueue(job.Id);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Created);
         return job;
@@ -246,10 +249,12 @@ public sealed class IngestService(
         queue.RequestCancellation(job.Id);
         await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.ReportItems, cancellationToken);
         await vectors.DeleteBySourceAsync("ingest_source", job.Source.VectorSourceId, Project.ScopeKey(job.ProjectId), cancellationToken);
+        await contextIndexing.DeleteIngestSourceAsync(job.ProjectId, job.SourceId, cancellationToken);
         await graphSync.RemoveSourceAsync(job.ProjectId, job.SourceId, cancellationToken);
 
         ingest.RemoveSource(job.Source);
         await ingest.SaveChangesAsync(cancellationToken);
+        await contextIndexing.ReindexProjectAsync(projectId, cancellationToken);
         Notify(projectId, job.Id, IngestJobUpdateKind.Deleted);
     }
 
@@ -280,6 +285,7 @@ public sealed class IngestService(
         await SyncReportEditToGraphAsync(item, cancellationToken);
         ingest.UpdateReportItem(item);
         await ingest.SaveChangesAsync(cancellationToken);
+        await ReindexReportItemContextAsync(item, cancellationToken);
         Notify(item.Job.ProjectId, item.JobId, IngestJobUpdateKind.Report);
         return item;
     }
@@ -296,7 +302,27 @@ public sealed class IngestService(
         await ingest.SaveChangesAsync(cancellationToken);
         await RefreshJobCountsAsync(item.JobId, cancellationToken);
         await ingest.SaveChangesAsync(cancellationToken);
+        await ReindexReportItemContextAsync(item, cancellationToken);
         Notify(item.Job.ProjectId, item.JobId, IngestJobUpdateKind.Report);
+    }
+
+    private async Task ReindexReportItemContextAsync(IngestReportItem item, CancellationToken cancellationToken)
+    {
+        switch (item.Kind)
+        {
+            case IngestReportItemKind.Entity when item.EntityId is Guid entityId:
+                await contextIndexing.ReindexEntityAsync(item.Job.ProjectId, entityId, cancellationToken);
+                break;
+
+            case IngestReportItemKind.Relationship:
+                foreach (var entityId in ReadRelationshipEndpointIds(item.PayloadJson))
+                    await contextIndexing.ReindexEntityAsync(item.Job.ProjectId, entityId, cancellationToken);
+                break;
+
+            case IngestReportItemKind.SourceChunkNote when item.SourceChunkId is Guid sourceChunkId:
+                await contextIndexing.ReindexIngestSourceChunkAsync(sourceChunkId, cancellationToken);
+                break;
+        }
     }
 
     private async Task SyncReportEditToGraphAsync(IngestReportItem item, CancellationToken cancellationToken)
@@ -623,6 +649,33 @@ public sealed class IngestService(
         && property.ValueKind == JsonValueKind.String
         && Guid.TryParse(property.GetString(), out var parsed)
         && parsed == entityId;
+
+    private static IReadOnlyList<Guid> ReadRelationshipEndpointIds(string payloadJson)
+    {
+        if (!payloadJson.TrimStart().StartsWith('{')) return [];
+        try
+        {
+            using var doc = JsonDocument.Parse(payloadJson);
+            var ids = new List<Guid>(2);
+            AddEndpointId(doc.RootElement, "fromEntityId", ids);
+            AddEndpointId(doc.RootElement, "toEntityId", ids);
+            return ids;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static void AddEndpointId(JsonElement element, string propertyName, ICollection<Guid> ids)
+    {
+        if (element.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.String
+            && Guid.TryParse(property.GetString(), out var parsed))
+        {
+            ids.Add(parsed);
+        }
+    }
 
     private static string ComputeHash(string text)
     {

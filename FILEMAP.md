@@ -57,9 +57,9 @@
 |------|-------------|
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared shell for project workspace pages: loads project by slug, renders title + horizontal tab strip (Editor / Graph / Ingest / Outline / Writing Sample), exposes `Project` via `CascadingValue`, and wraps routed page content in a flex-bounded `.project-body` so pages like Outline can own their internal scroll regions. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
-| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Three-column context-aware chapter editor: recommended entities left, JS-debounced line-numbered editor + AI console center, Context Feed right. Persists/reindexes body edits, locks while AI runs, and refreshes editor/context/recommendations after AI turns or approved changes. |
-| `RecommendedEntitiesPanel.razor` (+ `.razor.css`) | Editor left-panel entity suggester: shows graph/context-derived recommendations plus manual search results, and adds entities to the active chapter's persisted context working set. |
-| `ContextFeedPanel.razor` (+ `.razor.css`) | Editable Context Feed: async collapsible cards for project guidance, current chapter, outline, facts, selectable writing samples, and selected entities. Uses stable item keys and `IEditorContextService` to persist per-chapter include/exclude choices. |
+| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Three-column context-aware chapter editor: recommended context left, JS-debounced line-numbered editor + AI console center, Context Feed right. Persists/reindexes body edits, locks while AI runs, and refreshes editor/context/recommendations after AI turns or approved changes. |
+| `RecommendedContextPanel.razor` (+ `.razor.css`) | Editor left-panel context recommender: shows semantic/manual/graph-proximity recommendations for entities plus structural references, and adds them to the active chapter's persisted context working set. |
+| `ContextFeedPanel.razor` (+ `.razor.css`) | Editable Context Feed: async collapsible cards for project guidance, current chapter, outline, facts, selectable writing samples, selected entities, and selected structural references. Uses stable item keys and `IEditorContextService` to persist per-chapter include/exclude choices. |
 | `AiConsolePanel.razor` (+ `.razor.css`) | AI command console: input + Send/Cancel/History, Review edits toggle, pending-change review modal, and callbacks so the editor can flush/lock/refresh. History lists persisted `AiConsoleEntry` rows with prompt snapshots, tool calls, and final response. |
 | `GraphPage.razor` | Graph tab at `/projects/{Slug}/graph`; wraps the project shell and hosts the interactive graph workspace. |
 | `GraphContent.razor` (+ `.razor.css`, `.razor.js`) | Obsidian-inspired full-project graph workspace: loads graph snapshots, filters/searches nodes, bridges to the local `vis-network` renderer for pan/zoom/drag/select, and coordinates graph refreshes. |
@@ -157,7 +157,7 @@
 | `IWritingCoachConversationRepository.cs` / `WritingCoachConversationRepository.cs` | Persistence for the resettable project-level Writing Coach conversation + ordered messages, including assistant tool-call manifests and tool result rows. |
 | `IAiChangeRepository.cs` / `AiChangeRepository.cs` | Persistence for pending AI change batches and changes, including eager-loaded pending batch listing and change lookup for approval actions. |
 | `IEditorContextPreferenceRepository.cs` / `EditorContextPreferenceRepository.cs` | Persistence for active-chapter Context Feed include/exclude preferences, scoped by project, chapter, item kind, and item key. |
-| `IIngestRepository.cs` / `IngestRepository.cs` | Persistence for ingest sources, source chunks, vector fragments, jobs, job chunks, report items, and job events, including tracked processor reads plus lightweight no-tracking UI projections/excerpts. |
+| `IIngestRepository.cs` / `IngestRepository.cs` | Persistence for ingest sources, source chunks, vector fragments, jobs, job chunks, report items, and job events, including project source listing, tracked processor reads, and lightweight no-tracking UI projections/excerpts. |
 
 ### Knowledge/
 
@@ -207,9 +207,11 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Async context assembly for the Context Feed and AI console prompt. Builds keyed `ContextItem`s for guidance, current chapter, outline, facts, writing samples, and selected/auto-related entities; `Assemble()` remains the literal system message sent to the LLM. |
-| `IEditorContextService.cs` | Editor context facade extending `IContextBuilder`; persists per-chapter context item inclusion and exposes auto/included entity sets for recommendations. |
-| `IEditorEntityRecommendationService.cs` / `EditorEntityRecommendationService.cs` | Produces active-chapter entity recommendations from auto-related graph context and manual entity search while excluding entities already in context. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Async context assembly for the Context Feed and AI console prompt. Builds keyed `ContextItem`s for guidance, current chapter, outline, facts, writing samples, selected/auto-related entities, and selected structural references; `Assemble()` remains the literal system message sent to the LLM. |
+| `IEditorContextService.cs` | Editor context facade extending `IContextBuilder`; persists per-chapter context item inclusion and exposes auto/included entity/context key sets for recommendations. |
+| `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
+| `IContextIndexingService.cs` / `ContextIndexingService.cs` | Maintains direct vector rows for addable context items: graph entities, chapters, acts, ingest sources, and ingest source chunks. |
+| `ContextIndexBackfillWorker.cs` | One-shot startup worker that backfills context vectors for existing projects while logging embedding failures without blocking app startup. |
 | `ChapterFormatting.cs` | `WithLineNumbers` / `SplitLines` / `JoinLines` helpers shared by the editor gutter, Context Feed preview, and AI tool reads so user and LLM see identical line numbers. |
 
 ### Tokens/
