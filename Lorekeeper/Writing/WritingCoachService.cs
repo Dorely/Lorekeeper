@@ -20,7 +20,7 @@ public sealed class WritingCoachService(
     IOptions<AiConsoleOptions> options,
     ILogger<WritingCoachService> logger) : IWritingCoachService
 {
-    private const string CoachSystemPrompt = """
+    public const string CoachSystemPrompt = """
         You are a Writing Coach for a long-form fiction project. Your job is to help
         the writer produce writing samples in their own style and words so future AI
         drafting can better imitate their voice.

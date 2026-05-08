@@ -130,6 +130,11 @@
     padding: 0.2rem 0.5rem;
 }
 
+.chapter-metrics {
+    color: var(--bs-secondary-color, #6c757d);
+    white-space: nowrap;
+}
+
 .chapter-menu {
     position: absolute;
     top: calc(100% + 2px);

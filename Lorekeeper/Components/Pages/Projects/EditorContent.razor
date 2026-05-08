@@ -1,11 +1,13 @@
 @using Lorekeeper.Chapters
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
+@using Lorekeeper.Tokens
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IChapterService Chapters
 @inject IActService Acts
+@inject ITokenCounter TokenCounter
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
@@ -80,6 +82,10 @@ else
                 <button type="button" class="btn btn-sm btn-outline-secondary chapter-icon-btn"
                         title="New chapter" @onclick="CreateAndGoToOutlineAsync">+</button>
 
+                <div class="small chapter-metrics" title="@ChapterMetricsTitle()">
+                    @ChapterMetricsText()
+                </div>
+
                 <div class="ms-auto small index-status">
                     @SaveStatusText()
                 </div>
@@ -148,6 +154,9 @@ else
     private bool _chapterLocked;
     private ContextFeedPanel? _contextPanel;
     private int _contextRefreshSignal;
+    private int _chapterWordCount;
+    private int _chapterTokenCount;
+    private bool _chapterTokenIsExact = true;
 
     public EditorContent()
     {
@@ -171,6 +180,7 @@ else
         {
             _current = null;
             _activeChapterId = null;
+            UpdateChapterMetrics(string.Empty);
             return;
         }
 
@@ -197,6 +207,7 @@ else
 
         _activeChapterId = targetId;
         _current = _chapters.First(c => c.Id == targetId);
+        UpdateChapterMetrics(_current.Body);
         _saveState = SaveState.Idle;
         _saveError = null;
 
@@ -256,6 +267,7 @@ else
             if (_current is not null && _current.Id == chapterId)
             {
                 _current.Body = body;
+                UpdateChapterMetrics(body);
             }
 
             try
@@ -384,6 +396,44 @@ else
         _ => string.Empty,
     };
 
+    private string ChapterMetricsText() =>
+        $"Words {_chapterWordCount:N0} | Tokens {TokenPrefix(_chapterTokenIsExact)}{_chapterTokenCount:N0}";
+
+    private string ChapterMetricsTitle() => _chapterTokenIsExact
+        ? "Chapter text token count"
+        : "Chapter text token count is estimated";
+
+    private void UpdateChapterMetrics(string? body)
+    {
+        var text = body ?? string.Empty;
+        _chapterWordCount = CountWords(text);
+        var result = TokenCounter.Count(text);
+        _chapterTokenCount = result.TokenCount;
+        _chapterTokenIsExact = result.IsExact;
+    }
+
+    private static int CountWords(string text)
+    {
+        var count = 0;
+        var inWord = false;
+        foreach (var ch in text)
+        {
+            if (char.IsWhiteSpace(ch))
+            {
+                inWord = false;
+                continue;
+            }
+
+            if (inWord) continue;
+            count++;
+            inWord = true;
+        }
+
+        return count;
+    }
+
+    private static string TokenPrefix(bool isExact) => isExact ? string.Empty : "~";
+
     /// <summary>
     /// Called by AiConsolePanel before the LLM call begins. Flush any pending
     /// debounced edits and lock the editor so the user cannot type during the turn.
@@ -435,6 +485,7 @@ else
             if (fresh is not null)
             {
                 _current = fresh;
+                UpdateChapterMetrics(fresh.Body);
                 if (_editorHandle is not null)
                 {
                     try { await _editorHandle.InvokeVoidAsync("setValue", fresh.Body); }

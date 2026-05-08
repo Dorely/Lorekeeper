@@ -2,13 +2,20 @@
 @using System.Text.Json
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
+@using Lorekeeper.Tokens
 @implements IAsyncDisposable
 @inject IOutlineCollaborationService Collab
+@inject ITokenCounter TokenCounter
 @inject IJSRuntime JS
 
 <div class="outline-chat">
     <div class="outline-chat-header">
-        <span class="outline-chat-title">Outline Chat</span>
+        <div class="outline-chat-heading">
+            <span class="outline-chat-title">Outline Chat</span>
+            <span class="outline-chat-token-count" title="@ConversationTokenTitle()">
+                @ConversationTokenText()
+            </span>
+        </div>
         <div class="outline-chat-header-actions">
             @if (PendingChangeCount > 0)
             {
@@ -105,6 +112,9 @@
     private CancellationTokenSource? _cts;
     private Guid? _loadedProjectId;
     private List<AiChangeBatch> _pendingBatches = [];
+    private string? _pendingUserText;
+    private int _conversationTokenCount;
+    private bool _conversationTokenIsExact = true;
 
     private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
 
@@ -157,6 +167,9 @@
             _approvalEnabled = await Collab.GetAiChangeApprovalEnabledAsync(ProjectId);
             await LoadPendingChangesAsync(openIfPending: false);
             RebuildRenderable();
+            _pendingUserText = null;
+            _live = null;
+            UpdateConversationTokenCount();
         }
         finally
         {
@@ -189,6 +202,8 @@
             Status: OutlineMessageStatus.Completed,
             Parts: [new TextPart(text)]));
         _live = new LiveTurn();
+        _pendingUserText = text;
+        UpdateConversationTokenCount();
         await ResumeAutoFollowAsync();
         RequestScroll(force: true);
         StateHasChanged();
@@ -201,18 +216,21 @@
                 {
                     case TextDelta td:
                         _live!.AppendText(td.Text);
+                        UpdateConversationTokenCount();
                         RequestScroll();
                         StateHasChanged();
                         break;
 
                     case ToolCallStarted ts:
                         _live!.AddToolCall(ts.CallId, ts.ToolName, ts.ArgumentsJson);
+                        UpdateConversationTokenCount();
                         RequestScroll();
                         StateHasChanged();
                         break;
 
                     case ToolCallCompleted tc:
                         _live!.CompleteToolCall(tc.CallId, tc.Result, tc.Error);
+                        UpdateConversationTokenCount();
                         RequestScroll();
                         StateHasChanged();
                         break;
@@ -255,6 +273,7 @@
         {
             _running = false;
             _live = null;
+            UpdateConversationTokenCount();
             _cts?.Dispose();
             _cts = null;
             RequestScroll();
@@ -279,6 +298,9 @@
         if (_conversation is null) return;
         _messages = (await Collab.LoadMessagesAsync(_conversation.Id)).ToList();
         RebuildRenderable();
+        _pendingUserText = null;
+        _live = null;
+        UpdateConversationTokenCount();
     }
 
     private async Task LoadPendingChangesAsync(bool openIfPending)
@@ -333,6 +355,90 @@
                 Parts: BuildMessageParts(m, byCallId)));
         }
     }
+
+    private void UpdateConversationTokenCount()
+    {
+        var result = TokenCounter.Count(BuildConversationTokenText());
+        _conversationTokenCount = result.TokenCount;
+        _conversationTokenIsExact = result.IsExact;
+    }
+
+    private string BuildConversationTokenText()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("System:");
+        sb.AppendLine(OutlineCollaborationService.CollaborationSystemPrompt);
+
+        foreach (var message in _messages)
+            AppendMessageForTokenCount(sb, message);
+
+        if (!string.IsNullOrWhiteSpace(_pendingUserText))
+        {
+            sb.AppendLine("User:");
+            sb.AppendLine(_pendingUserText);
+        }
+
+        AppendLiveTurnForTokenCount(sb, _live);
+        return sb.ToString();
+    }
+
+    private static void AppendMessageForTokenCount(StringBuilder sb, OutlineMessage message)
+    {
+        sb.Append(message.Role).AppendLine(":");
+        if (!string.IsNullOrEmpty(message.Content))
+            sb.AppendLine(message.Content);
+        if (!string.IsNullOrWhiteSpace(message.ToolCallsJson) && message.ToolCallsJson != "[]")
+        {
+            sb.AppendLine("Tool calls:");
+            sb.AppendLine(message.ToolCallsJson);
+        }
+        if (!string.IsNullOrWhiteSpace(message.ToolName) || !string.IsNullOrWhiteSpace(message.ToolCallId))
+            sb.Append("Tool: ").Append(message.ToolName).Append(' ').AppendLine(message.ToolCallId);
+        if (!string.IsNullOrWhiteSpace(message.ErrorMessage))
+            sb.Append("Error: ").AppendLine(message.ErrorMessage);
+    }
+
+    private static void AppendLiveTurnForTokenCount(StringBuilder sb, LiveTurn? live)
+    {
+        if (live is null) return;
+
+        foreach (var message in live.Messages)
+        {
+            foreach (var part in message.Parts)
+            {
+                if (part is TextPart textPart)
+                {
+                    var text = textPart.Text.ToString();
+                    if (!string.IsNullOrEmpty(text))
+                        sb.AppendLine(text);
+                }
+                else if (part is ToolPart toolPart)
+                {
+                    AppendToolChipForTokenCount(sb, toolPart.Chip);
+                }
+            }
+        }
+    }
+
+    private static void AppendToolChipForTokenCount(StringBuilder sb, ToolChip chip)
+    {
+        sb.Append("Tool: ").Append(chip.Name).Append(' ').AppendLine(chip.CallId);
+        if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
+            sb.Append("Args: ").AppendLine(chip.ArgumentsJson);
+        if (!string.IsNullOrWhiteSpace(chip.Result))
+            sb.Append("Result: ").AppendLine(chip.Result);
+        if (!string.IsNullOrWhiteSpace(chip.Error))
+            sb.Append("Error: ").AppendLine(chip.Error);
+    }
+
+    private string ConversationTokenText() =>
+        $"{TokenPrefix(_conversationTokenIsExact)}{_conversationTokenCount:N0} conversation tokens";
+
+    private string ConversationTokenTitle() => _conversationTokenIsExact
+        ? "Current conversation token count"
+        : "Current conversation token count is estimated";
+
+    private static string TokenPrefix(bool isExact) => isExact ? string.Empty : "~";
 
     private static List<MessagePart> BuildMessageParts(OutlineMessage message, IReadOnlyDictionary<string, OutlineMessage> byCallId)
     {

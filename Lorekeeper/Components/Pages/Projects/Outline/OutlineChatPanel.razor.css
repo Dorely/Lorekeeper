@@ -23,6 +23,19 @@
     font-size: 0.9rem;
 }
 
+.outline-chat-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+    min-width: 0;
+}
+
+.outline-chat-token-count {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
 .outline-chat-header-actions {
     display: flex;
     align-items: center;

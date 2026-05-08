@@ -1,8 +1,10 @@
 @using Lorekeeper.Context
 @using Lorekeeper.Models
 @using Lorekeeper.Projects
+@using Lorekeeper.Tokens
 @inject IProjectService Projects
 @inject IEditorContextService EditorContext
+@inject ITokenCounter TokenCounter
 
 @if (_assembly is null)
 {
@@ -10,6 +12,10 @@
 }
 else
 {
+    <div class="ctx-feed-summary" title="@ContextTokenTitle()">
+        Combined context tokens: @TokenPrefix(_contextTokenIsExact)@_contextTokenCount.ToString("N0")
+    </div>
+
     @foreach (var item in _assembly.Items)
     {
         var collapsed = IsCollapsed(item.Key);
@@ -78,6 +84,8 @@ else
     private bool _promptDirty;
     private bool _promptSaving;
     private string? _promptError;
+    private int _contextTokenCount;
+    private bool _contextTokenIsExact = true;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -95,7 +103,21 @@ else
     private async Task RebuildAsync()
     {
         _assembly = await EditorContext.BuildAsync(Project, CurrentChapter);
+        UpdateContextTokenCount();
     }
+
+    private void UpdateContextTokenCount()
+    {
+        var result = TokenCounter.Count(_assembly?.Assemble() ?? string.Empty);
+        _contextTokenCount = result.TokenCount;
+        _contextTokenIsExact = result.IsExact;
+    }
+
+    private string ContextTokenTitle() => _contextTokenIsExact
+        ? "Enabled context token count"
+        : "Enabled context token count is estimated";
+
+    private static string TokenPrefix(bool isExact) => isExact ? string.Empty : "~";
 
     private bool IsCollapsed(string key) => _collapsed.Contains(key);
 

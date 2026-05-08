@@ -1,14 +1,21 @@
 @using System.Text
 @using System.Text.Json
 @using Lorekeeper.Models
+@using Lorekeeper.Tokens
 @using Lorekeeper.Writing
 @implements IAsyncDisposable
 @inject IWritingCoachService Coach
+@inject ITokenCounter TokenCounter
 @inject IJSRuntime JS
 
 <div class="writing-coach">
     <div class="writing-coach-header">
-        <span class="writing-coach-title">Writing Coach</span>
+        <div class="writing-coach-heading">
+            <span class="writing-coach-title">Writing Coach</span>
+            <span class="writing-coach-token-count" title="@ConversationTokenTitle()">
+                @ConversationTokenText()
+            </span>
+        </div>
         <button type="button" class="btn btn-link btn-sm writing-coach-reset" title="Start over"
                 disabled="@_running" @onclick="ResetAsync">Reset</button>
     </div>
@@ -85,6 +92,9 @@
     private string? _error;
     private CancellationTokenSource? _cts;
     private Guid? _loadedProjectId;
+    private string? _pendingUserText;
+    private int _conversationTokenCount;
+    private bool _conversationTokenIsExact = true;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -134,6 +144,9 @@
             _conversation = await Coach.GetOrCreateAsync(ProjectId);
             _messages = (await Coach.LoadMessagesAsync(_conversation.Id)).ToList();
             RebuildRenderable();
+            _pendingUserText = null;
+            _live = null;
+            UpdateConversationTokenCount();
         }
         finally
         {
@@ -164,6 +177,8 @@
             Status: WritingCoachMessageStatus.Completed,
             Parts: [new TextPart(text)]));
         _live = new LiveTurn();
+        _pendingUserText = text;
+        UpdateConversationTokenCount();
         await ResumeAutoFollowAsync();
         RequestScroll(force: true);
         StateHasChanged();
@@ -176,18 +191,21 @@
                 {
                     case WritingCoachTextDelta delta:
                         _live!.AppendText(delta.Text);
+                        UpdateConversationTokenCount();
                         RequestScroll();
                         StateHasChanged();
                         break;
 
                     case WritingCoachToolCallStarted started:
                         _live!.AddToolCall(started.CallId, started.ToolName, started.ArgumentsJson);
+                        UpdateConversationTokenCount();
                         RequestScroll();
                         StateHasChanged();
                         break;
 
                     case WritingCoachToolCallCompleted completed:
                         _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error);
+                        UpdateConversationTokenCount();
                         RequestScroll();
                         StateHasChanged();
                         break;
@@ -217,6 +235,7 @@
         {
             _running = false;
             _live = null;
+            UpdateConversationTokenCount();
             _cts?.Dispose();
             _cts = null;
             RequestScroll();
@@ -239,6 +258,9 @@
         if (_conversation is null) return;
         _messages = (await Coach.LoadMessagesAsync(_conversation.Id)).ToList();
         RebuildRenderable();
+        _pendingUserText = null;
+        _live = null;
+        UpdateConversationTokenCount();
     }
 
     private void RebuildRenderable()
@@ -260,6 +282,90 @@
                 Parts: BuildMessageParts(message, byCallId)));
         }
     }
+
+    private void UpdateConversationTokenCount()
+    {
+        var result = TokenCounter.Count(BuildConversationTokenText());
+        _conversationTokenCount = result.TokenCount;
+        _conversationTokenIsExact = result.IsExact;
+    }
+
+    private string BuildConversationTokenText()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("System:");
+        sb.AppendLine(WritingCoachService.CoachSystemPrompt);
+
+        foreach (var message in _messages)
+            AppendMessageForTokenCount(sb, message);
+
+        if (!string.IsNullOrWhiteSpace(_pendingUserText))
+        {
+            sb.AppendLine("User:");
+            sb.AppendLine(_pendingUserText);
+        }
+
+        AppendLiveTurnForTokenCount(sb, _live);
+        return sb.ToString();
+    }
+
+    private static void AppendMessageForTokenCount(StringBuilder sb, WritingCoachMessage message)
+    {
+        sb.Append(message.Role).AppendLine(":");
+        if (!string.IsNullOrEmpty(message.Content))
+            sb.AppendLine(message.Content);
+        if (!string.IsNullOrWhiteSpace(message.ToolCallsJson) && message.ToolCallsJson != "[]")
+        {
+            sb.AppendLine("Tool calls:");
+            sb.AppendLine(message.ToolCallsJson);
+        }
+        if (!string.IsNullOrWhiteSpace(message.ToolName) || !string.IsNullOrWhiteSpace(message.ToolCallId))
+            sb.Append("Tool: ").Append(message.ToolName).Append(' ').AppendLine(message.ToolCallId);
+        if (!string.IsNullOrWhiteSpace(message.ErrorMessage))
+            sb.Append("Error: ").AppendLine(message.ErrorMessage);
+    }
+
+    private static void AppendLiveTurnForTokenCount(StringBuilder sb, LiveTurn? live)
+    {
+        if (live is null) return;
+
+        foreach (var message in live.Messages)
+        {
+            foreach (var part in message.Parts)
+            {
+                if (part is TextPart textPart)
+                {
+                    var text = textPart.Text.ToString();
+                    if (!string.IsNullOrEmpty(text))
+                        sb.AppendLine(text);
+                }
+                else if (part is ToolPart toolPart)
+                {
+                    AppendToolChipForTokenCount(sb, toolPart.Chip);
+                }
+            }
+        }
+    }
+
+    private static void AppendToolChipForTokenCount(StringBuilder sb, ToolChip chip)
+    {
+        sb.Append("Tool: ").Append(chip.Name).Append(' ').AppendLine(chip.CallId);
+        if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
+            sb.Append("Args: ").AppendLine(chip.ArgumentsJson);
+        if (!string.IsNullOrWhiteSpace(chip.Result))
+            sb.Append("Result: ").AppendLine(chip.Result);
+        if (!string.IsNullOrWhiteSpace(chip.Error))
+            sb.Append("Error: ").AppendLine(chip.Error);
+    }
+
+    private string ConversationTokenText() =>
+        $"{TokenPrefix(_conversationTokenIsExact)}{_conversationTokenCount:N0} conversation tokens";
+
+    private string ConversationTokenTitle() => _conversationTokenIsExact
+        ? "Current conversation token count"
+        : "Current conversation token count is estimated";
+
+    private static string TokenPrefix(bool isExact) => isExact ? string.Empty : "~";
 
     private static List<MessagePart> BuildMessageParts(WritingCoachMessage message, IReadOnlyDictionary<string, WritingCoachMessage> byCallId)
     {
