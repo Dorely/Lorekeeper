@@ -612,7 +612,6 @@ public sealed class OutlineToolStagingContext(
 
         await changes.AddChangeAsync(change, cancellationToken);
         await changes.SaveChangesAsync(cancellationToken);
-        batch.Changes.Add(change);
         _newChanges.Add(change);
 
         foreach (var resource in createdResources)

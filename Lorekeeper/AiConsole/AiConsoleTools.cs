@@ -7,6 +7,7 @@ using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.AiConsole;
@@ -20,13 +21,22 @@ public sealed class AiConsoleTools(
     IChapterService chapters,
     IEntityService entities,
     IEntityTypeService entityTypes,
+    IProjectFactService projectFacts,
     IVectorStore vectors,
-    IEmbeddingService embeddings)
+    IEmbeddingService embeddings,
+    IProjectRepository projects,
+    IEditorContextService editorContext,
+    OutlineCollaborationTools outlineTools)
 {
     public IList<AITool> Build(AiConsoleContext context)
     {
-        return new List<AITool>
+        var tools = new List<AITool>
         {
+            AIFunctionFactory.Create(
+                method: () => ListContextAsync(context),
+                name: "list_context",
+                description: "Read the currently assembled editor context exactly as the model sees it, including enabled outline, facts, writing samples, and selected entities."),
+
             AIFunctionFactory.Create(
                 method: (string query, int topK) => VectorSearchAsync(context, query, topK),
                 name: "vector_search",
@@ -38,19 +48,29 @@ public sealed class AiConsoleTools(
                 description: "List every chapter in the current project (id, order, title, synopsis)."),
 
             AIFunctionFactory.Create(
-                method: () => ListEntityTypesAsync(context),
-                name: "list_entity_types",
-                description: "List graph entity types registered or discovered for the current project, including structural outline types."),
+                method: () => ListProjectFactsAsync(context),
+                name: "list_project_facts",
+                description: "List project-level facts and their linked graph entities as JSON."),
 
             AIFunctionFactory.Create(
-                method: (string type, string? parentId) => ListEntitiesAsync(context, type, parentId),
-                name: "list_entities",
-                description: "List graph entities of a given type. For chapter-scoped beats use type='Event' and parentId=<chapter id>; otherwise omit parentId."),
+                method: (string query, int topK) => SearchEntitiesAsync(context, query, topK),
+                name: "search_entities",
+                description: "Search story graph entities by name, type, and property text. Use this when you need a specific character, location, beat, or custom entity but do not know its id."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId) => ReadEntityAsync(context, entityId),
+                name: "read_entity",
+                description: "Read one graph entity by id, including properties and adjacent links."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
                 name: "list_entity_links",
                 description: "List all graph links adjacent to an entity, including structural HasChild links and semantic story relationships."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId, int depth) => GraphNeighborsAsync(context, entityId, depth),
+                name: "graph_neighbors",
+                description: "Traverse graph neighbors from an entity for 1-3 degrees and return reached entities plus the edge used to reach each one."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId) => ReadChapterAsync(context, chapterId),
@@ -67,8 +87,30 @@ public sealed class AiConsoleTools(
                     "If only startLine is provided: insert `content` BEFORE that line (1-based). " +
                     "If both startLine and endLine are provided: replace the inclusive line range with `content`. " +
                     "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
+                    "When Review edits is enabled this stages the edit for approval instead of applying it immediately. " +
                     "Returns the new line-numbered body and a short change summary."),
         };
+
+        var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var outlineTool in outlineTools.Build(new OutlineCollaborationContext(context.ProjectId, () => { }, context.OutlineStaging)))
+        {
+            if (outlineTool is AIFunction function && existingNames.Add(function.Name))
+                tools.Add(outlineTool);
+        }
+
+        return tools;
+    }
+
+    private async Task<string> ListContextAsync(AiConsoleContext ctx)
+    {
+        var project = await projects.GetByIdAsync(ctx.ProjectId)
+            ?? throw new InvalidOperationException($"Project {ctx.ProjectId} not found.");
+        Chapter? currentChapter = null;
+        if (ctx.CurrentChapterId is { } chapterId)
+            currentChapter = await chapters.GetAsync(chapterId);
+
+        var assembly = await editorContext.BuildAsync(project, currentChapter);
+        return assembly.Assemble();
     }
 
     private async Task<string> VectorSearchAsync(
@@ -116,6 +158,133 @@ public sealed class AiConsoleTools(
             sb.Append('\n');
         }
         return sb.ToString().TrimEnd();
+    }
+
+    private async Task<string> ListProjectFactsAsync(AiConsoleContext ctx)
+    {
+        var facts = await projectFacts.ListAsync(ctx.ProjectId);
+        return JsonSerializer.Serialize(facts.Select(fact => new
+        {
+            fact.Id,
+            fact.Key,
+            fact.Name,
+            fact.Value,
+            linkedEntities = fact.LinkedEntities.Select(link => new
+            {
+                link.EdgeType,
+                direction = link.Direction.ToString(),
+                link.EntityId,
+                link.EntityName,
+                link.EntityType,
+            }),
+        }));
+    }
+
+    private async Task<string> SearchEntitiesAsync(AiConsoleContext ctx, string query, int topK)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
+        topK = Math.Clamp(topK, 1, 50);
+
+        var matches = new List<StoryEntity>();
+        var types = await entityTypes.ListAsync(ctx.ProjectId, includeStructural: true);
+        foreach (var type in types.Where(type => IsSearchableEntityType(type.Type)))
+        {
+            var list = await entities.ListAsync(ctx.ProjectId, type.Type);
+            matches.AddRange(list.Where(entity => Matches(entity, query)));
+        }
+
+        return JsonSerializer.Serialize(matches
+            .OrderBy(entity => entity.Type, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(entity => entity.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(topK)
+            .Select(entity => new
+            {
+                id = entity.Id,
+                type = entity.Type,
+                name = entity.Name,
+                parentId = entity.ParentId,
+                properties = entity.Properties,
+            }));
+    }
+
+    private async Task<string> ReadEntityAsync(AiConsoleContext ctx, Guid entityId)
+    {
+        var entity = await entities.GetAsync(ctx.ProjectId, entityId);
+        if (entity is null)
+            return $"Error: entity {entityId} not found in this project.";
+
+        var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
+        return JsonSerializer.Serialize(new
+        {
+            id = entity.Id,
+            type = entity.Type,
+            name = entity.Name,
+            order = entity.Order,
+            parentId = entity.ParentId,
+            properties = entity.Properties,
+            links = links.Select(link => new
+            {
+                link.EdgeId,
+                link.EdgeType,
+                direction = link.Direction.ToString(),
+                link.OtherEntityId,
+                link.OtherEntityName,
+                link.OtherEntityType,
+                link.SortOrder,
+                link.Properties,
+            }),
+        });
+    }
+
+    private async Task<string> GraphNeighborsAsync(AiConsoleContext ctx, Guid entityId, int depth)
+    {
+        depth = Math.Clamp(depth, 1, 3);
+        var start = await entities.GetAsync(ctx.ProjectId, entityId);
+        if (start is null)
+            return $"Error: entity {entityId} not found in this project.";
+
+        var visited = new HashSet<Guid> { entityId };
+        var frontier = new List<Guid> { entityId };
+        var rows = new List<object>();
+
+        for (var level = 1; level <= depth; level++)
+        {
+            var next = new List<Guid>();
+            foreach (var current in frontier)
+            {
+                var links = await entities.ListLinksAsync(ctx.ProjectId, current);
+                foreach (var link in links)
+                {
+                    if (!visited.Add(link.OtherEntityId)) continue;
+                    var entity = await entities.GetAsync(ctx.ProjectId, link.OtherEntityId);
+                    if (entity is null) continue;
+
+                    rows.Add(new
+                    {
+                        depth = level,
+                        via = new
+                        {
+                            from = current,
+                            edgeType = link.EdgeType,
+                            direction = link.Direction.ToString(),
+                        },
+                        entity = new
+                        {
+                            id = entity.Id,
+                            type = entity.Type,
+                            name = entity.Name,
+                            properties = entity.Properties,
+                        },
+                    });
+                    next.Add(entity.Id);
+                }
+            }
+
+            frontier = next;
+            if (frontier.Count == 0) break;
+        }
+
+        return rows.Count == 0 ? "No neighbors." : JsonSerializer.Serialize(rows);
     }
 
     private async Task<string> ListEntityTypesAsync(AiConsoleContext ctx)
@@ -238,8 +407,31 @@ public sealed class AiConsoleTools(
             return "Error: endLine provided without startLine.";
         }
 
-        await chapters.UpdateAsync(chapterId, body: newBody);
         var newNumbered = ChapterFormatting.WithLineNumbers(newBody);
-        return $"OK. {summary}\n\nNew body:\n{(newNumbered.Length == 0 ? "(empty)" : newNumbered)}";
+        var result = $"OK. {summary}\n\nNew body:\n{(newNumbered.Length == 0 ? "(empty)" : newNumbered)}";
+
+        if (ctx.ReviewEdits && ctx.ConsoleStaging is not null)
+        {
+            await ctx.ConsoleStaging.StageChapterBodyEditAsync(chapter, newBody, summary, result);
+            return $"Staged for review. {summary}\n\nProposed body:\n{(newNumbered.Length == 0 ? "(empty)" : newNumbered)}";
+        }
+
+        await chapters.UpdateAsync(chapterId, body: newBody);
+        return result;
     }
+
+    private static bool Matches(StoryEntity entity, string query) =>
+        entity.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+        || entity.Type.Contains(query, StringComparison.OrdinalIgnoreCase)
+        || entity.Properties.Any(property =>
+            property.Key.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || (property.Value?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
+
+    private static bool IsSearchableEntityType(string type) =>
+        !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
 }

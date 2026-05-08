@@ -10,21 +10,27 @@ namespace Lorekeeper.Context;
 public interface IContextBuilder
 {
     /// <summary>Build the assembly for the given project + (optional) currently-open chapter.</summary>
-    ContextAssembly Build(Project project, Chapter? currentChapter);
+    Task<ContextAssembly> BuildAsync(Project project, Chapter? currentChapter, CancellationToken cancellationToken = default);
 }
 
 /// <summary>One renderable item in the Context Feed.</summary>
 public sealed record ContextItem(
+    string Key,
     ContextItemKind Kind,
     string Label,
     string Body,
     bool IsEnabled,
-    bool IsRemovable);
+    bool IsRemovable,
+    string? Badge = null,
+    string? Reason = null);
 
 public enum ContextItemKind
 {
     SystemPrompt,
     CurrentChapter,
+    ProjectOutline,
+    ProjectFacts,
+    WritingSample,
     Entity,
 }
 

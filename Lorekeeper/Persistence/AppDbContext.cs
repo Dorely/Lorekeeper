@@ -27,6 +27,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<WritingCoachMessage> WritingCoachMessages => Set<WritingCoachMessage>();
     public DbSet<AiChangeBatch> AiChangeBatches => Set<AiChangeBatch>();
     public DbSet<AiChange> AiChanges => Set<AiChange>();
+    public DbSet<EditorContextPreference> EditorContextPreferences => Set<EditorContextPreference>();
     public DbSet<IngestSource> IngestSources => Set<IngestSource>();
     public DbSet<IngestSourceChunk> IngestSourceChunks => Set<IngestSourceChunk>();
     public DbSet<IngestVectorFragment> IngestVectorFragments => Set<IngestVectorFragment>();
@@ -203,6 +204,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasOne(e => e.Batch)
                 .WithMany(b => b.Changes)
                 .HasForeignKey(e => e.BatchId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EditorContextPreference>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.ChapterId, e.Kind, e.Key }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.ChapterId, e.SortOrder });
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.EditorContextPreferences)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Chapter)
+                .WithMany(c => c.EditorContextPreferences)
+                .HasForeignKey(e => e.ChapterId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

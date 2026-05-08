@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.Outline;
 
 namespace Lorekeeper.AiConsole;
 
@@ -17,7 +18,27 @@ public interface IAiConsoleService
 }
 
 /// <summary>Per-request scope of a tool invocation.</summary>
-public sealed record AiConsoleContext(Guid ProjectId, Guid? CurrentChapterId);
+public sealed class AiConsoleContext(
+    Guid projectId,
+    Guid? currentChapterId,
+    Guid entryId,
+    bool reviewEdits,
+    OutlineToolStagingContext? outlineStaging,
+    AiConsoleChangeStagingContext? consoleStaging)
+{
+    public Guid ProjectId { get; } = projectId;
+    public Guid? CurrentChapterId { get; } = currentChapterId;
+    public Guid EntryId { get; } = entryId;
+    public bool ReviewEdits { get; } = reviewEdits;
+    public OutlineToolStagingContext? OutlineStaging { get; } = outlineStaging;
+    public AiConsoleChangeStagingContext? ConsoleStaging { get; } = consoleStaging;
+
+    public void BeginToolCall(string toolCallId, string toolName, string argumentsJson)
+    {
+        OutlineStaging?.BeginToolCall(EntryId, toolCallId, toolName, argumentsJson);
+        ConsoleStaging?.BeginToolCall(EntryId, toolCallId, toolName, argumentsJson);
+    }
+}
 
 /// <summary>One serialized record in <see cref="AiConsoleEntry.ToolCallsJson"/>.</summary>
 public sealed record AiToolCallRecord(

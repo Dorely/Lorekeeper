@@ -32,6 +32,8 @@ public class Chapter
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    public ICollection<EditorContextPreference> EditorContextPreferences { get; set; } = [];
+
     public VectorIndexState VectorIndexState { get; set; } = VectorIndexState.UpToDate;
 
     /// <summary>Timestamp of last successful reindex; null if never indexed.</summary>

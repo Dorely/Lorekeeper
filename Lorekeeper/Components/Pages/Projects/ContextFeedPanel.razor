@@ -2,7 +2,7 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Projects
 @inject IProjectService Projects
-@inject IContextBuilder ContextBuilder
+@inject IEditorContextService EditorContext
 
 @if (_assembly is null)
 {
@@ -12,22 +12,30 @@ else
 {
     @foreach (var item in _assembly.Items)
     {
-        var collapsed = IsCollapsed(item.Kind);
+        var collapsed = IsCollapsed(item.Key);
         <div class="ctx-card @(item.IsEnabled ? "" : "ctx-card--disabled")">
             <div class="ctx-card-head">
-                <button type="button" class="ctx-caret" @onclick="() => ToggleCollapsed(item.Kind)">
+                <button type="button" class="ctx-caret" @onclick="() => ToggleCollapsed(item.Key)">
                     @(collapsed ? "▸" : "▾")
                 </button>
                 <input type="checkbox"
                        class="form-check-input ctx-check"
                        checked="@item.IsEnabled"
                        disabled="@(!item.IsRemovable && item.Kind == ContextItemKind.SystemPrompt)"
-                       @onchange="@(e => OnToggleAsync(item.Kind, (bool)(e.Value ?? false)))" />
+                       @onchange="@(e => OnToggleAsync(item, (bool)(e.Value ?? false)))" />
                 <span class="ctx-label">@item.Label</span>
+                @if (!string.IsNullOrWhiteSpace(item.Badge))
+                {
+                    <span class="ctx-badge">@item.Badge</span>
+                }
             </div>
             @if (!collapsed)
             {
                 <div class="ctx-body">
+                    @if (!string.IsNullOrWhiteSpace(item.Reason))
+                    {
+                        <div class="ctx-reason">@item.Reason</div>
+                    }
                     @if (item.Kind == ContextItemKind.SystemPrompt)
                     {
                         <textarea class="form-control ctx-prompt-edit"
@@ -64,49 +72,44 @@ else
     [Parameter] public EventCallback OnContextChanged { get; set; }
 
     private ContextAssembly? _assembly;
-    private readonly HashSet<ContextItemKind> _collapsed = [ContextItemKind.CurrentChapter];
+    private readonly HashSet<string> _collapsed = [EditorContextKeys.CurrentChapter];
 
     private string _promptDraft = string.Empty;
     private bool _promptDirty;
     private bool _promptSaving;
     private string? _promptError;
-    private string _lastChapterBody = string.Empty;
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
-        Rebuild();
+        await RebuildAsync();
         if (!_promptDirty) _promptDraft = Project.SystemPrompt;
-        _lastChapterBody = CurrentChapter?.Body ?? string.Empty;
     }
 
     /// <summary>Called by the editor when the chapter body changes so the preview stays current.</summary>
-    public void Refresh()
+    public async Task RefreshAsync()
     {
-        Rebuild();
+        await RebuildAsync();
         StateHasChanged();
     }
 
-    private void Rebuild()
+    private async Task RebuildAsync()
     {
-        _assembly = ContextBuilder.Build(Project, CurrentChapter);
+        _assembly = await EditorContext.BuildAsync(Project, CurrentChapter);
     }
 
-    private bool IsCollapsed(ContextItemKind kind) => _collapsed.Contains(kind);
+    private bool IsCollapsed(string key) => _collapsed.Contains(key);
 
-    private void ToggleCollapsed(ContextItemKind kind)
+    private void ToggleCollapsed(string key)
     {
-        if (!_collapsed.Add(kind)) _collapsed.Remove(kind);
+        if (!_collapsed.Add(key)) _collapsed.Remove(key);
     }
 
-    private async Task OnToggleAsync(ContextItemKind kind, bool include)
+    private async Task OnToggleAsync(ContextItem item, bool include)
     {
-        if (kind == ContextItemKind.CurrentChapter)
-        {
-            await Projects.SetIncludeCurrentChapterAsync(Project.Id, include);
-            Project.IncludeCurrentChapterInContext = include;
-            Rebuild();
-            await OnContextChanged.InvokeAsync();
-        }
+        if (CurrentChapter is null || item.Kind == ContextItemKind.SystemPrompt) return;
+        await EditorContext.SetItemIncludedAsync(Project.Id, CurrentChapter.Id, item.Kind, item.Key, include);
+        await RebuildAsync();
+        await OnContextChanged.InvokeAsync();
     }
 
     private void OnPromptInput(ChangeEventArgs e)
@@ -133,7 +136,7 @@ else
             await Projects.UpdateSystemPromptAsync(Project.Id, _promptDraft);
             Project.SystemPrompt = _promptDraft;
             _promptDirty = false;
-            Rebuild();
+            await RebuildAsync();
             await OnContextChanged.InvokeAsync();
         }
         catch (Exception ex)

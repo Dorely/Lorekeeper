@@ -57,9 +57,10 @@
 |------|-------------|
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared shell for project workspace pages: loads project by slug, renders title + horizontal tab strip (Editor / Graph / Ingest / Outline / Writing Sample), exposes `Project` via `CascadingValue`, and wraps routed page content in a flex-bounded `.project-body` so pages like Outline can own their internal scroll regions. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
-| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Functional chapter editor body: chapter-selector header (dropdown menu, edit-title pencil, +new-chapter button), JS-debounced (1s) auto-save textarea with line-number gutter that persists via `IChapterService` and triggers `ReindexAsync`. Save/index status surfaced inline. Hosts `ContextFeedPanel` and `AiConsolePanel`; locks/dims the textarea while an AI turn is running and refreshes the body when the AI completes. |
-| `ContextFeedPanel.razor` (+ `.razor.css`) | Editable Context Feed: collapsible cards per `ContextItem` (system prompt, current chapter). Inline textarea edits the project's system prompt (rejects empty); checkbox toggles `Project.IncludeCurrentChapterInContext`. Calls `IProjectService` for persistence. |
-| `AiConsolePanel.razor` (+ `.razor.css`) | Stateless AI command console: input + Send/Cancel button; raises `OnAiTurnStarting`/`OnAiTurnCompleted` so the editor can flush + lock + refresh. Shows last response below the input and a History modal listing persisted `AiConsoleEntry` rows with full system prompt snapshot, tool-call timeline, and final response. |
+| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Three-column context-aware chapter editor: recommended entities left, JS-debounced line-numbered editor + AI console center, Context Feed right. Persists/reindexes body edits, locks while AI runs, and refreshes editor/context/recommendations after AI turns or approved changes. |
+| `RecommendedEntitiesPanel.razor` (+ `.razor.css`) | Editor left-panel entity suggester: shows graph/context-derived recommendations plus manual search results, and adds entities to the active chapter's persisted context working set. |
+| `ContextFeedPanel.razor` (+ `.razor.css`) | Editable Context Feed: async collapsible cards for project guidance, current chapter, outline, facts, selectable writing samples, and selected entities. Uses stable item keys and `IEditorContextService` to persist per-chapter include/exclude choices. |
+| `AiConsolePanel.razor` (+ `.razor.css`) | AI command console: input + Send/Cancel/History, Review edits toggle, pending-change review modal, and callbacks so the editor can flush/lock/refresh. History lists persisted `AiConsoleEntry` rows with prompt snapshots, tool calls, and final response. |
 | `GraphPage.razor` | Graph tab at `/projects/{Slug}/graph`; wraps the project shell and hosts the interactive graph workspace. |
 | `GraphContent.razor` (+ `.razor.css`, `.razor.js`) | Obsidian-inspired full-project graph workspace: loads graph snapshots, filters/searches nodes, bridges to the local `vis-network` renderer for pan/zoom/drag/select, and coordinates graph refreshes. |
 | `GraphDetailsPanel.razor` (+ `.razor.css`) | Selected-node graph editor side panel: create/edit/delete nodes, edit safe parent assignments, and create/edit/delete custom relationships while managed links stay protected. |
@@ -84,7 +85,7 @@
 | `EntitiesPanel.razor` (+ `.razor.css`) | Registry-driven project-scoped entities side panel. Lists non-structural graph types from `IEntityTypeService`, supports `+ Type`, per-type `+ Add`, clickable entity rows, and a Bootstrap-style modal with editable name/properties plus read-only adjacent graph links via `IEntityService.ListLinksAsync`. Save computes property diffs and calls `UpdateAsync(propertiesToSet, propertiesToRemove)`; modal also exposes Delete-with-confirm. Re-reads on `RefreshSignal` bumps. |
 | `ChapterBeats.razor` (+ `.razor.css`) | Inline beats expander rendered inside each chapter row. Loads beats via `IEntityService.ListAsync(projectId, "Event", chapterId)` ordered by `Order`, supports inline-edit (name + autosizing summary textarea), drag-reorder (calls `ReorderAsync`), `+ Add beat` and delete-with-confirm. Re-reads on `RefreshSignal` bumps. |
 | `OutlineChatPanel.razor` (+ `.razor.css`, `.razor.js`) | Multi-turn collaborative chat UI for Outline. Loads/creates the project's `OutlineConversation`, renders bubbles/tool chips, streams turn updates, exposes a persisted `Review edits` toggle, and opens `PendingAiChangesModal` for queued AI changes. |
-| `PendingAiChangesModal.razor` (+ `.razor.css`) | Durable AI change review modal: lists queued tool changes, shows dependency/cascade warnings and before/after JSON diffs, and supports Keep/Reject per change or batch with a rejection note. |
+| `PendingAiChangesModal.razor` (+ `.razor.css`) | Durable AI change review modal reused by Outline Chat and AI Console: lists queued tool changes, shows dependency/cascade warnings and before/after JSON diffs, and supports Keep/Reject per change or batch with a rejection note. |
 
 ### Components/Pages/Projects/WritingSample/
 
@@ -111,6 +112,7 @@
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF entity for a chapter (Title/Body/Synopsis/Order) under a `Project`, optionally assigned to an `Act` via nullable `ActId`. `Order` is scoped to the chapter's act bucket (or the project-level Unassigned bucket when `ActId` is null). Tracks `VectorIndexState` (UpToDate/Stale/Failed) + `VectorIndexedAt` + `VectorIndexError`; `VectorSourceId` returns the stable vector-store source id (`Id.ToString("N")`). |
 | `AiConsoleEntry.cs` | EF entity for one AI Console turn: command, system-prompt snapshot, JSON tool-call timeline, response text, status (`Pending`/`Completed`/`Failed`/`Cancelled`). Cascade-deleted with its `Project`. |
+| `EditorContextPreference.cs` | EF entity for per-chapter Context Feed include/exclude preferences keyed by context item kind + stable item key. |
 | `OutlineConversation.cs` | EF entity — one persistent multi-turn collaborative chat per `Project` (unique on `ProjectId`). Owns ordered `OutlineMessage`s; cascade-deleted with the project. |
 | `OutlineMessage.cs` | EF entity for a single chat row in an `OutlineConversation`: monotonic `Order`, `OutlineMessageRole` (System/User/Assistant/Tool), text `Content`, JSON `ToolCallsJson` for assistant function-calls, `ToolCallId` + `ToolName` for tool results, `OutlineMessageStatus` (Pending/Completed/Failed/Cancelled), optional `ErrorMessage`. |
 | `WritingSample.cs` | EF entity for a project-scoped prose sample used as a future style reference. Stores title/body plus created/updated timestamps. |
@@ -133,10 +135,10 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context for projects, outline/chat, writing samples/coach chat, graph, AI console, AI change approval, and ingest queues. JSON value converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
+| `AppDbContext.cs` | EF Core context for projects, outline/chat, writing samples/coach chat, graph, AI console, editor context preferences, AI change approval, and ingest queues. JSON value converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations (`InitialSchema`, `AddProjects`, `AddChapters`, `AddSystemPromptAndAiConsole`, `AddOutline`, `AddOutlineConversations`, graph/entity and AI approval migrations, `MoveProjectMetadataToProjectFacts`, `AddIngest`, `AddIngestJobProvider`, `AddWritingSamples`, `AddWritingCoachToolMessages`). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, `AddProjects`, `AddChapters`, `AddSystemPromptAndAiConsole`, `AddOutline`, `AddOutlineConversations`, graph/entity and AI approval migrations, `MoveProjectMetadataToProjectFacts`, `AddIngest`, `AddIngestJobProvider`, `AddWritingSamples`, `AddWritingCoachToolMessages`, `AddEditorContextPreferences`). |
 
 ### Persistence/Repositories/
 
@@ -154,6 +156,7 @@
 | `IWritingSampleRepository.cs` / `WritingSampleRepository.cs` | Project-scoped writing sample persistence: list by project (newest updated first), get/count, add/update/remove, and save. |
 | `IWritingCoachConversationRepository.cs` / `WritingCoachConversationRepository.cs` | Persistence for the resettable project-level Writing Coach conversation + ordered messages, including assistant tool-call manifests and tool result rows. |
 | `IAiChangeRepository.cs` / `AiChangeRepository.cs` | Persistence for pending AI change batches and changes, including eager-loaded pending batch listing and change lookup for approval actions. |
+| `IEditorContextPreferenceRepository.cs` / `EditorContextPreferenceRepository.cs` | Persistence for active-chapter Context Feed include/exclude preferences, scoped by project, chapter, item kind, and item key. |
 | `IIngestRepository.cs` / `IngestRepository.cs` | Persistence for ingest sources, source chunks, vector fragments, jobs, job chunks, report items, and job events, including tracked processor reads plus lightweight no-tracking UI projections/excerpts. |
 
 ### Knowledge/
@@ -204,7 +207,9 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Builds `ContextAssembly` (ordered `ContextItem`s + `Assemble()` concatenator) for the Context Feed. The Feed *is* the preview — `Assemble()` joins every checked block with labeled section headers and is the literal system message sent to the LLM. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Async context assembly for the Context Feed and AI console prompt. Builds keyed `ContextItem`s for guidance, current chapter, outline, facts, writing samples, and selected/auto-related entities; `Assemble()` remains the literal system message sent to the LLM. |
+| `IEditorContextService.cs` | Editor context facade extending `IContextBuilder`; persists per-chapter context item inclusion and exposes auto/included entity sets for recommendations. |
+| `IEditorEntityRecommendationService.cs` / `EditorEntityRecommendationService.cs` | Produces active-chapter entity recommendations from auto-related graph context and manual entity search while excluding entities already in context. |
 | `ChapterFormatting.cs` | `WithLineNumbers` / `SplitLines` / `JoinLines` helpers shared by the editor gutter, Context Feed preview, and AI tool reads so user and LLM see identical line numbers. |
 
 ### Tokens/
@@ -247,9 +252,10 @@
 | File | Description |
 |------|-------------|
 | `AiConsoleOptions.cs` | Bound from the `AiConsole` config section. `MaxToolIterations` caps the tool-call loop. |
-| `IAiConsoleService.cs` / `AiConsoleService.cs` | Stateless one-shot AI turn: assembles system prompt via `IContextBuilder`, resolves default `LlmProvider`, runs a tool-call loop with cancellation support, and persists an `AiConsoleEntry` capturing the full timeline. Defines `AiConsoleContext` and `AiToolCallRecord`. |
+| `IAiConsoleService.cs` / `AiConsoleService.cs` | Stateless one-shot AI turn: assembles system prompt via `IContextBuilder`, resolves default `LlmProvider`, creates approval staging contexts when Review edits is enabled, runs a tool-call loop with cancellation support, and persists an `AiConsoleEntry` timeline. Defines `AiConsoleContext` and `AiToolCallRecord`. |
 | `IAiConsoleHistoryService.cs` / `AiConsoleHistoryService.cs` | Project-scoped read API for persisted `AiConsoleEntry` rows. |
-| `AiConsoleTools.cs` | `AIFunction` definitions exposed to the LLM: `vector_search`, `list_chapters`, read-only graph discovery (`list_entity_types`, `list_entities`, `list_entity_links`), `read_chapter`, `edit_chapter` (line-based: full overwrite / insert before line / replace inclusive range). Closures capture per-request `AiConsoleContext`. |
+| `AiConsoleTools.cs` | `AIFunction` definitions exposed to the LLM: editor context, semantic search, outline/entity/fact reads, graph neighbor traversal, chapter reads, staged-or-direct line-based `edit_chapter`, and reused outline/entity mutation tools. Closures capture per-request `AiConsoleContext`. |
+| `AiConsoleChangeStagingContext.cs` | AI Console staging helper for chapter-body edits; creates pending `AiChange` rows when Review edits is enabled so approved changes apply through the shared approval service. |
 
 ### Outline/
 
@@ -258,7 +264,7 @@
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt` on every mutation and keeps Act graph nodes/structural edges synchronized. |
 | `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Multi-turn collaborative outline chat. Streams LLM text/tool updates, persists chat history, stages mutating tool calls when project approval is enabled, blocks new turns while pending changes remain, and instructs the LLM to persist project-level truths as `ProjectFact` graph nodes. |
 | `OutlineCollaborationTools.cs` | `AIFunction` definitions exposed to the outline LLM. `list_outline` includes `projectFacts`; ProjectFact creation uses generic entity tools and is parented to the Project graph node. Read/mutating tools either operate directly or route through `OutlineToolStagingContext` so approval-mode turns see staged changes as current state. |
-| `IOutlineChangeApprovalService.cs` / `OutlineChangeApprovalService.cs` | Applies or rejects queued AI changes, enforces dependency application/rejection cascading, and writes hidden system messages for rejected changes. |
+| `IOutlineChangeApprovalService.cs` / `OutlineChangeApprovalService.cs` | Applies or rejects queued AI changes, including outline/entity mutations and AI Console chapter-body edits; enforces dependency application/rejection cascading and writes hidden system messages for rejected changes. |
 | `OutlineToolStagingContext.cs` | Per-turn working snapshot for approval mode: overlays staged acts, chapters, ProjectFact/entities, reorders, and links; persists `AiChange` rows with dependency metadata. |
 | `OutlineChangePayloads.cs` | JSON payload records shared by staging and approval application for acts, chapters, entities, links, and reorders. |
 | `IEntityService.cs` / `EntityService.cs` | Single contract for every story-graph entity (Characters, Locations, Events/beats, ...). Entities persist as `GraphNode`s via `IGraphStore` with `NodeType=type`, `Key=Guid.NewGuid().ToString("N")`, `Label=name`, free-form `Properties`. When `parentId` is set, a `HasChild` edge from the parent stores relationship-specific `SortOrder` as the sole child-order source. `UpdateAsync` mutates the loaded node in place via the node repo to avoid `IGraphStore.UpsertNodeAsync`'s replace-merge semantics. `ListLinksAsync` returns all adjacent edges (both directions, every edge type incl. `HasChild`) with edge id, sort order, properties, and other endpoint metadata. Returns the public `StoryEntity` projection. |

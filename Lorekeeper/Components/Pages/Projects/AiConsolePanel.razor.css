@@ -1,11 +1,23 @@
 .aic-row {
     display: flex;
     gap: 0.5rem;
-    align-items: stretch;
+    align-items: center;
+    flex-wrap: wrap;
 }
 
 .aic-input {
     flex: 1 1 auto;
+    min-width: 14rem;
+}
+
+.aic-approval {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--bs-secondary-color, #6c757d);
+    white-space: nowrap;
 }
 
 .aic-result {

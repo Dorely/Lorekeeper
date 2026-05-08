@@ -159,6 +159,12 @@ public sealed class OutlineChangeApprovalService(
                 await chapters.UpdateAsync(after.Id, after.Title, body: null, after.Synopsis, new ChapterActAssignment(after.ActId), cancellationToken);
                 break;
             }
+            case "edit_chapter":
+            {
+                var after = ReadRequired<ChapterBodyChange>(change.AfterJson);
+                await chapters.UpdateAsync(after.Id, body: after.Body, cancellationToken: cancellationToken);
+                break;
+            }
             case "delete_chapter":
                 await chapters.DeleteAsync(ParseResourceGuid(change), cancellationToken);
                 break;

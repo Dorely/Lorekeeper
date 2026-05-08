@@ -2,6 +2,7 @@ using System.Text.Json;
 using Lorekeeper.Context;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -18,6 +19,9 @@ public sealed class AiConsoleService(
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     AiConsoleTools tools,
+    OutlineCollaborationTools outlineTools,
+    IOutlineCollaborationService outlineCollaboration,
+    IAiChangeRepository changes,
     IOptions<AiConsoleOptions> options,
     ILogger<AiConsoleService> logger) : IAiConsoleService
 {
@@ -39,7 +43,7 @@ public sealed class AiConsoleService(
             currentChapter = await chapterRepo.GetByIdAsync(cid, cancellationToken);
         }
 
-        var assembly = contextBuilder.Build(project, currentChapter);
+        var assembly = await contextBuilder.BuildAsync(project, currentChapter, cancellationToken);
         var systemPrompt = assembly.Assemble();
 
         var entry = new AiConsoleEntry
@@ -62,7 +66,23 @@ public sealed class AiConsoleService(
 
             var chat = await chatClientFactory.CreateChatClientAsync(defaultProvider.Id, cancellationToken);
 
-            var aiTools = tools.Build(new AiConsoleContext(projectId, currentChapterId));
+            OutlineToolStagingContext? outlineStaging = null;
+            AiConsoleChangeStagingContext? consoleStaging = null;
+            if (project.AiChangeApprovalEnabled)
+            {
+                var conversation = await outlineCollaboration.GetOrCreateAsync(projectId, cancellationToken);
+                outlineStaging = outlineTools.CreateStagingContext(projectId, conversation.Id);
+                consoleStaging = new AiConsoleChangeStagingContext(projectId, conversation.Id, changes);
+            }
+
+            var consoleContext = new AiConsoleContext(
+                projectId,
+                currentChapterId,
+                entry.Id,
+                project.AiChangeApprovalEnabled,
+                outlineStaging,
+                consoleStaging);
+            var aiTools = tools.Build(consoleContext);
             var chatOptions = new ChatOptions
             {
                 Tools = aiTools,
@@ -112,6 +132,7 @@ public sealed class AiConsoleService(
                         var aiFn = aiTools.OfType<AIFunction>().FirstOrDefault(f => f.Name == fc.Name)
                             ?? throw new InvalidOperationException($"Unknown tool '{fc.Name}'.");
 
+                        consoleContext.BeginToolCall(fc.CallId ?? fc.Name, fc.Name, argsJson);
                         var argsDict = fc.Arguments ?? new Dictionary<string, object?>();
                         var invokeResult = await aiFn.InvokeAsync(new AIFunctionArguments(argsDict), cancellationToken);
                         toolResult = invokeResult?.ToString() ?? string.Empty;

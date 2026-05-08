@@ -1,9 +1,12 @@
 @using System.Text.Json
+@using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.AiConsole
 @using Lorekeeper.Models
+@using Lorekeeper.Outline
 @implements IAsyncDisposable
 @inject IAiConsoleService AiConsole
 @inject IAiConsoleHistoryService History
+@inject IOutlineCollaborationService Collab
 
 <div class="aic-row">
     <input type="text"
@@ -20,9 +23,18 @@
     else
     {
         <button type="button" class="btn btn-primary" @onclick="SendAsync"
-                disabled="@string.IsNullOrWhiteSpace(_input)">Send</button>
+                disabled="@(string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)">Send</button>
     }
     <button type="button" class="btn btn-outline-secondary" @onclick="OpenHistoryAsync">History</button>
+    @if (PendingChangeCount > 0)
+    {
+        <button type="button" class="btn btn-outline-primary" @onclick="OpenPendingChanges">Review @PendingChangeCount</button>
+    }
+    <label class="aic-approval" title="Queue AI tool edits for review before applying them">
+        <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
+               disabled="@_running" @onchange="OnApprovalChangedAsync" />
+        <span>Review edits</span>
+    </label>
 </div>
 
 @if (_running)
@@ -135,6 +147,12 @@ else if (_lastEntry is not null)
     </div>
 }
 
+<PendingAiChangesModal ProjectId="@ProjectId"
+                       Batches="@_pendingBatches"
+                       IsOpen="@_showPendingChanges"
+                       OnClose="ClosePendingChanges"
+                       OnChanged="HandlePendingChangesChangedAsync" />
+
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid? CurrentChapterId { get; set; }
@@ -145,6 +163,9 @@ else if (_lastEntry is not null)
     /// <summary>Raised after the LLM call ends (success/cancel/fail) so the editor can refresh + unlock.</summary>
     [Parameter] public EventCallback<AiConsoleEntry> OnAiTurnCompleted { get; set; }
 
+    /// <summary>Raised after pending AI changes are applied/rejected so the editor can refresh affected panes.</summary>
+    [Parameter] public EventCallback OnAiChangesApplied { get; set; }
+
     private string _input = string.Empty;
     private bool _running;
     private AiConsoleEntry? _lastEntry;
@@ -154,6 +175,21 @@ else if (_lastEntry is not null)
     private IReadOnlyList<AiConsoleEntry>? _historyEntries;
     private Guid? _expandedHistoryId;
 
+    private Guid _loadedProjectId;
+    private bool _approvalEnabled = true;
+    private bool _showPendingChanges;
+    private List<AiChangeBatch> _pendingBatches = [];
+
+    private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ProjectId == Guid.Empty || ProjectId == _loadedProjectId) return;
+        _loadedProjectId = ProjectId;
+        _approvalEnabled = await Collab.GetAiChangeApprovalEnabledAsync(ProjectId);
+        await LoadPendingChangesAsync(openIfPending: false);
+    }
+
     private async Task OnInputKeyDownAsync(KeyboardEventArgs e)
     {
         if (e.Key == "Enter" && !e.ShiftKey && !_running) await SendAsync();
@@ -162,6 +198,12 @@ else if (_lastEntry is not null)
     private async Task SendAsync()
     {
         if (_running || string.IsNullOrWhiteSpace(_input)) return;
+        if (PendingChangeCount > 0)
+        {
+            _showPendingChanges = true;
+            return;
+        }
+
         var command = _input.Trim();
         _input = string.Empty;
         _running = true;
@@ -197,6 +239,7 @@ else if (_lastEntry is not null)
         }
 
         if (result is not null) await OnAiTurnCompleted.InvokeAsync(result);
+        await LoadPendingChangesAsync(openIfPending: true);
         StateHasChanged();
     }
 
@@ -215,6 +258,36 @@ else if (_lastEntry is not null)
     }
 
     private void CloseHistory() => _historyOpen = false;
+
+    private async Task LoadPendingChangesAsync(bool openIfPending)
+    {
+        _pendingBatches = (await Collab.ListPendingChangesAsync(ProjectId)).ToList();
+        if (openIfPending && PendingChangeCount > 0)
+            _showPendingChanges = true;
+        if (PendingChangeCount == 0)
+            _showPendingChanges = false;
+    }
+
+    private async Task OnApprovalChangedAsync(ChangeEventArgs args)
+    {
+        var enabled = args.Value is bool boolValue
+            ? boolValue
+            : bool.TryParse(args.Value?.ToString(), out var parsed) && parsed;
+        _approvalEnabled = enabled;
+        await Collab.SetAiChangeApprovalEnabledAsync(ProjectId, enabled);
+    }
+
+    private void OpenPendingChanges() => _showPendingChanges = true;
+
+    private void ClosePendingChanges() => _showPendingChanges = false;
+
+    private async Task HandlePendingChangesChangedAsync()
+    {
+        await LoadPendingChangesAsync(openIfPending: false);
+        if (OnAiChangesApplied.HasDelegate)
+            await OnAiChangesApplied.InvokeAsync();
+        StateHasChanged();
+    }
 
     private void ToggleHistory(Guid id)
     {

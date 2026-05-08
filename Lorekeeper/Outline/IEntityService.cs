@@ -22,6 +22,11 @@ namespace Lorekeeper.Outline;
 /// </summary>
 public interface IEntityService
 {
+    Task<StoryEntity?> GetAsync(
+        Guid projectId,
+        Guid entityId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<StoryEntity>> ListAsync(
         Guid projectId,
         string nodeType,

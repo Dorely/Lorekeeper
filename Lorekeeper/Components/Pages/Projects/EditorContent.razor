@@ -31,6 +31,14 @@ else if (_current is null)
 else
 {
     <div class="editor-grid">
+        <aside class="panel panel-recommendations">
+            <h6 class="panel-title">Recommended Entities</h6>
+            <RecommendedEntitiesPanel ProjectId="Project.Id"
+                                      ChapterId="_activeChapterId"
+                                      RefreshSignal="_contextRefreshSignal"
+                                      OnChanged="OnContextChangedAsync" />
+        </aside>
+
         <section class="panel panel-editor">
             <div class="chapter-header">
                 @if (_editingTitle)
@@ -91,7 +99,7 @@ else
             <ContextFeedPanel @ref="_contextPanel"
                               Project="Project"
                               CurrentChapter="_current"
-                              OnContextChanged="OnContextChanged" />
+                              OnContextChanged="OnContextChangedAsync" />
         </aside>
 
         <section class="panel panel-console">
@@ -99,7 +107,8 @@ else
             <AiConsolePanel ProjectId="Project.Id"
                             CurrentChapterId="_activeChapterId"
                             OnAiTurnStarting="OnAiTurnStartingAsync"
-                            OnAiTurnCompleted="OnAiTurnCompletedAsync" />
+                            OnAiTurnCompleted="OnAiTurnCompletedAsync"
+                            OnAiChangesApplied="OnAiChangesAppliedAsync" />
         </section>
     </div>
 }
@@ -138,6 +147,7 @@ else
 
     private bool _chapterLocked;
     private ContextFeedPanel? _contextPanel;
+    private int _contextRefreshSignal;
 
     public EditorContent()
     {
@@ -261,6 +271,8 @@ else
                 _saveError = ex.Message;
                 _lastSavedAt = DateTime.Now;
             }
+
+            await RefreshContextSurfacesAsync();
         }
         catch (Exception ex)
         {
@@ -398,6 +410,25 @@ else
     /// </summary>
     private async Task OnAiTurnCompletedAsync(Lorekeeper.Models.AiConsoleEntry entry)
     {
+        await ReloadCurrentChapterAfterAiAsync();
+
+        _chapterLocked = false;
+        if (_editorHandle is not null)
+        {
+            try { await _editorHandle.InvokeVoidAsync("setReadOnly", false); }
+            catch (JSDisconnectedException) { }
+        }
+        StateHasChanged();
+    }
+
+    private async Task OnAiChangesAppliedAsync()
+    {
+        await ReloadCurrentChapterAfterAiAsync();
+        StateHasChanged();
+    }
+
+    private async Task ReloadCurrentChapterAfterAiAsync()
+    {
         if (_activeChapterId is { } cid)
         {
             var fresh = await Chapters.GetAsync(cid);
@@ -409,20 +440,22 @@ else
                     try { await _editorHandle.InvokeVoidAsync("setValue", fresh.Body); }
                     catch (JSDisconnectedException) { }
                 }
-                _contextPanel?.Refresh();
+                await RefreshContextSurfacesAsync();
             }
         }
+    }
 
-        _chapterLocked = false;
-        if (_editorHandle is not null)
+    private async Task OnContextChangedAsync() => await RefreshContextSurfacesAsync();
+
+    private async Task RefreshContextSurfacesAsync()
+    {
+        _contextRefreshSignal++;
+        if (_contextPanel is not null)
         {
-            try { await _editorHandle.InvokeVoidAsync("setReadOnly", false); }
-            catch (JSDisconnectedException) { }
+            await _contextPanel.RefreshAsync();
         }
         StateHasChanged();
     }
-
-    private void OnContextChanged() => StateHasChanged();
 
     public async ValueTask DisposeAsync()
     {

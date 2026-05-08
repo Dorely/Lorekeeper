@@ -1,0 +1,149 @@
+@using Lorekeeper.Context
+@inject IEditorEntityRecommendationService Recommendations
+@inject IEditorContextService EditorContext
+
+<div class="recommended-entities">
+    <input type="search"
+           class="form-control form-control-sm recommended-search"
+           placeholder="Search entities..."
+           value="@_query"
+           @oninput="OnSearchInputAsync" />
+
+    @if (ChapterId is null)
+    {
+        <p class="text-muted small mb-0"><em>Select a chapter to see recommendations.</em></p>
+    }
+    else if (_loading)
+    {
+        <p class="text-muted small mb-0"><em>Loading…</em></p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="text-muted small mb-0"><em>No entity recommendations.</em></p>
+    }
+    else
+    {
+        <div class="recommended-list">
+            @foreach (var item in _items)
+            {
+                <article class="recommended-item" @key="item.EntityId">
+                    <div class="recommended-item-head">
+                        <div class="recommended-name">@item.Name</div>
+                        <span class="recommended-type">@item.Type</span>
+                    </div>
+                    @if (Preview(item.Properties) is { Length: > 0 } preview)
+                    {
+                        <div class="recommended-preview">@preview</div>
+                    }
+                    <div class="recommended-reasons">
+                        @foreach (var reason in item.Reasons)
+                        {
+                            <span>@reason</span>
+                        }
+                    </div>
+                    <button type="button"
+                            class="btn btn-sm btn-outline-primary recommended-add"
+                            @onclick="() => AddAsync(item)">
+                        Add to context
+                    </button>
+                </article>
+            }
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger alert-dismissible recommended-error">
+            @_error
+            <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public Guid? ChapterId { get; set; }
+    [Parameter] public int RefreshSignal { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private List<EditorEntityRecommendation> _items = [];
+    private string _query = string.Empty;
+    private string? _error;
+    private bool _loading;
+    private Guid _lastProjectId;
+    private Guid? _lastChapterId;
+    private int _lastRefreshSignal = -1;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ProjectId != _lastProjectId || ChapterId != _lastChapterId || RefreshSignal != _lastRefreshSignal)
+        {
+            _lastProjectId = ProjectId;
+            _lastChapterId = ChapterId;
+            _lastRefreshSignal = RefreshSignal;
+            await ReloadAsync();
+        }
+    }
+
+    private async Task OnSearchInputAsync(ChangeEventArgs args)
+    {
+        _query = args.Value?.ToString() ?? string.Empty;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (ChapterId is null)
+        {
+            _items = [];
+            return;
+        }
+
+        _loading = true;
+        _error = null;
+        try
+        {
+            _items = (await Recommendations.ListAsync(ProjectId, ChapterId.Value, _query)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task AddAsync(EditorEntityRecommendation item)
+    {
+        if (ChapterId is null) return;
+        try
+        {
+            await EditorContext.SetItemIncludedAsync(
+                ProjectId,
+                ChapterId.Value,
+                ContextItemKind.Entity,
+                EditorContextKeys.Entity(item.EntityId),
+                isIncluded: true);
+            await ReloadAsync();
+            if (OnChanged.HasDelegate)
+                await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private static string Preview(IReadOnlyDictionary<string, string?> properties)
+    {
+        var first = properties
+            .Where(property => !string.IsNullOrWhiteSpace(property.Value))
+            .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(first.Value)) return string.Empty;
+        var preview = first.Value.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return preview.Length <= 110 ? preview : preview[..110] + "...";
+    }
+}

@@ -39,8 +39,24 @@
     white-space: nowrap;
 }
 
+.ctx-badge {
+    flex: 0 0 auto;
+    border: 1px solid var(--bs-border-color-translucent, #e9ecef);
+    border-radius: 999px;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.68rem;
+    color: var(--bs-secondary-color, #6c757d);
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
 .ctx-body {
     padding: 0 0.5rem 0.5rem 0.5rem;
+}
+
+.ctx-reason {
+    margin-bottom: 0.35rem;
+    font-size: 0.72rem;
+    color: var(--bs-secondary-color, #6c757d);
 }
 
 .ctx-prompt-edit {

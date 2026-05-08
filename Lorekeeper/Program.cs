@@ -40,6 +40,7 @@ builder.Services.AddScoped<IOutlineConversationRepository, OutlineConversationRe
 builder.Services.AddScoped<IWritingSampleRepository, WritingSampleRepository>();
 builder.Services.AddScoped<IWritingCoachConversationRepository, WritingCoachConversationRepository>();
 builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
+builder.Services.AddScoped<IEditorContextPreferenceRepository, EditorContextPreferenceRepository>();
 builder.Services.AddScoped<IIngestRepository, IngestRepository>();
 
 // Knowledge
@@ -97,7 +98,10 @@ builder.Services.AddScoped<IIngestService, IngestService>();
 builder.Services.AddHostedService<IngestJobWorker>();
 
 // Context + AI Console
-builder.Services.AddSingleton<IContextBuilder, ContextBuilder>();
+builder.Services.AddScoped<ContextBuilder>();
+builder.Services.AddScoped<IContextBuilder>(sp => sp.GetRequiredService<ContextBuilder>());
+builder.Services.AddScoped<IEditorContextService>(sp => sp.GetRequiredService<ContextBuilder>());
+builder.Services.AddScoped<IEditorEntityRecommendationService, EditorEntityRecommendationService>();
 builder.Services.Configure<AiConsoleOptions>(builder.Configuration.GetSection("AiConsole"));
 builder.Services.AddScoped<AiConsoleTools>();
 builder.Services.AddScoped<IAiConsoleService, AiConsoleService>();

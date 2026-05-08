@@ -16,6 +16,18 @@ public sealed class EntityService(
     /// <summary>Canonical edge type linking a parent node to its ordered children.</summary>
     public const string HasChildEdgeType = "HasChild";
 
+    public async Task<StoryEntity?> GetAsync(
+        Guid projectId,
+        Guid entityId,
+        CancellationToken cancellationToken = default)
+    {
+        var node = await ResolveEntityNodeAsync(projectId, entityId, cancellationToken);
+        if (node is null) return null;
+
+        var parent = await FindParentAsync(node.Id, cancellationToken);
+        return Project(node, parent);
+    }
+
     public async Task<IReadOnlyList<StoryEntity>> ListAsync(
         Guid projectId,
         string nodeType,

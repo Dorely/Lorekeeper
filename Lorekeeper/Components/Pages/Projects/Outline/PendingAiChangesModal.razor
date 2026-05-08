@@ -10,7 +10,7 @@
         <header class="pending-ai-header">
             <div>
                 <div class="pending-ai-title">Pending AI Changes</div>
-                <div class="pending-ai-subtitle">Review queued tool changes before they update the outline.</div>
+                <div class="pending-ai-subtitle">Review queued tool changes before they update the project.</div>
             </div>
             <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
         </header>
@@ -141,6 +141,8 @@
             batch,
             change,
             ReadGuidList(change.DependsOnChangeIdsJson))))
+        .GroupBy(item => item.Change.Id)
+        .Select(group => group.First())
         .OrderBy(item => item.Batch.CreatedAt)
         .ThenBy(item => item.Change.Order)
         .ToList();

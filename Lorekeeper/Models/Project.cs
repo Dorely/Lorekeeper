@@ -53,6 +53,8 @@ public class Project
 
     public ICollection<AiChangeBatch> AiChangeBatches { get; set; } = [];
 
+    public ICollection<EditorContextPreference> EditorContextPreferences { get; set; } = [];
+
     public ICollection<IngestSource> IngestSources { get; set; } = [];
 
     public ICollection<IngestJob> IngestJobs { get; set; } = [];
