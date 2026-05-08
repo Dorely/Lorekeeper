@@ -1,4 +1,5 @@
 @using System.Text.Json
+@using Lorekeeper.Context
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
 @inject IOutlineCollaborationService Collab
@@ -93,16 +94,108 @@
                                       @bind="_rejectionMessage" @bind:event="oninput"></textarea>
                         </div>
 
-                        <div class="pending-ai-diff-grid">
-                            <section>
-                                <div class="pending-ai-section-label">Old</div>
-                                <pre>@FormatJson(Selected.Change.BeforeJson)</pre>
+                        @if (TryBuildReviewDiff(Selected.Change, out var reviewDiff))
+                        {
+                            <section class="pending-ai-unified-diff" aria-label="Change diff">
+                                <div class="pending-ai-diff-header">
+                                    <div>
+                                        <div class="pending-ai-section-label">@reviewDiff.Title</div>
+                                        @if (!string.IsNullOrWhiteSpace(reviewDiff.Subtitle))
+                                        {
+                                            <div class="pending-ai-diff-subtitle">@reviewDiff.Subtitle</div>
+                                        }
+                                    </div>
+                                    <div class="pending-ai-diff-header-actions">
+                                        <div class="pending-ai-diff-view-toggle" role="group" aria-label="Diff view">
+                                            <button type="button"
+                                                    class="@DiffViewButtonClass(DiffViewMode.Inline)"
+                                                    aria-pressed="@(_diffViewMode == DiffViewMode.Inline)"
+                                                    @onclick="() => _diffViewMode = DiffViewMode.Inline">Inline</button>
+                                            <button type="button"
+                                                    class="@DiffViewButtonClass(DiffViewMode.SideBySide)"
+                                                    aria-pressed="@(_diffViewMode == DiffViewMode.SideBySide)"
+                                                    @onclick="() => _diffViewMode = DiffViewMode.SideBySide">Side by side</button>
+                                        </div>
+                                        <div class="pending-ai-diff-stats" aria-label="Diff stats">
+                                            <span class="pending-ai-diff-added">+@reviewDiff.Additions</span>
+                                            <span class="pending-ai-diff-removed">-@reviewDiff.Deletions</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                @if (reviewDiff.Sections.Count == 0)
+                                {
+                                    <div class="pending-ai-diff-empty">No text changes detected.</div>
+                                }
+                                else
+                                {
+                                    @foreach (var diffSection in reviewDiff.Sections)
+                                    {
+                                        <section class="pending-ai-diff-section">
+                                            @if (!string.IsNullOrWhiteSpace(diffSection.Label))
+                                            {
+                                                <div class="pending-ai-diff-field">@diffSection.Label</div>
+                                            }
+
+                                            @if (diffSection.Hunks.Count == 0)
+                                            {
+                                                <div class="pending-ai-diff-empty">No text changes detected.</div>
+                                            }
+                                            else
+                                            {
+                                                @foreach (var hunk in diffSection.Hunks)
+                                                {
+                                                    <div class="pending-ai-diff-hunk-header">
+                                                        @HunkHeader(hunk)
+                                                    </div>
+                                                    @if (_diffViewMode == DiffViewMode.Inline)
+                                                    {
+                                                        @foreach (var row in hunk.Rows)
+                                                        {
+                                                            <div class="pending-ai-diff-row @DiffRowClass(row.Kind)">
+                                                                <span class="pending-ai-diff-line-number">@(row.OldLineNumber?.ToString() ?? string.Empty)</span>
+                                                                <span class="pending-ai-diff-line-number">@(row.NewLineNumber?.ToString() ?? string.Empty)</span>
+                                                                <span class="pending-ai-diff-marker">@row.Marker</span>
+                                                                <span class="pending-ai-diff-line-text">@row.Text</span>
+                                                            </div>
+                                                        }
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="pending-ai-diff-side-by-side">
+                                                            @foreach (var splitRow in BuildSplitRows(hunk.Rows))
+                                                            {
+                                                                <div class="pending-ai-split-row @SplitRowClass(splitRow)">
+                                                                    <span class="pending-ai-split-line-number old @SplitCellClass(splitRow.Old)">@(splitRow.Old?.OldLineNumber?.ToString() ?? string.Empty)</span>
+                                                                    <span class="pending-ai-split-marker old @SplitCellClass(splitRow.Old)">@(splitRow.Old?.Marker ?? string.Empty)</span>
+                                                                    <span class="pending-ai-split-line-text old @SplitCellClass(splitRow.Old)">@(splitRow.Old?.Text ?? string.Empty)</span>
+                                                                    <span class="pending-ai-split-line-number new @SplitCellClass(splitRow.New)">@(splitRow.New?.NewLineNumber?.ToString() ?? string.Empty)</span>
+                                                                    <span class="pending-ai-split-marker new @SplitCellClass(splitRow.New)">@(splitRow.New?.Marker ?? string.Empty)</span>
+                                                                    <span class="pending-ai-split-line-text new @SplitCellClass(splitRow.New)">@(splitRow.New?.Text ?? string.Empty)</span>
+                                                                </div>
+                                                            }
+                                                        </div>
+                                                    }
+                                                }
+                                            }
+                                        </section>
+                                    }
+                                }
                             </section>
-                            <section>
-                                <div class="pending-ai-section-label">New</div>
-                                <pre>@FormatJson(Selected.Change.AfterJson)</pre>
-                            </section>
-                        </div>
+                        }
+                        else
+                        {
+                            <div class="pending-ai-diff-grid">
+                                <section>
+                                    <div class="pending-ai-section-label">Old</div>
+                                    <pre>@FormatJson(Selected.Change.BeforeJson)</pre>
+                                </section>
+                                <section>
+                                    <div class="pending-ai-section-label">New</div>
+                                    <pre>@FormatJson(Selected.Change.AfterJson)</pre>
+                                </section>
+                            </div>
+                        }
 
                         <details class="pending-ai-raw">
                             <summary>Tool call</summary>
@@ -135,6 +228,7 @@
     private string _rejectionMessage = string.Empty;
     private string? _error;
     private bool _busy;
+    private DiffViewMode _diffViewMode = DiffViewMode.Inline;
 
     private List<PendingChangeItem> Flattened => Batches
         .SelectMany(batch => batch.Changes.OrderBy(change => change.Order).Select(change => new PendingChangeItem(
@@ -263,5 +357,422 @@
         }
     }
 
+    private static bool TryBuildReviewDiff(AiChange change, out ReviewDiff diff)
+    {
+        diff = null!;
+
+        if (string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryReadChange<ChapterBodyChange>(change.BeforeJson, out var before)
+                || !TryReadChange<ChapterBodyChange>(change.AfterJson, out var after))
+            {
+                return false;
+            }
+
+            diff = BuildReviewDiff(
+                "Chapter body",
+                after.Title,
+                [new DiffFieldInput("Body", before.Body, after.Body)],
+                showSingleFieldLabel: false);
+            return true;
+        }
+
+        if (string.Equals(change.ToolName, "update_act", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryReadChange<OutlineActChange>(change.BeforeJson, out var before)
+                || !TryReadChange<OutlineActChange>(change.AfterJson, out var after))
+            {
+                return false;
+            }
+
+            diff = BuildReviewDiff(
+                "Act edit",
+                after.Title,
+                [
+                    new DiffFieldInput("Title", before.Title, after.Title),
+                    new DiffFieldInput("Synopsis", before.Synopsis, after.Synopsis),
+                ]);
+            return true;
+        }
+
+        if (string.Equals(change.ToolName, "update_chapter", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryReadChange<OutlineChapterChange>(change.BeforeJson, out var before)
+                || !TryReadChange<OutlineChapterChange>(change.AfterJson, out var after))
+            {
+                return false;
+            }
+
+            diff = BuildReviewDiff(
+                "Chapter edit",
+                after.Title,
+                [
+                    new DiffFieldInput("Title", before.Title, after.Title),
+                    new DiffFieldInput("Synopsis", before.Synopsis, after.Synopsis),
+                ]);
+            return true;
+        }
+
+        if (string.Equals(change.ToolName, "update_entity", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryReadChange<OutlineEntityChange>(change.BeforeJson, out var before)
+                || !TryReadChange<OutlineEntityChange>(change.AfterJson, out var after))
+            {
+                return false;
+            }
+
+            var fields = new List<DiffFieldInput>
+            {
+                new("Name", before.Name, after.Name),
+            };
+            var propertyNames = before.Properties.Keys
+                .Concat(after.Properties.Keys)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(propertyName => propertyName, StringComparer.OrdinalIgnoreCase);
+            foreach (var propertyName in propertyNames)
+            {
+                var beforeExists = before.Properties.TryGetValue(propertyName, out var beforeValue);
+                var afterExists = after.Properties.TryGetValue(propertyName, out var afterValue);
+                if (beforeExists == afterExists && string.Equals(beforeValue, afterValue, StringComparison.Ordinal))
+                    continue;
+
+                fields.Add(new DiffFieldInput(
+                    $"properties.{propertyName}",
+                    beforeExists ? beforeValue ?? string.Empty : "(not set)",
+                    afterExists ? afterValue ?? string.Empty : "(not set)"));
+            }
+
+            diff = BuildReviewDiff("Entity edit", after.Name, fields);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadChange<T>(string json, out T value)
+        where T : class
+    {
+        value = null!;
+        if (string.IsNullOrWhiteSpace(json) || json == "null") return false;
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<T>(json, JsonSerializerOptions.Default);
+            if (parsed is null) return false;
+            value = parsed;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static ReviewDiff BuildReviewDiff(string title, string? subtitle, IReadOnlyList<DiffFieldInput> fields, bool showSingleFieldLabel = true)
+    {
+        var changedFields = fields
+            .Where(field => !FieldTextEquals(field.OldText, field.NewText))
+            .ToList();
+        var showLabels = showSingleFieldLabel || changedFields.Count > 1;
+        var sections = changedFields
+            .Select(field => new DiffSection(
+                showLabels ? field.Label : string.Empty,
+                BuildDiffHunks(BuildDiffRows(field.OldText, field.NewText))))
+            .Where(section => section.Hunks.Count > 0)
+            .ToList();
+
+        return new ReviewDiff(title, subtitle, sections);
+    }
+
+    private static bool FieldTextEquals(string oldText, string newText)
+    {
+        var oldLines = ChapterFormatting.SplitLines(oldText);
+        var newLines = ChapterFormatting.SplitLines(newText);
+        return oldLines.SequenceEqual(newLines, StringComparer.Ordinal);
+    }
+
+    private static IReadOnlyList<DiffRow> BuildDiffRows(string oldText, string newText)
+    {
+        var oldLines = ChapterFormatting.SplitLines(oldText);
+        var newLines = ChapterFormatting.SplitLines(newText);
+        var rows = new List<DiffRow>();
+        var prefix = 0;
+        while (prefix < oldLines.Count && prefix < newLines.Count && oldLines[prefix] == newLines[prefix])
+            prefix++;
+
+        var oldSuffix = oldLines.Count - 1;
+        var newSuffix = newLines.Count - 1;
+        while (oldSuffix >= prefix && newSuffix >= prefix && oldLines[oldSuffix] == newLines[newSuffix])
+        {
+            oldSuffix--;
+            newSuffix--;
+        }
+
+        for (var index = 0; index < prefix; index++)
+            rows.Add(new DiffRow(index + 1, index + 1, " ", oldLines[index], DiffRowKind.Context));
+
+        var oldMiddleLength = Math.Max(0, oldSuffix - prefix + 1);
+        var newMiddleLength = Math.Max(0, newSuffix - prefix + 1);
+        rows.AddRange(BuildMiddleDiffRows(oldLines, newLines, prefix, oldMiddleLength, newMiddleLength));
+
+        var suffixOldStart = oldSuffix + 1;
+        var suffixNewStart = newSuffix + 1;
+        for (var offset = 0; suffixOldStart + offset < oldLines.Count; offset++)
+        {
+            rows.Add(new DiffRow(
+                suffixOldStart + offset + 1,
+                suffixNewStart + offset + 1,
+                " ",
+                oldLines[suffixOldStart + offset],
+                DiffRowKind.Context));
+        }
+
+        return rows;
+    }
+
+    private static IReadOnlyList<DiffRow> BuildMiddleDiffRows(
+        IReadOnlyList<string> oldLines,
+        IReadOnlyList<string> newLines,
+        int offset,
+        int oldLength,
+        int newLength)
+    {
+        var rows = new List<DiffRow>();
+        if (oldLength == 0)
+        {
+            for (var index = 0; index < newLength; index++)
+                rows.Add(new DiffRow(null, offset + index + 1, "+", newLines[offset + index], DiffRowKind.Added));
+            return rows;
+        }
+
+        if (newLength == 0)
+        {
+            for (var index = 0; index < oldLength; index++)
+                rows.Add(new DiffRow(offset + index + 1, null, "-", oldLines[offset + index], DiffRowKind.Removed));
+            return rows;
+        }
+
+        if ((long)oldLength * newLength > 1_000_000)
+        {
+            for (var index = 0; index < oldLength; index++)
+                rows.Add(new DiffRow(offset + index + 1, null, "-", oldLines[offset + index], DiffRowKind.Removed));
+            for (var index = 0; index < newLength; index++)
+                rows.Add(new DiffRow(null, offset + index + 1, "+", newLines[offset + index], DiffRowKind.Added));
+            return rows;
+        }
+
+        var table = new int[oldLength + 1, newLength + 1];
+        for (var oldIndex = oldLength - 1; oldIndex >= 0; oldIndex--)
+        {
+            for (var newIndex = newLength - 1; newIndex >= 0; newIndex--)
+            {
+                table[oldIndex, newIndex] = oldLines[offset + oldIndex] == newLines[offset + newIndex]
+                    ? table[oldIndex + 1, newIndex + 1] + 1
+                    : Math.Max(table[oldIndex + 1, newIndex], table[oldIndex, newIndex + 1]);
+            }
+        }
+
+        var oldCursor = 0;
+        var newCursor = 0;
+        while (oldCursor < oldLength && newCursor < newLength)
+        {
+            if (oldLines[offset + oldCursor] == newLines[offset + newCursor])
+            {
+                rows.Add(new DiffRow(
+                    offset + oldCursor + 1,
+                    offset + newCursor + 1,
+                    " ",
+                    oldLines[offset + oldCursor],
+                    DiffRowKind.Context));
+                oldCursor++;
+                newCursor++;
+            }
+            else if (table[oldCursor + 1, newCursor] >= table[oldCursor, newCursor + 1])
+            {
+                rows.Add(new DiffRow(offset + oldCursor + 1, null, "-", oldLines[offset + oldCursor], DiffRowKind.Removed));
+                oldCursor++;
+            }
+            else
+            {
+                rows.Add(new DiffRow(null, offset + newCursor + 1, "+", newLines[offset + newCursor], DiffRowKind.Added));
+                newCursor++;
+            }
+        }
+
+        while (oldCursor < oldLength)
+        {
+            rows.Add(new DiffRow(offset + oldCursor + 1, null, "-", oldLines[offset + oldCursor], DiffRowKind.Removed));
+            oldCursor++;
+        }
+
+        while (newCursor < newLength)
+        {
+            rows.Add(new DiffRow(null, offset + newCursor + 1, "+", newLines[offset + newCursor], DiffRowKind.Added));
+            newCursor++;
+        }
+
+        return rows;
+    }
+
+    private static IReadOnlyList<DiffHunk> BuildDiffHunks(IReadOnlyList<DiffRow> rows)
+    {
+        const int contextLines = 3;
+        var changedIndexes = rows
+            .Select((row, index) => (row, index))
+            .Where(item => item.row.Kind != DiffRowKind.Context)
+            .Select(item => item.index)
+            .ToList();
+        if (changedIndexes.Count == 0) return [];
+
+        var ranges = new List<(int Start, int End)>();
+        foreach (var changedIndex in changedIndexes)
+        {
+            var start = Math.Max(0, changedIndex - contextLines);
+            var end = Math.Min(rows.Count - 1, changedIndex + contextLines);
+            if (ranges.Count == 0 || start > ranges[^1].End + 1)
+            {
+                ranges.Add((start, end));
+            }
+            else
+            {
+                var last = ranges[^1];
+                ranges[^1] = (last.Start, Math.Max(last.End, end));
+            }
+        }
+
+        return ranges
+            .Select(range => BuildHunk(rows, range.Start, range.End))
+            .ToList();
+    }
+
+    private static DiffHunk BuildHunk(IReadOnlyList<DiffRow> rows, int start, int end)
+    {
+        var hunkRows = rows.Skip(start).Take(end - start + 1).ToList();
+        var oldLength = hunkRows.Count(row => row.OldLineNumber.HasValue);
+        var newLength = hunkRows.Count(row => row.NewLineNumber.HasValue);
+        return new DiffHunk(
+            FindHunkStart(rows, start, oldLine: true),
+            oldLength,
+            FindHunkStart(rows, start, oldLine: false),
+            newLength,
+            hunkRows);
+    }
+
+    private static int FindHunkStart(IReadOnlyList<DiffRow> rows, int start, bool oldLine)
+    {
+        for (var index = start; index < rows.Count; index++)
+        {
+            var lineNumber = oldLine ? rows[index].OldLineNumber : rows[index].NewLineNumber;
+            if (lineNumber.HasValue) return lineNumber.Value;
+        }
+
+        for (var index = start - 1; index >= 0; index--)
+        {
+            var lineNumber = oldLine ? rows[index].OldLineNumber : rows[index].NewLineNumber;
+            if (lineNumber.HasValue) return lineNumber.Value + 1;
+        }
+
+        return 1;
+    }
+
+    private static string DiffRowClass(DiffRowKind kind) => kind switch
+    {
+        DiffRowKind.Added => "added",
+        DiffRowKind.Removed => "removed",
+        _ => "context",
+    };
+
+    private string DiffViewButtonClass(DiffViewMode mode) =>
+        _diffViewMode == mode
+            ? "pending-ai-diff-view-button active"
+            : "pending-ai-diff-view-button";
+
+    private static IReadOnlyList<SplitDiffRow> BuildSplitRows(IReadOnlyList<DiffRow> rows)
+    {
+        var splitRows = new List<SplitDiffRow>();
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            if (row.Kind == DiffRowKind.Context)
+            {
+                splitRows.Add(new SplitDiffRow(row, row));
+                continue;
+            }
+
+            var changedRows = new List<DiffRow>();
+            while (index < rows.Count && rows[index].Kind != DiffRowKind.Context)
+            {
+                changedRows.Add(rows[index]);
+                index++;
+            }
+            index--;
+
+            var removedRows = changedRows.Where(changedRow => changedRow.Kind == DiffRowKind.Removed).ToList();
+            var addedRows = changedRows.Where(changedRow => changedRow.Kind == DiffRowKind.Added).ToList();
+            var rowCount = Math.Max(removedRows.Count, addedRows.Count);
+            for (var changedIndex = 0; changedIndex < rowCount; changedIndex++)
+            {
+                splitRows.Add(new SplitDiffRow(
+                    changedIndex < removedRows.Count ? removedRows[changedIndex] : null,
+                    changedIndex < addedRows.Count ? addedRows[changedIndex] : null));
+            }
+        }
+
+        return splitRows;
+    }
+
+    private static string SplitRowClass(SplitDiffRow row)
+    {
+        if (row.Old?.Kind == DiffRowKind.Removed && row.New?.Kind == DiffRowKind.Added) return "changed";
+        if (row.Old?.Kind == DiffRowKind.Removed) return "removed";
+        if (row.New?.Kind == DiffRowKind.Added) return "added";
+        return "context";
+    }
+
+    private static string SplitCellClass(DiffRow? row) => row?.Kind switch
+    {
+        DiffRowKind.Added => "added",
+        DiffRowKind.Removed => "removed",
+        DiffRowKind.Context => "context",
+        _ => "empty",
+    };
+
+    private static string HunkHeader(DiffHunk hunk) => $"@@ -{hunk.OldStart},{hunk.OldLength} +{hunk.NewStart},{hunk.NewLength} @@";
+
     private sealed record PendingChangeItem(AiChangeBatch Batch, AiChange Change, IReadOnlyList<Guid> Dependencies);
+    private sealed record ReviewDiff(string Title, string? Subtitle, IReadOnlyList<DiffSection> Sections)
+    {
+        public int Additions => Sections.Sum(section => section.Additions);
+        public int Deletions => Sections.Sum(section => section.Deletions);
+    }
+
+    private sealed record DiffSection(string Label, IReadOnlyList<DiffHunk> Hunks)
+    {
+        public int Additions => Hunks.Sum(hunk => hunk.Additions);
+        public int Deletions => Hunks.Sum(hunk => hunk.Deletions);
+    }
+
+    private sealed record DiffHunk(int OldStart, int OldLength, int NewStart, int NewLength, IReadOnlyList<DiffRow> Rows)
+    {
+        public int Additions => Rows.Count(row => row.Kind == DiffRowKind.Added);
+        public int Deletions => Rows.Count(row => row.Kind == DiffRowKind.Removed);
+    }
+
+    private sealed record DiffRow(int? OldLineNumber, int? NewLineNumber, string Marker, string Text, DiffRowKind Kind);
+    private sealed record SplitDiffRow(DiffRow? Old, DiffRow? New);
+    private sealed record DiffFieldInput(string Label, string OldText, string NewText);
+
+    private enum DiffViewMode
+    {
+        Inline,
+        SideBySide,
+    }
+
+    private enum DiffRowKind
+    {
+        Context,
+        Added,
+        Removed,
+    }
 }

@@ -189,6 +189,243 @@
     gap: 0.75rem;
 }
 
+.pending-ai-unified-diff {
+    max-height: 32rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.4rem;
+    background: var(--bs-body-bg, #fff);
+    overflow: auto;
+}
+
+.pending-ai-diff-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.pending-ai-diff-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+}
+
+.pending-ai-diff-view-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.35rem;
+    background: var(--bs-body-bg, #fff);
+    overflow: hidden;
+}
+
+.pending-ai-diff-view-button {
+    min-height: 1.75rem;
+    padding: 0.2rem 0.55rem;
+    border: 0;
+    border-right: 1px solid var(--bs-border-color, #dee2e6);
+    background: transparent;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.78rem;
+    line-height: 1.2;
+}
+
+.pending-ai-diff-view-button:last-child {
+    border-right: 0;
+}
+
+.pending-ai-diff-view-button:hover,
+.pending-ai-diff-view-button.active {
+    background: var(--bs-primary, #0d6efd);
+    color: #fff;
+}
+
+.pending-ai-diff-subtitle {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.82rem;
+    overflow-wrap: anywhere;
+}
+
+.pending-ai-diff-stats {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0.55rem;
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.pending-ai-diff-added {
+    color: var(--bs-success, #198754);
+}
+
+.pending-ai-diff-removed {
+    color: var(--bs-danger, #dc3545);
+}
+
+.pending-ai-diff-section + .pending-ai-diff-section {
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+}
+
+.pending-ai-diff-field {
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+    background: rgba(0, 0, 0, 0.025);
+    color: var(--bs-secondary-color, #6c757d);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.pending-ai-diff-empty {
+    padding: 1rem;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+.pending-ai-diff-hunk-header {
+    padding: 0.35rem 0.65rem;
+    border-top: 1px solid rgba(13, 110, 253, 0.16);
+    border-bottom: 1px solid rgba(13, 110, 253, 0.16);
+    background: rgba(13, 110, 253, 0.08);
+    color: #0a58ca;
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+}
+
+.pending-ai-diff-row {
+    display: grid;
+    grid-template-columns: 3.25rem 3.25rem 1.45rem minmax(0, 1fr);
+    min-width: 0;
+    border-top: 1px solid rgba(0, 0, 0, 0.045);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.pending-ai-diff-row.context {
+    background: var(--bs-body-bg, #fff);
+}
+
+.pending-ai-diff-row.added {
+    background: rgba(25, 135, 84, 0.1);
+}
+
+.pending-ai-diff-row.removed {
+    background: rgba(220, 53, 69, 0.1);
+}
+
+.pending-ai-diff-line-number,
+.pending-ai-diff-marker,
+.pending-ai-diff-line-text {
+    padding: 0.18rem 0.45rem;
+}
+
+.pending-ai-diff-line-number {
+    border-right: 1px solid rgba(0, 0, 0, 0.065);
+    color: var(--bs-secondary-color, #6c757d);
+    text-align: right;
+    user-select: none;
+}
+
+.pending-ai-diff-marker {
+    color: var(--bs-secondary-color, #6c757d);
+    text-align: center;
+    user-select: none;
+}
+
+.pending-ai-diff-row.added .pending-ai-diff-marker {
+    color: var(--bs-success, #198754);
+}
+
+.pending-ai-diff-row.removed .pending-ai-diff-marker {
+    color: var(--bs-danger, #dc3545);
+}
+
+.pending-ai-diff-line-text {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.pending-ai-diff-side-by-side {
+    min-width: 48rem;
+}
+
+.pending-ai-split-row {
+    display: grid;
+    grid-template-columns: 3.25rem 1.45rem minmax(13rem, 1fr) 3.25rem 1.45rem minmax(13rem, 1fr);
+    min-width: 0;
+    border-top: 1px solid rgba(0, 0, 0, 0.045);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.pending-ai-split-line-number,
+.pending-ai-split-marker,
+.pending-ai-split-line-text {
+    padding: 0.18rem 0.45rem;
+}
+
+.pending-ai-split-line-number {
+    border-right: 1px solid rgba(0, 0, 0, 0.065);
+    color: var(--bs-secondary-color, #6c757d);
+    text-align: right;
+    user-select: none;
+}
+
+.pending-ai-split-marker {
+    color: var(--bs-secondary-color, #6c757d);
+    text-align: center;
+    user-select: none;
+}
+
+.pending-ai-split-line-text {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.pending-ai-split-line-text.old {
+    border-right: 1px solid rgba(0, 0, 0, 0.09);
+}
+
+.pending-ai-split-line-number.added,
+.pending-ai-split-marker.added,
+.pending-ai-split-line-text.added {
+    background: rgba(25, 135, 84, 0.1);
+}
+
+.pending-ai-split-line-number.removed,
+.pending-ai-split-marker.removed,
+.pending-ai-split-line-text.removed {
+    background: rgba(220, 53, 69, 0.1);
+}
+
+.pending-ai-split-line-number.empty,
+.pending-ai-split-marker.empty,
+.pending-ai-split-line-text.empty {
+    background: rgba(0, 0, 0, 0.025);
+}
+
+.pending-ai-split-marker.added {
+    color: var(--bs-success, #198754);
+}
+
+.pending-ai-split-marker.removed {
+    color: var(--bs-danger, #dc3545);
+}
+
 .pending-ai-diff-grid pre,
 .pending-ai-raw pre {
     min-height: 12rem;
@@ -227,6 +464,31 @@
     .pending-ai-body,
     .pending-ai-diff-grid {
         grid-template-columns: 1fr;
+    }
+
+    .pending-ai-diff-header {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+
+    .pending-ai-diff-header-actions {
+        align-items: flex-start;
+        justify-content: space-between;
+    }
+
+    .pending-ai-diff-row {
+        grid-template-columns: 2.75rem 2.75rem 1.25rem minmax(0, 1fr);
+        font-size: 0.74rem;
+    }
+
+    .pending-ai-diff-side-by-side {
+        min-width: 42rem;
+    }
+
+    .pending-ai-split-row {
+        grid-template-columns: 2.75rem 1.25rem minmax(11rem, 1fr) 2.75rem 1.25rem minmax(11rem, 1fr);
+        font-size: 0.74rem;
     }
 
     .pending-ai-list {
