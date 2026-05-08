@@ -379,6 +379,10 @@ public sealed class OutlineToolStagingContext(
         }
         if (parentId is not null && !CanResolveEntityOrChapter(parentId.Value)) return $"Error: parent entity {parentId} not found in this project.";
 
+        var duplicate = FindDuplicateForCreate(trimmedType, name, properties, parentId);
+        if (duplicate is not null)
+            return DuplicateEntityResult(trimmedType, duplicate);
+
         EnsureType(trimmedType, parentId is not null);
         var resolvedOrder = parentId is null ? order : order ?? NextEntityOrder(trimmedType, parentId.Value);
         var entity = new EntityState(
@@ -684,6 +688,39 @@ public sealed class OutlineToolStagingContext(
             .DefaultIfEmpty(-1)
             .Max() + 1;
 
+    private EntityState? FindDuplicateForCreate(string type, string name, IReadOnlyDictionary<string, string?>? properties, Guid? parentId)
+    {
+        var candidates = _entities.Values.Where(entity => !entity.Deleted && string.Equals(entity.Type, type, StringComparison.OrdinalIgnoreCase));
+        if (parentId is not null && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase))
+            candidates = candidates.Where(entity => entity.ParentId == parentId);
+
+        if (string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase))
+        {
+            var requestedKey = NormalizeForComparison(ReadProperty(properties, "key") ?? name);
+            return candidates.FirstOrDefault(entity =>
+                NormalizeForComparison(ReadProperty(entity.Properties, "key") ?? entity.Name) == requestedKey);
+        }
+
+        var requestedName = NormalizeForComparison(name);
+        return candidates.FirstOrDefault(entity => NormalizeForComparison(entity.Name) == requestedName);
+    }
+
+    private static string DuplicateEntityResult(string requestedType, EntityState duplicate) =>
+        Serialize(new
+        {
+            status = "existing_match",
+            message = $"No new {requestedType} was staged because an existing {duplicate.Type} with the same name or key already exists. Use update_entity or link_entities for the existing entity, or create a more distinctly named entity if this is a separate story subject.",
+            existing = new
+            {
+                id = duplicate.Id,
+                type = duplicate.Type,
+                name = duplicate.Name,
+                order = duplicate.Order,
+                parentId = duplicate.ParentId,
+                properties = duplicate.Properties,
+            },
+        });
+
     private void EnsureType(string type, bool isChapterScoped)
     {
         if (_entityTypes.ContainsKey(type)) return;
@@ -701,6 +738,12 @@ public sealed class OutlineToolStagingContext(
 
     private static string? ReadProperty(Dictionary<string, string?> properties, string key) =>
         properties.TryGetValue(key, out var value) ? value : null;
+
+    private static string? ReadProperty(IReadOnlyDictionary<string, string?>? properties, string key) =>
+        properties is not null && properties.TryGetValue(key, out var value) ? value : null;
+
+    private static string NormalizeForComparison(string value) =>
+        string.Join(' ', value.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
 
     private static string Serialize(object? value) => JsonSerializer.Serialize(value, JsonSerializerOptions.Default);
 

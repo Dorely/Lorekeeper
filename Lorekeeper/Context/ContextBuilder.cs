@@ -1,6 +1,7 @@
 using System.Text;
 using Lorekeeper.Chapters;
 using Lorekeeper.Ingest;
+using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
@@ -36,6 +37,14 @@ public sealed class ContextBuilder(
                 Body: project.SystemPrompt,
                 IsEnabled: true,
                 IsRemovable: false),
+            new(
+                Key: EditorContextKeys.AssistantWorkflow,
+                Kind: ContextItemKind.AssistantWorkflow,
+                Label: "Assistant Workflow",
+                Body: AssistantWorkflowInstructions.EditorConsole,
+                IsEnabled: true,
+                IsRemovable: false,
+                Badge: "App"),
         };
 
         if (currentChapter is not null)

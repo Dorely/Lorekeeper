@@ -27,7 +27,7 @@ else
                 <input type="checkbox"
                        class="form-check-input ctx-check"
                        checked="@item.IsEnabled"
-                       disabled="@(!item.IsRemovable && item.Kind == ContextItemKind.SystemPrompt)"
+                      disabled="@(!item.IsRemovable)"
                        @onchange="@(e => OnToggleAsync(item, (bool)(e.Value ?? false)))" />
                 <span class="ctx-label">@item.Label</span>
                 @if (!string.IsNullOrWhiteSpace(item.Badge))

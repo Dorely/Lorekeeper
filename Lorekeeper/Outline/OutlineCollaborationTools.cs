@@ -106,7 +106,7 @@ public sealed class OutlineCollaborationTools(
                 method: (string type, string name, string? propertiesJson, string? parentId, int? order) =>
                     CreateEntityAsync(context, type, name, propertiesJson, parentId, order),
                 name: "create_entity",
-                description: "Create a new graph entity. type is the entity category ('ProjectFact', 'Character', 'Location', 'Event' for beats, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. For ProjectFact include key/value properties; it will be parented to the Project automatically. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). Returns the new entity's id."),
+                description: "Create a new graph entity. type is the entity category ('ProjectFact', 'Character', 'Location', 'Event' for beats, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. For ProjectFact include key/value properties; it will be parented to the Project automatically. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). If an entity with the same name/key already exists, returns status='existing_match' and the existing id instead of creating a duplicate."),
 
             AIFunctionFactory.Create(
                 method: (string entityId, string? name, string? propertiesToSetJson, string? propertiesToRemoveJson) =>
@@ -465,6 +465,10 @@ public sealed class OutlineCollaborationTools(
         if (ctx.Staging is not null)
             return await ctx.Staging.CreateEntityAsync(trimmedType, name, properties, parent, order);
 
+        var duplicate = await FindDuplicateForCreateAsync(ctx, trimmedType, name, properties, parent);
+        if (duplicate is not null)
+            return DuplicateEntityResult(trimmedType, duplicate);
+
         try
         {
             var created = await entities.CreateAsync(ctx.ProjectId, trimmedType, name.Trim(), properties, parent, order);
@@ -500,6 +504,49 @@ public sealed class OutlineCollaborationTools(
             type = link.EntityType,
         }),
     };
+
+    private async Task<StoryEntity?> FindDuplicateForCreateAsync(
+        OutlineCollaborationContext ctx,
+        string type,
+        string name,
+        IReadOnlyDictionary<string, string?>? properties,
+        Guid? parentId)
+    {
+        var candidates = parentId is not null && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
+            ? await entities.ListAsync(ctx.ProjectId, type, parentId)
+            : await entities.ListAsync(ctx.ProjectId, type);
+
+        if (string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase))
+        {
+            var requestedKey = NormalizeForComparison(ReadProperty(properties, "key") ?? name);
+            return candidates.FirstOrDefault(candidate =>
+                NormalizeForComparison(ReadProperty(candidate.Properties, "key") ?? candidate.Name) == requestedKey);
+        }
+
+        var requestedName = NormalizeForComparison(name);
+        return candidates.FirstOrDefault(candidate => NormalizeForComparison(candidate.Name) == requestedName);
+    }
+
+    private static string DuplicateEntityResult(string requestedType, StoryEntity duplicate) =>
+        JsonSerializer.Serialize(new
+        {
+            status = "existing_match",
+            message = $"No new {requestedType} was created because an existing {duplicate.Type} with the same name or key already exists. Use update_entity or link_entities for the existing entity, or create a more distinctly named entity if this is a separate story subject.",
+            existing = EntityPayload(duplicate),
+        });
+
+    private static object EntityPayload(StoryEntity entity) => new
+    {
+        id = entity.Id,
+        type = entity.Type,
+        name = entity.Name,
+        order = entity.Order,
+        parentId = entity.ParentId,
+        properties = entity.Properties,
+    };
+
+    private static string? ReadProperty(IReadOnlyDictionary<string, string?>? properties, string key) =>
+        properties is not null && properties.TryGetValue(key, out var value) ? value : null;
 
     private async Task<string> UpdateEntityAsync(
         OutlineCollaborationContext ctx,
@@ -658,6 +705,9 @@ public sealed class OutlineCollaborationTools(
         }
         return list.ToArray();
     }
+
+    private static string NormalizeForComparison(string value) =>
+        string.Join(' ', value.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
 
     // ---- helpers ---------------------------------------------------------
 

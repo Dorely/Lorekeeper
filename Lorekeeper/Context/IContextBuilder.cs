@@ -27,6 +27,7 @@ public sealed record ContextItem(
 public enum ContextItemKind
 {
     SystemPrompt,
+    AssistantWorkflow,
     CurrentChapter,
     ProjectOutline,
     ProjectFacts,

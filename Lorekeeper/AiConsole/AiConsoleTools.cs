@@ -75,7 +75,7 @@ public sealed class AiConsoleTools(
             AIFunctionFactory.Create(
                 method: (Guid chapterId) => ReadChapterAsync(context, chapterId),
                 name: "read_chapter",
-                description: "Read a chapter's full body with line numbers (0001: ...). Use list_chapters to discover ids."),
+                description: "Read a chapter's full body with line numbers (0001: ...). Use list_chapters to discover ids. During Review edits, this returns the current staged draft for chapters edited earlier in this turn."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string content, int? startLine, int? endLine) =>
@@ -88,6 +88,7 @@ public sealed class AiConsoleTools(
                     "If both startLine and endLine are provided: replace the inclusive line range with `content`. " +
                     "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
                     "When Review edits is enabled this stages the edit for approval instead of applying it immediately. " +
+                    "After editing, call read_chapter to verify the staged draft or saved body before finalizing. " +
                     "Returns the new line-numbered body and a short change summary."),
         };
 
@@ -347,8 +348,16 @@ public sealed class AiConsoleTools(
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
-        var numbered = ChapterFormatting.WithLineNumbers(chapter.Body);
-        return $"# {chapter.Title}\n\n{(numbered.Length == 0 ? "(empty)" : numbered)}";
+        var body = chapter.Body;
+        var state = "saved body";
+        if (ctx.ReviewEdits && ctx.ConsoleStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
+        {
+            body = draftBody;
+            state = "staged draft for this turn";
+        }
+
+        var numbered = ChapterFormatting.WithLineNumbers(body);
+        return $"# {chapter.Title}\nState: {state}\n\n{(numbered.Length == 0 ? "(empty)" : numbered)}";
     }
 
     private async Task<string> EditChapterAsync(
@@ -363,7 +372,11 @@ public sealed class AiConsoleTools(
             return $"Error: chapter {chapterId} not found in this project.";
 
         content ??= string.Empty;
-        var existingLines = ChapterFormatting.SplitLines(chapter.Body);
+        var existingBody = chapter.Body;
+        if (ctx.ReviewEdits && ctx.ConsoleStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
+            existingBody = draftBody;
+
+        var existingLines = ChapterFormatting.SplitLines(existingBody);
         var contentLines = ChapterFormatting.SplitLines(content);
 
         string newBody;
@@ -412,7 +425,7 @@ public sealed class AiConsoleTools(
 
         if (ctx.ReviewEdits && ctx.ConsoleStaging is not null)
         {
-            await ctx.ConsoleStaging.StageChapterBodyEditAsync(chapter, newBody, summary, result);
+            await ctx.ConsoleStaging.StageChapterBodyEditAsync(chapter, existingBody, newBody, summary, result);
             return $"Staged for review. {summary}\n\nProposed body:\n{(newNumbered.Length == 0 ? "(empty)" : newNumbered)}";
         }
 

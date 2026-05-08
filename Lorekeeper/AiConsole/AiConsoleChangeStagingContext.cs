@@ -13,6 +13,7 @@ public sealed class AiConsoleChangeStagingContext(
 {
     private AiChangeBatch? _batch;
     private readonly List<AiChange> _newChanges = [];
+    private readonly Dictionary<Guid, string> _chapterBodyDrafts = [];
     private Guid? _entryId;
     private string _toolCallId = string.Empty;
     private string _toolName = string.Empty;
@@ -34,14 +35,18 @@ public sealed class AiConsoleChangeStagingContext(
         return result;
     }
 
+    public bool TryGetChapterBodyDraft(Guid chapterId, out string body) =>
+        _chapterBodyDrafts.TryGetValue(chapterId, out body!);
+
     public async Task StageChapterBodyEditAsync(
         Chapter chapter,
+        string beforeBody,
         string newBody,
         string summary,
         string result,
         CancellationToken cancellationToken = default)
     {
-        var before = new ChapterBodyChange(chapter.Id, chapter.Title, chapter.Body);
+        var before = new ChapterBodyChange(chapter.Id, chapter.Title, beforeBody);
         var after = new ChapterBodyChange(chapter.Id, chapter.Title, newBody);
         await StageChangeAsync(
             summary,
@@ -52,6 +57,7 @@ public sealed class AiConsoleChangeStagingContext(
             resourceId: Resource("Chapter", chapter.Id),
             referencedResources: [Resource("Chapter", chapter.Id)],
             cancellationToken);
+            _chapterBodyDrafts[chapter.Id] = newBody;
     }
 
     private async Task StageChangeAsync(
