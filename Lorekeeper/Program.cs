@@ -82,6 +82,7 @@ builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationSer
 
 // Writing samples
 builder.Services.AddScoped<IWritingSampleService, WritingSampleService>();
+builder.Services.AddScoped<WritingCoachTools>();
 builder.Services.AddScoped<IWritingCoachService, WritingCoachService>();
 
 // Ingest

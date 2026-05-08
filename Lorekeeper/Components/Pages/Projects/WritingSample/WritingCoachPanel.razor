@@ -1,4 +1,5 @@
 @using System.Text
+@using System.Text.Json
 @using Lorekeeper.Models
 @using Lorekeeper.Writing
 @implements IAsyncDisposable
@@ -19,38 +20,13 @@
         }
         else
         {
-            @foreach (var message in RenderableMessages())
+            @foreach (var message in _renderable)
             {
-                <div class="@MessageClass(message)">
-                    @if (!string.IsNullOrWhiteSpace(message.Content))
-                    {
-                        <div class="writing-coach-msg-text">@message.Content</div>
-                    }
-                    @if (message.Status == WritingCoachMessageStatus.Failed)
-                    {
-                        <div class="writing-coach-msg-status writing-coach-msg-failed">Failed</div>
-                    }
-                    else if (message.Status == WritingCoachMessageStatus.Cancelled)
-                    {
-                        <div class="writing-coach-msg-status writing-coach-msg-cancelled">Cancelled</div>
-                    }
-                </div>
+                @RenderMessage(message)
             }
-
-            @if (_running)
+            @if (_live is not null)
             {
-                @if (_liveText.Length == 0)
-                {
-                    <div class="writing-coach-msg writing-coach-msg-asst writing-coach-msg-streaming">
-                        <span class="writing-coach-typing"><span></span><span></span><span></span></span>
-                    </div>
-                }
-                else
-                {
-                    <div class="writing-coach-msg writing-coach-msg-asst writing-coach-msg-streaming">
-                        <div class="writing-coach-msg-text">@_liveText.ToString()<span class="writing-coach-cursor">|</span></div>
-                    </div>
-                }
+                @RenderLive(_live)
             }
         }
         <div class="writing-coach-bottom-sentinel" aria-hidden="true"></div>
@@ -100,7 +76,8 @@
 
     private WritingCoachConversation? _conversation;
     private List<WritingCoachMessage> _messages = [];
-    private readonly StringBuilder _liveText = new();
+    private List<RenderableMessage> _renderable = [];
+    private LiveTurn? _live;
 
     private string _input = string.Empty;
     private bool _running;
@@ -156,6 +133,7 @@
         {
             _conversation = await Coach.GetOrCreateAsync(ProjectId);
             _messages = (await Coach.LoadMessagesAsync(_conversation.Id)).ToList();
+            RebuildRenderable();
         }
         finally
         {
@@ -176,18 +154,16 @@
         _input = string.Empty;
         _running = true;
         _error = null;
-        _liveText.Clear();
         _cts?.Dispose();
         _cts = new CancellationTokenSource();
         _resetComposerAfterRender = true;
 
-        _messages.Add(new WritingCoachMessage
-        {
-            ConversationId = _conversation?.Id ?? Guid.Empty,
-            Role = WritingCoachMessageRole.User,
-            Content = text,
-            Status = WritingCoachMessageStatus.Completed,
-        });
+        _renderable.Add(new RenderableMessage(
+            Id: Guid.NewGuid(),
+            Role: WritingCoachMessageRole.User,
+            Status: WritingCoachMessageStatus.Completed,
+            Parts: [new TextPart(text)]));
+        _live = new LiveTurn();
         await ResumeAutoFollowAsync();
         RequestScroll(force: true);
         StateHasChanged();
@@ -199,14 +175,26 @@
                 switch (update)
                 {
                     case WritingCoachTextDelta delta:
-                        _liveText.Append(delta.Text);
+                        _live!.AppendText(delta.Text);
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+
+                    case WritingCoachToolCallStarted started:
+                        _live!.AddToolCall(started.CallId, started.ToolName, started.ArgumentsJson);
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+
+                    case WritingCoachToolCallCompleted completed:
+                        _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error);
                         RequestScroll();
                         StateHasChanged();
                         break;
 
                     case WritingCoachAssistantMessageCompleted:
                         await ReloadFromDbAsync();
-                        _liveText.Clear();
+                        _live = null;
                         RequestScroll();
                         StateHasChanged();
                         break;
@@ -214,7 +202,7 @@
                     case WritingCoachTurnError error:
                         _error = error.Cancelled ? null : error.Message;
                         await ReloadFromDbAsync();
-                        _liveText.Clear();
+                        _live = null;
                         RequestScroll();
                         StateHasChanged();
                         break;
@@ -228,7 +216,7 @@
         finally
         {
             _running = false;
-            _liveText.Clear();
+            _live = null;
             _cts?.Dispose();
             _cts = null;
             RequestScroll();
@@ -240,6 +228,7 @@
     {
         if (_running) return;
         await Coach.ResetAsync(ProjectId);
+        _loadedProjectId = null;
         await LoadAsync();
     }
 
@@ -249,15 +238,195 @@
     {
         if (_conversation is null) return;
         _messages = (await Coach.LoadMessagesAsync(_conversation.Id)).ToList();
+        RebuildRenderable();
     }
 
-    private IEnumerable<WritingCoachMessage> RenderableMessages() =>
-        _messages.Where(message => message.Role != WritingCoachMessageRole.System);
+    private void RebuildRenderable()
+    {
+        var byCallId = _messages
+            .Where(message => message.Role == WritingCoachMessageRole.Tool && message.ToolCallId is not null)
+            .ToDictionary(message => message.ToolCallId!, message => message);
 
-    private static string MessageClass(WritingCoachMessage message) =>
-        message.Role == WritingCoachMessageRole.User
+        _renderable = new List<RenderableMessage>(_messages.Count);
+        foreach (var message in _messages)
+        {
+            if (message.Role == WritingCoachMessageRole.Tool) continue;
+            if (message.Role == WritingCoachMessageRole.System) continue;
+
+            _renderable.Add(new RenderableMessage(
+                Id: message.Id,
+                Role: message.Role,
+                Status: message.Status,
+                Parts: BuildMessageParts(message, byCallId)));
+        }
+    }
+
+    private static List<MessagePart> BuildMessageParts(WritingCoachMessage message, IReadOnlyDictionary<string, WritingCoachMessage> byCallId)
+    {
+        if (message.Role != WritingCoachMessageRole.Assistant)
+            return string.IsNullOrEmpty(message.Content) ? [] : [new TextPart(message.Content)];
+
+        var calls = ReadPersistedCalls(message.ToolCallsJson);
+        if (calls.Count == 0)
+            return string.IsNullOrEmpty(message.Content) ? [] : [new TextPart(message.Content)];
+
+        var parts = new List<MessagePart>();
+        if (calls.All(call => call.TextOffset is not null))
+        {
+            var cursor = 0;
+            foreach (var item in calls
+                .Select((call, index) => new { Call = call, Index = index })
+                .OrderBy(item => item.Call.TextOffset!.Value)
+                .ThenBy(item => item.Index))
+            {
+                var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, message.Content.Length);
+                if (offset > cursor)
+                {
+                    parts.Add(new TextPart(message.Content[cursor..offset]));
+                    cursor = offset;
+                }
+                parts.Add(new ToolPart(BuildToolChip(item.Call, byCallId)));
+            }
+            if (cursor < message.Content.Length)
+                parts.Add(new TextPart(message.Content[cursor..]));
+
+            return parts;
+        }
+
+        if (!string.IsNullOrEmpty(message.Content))
+            parts.Add(new TextPart(message.Content));
+        foreach (var call in calls)
+            parts.Add(new ToolPart(BuildToolChip(call, byCallId)));
+        return parts;
+    }
+
+    private static ToolChip BuildToolChip(PersistedCall call, IReadOnlyDictionary<string, WritingCoachMessage> byCallId)
+    {
+        byCallId.TryGetValue(call.CallId, out var resultMessage);
+        return new ToolChip
+        {
+            CallId = call.CallId,
+            Name = call.Name,
+            ArgumentsJson = call.ArgumentsJson,
+            Result = resultMessage?.Status == WritingCoachMessageStatus.Completed ? resultMessage.Content : null,
+            Error = resultMessage?.Status == WritingCoachMessageStatus.Failed ? (resultMessage.ErrorMessage ?? resultMessage.Content) : null,
+            Completed = resultMessage is not null,
+        };
+    }
+
+    private static List<PersistedCall> ReadPersistedCalls(string toolCallsJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolCallsJson) || toolCallsJson == "[]") return [];
+        try { return JsonSerializer.Deserialize<List<PersistedCall>>(toolCallsJson) ?? []; }
+        catch { return []; }
+    }
+
+    private RenderFragment RenderChip(ToolChip chip) => __builder =>
+    {
+        var stateClass = chip.Error is not null
+            ? "writing-coach-chip-error"
+            : (chip.Completed ? "writing-coach-chip-ok" : "writing-coach-chip-pending");
+        <details class="writing-coach-chip @stateClass">
+            <summary>
+                <span class="writing-coach-chip-icon">@(chip.Error is not null ? "x" : (chip.Completed ? "ok" : "..."))</span>
+                <span class="writing-coach-chip-name">@chip.Name</span>
+                @if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
+                {
+                    <span class="writing-coach-chip-args">@TruncateInline(chip.ArgumentsJson, 80)</span>
+                }
+            </summary>
+            <div class="writing-coach-chip-body">
+                @if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
+                {
+                    <div class="writing-coach-chip-section">args</div>
+                    <pre class="writing-coach-chip-pre">@chip.ArgumentsJson</pre>
+                }
+                @if (chip.Error is not null)
+                {
+                    <div class="writing-coach-chip-section">error</div>
+                    <pre class="writing-coach-chip-pre writing-coach-chip-pre-error">@chip.Error</pre>
+                }
+                else if (chip.Result is not null)
+                {
+                    <div class="writing-coach-chip-section">result</div>
+                    <pre class="writing-coach-chip-pre">@chip.Result</pre>
+                }
+                else
+                {
+                    <div class="writing-coach-chip-section text-muted"><em>running...</em></div>
+                }
+            </div>
+        </details>
+    };
+
+    private static string TruncateInline(string value, int max)
+    {
+        value = value.Replace('\n', ' ').Replace('\r', ' ');
+        return value.Length <= max ? value : value[..max] + "...";
+    }
+
+    private RenderFragment RenderMessage(RenderableMessage message) => __builder =>
+    {
+        var bubbleClass = message.Role == WritingCoachMessageRole.User
             ? "writing-coach-msg writing-coach-msg-user"
             : "writing-coach-msg writing-coach-msg-asst";
+        <div class="@bubbleClass">
+            @foreach (var part in message.Parts)
+            {
+                @RenderPart(part)
+            }
+            @if (message.Status == WritingCoachMessageStatus.Failed)
+            {
+                <div class="writing-coach-msg-status writing-coach-msg-failed">Failed</div>
+            }
+            else if (message.Status == WritingCoachMessageStatus.Cancelled)
+            {
+                <div class="writing-coach-msg-status writing-coach-msg-cancelled">Cancelled</div>
+            }
+        </div>
+    };
+
+    private RenderFragment RenderLive(LiveTurn live) => __builder =>
+    {
+        if (!live.HasContent)
+        {
+            <div class="writing-coach-msg writing-coach-msg-asst writing-coach-msg-streaming">
+                <span class="writing-coach-typing"><span></span><span></span><span></span></span>
+            </div>
+            return;
+        }
+
+        var visibleMessages = live.Messages.Where(message => message.Parts.Count > 0).ToList();
+        var lastVisibleMessage = visibleMessages.LastOrDefault();
+        @foreach (var liveMessage in visibleMessages)
+        {
+            var trailingText = ReferenceEquals(liveMessage, lastVisibleMessage)
+                ? liveMessage.Parts.LastOrDefault() as TextPart
+                : null;
+            <div class="writing-coach-msg writing-coach-msg-asst writing-coach-msg-streaming">
+                @foreach (var part in liveMessage.Parts)
+                {
+                    @RenderPart(part, ReferenceEquals(part, trailingText))
+                }
+            </div>
+        }
+    };
+
+    private RenderFragment RenderPart(MessagePart part, bool showCursor = false) => __builder =>
+    {
+        if (part is TextPart textPart)
+        {
+            var text = textPart.Text.ToString();
+            if (!string.IsNullOrEmpty(text))
+            {
+                <div class="writing-coach-msg-text">@text@if (showCursor) { <span class="writing-coach-cursor">|</span> }</div>
+            }
+        }
+        else if (part is ToolPart toolPart)
+        {
+            @RenderChip(toolPart.Chip)
+        }
+    };
 
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
@@ -301,4 +470,105 @@
             try { await _scroller.DisposeAsync(); } catch { }
         }
     }
+
+    private sealed record RenderableMessage(
+        Guid Id,
+        WritingCoachMessageRole Role,
+        WritingCoachMessageStatus Status,
+        List<MessagePart> Parts);
+
+    private abstract class MessagePart;
+
+    private sealed class TextPart : MessagePart
+    {
+        public TextPart(string text) => Text.Append(text);
+
+        public StringBuilder Text { get; } = new();
+
+        public void Append(string text) => Text.Append(text);
+    }
+
+    private sealed class ToolPart(ToolChip chip) : MessagePart
+    {
+        public ToolChip Chip { get; } = chip;
+    }
+
+    private sealed class ToolChip
+    {
+        public required string CallId { get; init; }
+        public required string Name { get; init; }
+        public required string ArgumentsJson { get; init; }
+        public string? Result { get; set; }
+        public string? Error { get; set; }
+        public bool Completed { get; set; }
+    }
+
+    private sealed class LiveTurn
+    {
+        private bool _startNewMessageOnNextPart;
+
+        public List<LiveMessage> Messages { get; } = [];
+
+        public bool HasContent => Messages.Any(message => message.Parts.Count > 0);
+
+        public void AppendText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            CurrentMessage().AppendText(text);
+        }
+
+        public void AddToolCall(string callId, string name, string argumentsJson)
+        {
+            CurrentMessage().Parts.Add(new ToolPart(new ToolChip
+            {
+                CallId = callId,
+                Name = name,
+                ArgumentsJson = argumentsJson,
+            }));
+        }
+
+        public void CompleteToolCall(string callId, string? result, string? error)
+        {
+            var chip = Messages
+                .SelectMany(message => message.Parts)
+                .OfType<ToolPart>()
+                .Select(part => part.Chip)
+                .FirstOrDefault(candidate => candidate.CallId == callId);
+            if (chip is not null)
+            {
+                chip.Result = result;
+                chip.Error = error;
+                chip.Completed = true;
+            }
+            _startNewMessageOnNextPart = true;
+        }
+
+        private LiveMessage CurrentMessage()
+        {
+            if (_startNewMessageOnNextPart || Messages.Count == 0)
+            {
+                var message = new LiveMessage();
+                Messages.Add(message);
+                _startNewMessageOnNextPart = false;
+                return message;
+            }
+
+            return Messages[^1];
+        }
+    }
+
+    private sealed class LiveMessage
+    {
+        public List<MessagePart> Parts { get; } = [];
+
+        public void AppendText(string text)
+        {
+            if (Parts.LastOrDefault() is TextPart textPart)
+                textPart.Append(text);
+            else
+                Parts.Add(new TextPart(text));
+        }
+    }
+
+    private sealed record PersistedCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
 }

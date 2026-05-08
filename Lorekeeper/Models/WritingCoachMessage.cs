@@ -1,7 +1,9 @@
 namespace Lorekeeper.Models;
 
 /// <summary>
-/// One row in a project's Writing Coach conversation.
+/// One message in a project's Writing Coach conversation. Mirrors the outline
+/// chat message shape so assistant tool calls can be replayed into the LLM
+/// with separate tool-result rows.
 /// </summary>
 public class WritingCoachMessage
 {
@@ -16,6 +18,12 @@ public class WritingCoachMessage
 
     public string Content { get; set; } = string.Empty;
 
+    public string ToolCallsJson { get; set; } = "[]";
+
+    public string? ToolCallId { get; set; }
+
+    public string? ToolName { get; set; }
+
     public WritingCoachMessageStatus Status { get; set; } = WritingCoachMessageStatus.Completed;
 
     public string? ErrorMessage { get; set; }
@@ -28,6 +36,7 @@ public enum WritingCoachMessageRole
     System,
     User,
     Assistant,
+    Tool,
 }
 
 public enum WritingCoachMessageStatus
