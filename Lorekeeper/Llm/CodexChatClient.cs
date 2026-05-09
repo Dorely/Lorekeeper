@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -14,6 +15,7 @@ public sealed class CodexChatClient : IChatClient
 {
     private const string CodexEndpoint = "https://chatgpt.com/backend-api/codex/responses";
     private const string DefaultModel = "gpt-5.4-mini";
+    private const int MaxBufferedResponseAttempts = 2;
 
     private readonly HttpClient _httpClient;
     private readonly string _accessToken;
@@ -37,20 +39,56 @@ public sealed class CodexChatClient : IChatClient
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        var fullText = new StringBuilder();
-        var functionCalls = new List<FunctionCallContent>();
+        var bufferedMessages = chatMessages as IReadOnlyList<ChatMessage> ?? chatMessages.ToList();
 
-        await foreach (var update in GetStreamingResponseAsync(chatMessages, options, cancellationToken))
+        for (var attempt = 1; attempt <= MaxBufferedResponseAttempts; attempt++)
         {
-            foreach (var content in update.Contents)
+            var fullText = new StringBuilder();
+            var functionCalls = new List<FunctionCallContent>();
+
+            try
             {
-                if (content is TextContent tc && tc.Text is { Length: > 0 })
-                    fullText.Append(tc.Text);
-                else if (content is FunctionCallContent fcc)
-                    functionCalls.Add(fcc);
+                await foreach (var update in GetStreamingResponseAsync(bufferedMessages, options, cancellationToken))
+                {
+                    foreach (var content in update.Contents)
+                    {
+                        if (content is TextContent tc && tc.Text is { Length: > 0 })
+                            fullText.Append(tc.Text);
+                        else if (content is FunctionCallContent fcc)
+                            functionCalls.Add(fcc);
+                    }
+                }
             }
+            catch (HttpIOException ex) when (IsResponseEnded(ex)
+                && attempt < MaxBufferedResponseAttempts
+                && fullText.Length == 0
+                && functionCalls.Count == 0
+                && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Codex streaming response ended before assistant content on attempt {Attempt}; retrying once.",
+                    attempt);
+                continue;
+            }
+            catch (HttpIOException ex) when (IsResponseEnded(ex) && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Codex streaming response ended after partial assistant content; not retrying. TextChars={TextChars}, FunctionCalls={FunctionCallCount}",
+                    fullText.Length,
+                    functionCalls.Count);
+                throw;
+            }
+
+            return CreateResponse(fullText, functionCalls);
         }
 
+        throw new HttpRequestException("Codex streaming response ended prematurely before assistant content after retry.");
+    }
+
+    private static ChatResponse CreateResponse(StringBuilder fullText, IReadOnlyList<FunctionCallContent> functionCalls)
+    {
         var contents = new List<AIContent>();
         if (fullText.Length > 0)
             contents.Add(new TextContent(fullText.ToString()));
@@ -64,8 +102,10 @@ public sealed class CodexChatClient : IChatClient
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var body = BuildRequestBody(chatMessages, options);
+        var bufferedMessages = chatMessages as IReadOnlyCollection<ChatMessage> ?? chatMessages.ToList();
+        var body = BuildRequestBody(bufferedMessages, options);
         var json = JsonSerializer.Serialize(body);
+        var toolCount = options?.Tools?.Count ?? 0;
 
         _logger.LogDebug("Codex request body: {Body}", json);
 
@@ -79,7 +119,14 @@ public sealed class CodexChatClient : IChatClient
         request.Headers.TryAddWithoutValidation("User-Agent", "Lorekeeper");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
 
-        _logger.LogDebug("Codex request: POST {Endpoint}, account={AccountId}, model={Model}", CodexEndpoint, _accountId, _model);
+        _logger.LogDebug(
+            "Codex request: POST {Endpoint}, account={AccountId}, model={Model}, messages={MessageCount}, tools={ToolCount}, bodyChars={BodyChars}",
+            CodexEndpoint,
+            _accountId,
+            _model,
+            bufferedMessages.Count,
+            toolCount,
+            json.Length);
 
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
@@ -97,9 +144,33 @@ public sealed class CodexChatClient : IChatClient
         string? pendingCallId = null;
         string? pendingFuncName = null;
         var pendingArgs = new StringBuilder();
+        var eventCount = 0;
+        var outputTextChars = 0;
+        var functionCallCount = 0;
+        string? lastEventType = null;
 
-        while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+        while (true)
         {
+            try
+            {
+                line = await reader.ReadLineAsync(cancellationToken);
+            }
+            catch (HttpIOException ex) when (IsResponseEnded(ex) && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Codex streaming response ended prematurely after {EventCount} SSE events; lastEvent={LastEventType}; textChars={TextChars}; functionCalls={FunctionCallCount}; model={Model}; bodyChars={BodyChars}",
+                    eventCount,
+                    lastEventType ?? "(none)",
+                    outputTextChars,
+                    functionCallCount,
+                    _model,
+                    json.Length);
+                throw;
+            }
+
+            if (line is null) break;
+
             if (!line.StartsWith("data: ", StringComparison.Ordinal))
                 continue;
 
@@ -118,6 +189,8 @@ public sealed class CodexChatClient : IChatClient
             }
 
             var type = evt.TryGetProperty("type", out var typeProp) ? typeProp.GetString() : null;
+            eventCount++;
+            lastEventType = type ?? "(missing)";
 
             switch (type)
             {
@@ -127,6 +200,7 @@ public sealed class CodexChatClient : IChatClient
                         var text = delta.GetString();
                         if (!string.IsNullOrEmpty(text))
                         {
+                            outputTextChars += text.Length;
                             yield return new ChatResponseUpdate
                             {
                                 Role = ChatRole.Assistant,
@@ -170,6 +244,7 @@ public sealed class CodexChatClient : IChatClient
                 case "response.function_call_arguments.done":
                     if (pendingCallId is not null && pendingFuncName is not null)
                     {
+                        functionCallCount++;
                         var argsJson = pendingArgs.ToString();
                         IDictionary<string, object?>? argsDict = null;
                         if (!string.IsNullOrEmpty(argsJson) && argsJson != "{}")
@@ -197,6 +272,11 @@ public sealed class CodexChatClient : IChatClient
                     break;
 
                 case "response.completed" or "response.done":
+                    _logger.LogDebug(
+                        "Codex streaming response completed after {EventCount} SSE events. TextChars={TextChars}, FunctionCalls={FunctionCallCount}",
+                        eventCount,
+                        outputTextChars,
+                        functionCallCount);
                     yield break;
 
                 case "response.created":
@@ -230,11 +310,20 @@ public sealed class CodexChatClient : IChatClient
                     break;
             }
         }
+
+        _logger.LogDebug(
+            "Codex streaming response ended after {EventCount} SSE events without an explicit completion event. TextChars={TextChars}, FunctionCalls={FunctionCallCount}",
+            eventCount,
+            outputTextChars,
+            functionCallCount);
     }
 
     public object? GetService(Type serviceType, object? serviceKey = null) => null;
 
     public void Dispose() { }
+
+    private static bool IsResponseEnded(HttpIOException exception) =>
+        exception.HttpRequestError == HttpRequestError.ResponseEnded;
 
     private Dictionary<string, object> BuildRequestBody(IEnumerable<ChatMessage> chatMessages, ChatOptions? options)
     {

@@ -62,6 +62,7 @@
 
 .line-gutter {
     flex: 0 0 auto;
+    box-sizing: border-box;
     padding: 0.375rem 0.5rem 0.375rem 0.6rem;
     font-family: var(--bs-font-monospace, monospace);
     font-size: 0.95rem;
@@ -73,6 +74,11 @@
     user-select: none;
     overflow: hidden;
     white-space: pre;
+}
+
+.line-gutter ::deep .line-gutter-row {
+    box-sizing: border-box;
+    white-space: nowrap;
 }
 
 .chapter-body {

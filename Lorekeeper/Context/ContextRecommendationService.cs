@@ -15,6 +15,7 @@ public sealed class ContextRecommendationService(
     IChapterService chapters,
     IActService acts,
     IIngestRepository ingest,
+    IConfiguration configuration,
     IEmbeddingService embeddings,
     IVectorStore vectors,
     ILogger<ContextRecommendationService> logger) : IContextRecommendationService
@@ -22,6 +23,15 @@ public sealed class ContextRecommendationService(
     private const int RecommendationLimit = 50;
     private const int PerSourceTypeVectorLimit = 12;
     private const int SemanticQueryBodyChars = 6_000;
+    private const int ExactTitleSearchRank = 0;
+    private const int BoundaryPrefixTitleSearchRank = 1;
+    private const int PrefixTitleSearchRank = 2;
+    private const int ContainsTitleSearchRank = 3;
+    private const int DetailSearchRank = 4;
+    private const int SemanticSearchRank = 5;
+    private const int NoSearchRank = int.MaxValue;
+
+    private int SemanticQueryMaxChars => Math.Max(100, configuration.GetValue("Embeddings:MaxChunkChars", SemanticQueryBodyChars));
 
     public async Task<IReadOnlyList<ContextRecommendation>> ListAsync(
         Guid projectId,
@@ -34,7 +44,7 @@ public sealed class ContextRecommendationService(
         includedKeys.Add(EditorContextKeys.ChapterReference(chapterId));
 
         var includedEntityIds = (await editorContext.ListIncludedEntityIdsAsync(projectId, chapterId, cancellationToken)).ToHashSet();
-        var results = new Dictionary<string, ContextRecommendation>(StringComparer.OrdinalIgnoreCase);
+        var results = new Dictionary<string, RankedContextRecommendation>(StringComparer.OrdinalIgnoreCase);
         var trimmedQuery = query?.Trim();
 
         await AddSecondDegreeGraphRecommendationsAsync(projectId, includedEntityIds, includedKeys, results, cancellationToken);
@@ -44,10 +54,12 @@ public sealed class ContextRecommendationService(
             await AddManualSearchRecommendationsAsync(projectId, chapterId, includedKeys, results, trimmedQuery, cancellationToken);
 
         return results.Values
-            .OrderBy(recommendation => recommendation.IsSearchResult ? 0 : 1)
-            .ThenBy(recommendation => recommendation.Distance ?? double.MaxValue)
-            .ThenBy(recommendation => recommendation.Type, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(recommendation => recommendation.Name, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(result => result.Recommendation.IsSearchResult ? 0 : 1)
+            .ThenBy(result => result.SearchRank)
+            .ThenBy(result => result.Recommendation.Distance ?? double.MaxValue)
+            .ThenBy(result => result.Recommendation.Type, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(result => result.Recommendation.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(result => result.Recommendation)
             .Take(RecommendationLimit)
             .ToList();
     }
@@ -56,7 +68,7 @@ public sealed class ContextRecommendationService(
         Guid projectId,
         IReadOnlyCollection<Guid> includedEntityIds,
         IReadOnlySet<string> includedKeys,
-        IDictionary<string, ContextRecommendation> results,
+        IDictionary<string, RankedContextRecommendation> results,
         CancellationToken cancellationToken)
     {
         foreach (var rootId in includedEntityIds.Take(24))
@@ -75,7 +87,7 @@ public sealed class ContextRecommendationService(
                 var entity = await entities.GetAsync(projectId, link.OtherEntityId, cancellationToken);
                 if (entity is null || !IsContextEntityType(entity.Type)) continue;
 
-                AddOrMerge(results, ProjectEntity(entity, [$"Linked to {root.Type} — {root.Name}"], isSearchResult: false));
+                AddOrMerge(results, ProjectEntity(entity, [$"Linked to {root.Type} — {root.Name}"], isSearchResult: false), NoSearchRank);
             }
         }
     }
@@ -85,12 +97,13 @@ public sealed class ContextRecommendationService(
         Guid chapterId,
         IReadOnlyCollection<Guid> includedEntityIds,
         IReadOnlySet<string> includedKeys,
-        IDictionary<string, ContextRecommendation> results,
+        IDictionary<string, RankedContextRecommendation> results,
         string? query,
         CancellationToken cancellationToken)
     {
         var semanticQuery = await BuildSemanticQueryAsync(projectId, chapterId, includedEntityIds, query, cancellationToken);
         if (string.IsNullOrWhiteSpace(semanticQuery)) return;
+        semanticQuery = LimitSemanticQuery(semanticQuery, projectId, chapterId);
 
         try
         {
@@ -148,11 +161,25 @@ public sealed class ContextRecommendationService(
         return sb.ToString().Trim();
     }
 
+    private string LimitSemanticQuery(string semanticQuery, Guid projectId, Guid chapterId)
+    {
+        var maxChars = SemanticQueryMaxChars;
+        if (semanticQuery.Length <= maxChars) return semanticQuery;
+
+        logger.LogDebug(
+            "Context recommendation semantic query for project {ProjectId} chapter {ChapterId} was {Length} chars; trimming to {MaxChars} before embedding.",
+            projectId,
+            chapterId,
+            semanticQuery.Length,
+            maxChars);
+        return Truncate(semanticQuery, maxChars);
+    }
+
     private async Task AddVectorRecommendationAsync(
         Guid projectId,
         Guid currentChapterId,
         IReadOnlySet<string> includedKeys,
-        IDictionary<string, ContextRecommendation> results,
+        IDictionary<string, RankedContextRecommendation> results,
         KnowledgeResult match,
         bool isSearchResult,
         CancellationToken cancellationToken)
@@ -171,57 +198,74 @@ public sealed class ContextRecommendationService(
         };
 
         if (recommendation is null || includedKeys.Contains(recommendation.Key)) return;
-        AddOrMerge(results, recommendation);
+        AddOrMerge(results, recommendation, isSearchResult ? SemanticSearchRank : NoSearchRank);
     }
 
     private async Task AddManualSearchRecommendationsAsync(
         Guid projectId,
         Guid currentChapterId,
         IReadOnlySet<string> includedKeys,
-        IDictionary<string, ContextRecommendation> results,
+        IDictionary<string, RankedContextRecommendation> results,
         string query,
         CancellationToken cancellationToken)
     {
-        foreach (var entity in await SearchEntitiesAsync(projectId, query, cancellationToken))
+        foreach (var (entity, searchRank) in await SearchEntitiesAsync(projectId, query, cancellationToken))
         {
             var recommendation = ProjectEntity(entity, ["Matched manual search"], isSearchResult: true);
-            if (!includedKeys.Contains(recommendation.Key)) AddOrMerge(results, recommendation);
+            if (!includedKeys.Contains(recommendation.Key)) AddOrMerge(results, recommendation, searchRank);
         }
 
-        foreach (var chapter in (await chapters.ListAsync(projectId, cancellationToken)).Where(chapter => chapter.Id != currentChapterId && Matches(chapter, query)))
+        foreach (var chapter in await chapters.ListAsync(projectId, cancellationToken))
         {
+            if (chapter.Id == currentChapterId) continue;
+            var searchRank = SearchRank(chapter, query);
+            if (searchRank is null) continue;
+
             var recommendation = ProjectChapter(chapter, ["Matched manual search"], isSearchResult: true);
-            if (!includedKeys.Contains(recommendation.Key)) AddOrMerge(results, recommendation);
+            if (!includedKeys.Contains(recommendation.Key)) AddOrMerge(results, recommendation, searchRank.Value);
         }
 
-        foreach (var act in (await acts.ListAsync(projectId, cancellationToken)).Where(act => Matches(act, query)))
+        foreach (var act in await acts.ListAsync(projectId, cancellationToken))
         {
+            var searchRank = SearchRank(act, query);
+            if (searchRank is null) continue;
+
             var recommendation = ProjectAct(act, ["Matched manual search"], isSearchResult: true);
-            if (!includedKeys.Contains(recommendation.Key)) AddOrMerge(results, recommendation);
+            if (!includedKeys.Contains(recommendation.Key)) AddOrMerge(results, recommendation, searchRank.Value);
         }
 
-        foreach (var source in (await ingest.ListSourcesByProjectAsync(projectId, cancellationToken)).Where(source => Matches(source, query)))
+        foreach (var source in await ingest.ListSourcesByProjectAsync(projectId, cancellationToken))
         {
-            var recommendation = ProjectIngestSource(source, ["Matched manual search"], isSearchResult: true);
-            if (!includedKeys.Contains(recommendation.Key)) AddOrMerge(results, recommendation);
-
-            foreach (var sourceChunk in (await ingest.ListSourceChunksAsync(source.Id, cancellationToken)).Where(sourceChunk => Matches(sourceChunk, query)))
+            var sourceSearchRank = SearchRank(source, query);
+            if (sourceSearchRank is not null)
             {
+                var recommendation = ProjectIngestSource(source, ["Matched manual search"], isSearchResult: true);
+                if (!includedKeys.Contains(recommendation.Key)) AddOrMerge(results, recommendation, sourceSearchRank.Value);
+            }
+
+            foreach (var sourceChunk in await ingest.ListSourceChunksAsync(source.Id, cancellationToken))
+            {
+                var chunkSearchRank = SearchRank(source, sourceChunk, query);
+                if (chunkSearchRank is null) continue;
+
                 var chunkRecommendation = ProjectIngestSourceChunk(source, sourceChunk, ["Matched manual search"], isSearchResult: true);
-                if (!includedKeys.Contains(chunkRecommendation.Key)) AddOrMerge(results, chunkRecommendation);
+                if (!includedKeys.Contains(chunkRecommendation.Key)) AddOrMerge(results, chunkRecommendation, chunkSearchRank.Value);
             }
         }
     }
 
-    private async Task<IReadOnlyList<StoryEntity>> SearchEntitiesAsync(Guid projectId, string query, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<(StoryEntity Entity, int SearchRank)>> SearchEntitiesAsync(Guid projectId, string query, CancellationToken cancellationToken)
     {
         var types = await entityTypes.ListAsync(projectId, includeStructural: true, cancellationToken);
-        var matches = new List<StoryEntity>();
+        var matches = new List<(StoryEntity Entity, int SearchRank)>();
 
         foreach (var type in types.Where(type => IsContextEntityType(type.Type)))
         {
             var list = await entities.ListAsync(projectId, type.Type, parentId: null, cancellationToken);
-            matches.AddRange(list.Where(entity => Matches(entity, query)));
+            matches.AddRange(list
+                .Select(entity => (Entity: entity, SearchRank: SearchRank(entity, query)))
+                .Where(match => match.SearchRank is not null)
+                .Select(match => (match.Entity, match.SearchRank!.Value)));
         }
 
         return matches;
@@ -363,45 +407,132 @@ public sealed class ContextRecommendationService(
             isSearchResult,
             distance);
 
-    private static void AddOrMerge(IDictionary<string, ContextRecommendation> results, ContextRecommendation recommendation)
+    private static void AddOrMerge(IDictionary<string, RankedContextRecommendation> results, ContextRecommendation recommendation, int searchRank)
     {
         if (results.TryGetValue(recommendation.Key, out var existing))
         {
-            results[recommendation.Key] = existing with
+            var mergedRecommendation = existing.Recommendation with
             {
-                Reasons = existing.Reasons.Concat(recommendation.Reasons).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-                IsSearchResult = existing.IsSearchResult || recommendation.IsSearchResult,
-                Distance = existing.Distance is null
+                Reasons = existing.Recommendation.Reasons.Concat(recommendation.Reasons).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                IsSearchResult = existing.Recommendation.IsSearchResult || recommendation.IsSearchResult,
+                Distance = existing.Recommendation.Distance is null
                     ? recommendation.Distance
                     : recommendation.Distance is null
-                        ? existing.Distance
-                        : Math.Min(existing.Distance.Value, recommendation.Distance.Value),
+                        ? existing.Recommendation.Distance
+                        : Math.Min(existing.Recommendation.Distance.Value, recommendation.Distance.Value),
+            };
+
+            results[recommendation.Key] = existing with
+            {
+                Recommendation = mergedRecommendation,
+                SearchRank = Math.Min(existing.SearchRank, searchRank),
             };
             return;
         }
 
-        results[recommendation.Key] = recommendation;
+        results[recommendation.Key] = new RankedContextRecommendation(recommendation, searchRank);
     }
 
-    private static bool Matches(StoryEntity entity, string query) =>
-        Contains(entity.Name, query)
-        || Contains(entity.Type, query)
-        || entity.Properties.Any(property => Contains(property.Key, query) || Contains(property.Value, query));
+    private static int? SearchRank(StoryEntity entity, string query)
+    {
+        var titleRank = BestTitleSearchRank(query, entity.Name);
+        if (titleRank is not null) return titleRank.Value;
 
-    private static bool Matches(Chapter chapter, string query) =>
-        Contains(chapter.Title, query) || Contains(chapter.Synopsis, query) || Contains(chapter.Body, query);
+        return Contains(entity.Type, query)
+            || entity.Properties.Any(property => Contains(property.Key, query) || Contains(property.Value, query))
+            ? DetailSearchRank
+            : null;
+    }
 
-    private static bool Matches(Act act, string query) =>
-        Contains(act.Title, query) || Contains(act.Synopsis, query);
+    private static int? SearchRank(Chapter chapter, string query)
+    {
+        var titleRank = BestTitleSearchRank(
+            query,
+            chapter.Title,
+            $"Chapter {chapter.Order + 1}",
+            $"Chapter {chapter.Order + 1} {chapter.Title}");
+        if (titleRank is not null) return titleRank.Value;
 
-    private static bool Matches(IngestSource source, string query) =>
-        Contains(source.Title, query) || Contains(source.SourceKind, query) || Contains(source.Description, query) || Contains(source.UserInstructions, query);
+        return Contains(chapter.Synopsis, query) || Contains(chapter.Body, query)
+            ? DetailSearchRank
+            : null;
+    }
 
-    private static bool Matches(IngestSourceChunk sourceChunk, string query) =>
-        Contains(sourceChunk.Title, query) || Contains(sourceChunk.HeadingPath, query) || Contains(sourceChunk.Summary, query) || Contains(sourceChunk.AgentNotes, query);
+    private static int? SearchRank(Act act, string query)
+    {
+        var titleRank = BestTitleSearchRank(
+            query,
+            act.Title,
+            $"Act {act.Order + 1}",
+            $"Act {act.Order + 1} {act.Title}");
+        if (titleRank is not null) return titleRank.Value;
+
+        return Contains(act.Synopsis, query) ? DetailSearchRank : null;
+    }
+
+    private static int? SearchRank(IngestSource source, string query)
+    {
+        var titleRank = BestTitleSearchRank(query, source.Title);
+        if (titleRank is not null) return titleRank.Value;
+
+        return Contains(source.SourceKind, query) || Contains(source.Description, query) || Contains(source.UserInstructions, query)
+            ? DetailSearchRank
+            : null;
+    }
+
+    private static int? SearchRank(IngestSource source, IngestSourceChunk sourceChunk, string query)
+    {
+        var titleRank = BestTitleSearchRank(
+            query,
+            sourceChunk.Title,
+            sourceChunk.HeadingPath,
+            $"{source.Title} Part {sourceChunk.Index + 1}");
+        if (titleRank is not null) return titleRank.Value;
+
+        return Contains(sourceChunk.Summary, query) || Contains(sourceChunk.AgentNotes, query)
+            ? DetailSearchRank
+            : null;
+    }
+
+    private static int? BestTitleSearchRank(string query, params string?[] values)
+    {
+        int? bestRank = null;
+        foreach (var value in values)
+        {
+            var rank = TitleSearchRank(value, query);
+            if (rank is null) continue;
+            bestRank = bestRank is null ? rank.Value : Math.Min(bestRank.Value, rank.Value);
+        }
+
+        return bestRank;
+    }
+
+    private static int? TitleSearchRank(string? value, string query)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+
+        var title = value.Trim();
+        var trimmedQuery = query.Trim();
+        if (title.Equals(trimmedQuery, StringComparison.OrdinalIgnoreCase)) return ExactTitleSearchRank;
+        if (title.StartsWith(trimmedQuery, StringComparison.OrdinalIgnoreCase))
+        {
+            return HasBoundaryAfterPrefix(title, trimmedQuery.Length)
+                ? BoundaryPrefixTitleSearchRank
+                : PrefixTitleSearchRank;
+        }
+
+        return title.Contains(trimmedQuery, StringComparison.OrdinalIgnoreCase)
+            ? ContainsTitleSearchRank
+            : null;
+    }
+
+    private static bool HasBoundaryAfterPrefix(string value, int prefixLength) =>
+        prefixLength >= value.Length || !char.IsLetterOrDigit(value[prefixLength]);
 
     private static bool Contains(string? value, string query) =>
         value?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false;
+
+    private sealed record RankedContextRecommendation(ContextRecommendation Recommendation, int SearchRank);
 
     private static string Preview(string? value)
     {

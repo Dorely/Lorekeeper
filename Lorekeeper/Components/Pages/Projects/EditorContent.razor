@@ -92,7 +92,7 @@ else
             </div>
 
             <div class="chapter-editor @(_chapterLocked ? "chapter-editor--locked" : "")">
-                <div @ref="_gutterRef" class="line-gutter"></div>
+                <div @ref="_gutterRef" class="line-gutter" aria-hidden="true"></div>
                 <textarea @ref="_bodyTextarea"
                           class="form-control chapter-body"
                           readonly="@_chapterLocked"
