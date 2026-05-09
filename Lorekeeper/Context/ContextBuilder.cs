@@ -156,8 +156,6 @@ public sealed class ContextBuilder(
     {
         var byId = new Dictionary<Guid, StoryEntity>();
         var beats = await entities.ListAsync(projectId, EntityTypeService.EventNodeType, chapterId, cancellationToken);
-        foreach (var beat in beats)
-            AddContextEntity(byId, beat);
 
         await AddLinkedEntitiesAsync(projectId, chapterId, byId, cancellationToken);
         foreach (var beat in beats)
@@ -435,14 +433,14 @@ public sealed class ContextBuilder(
         {
             sb.Append("Act ").Append(act.Order + 1).Append(": ").AppendLine(act.Title);
             AppendOptionalIndented(sb, "Synopsis", act.Synopsis, 2);
-            await AppendChaptersAsync(sb, byAct.TryGetValue(act.Id, out var chaptersInAct) ? chaptersInAct : [], currentChapterId);
+            await AppendChaptersAsync(sb, byAct.TryGetValue(act.Id, out var chaptersInAct) ? chaptersInAct : [], currentChapterId, cancellationToken);
             sb.AppendLine();
         }
 
         if (unassigned.Count > 0)
         {
             sb.AppendLine("Unassigned Chapters");
-            await AppendChaptersAsync(sb, unassigned, currentChapterId);
+            await AppendChaptersAsync(sb, unassigned, currentChapterId, cancellationToken);
         }
 
         return sb.Length == 0 ? "(no outline yet)" : sb.ToString().TrimEnd();
@@ -518,18 +516,35 @@ public sealed class ContextBuilder(
         return sb.ToString().TrimEnd();
     }
 
-    private async Task AppendChaptersAsync(StringBuilder sb, IReadOnlyList<Chapter> chapterList, Guid currentChapterId)
+    private async Task AppendChaptersAsync(
+        StringBuilder sb,
+        IReadOnlyList<Chapter> chapterList,
+        Guid currentChapterId,
+        CancellationToken cancellationToken)
     {
         foreach (var chapter in chapterList.OrderBy(chapter => chapter.Order))
         {
-            var beatCount = await entities.CountChildrenAsync(chapter.ProjectId, chapter.Id, EntityTypeService.EventNodeType);
+            var beats = await entities.ListAsync(chapter.ProjectId, EntityTypeService.EventNodeType, chapter.Id, cancellationToken);
             sb.Append("  Chapter ").Append(chapter.Order + 1).Append(": ").Append(chapter.Title);
             if (chapter.Id == currentChapterId)
                 sb.Append(" (current)");
-            if (beatCount > 0)
-                sb.Append(" - ").Append(beatCount).Append(" beat").Append(beatCount == 1 ? string.Empty : "s");
             sb.AppendLine();
             AppendOptionalIndented(sb, "Synopsis", chapter.Synopsis, 4);
+            AppendBeats(sb, beats);
+        }
+    }
+
+    private static void AppendBeats(StringBuilder sb, IReadOnlyList<StoryEntity> beats)
+    {
+        if (beats.Count == 0) return;
+
+        sb.Append(' ', 4).AppendLine("Beats:");
+        for (var i = 0; i < beats.Count; i++)
+        {
+            var beat = beats[i];
+            sb.Append(' ', 6).Append("Beat ").Append(i + 1).Append(": ").AppendLine(beat.Name);
+            if (beat.Properties.TryGetValue("summary", out var summary))
+                AppendOptionalIndented(sb, "Summary", summary ?? string.Empty, 8);
         }
     }
 
