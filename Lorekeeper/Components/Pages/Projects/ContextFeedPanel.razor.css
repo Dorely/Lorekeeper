@@ -12,7 +12,10 @@
     background: var(--bs-body-bg, #fff);
 }
 
-.ctx-card--disabled {
+.ctx-card--disabled .ctx-caret,
+.ctx-card--disabled .ctx-label,
+.ctx-card--disabled .ctx-badge,
+.ctx-card--disabled .ctx-body {
     opacity: 0.55;
 }
 
@@ -33,14 +36,11 @@
     line-height: 1;
 }
 
-.ctx-check {
-    margin: 0;
-}
-
 .ctx-label {
     font-size: 0.875rem;
     font-weight: 600;
     flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -54,6 +54,14 @@
     font-size: 0.68rem;
     color: var(--bs-secondary-color, #6c757d);
     background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.ctx-action {
+    flex: 0 0 auto;
+    padding: 0.1rem 0.45rem;
+    font-size: 0.72rem;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
 .ctx-body {

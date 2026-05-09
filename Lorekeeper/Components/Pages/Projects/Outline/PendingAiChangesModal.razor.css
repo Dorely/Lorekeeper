@@ -189,6 +189,25 @@
     gap: 0.75rem;
 }
 
+.pending-ai-group-payloads {
+    display: grid;
+    gap: 0.85rem;
+}
+
+.pending-ai-group-payloads.compact {
+    gap: 0.6rem;
+}
+
+.pending-ai-group-payload {
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+}
+
+.pending-ai-group-payload:first-child {
+    padding-top: 0;
+    border-top: 0;
+}
+
 .pending-ai-unified-diff {
     max-height: 32rem;
     border: 1px solid var(--bs-border-color, #dee2e6);
@@ -355,6 +374,20 @@
     min-width: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+}
+
+.pending-ai-diff-segment.added,
+.pending-ai-diff-segment.removed {
+    border-radius: 0.18rem;
+    padding: 0 0.05rem;
+}
+
+.pending-ai-diff-segment.added {
+    background: rgba(25, 135, 84, 0.24);
+}
+
+.pending-ai-diff-segment.removed {
+    background: rgba(220, 53, 69, 0.24);
 }
 
 .pending-ai-diff-side-by-side {

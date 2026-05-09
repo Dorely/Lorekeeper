@@ -1,5 +1,4 @@
 @using System.Text.Json
-@using Lorekeeper.Context
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
 @inject IOutlineCollaborationService Collab
@@ -24,7 +23,7 @@
             </div>
         }
 
-        @if (Flattened.Count == 0)
+        @if (Grouped.Count == 0)
         {
             <div class="pending-ai-empty">No pending changes.</div>
         }
@@ -37,43 +36,48 @@
 
             <div class="pending-ai-body">
                 <aside class="pending-ai-list">
-                    @foreach (var item in Flattened)
+                    @foreach (var group in Grouped)
                     {
-                        var selected = _selectedChangeId == item.Change.Id;
-                        var cascadeCount = CountDependentPendingChanges(item.Change.Id);
-                        <article class="pending-ai-card @(selected ? "selected" : null) @StatusClass(item.Change.Status)"
-                                 @onclick="() => SelectChange(item.Change.Id)">
+                        var selected = _selectedGroupKey == group.Key;
+                        var cascadeCount = CountDependentPendingChanges(group.PendingChangeIds);
+                        var dependencies = GroupDependencies(group);
+                        <article class="pending-ai-card @(selected ? "selected" : null) @group.StatusClass"
+                                 @onclick="() => SelectGroup(group.Key)">
                             <div class="pending-ai-card-main">
-                                <span class="pending-ai-tool">@item.Change.ToolName</span>
-                                <span class="pending-ai-status">@item.Change.Status</span>
+                                <span class="pending-ai-tool">@GroupTitle(group)</span>
+                                <span class="pending-ai-status">@group.StatusText</span>
                             </div>
-                            <div class="pending-ai-summary">@item.Change.Summary</div>
-                            @if (!string.IsNullOrWhiteSpace(item.Change.ArgumentsJson) && item.Change.ArgumentsJson != "{}")
+                            <div class="pending-ai-summary">@GroupSummary(group)</div>
+                            @if (group.Items.Count == 1 && !string.IsNullOrWhiteSpace(group.Changes[0].ArgumentsJson) && group.Changes[0].ArgumentsJson != "{}")
                             {
-                                <code class="pending-ai-args">@Truncate(item.Change.ArgumentsJson, 120)</code>
+                                <code class="pending-ai-args">@Truncate(group.Changes[0].ArgumentsJson, 120)</code>
                             }
-                            @if (item.Dependencies.Count > 0)
+                            else if (group.Items.Count > 1)
                             {
-                                <div class="pending-ai-note">Depends on @item.Dependencies.Count earlier change@(item.Dependencies.Count == 1 ? string.Empty : "s").</div>
+                                <code class="pending-ai-args">@GroupToolNames(group)</code>
                             }
-                            @if (cascadeCount > 0 && item.Change.Status == AiChangeStatus.Pending)
+                            @if (dependencies.Count > 0)
+                            {
+                                <div class="pending-ai-note">Depends on @dependencies.Count earlier change@(dependencies.Count == 1 ? string.Empty : "s").</div>
+                            }
+                            @if (cascadeCount > 0 && group.HasPending)
                             {
                                 <div class="pending-ai-note warning">Rejecting this also rejects @cascadeCount dependent change@(cascadeCount == 1 ? string.Empty : "s").</div>
                             }
                             <div class="pending-ai-card-actions" @onclick:stopPropagation="true">
                                 <button type="button" class="btn btn-sm btn-outline-primary"
-                                        disabled="@(_busy || item.Change.Status != AiChangeStatus.Pending)"
-                                        @onclick="() => ApplyChangeAsync(item.Change.Id)">Keep</button>
+                                        disabled="@(_busy || !group.HasPending)"
+                                        @onclick="() => ApplyGroupAsync(group.Key)">Keep</button>
                                 <button type="button" class="btn btn-sm btn-outline-danger"
-                                        disabled="@(_busy || item.Change.Status != AiChangeStatus.Pending)"
-                                        @onclick="() => RejectChangeAsync(item.Change.Id)">Reject</button>
+                                        disabled="@(_busy || !group.HasPending)"
+                                        @onclick="() => RejectGroupAsync(group.Key)">Reject</button>
                             </div>
                         </article>
                     }
                 </aside>
 
                 <main class="pending-ai-detail">
-                    @if (Selected is null)
+                    @if (SelectedGroup is null)
                     {
                         <div class="pending-ai-empty">Select a change to inspect the diff.</div>
                     }
@@ -81,10 +85,10 @@
                     {
                         <div class="pending-ai-detail-head">
                             <div>
-                                <div class="pending-ai-tool large">@Selected.Change.ToolName</div>
-                                <div class="pending-ai-summary">@Selected.Change.Summary</div>
+                                <div class="pending-ai-tool large">@GroupTitle(SelectedGroup)</div>
+                                <div class="pending-ai-summary">@GroupSummary(SelectedGroup)</div>
                             </div>
-                            <span class="pending-ai-status">@Selected.Change.Status</span>
+                            <span class="pending-ai-status">@SelectedGroup.StatusText</span>
                         </div>
 
                         <div class="pending-ai-reject-note">
@@ -94,7 +98,7 @@
                                       @bind="_rejectionMessage" @bind:event="oninput"></textarea>
                         </div>
 
-                        @if (TryBuildReviewDiff(Selected.Change, out var reviewDiff))
+                        @if (AiChangeReviewDiffBuilder.TryBuild(SelectedGroup.Changes, out var reviewDiff))
                         {
                             <section class="pending-ai-unified-diff" aria-label="Change diff">
                                 <div class="pending-ai-diff-header">
@@ -156,7 +160,7 @@
                                                                 <span class="pending-ai-diff-line-number">@(row.OldLineNumber?.ToString() ?? string.Empty)</span>
                                                                 <span class="pending-ai-diff-line-number">@(row.NewLineNumber?.ToString() ?? string.Empty)</span>
                                                                 <span class="pending-ai-diff-marker">@row.Marker</span>
-                                                                <span class="pending-ai-diff-line-text">@row.Text</span>
+                                                                <span class="pending-ai-diff-line-text">@RenderSegments(row.Segments)</span>
                                                             </div>
                                                         }
                                                     }
@@ -168,10 +172,10 @@
                                                                 <div class="pending-ai-split-row @SplitRowClass(splitRow)">
                                                                     <span class="pending-ai-split-line-number old @SplitCellClass(splitRow.Old)">@(splitRow.Old?.OldLineNumber?.ToString() ?? string.Empty)</span>
                                                                     <span class="pending-ai-split-marker old @SplitCellClass(splitRow.Old)">@(splitRow.Old?.Marker ?? string.Empty)</span>
-                                                                    <span class="pending-ai-split-line-text old @SplitCellClass(splitRow.Old)">@(splitRow.Old?.Text ?? string.Empty)</span>
+                                                                    <span class="pending-ai-split-line-text old @SplitCellClass(splitRow.Old)">@RenderSegments(splitRow.Old?.Segments)</span>
                                                                     <span class="pending-ai-split-line-number new @SplitCellClass(splitRow.New)">@(splitRow.New?.NewLineNumber?.ToString() ?? string.Empty)</span>
                                                                     <span class="pending-ai-split-marker new @SplitCellClass(splitRow.New)">@(splitRow.New?.Marker ?? string.Empty)</span>
-                                                                    <span class="pending-ai-split-line-text new @SplitCellClass(splitRow.New)">@(splitRow.New?.Text ?? string.Empty)</span>
+                                                                    <span class="pending-ai-split-line-text new @SplitCellClass(splitRow.New)">@RenderSegments(splitRow.New?.Segments)</span>
                                                                 </div>
                                                             }
                                                         </div>
@@ -185,30 +189,71 @@
                         }
                         else
                         {
-                            <div class="pending-ai-diff-grid">
-                                <section>
-                                    <div class="pending-ai-section-label">Old</div>
-                                    <pre>@FormatJson(Selected.Change.BeforeJson)</pre>
-                                </section>
-                                <section>
-                                    <div class="pending-ai-section-label">New</div>
-                                    <pre>@FormatJson(Selected.Change.AfterJson)</pre>
-                                </section>
-                            </div>
+                            @if (SelectedGroup.Changes.Count == 1)
+                            {
+                                var rawChange = SelectedGroup.Changes[0];
+                                <div class="pending-ai-diff-grid">
+                                    <section>
+                                        <div class="pending-ai-section-label">Old</div>
+                                        <pre>@FormatJson(rawChange.BeforeJson)</pre>
+                                    </section>
+                                    <section>
+                                        <div class="pending-ai-section-label">New</div>
+                                        <pre>@FormatJson(rawChange.AfterJson)</pre>
+                                    </section>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="pending-ai-group-payloads">
+                                    @foreach (var rawChange in SelectedGroup.Changes)
+                                    {
+                                        <section class="pending-ai-group-payload">
+                                            <div class="pending-ai-section-label">@rawChange.ToolName</div>
+                                            <div class="pending-ai-summary">@rawChange.Summary</div>
+                                            <div class="pending-ai-diff-grid">
+                                                <section>
+                                                    <div class="pending-ai-section-label">Old</div>
+                                                    <pre>@FormatJson(rawChange.BeforeJson)</pre>
+                                                </section>
+                                                <section>
+                                                    <div class="pending-ai-section-label">New</div>
+                                                    <pre>@FormatJson(rawChange.AfterJson)</pre>
+                                                </section>
+                                            </div>
+                                        </section>
+                                    }
+                                </div>
+                            }
                         }
 
                         <details class="pending-ai-raw">
-                            <summary>Tool call</summary>
-                            <pre>@FormatJson(Selected.Change.ArgumentsJson)</pre>
+                            <summary>@(SelectedGroup.Changes.Count == 1 ? "Tool call" : "Tool calls")</summary>
+                            @if (SelectedGroup.Changes.Count == 1)
+                            {
+                                <pre>@FormatJson(SelectedGroup.Changes[0].ArgumentsJson)</pre>
+                            }
+                            else
+                            {
+                                <div class="pending-ai-group-payloads compact">
+                                    @foreach (var toolChange in SelectedGroup.Changes)
+                                    {
+                                        <section class="pending-ai-group-payload">
+                                            <div class="pending-ai-section-label">@toolChange.ToolName</div>
+                                            <pre>@FormatJson(toolChange.ArgumentsJson)</pre>
+                                        </section>
+                                    }
+                                </div>
+                            }
                         </details>
 
                         <div class="pending-ai-detail-actions">
                             <button type="button" class="btn btn-primary"
-                                    disabled="@(_busy || Selected.Change.Status != AiChangeStatus.Pending)"
-                                    @onclick="() => ApplyChangeAsync(Selected.Change.Id)">Keep</button>
+                                    disabled="@(_busy || !SelectedGroup.HasPending)"
+                                    @onclick="() => ApplyGroupAsync(SelectedGroup.Key)">Keep</button>
                             <button type="button" class="btn btn-outline-danger"
-                                    disabled="@(_busy || Selected.Change.Status != AiChangeStatus.Pending)"
-                                    @onclick="() => RejectChangeAsync(Selected.Change.Id)">Reject</button>
+                                    disabled="@(_busy || !SelectedGroup.HasPending)"
+                                    @onclick="() => RejectGroupAsync(SelectedGroup.Key)">Reject</button>
                         </div>
                     }
                 </main>
@@ -224,7 +269,7 @@
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
 
-    private Guid? _selectedChangeId;
+    private string? _selectedGroupKey;
     private string _rejectionMessage = string.Empty;
     private string? _error;
     private bool _busy;
@@ -241,21 +286,31 @@
         .ThenBy(item => item.Change.Order)
         .ToList();
 
-    private PendingChangeItem? Selected => Flattened.FirstOrDefault(item => item.Change.Id == _selectedChangeId) ?? Flattened.FirstOrDefault();
+    private List<PendingChangeGroup> Grouped => Flattened
+        .GroupBy(item => GroupKey(item.Change), StringComparer.OrdinalIgnoreCase)
+        .Select(group => new PendingChangeGroup(group.Key, group
+            .OrderBy(item => item.Batch.CreatedAt)
+            .ThenBy(item => item.Change.Order)
+            .ToList()))
+        .OrderBy(group => group.CreatedAt)
+        .ThenBy(group => group.Order)
+        .ToList();
+
+    private PendingChangeGroup? SelectedGroup => Grouped.FirstOrDefault(group => group.Key == _selectedGroupKey) ?? Grouped.FirstOrDefault();
 
     protected override void OnParametersSet()
     {
-        if (Selected is null)
+        if (SelectedGroup is null)
         {
-            _selectedChangeId = Flattened.FirstOrDefault()?.Change.Id;
+            _selectedGroupKey = Grouped.FirstOrDefault()?.Key;
         }
         else
         {
-            _selectedChangeId = Selected.Change.Id;
+            _selectedGroupKey = SelectedGroup.Key;
         }
     }
 
-    private void SelectChange(Guid changeId) => _selectedChangeId = changeId;
+    private void SelectGroup(string groupKey) => _selectedGroupKey = groupKey;
 
     private async Task CloseAsync()
     {
@@ -265,23 +320,37 @@
 
     private async Task ApplySelectedBatchAsync()
     {
-        var batchId = Selected?.Batch.Id;
+        var batchId = SelectedGroup?.PrimaryBatch.Id;
         if (batchId is null) return;
         await RunAsync(() => Collab.ApplyAiChangeBatchAsync(batchId.Value));
     }
 
     private async Task RejectSelectedBatchAsync()
     {
-        var batchId = Selected?.Batch.Id;
+        var batchId = SelectedGroup?.PrimaryBatch.Id;
         if (batchId is null) return;
         await RunAsync(() => Collab.RejectAiChangeBatchAsync(batchId.Value, _rejectionMessage));
     }
 
-    private async Task ApplyChangeAsync(Guid changeId) =>
-        await RunAsync(() => Collab.ApplyAiChangeAsync(changeId));
+    private async Task ApplyGroupAsync(string groupKey) =>
+        await RunAsync(async () =>
+        {
+            var group = Grouped.FirstOrDefault(candidate => candidate.Key == groupKey);
+            if (group is null) return;
 
-    private async Task RejectChangeAsync(Guid changeId) =>
-        await RunAsync(() => Collab.RejectAiChangeAsync(changeId, _rejectionMessage));
+            foreach (var change in group.Changes.Where(change => change.Status == AiChangeStatus.Pending))
+                await Collab.ApplyAiChangeAsync(change.Id);
+        });
+
+    private async Task RejectGroupAsync(string groupKey) =>
+        await RunAsync(async () =>
+        {
+            var group = Grouped.FirstOrDefault(candidate => candidate.Key == groupKey);
+            if (group is null) return;
+
+            foreach (var change in group.Changes.Where(change => change.Status == AiChangeStatus.Pending))
+                await Collab.RejectAiChangeAsync(change.Id, _rejectionMessage);
+        });
 
     private async Task RunAsync(Func<Task> action)
     {
@@ -304,9 +373,12 @@
         }
     }
 
-    private int CountDependentPendingChanges(Guid changeId)
+    private int CountDependentPendingChanges(IReadOnlyCollection<Guid> changeIds)
     {
-        var rejectedIds = new HashSet<Guid> { changeId };
+        if (changeIds.Count == 0) return 0;
+
+        var rejectedIds = new HashSet<Guid>(changeIds);
+        var rootCount = rejectedIds.Count;
         var changed = true;
         while (changed)
         {
@@ -321,16 +393,55 @@
                 }
             }
         }
-        return rejectedIds.Count - 1;
+        return rejectedIds.Count - rootCount;
     }
 
-    private static string StatusClass(AiChangeStatus status) => status switch
+    private static string GroupKey(AiChange change) =>
+        string.IsNullOrWhiteSpace(change.ResourceId)
+            ? change.Id.ToString("N")
+            : change.ResourceId;
+
+    private static string GroupTitle(PendingChangeGroup group)
     {
-        AiChangeStatus.Applied => "applied",
-        AiChangeStatus.Rejected => "rejected",
-        AiChangeStatus.Conflict => "conflict",
-        _ => "pending",
-    };
+        var label = ResourceLabel(group.Changes[0]);
+        return group.Changes.Count == 1
+            ? group.Changes[0].ToolName
+            : $"{label} ({group.Changes.Count} changes)";
+    }
+
+    private static string GroupSummary(PendingChangeGroup group)
+    {
+        if (group.Changes.Count == 1)
+            return group.Changes[0].Summary;
+
+        var summaries = string.Join("; ", group.Changes.Select(change => change.Summary).Where(summary => !string.IsNullOrWhiteSpace(summary)));
+        return string.IsNullOrWhiteSpace(summaries)
+            ? $"{group.Changes.Count} tool changes."
+            : $"{group.Changes.Count} tool changes: {Truncate(summaries, 180)}";
+    }
+
+    private static string GroupToolNames(PendingChangeGroup group) =>
+        Truncate(string.Join(" -> ", group.Changes.Select(change => change.ToolName)), 120);
+
+    private static string ResourceLabel(AiChange change)
+    {
+        if (change.ResourceId.StartsWith("Chapter:", StringComparison.OrdinalIgnoreCase)) return "Chapter";
+        if (change.ResourceId.StartsWith("Act:", StringComparison.OrdinalIgnoreCase)) return "Act";
+        if (change.ResourceId.StartsWith("Entity:", StringComparison.OrdinalIgnoreCase)) return string.IsNullOrWhiteSpace(change.ResourceKind) ? "Entity" : change.ResourceKind;
+        if (change.ResourceId.StartsWith("EntityLink:", StringComparison.OrdinalIgnoreCase)) return "Entity link";
+        if (string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase)) return "Chapter";
+        return string.IsNullOrWhiteSpace(change.ResourceKind) ? change.ToolName : change.ResourceKind;
+    }
+
+    private static IReadOnlyList<Guid> GroupDependencies(PendingChangeGroup group)
+    {
+        var ownIds = group.ChangeIds.ToHashSet();
+        return group.Items
+            .SelectMany(item => item.Dependencies)
+            .Where(dependencyId => !ownIds.Contains(dependencyId))
+            .Distinct()
+            .ToList();
+    }
 
     private static IReadOnlyList<Guid> ReadGuidList(string json) =>
         string.IsNullOrWhiteSpace(json) || json == "[]"
@@ -357,330 +468,32 @@
         }
     }
 
-    private static bool TryBuildReviewDiff(AiChange change, out ReviewDiff diff)
-    {
-        diff = null!;
-
-        if (string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!TryReadChange<ChapterBodyChange>(change.BeforeJson, out var before)
-                || !TryReadChange<ChapterBodyChange>(change.AfterJson, out var after))
-            {
-                return false;
-            }
-
-            diff = BuildReviewDiff(
-                "Chapter body",
-                after.Title,
-                [new DiffFieldInput("Body", before.Body, after.Body)],
-                showSingleFieldLabel: false);
-            return true;
-        }
-
-        if (string.Equals(change.ToolName, "update_act", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!TryReadChange<OutlineActChange>(change.BeforeJson, out var before)
-                || !TryReadChange<OutlineActChange>(change.AfterJson, out var after))
-            {
-                return false;
-            }
-
-            diff = BuildReviewDiff(
-                "Act edit",
-                after.Title,
-                [
-                    new DiffFieldInput("Title", before.Title, after.Title),
-                    new DiffFieldInput("Synopsis", before.Synopsis, after.Synopsis),
-                ]);
-            return true;
-        }
-
-        if (string.Equals(change.ToolName, "update_chapter", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!TryReadChange<OutlineChapterChange>(change.BeforeJson, out var before)
-                || !TryReadChange<OutlineChapterChange>(change.AfterJson, out var after))
-            {
-                return false;
-            }
-
-            diff = BuildReviewDiff(
-                "Chapter edit",
-                after.Title,
-                [
-                    new DiffFieldInput("Title", before.Title, after.Title),
-                    new DiffFieldInput("Synopsis", before.Synopsis, after.Synopsis),
-                ]);
-            return true;
-        }
-
-        if (string.Equals(change.ToolName, "update_entity", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!TryReadChange<OutlineEntityChange>(change.BeforeJson, out var before)
-                || !TryReadChange<OutlineEntityChange>(change.AfterJson, out var after))
-            {
-                return false;
-            }
-
-            var fields = new List<DiffFieldInput>
-            {
-                new("Name", before.Name, after.Name),
-            };
-            var propertyNames = before.Properties.Keys
-                .Concat(after.Properties.Keys)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(propertyName => propertyName, StringComparer.OrdinalIgnoreCase);
-            foreach (var propertyName in propertyNames)
-            {
-                var beforeExists = before.Properties.TryGetValue(propertyName, out var beforeValue);
-                var afterExists = after.Properties.TryGetValue(propertyName, out var afterValue);
-                if (beforeExists == afterExists && string.Equals(beforeValue, afterValue, StringComparison.Ordinal))
-                    continue;
-
-                fields.Add(new DiffFieldInput(
-                    $"properties.{propertyName}",
-                    beforeExists ? beforeValue ?? string.Empty : "(not set)",
-                    afterExists ? afterValue ?? string.Empty : "(not set)"));
-            }
-
-            diff = BuildReviewDiff("Entity edit", after.Name, fields);
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool TryReadChange<T>(string json, out T value)
-        where T : class
-    {
-        value = null!;
-        if (string.IsNullOrWhiteSpace(json) || json == "null") return false;
-
-        try
-        {
-            var parsed = JsonSerializer.Deserialize<T>(json, JsonSerializerOptions.Default);
-            if (parsed is null) return false;
-            value = parsed;
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static ReviewDiff BuildReviewDiff(string title, string? subtitle, IReadOnlyList<DiffFieldInput> fields, bool showSingleFieldLabel = true)
-    {
-        var changedFields = fields
-            .Where(field => !FieldTextEquals(field.OldText, field.NewText))
-            .ToList();
-        var showLabels = showSingleFieldLabel || changedFields.Count > 1;
-        var sections = changedFields
-            .Select(field => new DiffSection(
-                showLabels ? field.Label : string.Empty,
-                BuildDiffHunks(BuildDiffRows(field.OldText, field.NewText))))
-            .Where(section => section.Hunks.Count > 0)
-            .ToList();
-
-        return new ReviewDiff(title, subtitle, sections);
-    }
-
-    private static bool FieldTextEquals(string oldText, string newText)
-    {
-        var oldLines = ChapterFormatting.SplitLines(oldText);
-        var newLines = ChapterFormatting.SplitLines(newText);
-        return oldLines.SequenceEqual(newLines, StringComparer.Ordinal);
-    }
-
-    private static IReadOnlyList<DiffRow> BuildDiffRows(string oldText, string newText)
-    {
-        var oldLines = ChapterFormatting.SplitLines(oldText);
-        var newLines = ChapterFormatting.SplitLines(newText);
-        var rows = new List<DiffRow>();
-        var prefix = 0;
-        while (prefix < oldLines.Count && prefix < newLines.Count && oldLines[prefix] == newLines[prefix])
-            prefix++;
-
-        var oldSuffix = oldLines.Count - 1;
-        var newSuffix = newLines.Count - 1;
-        while (oldSuffix >= prefix && newSuffix >= prefix && oldLines[oldSuffix] == newLines[newSuffix])
-        {
-            oldSuffix--;
-            newSuffix--;
-        }
-
-        for (var index = 0; index < prefix; index++)
-            rows.Add(new DiffRow(index + 1, index + 1, " ", oldLines[index], DiffRowKind.Context));
-
-        var oldMiddleLength = Math.Max(0, oldSuffix - prefix + 1);
-        var newMiddleLength = Math.Max(0, newSuffix - prefix + 1);
-        rows.AddRange(BuildMiddleDiffRows(oldLines, newLines, prefix, oldMiddleLength, newMiddleLength));
-
-        var suffixOldStart = oldSuffix + 1;
-        var suffixNewStart = newSuffix + 1;
-        for (var offset = 0; suffixOldStart + offset < oldLines.Count; offset++)
-        {
-            rows.Add(new DiffRow(
-                suffixOldStart + offset + 1,
-                suffixNewStart + offset + 1,
-                " ",
-                oldLines[suffixOldStart + offset],
-                DiffRowKind.Context));
-        }
-
-        return rows;
-    }
-
-    private static IReadOnlyList<DiffRow> BuildMiddleDiffRows(
-        IReadOnlyList<string> oldLines,
-        IReadOnlyList<string> newLines,
-        int offset,
-        int oldLength,
-        int newLength)
-    {
-        var rows = new List<DiffRow>();
-        if (oldLength == 0)
-        {
-            for (var index = 0; index < newLength; index++)
-                rows.Add(new DiffRow(null, offset + index + 1, "+", newLines[offset + index], DiffRowKind.Added));
-            return rows;
-        }
-
-        if (newLength == 0)
-        {
-            for (var index = 0; index < oldLength; index++)
-                rows.Add(new DiffRow(offset + index + 1, null, "-", oldLines[offset + index], DiffRowKind.Removed));
-            return rows;
-        }
-
-        if ((long)oldLength * newLength > 1_000_000)
-        {
-            for (var index = 0; index < oldLength; index++)
-                rows.Add(new DiffRow(offset + index + 1, null, "-", oldLines[offset + index], DiffRowKind.Removed));
-            for (var index = 0; index < newLength; index++)
-                rows.Add(new DiffRow(null, offset + index + 1, "+", newLines[offset + index], DiffRowKind.Added));
-            return rows;
-        }
-
-        var table = new int[oldLength + 1, newLength + 1];
-        for (var oldIndex = oldLength - 1; oldIndex >= 0; oldIndex--)
-        {
-            for (var newIndex = newLength - 1; newIndex >= 0; newIndex--)
-            {
-                table[oldIndex, newIndex] = oldLines[offset + oldIndex] == newLines[offset + newIndex]
-                    ? table[oldIndex + 1, newIndex + 1] + 1
-                    : Math.Max(table[oldIndex + 1, newIndex], table[oldIndex, newIndex + 1]);
-            }
-        }
-
-        var oldCursor = 0;
-        var newCursor = 0;
-        while (oldCursor < oldLength && newCursor < newLength)
-        {
-            if (oldLines[offset + oldCursor] == newLines[offset + newCursor])
-            {
-                rows.Add(new DiffRow(
-                    offset + oldCursor + 1,
-                    offset + newCursor + 1,
-                    " ",
-                    oldLines[offset + oldCursor],
-                    DiffRowKind.Context));
-                oldCursor++;
-                newCursor++;
-            }
-            else if (table[oldCursor + 1, newCursor] >= table[oldCursor, newCursor + 1])
-            {
-                rows.Add(new DiffRow(offset + oldCursor + 1, null, "-", oldLines[offset + oldCursor], DiffRowKind.Removed));
-                oldCursor++;
-            }
-            else
-            {
-                rows.Add(new DiffRow(null, offset + newCursor + 1, "+", newLines[offset + newCursor], DiffRowKind.Added));
-                newCursor++;
-            }
-        }
-
-        while (oldCursor < oldLength)
-        {
-            rows.Add(new DiffRow(offset + oldCursor + 1, null, "-", oldLines[offset + oldCursor], DiffRowKind.Removed));
-            oldCursor++;
-        }
-
-        while (newCursor < newLength)
-        {
-            rows.Add(new DiffRow(null, offset + newCursor + 1, "+", newLines[offset + newCursor], DiffRowKind.Added));
-            newCursor++;
-        }
-
-        return rows;
-    }
-
-    private static IReadOnlyList<DiffHunk> BuildDiffHunks(IReadOnlyList<DiffRow> rows)
-    {
-        const int contextLines = 3;
-        var changedIndexes = rows
-            .Select((row, index) => (row, index))
-            .Where(item => item.row.Kind != DiffRowKind.Context)
-            .Select(item => item.index)
-            .ToList();
-        if (changedIndexes.Count == 0) return [];
-
-        var ranges = new List<(int Start, int End)>();
-        foreach (var changedIndex in changedIndexes)
-        {
-            var start = Math.Max(0, changedIndex - contextLines);
-            var end = Math.Min(rows.Count - 1, changedIndex + contextLines);
-            if (ranges.Count == 0 || start > ranges[^1].End + 1)
-            {
-                ranges.Add((start, end));
-            }
-            else
-            {
-                var last = ranges[^1];
-                ranges[^1] = (last.Start, Math.Max(last.End, end));
-            }
-        }
-
-        return ranges
-            .Select(range => BuildHunk(rows, range.Start, range.End))
-            .ToList();
-    }
-
-    private static DiffHunk BuildHunk(IReadOnlyList<DiffRow> rows, int start, int end)
-    {
-        var hunkRows = rows.Skip(start).Take(end - start + 1).ToList();
-        var oldLength = hunkRows.Count(row => row.OldLineNumber.HasValue);
-        var newLength = hunkRows.Count(row => row.NewLineNumber.HasValue);
-        return new DiffHunk(
-            FindHunkStart(rows, start, oldLine: true),
-            oldLength,
-            FindHunkStart(rows, start, oldLine: false),
-            newLength,
-            hunkRows);
-    }
-
-    private static int FindHunkStart(IReadOnlyList<DiffRow> rows, int start, bool oldLine)
-    {
-        for (var index = start; index < rows.Count; index++)
-        {
-            var lineNumber = oldLine ? rows[index].OldLineNumber : rows[index].NewLineNumber;
-            if (lineNumber.HasValue) return lineNumber.Value;
-        }
-
-        for (var index = start - 1; index >= 0; index--)
-        {
-            var lineNumber = oldLine ? rows[index].OldLineNumber : rows[index].NewLineNumber;
-            if (lineNumber.HasValue) return lineNumber.Value + 1;
-        }
-
-        return 1;
-    }
-
     private static string DiffRowClass(DiffRowKind kind) => kind switch
     {
         DiffRowKind.Added => "added",
         DiffRowKind.Removed => "removed",
         _ => "context",
+    };
+
+    private static RenderFragment RenderSegments(IReadOnlyList<DiffSegment>? segments) => builder =>
+    {
+        if (segments is null) return;
+
+        var sequence = 0;
+        foreach (var segment in segments)
+        {
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", DiffSegmentClass(segment.Kind));
+            builder.AddContent(sequence++, segment.Text);
+            builder.CloseElement();
+        }
+    };
+
+    private static string DiffSegmentClass(DiffSegmentKind kind) => kind switch
+    {
+        DiffSegmentKind.Added => "pending-ai-diff-segment added",
+        DiffSegmentKind.Removed => "pending-ai-diff-segment removed",
+        _ => "pending-ai-diff-segment",
     };
 
     private string DiffViewButtonClass(DiffViewMode mode) =>
@@ -700,23 +513,20 @@
                 continue;
             }
 
-            var changedRows = new List<DiffRow>();
-            while (index < rows.Count && rows[index].Kind != DiffRowKind.Context)
+            if (row.Kind == DiffRowKind.Removed
+                && index + 1 < rows.Count
+                && rows[index + 1].Kind == DiffRowKind.Added
+                && row.PairId.HasValue
+                && row.PairId == rows[index + 1].PairId)
             {
-                changedRows.Add(rows[index]);
                 index++;
+                splitRows.Add(new SplitDiffRow(row, rows[index]));
+                continue;
             }
-            index--;
 
-            var removedRows = changedRows.Where(changedRow => changedRow.Kind == DiffRowKind.Removed).ToList();
-            var addedRows = changedRows.Where(changedRow => changedRow.Kind == DiffRowKind.Added).ToList();
-            var rowCount = Math.Max(removedRows.Count, addedRows.Count);
-            for (var changedIndex = 0; changedIndex < rowCount; changedIndex++)
-            {
-                splitRows.Add(new SplitDiffRow(
-                    changedIndex < removedRows.Count ? removedRows[changedIndex] : null,
-                    changedIndex < addedRows.Count ? addedRows[changedIndex] : null));
-            }
+            splitRows.Add(row.Kind == DiffRowKind.Removed
+                ? new SplitDiffRow(row, null)
+                : new SplitDiffRow(null, row));
         }
 
         return splitRows;
@@ -741,38 +551,50 @@
     private static string HunkHeader(DiffHunk hunk) => $"@@ -{hunk.OldStart},{hunk.OldLength} +{hunk.NewStart},{hunk.NewLength} @@";
 
     private sealed record PendingChangeItem(AiChangeBatch Batch, AiChange Change, IReadOnlyList<Guid> Dependencies);
-    private sealed record ReviewDiff(string Title, string? Subtitle, IReadOnlyList<DiffSection> Sections)
+
+    private sealed class PendingChangeGroup(string key, IReadOnlyList<PendingChangeItem> items)
     {
-        public int Additions => Sections.Sum(section => section.Additions);
-        public int Deletions => Sections.Sum(section => section.Deletions);
+        public string Key { get; } = key;
+        public IReadOnlyList<PendingChangeItem> Items { get; } = items;
+        public IReadOnlyList<AiChange> Changes => Items.Select(item => item.Change).ToList();
+        public IReadOnlyList<Guid> ChangeIds => Items.Select(item => item.Change.Id).ToList();
+        public IReadOnlyList<Guid> PendingChangeIds => Items
+            .Where(item => item.Change.Status == AiChangeStatus.Pending)
+            .Select(item => item.Change.Id)
+            .ToList();
+        public AiChangeBatch PrimaryBatch => Items[0].Batch;
+        public DateTime CreatedAt => Items[0].Batch.CreatedAt;
+        public int Order => Items[0].Change.Order;
+        public bool HasPending => Items.Any(item => item.Change.Status == AiChangeStatus.Pending);
+        public string StatusText
+        {
+            get
+            {
+                var statuses = Items
+                    .Select(item => item.Change.Status)
+                    .Distinct()
+                    .ToList();
+                return statuses.Count == 1 ? statuses[0].ToString() : "Mixed";
+            }
+        }
+
+        public string StatusClass
+        {
+            get
+            {
+                if (Items.Any(item => item.Change.Status == AiChangeStatus.Conflict)) return "conflict";
+                if (Items.All(item => item.Change.Status == AiChangeStatus.Applied)) return "applied";
+                if (Items.All(item => item.Change.Status == AiChangeStatus.Rejected)) return "rejected";
+                return "pending";
+            }
+        }
     }
 
-    private sealed record DiffSection(string Label, IReadOnlyList<DiffHunk> Hunks)
-    {
-        public int Additions => Hunks.Sum(hunk => hunk.Additions);
-        public int Deletions => Hunks.Sum(hunk => hunk.Deletions);
-    }
-
-    private sealed record DiffHunk(int OldStart, int OldLength, int NewStart, int NewLength, IReadOnlyList<DiffRow> Rows)
-    {
-        public int Additions => Rows.Count(row => row.Kind == DiffRowKind.Added);
-        public int Deletions => Rows.Count(row => row.Kind == DiffRowKind.Removed);
-    }
-
-    private sealed record DiffRow(int? OldLineNumber, int? NewLineNumber, string Marker, string Text, DiffRowKind Kind);
     private sealed record SplitDiffRow(DiffRow? Old, DiffRow? New);
-    private sealed record DiffFieldInput(string Label, string OldText, string NewText);
 
     private enum DiffViewMode
     {
         Inline,
         SideBySide,
-    }
-
-    private enum DiffRowKind
-    {
-        Context,
-        Added,
-        Removed,
     }
 }

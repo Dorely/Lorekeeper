@@ -19,20 +19,24 @@ else
     @foreach (var item in _assembly.Items)
     {
         var collapsed = IsCollapsed(item.Key);
+        var canChange = CanChangeContextItem(item);
         <div class="ctx-card @(item.IsEnabled ? "" : "ctx-card--disabled")">
             <div class="ctx-card-head">
                 <button type="button" class="ctx-caret" @onclick="() => ToggleCollapsed(item.Key)">
                     @(collapsed ? "▸" : "▾")
                 </button>
-                <input type="checkbox"
-                       class="form-check-input ctx-check"
-                       checked="@item.IsEnabled"
-                      disabled="@(!item.IsRemovable)"
-                       @onchange="@(e => OnToggleAsync(item, (bool)(e.Value ?? false)))" />
                 <span class="ctx-label">@item.Label</span>
                 @if (!string.IsNullOrWhiteSpace(item.Badge))
                 {
                     <span class="ctx-badge">@item.Badge</span>
+                }
+                @if (canChange)
+                {
+                    <button type="button"
+                            class="@ContextActionButtonClass(item)"
+                            @onclick="() => ChangeContextItemAsync(item)">
+                        @ContextActionLabel(item)
+                    </button>
                 }
             </div>
             @if (!collapsed)
@@ -126,9 +130,29 @@ else
         if (!_collapsed.Add(key)) _collapsed.Remove(key);
     }
 
-    private async Task OnToggleAsync(ContextItem item, bool include)
+    private bool CanChangeContextItem(ContextItem item) =>
+        CurrentChapter is not null && item.IsRemovable;
+
+    private static bool IsRemoveAction(ContextItem item) =>
+        item.Kind is ContextItemKind.Entity
+            or ContextItemKind.ChapterReference
+            or ContextItemKind.ActReference
+            or ContextItemKind.IngestSourceReference
+            or ContextItemKind.IngestSourceChunkReference;
+
+    private static string ContextActionLabel(ContextItem item) =>
+        IsRemoveAction(item) ? "Remove" : item.IsEnabled ? "Disable" : "Enable";
+
+    private static string ContextActionButtonClass(ContextItem item) =>
+        IsRemoveAction(item)
+            ? "btn btn-sm btn-outline-danger ctx-action"
+            : "btn btn-sm btn-outline-secondary ctx-action";
+
+    private async Task ChangeContextItemAsync(ContextItem item)
     {
-        if (CurrentChapter is null || item.Kind == ContextItemKind.SystemPrompt) return;
+        if (!CanChangeContextItem(item) || CurrentChapter is null) return;
+
+        var include = IsRemoveAction(item) ? false : !item.IsEnabled;
         await EditorContext.SetItemIncludedAsync(Project.Id, CurrentChapter.Id, item.Kind, item.Key, include);
         await RebuildAsync();
         await OnContextChanged.InvokeAsync();
