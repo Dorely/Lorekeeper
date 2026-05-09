@@ -15,7 +15,7 @@ public sealed class OutlineToolStagingContext(
     IEntityService entities,
     IEntityTypeService entityTypes)
 {
-    private const string EventNodeType = "Event";
+    private const string _eventNodeType = "Event";
 
     private readonly Dictionary<Guid, ActState> _acts = [];
     private readonly Dictionary<Guid, ChapterState> _chapters = [];
@@ -62,7 +62,7 @@ public sealed class OutlineToolStagingContext(
             synopsis = chapter.Synopsis,
             beatCount = _entities.Values.Count(entity =>
                 !entity.Deleted
-                && string.Equals(entity.Type, EventNodeType, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(entity.Type, _eventNodeType, StringComparison.OrdinalIgnoreCase)
                 && entity.ParentId == chapter.Id),
         };
 
@@ -709,7 +709,7 @@ public sealed class OutlineToolStagingContext(
         Serialize(new
         {
             status = "existing_match",
-            message = $"No new {requestedType} was staged because an existing {duplicate.Type} with the same name or key already exists. Use update_entity or link_entities for the existing entity, or create a more distinctly named entity if this is a separate story subject.",
+            message = $"No new {requestedType} was created because an existing {duplicate.Type} with the same name or key already exists. Use update_entity or link_entities for the existing entity, or create a more distinctly named entity if this is a separate story subject.",
             existing = new
             {
                 id = duplicate.Id,

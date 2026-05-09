@@ -12,6 +12,6 @@ public sealed class AiConsoleHistoryService(AppDbContext db) : IAiConsoleHistory
             .OrderByDescending(e => e.StartedAt)
             .ToListAsync(cancellationToken);
 
-    public Task<AiConsoleEntry?> GetAsync(Guid entryId, CancellationToken cancellationToken = default) =>
-        db.AiConsoleEntries.FirstOrDefaultAsync(e => e.Id == entryId, cancellationToken);
+    public Task<AiConsoleEntry?> GetAsync(Guid projectId, Guid entryId, CancellationToken cancellationToken = default) =>
+        db.AiConsoleEntries.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == entryId, cancellationToken);
 }

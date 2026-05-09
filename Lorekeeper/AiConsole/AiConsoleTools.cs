@@ -25,6 +25,7 @@ public sealed class AiConsoleTools(
     IVectorStore vectors,
     IEmbeddingService embeddings,
     IProjectRepository projects,
+    IAiConsoleHistoryService history,
     IEditorContextService editorContext,
     OutlineCollaborationTools outlineTools)
 {
@@ -36,6 +37,17 @@ public sealed class AiConsoleTools(
                 method: () => ListContextAsync(context),
                 name: "list_context",
                 description: "Read the currently assembled editor context exactly as the model sees it, including enabled outline, facts, writing samples, and selected entities."),
+
+            AIFunctionFactory.Create(
+                method: (string query, int limit) => ListAiConsoleHistoryAsync(context, query, limit),
+                name: "list_ai_console_history",
+                description: "Search or list previous AI Console turns for this project. Use when the user references an earlier request, previous result, or something said last time. Pass an empty query to list recent turns; limit is clamped to 1-20."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entryId, bool includeToolResults, bool includePromptSnapshot) =>
+                    ReadAiConsoleTurnAsync(context, entryId, includeToolResults, includePromptSnapshot),
+                name: "read_ai_console_turn",
+                description: "Read one previous AI Console turn by id, including its command, response, status, and tool-call timeline. Use after list_ai_console_history when a prior turn may contain needed context."),
 
             AIFunctionFactory.Create(
                 method: (string query, int topK) => VectorSearchAsync(context, query, topK),
@@ -75,7 +87,7 @@ public sealed class AiConsoleTools(
             AIFunctionFactory.Create(
                 method: (Guid chapterId) => ReadChapterAsync(context, chapterId),
                 name: "read_chapter",
-                description: "Read a chapter's full body with line numbers (0001: ...). Use list_chapters to discover ids. During Review edits, this returns the current staged draft for chapters edited earlier in this turn."),
+                description: "Read a chapter's current body with line numbers (0001: ...). Use list_chapters to discover ids. If this turn already edited the chapter, returns the latest body for this turn."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string content, int? startLine, int? endLine) =>
@@ -87,8 +99,7 @@ public sealed class AiConsoleTools(
                     "If only startLine is provided: insert `content` BEFORE that line (1-based). " +
                     "If both startLine and endLine are provided: replace the inclusive line range with `content`. " +
                     "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
-                    "When Review edits is enabled this stages the edit for approval instead of applying it immediately. " +
-                    "After editing, call read_chapter to verify the staged draft or saved body before finalizing. " +
+                    "After editing, call read_chapter to verify the current body before finalizing. " +
                     "Returns the new line-numbered body and a short change summary."),
         };
 
@@ -100,6 +111,74 @@ public sealed class AiConsoleTools(
         }
 
         return tools;
+    }
+
+    private async Task<string> ListAiConsoleHistoryAsync(AiConsoleContext ctx, string query, int limit)
+    {
+        query = query?.Trim() ?? string.Empty;
+        limit = Math.Clamp(limit <= 0 ? 10 : limit, 1, 20);
+
+        var entries = await history.ListAsync(ctx.ProjectId);
+        var matches = entries.Where(entry => entry.Id != ctx.EntryId);
+        if (!string.IsNullOrWhiteSpace(query))
+            matches = matches.Where(entry => HistoryMatches(entry, query));
+
+        var result = matches
+            .Take(limit)
+            .Select(entry => new
+            {
+                id = entry.Id,
+                startedAt = entry.StartedAt,
+                completedAt = entry.CompletedAt,
+                status = entry.Status.ToString(),
+                chapterId = entry.ChapterId,
+                command = Truncate(entry.Command, 240),
+                response = Truncate(entry.ResponseText, 360),
+                error = Truncate(entry.ErrorMessage, 240),
+                toolCallCount = CountToolCalls(entry.ToolCallsJson),
+            })
+            .ToList();
+
+        return result.Count == 0 ? "No previous AI Console turns matched." : JsonSerializer.Serialize(result);
+    }
+
+    private async Task<string> ReadAiConsoleTurnAsync(
+        AiConsoleContext ctx,
+        Guid entryId,
+        bool includeToolResults,
+        bool includePromptSnapshot)
+    {
+        if (entryId == ctx.EntryId)
+            return "Error: the current AI Console turn is still running and is not previous history.";
+
+        var entry = await history.GetAsync(ctx.ProjectId, entryId);
+        if (entry is null)
+            return $"Error: AI Console turn {entryId} was not found in this project.";
+
+        var resultMax = includeToolResults ? 6000 : 500;
+        var toolCalls = ParseToolCalls(entry.ToolCallsJson);
+        return JsonSerializer.Serialize(new
+        {
+            id = entry.Id,
+            startedAt = entry.StartedAt,
+            completedAt = entry.CompletedAt,
+            status = entry.Status.ToString(),
+            chapterId = entry.ChapterId,
+            command = entry.Command,
+            response = entry.ResponseText,
+            error = entry.ErrorMessage,
+            promptSnapshot = includePromptSnapshot ? Truncate(entry.SystemPromptSnapshot, 12000) : null,
+            toolCalls = toolCalls.Select(call => new
+            {
+                name = call.Name,
+                arguments = Truncate(call.Arguments, 2000),
+                result = Truncate(call.Result, resultMax),
+                resultTruncated = IsTruncated(call.Result, resultMax),
+                error = call.Error,
+                startedAt = call.StartedAt,
+                completedAt = call.CompletedAt,
+            }),
+        });
     }
 
     private async Task<string> ListContextAsync(AiConsoleContext ctx)
@@ -349,15 +428,11 @@ public sealed class AiConsoleTools(
             return $"Error: chapter {chapterId} not found in this project.";
 
         var body = chapter.Body;
-        var state = "saved body";
         if (ctx.ReviewEdits && ctx.ConsoleStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
-        {
             body = draftBody;
-            state = "staged draft for this turn";
-        }
 
         var numbered = ChapterFormatting.WithLineNumbers(body);
-        return $"# {chapter.Title}\nState: {state}\n\n{(numbered.Length == 0 ? "(empty)" : numbered)}";
+        return $"# {chapter.Title}\n\n{(numbered.Length == 0 ? "(empty)" : numbered)}";
     }
 
     private async Task<string> EditChapterAsync(
@@ -426,12 +501,46 @@ public sealed class AiConsoleTools(
         if (ctx.ReviewEdits && ctx.ConsoleStaging is not null)
         {
             await ctx.ConsoleStaging.StageChapterBodyEditAsync(chapter, existingBody, newBody, summary, result);
-            return $"Staged for review. {summary}\n\nProposed body:\n{(newNumbered.Length == 0 ? "(empty)" : newNumbered)}";
+            return result;
         }
 
         await chapters.UpdateAsync(chapterId, body: newBody);
         return result;
     }
+
+    private static bool HistoryMatches(AiConsoleEntry entry, string query) =>
+        Contains(entry.Command, query)
+        || Contains(entry.ResponseText, query)
+        || Contains(entry.ErrorMessage, query)
+        || Contains(entry.ToolCallsJson, query);
+
+    private static bool Contains(string? value, string query) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    private static int CountToolCalls(string json) => ParseToolCalls(json).Count;
+
+    private static List<AiToolCallRecord> ParseToolCalls(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<AiToolCallRecord>>(json) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static string? Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength) return value;
+        return value[..maxLength] + "...";
+    }
+
+    private static bool IsTruncated(string? value, int maxLength) =>
+        value is not null && value.Length > maxLength;
 
     private static bool Matches(StoryEntity entity, string query) =>
         entity.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
