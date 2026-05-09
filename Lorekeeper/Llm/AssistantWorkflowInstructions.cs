@@ -39,6 +39,7 @@ public static class AssistantWorkflowInstructions
         Tool workflow and self-check:
         - Call list_outline early in the conversation, and again after major changes, to stay synced with the current outline. The result includes projectFacts and a beatCount per chapter.
         - Use tools for concrete changes. The outline lives in project facts, acts, chapters, beats, entities, and links; do not write it only as prose in chat.
+        - When the user asks about written chapter text, wants beats inferred from prose, or asks you to reconcile the outline with an existing draft, use read_chapter after list_outline gives you the relevant chapter id. For long chapters, read focused line ranges instead of the whole body when that is enough.
         - Before creating a Character, Location, ProjectFact, or other project-scoped entity, inspect likely existing matches with list_outline or list_entities when a duplicate is plausible. Update or link an existing entity when it is the same story subject.
         - When Review edits is enabled, mutating tools stage proposed changes for author approval. Verify the staged state with list_outline/list_entities before reporting.
         - When Review edits is disabled, mutating tools apply immediately. Verify persisted state after the change.

@@ -39,19 +39,19 @@ public sealed class IngestAgentTools(
             method: (string existingEntityId, string? propertiesJson, string? aliasesJson, string? evidence, string? notes) =>
                 RecordExistingEntityObservationAsync(context, existingEntityId, propertiesJson, aliasesJson, evidence, notes),
             name: "record_existing_entity_observation",
-            description: "Record source-scoped observations on an existing project entity without changing its canonical properties. Use this after search_project_entities finds a match."),
+            description: "Record source-scoped observations on an existing project entity without changing its canonical properties. Use this after search_project_entities finds a match. propertiesJson is a JSON object string such as {} or {\"summary\":\"...\"}; aliasesJson is a JSON array string such as [] or [\"alias\"]. Use [] when there are no aliases."),
 
         AIFunctionFactory.Create(
             method: (string type, string name, string? propertiesJson, string? aliasesJson, string? evidence, string? notes) =>
                 CreateEntityAsync(context, type, name, propertiesJson, aliasesJson, evidence, notes),
             name: "create_ingest_entity",
-            description: "Create a new graph entity with source-scoped observations. Only use after list_job_entities and variant search_project_entities calls find no plausible same subject. propertiesJson is a useful JSON object of readable observations, aliasesJson is a JSON array of strings."),
+            description: "Create a new graph entity with source-scoped observations. Only use after list_job_entities and variant search_project_entities calls find no plausible same subject. propertiesJson is a useful JSON object string of readable observations such as {} or {\"summary\":\"...\"}; aliasesJson is a JSON array string such as [] or [\"alias\"]. Use [] when there are no aliases."),
 
         AIFunctionFactory.Create(
             method: (string entityId, string? name, string? propertiesToSetJson, string? aliasesJson, string? evidence, string? notes) =>
                 UpdateEntityAsync(context, entityId, name, propertiesToSetJson, aliasesJson, evidence, notes),
             name: "update_ingest_entity",
-            description: "Update source-scoped observations for an entity already touched by this ingest job. Canonical project properties are not changed; name is only used for entities newly created by this job."),
+            description: "Update source-scoped observations for an entity already touched by this ingest job. Canonical project properties are not changed; name is only used for entities newly created by this job. propertiesToSetJson is a JSON object string such as {} or {\"status\":\"...\"}; aliasesJson is a JSON array string such as [] or [\"alias\"]. Use [] when there are no aliases."),
 
         AIFunctionFactory.Create(
             method: (string fromEntityId, string toEntityId, string edgeType, string? propertiesJson, string? evidence, string? notes) =>
@@ -1120,7 +1120,7 @@ public sealed class IngestAgentTools(
     {
         properties = null;
         error = null;
-        if (string.IsNullOrWhiteSpace(json)) return true;
+        if (string.IsNullOrWhiteSpace(json) || IsJsonNullLiteral(json)) return true;
 
         if (!LooksLikeJsonRoot(json, '{'))
         {
@@ -1163,7 +1163,7 @@ public sealed class IngestAgentTools(
     {
         values = null;
         error = null;
-        if (string.IsNullOrWhiteSpace(json)) return true;
+        if (string.IsNullOrWhiteSpace(json) || IsJsonNullLiteral(json)) return true;
 
         if (!LooksLikeJsonRoot(json, '['))
         {
@@ -1202,6 +1202,9 @@ public sealed class IngestAgentTools(
         }
         return false;
     }
+
+    private static bool IsJsonNullLiteral(string json) =>
+        string.Equals(json.Trim(), "null", StringComparison.OrdinalIgnoreCase);
 
     private static string? ReadString(object? value) => value switch
     {

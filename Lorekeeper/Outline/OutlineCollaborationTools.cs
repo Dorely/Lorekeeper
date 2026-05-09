@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Chapters;
+using Lorekeeper.Context;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -74,6 +75,11 @@ public sealed class OutlineCollaborationTools(
                 method: (Guid chapterId, string? title, string? synopsis, string? actId) => UpdateChapterAsync(context, chapterId, title, synopsis, actId),
                 name: "update_chapter",
                 description: "Update a chapter's title/synopsis and/or move it between act buckets. Pass null to leave a field unchanged. For actId: omit/null = leave act unchanged; 'unassigned' = move to unassigned; or pass a Guid to move into that act."),
+
+            AIFunctionFactory.Create(
+                method: (Guid chapterId, int? startLine, int? endLine) => ReadChapterAsync(context, chapterId, startLine, endLine),
+                name: "read_chapter",
+                description: "Read a chapter's persisted body with line numbers (0001: ...). Use list_outline to discover chapter ids. Pass optional startLine/endLine to read only part of a long chapter; omit both to read the full body."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId) => DeleteChapterAsync(context, chapterId),
@@ -278,6 +284,27 @@ public sealed class OutlineCollaborationTools(
         var updated = await chapters.UpdateAsync(chapterId, title?.Trim(), body: null, synopsis?.Trim(), assignment);
         ctx.OnMutated();
         return JsonSerializer.Serialize(new { id = updated.Id, actId = updated.ActId, order = updated.Order, title = updated.Title, synopsis = updated.Synopsis });
+    }
+
+    private async Task<string> ReadChapterAsync(OutlineCollaborationContext ctx, Guid chapterId, int? startLine, int? endLine)
+    {
+        var chapter = await chapters.GetAsync(chapterId);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId} not found in this project.";
+
+        var rangeError = FormatLineRange(chapter.Body, startLine, endLine, out var numbered, out var rangeLabel);
+        if (rangeError is not null)
+            return rangeError;
+
+        var sb = new StringBuilder();
+        sb.Append("# ").AppendLine(chapter.Title);
+        if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
+            sb.Append("Synopsis: ").AppendLine(chapter.Synopsis.Trim());
+        if (rangeLabel is not null)
+            sb.Append("Range: ").AppendLine(rangeLabel);
+        sb.AppendLine();
+        sb.Append(numbered.Length == 0 ? "(empty)" : numbered);
+        return sb.ToString();
     }
 
     private async Task<string> DeleteChapterAsync(OutlineCollaborationContext ctx, Guid chapterId)
@@ -708,6 +735,52 @@ public sealed class OutlineCollaborationTools(
 
     private static string NormalizeForComparison(string value) =>
         string.Join(' ', value.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
+
+    private static string? FormatLineRange(
+        string body,
+        int? startLine,
+        int? endLine,
+        out string numbered,
+        out string? rangeLabel)
+    {
+        numbered = string.Empty;
+        rangeLabel = null;
+
+        if (startLine is null && endLine is null)
+        {
+            numbered = ChapterFormatting.WithLineNumbers(body);
+            return null;
+        }
+
+        var lines = ChapterFormatting.SplitLines(body);
+        if (lines.Count == 0)
+        {
+            rangeLabel = "empty chapter";
+            return null;
+        }
+
+        var start = startLine ?? 1;
+        var end = endLine ?? lines.Count;
+        if (start < 1) return "Error: startLine must be 1 or greater.";
+        if (end < 1) return "Error: endLine must be 1 or greater.";
+        if (start > end) return "Error: startLine must be less than or equal to endLine.";
+        if (start > lines.Count) return $"Error: startLine {start} is beyond the chapter's {lines.Count} lines.";
+
+        end = Math.Min(end, lines.Count);
+        var width = Math.Max(4, lines.Count.ToString().Length);
+        var sb = new StringBuilder();
+        for (var i = start - 1; i < end; i++)
+        {
+            sb.Append((i + 1).ToString().PadLeft(width, '0'));
+            sb.Append(": ");
+            sb.Append(lines[i]);
+            if (i < end - 1) sb.Append('\n');
+        }
+
+        numbered = sb.ToString();
+        rangeLabel = $"lines {start}-{end} of {lines.Count}";
+        return null;
+    }
 
     // ---- helpers ---------------------------------------------------------
 

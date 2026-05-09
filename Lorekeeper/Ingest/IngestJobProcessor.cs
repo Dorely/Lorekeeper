@@ -45,6 +45,7 @@ public sealed class IngestJobProcessor(
         - Use canonical singular entity type keys from the known project entity types. Do not invent plural, lowercase, or near-duplicate categories such as "characters", "Characters", "locations", or "organisations" when Character, Location, or Organization/Faction-style categories are available.
         - Keep recurring source observations current. If a character appears again later with new history, status, aliases, relationships, or role details, update the source assertion for the existing entity.
         - Use propertiesJson for practical, readable observations such as summary, description, role, status, affiliation, history, motivation, or significance. Avoid empty schema-filling; prefer concise natural-language values that will help a writer understand and retrieve the entity later.
+        - JSON-string tool arguments must contain valid JSON text. Use {} for no properties and [] for no aliases; do not pass the string "null".
         - Use evidence from the current source chunk. Do not invent facts.
         - Link only entities already touched by this ingest job using link_ingest_entities. If an endpoint is an existing project entity, record an observation on it first.
         - Finish each source chunk by calling record_source_chunk_notes with a concise summary.
