@@ -1,5 +1,6 @@
 @using Lorekeeper.Context
-@inject IContextRecommendationService Recommendations
+@implements IDisposable
+@inject IServiceScopeFactory ScopeFactory
 @inject IEditorContextService EditorContext
 
 <div class="recommended-context">
@@ -7,7 +8,7 @@
            class="form-control form-control-sm recommended-search"
            placeholder="Search context..."
            value="@_query"
-           @oninput="OnSearchInputAsync" />
+           @oninput="OnSearchInput" />
 
     @if (ChapterId is null)
     {
@@ -73,46 +74,113 @@
     private Guid _lastProjectId;
     private Guid? _lastChapterId;
     private int _lastRefreshSignal = -1;
+    private CancellationTokenSource? _reloadCts;
+    private int _reloadVersion;
+    private bool _disposed;
 
-    protected override async Task OnParametersSetAsync()
+    protected override void OnParametersSet()
     {
         if (ProjectId != _lastProjectId || ChapterId != _lastChapterId || RefreshSignal != _lastRefreshSignal)
         {
             _lastProjectId = ProjectId;
             _lastChapterId = ChapterId;
             _lastRefreshSignal = RefreshSignal;
-            await ReloadAsync();
+            StartReload();
         }
     }
 
-    private async Task OnSearchInputAsync(ChangeEventArgs args)
+    private void OnSearchInput(ChangeEventArgs args)
     {
         _query = args.Value?.ToString() ?? string.Empty;
-        await ReloadAsync();
+        StartReload();
     }
 
-    private async Task ReloadAsync()
+    private void StartReload()
     {
+        if (_disposed) return;
+
+        _reloadCts?.Cancel();
+        _reloadCts?.Dispose();
+        _reloadCts = null;
+
         if (ChapterId is null)
         {
             _items = [];
+            _loading = false;
+            _error = null;
             return;
         }
 
         _loading = true;
         _error = null;
+
+        var projectId = ProjectId;
+        var chapterId = ChapterId.Value;
+        var query = _query;
+        var version = ++_reloadVersion;
+        var cts = new CancellationTokenSource();
+        _reloadCts = cts;
+
+        _ = Task.Run(() => LoadRecommendationsAsync(projectId, chapterId, query, version, cts.Token));
+    }
+
+    private async Task LoadRecommendationsAsync(
+        Guid projectId,
+        Guid chapterId,
+        string query,
+        int version,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            _items = (await Recommendations.ListAsync(ProjectId, ChapterId.Value, _query)).ToList();
+            using var scope = ScopeFactory.CreateScope();
+            var recommendations = scope.ServiceProvider.GetRequiredService<IContextRecommendationService>();
+            var items = (await recommendations.ListAsync(projectId, chapterId, query, cancellationToken)).ToList();
+
+            if (!IsCurrentLoad(version, cancellationToken)) return;
+
+            await InvokeAsync(() =>
+            {
+                if (!IsCurrentLoad(version, cancellationToken)) return;
+                _items = items;
+                _loading = false;
+                StateHasChanged();
+            });
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _error = ex.Message;
+            if (!IsCurrentLoad(version, cancellationToken)) return;
+
+            await InvokeAsync(() =>
+            {
+                if (!IsCurrentLoad(version, cancellationToken)) return;
+                _error = ex.Message;
+                _loading = false;
+                StateHasChanged();
+            });
         }
-        finally
+    }
+
+    private bool IsCurrentLoad(int version, CancellationToken cancellationToken) =>
+        !_disposed && !cancellationToken.IsCancellationRequested && version == _reloadVersion;
+
+    private void CancelReload()
+    {
+        _reloadCts?.Cancel();
+        _reloadCts?.Dispose();
+        _reloadCts = null;
+    }
+
+    private async Task NotifyChangedAsync()
+    {
+        if (OnChanged.HasDelegate)
         {
-            _loading = false;
+            await OnChanged.InvokeAsync();
+            return;
         }
+
+        StartReload();
     }
 
     private async Task AddAsync(ContextRecommendation item)
@@ -121,13 +189,17 @@
         try
         {
             await EditorContext.SetItemIncludedAsync(ProjectId, ChapterId.Value, item.Kind, item.Key, isIncluded: true);
-            await ReloadAsync();
-            if (OnChanged.HasDelegate)
-                await OnChanged.InvokeAsync();
+            await NotifyChangedAsync();
         }
         catch (Exception ex)
         {
             _error = ex.Message;
         }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        CancelReload();
     }
 }

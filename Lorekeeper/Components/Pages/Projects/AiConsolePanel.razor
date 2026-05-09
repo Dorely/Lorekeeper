@@ -8,55 +8,59 @@
 @inject IAiConsoleHistoryService History
 @inject IOutlineCollaborationService Collab
 
-<div class="aic-row">
-    <input type="text"
-           class="form-control aic-input"
-           placeholder="> What would you like the assistant to do?"
-           value="@_input"
-           disabled="@_running"
-           @oninput="@(e => _input = e.Value?.ToString() ?? string.Empty)"
-           @onkeydown="OnInputKeyDownAsync" />
+<div class="aic-shell">
+    <div class="aic-row">
+        <input type="text"
+               class="form-control aic-input"
+               placeholder="> What would you like the assistant to do?"
+               value="@_input"
+               disabled="@_running"
+               @oninput="@(e => _input = e.Value?.ToString() ?? string.Empty)"
+               @onkeydown="OnInputKeyDownAsync" />
+        @if (_running)
+        {
+            <button type="button" class="btn btn-outline-danger" @onclick="CancelAsync">Cancel</button>
+        }
+        else
+        {
+            <button type="button" class="btn btn-primary" @onclick="SendAsync"
+                    disabled="@(string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)">Send</button>
+        }
+        <button type="button" class="btn btn-outline-secondary" @onclick="OpenHistoryAsync">History</button>
+        @if (PendingChangeCount > 0)
+        {
+            <button type="button" class="btn btn-outline-primary" @onclick="OpenPendingChanges">Review @PendingChangeCount</button>
+        }
+        <label class="aic-approval" title="Queue AI tool edits for review before applying them">
+            <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
+                   disabled="@_running" @onchange="OnApprovalChangedAsync" />
+            <span>Review edits</span>
+        </label>
+    </div>
+
     @if (_running)
     {
-        <button type="button" class="btn btn-outline-danger" @onclick="CancelAsync">Cancel</button>
-    }
-    else
-    {
-        <button type="button" class="btn btn-primary" @onclick="SendAsync"
-                disabled="@(string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)">Send</button>
-    }
-    <button type="button" class="btn btn-outline-secondary" @onclick="OpenHistoryAsync">History</button>
-    @if (PendingChangeCount > 0)
-    {
-        <button type="button" class="btn btn-outline-primary" @onclick="OpenPendingChanges">Review @PendingChangeCount</button>
-    }
-    <label class="aic-approval" title="Queue AI tool edits for review before applying them">
-        <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
-               disabled="@_running" @onchange="OnApprovalChangedAsync" />
-        <span>Review edits</span>
-    </label>
-</div>
-
-@if (_running)
-{
-    <div class="small text-muted mt-2"><em>Running…</em></div>
-}
-else if (_lastEntry is not null)
-{
-    <div class="aic-result mt-2">
-        <div class="small text-muted">
-            @StatusBadgeText(_lastEntry.Status) · @_lastEntry.CompletedAt?.ToLocalTime().ToString("HH:mm:ss")
+        <div class="aic-result mt-2">
+            <div class="small text-muted"><em>Running…</em></div>
         </div>
-        @if (!string.IsNullOrEmpty(_lastEntry.ResponseText))
-        {
-            <div class="aic-response">@_lastEntry.ResponseText</div>
-        }
-        @if (!string.IsNullOrEmpty(_lastEntry.ErrorMessage))
-        {
-            <div class="text-danger small">@_lastEntry.ErrorMessage</div>
-        }
-    </div>
-}
+    }
+    else if (_lastEntry is not null)
+    {
+        <div class="aic-result mt-2">
+            <div class="small text-muted">
+                @StatusBadgeText(_lastEntry.Status) · @_lastEntry.CompletedAt?.ToLocalTime().ToString("HH:mm:ss")
+            </div>
+            @if (!string.IsNullOrEmpty(_lastEntry.ResponseText))
+            {
+                <div class="aic-response">@_lastEntry.ResponseText</div>
+            }
+            @if (!string.IsNullOrEmpty(_lastEntry.ErrorMessage))
+            {
+                <div class="text-danger small">@_lastEntry.ErrorMessage</div>
+            }
+        </div>
+    }
+</div>
 
 @if (_historyOpen)
 {

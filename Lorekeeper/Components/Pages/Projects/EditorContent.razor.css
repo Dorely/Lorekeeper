@@ -1,7 +1,7 @@
 .editor-grid {
     display: grid;
     grid-template-columns: minmax(15rem, 1fr) minmax(24rem, 2fr) minmax(18rem, 1.1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) clamp(11rem, 24vh, 18rem);
     grid-template-areas:
         "recommendations editor context"
         "recommendations console context";
@@ -35,7 +35,10 @@
 .panel-editor { grid-area: editor; }
 .panel-recommendations { grid-area: recommendations; }
 .panel-context { grid-area: context; }
-.panel-console { grid-area: console; }
+.panel-console {
+    grid-area: console;
+    overflow: hidden;
+}
 
 .chapter-editor {
     flex: 1 1 auto;
