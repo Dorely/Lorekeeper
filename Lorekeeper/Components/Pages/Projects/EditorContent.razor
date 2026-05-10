@@ -133,6 +133,8 @@ else
     private bool _loading = true;
     private Guid? _loadedProjectId;
     private Guid? _activeChapterId;
+    private bool _restoreChapterAfterRender;
+    private Guid? _pendingRememberChapterId;
 
     private bool _editingTitle;
     private string _titleDraft = string.Empty;
@@ -172,6 +174,10 @@ else
         {
             _loadedProjectId = Project.Id;
             _loading = true;
+            _current = null;
+            _activeChapterId = null;
+            _restoreChapterAfterRender = false;
+            _pendingRememberChapterId = null;
             _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
             _acts = (await Acts.ListAsync(Project.Id)).ToList();
             _loading = false;
@@ -181,6 +187,8 @@ else
         {
             _current = null;
             _activeChapterId = null;
+            _restoreChapterAfterRender = false;
+            _pendingRememberChapterId = null;
             UpdateChapterMetrics(string.Empty);
             return;
         }
@@ -190,15 +198,31 @@ else
         {
             targetId = cid;
         }
+        else if (ChapterId is null)
+        {
+            if (_activeChapterId is { } activeId && _chapters.Any(c => c.Id == activeId))
+            {
+                Nav.NavigateTo($"/projects/{Project.Slug}/editor/{activeId}", replace: true);
+                return;
+            }
+
+            _current = null;
+            _restoreChapterAfterRender = true;
+            return;
+        }
         else
         {
-            // Redirect to first chapter; OnParametersSetAsync will fire again with the new id.
             var first = _chapters[0];
             Nav.NavigateTo($"/projects/{Project.Slug}/editor/{first.Id}", replace: true);
             return;
         }
 
-        if (_activeChapterId == targetId) return;
+        _restoreChapterAfterRender = false;
+        if (_activeChapterId == targetId)
+        {
+            _pendingRememberChapterId = targetId;
+            return;
+        }
 
         // Switching chapter: flush pending save for the previous chapter first.
         if (_activeChapterId is not null)
@@ -211,6 +235,7 @@ else
         UpdateChapterMetrics(_current.Body);
         _saveState = SaveState.Idle;
         _saveError = null;
+        _pendingRememberChapterId = targetId;
 
         if (_editorHandle is not null)
         {
@@ -226,6 +251,17 @@ else
             _navHandlerRegistration = Nav.RegisterLocationChangingHandler(OnLocationChangingAsync);
         }
 
+        if (Project is not null && (_restoreChapterAfterRender || _current is not null || _pendingRememberChapterId is not null))
+        {
+            await EnsureEditorModuleAsync();
+        }
+
+        if (_restoreChapterAfterRender)
+        {
+            await RestoreRememberedChapterAsync();
+            return;
+        }
+
         if (_focusTitleNext)
         {
             _focusTitleNext = false;
@@ -233,18 +269,89 @@ else
             catch (JSDisconnectedException) { }
         }
 
-        if (_current is not null && _editorModule is null)
+        if (_current is not null && _editorModule is not null && _editorHandle is null)
         {
             try
             {
-                _editorModule = await JS.InvokeAsync<IJSObjectReference>("import",
-                    "./Components/Pages/Projects/EditorContent.razor.js");
                 _editorHandle = await _editorModule.InvokeAsync<IJSObjectReference>(
                     "attach",
                     new { textarea = _bodyTextarea, gutter = _gutterRef },
                     _selfRef, 1000, _current.Body);
             }
             catch (JSDisconnectedException) { }
+        }
+
+        if (_pendingRememberChapterId is { } chapterId)
+        {
+            await RememberSelectedChapterAsync(chapterId);
+        }
+    }
+
+    private async Task EnsureEditorModuleAsync()
+    {
+        if (_editorModule is not null) return;
+
+        try
+        {
+            _editorModule = await JS.InvokeAsync<IJSObjectReference>("import",
+                "./Components/Pages/Projects/EditorContent.razor.js");
+        }
+        catch (JSDisconnectedException) { }
+    }
+
+    private async Task RestoreRememberedChapterAsync()
+    {
+        if (Project is null || _editorModule is null || _chapters.Count == 0) return;
+
+        _restoreChapterAfterRender = false;
+        var targetId = _chapters[0].Id;
+
+        try
+        {
+            var remembered = await _editorModule.InvokeAsync<string?>(
+                "getLastEditorChapterId",
+                Project.Id.ToString("N"));
+
+            if (!string.IsNullOrWhiteSpace(remembered)
+                && Guid.TryParse(remembered, out var rememberedId)
+                && _chapters.Any(c => c.Id == rememberedId))
+            {
+                targetId = rememberedId;
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            _restoreChapterAfterRender = true;
+            return;
+        }
+        catch (JSException) { }
+
+        Nav.NavigateTo($"/projects/{Project.Slug}/editor/{targetId}", replace: true);
+    }
+
+    private async Task RememberSelectedChapterAsync(Guid chapterId)
+    {
+        if (Project is null || _editorModule is null)
+        {
+            _pendingRememberChapterId = chapterId;
+            return;
+        }
+
+        try
+        {
+            await _editorModule.InvokeVoidAsync(
+                "setLastEditorChapterId",
+                Project.Id.ToString("N"),
+                chapterId.ToString());
+            _pendingRememberChapterId = null;
+        }
+        catch (JSDisconnectedException)
+        {
+            _pendingRememberChapterId = chapterId;
+        }
+        catch (JSException)
+        {
+            _pendingRememberChapterId = null;
         }
     }
 

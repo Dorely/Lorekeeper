@@ -1,11 +1,13 @@
 using System.Text.RegularExpressions;
 using Lorekeeper.Tokens;
+using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Ingest;
 
 public sealed partial class IngestSourceStructureBuilder(
     ITokenCounter tokenCounter,
-    ITokenBudgetPlanner budgetPlanner) : IIngestSourceStructureBuilder
+    ITokenBudgetPlanner budgetPlanner,
+    IOptions<IngestSourceStructureOptions> options) : IIngestSourceStructureBuilder
 {
     public IReadOnlyList<IngestSourceChunkDraft> Build(IngestSourceStructureRequest request)
     {
@@ -13,11 +15,44 @@ public sealed partial class IngestSourceStructureBuilder(
         if (string.IsNullOrWhiteSpace(sourceText)) return [];
 
         var budget = budgetPlanner.Plan(request.BudgetRequest);
-        var targetTokens = Math.Max(1, request.SourceTextTargetTokens ?? budget.SourceTextTargetTokens);
+        var modelSafeTokens = Math.Max(1, budget.SourceTextTargetTokens);
+        var configuredTargetTokens = Math.Max(1, request.SourceTextTargetTokens ?? options.Value.TargetTokens);
+        var targetTokens = Math.Min(configuredTargetTokens, modelSafeTokens);
+        var softMaxTokens = ResolveSoftMaxTokens(targetTokens, modelSafeTokens);
+        var smallSectionTokens = ResolveSmallSectionTokens(targetTokens);
         var blocks = SplitIntoBlocks(sourceText);
         if (blocks.Count == 0) return [];
 
         var drafts = new List<IngestSourceChunkDraft>();
+        foreach (var section in BuildNaturalSections(blocks))
+            AddSectionDrafts(drafts, sourceText, section, targetTokens, softMaxTokens, request.TokenCountRequest);
+
+        return MergeAdjacentDrafts(drafts, sourceText, targetTokens, softMaxTokens, smallSectionTokens, request.TokenCountRequest);
+    }
+
+    private int ResolveSoftMaxTokens(int targetTokens, int modelSafeTokens)
+    {
+        var ratio = double.IsFinite(options.Value.SoftMaxRatio)
+            ? Math.Max(1.0, options.Value.SoftMaxRatio)
+            : 1.5;
+        var estimated = Math.Ceiling(targetTokens * ratio);
+        var softMaxTokens = estimated >= int.MaxValue ? int.MaxValue : (int)estimated;
+        return Math.Clamp(softMaxTokens, targetTokens, modelSafeTokens);
+    }
+
+    private int ResolveSmallSectionTokens(int targetTokens)
+    {
+        var ratio = double.IsFinite(options.Value.SmallSectionRatio)
+            ? Math.Clamp(options.Value.SmallSectionRatio, 0.0, 1.0)
+            : 0.15;
+        var estimated = Math.Ceiling(targetTokens * ratio);
+        var smallSectionTokens = estimated >= int.MaxValue ? int.MaxValue : (int)estimated;
+        return Math.Clamp(smallSectionTokens, 1, targetTokens);
+    }
+
+    private static IReadOnlyList<SourceSection> BuildNaturalSections(IReadOnlyList<TextBlock> blocks)
+    {
+        var sections = new List<SourceSection>();
         var currentStart = -1;
         var currentEnd = -1;
         var currentTitle = string.Empty;
@@ -25,74 +60,84 @@ public sealed partial class IngestSourceStructureBuilder(
 
         foreach (var block in blocks)
         {
-            if (block.IsHeading && currentStart >= 0 && currentEnd > currentStart)
+            if (block.IsHeading)
             {
-                AddDraft(drafts, sourceText, currentStart, currentEnd, currentTitle, currentHeadingPath, request.TokenCountRequest);
-                currentStart = -1;
-                currentEnd = -1;
-                currentTitle = string.Empty;
-                currentHeadingPath = string.Empty;
+                FlushSection();
+                currentStart = block.Start;
+                currentEnd = block.End;
+                currentTitle = CleanHeading(block.Text);
+                currentHeadingPath = currentTitle;
+                continue;
             }
 
             if (currentStart < 0)
             {
                 currentStart = block.Start;
-                currentTitle = block.IsHeading ? CleanHeading(block.Text) : string.Empty;
-                currentHeadingPath = currentTitle;
-            }
-            else if (string.IsNullOrWhiteSpace(currentTitle) && block.IsHeading)
-            {
-                currentTitle = CleanHeading(block.Text);
-                currentHeadingPath = currentTitle;
-            }
-
-            var candidateEnd = block.End;
-            var candidateText = sourceText[currentStart..candidateEnd];
-            var candidateTokens = tokenCounter.Count(candidateText, request.TokenCountRequest).TokenCount;
-
-            if (candidateTokens > targetTokens && currentEnd > currentStart)
-            {
-                AddDraft(drafts, sourceText, currentStart, currentEnd, currentTitle, currentHeadingPath, request.TokenCountRequest);
-                currentStart = block.Start;
-                currentEnd = block.End;
-                currentTitle = block.IsHeading ? CleanHeading(block.Text) : string.Empty;
-                currentHeadingPath = currentTitle;
-            }
-            else
-            {
-                currentEnd = candidateEnd;
-            }
-
-            while (currentStart >= 0)
-            {
-                var currentText = sourceText[currentStart..currentEnd];
-                var currentTokens = tokenCounter.Count(currentText, request.TokenCountRequest).TokenCount;
-                if (currentTokens <= targetTokens) break;
-
-                var splitEnd = FindSplitEnd(sourceText, currentStart, currentEnd, targetTokens, request.TokenCountRequest);
-                AddDraft(drafts, sourceText, currentStart, splitEnd, currentTitle, currentHeadingPath, request.TokenCountRequest);
-                currentStart = SkipWhitespace(sourceText, splitEnd, currentEnd);
                 currentTitle = string.Empty;
                 currentHeadingPath = string.Empty;
-                if (currentStart >= currentEnd)
-                {
-                    currentStart = -1;
-                    currentEnd = -1;
-                    break;
-                }
             }
+
+            currentEnd = block.End;
         }
 
-        if (currentStart >= 0 && currentEnd > currentStart)
-            AddDraft(drafts, sourceText, currentStart, currentEnd, currentTitle, currentHeadingPath, request.TokenCountRequest);
+        FlushSection();
+        return sections;
 
-        return MergeAdjacentDrafts(drafts, sourceText, targetTokens, request.TokenCountRequest);
+        void FlushSection()
+        {
+            if (currentStart >= 0 && currentEnd > currentStart)
+                sections.Add(new SourceSection(currentStart, currentEnd, currentTitle, currentHeadingPath));
+
+            currentStart = -1;
+            currentEnd = -1;
+            currentTitle = string.Empty;
+            currentHeadingPath = string.Empty;
+        }
+    }
+
+    private void AddSectionDrafts(
+        List<IngestSourceChunkDraft> drafts,
+        string sourceText,
+        SourceSection section,
+        int targetTokens,
+        int softMaxTokens,
+        TokenCountRequest tokenCountRequest)
+    {
+        var sectionTokens = tokenCounter.Count(sourceText[section.StartChar..section.EndChar], tokenCountRequest).TokenCount;
+        if (sectionTokens <= softMaxTokens)
+        {
+            AddDraft(drafts, sourceText, section.StartChar, section.EndChar, section.Title, section.HeadingPath, tokenCountRequest);
+            return;
+        }
+
+        var currentStart = section.StartChar;
+        var firstDraft = true;
+
+        while (currentStart < section.EndChar)
+        {
+            var remainingTokens = tokenCounter.Count(sourceText[currentStart..section.EndChar], tokenCountRequest).TokenCount;
+            var title = firstDraft ? section.Title : string.Empty;
+            var headingPath = firstDraft ? section.HeadingPath : string.Empty;
+
+            if (remainingTokens <= softMaxTokens)
+            {
+                AddDraft(drafts, sourceText, currentStart, section.EndChar, title, headingPath, tokenCountRequest);
+                break;
+            }
+
+            var splitEnd = FindSplitEnd(sourceText, currentStart, section.EndChar, targetTokens, tokenCountRequest);
+            AddDraft(drafts, sourceText, currentStart, splitEnd, title, headingPath, tokenCountRequest);
+            currentStart = SkipWhitespace(sourceText, splitEnd, section.EndChar);
+            firstDraft = false;
+        }
     }
 
     private IReadOnlyList<IngestSourceChunkDraft> MergeAdjacentDrafts(
         IReadOnlyList<IngestSourceChunkDraft> drafts,
         string sourceText,
         int targetTokens,
+        int softMaxTokens,
+        int smallSectionTokens,
         TokenCountRequest tokenCountRequest)
     {
         if (drafts.Count <= 1) return drafts;
@@ -105,7 +150,7 @@ public sealed partial class IngestSourceStructureBuilder(
             var candidateStart = pending[0].StartChar;
             var candidateEnd = next.EndChar;
             var candidateTokens = tokenCounter.Count(sourceText[candidateStart..candidateEnd], tokenCountRequest).TokenCount;
-            if (candidateTokens <= targetTokens)
+            if (ShouldMergePending(next, candidateTokens))
             {
                 pending.Add(next);
                 continue;
@@ -117,6 +162,15 @@ public sealed partial class IngestSourceStructureBuilder(
 
         FlushPending();
         return merged;
+
+        bool ShouldMergePending(IngestSourceChunkDraft next, int candidateTokens)
+        {
+            if (candidateTokens <= targetTokens) return true;
+            if (candidateTokens > softMaxTokens) return false;
+
+            var pendingTokens = tokenCounter.Count(sourceText[pending[0].StartChar..pending[^1].EndChar], tokenCountRequest).TokenCount;
+            return pendingTokens <= smallSectionTokens || next.TokenCount.TokenCount <= smallSectionTokens;
+        }
 
         void FlushPending()
         {
@@ -290,4 +344,5 @@ public sealed partial class IngestSourceStructureBuilder(
 
     private sealed record TextLine(int Start, int End, int NextStart);
     private sealed record TextBlock(int Start, int End, string Text, bool IsHeading);
+    private sealed record SourceSection(int StartChar, int EndChar, string Title, string HeadingPath);
 }

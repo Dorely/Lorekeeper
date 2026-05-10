@@ -125,7 +125,20 @@
 
 .editor-chat-typing {
     display: inline-flex;
+    align-items: center;
     gap: 0.25rem;
+}
+
+.editor-chat-thinking {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: fit-content;
+}
+
+.editor-chat-thinking-label {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.84rem;
 }
 
 .editor-chat-typing > span {

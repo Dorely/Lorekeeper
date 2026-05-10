@@ -248,7 +248,7 @@
                         break;
 
                     case EditorChatPendingAiChangeCreated:
-                        await LoadPendingChangesAsync(openIfPending: true);
+                        await LoadPendingChangesAsync(openIfPending: false);
                         StateHasChanged();
                         break;
 
@@ -567,9 +567,7 @@
     {
         if (!live.HasContent)
         {
-            <div class="editor-chat-msg editor-chat-msg-asst editor-chat-msg-streaming">
-                <span class="editor-chat-typing"><span></span><span></span><span></span></span>
-            </div>
+            @RenderThinkingIndicator()
             return;
         }
 
@@ -587,6 +585,19 @@
                 }
             </div>
         }
+
+        if (live.IsThinking)
+        {
+            @RenderThinkingIndicator()
+        }
+    };
+
+    private RenderFragment RenderThinkingIndicator() => __builder =>
+    {
+        <div class="editor-chat-msg editor-chat-msg-asst editor-chat-msg-streaming editor-chat-thinking">
+            <span class="editor-chat-typing" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span class="editor-chat-thinking-label">Thinking...</span>
+        </div>
     };
 
     private RenderFragment RenderPart(MessagePart part, bool showCursor = false) => __builder =>
@@ -688,14 +699,18 @@
 
         public bool HasContent => Messages.Any(message => message.Parts.Count > 0);
 
+        public bool IsThinking { get; private set; } = true;
+
         public void AppendText(string text)
         {
             if (string.IsNullOrEmpty(text)) return;
+            IsThinking = false;
             CurrentMessage().AppendText(text);
         }
 
         public void AddToolCall(string callId, string name, string argumentsJson)
         {
+            IsThinking = true;
             CurrentMessage().Parts.Add(new ToolPart(new ToolChip
             {
                 CallId = callId,
@@ -717,6 +732,7 @@
                 chip.Error = error;
                 chip.Completed = true;
             }
+            IsThinking = true;
             _startNewMessageOnNextPart = true;
         }
 

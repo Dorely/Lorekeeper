@@ -31,13 +31,6 @@ public sealed class ContextBuilder(
         var items = new List<ContextItem>
         {
             new(
-                Key: EditorContextKeys.SystemPrompt,
-                Kind: ContextItemKind.SystemPrompt,
-                Label: "Project Guidance",
-                Body: project.SystemPrompt,
-                IsEnabled: true,
-                IsRemovable: false),
-            new(
                 Key: EditorContextKeys.AssistantWorkflow,
                 Kind: ContextItemKind.AssistantWorkflow,
                 Label: "Assistant Workflow",
@@ -45,6 +38,13 @@ public sealed class ContextBuilder(
                 IsEnabled: true,
                 IsRemovable: false,
                 Badge: "App"),
+            new(
+                Key: EditorContextKeys.SystemPrompt,
+                Kind: ContextItemKind.SystemPrompt,
+                Label: "Project Guidance",
+                Body: project.SystemPrompt,
+                IsEnabled: true,
+                IsRemovable: false),
         };
 
         if (currentChapter is not null)

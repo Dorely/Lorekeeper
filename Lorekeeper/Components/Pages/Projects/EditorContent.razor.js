@@ -3,6 +3,32 @@
 //   elements: { textarea, gutter }
 // returns handle: { setValue, flush, setReadOnly, dispose }
 
+const lastChapterKey = (projectId) => `Lorekeeper.editor.lastChapter:${projectId}`;
+
+export function getLastEditorChapterId(projectId) {
+    try {
+        return window.localStorage.getItem(lastChapterKey(projectId));
+    } catch (_) {
+        return null;
+    }
+}
+
+export function setLastEditorChapterId(projectId, chapterId) {
+    try {
+        window.localStorage.setItem(lastChapterKey(projectId), chapterId);
+    } catch (_) {
+        // Storage can be unavailable in private or restricted browsing modes.
+    }
+}
+
+export function clearLastEditorChapterId(projectId) {
+    try {
+        window.localStorage.removeItem(lastChapterKey(projectId));
+    } catch (_) {
+        // Storage can be unavailable in private or restricted browsing modes.
+    }
+}
+
 export function attach(elements, dotNetRef, debounceMs, initialValue) {
     const el = elements.textarea ?? elements; // back-compat
     const gutter = elements.gutter ?? null;

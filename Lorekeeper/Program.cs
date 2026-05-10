@@ -89,6 +89,7 @@ builder.Services.AddScoped<WritingCoachTools>();
 builder.Services.AddScoped<IWritingCoachService, WritingCoachService>();
 
 // Ingest
+builder.Services.Configure<IngestSourceStructureOptions>(builder.Configuration.GetSection(IngestSourceStructureOptions.SectionName));
 builder.Services.AddSingleton<IIngestJobQueue, IngestJobQueue>();
 builder.Services.AddSingleton<IIngestJobNotifier, IngestJobNotifier>();
 builder.Services.AddScoped<IIngestSourceStructureBuilder, IngestSourceStructureBuilder>();
