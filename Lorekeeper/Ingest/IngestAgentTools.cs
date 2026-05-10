@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Lorekeeper.Context;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
@@ -36,28 +37,28 @@ public sealed class IngestAgentTools(
             description: "Search existing non-structural story entities in the project graph before creating a new entity. Use type when known; search exact names plus variants such as titles removed, aliases, alternate spellings, surnames, epithets, and descriptive terms."),
 
         AIFunctionFactory.Create(
-            method: (string existingEntityId, string? propertiesJson, string? aliasesJson, string? evidence, string? notes) =>
-                RecordExistingEntityObservationAsync(context, existingEntityId, propertiesJson, aliasesJson, evidence, notes),
+            method: (string existingEntityId, IngestObservationProperties? properties, string[]? aliases, string? evidence, string? notes) =>
+                RecordExistingEntityObservationAsync(context, existingEntityId, properties, aliases, evidence, notes),
             name: "record_existing_entity_observation",
-            description: "Record source-scoped observations on an existing project entity without changing its canonical properties. Use this after search_project_entities finds a match. propertiesJson is a JSON object string such as {} or {\"summary\":\"...\"}; aliasesJson is a JSON array string such as [] or [\"alias\"]. Use [] when there are no aliases."),
+            description: "Record source-scoped observations on an existing project entity without changing its canonical properties. Use this after search_project_entities finds a match. properties is an object with concise natural-language fields such as summary/status/history/significance; aliases is an array. Use {} for no properties and [] for no aliases."),
 
         AIFunctionFactory.Create(
-            method: (string type, string name, string? propertiesJson, string? aliasesJson, string? evidence, string? notes) =>
-                CreateEntityAsync(context, type, name, propertiesJson, aliasesJson, evidence, notes),
+            method: (string type, string name, IngestObservationProperties? properties, string[]? aliases, string? evidence, string? notes) =>
+                CreateEntityAsync(context, type, name, properties, aliases, evidence, notes),
             name: "create_ingest_entity",
-            description: "Create a new graph entity with source-scoped observations. Only use after list_job_entities and variant search_project_entities calls find no plausible same subject. propertiesJson is a useful JSON object string of readable observations such as {} or {\"summary\":\"...\"}; aliasesJson is a JSON array string such as [] or [\"alias\"]. Use [] when there are no aliases."),
+            description: "Create a new graph entity with source-scoped observations. Only use after list_job_entities and variant search_project_entities calls find no plausible same subject. properties is an object with concise natural-language fields such as summary/status/history/significance; aliases is an array. Use {} for no properties and [] for no aliases."),
 
         AIFunctionFactory.Create(
-            method: (string entityId, string? name, string? propertiesToSetJson, string? aliasesJson, string? evidence, string? notes) =>
-                UpdateEntityAsync(context, entityId, name, propertiesToSetJson, aliasesJson, evidence, notes),
+            method: (string entityId, string? name, IngestObservationProperties? propertiesToSet, string[]? aliases, string? evidence, string? notes) =>
+                UpdateEntityAsync(context, entityId, name, propertiesToSet, aliases, evidence, notes),
             name: "update_ingest_entity",
-            description: "Update source-scoped observations for an entity already touched by this ingest job. Canonical project properties are not changed; name is only used for entities newly created by this job. propertiesToSetJson is a JSON object string such as {} or {\"status\":\"...\"}; aliasesJson is a JSON array string such as [] or [\"alias\"]. Use [] when there are no aliases."),
+            description: "Update source-scoped observations for an entity already touched by this ingest job. Canonical project properties are not changed; name is only used for entities newly created by this job. propertiesToSet is an object with concise natural-language fields such as summary/status/history/significance; aliases is an array. Use {} for no properties and [] for no aliases."),
 
         AIFunctionFactory.Create(
-            method: (string fromEntityId, string toEntityId, string edgeType, string? propertiesJson, string? evidence, string? notes) =>
-                LinkEntitiesAsync(context, fromEntityId, toEntityId, edgeType, propertiesJson, evidence, notes),
+            method: (string fromEntityId, string toEntityId, string edgeType, IngestObservationProperties? properties, string? evidence, string? notes) =>
+                LinkEntitiesAsync(context, fromEntityId, toEntityId, edgeType, properties, evidence, notes),
             name: "link_ingest_entities",
-            description: "Record a source-scoped relationship between two entities already touched by this ingest job. Record observations on existing project endpoints before linking them."),
+            description: "Record a source-scoped relationship between two entities already touched by this ingest job. Record observations on existing project endpoints before linking them. properties is an object with concise natural-language relationship observations such as summary/status/history/significance."),
 
         AIFunctionFactory.Create(
             method: (string summary, string? notes) => RecordSourceChunkNotesAsync(context, summary, notes),
@@ -159,20 +160,14 @@ public sealed class IngestAgentTools(
     private async Task<string> RecordExistingEntityObservationAsync(
         IngestAgentContext context,
         string existingEntityId,
-        string? propertiesJson,
-        string? aliasesJson,
+        IngestObservationProperties? properties,
+        string[]? aliases,
         string? evidence,
         string? notes)
     {
         if (!Guid.TryParse(existingEntityId, out var parsed)) return $"Error: existingEntityId '{existingEntityId}' is not a valid Guid.";
-
-        if (!TryParsePropertiesJson(propertiesJson, out var parsedProperties, out var propertiesError))
-            return $"Error: propertiesJson is not a valid JSON object: {propertiesError}";
-        var observedProperties = parsedProperties ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-
-        if (!TryParseStringArrayJson(aliasesJson, out var parsedAliases, out var aliasesError))
-            return $"Error: aliasesJson is not a valid JSON array: {aliasesError}";
-        var aliases = parsedAliases ?? [];
+        var observedProperties = NormalizeProperties(properties);
+        var normalizedAliases = NormalizeAliases(aliases);
 
         var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, parsed);
         if (node is null) return $"Error: entity {parsed} is not a non-structural project story entity.";
@@ -185,7 +180,7 @@ public sealed class IngestAgentTools(
             item,
             IngestSourceAssertions.LinkedExistingEntityAction,
             observedProperties,
-            aliases,
+            normalizedAliases,
             evidence,
             notes);
 
@@ -204,25 +199,22 @@ public sealed class IngestAgentTools(
         IngestAgentContext context,
         [Description("Entity type such as Character, Location, Organization, Concept, Claim, Term, Object, or another meaningful non-structural type.")] string type,
         [Description("Display name for the entity.")] string name,
-        string? propertiesJson,
-        string? aliasesJson,
+        IngestObservationProperties? properties,
+        string[]? aliases,
         string? evidence,
         string? notes)
     {
-        if (string.IsNullOrWhiteSpace(type)) return "Error: type is required.";
-        var resolvedType = await ResolveEntityTypeAsync(context.ProjectId, type, allowNew: true);
-        if (resolvedType is null) return $"Error: type '{type.Trim()}' is structural or invalid and cannot be created by ingest.";
-        if (string.IsNullOrWhiteSpace(name)) return "Error: name is required.";
+        var normalizedType = NormalizeText(type).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedType)) return "Error: type is required.";
+        var resolvedType = await ResolveEntityTypeAsync(context.ProjectId, normalizedType, allowNew: true);
+        if (resolvedType is null) return $"Error: type '{normalizedType}' is structural or invalid and cannot be created by ingest.";
 
-        if (!TryParsePropertiesJson(propertiesJson, out var parsedProperties, out var propertiesError))
-            return $"Error: propertiesJson is not a valid JSON object: {propertiesError}";
-        var observedProperties = parsedProperties ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var trimmedName = NormalizeText(name).Trim();
+        if (string.IsNullOrWhiteSpace(trimmedName)) return "Error: name is required.";
 
-        if (!TryParseStringArrayJson(aliasesJson, out var parsedAliases, out var aliasesError))
-            return $"Error: aliasesJson is not a valid JSON array: {aliasesError}";
-        var aliases = parsedAliases ?? [];
+        var observedProperties = NormalizeProperties(properties);
+        var normalizedAliases = NormalizeAliases(aliases);
 
-        var trimmedName = name.Trim();
         var duplicateNode = await FindDuplicateEntityByNameAsync(context.ProjectId, resolvedType.Type, trimmedName);
         if (duplicateNode is not null && Guid.TryParseExact(duplicateNode.Key, "N", out var duplicateId))
         {
@@ -237,7 +229,7 @@ public sealed class IngestAgentTools(
                 duplicateItem,
                 action,
                 observedProperties,
-                aliases,
+                normalizedAliases,
                 evidence,
                 notes);
 
@@ -256,7 +248,9 @@ public sealed class IngestAgentTools(
 
         var entityProperties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         entityProperties[IngestSourceAssertions.GraphOriginProperty] = IngestSourceAssertions.GraphOriginIngestValue;
-        var assertionInput = BuildAssertionInput(context, BestSummary(observedProperties), observedProperties, aliases, evidence, notes);
+        var normalizedEvidence = NormalizeText(evidence);
+        var normalizedNotes = NormalizeText(notes);
+        var assertionInput = BuildAssertionInput(context, BestSummary(observedProperties), observedProperties, normalizedAliases, normalizedEvidence, normalizedNotes);
         var write = IngestSourceAssertions.UpsertEntityAssertion(entityProperties, assertionInput);
 
         var created = await entities.CreateAsync(context.ProjectId, resolvedType.Type, trimmedName, entityProperties);
@@ -272,9 +266,9 @@ public sealed class IngestAgentTools(
             IngestSourceAssertions.CreatedEntityAction,
             write,
             observedProperties,
-            aliases,
-            evidence,
-            notes);
+            normalizedAliases,
+            normalizedEvidence,
+            normalizedNotes);
         context.OnMutated();
         await contextIndexing.ReindexEntityAsync(context.ProjectId, created.Id);
 
@@ -293,20 +287,14 @@ public sealed class IngestAgentTools(
         IngestAgentContext context,
         string entityId,
         string? name,
-        string? propertiesToSetJson,
-        string? aliasesJson,
+        IngestObservationProperties? propertiesToSet,
+        string[]? aliases,
         string? evidence,
         string? notes)
     {
         if (!Guid.TryParse(entityId, out var parsed)) return $"Error: entityId '{entityId}' is not a valid Guid.";
-
-        if (!TryParsePropertiesJson(propertiesToSetJson, out var parsedPropertiesToSet, out var propertiesToSetError))
-            return $"Error: propertiesToSetJson is not a valid JSON object: {propertiesToSetError}";
-        var observedProperties = parsedPropertiesToSet ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-
-        if (!TryParseStringArrayJson(aliasesJson, out var parsedAliases, out var aliasesError))
-            return $"Error: aliasesJson is not a valid JSON array: {aliasesError}";
-        var aliases = parsedAliases ?? [];
+        var observedProperties = NormalizeProperties(propertiesToSet);
+        var normalizedAliases = NormalizeAliases(aliases);
 
         var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, parsed);
         if (node is null) return $"Error: entity {parsed} is not a non-structural project story entity.";
@@ -316,14 +304,15 @@ public sealed class IngestAgentTools(
             ? IngestSourceAssertions.LinkedExistingEntityAction
             : IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson) ?? IngestSourceAssertions.LinkedExistingEntityAction;
 
+        var normalizedName = NormalizeText(name).Trim();
         if (string.Equals(action, IngestSourceAssertions.CreatedEntityAction, StringComparison.Ordinal)
-            && !string.IsNullOrWhiteSpace(name))
+            && !string.IsNullOrWhiteSpace(normalizedName))
         {
-            var duplicate = await FindDuplicateEntityByNameAsync(context.ProjectId, node.NodeType, name.Trim(), excludeNodeId: node.Id);
+            var duplicate = await FindDuplicateEntityByNameAsync(context.ProjectId, node.NodeType, normalizedName, excludeNodeId: node.Id);
             if (duplicate is not null)
                 return $"Error: another {node.NodeType} named '{duplicate.Label ?? duplicate.Key}' already exists. Use that entity instead of renaming this one.";
 
-            node.Label = name.Trim();
+            node.Label = normalizedName;
         }
 
         await RecordEntityObservationAsync(
@@ -333,7 +322,7 @@ public sealed class IngestAgentTools(
             item,
             action,
             observedProperties,
-            aliases,
+            normalizedAliases,
             evidence,
             notes);
 
@@ -353,13 +342,13 @@ public sealed class IngestAgentTools(
         string fromEntityId,
         string toEntityId,
         string edgeType,
-        string? propertiesJson,
+        IngestObservationProperties? properties,
         string? evidence,
         string? notes)
     {
         if (!Guid.TryParse(fromEntityId, out var from)) return $"Error: fromEntityId '{fromEntityId}' is not a valid Guid.";
         if (!Guid.TryParse(toEntityId, out var to)) return $"Error: toEntityId '{toEntityId}' is not a valid Guid.";
-        var trimmedEdgeType = edgeType.Trim();
+        var trimmedEdgeType = NormalizeText(edgeType).Trim();
         if (string.IsNullOrWhiteSpace(trimmedEdgeType)) return "Error: edgeType is required.";
         if (string.Equals(trimmedEdgeType, EntityService.HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
             return "Error: HasChild is a managed structural relationship and cannot be created by ingest.";
@@ -369,15 +358,15 @@ public sealed class IngestAgentTools(
         if (fromItem is null || toItem is null)
             return "Error: both relationship endpoints must be entities already touched by this ingest job. Use record_existing_entity_observation for existing project entities first.";
 
-        if (!TryParsePropertiesJson(propertiesJson, out var parsedProperties, out var propertiesError))
-            return $"Error: propertiesJson is not a valid JSON object: {propertiesError}";
-        var observedProperties = parsedProperties ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var observedProperties = NormalizeProperties(properties);
 
         var fromNode = await nodes.FindByKeyAsync(context.ProjectId, from.ToString("N"));
         var toNode = await nodes.FindByKeyAsync(context.ProjectId, to.ToString("N"));
         if (fromNode is null || toNode is null) return "Error: one or both relationship endpoint graph nodes were not found.";
 
-        var assertionInput = BuildAssertionInput(context, BestSummary(observedProperties), observedProperties, [], evidence, notes);
+        var normalizedEvidence = NormalizeText(evidence);
+        var normalizedNotes = NormalizeText(notes);
+        var assertionInput = BuildAssertionInput(context, BestSummary(observedProperties), observedProperties, [], normalizedEvidence, normalizedNotes);
         var existingEdge = await edges.FindAsync(fromNode.Id, toNode.Id, trimmedEdgeType);
         var action = existingEdge is null
             ? IngestSourceAssertions.CreatedEdgeAction
@@ -413,8 +402,8 @@ public sealed class IngestAgentTools(
             fromNode.Label ?? fromItem.Title,
             toNode.Label ?? toItem.Title,
             observedProperties,
-            evidence,
-            notes);
+            normalizedEvidence,
+            normalizedNotes);
         context.OnMutated();
         await contextIndexing.ReindexEntityAsync(context.ProjectId, from);
         await contextIndexing.ReindexEntityAsync(context.ProjectId, to);
@@ -435,8 +424,8 @@ public sealed class IngestAgentTools(
         var sourceChunk = await ingest.GetSourceChunkAsync(context.SourceChunkId);
         if (sourceChunk is null) return $"Error: source chunk {context.SourceChunkId} not found.";
 
-        sourceChunk.Summary = summary?.Trim() ?? string.Empty;
-        sourceChunk.AgentNotes = notes?.Trim() ?? string.Empty;
+        sourceChunk.Summary = NormalizeText(summary).Trim();
+        sourceChunk.AgentNotes = NormalizeText(notes).Trim();
         sourceChunk.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateSourceChunk(sourceChunk);
 
@@ -475,7 +464,9 @@ public sealed class IngestAgentTools(
         string? evidence,
         string? notes)
     {
-        var assertionInput = BuildAssertionInput(context, BestSummary(observedProperties), observedProperties, aliases, evidence, notes);
+        var normalizedEvidence = NormalizeText(evidence);
+        var normalizedNotes = NormalizeText(notes);
+        var assertionInput = BuildAssertionInput(context, BestSummary(observedProperties), observedProperties, aliases, normalizedEvidence, normalizedNotes);
         var write = IngestSourceAssertions.UpsertEntityAssertion(node.Properties, assertionInput);
         node.UpdatedAt = DateTime.UtcNow;
         nodes.Update(node);
@@ -491,8 +482,8 @@ public sealed class IngestAgentTools(
             write,
             observedProperties,
             aliases,
-            evidence,
-            notes);
+            normalizedEvidence,
+            normalizedNotes);
         context.OnMutated();
         await contextIndexing.ReindexEntityAsync(context.ProjectId, entityId);
     }
@@ -1116,82 +1107,39 @@ public sealed class IngestAgentTools(
         return string.IsNullOrWhiteSpace(existing) ? block : existing.TrimEnd() + "\n" + block;
     }
 
-    private static bool TryParsePropertiesJson(string? json, out Dictionary<string, string?>? properties, out string? error)
+    private static Dictionary<string, string?> NormalizeProperties(IngestObservationProperties? properties)
     {
-        properties = null;
-        error = null;
-        if (string.IsNullOrWhiteSpace(json) || IsJsonNullLiteral(json)) return true;
+        var result = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        if (properties is null) return result;
 
-        if (!LooksLikeJsonRoot(json, '{'))
-        {
-            error = "expected a JSON object at the root.";
-            return false;
-        }
-
-        JsonDocument doc;
-        try { doc = JsonDocument.Parse(json); }
-        catch (JsonException ex)
-        {
-            error = ex.Message;
-            return false;
-        }
-        using (doc)
-        {
-            if (doc.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                error = "expected a JSON object at the root.";
-                return false;
-            }
-
-            var dict = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var prop in doc.RootElement.EnumerateObject())
-            {
-                if (IngestSourceAssertions.IsProtectedProperty(prop.Name)) continue;
-                dict[prop.Name] = prop.Value.ValueKind switch
-                {
-                    JsonValueKind.Null => null,
-                    JsonValueKind.String => prop.Value.GetString(),
-                    _ => prop.Value.GetRawText(),
-                };
-            }
-            properties = dict;
-            return true;
-        }
+        AddNormalizedProperty(result, "summary", properties.Summary);
+        AddNormalizedProperty(result, "description", properties.Description);
+        AddNormalizedProperty(result, "role", properties.Role);
+        AddNormalizedProperty(result, "status", properties.Status);
+        AddNormalizedProperty(result, "affiliation", properties.Affiliation);
+        AddNormalizedProperty(result, "history", properties.History);
+        AddNormalizedProperty(result, "motivation", properties.Motivation);
+        AddNormalizedProperty(result, "significance", properties.Significance);
+        AddNormalizedProperty(result, "relationship", properties.Relationship);
+        AddNormalizedProperty(result, "details", properties.Details);
+        return result;
     }
 
-    private static bool TryParseStringArrayJson(string? json, out string[]? values, out string? error)
+    private static void AddNormalizedProperty(Dictionary<string, string?> properties, string key, string? value)
     {
-        values = null;
-        error = null;
-        if (string.IsNullOrWhiteSpace(json) || IsJsonNullLiteral(json)) return true;
+        if (IngestSourceAssertions.IsProtectedProperty(key)) return;
+        var normalized = NormalizeText(value).Trim();
+        if (!string.IsNullOrWhiteSpace(normalized)) properties[key] = normalized;
+    }
 
-        if (!LooksLikeJsonRoot(json, '['))
-        {
-            error = "expected a JSON array at the root.";
-            return false;
-        }
-
-        JsonDocument doc;
-        try { doc = JsonDocument.Parse(json); }
-        catch (JsonException ex)
-        {
-            error = ex.Message;
-            return false;
-        }
-        using (doc)
-        {
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
-            {
-                error = "expected a JSON array at the root.";
-                return false;
-            }
-            values = doc.RootElement.EnumerateArray()
-                .Select(element => element.ValueKind == JsonValueKind.String ? element.GetString() ?? string.Empty : element.GetRawText())
-                .Where(value => !string.IsNullOrWhiteSpace(value))
+    private static string[] NormalizeAliases(string[]? aliases) =>
+        aliases is null
+            ? []
+            : aliases
+                .Select(alias => NormalizeText(alias).Trim())
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            return true;
-        }
-    }
 
     private static bool LooksLikeJsonRoot(string json, char rootChar)
     {
@@ -1202,9 +1150,6 @@ public sealed class IngestAgentTools(
         }
         return false;
     }
-
-    private static bool IsJsonNullLiteral(string json) =>
-        string.Equals(json.Trim(), "null", StringComparison.OrdinalIgnoreCase);
 
     private static string? ReadString(object? value) => value switch
     {
@@ -1228,6 +1173,23 @@ public sealed class IngestAgentTools(
         return trimmed.Length <= max ? trimmed : trimmed[..max] + "...";
     }
 
+    private static string NormalizeText(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        var buffer = new char[value.Length];
+        var index = 0;
+        foreach (var ch in value)
+        {
+            buffer[index++] = ch switch
+            {
+                '\u0018' or '\u0019' => '\'',
+                _ when char.IsControl(ch) && ch is not '\r' and not '\n' and not '\t' => ' ',
+                _ => ch,
+            };
+        }
+        return new string(buffer, 0, index);
+    }
+
     private sealed record ProjectEntityCandidate(
         Guid Id,
         string Type,
@@ -1238,4 +1200,47 @@ public sealed class IngestAgentTools(
         int Score);
 
     private sealed record EntityTypeResolution(string Type, bool ExistingType);
+}
+
+public sealed class IngestObservationProperties
+{
+    [JsonPropertyName("summary")]
+    [Description("Concise source-grounded summary of the entity or relationship.")]
+    public string? Summary { get; set; }
+
+    [JsonPropertyName("description")]
+    [Description("Plain-language description when a summary alone is not enough.")]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("role")]
+    [Description("Narrative, factional, social, or functional role shown by the source.")]
+    public string? Role { get; set; }
+
+    [JsonPropertyName("status")]
+    [Description("Current condition, state, or situation shown by the source.")]
+    public string? Status { get; set; }
+
+    [JsonPropertyName("affiliation")]
+    [Description("Group, faction, allegiance, or association shown by the source.")]
+    public string? Affiliation { get; set; }
+
+    [JsonPropertyName("history")]
+    [Description("Relevant past events or background from the source.")]
+    public string? History { get; set; }
+
+    [JsonPropertyName("motivation")]
+    [Description("Goal, desire, fear, grievance, or driving force shown by the source.")]
+    public string? Motivation { get; set; }
+
+    [JsonPropertyName("significance")]
+    [Description("Why this entity or relationship matters for later writing and retrieval.")]
+    public string? Significance { get; set; }
+
+    [JsonPropertyName("relationship")]
+    [Description("Relationship-specific observation, especially for link_ingest_entities.")]
+    public string? Relationship { get; set; }
+
+    [JsonPropertyName("details")]
+    [Description("Other concise source-grounded details that do not fit the named fields.")]
+    public string? Details { get; set; }
 }

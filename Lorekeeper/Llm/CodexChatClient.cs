@@ -477,6 +477,19 @@ public sealed class CodexChatClient : IChatClient
         if (element.ValueKind != JsonValueKind.Object)
             return element;
 
+        if (isPropertiesContainer)
+        {
+            var properties = new Dictionary<string, object>();
+            foreach (var prop in element.EnumerateObject())
+            {
+                properties[prop.Name] = prop.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array
+                    ? EnforceStrictSchema(prop.Value)
+                    : prop.Value;
+            }
+
+            return JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(properties));
+        }
+
         var dict = new Dictionary<string, object>();
         var isObject = false;
         var hasProperties = false;

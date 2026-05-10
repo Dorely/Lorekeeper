@@ -43,8 +43,8 @@ public sealed class IngestJobProcessor(
         - Create a new entity only when no existing project entity or same-job entity matches after variant searches. The tool will reject duplicate names; treat that as instruction to reuse the returned/existing entity.
         - Use canonical singular entity type keys from the known project entity types. Do not invent plural, lowercase, or near-duplicate categories such as "characters", "Characters", "locations", or "organisations" when Character, Location, or Organization/Faction-style categories are available.
         - Keep recurring source observations current. If a character appears again later with new history, status, aliases, relationships, or role details, update the source assertion for the existing entity.
-        - Use propertiesJson for practical, readable observations such as summary, description, role, status, affiliation, history, motivation, or significance. Avoid empty schema-filling; prefer concise natural-language values that will help a writer understand and retrieve the entity later.
-        - JSON-string tool arguments must contain valid JSON text. Use {} for no properties and [] for no aliases; do not pass the string "null".
+        - Use the properties object for practical, readable observations such as summary, description, role, status, affiliation, history, motivation, or significance. Avoid empty schema-filling; prefer concise natural-language values that will help a writer understand and retrieve the entity later.
+        - Pass tool objects and arrays directly. Do not serialize properties or aliases into JSON strings; use {} for no properties and [] for no aliases.
         - Use evidence from the current source chunk. Do not invent facts.
         - Link only entities already touched by this ingest job using link_ingest_entities. If an endpoint is an existing project entity, record an observation on it first.
         - Finish each source chunk by calling record_source_chunk_notes with a concise summary.
@@ -371,7 +371,7 @@ public sealed class IngestJobProcessor(
             4. Reuse a plausible same-job or project entity instead of creating duplicate names or duplicate categories. For example, link "Prince Kael'thas" observations to an existing "Kael'thas" Character when the context points to the same person.
             5. Create only when the roster and project searches do not return a plausible same subject.
 
-            Write useful observations. propertiesJson may use broad natural-language fields such as summary, description, role, status, affiliation, history, motivation, or significance; it does not need to be highly structured when a readable note is more useful.
+            Write useful observations. The properties object may use broad natural-language fields such as summary, description, role, status, affiliation, history, motivation, or significance; it does not need to be highly structured when a readable note is more useful.
 
             Current source chunk text:
             ```text
