@@ -4,9 +4,9 @@ using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
 
-namespace Lorekeeper.AiConsole;
+namespace Lorekeeper.EditorChat;
 
-public sealed class AiConsoleChangeStagingContext(
+public sealed class EditorChatChangeStagingContext(
     Guid projectId,
     Guid conversationId,
     IAiChangeRepository changes)
@@ -14,15 +14,15 @@ public sealed class AiConsoleChangeStagingContext(
     private AiChangeBatch? _batch;
     private readonly List<AiChange> _newChanges = [];
     private readonly Dictionary<Guid, string> _chapterBodyDrafts = [];
-    private Guid? _entryId;
+    private Guid? _assistantMessageId;
     private string _toolCallId = string.Empty;
     private string _toolName = string.Empty;
     private string _argumentsJson = "{}";
     private int _nextOrder;
 
-    public void BeginToolCall(Guid entryId, string toolCallId, string toolName, string argumentsJson)
+    public void BeginToolCall(Guid assistantMessageId, string toolCallId, string toolName, string argumentsJson)
     {
-        _entryId = entryId;
+        _assistantMessageId = assistantMessageId;
         _toolCallId = toolCallId;
         _toolName = toolName;
         _argumentsJson = string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson;
@@ -57,7 +57,7 @@ public sealed class AiConsoleChangeStagingContext(
             resourceId: Resource("Chapter", chapter.Id),
             referencedResources: [Resource("Chapter", chapter.Id)],
             cancellationToken);
-            _chapterBodyDrafts[chapter.Id] = newBody;
+        _chapterBodyDrafts[chapter.Id] = newBody;
     }
 
     private async Task StageChangeAsync(
@@ -101,11 +101,13 @@ public sealed class AiConsoleChangeStagingContext(
         _batch = new AiChangeBatch
         {
             ProjectId = projectId,
+            ConversationKind = AiChangeConversationKind.Editor,
             ConversationId = conversationId,
-            AssistantMessageId = _entryId,
+            AssistantMessageId = _assistantMessageId,
         };
         await changes.AddBatchAsync(_batch, cancellationToken);
         await changes.SaveChangesAsync(cancellationToken);
+        _nextOrder = 0;
         return _batch;
     }
 

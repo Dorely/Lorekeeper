@@ -6,13 +6,14 @@ using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Outline;
 
-public sealed class OutlineChangeApprovalService(
+public sealed class AiChangeApprovalService(
     IAiChangeRepository changes,
-    IOutlineConversationRepository conversations,
+    IOutlineConversationRepository outlineConversations,
+    IEditorConversationRepository editorConversations,
     IActService acts,
     IChapterService chapters,
     IEntityService entities,
-    ILogger<OutlineChangeApprovalService> logger) : IOutlineChangeApprovalService
+    ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
 {
     public async Task<IReadOnlyList<AiChangeBatch>> ListPendingBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await changes.ListPendingBatchesAsync(projectId, cancellationToken);
@@ -264,15 +265,38 @@ public sealed class OutlineChangeApprovalService(
             builder.AppendLine();
         }
 
-        var order = await conversations.GetMaxOrderAsync(batch.ConversationId, cancellationToken) + 1;
-        await conversations.AddMessageAsync(new OutlineMessage
+        var correction = builder.ToString().TrimEnd();
+        switch (batch.ConversationKind)
         {
-            ConversationId = batch.ConversationId,
-            Order = order,
-            Role = OutlineMessageRole.System,
-            Content = builder.ToString().TrimEnd(),
-            Status = OutlineMessageStatus.Completed,
-        }, cancellationToken);
+            case AiChangeConversationKind.Outline:
+            {
+                var order = await outlineConversations.GetMaxOrderAsync(batch.ConversationId, cancellationToken) + 1;
+                await outlineConversations.AddMessageAsync(new OutlineMessage
+                {
+                    ConversationId = batch.ConversationId,
+                    Order = order,
+                    Role = OutlineMessageRole.System,
+                    Content = correction,
+                    Status = OutlineMessageStatus.Completed,
+                }, cancellationToken);
+                break;
+            }
+            case AiChangeConversationKind.Editor:
+            {
+                var order = await editorConversations.GetMaxOrderAsync(batch.ConversationId, cancellationToken) + 1;
+                await editorConversations.AddMessageAsync(new EditorMessage
+                {
+                    ConversationId = batch.ConversationId,
+                    Order = order,
+                    Role = EditorMessageRole.System,
+                    Content = correction,
+                    Status = EditorMessageStatus.Completed,
+                }, cancellationToken);
+                break;
+            }
+            default:
+                throw new InvalidOperationException($"Unsupported AI change conversation kind '{batch.ConversationKind}'.");
+        }
     }
 
     private void UpdateBatchStatus(AiChangeBatch batch)
@@ -309,5 +333,4 @@ public sealed class OutlineChangeApprovalService(
         string.IsNullOrWhiteSpace(json) || json == "[]"
             ? []
             : JsonSerializer.Deserialize<List<Guid>>(json, JsonSerializerOptions.Default) ?? [];
-
 }

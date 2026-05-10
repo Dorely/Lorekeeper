@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
-using Lorekeeper.AiConsole;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
@@ -17,14 +16,14 @@ public sealed class OutlineCollaborationService(
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     OutlineCollaborationTools tools,
-    IOutlineChangeApprovalService changeApproval,
-    IOptions<AiConsoleOptions> options,
+    IAiChangeApprovalService changeApproval,
+    IOptions<AgentOptions> options,
     ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
 {
     /// <summary>
     /// System prompt that frames the assistant as a writing collaborator. Hardcoded by design:
     /// it is independent of the user's project-level <c>SystemPrompt</c> (which targets the
-    /// chapter-editing console). Kept terse to leave room in the context window for the
+    /// chapter editor chat). Kept terse to leave room in the context window for the
     /// growing conversation history.
     /// </summary>
     public static readonly string CollaborationSystemPrompt = $$"""

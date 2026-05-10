@@ -11,8 +11,9 @@ public class AiChangeBatch
     public Guid ProjectId { get; set; }
     public Project Project { get; set; } = null!;
 
+    public AiChangeConversationKind ConversationKind { get; set; } = AiChangeConversationKind.Outline;
+
     public Guid ConversationId { get; set; }
-    public OutlineConversation Conversation { get; set; } = null!;
 
     public Guid? AssistantMessageId { get; set; }
 
@@ -29,4 +30,10 @@ public enum AiChangeBatchStatus
 {
     Pending,
     Resolved,
+}
+
+public enum AiChangeConversationKind
+{
+    Outline,
+    Editor,
 }

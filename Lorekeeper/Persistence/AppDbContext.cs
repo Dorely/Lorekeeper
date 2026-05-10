@@ -19,9 +19,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<GraphNode> GraphNodes => Set<GraphNode>();
     public DbSet<GraphEdge> GraphEdges => Set<GraphEdge>();
     public DbSet<GraphEntityType> GraphEntityTypes => Set<GraphEntityType>();
-    public DbSet<AiConsoleEntry> AiConsoleEntries => Set<AiConsoleEntry>();
     public DbSet<OutlineConversation> OutlineConversations => Set<OutlineConversation>();
     public DbSet<OutlineMessage> OutlineMessages => Set<OutlineMessage>();
+    public DbSet<EditorConversation> EditorConversations => Set<EditorConversation>();
+    public DbSet<EditorMessage> EditorMessages => Set<EditorMessage>();
     public DbSet<WritingSample> WritingSamples => Set<WritingSample>();
     public DbSet<WritingCoachConversation> WritingCoachConversations => Set<WritingCoachConversation>();
     public DbSet<WritingCoachMessage> WritingCoachMessages => Set<WritingCoachMessage>();
@@ -113,17 +114,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
-        modelBuilder.Entity<AiConsoleEntry>(entity =>
-        {
-            entity.HasIndex(e => new { e.ProjectId, e.StartedAt });
-            entity.Property(e => e.Status).HasConversion<string>();
-
-            entity.HasOne(e => e.Project)
-                .WithMany(p => p.AiConsoleEntries)
-                .HasForeignKey(e => e.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
         modelBuilder.Entity<OutlineConversation>(entity =>
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
@@ -135,6 +125,28 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         });
 
         modelBuilder.Entity<OutlineMessage>(entity =>
+        {
+            entity.HasIndex(e => new { e.ConversationId, e.Order });
+            entity.Property(e => e.Role).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Conversation)
+                .WithMany(c => c.Messages)
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EditorConversation>(entity =>
+        {
+            entity.HasIndex(e => e.ProjectId).IsUnique();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.EditorConversations)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EditorMessage>(entity =>
         {
             entity.HasIndex(e => new { e.ConversationId, e.Order });
             entity.Property(e => e.Role).HasConversion<string>();
@@ -182,16 +194,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<AiChangeBatch>(entity =>
         {
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
+            entity.Property(e => e.ConversationKind).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.AiChangeBatches)
                 .HasForeignKey(e => e.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(e => e.Conversation)
-                .WithMany()
-                .HasForeignKey(e => e.ConversationId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

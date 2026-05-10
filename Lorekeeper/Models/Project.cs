@@ -43,9 +43,9 @@ public class Project
 
     public ICollection<Chapter> Chapters { get; set; } = [];
 
-    public ICollection<AiConsoleEntry> AiConsoleEntries { get; set; } = [];
-
     public ICollection<OutlineConversation> OutlineConversations { get; set; } = [];
+
+    public ICollection<EditorConversation> EditorConversations { get; set; } = [];
 
     public ICollection<WritingSample> WritingSamples { get; set; } = [];
 

@@ -1,0 +1,751 @@
+@using System.Text
+@using System.Text.Json
+@using Lorekeeper.Components.Pages.Projects.Outline
+@using Lorekeeper.EditorChat
+@using Lorekeeper.Models
+@using Lorekeeper.Tokens
+@implements IAsyncDisposable
+@inject IEditorChatService Chat
+@inject ITokenCounter TokenCounter
+@inject IJSRuntime JS
+
+<div class="editor-chat">
+    <div class="editor-chat-header">
+        <div class="editor-chat-heading">
+            <span class="editor-chat-title">Editor Chat</span>
+            <span class="editor-chat-token-count" title="@ConversationTokenTitle()">
+                @ConversationTokenText()
+            </span>
+        </div>
+        <div class="editor-chat-header-actions">
+            @if (PendingChangeCount > 0)
+            {
+                <button type="button" class="btn btn-link btn-sm editor-chat-review" @onclick="OpenPendingChanges">
+                    Review @PendingChangeCount
+                </button>
+            }
+            <button type="button" class="btn btn-link btn-sm editor-chat-reset" title="Start over"
+                    disabled="@(_running || PendingChangeCount > 0)" @onclick="ResetAsync">Reset</button>
+        </div>
+    </div>
+
+    <div class="editor-chat-scroll" @ref="_scrollEl">
+        @if (_loading)
+        {
+            <div class="editor-chat-empty"><em>Loading...</em></div>
+        }
+        else
+        {
+            @foreach (var message in _renderable)
+            {
+                @RenderMessage(message)
+            }
+            @if (_live is not null)
+            {
+                @RenderLive(_live)
+            }
+        }
+        <div class="editor-chat-bottom-sentinel" aria-hidden="true"></div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="editor-chat-error">
+            <span>@_error</span>
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _error = null"></button>
+        </div>
+    }
+
+    <div class="editor-chat-composer">
+        <textarea class="form-control editor-chat-input" rows="1" placeholder="Type a message..."
+                  @ref="_composerEl"
+                  disabled="@(_running || PendingChangeCount > 0)"
+                  @bind="_input" @bind:event="oninput"
+                  @onkeydown="OnKeyDown"></textarea>
+        <label class="editor-chat-approval" title="Queue AI tool edits for review before applying them">
+            <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
+                   disabled="@_running" @onchange="OnApprovalChangedAsync" />
+            <span>Review edits</span>
+        </label>
+        @if (_running)
+        {
+            <button type="button" class="btn btn-outline-danger" @onclick="CancelAsync">Stop</button>
+        }
+        else
+        {
+            <button type="button" class="btn btn-primary"
+                    disabled="@(string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)"
+                    @onclick="SendAsync">Send</button>
+        }
+    </div>
+</div>
+
+<PendingAiChangesModal ProjectId="@ProjectId"
+                       Batches="@_pendingBatches"
+                       IsOpen="@_showPendingChanges"
+                       OnClose="ClosePendingChanges"
+                       OnChanged="HandlePendingChangesChangedAsync" />
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public Guid? CurrentChapterId { get; set; }
+    [Parameter] public EventCallback OnAiTurnStarting { get; set; }
+    [Parameter] public EventCallback OnAiTurnCompleted { get; set; }
+    [Parameter] public EventCallback OnAiChangesApplied { get; set; }
+
+    private ElementReference _scrollEl;
+    private ElementReference _composerEl;
+    private IJSObjectReference? _scroller;
+    private bool _scrollerAttached;
+    private bool _autoSizeAttached;
+    private bool _resetComposerAfterRender;
+    private bool _scrollAfterRender;
+    private bool _forceScrollAfterRender;
+
+    private EditorConversation? _conversation;
+    private List<EditorMessage> _messages = [];
+    private List<RenderableMessage> _renderable = [];
+    private LiveTurn? _live;
+
+    private string _input = string.Empty;
+    private bool _running;
+    private bool _loading = true;
+    private bool _approvalEnabled = true;
+    private bool _showPendingChanges;
+    private string? _error;
+    private CancellationTokenSource? _cts;
+    private Guid? _loadedProjectId;
+    private List<AiChangeBatch> _pendingBatches = [];
+    private string? _pendingUserText;
+    private int _conversationTokenCount;
+    private bool _conversationTokenIsExact = true;
+
+    private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _scroller = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./Components/Pages/Projects/EditorChatPanel.razor.js");
+        }
+        if (_scroller is not null && !_scrollerAttached)
+        {
+            try { await _scroller.InvokeVoidAsync("attachScroller", _scrollEl); _scrollerAttached = true; }
+            catch { }
+        }
+        if (_scroller is not null && !_autoSizeAttached)
+        {
+            try { await _scroller.InvokeVoidAsync("attachAutoSize", _composerEl); _autoSizeAttached = true; }
+            catch { }
+        }
+        if (_scroller is not null && _resetComposerAfterRender)
+        {
+            _resetComposerAfterRender = false;
+            await ResetComposerSizeAsync();
+        }
+        if (_scroller is not null && _scrollAfterRender)
+        {
+            var force = _forceScrollAfterRender;
+            _scrollAfterRender = false;
+            _forceScrollAfterRender = false;
+            await ScrollToBottomAsync(force);
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ProjectId == Guid.Empty) return;
+        if (_loadedProjectId == ProjectId) return;
+
+        _loadedProjectId = ProjectId;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _conversation = await Chat.GetOrCreateAsync(ProjectId);
+            _messages = (await Chat.LoadMessagesAsync(_conversation.Id)).ToList();
+            _approvalEnabled = await Chat.GetAiChangeApprovalEnabledAsync(ProjectId);
+            await LoadPendingChangesAsync(openIfPending: false);
+            RebuildRenderable();
+            _pendingUserText = null;
+            _live = null;
+            UpdateConversationTokenCount();
+        }
+        finally
+        {
+            _loading = false;
+        }
+        RequestScroll(force: true);
+    }
+
+    private async Task SendAsync()
+    {
+        var text = _input?.Trim();
+        if (_running || string.IsNullOrEmpty(text)) return;
+        if (PendingChangeCount > 0)
+        {
+            _showPendingChanges = true;
+            return;
+        }
+
+        _input = string.Empty;
+        _running = true;
+        _error = null;
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        _resetComposerAfterRender = true;
+
+        _renderable.Add(new RenderableMessage(
+            Id: Guid.NewGuid(),
+            Role: EditorMessageRole.User,
+            Status: EditorMessageStatus.Completed,
+            Parts: [new TextPart(text)]));
+        _live = new LiveTurn();
+        _pendingUserText = text;
+        UpdateConversationTokenCount();
+        await ResumeAutoFollowAsync();
+        RequestScroll(force: true);
+        StateHasChanged();
+
+        if (OnAiTurnStarting.HasDelegate)
+            await OnAiTurnStarting.InvokeAsync();
+
+        try
+        {
+            await foreach (var update in Chat.SendAsync(ProjectId, CurrentChapterId, text, _cts.Token))
+            {
+                switch (update)
+                {
+                    case EditorChatTextDelta delta:
+                        _live!.AppendText(delta.Text);
+                        UpdateConversationTokenCount();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+
+                    case EditorChatToolCallStarted started:
+                        _live!.AddToolCall(started.CallId, started.ToolName, started.ArgumentsJson);
+                        UpdateConversationTokenCount();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+
+                    case EditorChatToolCallCompleted completed:
+                        _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error);
+                        UpdateConversationTokenCount();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+
+                    case EditorChatMutated:
+                        if (OnAiChangesApplied.HasDelegate)
+                            await OnAiChangesApplied.InvokeAsync();
+                        break;
+
+                    case EditorChatPendingAiChangeCreated:
+                        await LoadPendingChangesAsync(openIfPending: true);
+                        StateHasChanged();
+                        break;
+
+                    case EditorChatAssistantMessageCompleted:
+                        await ReloadFromDbAsync();
+                        await LoadPendingChangesAsync(openIfPending: true);
+                        _live = null;
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+
+                    case EditorChatTurnError error:
+                        _error = error.Cancelled ? null : error.Message;
+                        await ReloadFromDbAsync();
+                        await LoadPendingChangesAsync(openIfPending: false);
+                        _live = null;
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _running = false;
+            _live = null;
+            UpdateConversationTokenCount();
+            _cts?.Dispose();
+            _cts = null;
+            if (OnAiTurnCompleted.HasDelegate)
+                await OnAiTurnCompleted.InvokeAsync();
+            RequestScroll();
+            StateHasChanged();
+        }
+    }
+
+    private void CancelAsync() => _cts?.Cancel();
+
+    private async Task ResetAsync()
+    {
+        if (_running) return;
+        await Chat.ResetAsync(ProjectId);
+        _loadedProjectId = null;
+        await LoadAsync();
+    }
+
+    private async Task ReloadFromDbAsync()
+    {
+        if (_conversation is null) return;
+        _messages = (await Chat.LoadMessagesAsync(_conversation.Id)).ToList();
+        RebuildRenderable();
+        _pendingUserText = null;
+        _live = null;
+        UpdateConversationTokenCount();
+    }
+
+    private async Task LoadPendingChangesAsync(bool openIfPending)
+    {
+        _pendingBatches = (await Chat.ListPendingChangesAsync(ProjectId)).ToList();
+        if (openIfPending && PendingChangeCount > 0)
+            _showPendingChanges = true;
+        if (PendingChangeCount == 0)
+            _showPendingChanges = false;
+    }
+
+    private async Task OnApprovalChangedAsync(ChangeEventArgs args)
+    {
+        var enabled = args.Value is bool boolValue
+            ? boolValue
+            : bool.TryParse(args.Value?.ToString(), out var parsed) && parsed;
+        _approvalEnabled = enabled;
+        await Chat.SetAiChangeApprovalEnabledAsync(ProjectId, enabled);
+    }
+
+    private void OpenPendingChanges() => _showPendingChanges = true;
+
+    private void ClosePendingChanges() => _showPendingChanges = false;
+
+    private async Task HandlePendingChangesChangedAsync()
+    {
+        await LoadPendingChangesAsync(openIfPending: false);
+        await ReloadFromDbAsync();
+        if (OnAiChangesApplied.HasDelegate)
+            await OnAiChangesApplied.InvokeAsync();
+        StateHasChanged();
+    }
+
+    private void RebuildRenderable()
+    {
+        var byCallId = _messages
+            .Where(message => message.Role == EditorMessageRole.Tool && message.ToolCallId is not null)
+            .ToDictionary(message => message.ToolCallId!, message => message);
+
+        _renderable = new List<RenderableMessage>(_messages.Count);
+        foreach (var message in _messages)
+        {
+            if (message.Role is EditorMessageRole.Tool or EditorMessageRole.System) continue;
+
+            _renderable.Add(new RenderableMessage(
+                Id: message.Id,
+                Role: message.Role,
+                Status: message.Status,
+                Parts: BuildMessageParts(message, byCallId)));
+        }
+    }
+
+    private void UpdateConversationTokenCount()
+    {
+        var result = TokenCounter.Count(BuildConversationTokenText());
+        _conversationTokenCount = result.TokenCount;
+        _conversationTokenIsExact = result.IsExact;
+    }
+
+    private string BuildConversationTokenText()
+    {
+        var sb = new StringBuilder();
+        foreach (var message in _messages)
+            AppendMessageForTokenCount(sb, message);
+
+        if (!string.IsNullOrWhiteSpace(_pendingUserText))
+        {
+            sb.AppendLine("User:");
+            sb.AppendLine(_pendingUserText);
+        }
+
+        AppendLiveTurnForTokenCount(sb, _live);
+        return sb.ToString();
+    }
+
+    private static void AppendMessageForTokenCount(StringBuilder sb, EditorMessage message)
+    {
+        sb.Append(message.Role).AppendLine(":");
+        if (!string.IsNullOrEmpty(message.Content))
+            sb.AppendLine(message.Content);
+        if (!string.IsNullOrWhiteSpace(message.ToolCallsJson) && message.ToolCallsJson != "[]")
+        {
+            sb.AppendLine("Tool calls:");
+            sb.AppendLine(message.ToolCallsJson);
+        }
+        if (!string.IsNullOrWhiteSpace(message.ToolName) || !string.IsNullOrWhiteSpace(message.ToolCallId))
+            sb.Append("Tool: ").Append(message.ToolName).Append(' ').AppendLine(message.ToolCallId);
+        if (!string.IsNullOrWhiteSpace(message.ErrorMessage))
+            sb.Append("Error: ").AppendLine(message.ErrorMessage);
+    }
+
+    private static void AppendLiveTurnForTokenCount(StringBuilder sb, LiveTurn? live)
+    {
+        if (live is null) return;
+
+        foreach (var message in live.Messages)
+        {
+            foreach (var part in message.Parts)
+            {
+                if (part is TextPart textPart)
+                {
+                    var text = textPart.Text.ToString();
+                    if (!string.IsNullOrEmpty(text))
+                        sb.AppendLine(text);
+                }
+                else if (part is ToolPart toolPart)
+                {
+                    AppendToolChipForTokenCount(sb, toolPart.Chip);
+                }
+            }
+        }
+    }
+
+    private static void AppendToolChipForTokenCount(StringBuilder sb, ToolChip chip)
+    {
+        sb.Append("Tool: ").Append(chip.Name).Append(' ').AppendLine(chip.CallId);
+        if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
+            sb.Append("Args: ").AppendLine(chip.ArgumentsJson);
+        if (!string.IsNullOrWhiteSpace(chip.Result))
+            sb.Append("Result: ").AppendLine(chip.Result);
+        if (!string.IsNullOrWhiteSpace(chip.Error))
+            sb.Append("Error: ").AppendLine(chip.Error);
+    }
+
+    private string ConversationTokenText() =>
+        $"{TokenPrefix(_conversationTokenIsExact)}{_conversationTokenCount:N0} chat tokens";
+
+    private string ConversationTokenTitle() => _conversationTokenIsExact
+        ? "Current chat transcript token count"
+        : "Current chat transcript token count is estimated";
+
+    private static string TokenPrefix(bool isExact) => isExact ? string.Empty : "~";
+
+    private static List<MessagePart> BuildMessageParts(EditorMessage message, IReadOnlyDictionary<string, EditorMessage> byCallId)
+    {
+        if (message.Role != EditorMessageRole.Assistant)
+            return string.IsNullOrEmpty(message.Content) ? [] : [new TextPart(message.Content)];
+
+        var calls = ReadPersistedCalls(message.ToolCallsJson);
+        if (calls.Count == 0)
+            return string.IsNullOrEmpty(message.Content) ? [] : [new TextPart(message.Content)];
+
+        var parts = new List<MessagePart>();
+        if (calls.All(call => call.TextOffset is not null))
+        {
+            var cursor = 0;
+            foreach (var item in calls
+                .Select((call, index) => new { Call = call, Index = index })
+                .OrderBy(item => item.Call.TextOffset!.Value)
+                .ThenBy(item => item.Index))
+            {
+                var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, message.Content.Length);
+                if (offset > cursor)
+                {
+                    parts.Add(new TextPart(message.Content[cursor..offset]));
+                    cursor = offset;
+                }
+                parts.Add(new ToolPart(BuildToolChip(item.Call, byCallId)));
+            }
+            if (cursor < message.Content.Length)
+                parts.Add(new TextPart(message.Content[cursor..]));
+
+            return parts;
+        }
+
+        if (!string.IsNullOrEmpty(message.Content))
+            parts.Add(new TextPart(message.Content));
+        foreach (var call in calls)
+            parts.Add(new ToolPart(BuildToolChip(call, byCallId)));
+        return parts;
+    }
+
+    private static ToolChip BuildToolChip(PersistedCall call, IReadOnlyDictionary<string, EditorMessage> byCallId)
+    {
+        byCallId.TryGetValue(call.CallId, out var resultMessage);
+        return new ToolChip
+        {
+            CallId = call.CallId,
+            Name = call.Name,
+            ArgumentsJson = call.ArgumentsJson,
+            Result = resultMessage?.Status == EditorMessageStatus.Completed ? resultMessage.Content : null,
+            Error = resultMessage?.Status == EditorMessageStatus.Failed ? (resultMessage.ErrorMessage ?? resultMessage.Content) : null,
+            Completed = resultMessage is not null,
+        };
+    }
+
+    private static List<PersistedCall> ReadPersistedCalls(string toolCallsJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolCallsJson) || toolCallsJson == "[]") return [];
+        try { return JsonSerializer.Deserialize<List<PersistedCall>>(toolCallsJson) ?? []; }
+        catch { return []; }
+    }
+
+    private RenderFragment RenderChip(ToolChip chip) => __builder =>
+    {
+        var stateClass = chip.Error is not null
+            ? "editor-chat-chip-error"
+            : (chip.Completed ? "editor-chat-chip-ok" : "editor-chat-chip-pending");
+        <details class="editor-chat-chip @stateClass">
+            <summary>
+                <span class="editor-chat-chip-icon">@(chip.Error is not null ? "x" : (chip.Completed ? "ok" : "..."))</span>
+                <span class="editor-chat-chip-name">@chip.Name</span>
+                @if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
+                {
+                    <span class="editor-chat-chip-args">@TruncateInline(chip.ArgumentsJson, 80)</span>
+                }
+            </summary>
+            <div class="editor-chat-chip-body">
+                @if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
+                {
+                    <div class="editor-chat-chip-section">args</div>
+                    <pre class="editor-chat-chip-pre">@chip.ArgumentsJson</pre>
+                }
+                @if (chip.Error is not null)
+                {
+                    <div class="editor-chat-chip-section">error</div>
+                    <pre class="editor-chat-chip-pre editor-chat-chip-pre-error">@chip.Error</pre>
+                }
+                else if (chip.Result is not null)
+                {
+                    <div class="editor-chat-chip-section">result</div>
+                    <pre class="editor-chat-chip-pre">@chip.Result</pre>
+                }
+                else
+                {
+                    <div class="editor-chat-chip-section text-muted"><em>running...</em></div>
+                }
+            </div>
+        </details>
+    };
+
+    private static string TruncateInline(string value, int max)
+    {
+        value = value.Replace('\n', ' ').Replace('\r', ' ');
+        return value.Length <= max ? value : value[..max] + "...";
+    }
+
+    private RenderFragment RenderMessage(RenderableMessage message) => __builder =>
+    {
+        var bubbleClass = message.Role == EditorMessageRole.User ? "editor-chat-msg editor-chat-msg-user" : "editor-chat-msg editor-chat-msg-asst";
+        <div class="@bubbleClass">
+            @foreach (var part in message.Parts)
+            {
+                @RenderPart(part)
+            }
+            @if (message.Status == EditorMessageStatus.Failed)
+            {
+                <div class="editor-chat-msg-status editor-chat-msg-failed">Failed</div>
+            }
+            else if (message.Status == EditorMessageStatus.Cancelled)
+            {
+                <div class="editor-chat-msg-status editor-chat-msg-cancelled">Cancelled</div>
+            }
+        </div>
+    };
+
+    private RenderFragment RenderLive(LiveTurn live) => __builder =>
+    {
+        if (!live.HasContent)
+        {
+            <div class="editor-chat-msg editor-chat-msg-asst editor-chat-msg-streaming">
+                <span class="editor-chat-typing"><span></span><span></span><span></span></span>
+            </div>
+            return;
+        }
+
+        var visibleMessages = live.Messages.Where(message => message.Parts.Count > 0).ToList();
+        var lastVisibleMessage = visibleMessages.LastOrDefault();
+        @foreach (var liveMessage in visibleMessages)
+        {
+            var trailingText = ReferenceEquals(liveMessage, lastVisibleMessage)
+                ? liveMessage.Parts.LastOrDefault() as TextPart
+                : null;
+            <div class="editor-chat-msg editor-chat-msg-asst editor-chat-msg-streaming">
+                @foreach (var part in liveMessage.Parts)
+                {
+                    @RenderPart(part, ReferenceEquals(part, trailingText))
+                }
+            </div>
+        }
+    };
+
+    private RenderFragment RenderPart(MessagePart part, bool showCursor = false) => __builder =>
+    {
+        if (part is TextPart textPart)
+        {
+            var text = textPart.Text.ToString();
+            if (!string.IsNullOrEmpty(text))
+            {
+                <div class="editor-chat-msg-text">@text@if (showCursor) { <span class="editor-chat-cursor">|</span> }</div>
+            }
+        }
+        else if (part is ToolPart toolPart)
+        {
+            @RenderChip(toolPart.Chip)
+        }
+    };
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+            await SendAsync();
+    }
+
+    private void RequestScroll(bool force = false)
+    {
+        _scrollAfterRender = true;
+        _forceScrollAfterRender = _forceScrollAfterRender || force;
+    }
+
+    private async Task ResumeAutoFollowAsync()
+    {
+        if (_scroller is null) return;
+        try { await _scroller.InvokeVoidAsync("resumeAutoFollow", _scrollEl); }
+        catch { }
+    }
+
+    private async Task ScrollToBottomAsync(bool force = false)
+    {
+        if (_scroller is null) return;
+        try { await _scroller.InvokeVoidAsync("scrollToBottom", _scrollEl, force); }
+        catch { }
+    }
+
+    private async Task ResetComposerSizeAsync()
+    {
+        if (_scroller is null) return;
+        try { await _scroller.InvokeVoidAsync("resetAutoSize", _composerEl); }
+        catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        if (_scroller is not null)
+        {
+            try { await _scroller.DisposeAsync(); } catch { }
+        }
+    }
+
+    private sealed record RenderableMessage(
+        Guid Id,
+        EditorMessageRole Role,
+        EditorMessageStatus Status,
+        List<MessagePart> Parts);
+
+    private abstract class MessagePart;
+
+    private sealed class TextPart : MessagePart
+    {
+        public TextPart(string text) => Text.Append(text);
+
+        public StringBuilder Text { get; } = new();
+
+        public void Append(string text) => Text.Append(text);
+    }
+
+    private sealed class ToolPart(ToolChip chip) : MessagePart
+    {
+        public ToolChip Chip { get; } = chip;
+    }
+
+    private sealed class ToolChip
+    {
+        public required string CallId { get; init; }
+        public required string Name { get; init; }
+        public required string ArgumentsJson { get; init; }
+        public string? Result { get; set; }
+        public string? Error { get; set; }
+        public bool Completed { get; set; }
+    }
+
+    private sealed class LiveTurn
+    {
+        private bool _startNewMessageOnNextPart;
+
+        public List<LiveMessage> Messages { get; } = [];
+
+        public bool HasContent => Messages.Any(message => message.Parts.Count > 0);
+
+        public void AppendText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            CurrentMessage().AppendText(text);
+        }
+
+        public void AddToolCall(string callId, string name, string argumentsJson)
+        {
+            CurrentMessage().Parts.Add(new ToolPart(new ToolChip
+            {
+                CallId = callId,
+                Name = name,
+                ArgumentsJson = argumentsJson,
+            }));
+        }
+
+        public void CompleteToolCall(string callId, string? result, string? error)
+        {
+            var chip = Messages
+                .SelectMany(message => message.Parts)
+                .OfType<ToolPart>()
+                .Select(part => part.Chip)
+                .FirstOrDefault(candidate => candidate.CallId == callId);
+            if (chip is not null)
+            {
+                chip.Result = result;
+                chip.Error = error;
+                chip.Completed = true;
+            }
+            _startNewMessageOnNextPart = true;
+        }
+
+        private LiveMessage CurrentMessage()
+        {
+            if (_startNewMessageOnNextPart || Messages.Count == 0)
+            {
+                var message = new LiveMessage();
+                Messages.Add(message);
+                _startNewMessageOnNextPart = false;
+                return message;
+            }
+
+            return Messages[^1];
+        }
+    }
+
+    private sealed class LiveMessage
+    {
+        public List<MessagePart> Parts { get; } = [];
+
+        public void AppendText(string text)
+        {
+            if (Parts.LastOrDefault() is TextPart textPart)
+                textPart.Append(text);
+            else
+                Parts.Add(new TextPart(text));
+        }
+    }
+
+    private sealed record PersistedCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
+}

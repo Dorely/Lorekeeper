@@ -629,6 +629,7 @@ public sealed class OutlineToolStagingContext(
         _batch = new AiChangeBatch
         {
             ProjectId = ProjectId,
+            ConversationKind = AiChangeConversationKind.Outline,
             ConversationId = ConversationId,
             AssistantMessageId = _currentAssistantMessageId,
         };

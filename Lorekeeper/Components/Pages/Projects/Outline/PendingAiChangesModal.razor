@@ -1,7 +1,7 @@
 @using System.Text.Json
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
-@inject IOutlineCollaborationService Collab
+@inject IAiChangeApprovalService ChangeApproval
 
 @if (IsOpen)
 {
@@ -322,14 +322,14 @@
     {
         var batchId = SelectedGroup?.PrimaryBatch.Id;
         if (batchId is null) return;
-        await RunAsync(() => Collab.ApplyAiChangeBatchAsync(batchId.Value));
+        await RunAsync(() => ChangeApproval.ApplyBatchAsync(batchId.Value));
     }
 
     private async Task RejectSelectedBatchAsync()
     {
         var batchId = SelectedGroup?.PrimaryBatch.Id;
         if (batchId is null) return;
-        await RunAsync(() => Collab.RejectAiChangeBatchAsync(batchId.Value, _rejectionMessage));
+        await RunAsync(() => ChangeApproval.RejectBatchAsync(batchId.Value, _rejectionMessage));
     }
 
     private async Task ApplyGroupAsync(string groupKey) =>
@@ -339,7 +339,7 @@
             if (group is null) return;
 
             foreach (var change in group.Changes.Where(change => change.Status == AiChangeStatus.Pending))
-                await Collab.ApplyAiChangeAsync(change.Id);
+                await ChangeApproval.ApplyChangeAsync(change.Id);
         });
 
     private async Task RejectGroupAsync(string groupKey) =>
@@ -349,7 +349,7 @@
             if (group is null) return;
 
             foreach (var change in group.Changes.Where(change => change.Status == AiChangeStatus.Pending))
-                await Collab.RejectAiChangeAsync(change.Id, _rejectionMessage);
+                await ChangeApproval.RejectChangeAsync(change.Id, _rejectionMessage);
         });
 
     private async Task RunAsync(Func<Task> action)

@@ -2,51 +2,35 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Chapters;
+using Lorekeeper.Context;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
-namespace Lorekeeper.Writing;
+namespace Lorekeeper.EditorChat;
 
-public sealed class WritingCoachService(
+public sealed class EditorChatService(
     IProjectRepository projects,
-    IWritingCoachConversationRepository conversations,
+    IChapterService chapters,
+    IEditorConversationRepository conversations,
+    IContextBuilder contextBuilder,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
-    WritingCoachTools tools,
+    EditorChatTools tools,
+    OutlineCollaborationTools outlineTools,
+    IAiChangeApprovalService changeApproval,
+    IAiChangeRepository changes,
     IOptions<AgentOptions> options,
-    ILogger<WritingCoachService> logger) : IWritingCoachService
+    ILogger<EditorChatService> logger) : IEditorChatService
 {
-    public const string CoachSystemPrompt = """
-        You are a Writing Coach for a long-form fiction project. Your job is to help
-        the writer produce writing samples in their own style and words so future AI
-        drafting can better imitate their voice.
-
-        How to work:
-        - You are a partner, not an oracle. Ask questions, propose options, and
-          surface craft trade-offs. Do not take over the prose.
-        - At the beginning of every user turn, call read_current_section before you
-          answer. Treat its result as the latest current draft. Do not ask the user to
-          paste the current section unless the tool result says it is unavailable.
-        - Call list_project_facts when project-level context would change your advice,
-          especially for premise, tone, setting, character, canon, style constraints,
-          or other established truths.
-        - Your tools are read-only. You cannot edit, save, rename, delete, or otherwise
-          change stored samples or project facts from this chat.
-        - Do not claim you changed the draft or stored anything.
-        - Avoid taking over the prose. When the user asks for examples, keep them short
-          and frame them as options the writer can adapt.
-        - Keep replies concise and practical. Prefer one next step over a broad lecture.
-        - Pay attention to sentence rhythm, diction, point of view, imagery, pacing,
-          and emotional texture. Help the writer make those choices intentional.
-        """;
-
     private const string InitialAssistantGreeting =
-        "Let's shape a writing sample in your own voice. What kind of scene, moment, or mood do you want to practice first?";
+        "I'm ready to work on the draft with you. Tell me what you want to shape, revise, or check in the current chapter.";
 
-    public async Task<WritingCoachConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
+    public async Task<EditorConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is not null) return existing;
@@ -54,54 +38,79 @@ public sealed class WritingCoachService(
         _ = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
-        var conversation = new WritingCoachConversation { ProjectId = projectId };
+        var conversation = new EditorConversation { ProjectId = projectId };
         await conversations.AddConversationAsync(conversation, cancellationToken);
 
-        var greeting = new WritingCoachMessage
+        await conversations.AddMessageAsync(new EditorMessage
         {
             ConversationId = conversation.Id,
             Order = 0,
-            Role = WritingCoachMessageRole.Assistant,
+            Role = EditorMessageRole.Assistant,
             Content = InitialAssistantGreeting,
-            Status = WritingCoachMessageStatus.Completed,
-        };
-        await conversations.AddMessageAsync(greeting, cancellationToken);
+            Status = EditorMessageStatus.Completed,
+        }, cancellationToken);
         await conversations.SaveChangesAsync(cancellationToken);
         return conversation;
     }
 
-    public async Task<IReadOnlyList<WritingCoachMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
+    public async Task<IReadOnlyList<EditorMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
         await conversations.LoadMessagesAsync(conversationId, cancellationToken);
+
+    public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+        return project.AiChangeApprovalEnabled;
+    }
+
+    public async Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default)
+    {
+        var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+        if (project.AiChangeApprovalEnabled == enabled) return;
+        project.AiChangeApprovalEnabled = enabled;
+        project.UpdatedAt = DateTime.UtcNow;
+        projects.Update(project);
+        await projects.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
-
         conversations.RemoveConversation(existing);
         await conversations.SaveChangesAsync(cancellationToken);
     }
 
-    public async IAsyncEnumerable<WritingCoachTurnUpdate> SendAsync(
+    public async IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(
         Guid projectId,
+        Guid? currentChapterId,
         string userText,
-        string? currentSampleTitle,
-        string? currentSampleBody,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
             throw new ArgumentException("Message cannot be empty.", nameof(userText));
 
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
-        var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
 
-        var userMessage = new WritingCoachMessage
+        var unresolvedChanges = await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
+        if (unresolvedChanges.Count > 0)
+        {
+            yield return new EditorChatTurnError("Review the pending AI changes before sending another editor chat message.", Cancelled: false);
+            yield break;
+        }
+
+        var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
+        var userMessage = new EditorMessage
         {
             ConversationId = conversation.Id,
             Order = nextOrder++,
-            Role = WritingCoachMessageRole.User,
+            Role = EditorMessageRole.User,
             Content = userText.Trim(),
-            Status = WritingCoachMessageStatus.Completed,
+            Status = EditorMessageStatus.Completed,
         };
         await conversations.AddMessageAsync(userMessage, cancellationToken);
         conversation.UpdatedAt = DateTime.UtcNow;
@@ -109,26 +118,54 @@ public sealed class WritingCoachService(
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
+        EditorChatContext editorContext = null!;
+        string systemPrompt = string.Empty;
         string? setupError = null;
         try
         {
             var project = await projects.GetByIdAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
+
+            Chapter? currentChapter = null;
+            if (currentChapterId is { } chapterId)
+            {
+                currentChapter = await chapters.GetAsync(chapterId, cancellationToken);
+                if (currentChapter is null || currentChapter.ProjectId != projectId)
+                    throw new InvalidOperationException($"Chapter {chapterId} not found in this project.");
+            }
+
+            var assembly = await contextBuilder.BuildAsync(project, currentChapter, cancellationToken);
+            systemPrompt = assembly.Assemble();
+
             var defaultProvider = await providerService.GetDefaultAsync(cancellationToken)
                 ?? throw new InvalidOperationException("No default LLM provider configured.");
             chat = await chatClientFactory.CreateChatClientAsync(defaultProvider.Id, cancellationToken);
-            aiTools = tools.Build(new WritingCoachContext(project.Id, currentSampleTitle, currentSampleBody));
+
+            OutlineToolStagingContext? outlineStaging = null;
+            EditorChatChangeStagingContext? editorStaging = null;
+            if (project.AiChangeApprovalEnabled)
+            {
+                outlineStaging = outlineTools.CreateStagingContext(projectId, conversation.Id);
+                editorStaging = new EditorChatChangeStagingContext(projectId, conversation.Id, changes);
+            }
+
+            editorContext = new EditorChatContext(
+                projectId,
+                currentChapterId,
+                OnToolMutated,
+                project.AiChangeApprovalEnabled,
+                outlineStaging,
+                editorStaging);
+            aiTools = tools.Build(editorContext);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Writing Coach turn setup failed for project {ProjectId}", projectId);
-            await PersistFailedAssistantAsync(conversation.Id, nextOrder, ex.Message);
+            logger.LogError(ex, "Editor chat turn setup failed for project {ProjectId}", projectId);
             setupError = ex.Message;
         }
-
         if (setupError is not null)
         {
-            yield return new WritingCoachTurnError(setupError, Cancelled: false);
+            yield return new EditorChatTurnError(setupError, Cancelled: false);
             yield break;
         }
 
@@ -139,19 +176,19 @@ public sealed class WritingCoachService(
         };
 
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
-        var messages = new List<ChatMessage> { new(ChatRole.System, CoachSystemPrompt) };
+        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         messages.AddRange(history.Select(ToChatMessage));
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
         {
-            var activeAssistant = new WritingCoachMessage
+            var activeAssistant = new EditorMessage
             {
                 ConversationId = conversation.Id,
                 Order = nextOrder++,
-                Role = WritingCoachMessageRole.Assistant,
+                Role = EditorMessageRole.Assistant,
                 Content = string.Empty,
-                Status = WritingCoachMessageStatus.Pending,
+                Status = EditorMessageStatus.Pending,
             };
             await conversations.AddMessageAsync(activeAssistant, cancellationToken);
             await conversations.SaveChangesAsync(cancellationToken);
@@ -180,7 +217,7 @@ public sealed class WritingCoachService(
                     }
                     catch (Exception ex)
                     {
-                        logger.LogError(ex, "Writing Coach streaming round failed");
+                        logger.LogError(ex, "Editor chat streaming round failed");
                         streamFailed = true;
                         streamError = ex.Message;
                         break;
@@ -188,12 +225,13 @@ public sealed class WritingCoachService(
 
                     if (!hasNext) break;
 
-                    foreach (var content in enumerator.Current.Contents)
+                    var update = enumerator.Current;
+                    foreach (var content in update.Contents)
                     {
                         if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
                         {
                             textBuilder.Append(textContent.Text);
-                            yield return new WritingCoachTextDelta(textContent.Text);
+                            yield return new EditorChatTextDelta(textContent.Text);
                         }
                         else if (content is FunctionCallContent functionCall)
                         {
@@ -201,14 +239,13 @@ public sealed class WritingCoachService(
                             var argumentsJson = functionCall.Arguments is null
                                 ? "{}"
                                 : JsonSerializer.Serialize(functionCall.Arguments);
-                            var pendingCall = new PendingToolCall(
+                            pendingCalls.Add(new PendingToolCall(
                                 functionCall,
                                 callId,
                                 functionCall.Name,
                                 argumentsJson,
-                                textBuilder.Length);
-                            pendingCalls.Add(pendingCall);
-                            yield return new WritingCoachToolCallStarted(callId, functionCall.Name, argumentsJson);
+                                textBuilder.Length));
+                            yield return new EditorChatToolCallStarted(callId, functionCall.Name, argumentsJson);
                         }
                     }
                 }
@@ -218,34 +255,36 @@ public sealed class WritingCoachService(
                 await enumerator.DisposeAsync();
             }
 
+            DrainMutated();
+
             if (cancelled)
             {
                 activeAssistant.Content = textBuilder.ToString();
-                activeAssistant.Status = WritingCoachMessageStatus.Cancelled;
+                activeAssistant.Status = EditorMessageStatus.Cancelled;
                 activeAssistant.ErrorMessage = "Cancelled by user.";
                 await SafePersistAsync(activeAssistant);
-                yield return new WritingCoachTurnError("Cancelled.", Cancelled: true);
+                yield return new EditorChatTurnError("Cancelled.", Cancelled: true);
                 yield break;
             }
 
             if (streamFailed)
             {
                 activeAssistant.Content = textBuilder.ToString();
-                activeAssistant.Status = WritingCoachMessageStatus.Failed;
+                activeAssistant.Status = EditorMessageStatus.Failed;
                 activeAssistant.ErrorMessage = streamError;
                 await SafePersistAsync(activeAssistant);
-                yield return new WritingCoachTurnError(streamError ?? "Writing Coach streaming failed.", Cancelled: false);
+                yield return new EditorChatTurnError(streamError ?? "LLM streaming failed.", Cancelled: false);
                 yield break;
             }
 
             if (pendingCalls.Count == 0)
             {
                 activeAssistant.Content = textBuilder.ToString();
-                activeAssistant.Status = WritingCoachMessageStatus.Completed;
+                activeAssistant.Status = EditorMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
                 conversation.UpdatedAt = DateTime.UtcNow;
                 await conversations.SaveChangesAsync(CancellationToken.None);
-                yield return new WritingCoachAssistantMessageCompleted(activeAssistant.Id);
+                yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
                 yield break;
             }
 
@@ -258,7 +297,7 @@ public sealed class WritingCoachService(
                 .ToList();
             activeAssistant.Content = textBuilder.ToString();
             activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
-            activeAssistant.Status = WritingCoachMessageStatus.Completed;
+            activeAssistant.Status = EditorMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
 
             messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantContents(textBuilder.ToString(), manifest)));
@@ -268,20 +307,22 @@ public sealed class WritingCoachService(
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    yield return new WritingCoachTurnError("Cancelled.", Cancelled: true);
+                    yield return new EditorChatTurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
 
-                var sw = Stopwatch.StartNew();
+                editorContext.BeginToolCall(activeAssistant.Id, pendingCall.CallId, pendingCall.Name, pendingCall.ArgumentsJson);
+
+                var stopwatch = Stopwatch.StartNew();
                 string? toolResult = null;
                 string? toolError = null;
                 var toolCancelled = false;
                 try
                 {
-                    var aiFn = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name)
+                    var aiFunction = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name)
                         ?? throw new InvalidOperationException($"Unknown tool '{pendingCall.Name}'.");
                     var argsDict = pendingCall.Content.Arguments ?? new Dictionary<string, object?>();
-                    var invokeResult = await aiFn.InvokeAsync(new AIFunctionArguments(argsDict), cancellationToken);
+                    var invokeResult = await aiFunction.InvokeAsync(new AIFunctionArguments(argsDict), cancellationToken);
                     toolResult = invokeResult?.ToString() ?? string.Empty;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -290,63 +331,100 @@ public sealed class WritingCoachService(
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "Writing Coach tool '{Tool}' failed", pendingCall.Name);
+                    logger.LogWarning(ex, "Editor chat tool '{Tool}' failed", pendingCall.Name);
                     toolError = ex.Message;
                     toolResult = $"Error: {ex.Message}";
                 }
-                sw.Stop();
+                stopwatch.Stop();
 
                 if (toolCancelled)
                 {
-                    yield return new WritingCoachTurnError("Cancelled.", Cancelled: true);
+                    yield return new EditorChatTurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
 
-                var toolMessage = new WritingCoachMessage
+                var toolMessage = new EditorMessage
                 {
                     ConversationId = conversation.Id,
                     Order = nextOrder++,
-                    Role = WritingCoachMessageRole.Tool,
+                    Role = EditorMessageRole.Tool,
                     Content = toolResult ?? string.Empty,
                     ToolCallId = pendingCall.CallId,
                     ToolName = pendingCall.Name,
-                    Status = toolError is null ? WritingCoachMessageStatus.Completed : WritingCoachMessageStatus.Failed,
+                    Status = toolError is null ? EditorMessageStatus.Completed : EditorMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
                 await conversations.AddMessageAsync(toolMessage, CancellationToken.None);
                 await conversations.SaveChangesAsync(CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
-                yield return new WritingCoachToolCallCompleted(
-                    pendingCall.CallId,
-                    pendingCall.Name,
-                    toolError is null ? toolResult : null,
-                    toolError,
-                    sw.Elapsed.TotalMilliseconds);
+                foreach (var pendingChange in editorContext.OutlineStaging?.DrainNewChanges() ?? [])
+                {
+                    yield return new EditorChatPendingAiChangeCreated(
+                        pendingChange.BatchId,
+                        pendingChange.Id,
+                        pendingChange.ToolCallId,
+                        pendingChange.ToolName,
+                        pendingChange.Summary);
+                }
+                foreach (var pendingChange in editorContext.EditorStaging?.DrainNewChanges() ?? [])
+                {
+                    yield return new EditorChatPendingAiChangeCreated(
+                        pendingChange.BatchId,
+                        pendingChange.Id,
+                        pendingChange.ToolCallId,
+                        pendingChange.ToolName,
+                        pendingChange.Summary);
+                }
+
+                yield return new EditorChatToolCallCompleted(pendingCall.CallId, pendingCall.Name, toolError is null ? toolResult : null, toolError, stopwatch.Elapsed.TotalMilliseconds);
+
+                if (DrainMutated())
+                    yield return new EditorChatMutated();
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
 
             if (iteration == maxIterations - 1)
             {
-                yield return new WritingCoachTurnError(
-                    $"Writing Coach tool-call loop hit cap of {maxIterations} iterations without producing a final response.",
-                    Cancelled: false);
+                yield return new EditorChatTurnError($"Tool-call loop hit cap of {maxIterations} iterations without producing a final response.", Cancelled: false);
                 yield break;
             }
         }
     }
 
-    private static ChatMessage ToChatMessage(WritingCoachMessage message) => message.Role switch
+    private bool _mutatedSinceYield;
+    private void OnToolMutated() => _mutatedSinceYield = true;
+    private bool DrainMutated()
     {
-        WritingCoachMessageRole.System => new ChatMessage(ChatRole.System, message.Content),
-        WritingCoachMessageRole.User => new ChatMessage(ChatRole.User, message.Content),
-        WritingCoachMessageRole.Assistant => BuildAssistantReplay(message),
-        WritingCoachMessageRole.Tool => new ChatMessage(ChatRole.Tool, [new FunctionResultContent(message.ToolCallId ?? string.Empty, message.Content)]),
+        if (!_mutatedSinceYield) return false;
+        _mutatedSinceYield = false;
+        return true;
+    }
+
+    private async Task SafePersistAsync(EditorMessage message)
+    {
+        try
+        {
+            conversations.UpdateMessage(message);
+            await conversations.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to persist editor chat message {MessageId}", message.Id);
+        }
+    }
+
+    private static ChatMessage ToChatMessage(EditorMessage message) => message.Role switch
+    {
+        EditorMessageRole.System => new ChatMessage(ChatRole.System, message.Content),
+        EditorMessageRole.User => new ChatMessage(ChatRole.User, message.Content),
+        EditorMessageRole.Assistant => BuildAssistantReplay(message),
+        EditorMessageRole.Tool => new ChatMessage(ChatRole.Tool, [new FunctionResultContent(message.ToolCallId ?? string.Empty, message.Content)]),
         _ => new ChatMessage(ChatRole.User, message.Content),
     };
 
-    private static ChatMessage BuildAssistantReplay(WritingCoachMessage message)
+    private static ChatMessage BuildAssistantReplay(EditorMessage message)
     {
         var calls = ReadPersistedToolCalls(message.ToolCallsJson);
         var contents = calls.Count == 0
@@ -423,40 +501,6 @@ public sealed class WritingCoachService(
         }
 
         return new FunctionCallContent(call.CallId, call.Name, args);
-    }
-
-    private async Task PersistFailedAssistantAsync(Guid conversationId, int order, string error)
-    {
-        try
-        {
-            var message = new WritingCoachMessage
-            {
-                ConversationId = conversationId,
-                Order = order,
-                Role = WritingCoachMessageRole.Assistant,
-                Status = WritingCoachMessageStatus.Failed,
-                ErrorMessage = error,
-            };
-            await conversations.AddMessageAsync(message, CancellationToken.None);
-            await conversations.SaveChangesAsync(CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to persist Writing Coach setup failure");
-        }
-    }
-
-    private async Task SafePersistAsync(WritingCoachMessage message)
-    {
-        try
-        {
-            conversations.UpdateMessage(message);
-            await conversations.SaveChangesAsync(CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to persist Writing Coach message {MessageId}", message.Id);
-        }
     }
 
     private sealed record PendingToolCall(

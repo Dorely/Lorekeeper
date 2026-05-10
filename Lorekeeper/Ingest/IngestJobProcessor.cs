@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using Lorekeeper.AiConsole;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -22,7 +21,7 @@ public sealed class IngestJobProcessor(
     ITextChunker chunker,
     IIngestGraphSync graphSync,
     IIngestJobNotifier notifier,
-    IOptions<AiConsoleOptions> options,
+    IOptions<AgentOptions> options,
     ILogger<IngestJobProcessor> logger)
 {
     private const string _systemPrompt = """

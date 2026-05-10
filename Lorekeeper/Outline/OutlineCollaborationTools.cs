@@ -20,7 +20,7 @@ public sealed record OutlineCollaborationContext(Guid ProjectId, Action OnMutate
 
 /// <summary>
 /// Builds the set of <see cref="AITool"/>s exposed to the LLM during an Outline
-/// collaboration turn. Mirrors <c>AiConsoleTools</c>: every tool closure captures the
+/// collaboration turn. Every tool closure captures the
 /// per-request <see cref="OutlineCollaborationContext"/> so behavior stays project-scoped
 /// without ambient state.
 /// </summary>

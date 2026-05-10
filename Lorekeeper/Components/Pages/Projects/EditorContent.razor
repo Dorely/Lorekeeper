@@ -33,12 +33,12 @@ else if (_current is null)
 else
 {
     <div class="editor-grid">
-        <aside class="panel panel-recommendations">
-            <h6 class="panel-title">Recommended Context</h6>
-            <RecommendedContextPanel ProjectId="Project.Id"
-                                     ChapterId="_activeChapterId"
-                                     RefreshSignal="_contextRefreshSignal"
-                                     OnChanged="OnContextChangedAsync" />
+        <aside class="editor-chat-pane">
+            <EditorChatPanel ProjectId="Project.Id"
+                             CurrentChapterId="_activeChapterId"
+                             OnAiTurnStarting="OnAiTurnStartingAsync"
+                             OnAiTurnCompleted="OnAiTurnCompletedAsync"
+                             OnAiChangesApplied="OnAiChangesAppliedAsync" />
         </aside>
 
         <section class="panel panel-editor">
@@ -100,22 +100,23 @@ else
             </div>
         </section>
 
-        <aside class="panel panel-context">
-            <h6 class="panel-title">Context Feed</h6>
-            <ContextFeedPanel @ref="_contextPanel"
-                              Project="Project"
-                              CurrentChapter="_current"
-                              OnContextChanged="OnContextChangedAsync" />
-        </aside>
+        <aside class="editor-side-pane">
+            <section class="panel panel-recommendations">
+                <h6 class="panel-title">Recommended Context</h6>
+                <RecommendedContextPanel ProjectId="Project.Id"
+                                         ChapterId="_activeChapterId"
+                                         RefreshSignal="_contextRefreshSignal"
+                                         OnChanged="OnContextChangedAsync" />
+            </section>
 
-        <section class="panel panel-console">
-            <h6 class="panel-title">AI Console</h6>
-            <AiConsolePanel ProjectId="Project.Id"
-                            CurrentChapterId="_activeChapterId"
-                            OnAiTurnStarting="OnAiTurnStartingAsync"
-                            OnAiTurnCompleted="OnAiTurnCompletedAsync"
-                            OnAiChangesApplied="OnAiChangesAppliedAsync" />
-        </section>
+            <section class="panel panel-context">
+                <h6 class="panel-title">Context Feed</h6>
+                <ContextFeedPanel @ref="_contextPanel"
+                                  Project="Project"
+                                  CurrentChapter="_current"
+                                  OnContextChanged="OnContextChangedAsync" />
+            </section>
+        </aside>
     </div>
 }
 
@@ -435,7 +436,7 @@ else
     private static string TokenPrefix(bool isExact) => isExact ? string.Empty : "~";
 
     /// <summary>
-    /// Called by AiConsolePanel before the LLM call begins. Flush any pending
+    /// Called by EditorChatPanel before the LLM call begins. Flush any pending
     /// debounced edits and lock the editor so the user cannot type during the turn.
     /// </summary>
     private async Task OnAiTurnStartingAsync()
@@ -458,7 +459,7 @@ else
     /// Called when the AI turn ends. Reload the chapter body (the AI may have edited
     /// it via the edit_chapter tool) and unlock the editor.
     /// </summary>
-    private async Task OnAiTurnCompletedAsync(Lorekeeper.Models.AiConsoleEntry entry)
+    private async Task OnAiTurnCompletedAsync()
     {
         await ReloadCurrentChapterAfterAiAsync();
 

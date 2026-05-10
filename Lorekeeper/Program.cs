@@ -1,8 +1,8 @@
-using Lorekeeper.AiConsole;
 using Lorekeeper.Auth;
 using Lorekeeper.Chapters;
 using Lorekeeper.Components;
 using Lorekeeper.Context;
+using Lorekeeper.EditorChat;
 using Lorekeeper.Graph;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
@@ -37,6 +37,7 @@ builder.Services.AddScoped<IGraphEntityTypeRepository, GraphEntityTypeRepository
 builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
 builder.Services.AddScoped<IActRepository, ActRepository>();
 builder.Services.AddScoped<IOutlineConversationRepository, OutlineConversationRepository>();
+builder.Services.AddScoped<IEditorConversationRepository, EditorConversationRepository>();
 builder.Services.AddScoped<IWritingSampleRepository, WritingSampleRepository>();
 builder.Services.AddScoped<IWritingCoachConversationRepository, WritingCoachConversationRepository>();
 builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
@@ -57,6 +58,7 @@ builder.Services.AddScoped<ICodexAuthService, CodexAuthService>();
 // Token counting + prompt budgets
 builder.Services.Configure<TokenCountingOptions>(builder.Configuration.GetSection(TokenCountingOptions.SectionName));
 builder.Services.Configure<TokenBudgetOptions>(builder.Configuration.GetSection(TokenBudgetOptions.SectionName));
+builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.SectionName));
 builder.Services.AddSingleton<TiktokenTokenCounter>();
 builder.Services.AddSingleton<CharEstimateTokenCounter>();
 builder.Services.AddSingleton<ITokenCounter, CompositeTokenCounter>();
@@ -78,7 +80,7 @@ builder.Services.AddScoped<IEntityTypeService, EntityTypeService>();
 builder.Services.AddScoped<IProjectFactService, ProjectFactService>();
 builder.Services.AddScoped<IOutlineGraphSync, OutlineGraphSync>();
 builder.Services.AddScoped<OutlineCollaborationTools>();
-builder.Services.AddScoped<IOutlineChangeApprovalService, OutlineChangeApprovalService>();
+builder.Services.AddScoped<IAiChangeApprovalService, AiChangeApprovalService>();
 builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationService>();
 
 // Writing samples
@@ -97,17 +99,15 @@ builder.Services.AddScoped<IngestJobProcessor>();
 builder.Services.AddScoped<IIngestService, IngestService>();
 builder.Services.AddHostedService<IngestJobWorker>();
 
-// Context + AI Console
+// Context + editor chat
 builder.Services.AddScoped<ContextBuilder>();
 builder.Services.AddScoped<IContextBuilder>(sp => sp.GetRequiredService<ContextBuilder>());
 builder.Services.AddScoped<IEditorContextService>(sp => sp.GetRequiredService<ContextBuilder>());
 builder.Services.AddScoped<IContextIndexingService, ContextIndexingService>();
 builder.Services.AddScoped<IContextRecommendationService, ContextRecommendationService>();
 builder.Services.AddHostedService<ContextIndexBackfillWorker>();
-builder.Services.Configure<AiConsoleOptions>(builder.Configuration.GetSection("AiConsole"));
-builder.Services.AddScoped<AiConsoleTools>();
-builder.Services.AddScoped<IAiConsoleService, AiConsoleService>();
-builder.Services.AddScoped<IAiConsoleHistoryService, AiConsoleHistoryService>();
+builder.Services.AddScoped<EditorChatTools>();
+builder.Services.AddScoped<IEditorChatService, EditorChatService>();
 
 var app = builder.Build();
 

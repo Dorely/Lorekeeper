@@ -10,14 +10,9 @@ using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
 
-namespace Lorekeeper.AiConsole;
+namespace Lorekeeper.EditorChat;
 
-/// <summary>
-/// Builds the set of <see cref="AIFunction"/>s exposed to the LLM during a single
-/// AI Console turn. Each tool closure captures the per-request <see cref="AiConsoleContext"/>,
-/// keeping all behavior project-scoped without ambient state.
-/// </summary>
-public sealed class AiConsoleTools(
+public sealed class EditorChatTools(
     IChapterService chapters,
     IEntityService entities,
     IEntityTypeService entityTypes,
@@ -25,11 +20,10 @@ public sealed class AiConsoleTools(
     IVectorStore vectors,
     IEmbeddingService embeddings,
     IProjectRepository projects,
-    IAiConsoleHistoryService history,
     IEditorContextService editorContext,
     OutlineCollaborationTools outlineTools)
 {
-    public IList<AITool> Build(AiConsoleContext context)
+    public IList<AITool> Build(EditorChatContext context)
     {
         var tools = new List<AITool>
         {
@@ -37,17 +31,6 @@ public sealed class AiConsoleTools(
                 method: () => ListContextAsync(context),
                 name: "list_context",
                 description: "Read the currently assembled editor context exactly as the model sees it, including enabled outline, facts, writing samples, and selected entities."),
-
-            AIFunctionFactory.Create(
-                method: (string query, int limit) => ListAiConsoleHistoryAsync(context, query, limit),
-                name: "list_ai_console_history",
-                description: "Search or list previous AI Console turns for this project. Use when the user references an earlier request, previous result, or something said last time. Pass an empty query to list recent turns; limit is clamped to 1-20."),
-
-            AIFunctionFactory.Create(
-                method: (Guid entryId, bool includeToolResults, bool includePromptSnapshot) =>
-                    ReadAiConsoleTurnAsync(context, entryId, includeToolResults, includePromptSnapshot),
-                name: "read_ai_console_turn",
-                description: "Read one previous AI Console turn by id, including its command, response, status, and tool-call timeline. Use after list_ai_console_history when a prior turn may contain needed context."),
 
             AIFunctionFactory.Create(
                 method: (string query, int topK) => VectorSearchAsync(context, query, topK),
@@ -87,7 +70,7 @@ public sealed class AiConsoleTools(
             AIFunctionFactory.Create(
                 method: (Guid chapterId) => ReadChapterAsync(context, chapterId),
                 name: "read_chapter",
-                description: "Read a chapter's current body with line numbers (0001: ...). Use list_chapters to discover ids. If this turn already edited the chapter, returns the latest body for this turn."),
+                description: "Read a chapter's current body with line numbers (0001: ...). Use list_chapters to discover ids. If this turn already staged an edit to the chapter, returns the latest staged body for this turn."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string content, int? startLine, int? endLine) =>
@@ -104,7 +87,7 @@ public sealed class AiConsoleTools(
         };
 
         var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var outlineTool in outlineTools.Build(new OutlineCollaborationContext(context.ProjectId, () => { }, context.OutlineStaging)))
+        foreach (var outlineTool in outlineTools.Build(new OutlineCollaborationContext(context.ProjectId, context.OnMutated, context.OutlineStaging)))
         {
             if (outlineTool is AIFunction function && existingNames.Add(function.Name))
                 tools.Add(outlineTool);
@@ -113,75 +96,7 @@ public sealed class AiConsoleTools(
         return tools;
     }
 
-    private async Task<string> ListAiConsoleHistoryAsync(AiConsoleContext ctx, string query, int limit)
-    {
-        query = query?.Trim() ?? string.Empty;
-        limit = Math.Clamp(limit <= 0 ? 10 : limit, 1, 20);
-
-        var entries = await history.ListAsync(ctx.ProjectId);
-        var matches = entries.Where(entry => entry.Id != ctx.EntryId);
-        if (!string.IsNullOrWhiteSpace(query))
-            matches = matches.Where(entry => HistoryMatches(entry, query));
-
-        var result = matches
-            .Take(limit)
-            .Select(entry => new
-            {
-                id = entry.Id,
-                startedAt = entry.StartedAt,
-                completedAt = entry.CompletedAt,
-                status = entry.Status.ToString(),
-                chapterId = entry.ChapterId,
-                command = Truncate(entry.Command, 240),
-                response = Truncate(entry.ResponseText, 360),
-                error = Truncate(entry.ErrorMessage, 240),
-                toolCallCount = CountToolCalls(entry.ToolCallsJson),
-            })
-            .ToList();
-
-        return result.Count == 0 ? "No previous AI Console turns matched." : JsonSerializer.Serialize(result);
-    }
-
-    private async Task<string> ReadAiConsoleTurnAsync(
-        AiConsoleContext ctx,
-        Guid entryId,
-        bool includeToolResults,
-        bool includePromptSnapshot)
-    {
-        if (entryId == ctx.EntryId)
-            return "Error: the current AI Console turn is still running and is not previous history.";
-
-        var entry = await history.GetAsync(ctx.ProjectId, entryId);
-        if (entry is null)
-            return $"Error: AI Console turn {entryId} was not found in this project.";
-
-        var resultMax = includeToolResults ? 6000 : 500;
-        var toolCalls = ParseToolCalls(entry.ToolCallsJson);
-        return JsonSerializer.Serialize(new
-        {
-            id = entry.Id,
-            startedAt = entry.StartedAt,
-            completedAt = entry.CompletedAt,
-            status = entry.Status.ToString(),
-            chapterId = entry.ChapterId,
-            command = entry.Command,
-            response = entry.ResponseText,
-            error = entry.ErrorMessage,
-            promptSnapshot = includePromptSnapshot ? Truncate(entry.SystemPromptSnapshot, 12000) : null,
-            toolCalls = toolCalls.Select(call => new
-            {
-                name = call.Name,
-                arguments = Truncate(call.Arguments, 2000),
-                result = Truncate(call.Result, resultMax),
-                resultTruncated = IsTruncated(call.Result, resultMax),
-                error = call.Error,
-                startedAt = call.StartedAt,
-                completedAt = call.CompletedAt,
-            }),
-        });
-    }
-
-    private async Task<string> ListContextAsync(AiConsoleContext ctx)
+    private async Task<string> ListContextAsync(EditorChatContext ctx)
     {
         var project = await projects.GetByIdAsync(ctx.ProjectId)
             ?? throw new InvalidOperationException($"Project {ctx.ProjectId} not found.");
@@ -194,7 +109,7 @@ public sealed class AiConsoleTools(
     }
 
     private async Task<string> VectorSearchAsync(
-        AiConsoleContext ctx,
+        EditorChatContext ctx,
         [Description("Natural-language query to embed and search.")] string query,
         [Description("Maximum number of results to return (1-20).")] int topK)
     {
@@ -209,38 +124,38 @@ public sealed class AiConsoleTools(
         var sb = new StringBuilder();
         for (var i = 0; i < results.Count; i++)
         {
-            var r = results[i];
+            var result = results[i];
             sb.Append('[').Append(i + 1).Append("] ")
-              .Append(r.SourceType).Append('/').Append(r.SourceId ?? "?")
-              .Append(" row=").Append(r.RowId);
-            if (r.ChunkIndex is not null)
-                sb.Append(" fragment=").Append(r.ChunkIndex.Value + 1);
-            if (!string.IsNullOrWhiteSpace(r.Metadata))
-                sb.Append(" - ").Append(r.Metadata);
-            sb.Append(" (distance ").Append(r.Distance.ToString("F4")).Append(")\n");
-            sb.Append(r.Content).Append("\n\n");
+              .Append(result.SourceType).Append('/').Append(result.SourceId ?? "?")
+              .Append(" row=").Append(result.RowId);
+            if (result.ChunkIndex is not null)
+                sb.Append(" fragment=").Append(result.ChunkIndex.Value + 1);
+            if (!string.IsNullOrWhiteSpace(result.Metadata))
+                sb.Append(" - ").Append(result.Metadata);
+            sb.Append(" (distance ").Append(result.Distance.ToString("F4")).Append(")\n");
+            sb.Append(result.Content).Append("\n\n");
         }
         return sb.ToString().TrimEnd();
     }
 
-    private async Task<string> ListChaptersAsync(AiConsoleContext ctx)
+    private async Task<string> ListChaptersAsync(EditorChatContext ctx)
     {
         var list = await chapters.ListAsync(ctx.ProjectId);
         if (list.Count == 0) return "No chapters in this project.";
 
         var sb = new StringBuilder();
-        foreach (var c in list)
+        foreach (var chapter in list)
         {
-            sb.Append(c.Order + 1).Append(". ").Append(c.Title)
-              .Append(" — id=").Append(c.Id);
-            if (!string.IsNullOrWhiteSpace(c.Synopsis))
-                sb.Append(" — ").Append(c.Synopsis);
+            sb.Append(chapter.Order + 1).Append(". ").Append(chapter.Title)
+              .Append(" - id=").Append(chapter.Id);
+            if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
+                sb.Append(" - ").Append(chapter.Synopsis);
             sb.Append('\n');
         }
         return sb.ToString().TrimEnd();
     }
 
-    private async Task<string> ListProjectFactsAsync(AiConsoleContext ctx)
+    private async Task<string> ListProjectFactsAsync(EditorChatContext ctx)
     {
         var facts = await projectFacts.ListAsync(ctx.ProjectId);
         return JsonSerializer.Serialize(facts.Select(fact => new
@@ -260,7 +175,7 @@ public sealed class AiConsoleTools(
         }));
     }
 
-    private async Task<string> SearchEntitiesAsync(AiConsoleContext ctx, string query, int topK)
+    private async Task<string> SearchEntitiesAsync(EditorChatContext ctx, string query, int topK)
     {
         if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
         topK = Math.Clamp(topK, 1, 50);
@@ -287,7 +202,7 @@ public sealed class AiConsoleTools(
             }));
     }
 
-    private async Task<string> ReadEntityAsync(AiConsoleContext ctx, Guid entityId)
+    private async Task<string> ReadEntityAsync(EditorChatContext ctx, Guid entityId)
     {
         var entity = await entities.GetAsync(ctx.ProjectId, entityId);
         if (entity is null)
@@ -316,7 +231,7 @@ public sealed class AiConsoleTools(
         });
     }
 
-    private async Task<string> GraphNeighborsAsync(AiConsoleContext ctx, Guid entityId, int depth)
+    private async Task<string> GraphNeighborsAsync(EditorChatContext ctx, Guid entityId, int depth)
     {
         depth = Math.Clamp(depth, 1, 3);
         var start = await entities.GetAsync(ctx.ProjectId, entityId);
@@ -367,68 +282,30 @@ public sealed class AiConsoleTools(
         return rows.Count == 0 ? "No neighbors." : JsonSerializer.Serialize(rows);
     }
 
-    private async Task<string> ListEntityTypesAsync(AiConsoleContext ctx)
-    {
-        var list = await entityTypes.ListAsync(ctx.ProjectId, includeStructural: true);
-        return JsonSerializer.Serialize(list.Select(t => new
-        {
-            type = t.Type,
-            singular = t.SingularLabel,
-            plural = t.PluralLabel,
-            isStructural = t.IsStructural,
-            isChapterScoped = t.IsChapterScoped,
-            defaultProperties = t.DefaultProperties,
-        }));
-    }
-
-    private async Task<string> ListEntitiesAsync(AiConsoleContext ctx, string type, string? parentId)
-    {
-        if (string.IsNullOrWhiteSpace(type)) return "Error: type is required.";
-
-        Guid? parent = null;
-        if (!string.IsNullOrWhiteSpace(parentId))
-        {
-            if (!Guid.TryParse(parentId, out var parsed))
-                return $"Error: parentId '{parentId}' is not a valid Guid.";
-            parent = parsed;
-        }
-
-        var list = await entities.ListAsync(ctx.ProjectId, type.Trim(), parent);
-        return JsonSerializer.Serialize(list.Select(e => new
-        {
-            id = e.Id,
-            type = e.Type,
-            name = e.Name,
-            order = e.Order,
-            parentId = e.ParentId,
-            properties = e.Properties,
-        }));
-    }
-
-    private async Task<string> ListEntityLinksAsync(AiConsoleContext ctx, Guid entityId)
+    private async Task<string> ListEntityLinksAsync(EditorChatContext ctx, Guid entityId)
     {
         var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
-        return JsonSerializer.Serialize(links.Select(l => new
+        return JsonSerializer.Serialize(links.Select(link => new
         {
-            edgeId = l.EdgeId,
-            edgeType = l.EdgeType,
-            direction = l.Direction.ToString(),
-            otherEntityId = l.OtherEntityId,
-            otherEntityName = l.OtherEntityName,
-            otherEntityType = l.OtherEntityType,
-            sortOrder = l.SortOrder,
-            properties = l.Properties,
+            edgeId = link.EdgeId,
+            edgeType = link.EdgeType,
+            direction = link.Direction.ToString(),
+            otherEntityId = link.OtherEntityId,
+            otherEntityName = link.OtherEntityName,
+            otherEntityType = link.OtherEntityType,
+            sortOrder = link.SortOrder,
+            properties = link.Properties,
         }));
     }
 
-    private async Task<string> ReadChapterAsync(AiConsoleContext ctx, Guid chapterId)
+    private async Task<string> ReadChapterAsync(EditorChatContext ctx, Guid chapterId)
     {
         var chapter = await chapters.GetAsync(chapterId);
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
         var body = chapter.Body;
-        if (ctx.ReviewEdits && ctx.ConsoleStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
+        if (ctx.ReviewEdits && ctx.EditorStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
             body = draftBody;
 
         var numbered = ChapterFormatting.WithLineNumbers(body);
@@ -436,7 +313,7 @@ public sealed class AiConsoleTools(
     }
 
     private async Task<string> EditChapterAsync(
-        AiConsoleContext ctx,
+        EditorChatContext ctx,
         Guid chapterId,
         string content,
         int? startLine,
@@ -448,7 +325,7 @@ public sealed class AiConsoleTools(
 
         content ??= string.Empty;
         var existingBody = chapter.Body;
-        if (ctx.ReviewEdits && ctx.ConsoleStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
+        if (ctx.ReviewEdits && ctx.EditorStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
             existingBody = draftBody;
 
         var existingLines = ChapterFormatting.SplitLines(existingBody);
@@ -460,35 +337,34 @@ public sealed class AiConsoleTools(
         if (startLine is null && endLine is null)
         {
             newBody = content;
-            summary = $"Full overwrite ({existingLines.Count} → {contentLines.Count} lines).";
+            summary = $"Full overwrite ({existingLines.Count} -> {contentLines.Count} lines).";
         }
-        else if (startLine is int s && endLine is null)
+        else if (startLine is int insertLine && endLine is null)
         {
-            // Insert before startLine. startLine == existingLines.Count + 1 means append.
-            if (s < 1 || s > existingLines.Count + 1)
-                return $"Error: startLine {s} out of range (1..{existingLines.Count + 1}).";
+            if (insertLine < 1 || insertLine > existingLines.Count + 1)
+                return $"Error: startLine {insertLine} out of range (1..{existingLines.Count + 1}).";
 
             var merged = new List<string>(existingLines.Count + contentLines.Count);
-            merged.AddRange(existingLines.Take(s - 1));
+            merged.AddRange(existingLines.Take(insertLine - 1));
             merged.AddRange(contentLines);
-            merged.AddRange(existingLines.Skip(s - 1));
+            merged.AddRange(existingLines.Skip(insertLine - 1));
             newBody = ChapterFormatting.JoinLines(merged);
-            summary = $"Inserted {contentLines.Count} line(s) before line {s}.";
+            summary = $"Inserted {contentLines.Count} line(s) before line {insertLine}.";
         }
-        else if (startLine is int s2 && endLine is int e)
+        else if (startLine is int replaceStart && endLine is int replaceEnd)
         {
-            if (s2 < 1 || s2 > existingLines.Count)
-                return $"Error: startLine {s2} out of range (1..{existingLines.Count}).";
-            if (e < s2 || e > existingLines.Count)
-                return $"Error: endLine {e} out of range ({s2}..{existingLines.Count}).";
+            if (replaceStart < 1 || replaceStart > existingLines.Count)
+                return $"Error: startLine {replaceStart} out of range (1..{existingLines.Count}).";
+            if (replaceEnd < replaceStart || replaceEnd > existingLines.Count)
+                return $"Error: endLine {replaceEnd} out of range ({replaceStart}..{existingLines.Count}).";
 
-            var replacedCount = e - s2 + 1;
+            var replacedCount = replaceEnd - replaceStart + 1;
             var merged = new List<string>(existingLines.Count - replacedCount + contentLines.Count);
-            merged.AddRange(existingLines.Take(s2 - 1));
+            merged.AddRange(existingLines.Take(replaceStart - 1));
             merged.AddRange(contentLines);
-            merged.AddRange(existingLines.Skip(e));
+            merged.AddRange(existingLines.Skip(replaceEnd));
             newBody = ChapterFormatting.JoinLines(merged);
-            summary = $"Replaced lines {s2}-{e} ({replacedCount} → {contentLines.Count} lines).";
+            summary = $"Replaced lines {replaceStart}-{replaceEnd} ({replacedCount} -> {contentLines.Count} lines).";
         }
         else
         {
@@ -498,49 +374,16 @@ public sealed class AiConsoleTools(
         var newNumbered = ChapterFormatting.WithLineNumbers(newBody);
         var result = $"OK. {summary}\n\nNew body:\n{(newNumbered.Length == 0 ? "(empty)" : newNumbered)}";
 
-        if (ctx.ReviewEdits && ctx.ConsoleStaging is not null)
+        if (ctx.ReviewEdits && ctx.EditorStaging is not null)
         {
-            await ctx.ConsoleStaging.StageChapterBodyEditAsync(chapter, existingBody, newBody, summary, result);
+            await ctx.EditorStaging.StageChapterBodyEditAsync(chapter, existingBody, newBody, summary, result);
             return result;
         }
 
         await chapters.UpdateAsync(chapterId, body: newBody);
+        ctx.OnMutated();
         return result;
     }
-
-    private static bool HistoryMatches(AiConsoleEntry entry, string query) =>
-        Contains(entry.Command, query)
-        || Contains(entry.ResponseText, query)
-        || Contains(entry.ErrorMessage, query)
-        || Contains(entry.ToolCallsJson, query);
-
-    private static bool Contains(string? value, string query) =>
-        !string.IsNullOrWhiteSpace(value)
-        && value.Contains(query, StringComparison.OrdinalIgnoreCase);
-
-    private static int CountToolCalls(string json) => ParseToolCalls(json).Count;
-
-    private static List<AiToolCallRecord> ParseToolCalls(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return [];
-        try
-        {
-            return JsonSerializer.Deserialize<List<AiToolCallRecord>>(json) ?? [];
-        }
-        catch
-        {
-            return [];
-        }
-    }
-
-    private static string? Truncate(string? value, int maxLength)
-    {
-        if (string.IsNullOrEmpty(value) || value.Length <= maxLength) return value;
-        return value[..maxLength] + "...";
-    }
-
-    private static bool IsTruncated(string? value, int maxLength) =>
-        value is not null && value.Length > maxLength;
 
     private static bool Matches(StoryEntity entity, string query) =>
         entity.Name.Contains(query, StringComparison.OrdinalIgnoreCase)

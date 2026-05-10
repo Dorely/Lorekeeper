@@ -41,7 +41,7 @@ public sealed class ContextBuilder(
                 Key: EditorContextKeys.AssistantWorkflow,
                 Kind: ContextItemKind.AssistantWorkflow,
                 Label: "Assistant Workflow",
-                Body: AssistantWorkflowInstructions.EditorConsole,
+                Body: AssistantWorkflowInstructions.EditorChat,
                 IsEnabled: true,
                 IsRemovable: false,
                 Badge: "App"),

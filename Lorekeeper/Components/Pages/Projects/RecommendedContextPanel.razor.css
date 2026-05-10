@@ -1,7 +1,10 @@
 .recommended-context {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
+    height: 100%;
     min-height: 0;
+    overflow: hidden;
 }
 
 .recommended-search {
@@ -12,6 +15,9 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 0.1rem;
 }
 
 .recommended-item {

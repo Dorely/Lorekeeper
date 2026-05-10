@@ -2,7 +2,7 @@ using Lorekeeper.Models;
 
 namespace Lorekeeper.Outline;
 
-public interface IOutlineChangeApprovalService
+public interface IAiChangeApprovalService
 {
     Task<IReadOnlyList<AiChangeBatch>> ListPendingBatchesAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<AiChangeBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default);
