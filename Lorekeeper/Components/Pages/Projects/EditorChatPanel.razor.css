@@ -247,6 +247,47 @@
     align-items: flex-end;
 }
 
+.editor-chat-contest-config {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.45rem 0.5rem;
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+    background: var(--bs-body-bg, #fff);
+}
+
+.editor-chat-contest-config.enabled {
+    align-items: flex-start;
+    flex-direction: column;
+}
+
+.editor-chat-contest-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 1.8rem;
+    margin: 0;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+
+.editor-chat-contest-toggle input {
+    margin: 0;
+}
+
+.editor-chat-contest-slots {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+    width: 100%;
+}
+
+.editor-chat-contest-select {
+    min-width: 0;
+    font-size: 0.78rem;
+}
+
 .editor-chat-composer textarea {
     resize: none;
     flex: 1;

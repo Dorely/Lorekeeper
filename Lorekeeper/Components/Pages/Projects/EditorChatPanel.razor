@@ -2,10 +2,12 @@
 @using System.Text.Json
 @using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.EditorChat
+@using Lorekeeper.Llm
 @using Lorekeeper.Models
 @using Lorekeeper.Tokens
 @implements IAsyncDisposable
 @inject IEditorChatService Chat
+@inject ILlmProviderService ProviderService
 @inject ITokenCounter TokenCounter
 @inject IJSRuntime JS
 
@@ -22,6 +24,12 @@
             {
                 <button type="button" class="btn btn-link btn-sm editor-chat-review" @onclick="OpenPendingChanges">
                     Review @PendingChangeCount
+                </button>
+            }
+            @if (ContestCandidateCount > 0)
+            {
+                <button type="button" class="btn btn-link btn-sm editor-chat-review" @onclick="OpenContestReview">
+                    Contest @ContestCandidateCount
                 </button>
             }
             <button type="button" class="btn btn-link btn-sm editor-chat-reset" title="Start over"
@@ -56,6 +64,22 @@
         </div>
     }
 
+    <div class="editor-chat-contest-config @(_contestEnabled ? "enabled" : null)">
+        <label class="editor-chat-contest-toggle" title="Use read-only chat preparation, then compare up to three model candidates before staging one edit">
+            <input class="form-check-input" type="checkbox" checked="@_contestEnabled"
+                   disabled="@_running" @onchange="OnContestEnabledChangedAsync" />
+            <span>Contest Mode</span>
+        </label>
+        @if (_contestEnabled)
+        {
+            <div class="editor-chat-contest-slots" aria-label="Contest models">
+                @RenderContestProviderSelect(1, _contestProviderSlot1Id)
+                @RenderContestProviderSelect(2, _contestProviderSlot2Id)
+                @RenderContestProviderSelect(3, _contestProviderSlot3Id)
+            </div>
+        }
+    </div>
+
     <div class="editor-chat-composer">
         <textarea class="form-control editor-chat-input" rows="1" placeholder="Type a message..."
                   @ref="_composerEl"
@@ -74,11 +98,17 @@
         else
         {
             <button type="button" class="btn btn-primary"
-                    disabled="@(string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)"
+                    disabled="@(string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0 || !ContestCanSend)"
                     @onclick="SendAsync">Send</button>
         }
     </div>
 </div>
+
+<ContestReviewModal ProjectId="@ProjectId"
+                    Batches="@_contestBatches"
+                    IsOpen="@_showContestReview"
+                    OnClose="CloseContestReview"
+                    OnChanged="HandleContestChangedAsync" />
 
 <PendingAiChangesModal ProjectId="@ProjectId"
                        Batches="@_pendingBatches"
@@ -116,11 +146,20 @@
     private CancellationTokenSource? _cts;
     private Guid? _loadedProjectId;
     private List<AiChangeBatch> _pendingBatches = [];
+    private List<ContestBatch> _contestBatches = [];
+    private List<LlmProvider> _providers = [];
     private string? _pendingUserText;
     private int _conversationTokenCount;
     private bool _conversationTokenIsExact = true;
+    private bool _contestEnabled;
+    private bool _showContestReview;
+    private int? _contestProviderSlot1Id;
+    private int? _contestProviderSlot2Id;
+    private int? _contestProviderSlot3Id;
 
     private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
+    private int ContestCandidateCount => _contestBatches.Sum(batch => batch.Candidates.Count);
+    private bool ContestCanSend => !_contestEnabled || ContestProviderIds().Any();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -170,7 +209,14 @@
             _conversation = await Chat.GetOrCreateAsync(ProjectId);
             _messages = (await Chat.LoadMessagesAsync(_conversation.Id)).ToList();
             _approvalEnabled = await Chat.GetAiChangeApprovalEnabledAsync(ProjectId);
+            _providers = await ProviderService.GetAllAsync();
+            var contestSettings = await Chat.GetContestSettingsAsync(ProjectId);
+            _contestEnabled = contestSettings.Enabled;
+            _contestProviderSlot1Id = contestSettings.ProviderSlot1Id;
+            _contestProviderSlot2Id = contestSettings.ProviderSlot2Id;
+            _contestProviderSlot3Id = contestSettings.ProviderSlot3Id;
             await LoadPendingChangesAsync(openIfPending: false);
+            await LoadContestBatchesAsync(openIfAvailable: false);
             RebuildRenderable();
             _pendingUserText = null;
             _live = null;
@@ -187,6 +233,11 @@
     {
         var text = _input?.Trim();
         if (_running || string.IsNullOrEmpty(text)) return;
+        if (!ContestCanSend)
+        {
+            _error = "Choose at least one Contest Mode model before sending.";
+            return;
+        }
         if (PendingChangeCount > 0)
         {
             _showPendingChanges = true;
@@ -249,6 +300,21 @@
 
                     case EditorChatPendingAiChangeCreated:
                         await LoadPendingChangesAsync(openIfPending: false);
+                        StateHasChanged();
+                        break;
+
+                    case EditorChatContestStarted:
+                        await LoadContestBatchesAsync(openIfAvailable: true);
+                        StateHasChanged();
+                        break;
+
+                    case EditorChatContestCandidateUpdated:
+                        await LoadContestBatchesAsync(openIfAvailable: true);
+                        StateHasChanged();
+                        break;
+
+                    case EditorChatContestCompleted:
+                        await LoadContestBatchesAsync(openIfAvailable: true);
                         StateHasChanged();
                         break;
 
@@ -318,6 +384,13 @@
             _showPendingChanges = false;
     }
 
+    private async Task LoadContestBatchesAsync(bool openIfAvailable)
+    {
+        _contestBatches = (await Chat.ListContestBatchesAsync(ProjectId)).ToList();
+        if (openIfAvailable && ContestCandidateCount > 0)
+            _showContestReview = true;
+    }
+
     private async Task OnApprovalChangedAsync(ChangeEventArgs args)
     {
         var enabled = args.Value is bool boolValue
@@ -327,9 +400,29 @@
         await Chat.SetAiChangeApprovalEnabledAsync(ProjectId, enabled);
     }
 
+    private async Task OnContestEnabledChangedAsync(ChangeEventArgs args)
+    {
+        var enabled = args.Value is bool boolValue
+            ? boolValue
+            : bool.TryParse(args.Value?.ToString(), out var parsed) && parsed;
+        _contestEnabled = enabled;
+        await Chat.SetContestModeEnabledAsync(ProjectId, enabled);
+    }
+
+    private async Task OnContestProviderChangedAsync(int slot, ChangeEventArgs args)
+    {
+        var providerId = int.TryParse(args.Value?.ToString(), out var parsed) ? parsed : (int?)null;
+        SetLocalContestProvider(slot, providerId);
+        await Chat.SetContestProviderAsync(ProjectId, slot, providerId);
+    }
+
     private void OpenPendingChanges() => _showPendingChanges = true;
 
     private void ClosePendingChanges() => _showPendingChanges = false;
+
+    private void OpenContestReview() => _showContestReview = true;
+
+    private void CloseContestReview() => _showContestReview = false;
 
     private async Task HandlePendingChangesChangedAsync()
     {
@@ -339,6 +432,51 @@
             await OnAiChangesApplied.InvokeAsync();
         StateHasChanged();
     }
+
+    private async Task HandleContestChangedAsync()
+    {
+        await LoadContestBatchesAsync(openIfAvailable: false);
+        await LoadPendingChangesAsync(openIfPending: true);
+        _showContestReview = false;
+        StateHasChanged();
+    }
+
+    private IEnumerable<int> ContestProviderIds()
+    {
+        if (_contestProviderSlot1Id is { } slot1) yield return slot1;
+        if (_contestProviderSlot2Id is { } slot2) yield return slot2;
+        if (_contestProviderSlot3Id is { } slot3) yield return slot3;
+    }
+
+    private void SetLocalContestProvider(int slot, int? providerId)
+    {
+        switch (slot)
+        {
+            case 1:
+                _contestProviderSlot1Id = providerId;
+                break;
+            case 2:
+                _contestProviderSlot2Id = providerId;
+                break;
+            case 3:
+                _contestProviderSlot3Id = providerId;
+                break;
+        }
+    }
+
+    private RenderFragment RenderContestProviderSelect(int slot, int? selectedProviderId) => __builder =>
+    {
+        <select class="form-select form-select-sm editor-chat-contest-select"
+                value="@(selectedProviderId?.ToString() ?? string.Empty)"
+                disabled="@_running"
+                @onchange="args => OnContestProviderChangedAsync(slot, args)">
+            <option value="">Model @slot</option>
+            @foreach (var provider in _providers)
+            {
+                <option value="@provider.Id">@(provider.DisplayName ?? provider.Name) - @provider.ModelId</option>
+            }
+        </select>
+    };
 
     private void RebuildRenderable()
     {

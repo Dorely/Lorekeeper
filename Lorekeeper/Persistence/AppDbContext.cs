@@ -28,6 +28,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<WritingCoachMessage> WritingCoachMessages => Set<WritingCoachMessage>();
     public DbSet<AiChangeBatch> AiChangeBatches => Set<AiChangeBatch>();
     public DbSet<AiChange> AiChanges => Set<AiChange>();
+    public DbSet<ContestBatch> ContestBatches => Set<ContestBatch>();
+    public DbSet<ContestCandidate> ContestCandidates => Set<ContestCandidate>();
     public DbSet<EditorContextPreference> EditorContextPreferences => Set<EditorContextPreference>();
     public DbSet<IngestSource> IngestSources => Set<IngestSource>();
     public DbSet<IngestSourceChunk> IngestSourceChunks => Set<IngestSourceChunk>();
@@ -211,6 +213,29 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.HasOne(e => e.Batch)
                 .WithMany(b => b.Changes)
+                .HasForeignKey(e => e.BatchId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ContestBatch>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
+            entity.HasIndex(e => new { e.ConversationId, e.CreatedAt });
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.ContestBatches)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ContestCandidate>(entity =>
+        {
+            entity.HasIndex(e => new { e.BatchId, e.Order });
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Batch)
+                .WithMany(b => b.Candidates)
                 .HasForeignKey(e => e.BatchId)
                 .OnDelete(DeleteBehavior.Cascade);
         });

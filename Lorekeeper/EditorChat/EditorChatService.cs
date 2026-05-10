@@ -22,6 +22,7 @@ public sealed class EditorChatService(
     IChatClientFactory chatClientFactory,
     EditorChatTools tools,
     OutlineCollaborationTools outlineTools,
+    IEditorContestService contestService,
     IAiChangeApprovalService changeApproval,
     IAiChangeRepository changes,
     IOptions<AgentOptions> options,
@@ -74,8 +75,23 @@ public sealed class EditorChatService(
         await projects.SaveChangesAsync(cancellationToken);
     }
 
+    public Task<EditorContestSettings> GetContestSettingsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        contestService.GetSettingsAsync(projectId, cancellationToken);
+
+    public Task SetContestModeEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default) =>
+        contestService.SetContestModeEnabledAsync(projectId, enabled, cancellationToken);
+
+    public Task SetContestProviderAsync(Guid projectId, int slot, int? providerId, CancellationToken cancellationToken = default) =>
+        contestService.SetContestProviderAsync(projectId, slot, providerId, cancellationToken);
+
     public async Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
+
+    public async Task<IReadOnlyList<ContestBatch>> ListContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        await contestService.ListContestBatchesAsync(projectId, cancellationToken);
+
+    public Task StageContestCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default) =>
+        contestService.StageCandidateAsync(candidateId, cancellationToken);
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -119,6 +135,8 @@ public sealed class EditorChatService(
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
         EditorChatContext editorContext = null!;
+        ContestTurnCollector? contestCollector = null;
+        var contestModeEnabled = false;
         string systemPrompt = string.Empty;
         string? setupError = null;
         try
@@ -135,7 +153,17 @@ public sealed class EditorChatService(
             }
 
             var assembly = await contextBuilder.BuildAsync(project, currentChapter, cancellationToken);
-            systemPrompt = assembly.Assemble();
+            contestModeEnabled = project.ContestModeEnabled;
+            systemPrompt = assembly.Assemble(contestModeEnabled ? AssistantWorkflowInstructions.EditorContestPreparation : null);
+            if (contestModeEnabled)
+            {
+                contestCollector = new ContestTurnCollector(
+                    userText.Trim(),
+                    assembly.Items
+                        .Where(item => item.IsEnabled)
+                        .Select(item => new ContestContextItemSnapshot(item.Kind.ToString(), item.Label, item.Body))
+                        .ToList());
+            }
 
             var defaultProvider = await providerService.GetDefaultAsync(cancellationToken)
                 ?? throw new InvalidOperationException("No default LLM provider configured.");
@@ -156,7 +184,7 @@ public sealed class EditorChatService(
                 project.AiChangeApprovalEnabled,
                 outlineStaging,
                 editorStaging);
-            aiTools = tools.Build(editorContext);
+            aiTools = tools.Build(editorContext, contestModeEnabled ? EditorChatToolMode.ContestPreparation : EditorChatToolMode.Normal);
         }
         catch (Exception ex)
         {
@@ -231,6 +259,7 @@ public sealed class EditorChatService(
                         if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
                         {
                             textBuilder.Append(textContent.Text);
+                            contestCollector?.AppendAssistantText(textContent.Text);
                             yield return new EditorChatTextDelta(textContent.Text);
                         }
                         else if (content is FunctionCallContent functionCall)
@@ -245,6 +274,8 @@ public sealed class EditorChatService(
                                 functionCall.Name,
                                 argumentsJson,
                                 textBuilder.Length));
+                            if (!string.Equals(functionCall.Name, "start_contest", StringComparison.Ordinal))
+                                contestCollector?.ToolStarted(callId, functionCall.Name, argumentsJson);
                             yield return new EditorChatToolCallStarted(callId, functionCall.Name, argumentsJson);
                         }
                     }
@@ -286,6 +317,25 @@ public sealed class EditorChatService(
                 await conversations.SaveChangesAsync(CancellationToken.None);
                 yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
                 yield break;
+            }
+
+            var startContestIndex = pendingCalls.FindIndex(pendingCall => string.Equals(pendingCall.Name, "start_contest", StringComparison.Ordinal));
+            if (startContestIndex >= 0 && startContestIndex != pendingCalls.Count - 1)
+            {
+                activeAssistant.Content = textBuilder.ToString();
+                activeAssistant.Status = EditorMessageStatus.Failed;
+                activeAssistant.ErrorMessage = "start_contest must be the final tool call in a Contest Mode turn.";
+                await SafePersistAsync(activeAssistant);
+                yield return new EditorChatTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                yield break;
+            }
+
+            if (startContestIndex >= 0 && textBuilder.Length == 0)
+            {
+                const string contestNote = "I've started a contest for this chapter edit. Review the candidate responses as they arrive.";
+                textBuilder.Append(contestNote);
+                contestCollector?.AppendAssistantText(contestNote);
+                yield return new EditorChatTextDelta(contestNote);
             }
 
             var manifest = pendingCalls
@@ -358,6 +408,8 @@ public sealed class EditorChatService(
                 await conversations.SaveChangesAsync(CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
+                if (!string.Equals(pendingCall.Name, "start_contest", StringComparison.Ordinal))
+                    contestCollector?.ToolCompleted(pendingCall.CallId, toolError is null ? toolResult : null, toolError);
                 foreach (var pendingChange in editorContext.OutlineStaging?.DrainNewChanges() ?? [])
                 {
                     yield return new EditorChatPendingAiChangeCreated(
@@ -378,6 +430,41 @@ public sealed class EditorChatService(
                 }
 
                 yield return new EditorChatToolCallCompleted(pendingCall.CallId, pendingCall.Name, toolError is null ? toolResult : null, toolError, stopwatch.Elapsed.TotalMilliseconds);
+
+                if (toolError is null
+                    && string.Equals(pendingCall.Name, "start_contest", StringComparison.Ordinal)
+                    && editorContext.TryTakeContestRequest(out var contestRequest))
+                {
+                    var snapshot = contestCollector?.Snapshot()
+                        ?? new ContestTurnSnapshot(userText.Trim(), [], [], textBuilder.ToString());
+
+                    await foreach (var contestUpdate in contestService.StartContestAsync(
+                        projectId,
+                        conversation.Id,
+                        activeAssistant.Id,
+                        contestRequest,
+                        snapshot,
+                        cancellationToken))
+                    {
+                        switch (contestUpdate)
+                        {
+                            case EditorContestStarted started:
+                                yield return new EditorChatContestStarted(started.BatchId);
+                                break;
+                            case EditorContestCandidateUpdated candidateUpdated:
+                                yield return new EditorChatContestCandidateUpdated(candidateUpdated.BatchId, candidateUpdated.CandidateId, candidateUpdated.Status.ToString());
+                                break;
+                            case EditorContestCompleted completed:
+                                yield return new EditorChatContestCompleted(completed.BatchId, completed.Status.ToString());
+                                break;
+                        }
+                    }
+
+                    conversation.UpdatedAt = DateTime.UtcNow;
+                    await conversations.SaveChangesAsync(CancellationToken.None);
+                    yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
+                    yield break;
+                }
 
                 if (DrainMutated())
                     yield return new EditorChatMutated();

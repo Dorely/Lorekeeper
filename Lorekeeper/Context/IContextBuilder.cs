@@ -45,7 +45,7 @@ public sealed record ContextAssembly(IReadOnlyList<ContextItem> Items)
     /// Concatenates every enabled item's body, in display order, separated by labeled
     /// section headers. The result is the literal system message sent to the LLM.
     /// </summary>
-    public string Assemble()
+    public string Assemble(string? assistantWorkflowOverride = null)
     {
         var sb = new System.Text.StringBuilder();
         var first = true;
@@ -55,7 +55,9 @@ public sealed record ContextAssembly(IReadOnlyList<ContextItem> Items)
             if (!first) sb.Append("\n\n");
             first = false;
             sb.Append("## ").Append(item.Label).Append('\n');
-            sb.Append(item.Body);
+            sb.Append(assistantWorkflowOverride is not null && item.Kind == ContextItemKind.AssistantWorkflow
+                ? assistantWorkflowOverride
+                : item.Body);
         }
         return sb.ToString();
     }

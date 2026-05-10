@@ -23,7 +23,7 @@ public sealed class EditorChatTools(
     IEditorContextService editorContext,
     OutlineCollaborationTools outlineTools)
 {
-    public IList<AITool> Build(EditorChatContext context)
+    public IList<AITool> Build(EditorChatContext context, EditorChatToolMode mode = EditorChatToolMode.Normal)
     {
         var tools = new List<AITool>
         {
@@ -71,20 +71,34 @@ public sealed class EditorChatTools(
                 method: (Guid chapterId) => ReadChapterAsync(context, chapterId),
                 name: "read_chapter",
                 description: "Read a chapter's current body with line numbers (0001: ...). Use list_chapters to discover ids. If this turn already staged an edit to the chapter, returns the latest staged body for this turn."),
-
-            AIFunctionFactory.Create(
-                method: (Guid chapterId, string content, int? startLine, int? endLine) =>
-                    EditChapterAsync(context, chapterId, content, startLine, endLine),
-                name: "edit_chapter",
-                description:
-                    "Edit a chapter using line-based semantics. " +
-                    "If both startLine and endLine are null: replace the entire body with `content`. " +
-                    "If only startLine is provided: insert `content` BEFORE that line (1-based). " +
-                    "If both startLine and endLine are provided: replace the inclusive line range with `content`. " +
-                    "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
-                    "After editing, call read_chapter to verify the current body before finalizing. " +
-                    "Returns the new line-numbered body and a short change summary."),
         };
+
+        if (mode == EditorChatToolMode.ContestPreparation)
+        {
+            tools.Add(AIFunctionFactory.Create(
+                method: (Guid chapterId, string operationKind, string userGoal, string mutationInstructions, string targetRangesJson) =>
+                    StartContestAsync(context, chapterId, operationKind, userGoal, mutationInstructions, targetRangesJson),
+                name: "start_contest",
+                description:
+                    "Start a terminal Contest Mode generation job for chapter-body mutations. " +
+                    "Call this exactly once after gathering enough read-only context. " +
+                    "Do not pass gathered context; the backend automatically captures the current turn's Context Feed, assistant notes, read-only tool calls, and read-only tool results. " +
+                    "targetRangesJson must be a JSON array, or [] when no exact ranges apply."));
+            return tools;
+        }
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid chapterId, string content, int? startLine, int? endLine) =>
+                EditChapterAsync(context, chapterId, content, startLine, endLine),
+            name: "edit_chapter",
+            description:
+                "Edit a chapter using line-based semantics. " +
+                "If both startLine and endLine are null: replace the entire body with `content`. " +
+                "If only startLine is provided: insert `content` BEFORE that line (1-based). " +
+                "If both startLine and endLine are provided: replace the inclusive line range with `content`. " +
+                "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
+                "After editing, call read_chapter to verify the current body before finalizing. " +
+                "Returns the new line-numbered body and a short change summary."));
 
         var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var outlineTool in outlineTools.Build(new OutlineCollaborationContext(context.ProjectId, context.OnMutated, context.OutlineStaging)))
@@ -385,6 +399,31 @@ public sealed class EditorChatTools(
         return result;
     }
 
+    private Task<string> StartContestAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        string operationKind,
+        string userGoal,
+        string mutationInstructions,
+        string targetRangesJson)
+    {
+        if (chapterId == Guid.Empty)
+            return Task.FromResult("Error: chapterId is required.");
+        if (string.IsNullOrWhiteSpace(operationKind))
+            return Task.FromResult("Error: operationKind is required.");
+        if (string.IsNullOrWhiteSpace(userGoal))
+            return Task.FromResult("Error: userGoal is required.");
+
+        ctx.RequestContest(new EditorContestStartRequest(
+            chapterId,
+            operationKind.Trim(),
+            userGoal.Trim(),
+            (mutationInstructions ?? string.Empty).Trim(),
+            string.IsNullOrWhiteSpace(targetRangesJson) ? "[]" : targetRangesJson.Trim()));
+
+        return Task.FromResult("Contest started. Candidate responses will stream into the review modal.");
+    }
+
     private static bool Matches(StoryEntity entity, string query) =>
         entity.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
         || entity.Type.Contains(query, StringComparison.OrdinalIgnoreCase)
@@ -399,4 +438,10 @@ public sealed class EditorChatTools(
         && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+}
+
+public enum EditorChatToolMode
+{
+    Normal,
+    ContestPreparation,
 }

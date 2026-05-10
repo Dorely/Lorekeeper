@@ -1,0 +1,292 @@
+.contest-review-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1040;
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.contest-review-modal {
+    position: fixed;
+    z-index: 1050;
+    inset: 5vh 5vw;
+    display: flex;
+    flex-direction: column;
+    min-width: min(68rem, 90vw);
+    min-height: 32rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    background: var(--bs-body-bg, #fff);
+    box-shadow: 0 1rem 3rem rgba(15, 23, 42, 0.28);
+    overflow: hidden;
+}
+
+.contest-review-header,
+.contest-review-detail-head,
+.contest-review-card-main,
+.contest-review-diff-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.contest-review-header {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.contest-review-title {
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.contest-review-subtitle,
+.contest-review-model-subtitle,
+.contest-review-meta,
+.contest-review-note {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.84rem;
+}
+
+.contest-review-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin: 0.75rem 1rem 0;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.4rem;
+    background: rgba(220, 53, 69, 0.1);
+    color: var(--bs-danger, #dc3545);
+    font-size: 0.85rem;
+}
+
+.contest-review-empty {
+    margin: 2rem;
+    color: var(--bs-secondary-color, #6c757d);
+    text-align: center;
+}
+
+.contest-review-empty.compact {
+    margin: 1rem;
+}
+
+.contest-review-body {
+    display: grid;
+    grid-template-columns: minmax(18rem, 0.9fr) minmax(26rem, 1.6fr);
+    min-height: 0;
+    flex: 1;
+}
+
+.contest-review-list {
+    min-width: 0;
+    overflow-y: auto;
+    padding: 0.75rem;
+    border-right: 1px solid var(--bs-border-color, #dee2e6);
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.contest-review-card {
+    padding: 0.65rem;
+    margin-bottom: 0.6rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.45rem;
+    background: var(--bs-body-bg, #fff);
+    cursor: pointer;
+}
+
+.contest-review-card.selected {
+    border-color: var(--bs-primary, #0d6efd);
+    box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.12);
+}
+
+.contest-review-card.completed,
+.contest-review-card.selected-status {
+    border-color: rgba(25, 135, 84, 0.45);
+}
+
+.contest-review-card.failed,
+.contest-review-card.rejected {
+    border-color: rgba(220, 53, 69, 0.45);
+}
+
+.contest-review-model {
+    font-weight: 700;
+    font-size: 0.88rem;
+}
+
+.contest-review-model.large {
+    font-size: 1rem;
+}
+
+.contest-review-status {
+    flex: 0 0 auto;
+    border-radius: 999px;
+    padding: 0.1rem 0.45rem;
+    background: var(--bs-secondary-bg, #e9ecef);
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+}
+
+.contest-review-summary,
+.contest-review-error-text {
+    margin-top: 0.35rem;
+    font-size: 0.88rem;
+}
+
+.contest-review-error-text {
+    color: var(--bs-danger, #dc3545);
+}
+
+.contest-review-detail {
+    min-width: 0;
+    overflow-y: auto;
+    padding: 1rem;
+}
+
+.contest-review-note {
+    margin: 0.75rem 0;
+}
+
+.contest-review-diff {
+    max-height: 34rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.4rem;
+    background: var(--bs-body-bg, #fff);
+    overflow: auto;
+}
+
+.contest-review-diff-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.contest-review-section-label {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.contest-review-diff-subtitle {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.82rem;
+}
+
+.contest-review-diff-stats {
+    display: flex;
+    gap: 0.55rem;
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.contest-review-diff-added {
+    color: var(--bs-success, #198754);
+}
+
+.contest-review-diff-removed {
+    color: var(--bs-danger, #dc3545);
+}
+
+.contest-review-diff-section + .contest-review-diff-section {
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+}
+
+.contest-review-diff-field,
+.contest-review-diff-hunk-header {
+    padding: 0.35rem 0.65rem;
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+}
+
+.contest-review-diff-field {
+    border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+    background: rgba(0, 0, 0, 0.025);
+    color: var(--bs-secondary-color, #6c757d);
+    font-weight: 700;
+}
+
+.contest-review-diff-hunk-header {
+    border-top: 1px solid rgba(13, 110, 253, 0.16);
+    border-bottom: 1px solid rgba(13, 110, 253, 0.16);
+    background: rgba(13, 110, 253, 0.08);
+    color: #0a58ca;
+}
+
+.contest-review-diff-row {
+    display: grid;
+    grid-template-columns: 3.25rem 3.25rem 1.45rem minmax(0, 1fr);
+    min-width: 0;
+    border-top: 1px solid rgba(0, 0, 0, 0.045);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.contest-review-diff-row.added {
+    background: rgba(25, 135, 84, 0.1);
+}
+
+.contest-review-diff-row.removed {
+    background: rgba(220, 53, 69, 0.1);
+}
+
+.contest-review-line-number,
+.contest-review-marker,
+.contest-review-line-text {
+    padding: 0.18rem 0.45rem;
+}
+
+.contest-review-line-number {
+    border-right: 1px solid rgba(0, 0, 0, 0.065);
+    color: var(--bs-secondary-color, #6c757d);
+    text-align: right;
+    user-select: none;
+}
+
+.contest-review-marker {
+    color: var(--bs-secondary-color, #6c757d);
+    text-align: center;
+    user-select: none;
+}
+
+.contest-review-line-text {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.contest-review-segment.added,
+.contest-review-segment.removed {
+    border-radius: 0.18rem;
+    padding: 0 0.05rem;
+}
+
+.contest-review-segment.added {
+    background: rgba(25, 135, 84, 0.24);
+}
+
+.contest-review-segment.removed {
+    background: rgba(220, 53, 69, 0.24);
+}
+
+.contest-review-raw {
+    margin-top: 0.9rem;
+}
+
+.contest-review-raw pre {
+    margin-top: 0.45rem;
+    padding: 0.65rem;
+    border-radius: 0.35rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+}

@@ -32,6 +32,16 @@ public class Project
     /// </summary>
     public bool AiChangeApprovalEnabled { get; set; } = true;
 
+    /// <summary>
+    /// When true, editor chat prepares generation requests with read-only tools, then
+    /// starts a contest across the configured model slots instead of mutating directly.
+    /// </summary>
+    public bool ContestModeEnabled { get; set; }
+
+    public int? ContestProviderSlot1Id { get; set; }
+    public int? ContestProviderSlot2Id { get; set; }
+    public int? ContestProviderSlot3Id { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
@@ -52,6 +62,8 @@ public class Project
     public ICollection<WritingCoachConversation> WritingCoachConversations { get; set; } = [];
 
     public ICollection<AiChangeBatch> AiChangeBatches { get; set; } = [];
+
+    public ICollection<ContestBatch> ContestBatches { get; set; } = [];
 
     public ICollection<EditorContextPreference> EditorContextPreferences { get; set; } = [];
 
