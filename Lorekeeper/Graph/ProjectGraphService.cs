@@ -263,6 +263,14 @@ public sealed class ProjectGraphService(
             return;
         }
 
+        if (Guid.TryParseExact(node.Key, "N", out var entityId))
+        {
+            var parentGuid = await ResolveParentGuidAsync(projectId, request.ParentNodeId, cancellationToken);
+            await entities.MoveParentAsync(projectId, entityId, parentGuid, cancellationToken);
+            await TouchProjectAsync(projectId, cancellationToken);
+            return;
+        }
+
         GraphNode? newParent = null;
         if (request.ParentNodeId is long parentNodeId)
             newParent = await GetRequiredProjectNodeAsync(projectId, parentNodeId, cancellationToken);
@@ -277,7 +285,6 @@ public sealed class ProjectGraphService(
             var sortOrder = siblings.Count == 0 ? 0 : siblings.Max(e => e.SortOrder ?? -1) + 1;
             await graph.UpsertEdgeAsync(newParent.Id, node.Id, HasChildEdgeType, sortOrder: sortOrder, cancellationToken: cancellationToken);
         }
-
         await TouchProjectAsync(projectId, cancellationToken);
     }
 
@@ -289,6 +296,13 @@ public sealed class ProjectGraphService(
         if (from.Id == to.Id)
             throw new InvalidOperationException("A relationship must connect two different nodes.");
 
+        if (Guid.TryParseExact(from.Key, "N", out var fromId) && Guid.TryParseExact(to.Key, "N", out var toId))
+        {
+            await entities.LinkAsync(projectId, fromId, toId, edgeType, CleanProperties(request.Properties), cancellationToken);
+            await TouchProjectAsync(projectId, cancellationToken);
+            return;
+        }
+
         await graph.UpsertEdgeAsync(from.Id, to.Id, edgeType, ToObjectDictionary(CleanProperties(request.Properties)), cancellationToken: cancellationToken);
         await TouchProjectAsync(projectId, cancellationToken);
     }
@@ -299,11 +313,7 @@ public sealed class ProjectGraphService(
         if (string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Managed parent links cannot be edited directly.");
 
-        edge.EdgeType = NormalizeEditableEdgeType(request.EdgeType);
-        edge.Properties = ToObjectDictionary(CleanProperties(request.Properties));
-        edge.UpdatedAt = DateTime.UtcNow;
-        edges.Update(edge);
-        await edges.SaveChangesAsync(cancellationToken);
+        await entities.UpdateLinkAsync(projectId, edge.Id, request.EdgeType, CleanProperties(request.Properties), cancellationToken);
         await TouchProjectAsync(projectId, cancellationToken);
     }
 
@@ -313,7 +323,7 @@ public sealed class ProjectGraphService(
         if (string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Managed parent links cannot be deleted directly.");
 
-        await graph.RemoveEdgeAsync(edge.Id, cancellationToken);
+        await entities.DeleteLinkAsync(projectId, edge.Id, cancellationToken);
         await TouchProjectAsync(projectId, cancellationToken);
     }
 

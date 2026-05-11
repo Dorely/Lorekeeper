@@ -197,7 +197,8 @@ public sealed class IngestService(
 
         queue.RequestCancellation(job.Id);
 
-        await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.ReportItems, cancellationToken);
+        var cleanup = await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.ReportItems, cancellationToken);
+        await ApplyGraphCleanupContextUpdatesAsync(job.ProjectId, cleanup, cancellationToken);
 
         foreach (var item in job.ReportItems.Where(item => item.Status != IngestReportItemStatus.Deleted))
         {
@@ -236,6 +237,7 @@ public sealed class IngestService(
         job.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJob(job);
         await ingest.SaveChangesAsync(cancellationToken);
+        await contextIndexing.ReindexIngestSourceAsync(job.SourceId, cancellationToken);
         queue.Enqueue(job.Id);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Queued);
     }
@@ -247,15 +249,25 @@ public sealed class IngestService(
 
         var projectId = job.ProjectId;
         queue.RequestCancellation(job.Id);
-        await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.ReportItems, cancellationToken);
+        var cleanup = await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.ReportItems, cancellationToken);
+        await ApplyGraphCleanupContextUpdatesAsync(job.ProjectId, cleanup, cancellationToken);
         await vectors.DeleteBySourceAsync("ingest_source", job.Source.VectorSourceId, Project.ScopeKey(job.ProjectId), cancellationToken);
         await contextIndexing.DeleteIngestSourceAsync(job.ProjectId, job.SourceId, cancellationToken);
         await graphSync.RemoveSourceAsync(job.ProjectId, job.SourceId, cancellationToken);
 
         ingest.RemoveSource(job.Source);
         await ingest.SaveChangesAsync(cancellationToken);
-        await contextIndexing.ReindexProjectAsync(projectId, cancellationToken);
         Notify(projectId, job.Id, IngestJobUpdateKind.Deleted);
+    }
+
+    private async Task ApplyGraphCleanupContextUpdatesAsync(Guid projectId, IngestGraphCleanupResult cleanup, CancellationToken cancellationToken)
+    {
+        var deletedEntityIds = cleanup.EntityIdsToDelete.ToHashSet();
+        foreach (var entityId in deletedEntityIds)
+            await contextIndexing.DeleteEntityAsync(projectId, entityId, cancellationToken);
+
+        foreach (var entityId in cleanup.EntityIdsToReindex.Where(entityId => !deletedEntityIds.Contains(entityId)).Distinct())
+            await contextIndexing.ReindexEntityAsync(projectId, entityId, cancellationToken);
     }
 
     public async Task<IngestReportItem> UpdateReportItemAsync(Guid reportItemId, IngestReportItemUpdateRequest request, CancellationToken cancellationToken = default)
@@ -296,13 +308,15 @@ public sealed class IngestService(
             ?? throw new InvalidOperationException($"Ingest report item {reportItemId} not found.");
         if (item.Status == IngestReportItemStatus.Deleted) return;
 
-        await RemoveSingleReportGraphItemAsync(item, cancellationToken);
+        var affectedEntityIds = await RemoveSingleReportGraphItemAsync(item, cancellationToken);
         MarkReportItemDeleted(item);
         ingest.UpdateReportItem(item);
         await ingest.SaveChangesAsync(cancellationToken);
         await RefreshJobCountsAsync(item.JobId, cancellationToken);
         await ingest.SaveChangesAsync(cancellationToken);
         await ReindexReportItemContextAsync(item, cancellationToken);
+        foreach (var entityId in affectedEntityIds)
+            await contextIndexing.ReindexEntityAsync(item.Job.ProjectId, entityId, cancellationToken);
         Notify(item.Job.ProjectId, item.JobId, IngestJobUpdateKind.Report);
     }
 
@@ -367,8 +381,9 @@ public sealed class IngestService(
         }
     }
 
-    private async Task RemoveSingleReportGraphItemAsync(IngestReportItem item, CancellationToken cancellationToken)
+    private async Task<IReadOnlyCollection<Guid>> RemoveSingleReportGraphItemAsync(IngestReportItem item, CancellationToken cancellationToken)
     {
+        var affectedEntityIds = new HashSet<Guid>();
         switch (item.Kind)
         {
             case IngestReportItemKind.Entity:
@@ -380,6 +395,8 @@ public sealed class IngestService(
                         && candidate.Kind == IngestReportItemKind.Relationship
                         && IsRelationshipConnectedTo(candidate, item.EntityId.Value)))
                     {
+                        foreach (var entityId in ReadRelationshipEndpointIds(relationship.PayloadJson))
+                            if (entityId != item.EntityId.Value) affectedEntityIds.Add(entityId);
                         await RemoveRelationshipGraphEdgeAsync(relationship, item.Job.SourceId, cancellationToken);
                         MarkReportItemDeleted(relationship);
                         ingest.UpdateReportItem(relationship);
@@ -390,6 +407,8 @@ public sealed class IngestService(
                 break;
 
             case IngestReportItemKind.Relationship:
+                foreach (var entityId in ReadRelationshipEndpointIds(item.PayloadJson))
+                    affectedEntityIds.Add(entityId);
                 await RemoveRelationshipGraphEdgeAsync(item, item.Job.SourceId, cancellationToken);
                 break;
 
@@ -404,6 +423,8 @@ public sealed class IngestService(
                 ingest.UpdateSourceChunk(sourceChunk);
                 break;
         }
+
+            return affectedEntityIds;
     }
 
     private async Task RefreshJobCountsAsync(Guid jobId, CancellationToken cancellationToken)

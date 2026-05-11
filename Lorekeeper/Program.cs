@@ -71,8 +71,6 @@ builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
 
 // Chapters
 builder.Services.AddScoped<IChapterService, ChapterService>();
-builder.Services.AddSingleton<IStaleChapterNotifier, StaleChapterNotifier>();
-builder.Services.AddHostedService<StaleChapterReindexer>();
 
 // Outline
 builder.Services.AddScoped<IActService, ActService>();
@@ -107,7 +105,6 @@ builder.Services.AddScoped<IContextBuilder>(sp => sp.GetRequiredService<ContextB
 builder.Services.AddScoped<IEditorContextService>(sp => sp.GetRequiredService<ContextBuilder>());
 builder.Services.AddScoped<IContextIndexingService, ContextIndexingService>();
 builder.Services.AddScoped<IContextRecommendationService, ContextRecommendationService>();
-builder.Services.AddHostedService<ContextIndexBackfillWorker>();
 builder.Services.AddScoped<EditorChatTools>();
 builder.Services.AddScoped<IEditorContestService, EditorContestService>();
 builder.Services.AddScoped<IEditorChatService, EditorChatService>();

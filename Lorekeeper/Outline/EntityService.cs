@@ -162,8 +162,10 @@ public sealed class EntityService(
     {
         var node = await ResolveEntityNodeAsync(projectId, entityId, cancellationToken);
         if (node is null) return;
+        var impactedEntityIds = await ListAdjacentContextEntityIdsAsync(projectId, node.Id, cancellationToken);
         await contextIndexing.DeleteEntityAsync(projectId, entityId, cancellationToken);
         await graph.RemoveNodeAsync(node.Id, cancellationToken);
+        await ReindexEntitiesAsync(projectId, impactedEntityIds, cancellationToken);
     }
 
     public async Task ReorderAsync(
@@ -206,6 +208,65 @@ public sealed class EntityService(
         await edges.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task MoveParentAsync(
+        Guid projectId,
+        Guid entityId,
+        Guid? parentId,
+        CancellationToken cancellationToken = default)
+    {
+        var node = await ResolveEntityNodeAsync(projectId, entityId, cancellationToken)
+            ?? throw new InvalidOperationException($"Entity {entityId} not found in project {projectId}.");
+
+        GraphNode? newParent = null;
+        if (parentId is Guid requestedParentId)
+        {
+            newParent = await EnsureParentNodeAsync(projectId, requestedParentId, cancellationToken)
+                ?? throw new InvalidOperationException($"Parent entity {requestedParentId} not found in project {projectId}.");
+            if (newParent.Id == node.Id)
+                throw new InvalidOperationException("An entity cannot be its own parent.");
+        }
+
+        var impactedEntityIds = new HashSet<Guid>();
+        AddContextEntityId(node, impactedEntityIds);
+        if (newParent is not null) AddContextEntityId(newParent, impactedEntityIds);
+
+        var incomingParents = await edges.GetAdjacentAsync(
+            node.Id,
+            EdgeDirection.Incoming,
+            [HasChildEdgeType],
+            maxResults: null,
+            cancellationToken);
+
+        if (incomingParents.Count > 0)
+        {
+            var oldParents = await nodes.GetByIdsAsync(incomingParents.Select(edge => edge.FromNodeId), cancellationToken);
+            foreach (var oldParent in oldParents)
+                AddContextEntityId(oldParent, impactedEntityIds);
+        }
+
+        foreach (var edge in incomingParents.Where(edge => newParent is null || edge.FromNodeId != newParent.Id))
+            await graph.RemoveEdgeAsync(edge.Id, cancellationToken);
+
+        if (newParent is not null)
+        {
+            var siblings = await edges.GetAdjacentAsync(
+                newParent.Id,
+                EdgeDirection.Outgoing,
+                [HasChildEdgeType],
+                maxResults: null,
+                cancellationToken);
+            var sortOrder = siblings.Count == 0 ? 0 : siblings.Max(edge => edge.SortOrder ?? -1) + 1;
+            await graph.UpsertEdgeAsync(
+                newParent.Id,
+                node.Id,
+                HasChildEdgeType,
+                sortOrder: sortOrder,
+                cancellationToken: cancellationToken);
+        }
+
+        await ReindexEntitiesAsync(projectId, impactedEntityIds, cancellationToken);
+    }
+
     public async Task LinkAsync(
         Guid projectId,
         Guid fromEntityId,
@@ -219,6 +280,8 @@ public sealed class EntityService(
         if (fromEntityId == toEntityId)
             throw new InvalidOperationException("Cannot link an entity to itself.");
 
+        var normalizedEdgeType = NormalizeEditableEdgeType(edgeType);
+
         var fromNode = await ResolveEntityNodeAsync(projectId, fromEntityId, cancellationToken)
             ?? throw new InvalidOperationException($"Source entity {fromEntityId} not found in project {projectId}.");
         var toNode = await ResolveEntityNodeAsync(projectId, toEntityId, cancellationToken)
@@ -227,12 +290,41 @@ public sealed class EntityService(
         await graph.UpsertEdgeAsync(
             fromNode.Id,
             toNode.Id,
-            edgeType.Trim(),
+            normalizedEdgeType,
             properties: ToObjectDict(properties),
             cancellationToken: cancellationToken);
 
-        await contextIndexing.ReindexEntityAsync(projectId, fromEntityId, cancellationToken);
-        await contextIndexing.ReindexEntityAsync(projectId, toEntityId, cancellationToken);
+        await ReindexEntitiesAsync(projectId, new[] { fromEntityId, toEntityId }, cancellationToken);
+    }
+
+    public async Task UpdateLinkAsync(
+        Guid projectId,
+        long edgeId,
+        string edgeType,
+        IDictionary<string, string?>? properties = null,
+        CancellationToken cancellationToken = default)
+    {
+        var (edge, fromNode, toNode) = await GetRequiredProjectEdgeAsync(projectId, edgeId, cancellationToken);
+        if (string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Managed parent links cannot be edited directly.");
+
+        edge.EdgeType = NormalizeEditableEdgeType(edgeType);
+        edge.Properties = ToObjectDict(properties);
+        edge.UpdatedAt = DateTime.UtcNow;
+        edges.Update(edge);
+        await edges.SaveChangesAsync(cancellationToken);
+
+        await ReindexEntitiesAsync(projectId, EndpointEntityIds(fromNode, toNode), cancellationToken);
+    }
+
+    public async Task DeleteLinkAsync(Guid projectId, long edgeId, CancellationToken cancellationToken = default)
+    {
+        var (edge, fromNode, toNode) = await GetRequiredProjectEdgeAsync(projectId, edgeId, cancellationToken);
+        if (string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Managed parent links cannot be deleted directly.");
+
+        await graph.RemoveEdgeAsync(edge.Id, cancellationToken);
+        await ReindexEntitiesAsync(projectId, EndpointEntityIds(fromNode, toNode), cancellationToken);
     }
 
     public async Task<int> CountChildrenAsync(
@@ -354,6 +446,82 @@ public sealed class EntityService(
         var parentNode = await nodes.GetByIdAsync(incoming[0].FromNodeId, cancellationToken);
         return parentNode is null ? null : Guid.ParseExact(parentNode.Key, "N");
     }
+
+    private async Task<(GraphEdge Edge, GraphNode From, GraphNode To)> GetRequiredProjectEdgeAsync(
+        Guid projectId,
+        long edgeId,
+        CancellationToken cancellationToken)
+    {
+        var edge = await edges.GetByIdAsync(edgeId, cancellationToken)
+            ?? throw new InvalidOperationException("Graph relationship not found.");
+        var fromNode = await nodes.GetByIdAsync(edge.FromNodeId, cancellationToken)
+            ?? throw new InvalidOperationException("Graph relationship source node not found.");
+        var toNode = await nodes.GetByIdAsync(edge.ToNodeId, cancellationToken)
+            ?? throw new InvalidOperationException("Graph relationship target node not found.");
+        if (fromNode.ProjectId != projectId || toNode.ProjectId != projectId || fromNode.ProjectId != toNode.ProjectId)
+            throw new InvalidOperationException("Graph relationship belongs to a different project.");
+        return (edge, fromNode, toNode);
+    }
+
+    private async Task<HashSet<Guid>> ListAdjacentContextEntityIdsAsync(Guid projectId, long nodeId, CancellationToken cancellationToken)
+    {
+        var adjacent = await edges.GetAdjacentAsync(nodeId, EdgeDirection.Both, edgeTypes: null, maxResults: null, cancellationToken);
+        var otherIds = adjacent
+            .Select(edge => edge.FromNodeId == nodeId ? edge.ToNodeId : edge.FromNodeId)
+            .Distinct()
+            .ToList();
+        IReadOnlyList<GraphNode> otherNodes = otherIds.Count == 0
+            ? []
+            : await nodes.GetByIdsAsync(otherIds, cancellationToken);
+
+        var result = new HashSet<Guid>();
+        foreach (var otherNode in otherNodes.Where(node => node.ProjectId == projectId))
+            AddContextEntityId(otherNode, result);
+        return result;
+    }
+
+    private async Task ReindexEntitiesAsync(Guid projectId, IEnumerable<Guid> entityIds, CancellationToken cancellationToken)
+    {
+        foreach (var entityId in entityIds.Distinct())
+            await contextIndexing.ReindexEntityAsync(projectId, entityId, cancellationToken);
+    }
+
+    private static IEnumerable<Guid> EndpointEntityIds(params GraphNode[] endpointNodes)
+    {
+        foreach (var node in endpointNodes)
+        {
+            if (Guid.TryParseExact(node.Key, "N", out var entityId))
+                yield return entityId;
+        }
+    }
+
+    private static void AddContextEntityId(GraphNode node, ISet<Guid> ids)
+    {
+        if (IsContextEntityNode(node) && Guid.TryParseExact(node.Key, "N", out var entityId))
+            ids.Add(entityId);
+    }
+
+    private static string NormalizeEditableEdgeType(string edgeType)
+    {
+        var type = (edgeType ?? string.Empty).Trim();
+        if (type.Length == 0)
+            throw new ArgumentException("Relationship type is required.", nameof(edgeType));
+        if (string.Equals(type, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Managed parent links cannot be edited directly.");
+        return type;
+    }
+
+    private static bool IsContextEntityNode(GraphNode node) =>
+        Guid.TryParseExact(node.Key, "N", out _)
+        && IsContextEntityType(node.NodeType);
+
+    private static bool IsContextEntityType(string type) =>
+        !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
 
     private static StoryEntity Project(GraphNode node, Guid? parentId, int? orderOverride = null)
     {

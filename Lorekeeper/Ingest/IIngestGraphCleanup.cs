@@ -16,4 +16,6 @@ public sealed record IngestGraphCleanupResult(
     int NodesDeleted,
     int EdgesUpdated,
     int EdgesDeleted,
-    int ExtractedFromEdgesDeleted);
+    int ExtractedFromEdgesDeleted,
+    IReadOnlyCollection<Guid> EntityIdsToReindex,
+    IReadOnlyCollection<Guid> EntityIdsToDelete);

@@ -23,22 +23,6 @@ public sealed class ContextIndexingService(
     private const int MaxEntityLinks = 30;
     private const int MaxSourceChunkExcerptChars = 6_000;
 
-    public async Task ReindexProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
-    {
-        var graphNodes = await nodes.ListByProjectAsync(projectId, cancellationToken);
-        foreach (var node in graphNodes.Where(IsContextEntityNode))
-            await ReindexEntityNodeAsync(node, cancellationToken);
-
-        foreach (var act in await acts.ListByProjectAsync(projectId, cancellationToken))
-            await TryReindexActCoreAsync(act, cancellationToken);
-
-        foreach (var chapter in await chapters.ListByProjectAsync(projectId, cancellationToken))
-            await TryReindexChapterCoreAsync(chapter, cancellationToken);
-
-        foreach (var source in await ingest.ListSourcesByProjectAsync(projectId, cancellationToken))
-            await TryReindexIngestSourceCoreAsync(source, cancellationToken);
-    }
-
     public async Task ReindexEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default)
     {
         try
@@ -174,18 +158,6 @@ public sealed class ContextIndexingService(
             cancellationToken);
     }
 
-    private async Task TryReindexChapterCoreAsync(Chapter chapter, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await ReindexChapterCoreAsync(chapter, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Failed to reindex context chapter {ChapterId}", chapter.Id);
-        }
-    }
-
     private async Task ReindexActCoreAsync(Act act, CancellationToken cancellationToken)
     {
         var text = await BuildActTextAsync(act, cancellationToken);
@@ -196,18 +168,6 @@ public sealed class ContextIndexingService(
             $"Act {act.Order + 1} {act.Title}",
             text,
             cancellationToken);
-    }
-
-    private async Task TryReindexActCoreAsync(Act act, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await ReindexActCoreAsync(act, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Failed to reindex context act {ActId}", act.Id);
-        }
     }
 
     private async Task ReindexIngestSourceCoreAsync(IngestSource source, CancellationToken cancellationToken)
@@ -223,18 +183,6 @@ public sealed class ContextIndexingService(
 
         foreach (var sourceChunk in await ingest.ListSourceChunksAsync(source.Id, cancellationToken))
             await ReindexIngestSourceChunkCoreAsync(sourceChunk, cancellationToken);
-    }
-
-    private async Task TryReindexIngestSourceCoreAsync(IngestSource source, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await ReindexIngestSourceCoreAsync(source, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Failed to reindex context ingest source {SourceId}", source.Id);
-        }
     }
 
     private async Task ReindexIngestSourceChunkCoreAsync(IngestSourceChunk sourceChunk, CancellationToken cancellationToken)

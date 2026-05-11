@@ -1,5 +1,6 @@
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
+using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Ingest;
@@ -21,10 +22,13 @@ public sealed class IngestGraphCleanup(
         var projectEdges = await edges.ListByProjectAsync(projectId, cancellationToken);
         var nodeActions = BuildNodeActions(reportItemList, projectNodes);
         var edgeActions = BuildEdgeActions(reportItemList);
+        var nodeById = projectNodes.ToDictionary(node => node.Id);
         var sourceGraphNodeIds = projectNodes
             .Where(node => IsSourceGraphNodeForSource(node, sourceKey))
             .Select(node => node.Id)
             .ToHashSet();
+        var entityIdsToReindex = new HashSet<Guid>();
+        var entityIdsToDelete = new HashSet<Guid>();
 
         var nodesUpdated = 0;
         var nodesDeleted = 0;
@@ -35,6 +39,7 @@ public sealed class IngestGraphCleanup(
         var deletedEdgeIds = new HashSet<long>();
         foreach (var edge in projectEdges.Where(edge => IsSourceOwnedExtractedFromEdge(edge, sourceKey, sourceGraphNodeIds)).ToList())
         {
+            AddEdgeEndpointContextEntityIds(edge, nodeById, entityIdsToReindex);
             await graphStore.RemoveEdgeAsync(edge.Id, cancellationToken);
             deletedEdgeIds.Add(edge.Id);
             extractedFromEdgesDeleted++;
@@ -52,12 +57,14 @@ public sealed class IngestGraphCleanup(
             var graphAction = edgeActions.GetValueOrDefault(edge.Id);
             if (CanRemoveGraphEdgeAfterSourceSubtraction(edge, graphAction))
             {
+                AddEdgeEndpointContextEntityIds(edge, nodeById, entityIdsToReindex);
                 await graphStore.RemoveEdgeAsync(edge.Id, cancellationToken);
                 deletedEdgeIds.Add(edge.Id);
                 edgesDeleted++;
             }
             else if (removal.Removed)
             {
+                AddEdgeEndpointContextEntityIds(edge, nodeById, entityIdsToReindex);
                 edge.UpdatedAt = DateTime.UtcNow;
                 edges.Update(edge);
                 await edges.SaveChangesAsync(cancellationToken);
@@ -76,11 +83,13 @@ public sealed class IngestGraphCleanup(
             var graphAction = nodeActions.GetValueOrDefault(node.Id);
             if (await CanRemoveGraphNodeAfterSourceSubtractionAsync(node, graphAction, cancellationToken))
             {
+                AddContextEntityId(node, entityIdsToDelete);
                 await graphStore.RemoveNodeAsync(node.Id, cancellationToken);
                 nodesDeleted++;
             }
             else if (removal.Removed)
             {
+                AddContextEntityId(node, entityIdsToReindex);
                 node.UpdatedAt = DateTime.UtcNow;
                 nodes.Update(node);
                 await nodes.SaveChangesAsync(cancellationToken);
@@ -93,7 +102,9 @@ public sealed class IngestGraphCleanup(
             nodesDeleted,
             edgesUpdated,
             edgesDeleted,
-            extractedFromEdgesDeleted);
+                extractedFromEdgesDeleted,
+                entityIdsToReindex.Except(entityIdsToDelete).ToList(),
+                entityIdsToDelete.ToList());
     }
 
     private static Dictionary<long, string?> BuildNodeActions(
@@ -225,4 +236,33 @@ public sealed class IngestGraphCleanup(
     private static bool HasSourceId(IReadOnlyDictionary<string, object?> properties, string sourceKey) =>
         properties.TryGetValue("sourceId", out var value)
         && string.Equals(value?.ToString(), sourceKey, StringComparison.OrdinalIgnoreCase);
+
+    private static void AddEdgeEndpointContextEntityIds(
+        GraphEdge edge,
+        IReadOnlyDictionary<long, GraphNode> nodeById,
+        ISet<Guid> ids)
+    {
+        if (nodeById.TryGetValue(edge.FromNodeId, out var fromNode))
+            AddContextEntityId(fromNode, ids);
+        if (nodeById.TryGetValue(edge.ToNodeId, out var toNode))
+            AddContextEntityId(toNode, ids);
+    }
+
+    private static void AddContextEntityId(GraphNode node, ISet<Guid> ids)
+    {
+        if (IsContextEntityNode(node) && Guid.TryParseExact(node.Key, "N", out var entityId))
+            ids.Add(entityId);
+    }
+
+    private static bool IsContextEntityNode(GraphNode node) =>
+        Guid.TryParseExact(node.Key, "N", out _)
+        && IsContextEntityType(node.NodeType);
+
+    private static bool IsContextEntityType(string type) =>
+        !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
 }

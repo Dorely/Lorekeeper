@@ -10,10 +10,6 @@ public class ChapterRepository(AppDbContext db) : IChapterRepository
                    .OrderBy(c => c.Order)
                    .ToListAsync(cancellationToken);
 
-    public Task<List<Chapter>> ListStaleAsync(CancellationToken cancellationToken = default) =>
-        db.Chapters.Where(c => c.VectorIndexState != VectorIndexState.UpToDate)
-                   .ToListAsync(cancellationToken);
-
     public Task<Chapter?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         db.Chapters.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
 

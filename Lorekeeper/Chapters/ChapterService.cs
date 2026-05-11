@@ -13,7 +13,6 @@ public class ChapterService(
     IVectorStore vectors,
     IEmbeddingService embeddings,
     ITextChunker chunker,
-    IStaleChapterNotifier staleNotifier,
     IOutlineGraphSync outlineGraphSync,
     IContextIndexingService contextIndexing,
     ILogger<ChapterService> logger) : IChapterService
@@ -69,8 +68,18 @@ public class ChapterService(
         var previousActId = chapter.ActId;
 
         var bodyChanged = false;
-        if (title is not null && title != chapter.Title) chapter.Title = title;
-        if (synopsis is not null && synopsis != chapter.Synopsis) chapter.Synopsis = synopsis;
+        var titleOrSynopsisChanged = false;
+        var actChanged = false;
+        if (title is not null && title != chapter.Title)
+        {
+            chapter.Title = title;
+            titleOrSynopsisChanged = true;
+        }
+        if (synopsis is not null && synopsis != chapter.Synopsis)
+        {
+            chapter.Synopsis = synopsis;
+            titleOrSynopsisChanged = true;
+        }
         if (body is not null && body != chapter.Body)
         {
             chapter.Body = body;
@@ -82,7 +91,11 @@ public class ChapterService(
             chapter.ActId = assignment.Value;
             // Append to the end of the destination bucket so we don't collide with existing orders.
             chapter.Order = await repo.GetMaxOrderAsync(chapter.ProjectId, assignment.Value, cancellationToken) + 1;
+            actChanged = true;
         }
+
+        if (!bodyChanged && !titleOrSynopsisChanged && !actChanged)
+            return chapter;
 
         chapter.UpdatedAt = DateTime.UtcNow;
         repo.Update(chapter);
@@ -96,16 +109,41 @@ public class ChapterService(
 
         await repo.SaveChangesAsync(cancellationToken);
 
-        if (bodyChanged) staleNotifier.Notify(chapter.Id);
-
         await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
-        await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
-        if (previousActId is Guid oldActId)
-            await contextIndexing.ReindexActAsync(oldActId, cancellationToken);
-        if (chapter.ActId is Guid newActId && newActId != previousActId)
-            await contextIndexing.ReindexActAsync(newActId, cancellationToken);
+
+        if (bodyChanged)
+            await TryReindexBodyAsync(chapter.Id, cancellationToken);
+        else
+            await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
+
+        var actIdsToReindex = new HashSet<Guid>();
+        if (titleOrSynopsisChanged && chapter.ActId is Guid currentActId)
+            actIdsToReindex.Add(currentActId);
+        if (actChanged && previousActId is Guid oldActId)
+            actIdsToReindex.Add(oldActId);
+        if (actChanged && chapter.ActId is Guid newActId)
+            actIdsToReindex.Add(newActId);
+
+        foreach (var actToReindex in actIdsToReindex)
+            await contextIndexing.ReindexActAsync(actToReindex, cancellationToken);
 
         return chapter;
+    }
+
+    private async Task TryReindexBodyAsync(Guid chapterId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ReindexAsync(chapterId, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // ReindexAsync already records failure details on the chapter.
+        }
     }
 
     public async Task DeleteAsync(Guid chapterId, CancellationToken cancellationToken = default)
@@ -157,7 +195,10 @@ public class ChapterService(
 
         await repo.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.RepairProjectAsync(projectId, cancellationToken);
-        await contextIndexing.ReindexProjectAsync(projectId, cancellationToken);
+        foreach (var chapterId in orderedIds)
+            await contextIndexing.ReindexChapterAsync(chapterId, cancellationToken);
+        if (actId is Guid reorderedActId)
+            await contextIndexing.ReindexActAsync(reorderedActId, cancellationToken);
     }
 
     public async Task ReindexAsync(Guid chapterId, CancellationToken cancellationToken = default)
@@ -203,6 +244,10 @@ public class ChapterService(
             await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
 
             logger.LogDebug("Reindexed chapter {ChapterId} with {Count} chunks", chapter.Id, chunks.Count);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

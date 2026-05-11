@@ -371,26 +371,27 @@ else
             _saveError = null;
             await InvokeAsync(StateHasChanged);
 
-            await Chapters.UpdateAsync(chapterId, body: body);
+            var updated = await Chapters.UpdateAsync(chapterId, body: body);
             if (_current is not null && _current.Id == chapterId)
             {
                 _current.Body = body;
+                _current.VectorIndexState = updated.VectorIndexState;
+                _current.VectorIndexError = updated.VectorIndexError;
+                _current.VectorIndexedAt = updated.VectorIndexedAt;
                 UpdateChapterMetrics(body);
             }
 
-            try
+            if (updated.VectorIndexState == VectorIndexState.Failed)
             {
-                await Chapters.ReindexAsync(chapterId);
-                _saveState = SaveState.Saved;
-                _lastSavedAt = DateTime.Now;
-            }
-            catch (Exception ex)
-            {
-                // Update succeeded; reindex did not. Background service will retry.
                 _saveState = SaveState.IndexFailed;
-                _saveError = ex.Message;
-                _lastSavedAt = DateTime.Now;
+                _saveError = updated.VectorIndexError;
             }
+            else
+            {
+                _saveState = SaveState.Saved;
+            }
+
+            _lastSavedAt = DateTime.Now;
 
             await RefreshContextSurfacesAsync();
         }

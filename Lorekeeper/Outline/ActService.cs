@@ -87,7 +87,6 @@ public class ActService(
         await repo.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.RemoveActAsync(projectId, act.Id, cancellationToken);
         await outlineGraphSync.RepairProjectAsync(projectId, cancellationToken);
-        await contextIndexing.ReindexProjectAsync(projectId, cancellationToken);
     }
 
     public async Task ReorderAsync(Guid projectId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
@@ -103,6 +102,7 @@ public class ActService(
 
         await repo.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.RepairProjectAsync(projectId, cancellationToken);
-        await contextIndexing.ReindexProjectAsync(projectId, cancellationToken);
+        foreach (var actId in orderedIds)
+            await contextIndexing.ReindexActAsync(actId, cancellationToken);
     }
 }

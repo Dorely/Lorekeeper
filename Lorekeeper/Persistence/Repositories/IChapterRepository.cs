@@ -5,7 +5,6 @@ namespace Lorekeeper.Persistence.Repositories;
 public interface IChapterRepository
 {
     Task<List<Chapter>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
-    Task<List<Chapter>> ListStaleAsync(CancellationToken cancellationToken = default);
     Task<Chapter?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>

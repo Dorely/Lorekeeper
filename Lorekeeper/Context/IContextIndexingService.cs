@@ -20,7 +20,6 @@ public static class ContextVectorSourceTypes
 
 public interface IContextIndexingService
 {
-    Task ReindexProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task ReindexEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default);
     Task DeleteEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default);
     Task ReindexChapterAsync(Guid chapterId, CancellationToken cancellationToken = default);

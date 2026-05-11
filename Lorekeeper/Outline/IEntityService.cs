@@ -60,6 +60,12 @@ public interface IEntityService
         IReadOnlyList<Guid> orderedEntityIds,
         CancellationToken cancellationToken = default);
 
+    Task MoveParentAsync(
+        Guid projectId,
+        Guid entityId,
+        Guid? parentId,
+        CancellationToken cancellationToken = default);
+
     Task LinkAsync(
         Guid projectId,
         Guid fromEntityId,
@@ -67,6 +73,15 @@ public interface IEntityService
         string edgeType,
         IDictionary<string, string?>? properties = null,
         CancellationToken cancellationToken = default);
+
+    Task UpdateLinkAsync(
+        Guid projectId,
+        long edgeId,
+        string edgeType,
+        IDictionary<string, string?>? properties = null,
+        CancellationToken cancellationToken = default);
+
+    Task DeleteLinkAsync(Guid projectId, long edgeId, CancellationToken cancellationToken = default);
 
     /// <summary>Counts a parent's <c>HasChild</c> children of the given type. Used by <c>list_outline</c>.</summary>
     Task<int> CountChildrenAsync(

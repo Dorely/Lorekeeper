@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Context;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -21,6 +22,7 @@ public sealed class IngestJobProcessor(
     ITextChunker chunker,
     IIngestGraphSync graphSync,
     IIngestJobNotifier notifier,
+    IContextIndexingService contextIndexing,
     IOptions<AgentOptions> options,
     ILogger<IngestJobProcessor> logger)
 {
@@ -228,6 +230,8 @@ public sealed class IngestJobProcessor(
         {
             var sourceChunks = await ingest.ListSourceChunksAsync(job.SourceId, cancellationToken);
             await graphSync.EnsureSourceAsync(job.Source, sourceChunks, cancellationToken);
+            if (sourceGraphChanged)
+                await contextIndexing.ReindexIngestSourceChunkAsync(sourceChunk.Id, cancellationToken);
         }
     }
 
