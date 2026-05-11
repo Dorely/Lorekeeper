@@ -54,8 +54,7 @@
                   @ref="_composerEl"
                   disabled="@ComposerDisabled"
                   value="@Input"
-                  @oninput="OnInputAsync"
-                  @onkeydown="OnKeyDown"></textarea>
+                  @oninput="OnInputAsync"></textarea>
         @if (ComposerOptions is not null)
         {
             @ComposerOptions
@@ -66,7 +65,7 @@
         }
         else
         {
-            <button type="button" class="btn btn-primary" disabled="@SendDisabled" @onclick="OnSend">Send</button>
+            <button type="button" class="btn btn-primary" data-chat-send="true" disabled="@SendDisabled" @onclick="OnSend">Send</button>
         }
     </div>
 </div>
@@ -88,6 +87,7 @@
     [Parameter] public bool SendDisabled { get; set; }
     [Parameter] public string? CssClass { get; set; }
     [Parameter] public int ForceScrollKey { get; set; }
+    [Parameter] public int ScrollKey { get; set; }
     [Parameter] public int AutoFollowKey { get; set; }
     [Parameter] public int ResetComposerKey { get; set; }
     [Parameter] public EventCallback OnSend { get; set; }
@@ -102,7 +102,9 @@
     private IJSObjectReference? _module;
     private bool _scrollerAttached;
     private bool _autoSizeAttached;
+    private bool _composerAttached;
     private int _seenForceScrollKey;
+    private int _seenScrollKey;
     private int _seenAutoFollowKey;
     private int _seenResetComposerKey;
 
@@ -127,6 +129,12 @@
             catch { }
         }
 
+        if (!_composerAttached)
+        {
+            try { await _module.InvokeVoidAsync("attachComposer", _composerEl); _composerAttached = true; }
+            catch { }
+        }
+
         if (_seenAutoFollowKey != AutoFollowKey)
         {
             _seenAutoFollowKey = AutoFollowKey;
@@ -137,7 +145,7 @@
         if (_seenResetComposerKey != ResetComposerKey)
         {
             _seenResetComposerKey = ResetComposerKey;
-            try { await _module.InvokeVoidAsync("resetAutoSize", _composerEl); }
+            try { await _module.InvokeVoidAsync("resetComposer", _composerEl); }
             catch { }
         }
 
@@ -145,18 +153,19 @@
         if (force)
             _seenForceScrollKey = ForceScrollKey;
 
-        try { await _module.InvokeVoidAsync("scrollToBottom", _scrollEl, force); }
-        catch { }
+        var requested = _seenScrollKey != ScrollKey;
+        if (requested)
+            _seenScrollKey = ScrollKey;
+
+        if (force || requested)
+        {
+            try { await _module.InvokeVoidAsync("scrollToBottom", _scrollEl, force); }
+            catch { }
+        }
     }
 
     private async Task OnInputAsync(ChangeEventArgs args) =>
         await InputChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
-
-    private async Task OnKeyDown(KeyboardEventArgs args)
-    {
-        if (args.Key == "Enter" && !args.ShiftKey && !Running && !SendDisabled)
-            await OnSend.InvokeAsync();
-    }
 
     private RenderFragment RenderMessage(ChatRenderableMessage message) => __builder =>
     {

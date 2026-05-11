@@ -24,6 +24,7 @@
              OnSend="SendAsync"
              OnStop="CancelAsync"
              ForceScrollKey="@_forceScrollKey"
+             ScrollKey="@_scrollKey"
              AutoFollowKey="@_autoFollowKey"
              ResetComposerKey="@_resetComposerKey">
     <HeaderActions>
@@ -56,6 +57,7 @@
     [Parameter] public EventCallback OnOutlineChanged { get; set; }
 
     private int _forceScrollKey;
+    private int _scrollKey;
     private int _autoFollowKey;
     private int _resetComposerKey;
 
@@ -407,6 +409,7 @@
 
     private void RequestScroll(bool force = false)
     {
+        _scrollKey++;
         if (force)
             _forceScrollKey++;
     }

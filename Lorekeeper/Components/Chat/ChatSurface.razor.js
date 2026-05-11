@@ -116,6 +116,52 @@ export function attachAutoSize(element) {
     resize(element);
 }
 
+export function attachComposer(element) {
+    if (!element) return;
+    const state = ensureComposer(element);
+    if (state.attached) return;
+
+    state.attached = true;
+    state.onKeyDown = event => {
+        if (event.defaultPrevented || event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) {
+            return;
+        }
+
+        event.preventDefault();
+        const sendButton = findSendButton(element);
+        if (!sendButton || sendButton.disabled || sendButton.getAttribute('aria-disabled') === 'true') {
+            return;
+        }
+
+        sendButton.click();
+    };
+
+    element.addEventListener('keydown', state.onKeyDown);
+}
+
+function ensureComposer(element) {
+    if (element.__chatSurfaceComposer) return element.__chatSurfaceComposer;
+    element.__chatSurfaceComposer = {
+        attached: false,
+        onKeyDown: null,
+    };
+    return element.__chatSurfaceComposer;
+}
+
+function findSendButton(element) {
+    const composer = element.closest('.chat-composer');
+    return composer ? composer.querySelector('[data-chat-send]') : null;
+}
+
+export function resetComposer(element) {
+    if (!element) return;
+    if (element.value !== '') {
+        element.value = '';
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    resetAutoSize(element);
+}
+
 export function resetAutoSize(element) {
     if (!element) return;
     element.style.height = 'auto';
