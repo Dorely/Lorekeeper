@@ -87,8 +87,11 @@ public sealed class EditorChatService(
     public async Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
 
-    public async Task<IReadOnlyList<ContestBatch>> ListContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await contestService.ListContestBatchesAsync(projectId, cancellationToken);
+    public async Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        await contestService.ListCurrentContestBatchesAsync(projectId, cancellationToken);
+
+    public async Task<IReadOnlyList<ContestBatch>> ListContestHistoryAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        await contestService.ListContestHistoryAsync(projectId, cancellationToken);
 
     public Task StageContestCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default) =>
         contestService.StageCandidateAsync(candidateId, cancellationToken);

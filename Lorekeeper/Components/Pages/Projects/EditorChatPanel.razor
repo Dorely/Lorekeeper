@@ -41,6 +41,12 @@
                     Contest @ContestCandidateCount
                 </button>
             }
+            @if (ContestHistoryBatchCount > 0)
+            {
+                <button type="button" class="btn btn-link btn-sm editor-chat-review" title="Review previous Contest Mode turns" @onclick="OpenContestHistory">
+                    History @ContestHistoryBatchCount
+                </button>
+            }
             <button type="button" class="btn btn-link btn-sm editor-chat-reset" title="Start over"
                     disabled="@(_running || PendingChangeCount > 0)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
@@ -73,7 +79,20 @@
 <ContestReviewModal ProjectId="@ProjectId"
                     Batches="@_contestBatches"
                     IsOpen="@_showContestReview"
+                    Title="Contest Review"
+                    Subtitle="Compare candidate chapter edits from the current contest turn, then stage one for normal change review."
+                    EmptyText="No current contest candidates yet."
                     OnClose="CloseContestReview"
+                    OnChanged="HandleContestChangedAsync" />
+
+<ContestReviewModal ProjectId="@ProjectId"
+                    Batches="@_contestHistoryBatches"
+                    IsOpen="@_showContestHistory"
+                    Title="Contest History"
+                    Subtitle="Review candidate chapter edits from previous contest turns."
+                    EmptyText="No previous contest candidates yet."
+                    ShowBatchDetails="true"
+                    OnClose="CloseContestHistory"
                     OnChanged="HandleContestChangedAsync" />
 
 <PendingAiChangesModal ProjectId="@ProjectId"
@@ -108,18 +127,22 @@
     private Guid? _loadedProjectId;
     private List<AiChangeBatch> _pendingBatches = [];
     private List<ContestBatch> _contestBatches = [];
+    private List<ContestBatch> _contestHistoryBatches = [];
     private List<LlmProvider> _providers = [];
     private string? _pendingUserText;
     private int _conversationTokenCount;
     private bool _conversationTokenIsExact = true;
     private bool _contestEnabled;
     private bool _showContestReview;
+    private bool _showContestHistory;
     private int? _contestProviderSlot1Id;
     private int? _contestProviderSlot2Id;
     private int? _contestProviderSlot3Id;
 
     private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
     private int ContestCandidateCount => _contestBatches.Sum(batch => batch.Candidates.Count);
+    private int ContestHistoryBatchCount => _contestHistoryBatches.Count;
+    private int ContestHistoryCandidateCount => _contestHistoryBatches.Sum(batch => batch.Candidates.Count);
     private bool ContestCanSend => !_contestEnabled || ContestProviderIds().Any();
 
     protected override async Task OnParametersSetAsync()
@@ -328,9 +351,17 @@
 
     private async Task LoadContestBatchesAsync(bool openIfAvailable)
     {
-        _contestBatches = (await Chat.ListContestBatchesAsync(ProjectId)).ToList();
+        _contestBatches = (await Chat.ListCurrentContestBatchesAsync(ProjectId)).ToList();
+        _contestHistoryBatches = (await Chat.ListContestHistoryAsync(ProjectId)).ToList();
         if (openIfAvailable && ContestCandidateCount > 0)
+        {
+            _showContestHistory = false;
             _showContestReview = true;
+        }
+        if (ContestCandidateCount == 0)
+            _showContestReview = false;
+        if (ContestHistoryCandidateCount == 0)
+            _showContestHistory = false;
     }
 
     private void ApplyContestCandidateRawResponseDelta(Guid candidateId, string rawResponse)
@@ -373,9 +404,21 @@
 
     private void ClosePendingChanges() => _showPendingChanges = false;
 
-    private void OpenContestReview() => _showContestReview = true;
+    private void OpenContestReview()
+    {
+        _showContestHistory = false;
+        _showContestReview = true;
+    }
 
     private void CloseContestReview() => _showContestReview = false;
+
+    private void OpenContestHistory()
+    {
+        _showContestReview = false;
+        _showContestHistory = true;
+    }
+
+    private void CloseContestHistory() => _showContestHistory = false;
 
     private async Task HandlePendingChangesChangedAsync()
     {
@@ -391,6 +434,7 @@
         await LoadContestBatchesAsync(openIfAvailable: false);
         await LoadPendingChangesAsync(openIfPending: true);
         _showContestReview = false;
+        _showContestHistory = false;
         StateHasChanged();
     }
 

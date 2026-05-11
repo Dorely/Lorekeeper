@@ -79,8 +79,11 @@ public sealed class EditorContestService(
         await projects.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<ContestBatch>> ListContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await contests.ListActiveByProjectAsync(projectId, cancellationToken);
+    public async Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        await contests.ListCurrentByProjectAsync(projectId, cancellationToken);
+
+    public async Task<IReadOnlyList<ContestBatch>> ListContestHistoryAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        await contests.ListHistoryByProjectAsync(projectId, cancellationToken);
 
     public async IAsyncEnumerable<EditorContestRunUpdate> StartContestAsync(
         Guid projectId,

@@ -5,13 +5,34 @@ namespace Lorekeeper.Persistence.Repositories;
 
 public sealed class ContestRepository(AppDbContext db) : IContestRepository
 {
-    public Task<List<ContestBatch>> ListActiveByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+    public Task<List<ContestBatch>> ListCurrentByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         db.ContestBatches
             .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
             .Where(batch => batch.ProjectId == projectId && batch.Status != ContestBatchStatus.Cancelled)
             .OrderByDescending(batch => batch.CreatedAt)
-            .Take(5)
+            .Take(1)
             .ToListAsync(cancellationToken);
+
+    public async Task<List<ContestBatch>> ListHistoryByProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var latestBatchId = await db.ContestBatches
+            .Where(batch => batch.ProjectId == projectId && batch.Status != ContestBatchStatus.Cancelled)
+            .OrderByDescending(batch => batch.CreatedAt)
+            .Select(batch => (Guid?)batch.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (latestBatchId is null)
+            return [];
+
+        return await db.ContestBatches
+            .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
+            .Where(batch => batch.ProjectId == projectId
+                && batch.Status != ContestBatchStatus.Cancelled
+                && batch.Id != latestBatchId.Value)
+            .OrderByDescending(batch => batch.CreatedAt)
+            .Take(10)
+            .ToListAsync(cancellationToken);
+    }
 
     public Task<ContestBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>
         db.ContestBatches
