@@ -4,6 +4,7 @@ namespace Lorekeeper.Writing;
 
 [JsonDerivedType(typeof(WritingCoachTextDelta), typeDiscriminator: "text")]
 [JsonDerivedType(typeof(WritingCoachToolCallStarted), typeDiscriminator: "tool-start")]
+[JsonDerivedType(typeof(WritingCoachToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(WritingCoachToolCallCompleted), typeDiscriminator: "tool-end")]
 [JsonDerivedType(typeof(WritingCoachAssistantMessageCompleted), typeDiscriminator: "assistant-end")]
 [JsonDerivedType(typeof(WritingCoachTurnError), typeDiscriminator: "error")]
@@ -14,7 +15,13 @@ public sealed record WritingCoachTextDelta(string Text) : WritingCoachTurnUpdate
 public sealed record WritingCoachToolCallStarted(
     string CallId,
     string ToolName,
-    string ArgumentsJson) : WritingCoachTurnUpdate;
+    string ArgumentsJson,
+    bool ArgumentsComplete = true) : WritingCoachTurnUpdate;
+
+public sealed record WritingCoachToolCallArgumentsDelta(
+    string CallId,
+    string ArgumentsDelta,
+    bool ArgumentsComplete) : WritingCoachTurnUpdate;
 
 public sealed record WritingCoachToolCallCompleted(
     string CallId,

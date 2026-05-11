@@ -1,0 +1,99 @@
+.chat-chip {
+    margin-top: 0.4rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.4rem;
+    background: rgba(255, 255, 255, 0.55);
+    font-size: 0.82rem;
+}
+
+.chat-chip > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    user-select: none;
+}
+
+.chat-chip > summary::-webkit-details-marker {
+    display: none;
+}
+
+.chat-chip-icon {
+    width: 1.5rem;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+}
+
+.chat-chip-ok .chat-chip-icon {
+    color: var(--bs-success, #198754);
+}
+
+.chat-chip-error .chat-chip-icon {
+    color: var(--bs-danger, #dc3545);
+}
+
+.chat-chip-running .chat-chip-icon,
+.chat-chip-pending .chat-chip-icon {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.chat-chip-name {
+    font-family: var(--bs-font-monospace, monospace);
+    font-weight: 600;
+}
+
+.chat-chip-args {
+    color: var(--bs-secondary-color, #6c757d);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+.chat-chip-body {
+    padding: 0.25rem 0.5rem 0.5rem;
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+}
+
+.chat-chip-section {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--bs-secondary-color, #6c757d);
+    margin-top: 0.25rem;
+}
+
+.chat-chip-pre {
+    margin: 0.15rem 0 0;
+    padding: 0.35rem 0.5rem;
+    border-radius: 0.25rem;
+    background: rgba(0, 0, 0, 0.05);
+    font-size: 0.78rem;
+    max-height: 14rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.chat-chip-pre-error {
+    background: rgba(220, 53, 69, 0.1);
+    color: var(--bs-danger, #dc3545);
+}
+
+.chat-cursor {
+    display: inline-block;
+    margin-left: 1px;
+    color: var(--bs-secondary-color, #6c757d);
+    animation: chat-chip-blink 1s steps(2) infinite;
+}
+
+@keyframes chat-chip-blink {
+    50% { opacity: 0; }
+}

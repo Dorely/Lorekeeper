@@ -40,6 +40,12 @@ public sealed record EditorContestStarted(Guid BatchId) : EditorContestRunUpdate
 
 public sealed record EditorContestCandidateUpdated(Guid BatchId, Guid CandidateId, ContestCandidateStatus Status) : EditorContestRunUpdate;
 
+public sealed record EditorContestCandidateRawResponseDelta(
+    Guid BatchId,
+    Guid CandidateId,
+    string Delta,
+    string RawResponse) : EditorContestRunUpdate;
+
 public sealed record EditorContestCompleted(Guid BatchId, ContestBatchStatus Status) : EditorContestRunUpdate;
 
 public sealed record ContestCandidateResponse(

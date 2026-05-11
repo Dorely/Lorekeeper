@@ -141,9 +141,9 @@
                             <div class="contest-review-empty">This candidate has no renderable diff.</div>
                         }
 
-                        <details class="contest-review-raw">
+                        <details class="contest-review-raw" open="@ShouldOpenRaw(SelectedItem.Candidate)">
                             <summary>Candidate JSON</summary>
-                            <pre>@FormatJson(SelectedItem.Candidate.RawResponse)</pre>
+                            <pre>@CandidateJsonText(SelectedItem.Candidate)@if (IsStreaming(SelectedItem.Candidate)) { <span class="contest-review-json-cursor">|</span> }</pre>
                         </details>
                     }
                 </main>
@@ -274,6 +274,20 @@
         {
             return value;
         }
+    }
+
+    private static bool IsStreaming(ContestCandidate candidate) =>
+        candidate.Status is ContestCandidateStatus.Running or ContestCandidateStatus.Pending;
+
+    private static bool ShouldOpenRaw(ContestCandidate candidate) =>
+        IsStreaming(candidate) || !string.IsNullOrWhiteSpace(candidate.RawResponse);
+
+    private static string CandidateJsonText(ContestCandidate candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate.RawResponse) && IsStreaming(candidate))
+            return "Waiting for JSON...";
+
+        return FormatJson(candidate.RawResponse);
     }
 
     private sealed record ContestCandidateItem(ContestBatch Batch, ContestCandidate Candidate);

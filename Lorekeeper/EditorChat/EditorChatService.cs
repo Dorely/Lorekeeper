@@ -223,6 +223,7 @@ public sealed class EditorChatService(
 
             var textBuilder = new StringBuilder();
             var pendingCalls = new List<PendingToolCall>();
+            var toolCallTracker = new StreamingToolCallTracker();
             var streamFailed = false;
             string? streamError = null;
             var cancelled = false;
@@ -262,21 +263,30 @@ public sealed class EditorChatService(
                             contestCollector?.AppendAssistantText(textContent.Text);
                             yield return new EditorChatTextDelta(textContent.Text);
                         }
-                        else if (content is FunctionCallContent functionCall)
+                        else
                         {
-                            var callId = functionCall.CallId ?? functionCall.Name;
-                            var argumentsJson = functionCall.Arguments is null
-                                ? "{}"
-                                : JsonSerializer.Serialize(functionCall.Arguments);
-                            pendingCalls.Add(new PendingToolCall(
-                                functionCall,
-                                callId,
-                                functionCall.Name,
-                                argumentsJson,
-                                textBuilder.Length));
-                            if (!string.Equals(functionCall.Name, "start_contest", StringComparison.Ordinal))
-                                contestCollector?.ToolStarted(callId, functionCall.Name, argumentsJson);
-                            yield return new EditorChatToolCallStarted(callId, functionCall.Name, argumentsJson);
+                            foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
+                            {
+                                switch (toolUpdate)
+                                {
+                                    case StreamingToolCallStartedUpdate started:
+                                        yield return new EditorChatToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
+                                        break;
+                                    case StreamingToolCallArgumentsDeltaUpdate delta:
+                                        yield return new EditorChatToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
+                                        break;
+                                    case StreamingToolCallReadyUpdate ready:
+                                        pendingCalls.Add(new PendingToolCall(
+                                            ready.Content,
+                                            ready.CallId,
+                                            ready.ToolName,
+                                            ready.ArgumentsJson,
+                                            ready.TextOffset));
+                                        if (!string.Equals(ready.ToolName, "start_contest", StringComparison.Ordinal))
+                                            contestCollector?.ToolStarted(ready.CallId, ready.ToolName, ready.ArgumentsJson);
+                                        break;
+                                }
+                            }
                         }
                     }
                 }
@@ -453,6 +463,9 @@ public sealed class EditorChatService(
                                 break;
                             case EditorContestCandidateUpdated candidateUpdated:
                                 yield return new EditorChatContestCandidateUpdated(candidateUpdated.BatchId, candidateUpdated.CandidateId, candidateUpdated.Status.ToString());
+                                break;
+                            case EditorContestCandidateRawResponseDelta rawDelta:
+                                yield return new EditorChatContestCandidateJsonDelta(rawDelta.BatchId, rawDelta.CandidateId, rawDelta.Delta, rawDelta.RawResponse);
                                 break;
                             case EditorContestCompleted completed:
                                 yield return new EditorChatContestCompleted(completed.BatchId, completed.Status.ToString());

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.Llm;
@@ -26,6 +27,8 @@ public sealed class EditorContestService(
         PropertyNameCaseInsensitive = true,
         WriteIndented = true,
     };
+    private static readonly TimeSpan CandidateRawResponseSaveInterval = TimeSpan.FromMilliseconds(750);
+    private const int CandidateRawResponseSaveChars = 512;
 
     public async Task<EditorContestSettings> GetSettingsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -130,6 +133,15 @@ public sealed class EditorContestService(
 
         yield return new EditorContestStarted(batch.Id);
 
+        var progressChannel = Channel.CreateUnbounded<ContestCandidateRawProgress>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+        });
+        var candidatesById = candidateRows.ToDictionary(candidate => candidate.Id);
+        var rawResponseBuffers = candidateRows.ToDictionary(candidate => candidate.Id, _ => new StringBuilder());
+        var lastRawSaveAt = candidateRows.ToDictionary(candidate => candidate.Id, _ => DateTime.UtcNow);
+        var lastRawSaveLength = candidateRows.ToDictionary(candidate => candidate.Id, _ => 0);
         var tasks = new Dictionary<Task<ContestCandidateResult>, ContestCandidate>();
         foreach (var candidate in candidateRows)
         {
@@ -160,12 +172,47 @@ public sealed class EditorContestService(
             await contests.SaveChangesAsync(cancellationToken);
             yield return new EditorContestCandidateUpdated(batch.Id, candidate.Id, candidate.Status);
 
-            tasks[RunCandidateAsync(chat, batch, candidate, snapshot, request, cancellationToken)] = candidate;
+            tasks[RunCandidateAsync(chat, batch, candidate, snapshot, request, progressChannel.Writer, cancellationToken)] = candidate;
         }
 
+        Task<ContestCandidateRawProgress>? progressTask = null;
         while (tasks.Count > 0)
         {
-            var completedTask = await Task.WhenAny(tasks.Keys);
+            progressTask ??= progressChannel.Reader.ReadAsync().AsTask();
+            var completedAny = await Task.WhenAny(tasks.Keys.Cast<Task>().Append(progressTask));
+            if (completedAny == progressTask)
+            {
+                var progress = await progressTask;
+                progressTask = null;
+
+                if (!candidatesById.TryGetValue(progress.CandidateId, out var progressCandidate))
+                    continue;
+
+                var rawBuffer = rawResponseBuffers[progress.CandidateId];
+                rawBuffer.Append(progress.Delta);
+                progressCandidate.RawResponse = rawBuffer.ToString();
+                progressCandidate.UpdatedAt = DateTime.UtcNow;
+
+                yield return new EditorContestCandidateRawResponseDelta(
+                    batch.Id,
+                    progress.CandidateId,
+                    progress.Delta,
+                    progressCandidate.RawResponse);
+
+                var saveDue = progressCandidate.RawResponse.Length - lastRawSaveLength[progress.CandidateId] >= CandidateRawResponseSaveChars
+                    || DateTime.UtcNow - lastRawSaveAt[progress.CandidateId] >= CandidateRawResponseSaveInterval;
+                if (saveDue)
+                {
+                    contests.UpdateCandidate(progressCandidate);
+                    await contests.SaveChangesAsync(CancellationToken.None);
+                    lastRawSaveLength[progress.CandidateId] = progressCandidate.RawResponse.Length;
+                    lastRawSaveAt[progress.CandidateId] = DateTime.UtcNow;
+                }
+
+                continue;
+            }
+
+            var completedTask = (Task<ContestCandidateResult>)completedAny;
             var candidate = tasks[completedTask];
             tasks.Remove(completedTask);
 
@@ -173,6 +220,7 @@ public sealed class EditorContestService(
             {
                 var result = await completedTask;
                 candidate.RawResponse = result.RawResponse;
+                rawResponseBuffers[candidate.Id].Clear().Append(result.RawResponse);
                 candidate.Summary = result.Response.Summary.Trim();
                 candidate.Notes = string.IsNullOrWhiteSpace(result.Response.Notes) ? null : result.Response.Notes.Trim();
                 candidate.MutationsJson = JsonSerializer.Serialize(result.Response.Mutations, JsonOptions);
@@ -192,6 +240,7 @@ public sealed class EditorContestService(
             {
                 logger.LogWarning(ex, "Contest candidate {CandidateId} returned invalid output", candidate.Id);
                 candidate.RawResponse = ex.RawResponse;
+                rawResponseBuffers[candidate.Id].Clear().Append(ex.RawResponse);
                 MarkCandidateFailed(candidate, ex.Message, invalid: true);
             }
             catch (Exception ex)
@@ -310,10 +359,13 @@ public sealed class EditorContestService(
         ContestCandidate candidate,
         ContestTurnSnapshot snapshot,
         EditorContestStartRequest request,
+        ChannelWriter<ContestCandidateRawProgress> progressWriter,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
         var responseText = new StringBuilder();
+        var pendingProgress = new StringBuilder();
+        var lastProgressFlush = Stopwatch.StartNew();
         var messages = new List<ChatMessage>
         {
             new(ChatRole.System, BuildContestSystemPrompt()),
@@ -325,9 +377,21 @@ public sealed class EditorContestService(
             foreach (var content in update.Contents)
             {
                 if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
+                {
                     responseText.Append(textContent.Text);
+                    pendingProgress.Append(textContent.Text);
+                    if (pendingProgress.Length >= 128 || lastProgressFlush.ElapsedMilliseconds >= 150)
+                    {
+                        progressWriter.TryWrite(new ContestCandidateRawProgress(candidate.Id, pendingProgress.ToString()));
+                        pendingProgress.Clear();
+                        lastProgressFlush.Restart();
+                    }
+                }
             }
         }
+
+        if (pendingProgress.Length > 0)
+            progressWriter.TryWrite(new ContestCandidateRawProgress(candidate.Id, pendingProgress.ToString()));
 
         stopwatch.Stop();
         var raw = responseText.ToString().Trim();
@@ -566,6 +630,8 @@ public sealed class EditorContestService(
         ContestCandidateResponse Response,
         string ProposedBody,
         TimeSpan Duration);
+
+    private sealed record ContestCandidateRawProgress(Guid CandidateId, string Delta);
 
     private sealed record NormalizedMutation(string Kind, int StartLine, int EndLine, string ReplacementText);
 

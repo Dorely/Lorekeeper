@@ -1,22 +1,32 @@
 @using System.Text
-@using System.Text.Json
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
 @using Lorekeeper.Tokens
 @implements IAsyncDisposable
 @inject IOutlineCollaborationService Collab
 @inject ITokenCounter TokenCounter
-@inject IJSRuntime JS
 
-<div class="outline-chat">
-    <div class="outline-chat-header">
-        <div class="outline-chat-heading">
-            <span class="outline-chat-title">Outline Chat</span>
-            <span class="outline-chat-token-count" title="@ConversationTokenTitle()">
-                @ConversationTokenText()
-            </span>
-        </div>
-        <div class="outline-chat-header-actions">
+<ChatSurface Title="Outline Chat"
+             TokenText="@ConversationTokenText()"
+             TokenTitle="@ConversationTokenTitle()"
+             Loading="@_loading"
+             LoadingText="Loading..."
+             Messages="@_renderable"
+             Live="@_live"
+             Error="@_error"
+             OnClearError="ClearError"
+             Input="@_input"
+             InputChanged="SetInput"
+             Placeholder="Type a message..."
+             Running="@_running"
+             ComposerDisabled="@(_running || PendingChangeCount > 0)"
+             SendDisabled="@(string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)"
+             OnSend="SendAsync"
+             OnStop="CancelAsync"
+             ForceScrollKey="@_forceScrollKey"
+             AutoFollowKey="@_autoFollowKey"
+             ResetComposerKey="@_resetComposerKey">
+    <HeaderActions>
             @if (PendingChangeCount > 0)
             {
                 <button type="button" class="btn btn-link btn-sm outline-chat-review" @onclick="OpenPendingChanges">
@@ -25,59 +35,15 @@
             }
             <button type="button" class="btn btn-link btn-sm outline-chat-reset" title="Start over"
                     disabled="@(_running || PendingChangeCount > 0)" @onclick="ResetAsync">Reset</button>
-        </div>
-    </div>
-
-    <div class="outline-chat-scroll" @ref="_scrollEl">
-        @if (_loading)
-        {
-            <div class="outline-chat-empty"><em>Loading…</em></div>
-        }
-        else
-        {
-            @foreach (var msg in _renderable)
-            {
-                @RenderMessage(msg)
-            }
-            @if (_live is not null)
-            {
-                @RenderLive(_live)
-            }
-        }
-        <div class="outline-bottom-sentinel" aria-hidden="true"></div>
-    </div>
-
-    @if (_error is not null)
-    {
-        <div class="outline-chat-error">
-            <span>@_error</span>
-            <button type="button" class="btn-close btn-close-sm" @onclick="() => _error = null"></button>
-        </div>
-    }
-
-    <div class="outline-chat-composer">
-        <textarea class="form-control outline-chat-input" rows="1" placeholder="Type a message…"
-                  @ref="_composerEl"
-                  disabled="@(_running || PendingChangeCount > 0)"
-                  @bind="_input" @bind:event="oninput"
-                  @onkeydown="OnKeyDown"></textarea>
+    </HeaderActions>
+    <ComposerOptions>
         <label class="outline-chat-approval" title="Queue AI tool edits for review before applying them">
             <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
                    disabled="@_running" @onchange="OnApprovalChangedAsync" />
             <span>Review edits</span>
         </label>
-        @if (_running)
-        {
-            <button type="button" class="btn btn-outline-danger" @onclick="CancelAsync">Stop</button>
-        }
-        else
-        {
-            <button type="button" class="btn btn-primary"
-                    disabled="@(string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)"
-                    @onclick="SendAsync">Send</button>
-        }
-    </div>
-</div>
+    </ComposerOptions>
+</ChatSurface>
 
 <PendingAiChangesModal ProjectId="@ProjectId"
                        Batches="@_pendingBatches"
@@ -89,19 +55,14 @@
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public EventCallback OnOutlineChanged { get; set; }
 
-    private ElementReference _scrollEl;
-    private ElementReference _composerEl;
-    private IJSObjectReference? _scroller;
-    private bool _scrollerAttached;
-    private bool _autoSizeAttached;
-    private bool _resetComposerAfterRender;
-    private bool _scrollAfterRender;
-    private bool _forceScrollAfterRender;
+    private int _forceScrollKey;
+    private int _autoFollowKey;
+    private int _resetComposerKey;
 
     private OutlineConversation? _conversation;
     private List<OutlineMessage> _messages = [];
-    private List<RenderableMessage> _renderable = [];
-    private LiveTurn? _live;
+    private List<ChatRenderableMessage> _renderable = [];
+    private ChatLiveTurn? _live;
 
     private string _input = string.Empty;
     private bool _running;
@@ -117,37 +78,6 @@
     private bool _conversationTokenIsExact = true;
 
     private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender)
-        {
-            _scroller = await JS.InvokeAsync<IJSObjectReference>(
-                "import", "./Components/Pages/Projects/Outline/OutlineChatPanel.razor.js");
-        }
-        if (_scroller is not null && !_scrollerAttached)
-        {
-            try { await _scroller.InvokeVoidAsync("attachScroller", _scrollEl); _scrollerAttached = true; }
-            catch { /* element gone or circuit terminating */ }
-        }
-        if (_scroller is not null && !_autoSizeAttached)
-        {
-            try { await _scroller.InvokeVoidAsync("attachAutoSize", _composerEl); _autoSizeAttached = true; }
-            catch { /* element gone or circuit terminating */ }
-        }
-        if (_scroller is not null && _resetComposerAfterRender)
-        {
-            _resetComposerAfterRender = false;
-            await ResetComposerSizeAsync();
-        }
-        if (_scroller is not null && _scrollAfterRender)
-        {
-            var force = _forceScrollAfterRender;
-            _scrollAfterRender = false;
-            _forceScrollAfterRender = false;
-            await ScrollToBottomAsync(force);
-        }
-    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -193,15 +123,14 @@
         _error = null;
         _cts?.Dispose();
         _cts = new CancellationTokenSource();
-        _resetComposerAfterRender = true;
+        _resetComposerKey++;
 
-        // Optimistically append the user's message; the service will persist its own copy.
-        _renderable.Add(new RenderableMessage(
+        _renderable.Add(new ChatRenderableMessage(
             Id: Guid.NewGuid(),
-            Role: OutlineMessageRole.User,
-            Status: OutlineMessageStatus.Completed,
-            Parts: [new TextPart(text)]));
-        _live = new LiveTurn();
+            Role: ChatMessageRole.User,
+            Status: ChatMessageStatus.Completed,
+            Parts: [new ChatTextPart(text)]));
+        _live = new ChatLiveTurn();
         _pendingUserText = text;
         UpdateConversationTokenCount();
         await ResumeAutoFollowAsync();
@@ -222,7 +151,14 @@
                         break;
 
                     case ToolCallStarted ts:
-                        _live!.AddToolCall(ts.CallId, ts.ToolName, ts.ArgumentsJson);
+                        _live!.StartToolCall(ts.CallId, ts.ToolName, ts.ArgumentsJson, ts.ArgumentsComplete);
+                        UpdateConversationTokenCount();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+
+                    case ToolCallArgumentsDelta delta:
+                        _live!.AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
                         UpdateConversationTokenCount();
                         RequestScroll();
                         StateHasChanged();
@@ -342,19 +278,31 @@
             .Where(m => m.Role == OutlineMessageRole.Tool && m.ToolCallId is not null)
             .ToDictionary(m => m.ToolCallId!, m => m);
 
-        _renderable = new List<RenderableMessage>(_messages.Count);
+        _renderable = new List<ChatRenderableMessage>(_messages.Count);
         foreach (var m in _messages)
         {
             if (m.Role == OutlineMessageRole.Tool) continue; // attached, not rendered standalone
             if (m.Role == OutlineMessageRole.System) continue;
 
-            _renderable.Add(new RenderableMessage(
+            _renderable.Add(new ChatRenderableMessage(
                 Id: m.Id,
-                Role: m.Role,
-                Status: m.Status,
+                Role: ToChatRole(m.Role),
+                Status: ToChatStatus(m.Status),
                 Parts: BuildMessageParts(m, byCallId)));
         }
     }
+
+    private static ChatMessageRole ToChatRole(OutlineMessageRole role) => role == OutlineMessageRole.User
+        ? ChatMessageRole.User
+        : ChatMessageRole.Assistant;
+
+    private static ChatMessageStatus ToChatStatus(OutlineMessageStatus status) => status switch
+    {
+        OutlineMessageStatus.Failed => ChatMessageStatus.Failed,
+        OutlineMessageStatus.Cancelled => ChatMessageStatus.Cancelled,
+        OutlineMessageStatus.Pending => ChatMessageStatus.Pending,
+        _ => ChatMessageStatus.Completed,
+    };
 
     private void UpdateConversationTokenCount()
     {
@@ -378,7 +326,7 @@
             sb.AppendLine(_pendingUserText);
         }
 
-        AppendLiveTurnForTokenCount(sb, _live);
+        ChatTranscriptHelpers.AppendLiveTurnForTokenCount(sb, _live);
         return sb.ToString();
     }
 
@@ -398,39 +346,6 @@
             sb.Append("Error: ").AppendLine(message.ErrorMessage);
     }
 
-    private static void AppendLiveTurnForTokenCount(StringBuilder sb, LiveTurn? live)
-    {
-        if (live is null) return;
-
-        foreach (var message in live.Messages)
-        {
-            foreach (var part in message.Parts)
-            {
-                if (part is TextPart textPart)
-                {
-                    var text = textPart.Text.ToString();
-                    if (!string.IsNullOrEmpty(text))
-                        sb.AppendLine(text);
-                }
-                else if (part is ToolPart toolPart)
-                {
-                    AppendToolChipForTokenCount(sb, toolPart.Chip);
-                }
-            }
-        }
-    }
-
-    private static void AppendToolChipForTokenCount(StringBuilder sb, ToolChip chip)
-    {
-        sb.Append("Tool: ").Append(chip.Name).Append(' ').AppendLine(chip.CallId);
-        if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
-            sb.Append("Args: ").AppendLine(chip.ArgumentsJson);
-        if (!string.IsNullOrWhiteSpace(chip.Result))
-            sb.Append("Result: ").AppendLine(chip.Result);
-        if (!string.IsNullOrWhiteSpace(chip.Error))
-            sb.Append("Error: ").AppendLine(chip.Error);
-    }
-
     private string ConversationTokenText() =>
         $"{TokenPrefix(_conversationTokenIsExact)}{_conversationTokenCount:N0} conversation tokens";
 
@@ -440,16 +355,16 @@
 
     private static string TokenPrefix(bool isExact) => isExact ? string.Empty : "~";
 
-    private static List<MessagePart> BuildMessageParts(OutlineMessage message, IReadOnlyDictionary<string, OutlineMessage> byCallId)
+    private static List<ChatMessagePart> BuildMessageParts(OutlineMessage message, IReadOnlyDictionary<string, OutlineMessage> byCallId)
     {
         if (message.Role != OutlineMessageRole.Assistant)
-            return string.IsNullOrEmpty(message.Content) ? [] : [new TextPart(message.Content)];
+            return string.IsNullOrEmpty(message.Content) ? [] : [new ChatTextPart(message.Content)];
 
-        var calls = ReadPersistedCalls(message.ToolCallsJson);
+        var calls = ChatTranscriptHelpers.ReadPersistedCalls(message.ToolCallsJson);
         if (calls.Count == 0)
-            return string.IsNullOrEmpty(message.Content) ? [] : [new TextPart(message.Content)];
+            return string.IsNullOrEmpty(message.Content) ? [] : [new ChatTextPart(message.Content)];
 
-        var parts = new List<MessagePart>();
+        var parts = new List<ChatMessagePart>();
         if (calls.All(call => call.TextOffset is not null))
         {
             var cursor = 0;
@@ -461,295 +376,55 @@
                 var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, message.Content.Length);
                 if (offset > cursor)
                 {
-                    parts.Add(new TextPart(message.Content[cursor..offset]));
+                    parts.Add(new ChatTextPart(message.Content[cursor..offset]));
                     cursor = offset;
                 }
-                parts.Add(new ToolPart(BuildToolChip(item.Call, byCallId)));
+                parts.Add(new ChatToolPart(BuildToolChip(item.Call, byCallId)));
             }
             if (cursor < message.Content.Length)
-                parts.Add(new TextPart(message.Content[cursor..]));
+                parts.Add(new ChatTextPart(message.Content[cursor..]));
 
             return parts;
         }
 
         if (!string.IsNullOrEmpty(message.Content))
-            parts.Add(new TextPart(message.Content));
+            parts.Add(new ChatTextPart(message.Content));
         foreach (var call in calls)
-            parts.Add(new ToolPart(BuildToolChip(call, byCallId)));
+            parts.Add(new ChatToolPart(BuildToolChip(call, byCallId)));
         return parts;
     }
 
-    private static ToolChip BuildToolChip(PersistedCall call, IReadOnlyDictionary<string, OutlineMessage> byCallId)
+    private static ChatToolChip BuildToolChip(ChatPersistedToolCall call, IReadOnlyDictionary<string, OutlineMessage> byCallId)
     {
         byCallId.TryGetValue(call.CallId, out var resultMsg);
-        return new ToolChip
+        return new ChatToolChip(call.CallId, call.Name, call.ArgumentsJson)
         {
-            CallId = call.CallId,
-            Name = call.Name,
-            ArgumentsJson = call.ArgumentsJson,
             Result = resultMsg?.Status == OutlineMessageStatus.Completed ? resultMsg.Content : null,
             Error = resultMsg?.Status == OutlineMessageStatus.Failed ? (resultMsg.ErrorMessage ?? resultMsg.Content) : null,
             Completed = resultMsg is not null,
         };
     }
 
-    private static List<PersistedCall> ReadPersistedCalls(string toolCallsJson)
-    {
-        if (string.IsNullOrWhiteSpace(toolCallsJson) || toolCallsJson == "[]") return [];
-        try { return JsonSerializer.Deserialize<List<PersistedCall>>(toolCallsJson) ?? []; }
-        catch { return []; }
-    }
-
-    private RenderFragment RenderChip(ToolChip chip) => __builder =>
-    {
-        var stateClass = chip.Error is not null
-            ? "outline-chip-error"
-            : (chip.Completed ? "outline-chip-ok" : "outline-chip-pending");
-        <details class="outline-chip @stateClass">
-            <summary>
-                <span class="outline-chip-icon">@(chip.Error is not null ? "✕" : (chip.Completed ? "✓" : "…"))</span>
-                <span class="outline-chip-name">@chip.Name</span>
-                @if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
-                {
-                    <span class="outline-chip-args">@TruncateInline(chip.ArgumentsJson, 80)</span>
-                }
-            </summary>
-            <div class="outline-chip-body">
-                @if (!string.IsNullOrWhiteSpace(chip.ArgumentsJson) && chip.ArgumentsJson != "{}")
-                {
-                    <div class="outline-chip-section">args</div>
-                    <pre class="outline-chip-pre">@chip.ArgumentsJson</pre>
-                }
-                @if (chip.Error is not null)
-                {
-                    <div class="outline-chip-section">error</div>
-                    <pre class="outline-chip-pre outline-chip-pre-error">@chip.Error</pre>
-                }
-                else if (chip.Result is not null)
-                {
-                    <div class="outline-chip-section">result</div>
-                    <pre class="outline-chip-pre">@chip.Result</pre>
-                }
-                else
-                {
-                    <div class="outline-chip-section text-muted"><em>running…</em></div>
-                }
-            </div>
-        </details>
-    };
-
-    private static string TruncateInline(string s, int max)
-    {
-        s = s.Replace('\n', ' ').Replace('\r', ' ');
-        return s.Length <= max ? s : s[..max] + "…";
-    }
-
-    private RenderFragment RenderMessage(RenderableMessage msg) => __builder =>
-    {
-        var bubbleClass = msg.Role == OutlineMessageRole.User ? "outline-msg outline-msg-user" : "outline-msg outline-msg-asst";
-        <div class="@bubbleClass">
-            @foreach (var part in msg.Parts)
-            {
-                @RenderPart(part)
-            }
-            @if (msg.Status == OutlineMessageStatus.Failed)
-            {
-                <div class="outline-msg-status outline-msg-failed">Failed</div>
-            }
-            else if (msg.Status == OutlineMessageStatus.Cancelled)
-            {
-                <div class="outline-msg-status outline-msg-cancelled">Cancelled</div>
-            }
-        </div>
-    };
-
-    private RenderFragment RenderLive(LiveTurn live) => __builder =>
-    {
-        if (!live.HasContent)
-        {
-            <div class="outline-msg outline-msg-asst outline-msg-streaming">
-                <span class="outline-typing"><span></span><span></span><span></span></span>
-            </div>
-            return;
-        }
-
-        var visibleMessages = live.Messages.Where(message => message.Parts.Count > 0).ToList();
-        var lastVisibleMessage = visibleMessages.LastOrDefault();
-        @foreach (var liveMessage in visibleMessages)
-        {
-            var trailingText = ReferenceEquals(liveMessage, lastVisibleMessage)
-                ? liveMessage.Parts.LastOrDefault() as TextPart
-                : null;
-            <div class="outline-msg outline-msg-asst outline-msg-streaming">
-                @foreach (var part in liveMessage.Parts)
-                {
-                    @RenderPart(part, ReferenceEquals(part, trailingText))
-                }
-            </div>
-        }
-    };
-
-    private RenderFragment RenderPart(MessagePart part, bool showCursor = false) => __builder =>
-    {
-        if (part is TextPart textPart)
-        {
-            var text = textPart.Text.ToString();
-            if (!string.IsNullOrEmpty(text))
-            {
-                <div class="outline-msg-text">@text@if (showCursor) { <span class="outline-cursor">▍</span> }</div>
-            }
-        }
-        else if (part is ToolPart toolPart)
-        {
-            @RenderChip(toolPart.Chip)
-        }
-    };
-
-    private async Task OnKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter" && !e.ShiftKey)
-        {
-            await SendAsync();
-        }
-    }
-
     private void RequestScroll(bool force = false)
     {
-        _scrollAfterRender = true;
-        _forceScrollAfterRender = _forceScrollAfterRender || force;
+        if (force)
+            _forceScrollKey++;
     }
 
-    private async Task ResumeAutoFollowAsync()
+    private Task ResumeAutoFollowAsync()
     {
-        if (_scroller is null) return;
-        try { await _scroller.InvokeVoidAsync("resumeAutoFollow", _scrollEl); }
-        catch { /* element gone or circuit terminating */ }
+        _autoFollowKey++;
+        return Task.CompletedTask;
     }
 
-    private async Task ScrollToBottomAsync(bool force = false)
-    {
-        if (_scroller is null) return;
-        try { await _scroller.InvokeVoidAsync("scrollToBottom", _scrollEl, force); }
-        catch { /* element gone or circuit terminating */ }
-    }
+    private void SetInput(string value) => _input = value;
 
-    private async Task ResetComposerSizeAsync()
-    {
-        if (_scroller is null) return;
-        try { await _scroller.InvokeVoidAsync("resetAutoSize", _composerEl); }
-        catch { /* element gone or circuit terminating */ }
-    }
+    private void ClearError() => _error = null;
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _cts?.Cancel();
         _cts?.Dispose();
-        if (_scroller is not null)
-        {
-            try { await _scroller.DisposeAsync(); } catch { }
-        }
+        return ValueTask.CompletedTask;
     }
-
-    // -- view models ----
-
-    private sealed record RenderableMessage(
-        Guid Id,
-        OutlineMessageRole Role,
-        OutlineMessageStatus Status,
-        List<MessagePart> Parts);
-
-    private abstract class MessagePart;
-
-    private sealed class TextPart : MessagePart
-    {
-        public TextPart(string text) => Text.Append(text);
-
-        public StringBuilder Text { get; } = new();
-
-        public void Append(string text) => Text.Append(text);
-    }
-
-    private sealed class ToolPart(ToolChip chip) : MessagePart
-    {
-        public ToolChip Chip { get; } = chip;
-    }
-
-    private sealed class ToolChip
-    {
-        public required string CallId { get; init; }
-        public required string Name { get; init; }
-        public required string ArgumentsJson { get; init; }
-        public string? Result { get; set; }
-        public string? Error { get; set; }
-        public bool Completed { get; set; }
-    }
-
-    private sealed class LiveTurn
-    {
-        private bool _startNewMessageOnNextPart;
-
-        public List<LiveMessage> Messages { get; } = [];
-
-        public bool HasContent => Messages.Any(message => message.Parts.Count > 0);
-
-        public void AppendText(string text)
-        {
-            if (string.IsNullOrEmpty(text)) return;
-            CurrentMessage().AppendText(text);
-        }
-
-        public void AddToolCall(string callId, string name, string argumentsJson)
-        {
-            CurrentMessage().Parts.Add(new ToolPart(new ToolChip
-            {
-                CallId = callId,
-                Name = name,
-                ArgumentsJson = argumentsJson,
-            }));
-        }
-
-        public void CompleteToolCall(string callId, string? result, string? error)
-        {
-            var chip = Messages
-                .SelectMany(message => message.Parts)
-                .OfType<ToolPart>()
-                .Select(part => part.Chip)
-                .FirstOrDefault(candidate => candidate.CallId == callId);
-            if (chip is not null)
-            {
-                chip.Result = result;
-                chip.Error = error;
-                chip.Completed = true;
-            }
-            _startNewMessageOnNextPart = true;
-        }
-
-        private LiveMessage CurrentMessage()
-        {
-            if (_startNewMessageOnNextPart || Messages.Count == 0)
-            {
-                var message = new LiveMessage();
-                Messages.Add(message);
-                _startNewMessageOnNextPart = false;
-                return message;
-            }
-
-            return Messages[^1];
-        }
-    }
-
-    private sealed class LiveMessage
-    {
-        public List<MessagePart> Parts { get; } = [];
-
-        public void AppendText(string text)
-        {
-            if (Parts.LastOrDefault() is TextPart textPart)
-                textPart.Append(text);
-            else
-                Parts.Add(new TextPart(text));
-        }
-    }
-
-    private sealed record PersistedCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
 }

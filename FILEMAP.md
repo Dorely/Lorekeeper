@@ -35,6 +35,14 @@
 | `Routes.razor` | `<Router>` wiring `MainLayout` and `NotFound`. |
 | `_Imports.razor` | Shared `@using` directives for all components. |
 
+### Components/Chat/
+
+| File | Description |
+|------|-------------|
+| `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text parts, tool-call chips, and transcript token-count helpers. |
+| `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell for transcript rendering, live-turn rendering, composer controls, scrolling, and textarea autosize behavior. |
+| `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments, result/error details, and in-progress state. |
+
 ### Components/Layout/
 
 | File | Description |
@@ -58,8 +66,8 @@
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared shell for project workspace pages: loads project by slug, renders title + horizontal tab strip (Editor / Graph / Ingest / Outline / Writing Sample), exposes `Project` via `CascadingValue`, and wraps routed page content in a flex-bounded `.project-body` so pages like Outline can own their internal scroll regions. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Three-column context-aware chapter editor: project-wide editor chat left, full-height JS-debounced line-numbered editor center, and right-column Recommended Context/Context Feed. Persists/reindexes body edits, remembers the selected chapter per browser/project, locks while AI runs, and refreshes editor/context/recommendations after AI turns or approved changes. |
-| `EditorChatPanel.razor` (+ `.razor.css`, `.razor.js`) | Multi-turn editor chat UI for drafting/editing. Loads the project's `EditorConversation`, renders bubbles/tool chips, streams turn updates, exposes persisted `Review edits`, Contest Mode toggle/model slots, and opens review modals for queued AI changes or contest candidates. |
-| `ContestReviewModal.razor` (+ `.razor.css`) | Editor Contest Mode comparison modal: shows mutually-exclusive model candidates with chapter-body diffs, streams status updates from contest batches, and stages the selected candidate into the normal pending AI change review flow. |
+| `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat domain adapter over shared `ChatSurface`: loads the project's `EditorConversation`, streams text/tool/contest updates, exposes Review edits plus Contest Mode controls, and opens review modals for queued AI changes or candidates. |
+| `ContestReviewModal.razor` (+ `.razor.css`) | Editor Contest Mode comparison modal: shows mutually-exclusive model candidates with chapter-body diffs, streams status/raw Candidate JSON from contest batches, and stages the selected candidate into the normal pending AI change review flow. |
 | `RecommendedContextPanel.razor` (+ `.razor.css`) | Editor right-column context recommender: shows semantic/manual/graph-proximity recommendations for entities plus structural references, and adds them to the active chapter's persisted context working set. |
 | `ContextFeedPanel.razor` (+ `.razor.css`) | Editable Context Feed: async collapsible cards for project guidance, current chapter, outline, facts, selectable writing samples, selected entities, and selected structural references. Uses stable item keys and `IEditorContextService` to persist per-chapter include/exclude choices. |
 | `GraphPage.razor` | Graph tab at `/projects/{Slug}/graph`; wraps the project shell and hosts the interactive graph workspace. |
@@ -85,7 +93,7 @@
 | `OutlineTree.razor` (+ `.razor.css`) | Hierarchical Acts → Chapters tree. Acts are collapsible, drag-reorderable groups with inline-editable title/synopsis and `+ Chapter` / Delete (chapters fall back to Unassigned via `OnDelete.SetNull`). Act/chapter synopsis textareas autosize to their content via `wwwroot/js/autosizeTextareas.js`. Chapters are inline-editable rows with a beats-toggle caret + count badge (renders `ChapterBeats` inline when expanded), stale/failed vector-index badge, drag-reorder within their act bucket, an act-picker `<select>` for cross-act moves, Open link, and delete-with-confirm. Re-fetches per-chapter beat counts via `IEntityService.CountChildrenAsync` whenever `RefreshSignal` bumps. |
 | `EntitiesPanel.razor` (+ `.razor.css`) | Registry-driven project-scoped entities side panel. Lists non-structural graph types from `IEntityTypeService`, supports `+ Type`, per-type `+ Add`, clickable entity rows, and a Bootstrap-style modal with editable name/properties plus read-only adjacent graph links via `IEntityService.ListLinksAsync`. Save computes property diffs and calls `UpdateAsync(propertiesToSet, propertiesToRemove)`; modal also exposes Delete-with-confirm. Re-reads on `RefreshSignal` bumps. |
 | `ChapterBeats.razor` (+ `.razor.css`) | Inline beats expander rendered inside each chapter row. Loads beats via `IEntityService.ListAsync(projectId, "Event", chapterId)` ordered by `Order`, supports inline-edit (name + autosizing summary textarea), drag-reorder (calls `ReorderAsync`), `+ Add beat` and delete-with-confirm. Re-reads on `RefreshSignal` bumps. |
-| `OutlineChatPanel.razor` (+ `.razor.css`, `.razor.js`) | Multi-turn collaborative chat UI for Outline. Loads/creates the project's `OutlineConversation`, renders bubbles/tool chips, streams turn updates, exposes a persisted `Review edits` toggle, and opens `PendingAiChangesModal` for queued AI changes. |
+| `OutlineChatPanel.razor` (+ `.razor.css`) | Outline chat domain adapter over shared `ChatSurface`. Loads/creates the project's `OutlineConversation`, streams text/tool updates, exposes a persisted Review edits toggle, and opens `PendingAiChangesModal` for queued AI changes. |
 | `PendingAiChangesModal.razor` (+ `.razor.css`) | Durable AI change review modal reused by Outline Chat and Editor Chat: groups queued tool changes by resource, shows dependency/cascade warnings, renders inline or side-by-side PR-style diffs with JSON fallback, and supports Keep/Reject per group or batch with a rejection note. |
 
 ### Components/Pages/Projects/WritingSample/
@@ -93,7 +101,7 @@
 | File | Description |
 |------|-------------|
 | `WritingSampleContent.razor` (+ `.razor.css`) | Top-level Writing Sample tab orchestrator. Three-pane CSS-grid layout (coach chat | sample editor | sample list), loads project-scoped samples, autosaves the active sample body through the shared editor JS bridge, supports title edits, and flushes pending edits before sample switches or coach sends. |
-| `WritingCoachPanel.razor` (+ `.razor.css`, `.razor.js`) | Resettable project-level Writing Coach chat UI. Mirrors the Outline chat bubble/tool-chip rendering for read-only coach tools while exposing no mutation/review controls. |
+| `WritingCoachPanel.razor` (+ `.razor.css`) | Writing Coach domain adapter over shared `ChatSurface`. Streams resettable project-level coaching text and read-only tool cards while exposing no mutation/review controls. |
 | `WritingSampleListPanel.razor` (+ `.razor.css`) | Right-side sample manager with clickable active rows, excerpts, updated timestamps, `New`, and delete-with-confirm. |
 
 ### Components/Pages/Settings/
@@ -184,7 +192,9 @@
 | `ILlmProviderService.cs` / `LlmProviderService.cs` | CRUD over providers + `GetEffectiveApiKeyAsync` that walks `CredentialSourceId` and resolves OAuth tokens. |
 | `ICodexAuthService.cs` / `CodexAuthService.cs` | OpenAI Codex PKCE OAuth flow (start, handle callback, refresh, revoke). Uses in-process pending state map. |
 | `ReasoningContent.cs` | `AIContent` subclass for Codex reasoning summary streaming. |
-| `CodexChatClient.cs` | `IChatClient` implementation for Codex Responses API (SSE parser, function-calling, strict-schema enforcement). |
+| `ToolCallStreamingContent.cs` | `AIContent` subclasses for provider-level function-call start and argument-delta streaming. |
+| `StreamingToolCallTracker.cs` | Normalizes provider function-call start/delta/final content into app-level started/arguments/ready updates for chat services. |
+| `CodexChatClient.cs` | `IChatClient` implementation for Codex Responses API (SSE parser, function-calling, strict-schema enforcement, reasoning and tool-argument streaming). |
 | `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs an `IChatClient` per provider (Codex vs OpenAI-compatible) and exposes `TestModelAsync`. |
 | `AssistantWorkflowInstructions.cs` | Code-owned, non-editable AI workflow/tool-use instructions appended to project guidance and reused by editor/outline chat, including Contest Mode preparation rules. |
 | `AgentOptions.cs` | Shared tool-loop options bound from `Agents:*`; `MaxToolIterations` caps iterative tool-call rounds for chat, writing coach, and ingest agents. |
@@ -207,9 +217,9 @@
 | File | Description |
 |------|-------------|
 | `IWritingSampleService.cs` / `WritingSampleService.cs` | UI-facing facade for project-scoped writing samples: create/list/get/update/delete, title validation, sample body persistence, and project `UpdatedAt` touches. |
-| `IWritingCoachService.cs` / `WritingCoachService.cs` | Resettable project-level Writing Coach chat service. Mirrors the Outline chat streaming/tool-call loop with a coach prompt and read-only tool set; persists assistant tool calls plus tool-result rows. |
+| `IWritingCoachService.cs` / `WritingCoachService.cs` | Resettable project-level Writing Coach chat service. Mirrors the Outline chat streaming/tool-call loop with a coach prompt and read-only tool set; streams tool arguments and persists assistant tool calls plus tool-result rows. |
 | `WritingCoachTools.cs` | Read-only Writing Coach tool builder. Exposes `read_current_section` for the latest editor draft and `list_project_facts` for graph-backed ProjectFact context. |
-| `WritingCoachTurnUpdate.cs` | Streaming update records consumed by the Writing Coach panel: text deltas, tool-call start/completion, assistant completion, and turn errors/cancellation. |
+| `WritingCoachTurnUpdate.cs` | Streaming update records consumed by the Writing Coach panel: text deltas, tool-call start/argument/completion updates, assistant completion, and turn errors/cancellation. |
 
 ### Context/
 
@@ -262,12 +272,12 @@
 | File | Description |
 |------|-------------|
 | `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` captured by editor tools, staging helpers, and Contest Mode settings/actions. |
-| `EditorChatService.cs` | Persistent streaming editor chat: assembles the active Context Feed into the system prompt, resolves the default model, runs tool-call loops, persists user/assistant/tool messages, stages Review edits, emits UI refresh events, and routes Contest Mode terminal tool calls into async candidate generation. |
+| `EditorChatService.cs` | Persistent streaming editor chat: assembles the active Context Feed into the system prompt, resolves the default model, streams text/tool-call arguments, persists user/assistant/tool messages, stages Review edits, emits UI refresh events, and routes Contest Mode terminal tool calls into async candidate generation. |
 | `EditorChatTools.cs` | Editor chat LLM tools for assembled context, semantic search, chapters, facts, entities, graph neighbors, chapter reads, normal line-based `edit_chapter`/outline mutations, and read-only Contest preparation with terminal `start_contest`. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
-| `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/end, pending changes, contest progress, mutation refresh, assistant completion, and turn errors. |
-| `EditorContestModels.cs` | DTOs and helper records for Contest Mode settings, start requests, captured turn snapshots/tool traces, model responses, mutation JSON, and streaming contest updates. |
-| `IEditorContestService.cs` / `EditorContestService.cs` | Contest Mode application service: persists project settings, starts terminal contest batches, runs selected models without tools, validates JSON chapter-body mutations, builds proposed bodies, and stages the selected candidate as a normal `edit_chapter` pending change. |
+| `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
+| `EditorContestModels.cs` | DTOs and helper records for Contest Mode settings, start requests, captured turn snapshots/tool traces, model responses, mutation JSON, and streaming contest status/raw-response updates. |
+| `IEditorContestService.cs` / `EditorContestService.cs` | Contest Mode application service: persists project settings, starts terminal contest batches, runs selected models without tools, streams raw Candidate JSON, validates JSON chapter-body mutations, builds proposed bodies, and stages the selected candidate as a normal `edit_chapter` pending change. |
 
 ### Outline/
 
@@ -284,7 +294,7 @@
 | `IEntityTypeService.cs` / `EntityTypeService.cs` | Lightweight graph type registry facade. Seeds structural/default types (`Project`, `Act`, `Chapter`, `ProjectFact`, `Event`, `Character`, `Location`), discovers arbitrary node types, and creates custom non-structural types for the side panel. |
 | `IProjectFactService.cs` / `ProjectFactService.cs` | Project-level graph fact facade. Stores one `ProjectFact` graph node per key/value pair, ensures a Project → ProjectFact `HasChild` edge, enforces case-insensitive key upserts, touches `Project.UpdatedAt`, and projects linked graph entities for UI/prompt display. |
 | `IOutlineGraphSync.cs` / `OutlineGraphSync.cs` | Synchronizes the EF outline spine into graph nodes and `HasChild` edges: Project → Acts / unassigned Chapters, Act → Chapters, Chapter → Events. Used by project/act/chapter services and startup repair. |
-| `OutlineTurnUpdate.cs` | `[JsonDerivedType]`-decorated abstract record for streaming chat updates: `TextDelta`, `ToolCallStarted`, `ToolCallCompleted`, `AssistantMessageCompleted`, `OutlineMutated`, `TurnError`. |
+| `OutlineTurnUpdate.cs` | `[JsonDerivedType]`-decorated abstract record for streaming chat updates: text deltas, tool-call start/argument/completion updates, assistant completion, outline mutation refresh, and turn errors. |
 
 ### Chapters/
 

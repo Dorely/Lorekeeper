@@ -1,0 +1,55 @@
+@namespace Lorekeeper.Components.Chat
+
+<details class="chat-chip @StateClass">
+    <summary>
+        <span class="chat-chip-icon">@IconText</span>
+        <span class="chat-chip-name">@Chip.Name</span>
+        @if (Chip.HasArguments)
+        {
+            <span class="chat-chip-args">@ChatTranscriptHelpers.TruncateInline(Chip.ArgumentsJson, 96)</span>
+        }
+    </summary>
+    <div class="chat-chip-body">
+        @if (Chip.HasArguments || !Chip.ArgumentsComplete)
+        {
+            <div class="chat-chip-section">args</div>
+            <pre class="chat-chip-pre">@Chip.ArgumentsJson@if (!Chip.ArgumentsComplete) { <span class="chat-cursor">|</span> }</pre>
+        }
+        @if (Chip.Error is not null)
+        {
+            <div class="chat-chip-section">error</div>
+            <pre class="chat-chip-pre chat-chip-pre-error">@Chip.Error</pre>
+        }
+        else if (Chip.Result is not null)
+        {
+            <div class="chat-chip-section">result</div>
+            <pre class="chat-chip-pre">@Chip.Result</pre>
+        }
+        else
+        {
+            <div class="chat-chip-section text-muted"><em>@PendingText</em></div>
+        }
+    </div>
+</details>
+
+@code {
+    [Parameter, EditorRequired] public ChatToolChip Chip { get; set; } = null!;
+
+    private string StateClass => Chip.Error is not null
+        ? "chat-chip-error"
+        : Chip.Completed
+            ? "chat-chip-ok"
+            : Chip.ArgumentsComplete
+                ? "chat-chip-running"
+                : "chat-chip-pending";
+
+    private string IconText => Chip.Error is not null
+        ? "x"
+        : Chip.Completed
+            ? "ok"
+            : Chip.ArgumentsComplete
+                ? "run"
+                : "...";
+
+    private string PendingText => Chip.ArgumentsComplete ? "running..." : "receiving args...";
+}

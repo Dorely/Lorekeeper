@@ -257,6 +257,7 @@ they commit to a direction, act on it without a second confirmation.
 
             var textBuilder = new StringBuilder();
             var pendingCalls = new List<PendingToolCall>();
+            var toolCallTracker = new StreamingToolCallTracker();
             var streamFailed = false;
             string? streamError = null;
             var cancelled = false;
@@ -296,20 +297,28 @@ they commit to a direction, act on it without a second confirmation.
                             textBuilder.Append(tc.Text);
                             yield return new TextDelta(tc.Text);
                         }
-                        else if (content is FunctionCallContent functionCall)
+                        else
                         {
-                            var callId = functionCall.CallId ?? functionCall.Name;
-                            var argumentsJson = functionCall.Arguments is null
-                                ? "{}"
-                                : JsonSerializer.Serialize(functionCall.Arguments);
-                            var pendingCall = new PendingToolCall(
-                                functionCall,
-                                callId,
-                                functionCall.Name,
-                                argumentsJson,
-                                textBuilder.Length);
-                            pendingCalls.Add(pendingCall);
-                            yield return new ToolCallStarted(callId, functionCall.Name, argumentsJson);
+                            foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
+                            {
+                                switch (toolUpdate)
+                                {
+                                    case StreamingToolCallStartedUpdate started:
+                                        yield return new ToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
+                                        break;
+                                    case StreamingToolCallArgumentsDeltaUpdate delta:
+                                        yield return new ToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
+                                        break;
+                                    case StreamingToolCallReadyUpdate ready:
+                                        pendingCalls.Add(new PendingToolCall(
+                                            ready.Content,
+                                            ready.CallId,
+                                            ready.ToolName,
+                                            ready.ArgumentsJson,
+                                            ready.TextOffset));
+                                        break;
+                                }
+                            }
                         }
                     }
                 }

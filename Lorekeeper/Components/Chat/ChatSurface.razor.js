@@ -56,8 +56,8 @@ export function resumeAutoFollow(element) {
 }
 
 function ensureScroller(element) {
-    if (element.__outlineScroller) return element.__outlineScroller;
-    element.__outlineScroller = {
+    if (element.__chatSurfaceScroller) return element.__chatSurfaceScroller;
+    element.__chatSurfaceScroller = {
         attached: false,
         autoFollow: true,
         forcePending: false,
@@ -65,7 +65,7 @@ function ensureScroller(element) {
         raf: 0,
         userIntentUntil: 0,
     };
-    return element.__outlineScroller;
+    return element.__chatSurfaceScroller;
 }
 
 function markUserIntent(state) {
@@ -89,35 +89,30 @@ function isNearBottom(element) {
     return element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX;
 }
 
-// Auto-grows a textarea up to ~half of its containing chat frame, so the user can
-// always see what they're typing without having to scroll the message itself.
-// Beyond the cap the textarea scrolls internally.
-function resize(el) {
-    if (!el) return;
-    // Reset to measure true scrollHeight, then clamp.
-    el.style.height = 'auto';
-    const cap = computeCap(el);
-    const next = Math.min(el.scrollHeight, cap);
-    el.style.height = next + 'px';
-    el.style.overflowY = el.scrollHeight > cap ? 'auto' : 'hidden';
+function resize(element) {
+    if (!element) return;
+    element.style.height = 'auto';
+    const cap = computeCap(element);
+    const next = Math.min(element.scrollHeight, cap);
+    element.style.height = next + 'px';
+    element.style.overflowY = element.scrollHeight > cap ? 'auto' : 'hidden';
 }
 
-function computeCap(el) {
-    // Walk up to find the nearest .outline-chat container; cap at half of it.
-    let frame = el.closest('.outline-chat');
-    const frameH = frame ? frame.clientHeight : (window.innerHeight || 600);
-    return Math.max(120, Math.floor(frameH * 0.5));
+function computeCap(element) {
+    const frame = element.closest('.chat-surface');
+    const frameHeight = frame ? frame.clientHeight : (window.innerHeight || 600);
+    return Math.max(120, Math.floor(frameHeight * 0.5));
 }
 
 export function attachAutoSize(element) {
     if (!element) return;
-    if (element.__autoSizeAttached) {
+    if (element.__chatSurfaceAutoSizeAttached) {
         resize(element);
         return;
     }
-    element.__autoSizeAttached = true;
-    element.__autoSizeHandler = () => resize(element);
-    element.addEventListener('input', element.__autoSizeHandler);
+    element.__chatSurfaceAutoSizeAttached = true;
+    element.__chatSurfaceAutoSizeHandler = () => resize(element);
+    element.addEventListener('input', element.__chatSurfaceAutoSizeHandler);
     resize(element);
 }
 
@@ -127,4 +122,3 @@ export function resetAutoSize(element) {
     element.style.overflowY = 'hidden';
     resize(element);
 }
-

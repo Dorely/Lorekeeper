@@ -8,6 +8,7 @@ namespace Lorekeeper.Outline;
 /// </summary>
 [JsonDerivedType(typeof(TextDelta), typeDiscriminator: "text")]
 [JsonDerivedType(typeof(ToolCallStarted), typeDiscriminator: "tool-start")]
+[JsonDerivedType(typeof(ToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(ToolCallCompleted), typeDiscriminator: "tool-end")]
 [JsonDerivedType(typeof(PendingAiChangeCreated), typeDiscriminator: "pending-change")]
 [JsonDerivedType(typeof(AssistantMessageCompleted), typeDiscriminator: "assistant-end")]
@@ -19,7 +20,10 @@ public abstract record OutlineTurnUpdate;
 public sealed record TextDelta(string Text) : OutlineTurnUpdate;
 
 /// <summary>A function call has been parsed; tool invocation is about to begin.</summary>
-public sealed record ToolCallStarted(string CallId, string ToolName, string ArgumentsJson) : OutlineTurnUpdate;
+public sealed record ToolCallStarted(string CallId, string ToolName, string ArgumentsJson, bool ArgumentsComplete = true) : OutlineTurnUpdate;
+
+/// <summary>Streaming argument text for an already-started function call.</summary>
+public sealed record ToolCallArgumentsDelta(string CallId, string ArgumentsDelta, bool ArgumentsComplete) : OutlineTurnUpdate;
 
 /// <summary>A function call has finished. <paramref name="Error"/> is null on success.</summary>
 public sealed record ToolCallCompleted(string CallId, string ToolName, string? Result, string? Error, double DurationMs) : OutlineTurnUpdate;

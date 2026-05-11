@@ -158,6 +158,7 @@ public sealed class WritingCoachService(
 
             var textBuilder = new StringBuilder();
             var pendingCalls = new List<PendingToolCall>();
+            var toolCallTracker = new StreamingToolCallTracker();
             var streamFailed = false;
             string? streamError = null;
             var cancelled = false;
@@ -195,20 +196,28 @@ public sealed class WritingCoachService(
                             textBuilder.Append(textContent.Text);
                             yield return new WritingCoachTextDelta(textContent.Text);
                         }
-                        else if (content is FunctionCallContent functionCall)
+                        else
                         {
-                            var callId = functionCall.CallId ?? functionCall.Name;
-                            var argumentsJson = functionCall.Arguments is null
-                                ? "{}"
-                                : JsonSerializer.Serialize(functionCall.Arguments);
-                            var pendingCall = new PendingToolCall(
-                                functionCall,
-                                callId,
-                                functionCall.Name,
-                                argumentsJson,
-                                textBuilder.Length);
-                            pendingCalls.Add(pendingCall);
-                            yield return new WritingCoachToolCallStarted(callId, functionCall.Name, argumentsJson);
+                            foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
+                            {
+                                switch (toolUpdate)
+                                {
+                                    case StreamingToolCallStartedUpdate started:
+                                        yield return new WritingCoachToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
+                                        break;
+                                    case StreamingToolCallArgumentsDeltaUpdate delta:
+                                        yield return new WritingCoachToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
+                                        break;
+                                    case StreamingToolCallReadyUpdate ready:
+                                        pendingCalls.Add(new PendingToolCall(
+                                            ready.Content,
+                                            ready.CallId,
+                                            ready.ToolName,
+                                            ready.ArgumentsJson,
+                                            ready.TextOffset));
+                                        break;
+                                }
+                            }
                         }
                     }
                 }

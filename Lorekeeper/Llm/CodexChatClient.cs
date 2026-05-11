@@ -233,19 +233,43 @@ public sealed class CodexChatClient : IChatClient
                         pendingCallId = item.TryGetProperty("call_id", out var cid) ? cid.GetString() : null;
                         pendingFuncName = item.TryGetProperty("name", out var fname) ? fname.GetString() : null;
                         pendingArgs.Clear();
+                        if (pendingCallId is not null && pendingFuncName is not null)
+                        {
+                            yield return new ChatResponseUpdate
+                            {
+                                Role = ChatRole.Assistant,
+                                Contents = [new FunctionCallStartedContent(pendingCallId, pendingFuncName)]
+                            };
+                        }
                     }
                     break;
 
                 case "response.function_call_arguments.delta":
                     if (evt.TryGetProperty("delta", out var argDelta))
-                        pendingArgs.Append(argDelta.GetString());
+                    {
+                        var argumentsDelta = argDelta.GetString();
+                        if (!string.IsNullOrEmpty(argumentsDelta))
+                        {
+                            pendingArgs.Append(argumentsDelta);
+                            if (pendingCallId is not null && pendingFuncName is not null)
+                            {
+                                yield return new ChatResponseUpdate
+                                {
+                                    Role = ChatRole.Assistant,
+                                    Contents = [new FunctionCallArgumentsDeltaContent(pendingCallId, pendingFuncName, argumentsDelta)]
+                                };
+                            }
+                        }
+                    }
                     break;
 
                 case "response.function_call_arguments.done":
                     if (pendingCallId is not null && pendingFuncName is not null)
                     {
                         functionCallCount++;
-                        var argsJson = pendingArgs.ToString();
+                        var argsJson = evt.TryGetProperty("arguments", out var doneArguments)
+                            ? doneArguments.GetString() ?? pendingArgs.ToString()
+                            : pendingArgs.ToString();
                         IDictionary<string, object?>? argsDict = null;
                         if (!string.IsNullOrEmpty(argsJson) && argsJson != "{}")
                         {

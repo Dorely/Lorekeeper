@@ -290,3 +290,14 @@
     font-size: 0.78rem;
     white-space: pre-wrap;
 }
+
+.contest-review-json-cursor {
+    display: inline-block;
+    margin-left: 1px;
+    color: var(--bs-secondary-color, #6c757d);
+    animation: contest-review-json-blink 1s steps(2) infinite;
+}
+
+@keyframes contest-review-json-blink {
+    50% { opacity: 0; }
+}
