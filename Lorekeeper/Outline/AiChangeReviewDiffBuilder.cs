@@ -10,6 +10,10 @@ public static class AiChangeReviewDiffBuilder
     private const int MaxLineDiffCells = 1_000_000;
     private const int MaxFuzzyPairCells = 200_000;
     private const int MaxTokenDiffCells = 80_000;
+    private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
 
     public static bool TryBuild(IReadOnlyList<AiChange> changes, out ReviewDiff diff)
     {
@@ -286,7 +290,7 @@ public static class AiChangeReviewDiffBuilder
 
         try
         {
-            var parsed = JsonSerializer.Deserialize<T>(json, JsonSerializerOptions.Default);
+            var parsed = JsonSerializer.Deserialize<T>(json, ChangePayloadJsonOptions);
             if (parsed is null) return false;
             value = parsed;
             return true;

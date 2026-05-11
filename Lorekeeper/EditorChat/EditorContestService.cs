@@ -254,12 +254,12 @@ public sealed class EditorContestService(
                 mutations = ReadCandidateMutations(candidate.MutationsJson),
             }, JsonOptions),
             Summary = $"Contest winner from {candidate.ProviderName} ({candidate.ModelName}): {candidate.Summary}",
-            BeforeJson = JsonSerializer.Serialize(before, JsonOptions),
-            AfterJson = JsonSerializer.Serialize(after, JsonOptions),
+            BeforeJson = JsonSerializer.Serialize(before, JsonSerializerOptions.Default),
+            AfterJson = JsonSerializer.Serialize(after, JsonSerializerOptions.Default),
             ResultJson = candidate.RawResponse,
             ResourceKind = "ChapterBody",
             ResourceId = $"Chapter:{chapter.Id:N}",
-            ReferencedResourceIdsJson = JsonSerializer.Serialize(new[] { $"Chapter:{chapter.Id:N}" }, JsonOptions),
+            ReferencedResourceIdsJson = JsonSerializer.Serialize(new[] { $"Chapter:{chapter.Id:N}" }, JsonSerializerOptions.Default),
         }, cancellationToken);
 
         foreach (var batchCandidate in batch.Candidates)

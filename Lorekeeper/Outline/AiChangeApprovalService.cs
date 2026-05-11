@@ -15,6 +15,11 @@ public sealed class AiChangeApprovalService(
     IEntityService entities,
     ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
 {
+    private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     public async Task<IReadOnlyList<AiChangeBatch>> ListPendingBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await changes.ListPendingBatchesAsync(projectId, cancellationToken);
 
@@ -321,13 +326,13 @@ public sealed class AiChangeApprovalService(
     }
 
     private static T ReadRequired<T>(string json) =>
-        JsonSerializer.Deserialize<T>(json, JsonSerializerOptions.Default)
+        JsonSerializer.Deserialize<T>(json, ChangePayloadJsonOptions)
         ?? throw new InvalidOperationException($"Could not deserialize {typeof(T).Name} payload.");
 
     private static T? ReadOptional<T>(string json) =>
         string.IsNullOrWhiteSpace(json) || json == "null"
             ? default
-            : JsonSerializer.Deserialize<T>(json, JsonSerializerOptions.Default);
+            : JsonSerializer.Deserialize<T>(json, ChangePayloadJsonOptions);
 
     private static IReadOnlyList<Guid> ReadGuidList(string json) =>
         string.IsNullOrWhiteSpace(json) || json == "[]"

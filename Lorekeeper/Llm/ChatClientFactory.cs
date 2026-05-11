@@ -15,16 +15,44 @@ public class ChatClientFactory(
         var provider = await providerService.GetByIdAsync(providerId, cancellationToken)
             ?? throw new InvalidOperationException($"Provider {providerId} not found.");
 
-        var apiKey = await providerService.GetEffectiveApiKeyAsync(providerId, cancellationToken);
+        var (apiKey, effectiveAuthType) = await ResolveConnectionAsync(provider, cancellationToken);
+        return CreateChatClient(provider, apiKey, effectiveAuthType);
+    }
 
-        var effectiveAuthType = provider.AuthType;
+    public async Task TestModelAsync(int providerId, CancellationToken cancellationToken = default)
+    {
+        var chatClient = await CreateChatClientAsync(providerId, cancellationToken);
+        await TestChatClientAsync(chatClient, cancellationToken);
+    }
+
+    public async Task TestModelAsync(LlmProvider provider, CancellationToken cancellationToken = default)
+    {
+        var (apiKey, effectiveAuthType) = await ResolveConnectionAsync(provider, cancellationToken);
+        var chatClient = CreateChatClient(provider, apiKey, effectiveAuthType);
+        await TestChatClientAsync(chatClient, cancellationToken);
+    }
+
+    private async Task<(string? ApiKey, AuthType EffectiveAuthType)> ResolveConnectionAsync(
+        LlmProvider provider,
+        CancellationToken cancellationToken)
+    {
         if (provider.CredentialSourceId is int sourceId)
         {
-            var credSource = await providerService.GetByIdAsync(sourceId, cancellationToken);
-            if (credSource is not null)
-                effectiveAuthType = credSource.AuthType;
+            var credentialSource = await providerService.GetByIdAsync(sourceId, cancellationToken)
+                ?? throw new InvalidOperationException($"Credential source provider {sourceId} not found.");
+
+            var sourceApiKey = await providerService.GetEffectiveApiKeyAsync(sourceId, cancellationToken);
+            return (sourceApiKey, credentialSource.AuthType);
         }
 
+        if (provider.Id != 0)
+            return (await providerService.GetEffectiveApiKeyAsync(provider.Id, cancellationToken), provider.AuthType);
+
+        return (provider.ApiKey, provider.AuthType);
+    }
+
+    private IChatClient CreateChatClient(LlmProvider provider, string? apiKey, AuthType effectiveAuthType)
+    {
         // OAuth tokens are JWTs (3 dot-separated parts) → route to Codex Responses API.
         if (effectiveAuthType == AuthType.OAuth && apiKey is not null && IsJwt(apiKey))
         {
@@ -48,9 +76,8 @@ public class ChatClientFactory(
         return client.GetChatClient(provider.ModelId).AsIChatClient();
     }
 
-    public async Task TestModelAsync(int providerId, CancellationToken cancellationToken = default)
+    private static async Task TestChatClientAsync(IChatClient chatClient, CancellationToken cancellationToken)
     {
-        var chatClient = await CreateChatClientAsync(providerId, cancellationToken);
         var options = new ChatOptions { MaxOutputTokens = 1 };
         await chatClient.GetResponseAsync("hi", options, cancellationToken);
     }
