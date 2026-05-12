@@ -138,7 +138,6 @@ public sealed class EditorChatService(
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
         EditorChatContext editorContext = null!;
-        ContestTurnCollector? contestCollector = null;
         var contestModeEnabled = false;
         string systemPrompt = string.Empty;
         string? setupError = null;
@@ -158,15 +157,6 @@ public sealed class EditorChatService(
             var assembly = await contextBuilder.BuildAsync(project, currentChapter, cancellationToken);
             contestModeEnabled = project.ContestModeEnabled;
             systemPrompt = assembly.Assemble(contestModeEnabled ? AssistantWorkflowInstructions.EditorContestPreparation : null);
-            if (contestModeEnabled)
-            {
-                contestCollector = new ContestTurnCollector(
-                    userText.Trim(),
-                    assembly.Items
-                        .Where(item => item.IsEnabled)
-                        .Select(item => new ContestContextItemSnapshot(item.Kind.ToString(), item.Label, item.Body))
-                        .ToList());
-            }
 
             var defaultProvider = await providerService.GetDefaultAsync(cancellationToken)
                 ?? throw new InvalidOperationException("No default LLM provider configured.");
@@ -263,7 +253,6 @@ public sealed class EditorChatService(
                         if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
                         {
                             textBuilder.Append(textContent.Text);
-                            contestCollector?.AppendAssistantText(textContent.Text);
                             yield return new EditorChatTextDelta(textContent.Text);
                         }
                         else
@@ -285,8 +274,6 @@ public sealed class EditorChatService(
                                             ready.ToolName,
                                             ready.ArgumentsJson,
                                             ready.TextOffset));
-                                        if (!string.Equals(ready.ToolName, "start_contest", StringComparison.Ordinal))
-                                            contestCollector?.ToolStarted(ready.CallId, ready.ToolName, ready.ArgumentsJson);
                                         break;
                                 }
                             }
@@ -347,7 +334,6 @@ public sealed class EditorChatService(
             {
                 const string contestNote = "I've started a contest for this chapter edit. Review the candidate responses as they arrive.";
                 textBuilder.Append(contestNote);
-                contestCollector?.AppendAssistantText(contestNote);
                 yield return new EditorChatTextDelta(contestNote);
             }
 
@@ -421,8 +407,6 @@ public sealed class EditorChatService(
                 await conversations.SaveChangesAsync(CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
-                if (!string.Equals(pendingCall.Name, "start_contest", StringComparison.Ordinal))
-                    contestCollector?.ToolCompleted(pendingCall.CallId, toolError is null ? toolResult : null, toolError);
                 foreach (var pendingChange in editorContext.OutlineStaging?.DrainNewChanges() ?? [])
                 {
                     yield return new EditorChatPendingAiChangeCreated(
@@ -448,8 +432,14 @@ public sealed class EditorChatService(
                     && string.Equals(pendingCall.Name, "start_contest", StringComparison.Ordinal)
                     && editorContext.TryTakeContestRequest(out var contestRequest))
                 {
-                    var snapshot = contestCollector?.Snapshot()
-                        ?? new ContestTurnSnapshot(userText.Trim(), [], [], textBuilder.ToString());
+                    var contestSnapshotToolResults = resultContents
+                        .OfType<FunctionResultContent>()
+                        .Where(result => result.CallId != pendingCall.CallId)
+                        .Cast<AIContent>()
+                        .ToList();
+                    var snapshot = new ContestTurnSnapshot(BuildContestSnapshotMessages(
+                        messages,
+                        contestSnapshotToolResults));
 
                     await foreach (var contestUpdate in contestService.StartContestAsync(
                         projectId,
@@ -526,6 +516,70 @@ public sealed class EditorChatService(
         EditorMessageRole.Tool => new ChatMessage(ChatRole.Tool, [new FunctionResultContent(message.ToolCallId ?? string.Empty, message.Content)]),
         _ => new ChatMessage(ChatRole.User, message.Content),
     };
+
+    private static IReadOnlyList<ContestChatMessageSnapshot> BuildContestSnapshotMessages(
+        IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<AIContent> pendingToolResults)
+    {
+        var snapshot = messages
+            .Select(ToContestChatMessageSnapshot)
+            .Where(message => !string.IsNullOrWhiteSpace(message.Content))
+            .ToList();
+
+        if (pendingToolResults.Count > 0)
+        {
+            var content = FormatContestContents(pendingToolResults);
+            if (!string.IsNullOrWhiteSpace(content))
+                snapshot.Add(new ContestChatMessageSnapshot("Tool", content));
+        }
+
+        return snapshot;
+    }
+
+    private static ContestChatMessageSnapshot ToContestChatMessageSnapshot(ChatMessage message)
+    {
+        var content = FormatContestContents(message.Contents);
+        if (string.IsNullOrWhiteSpace(content))
+            content = message.Text ?? string.Empty;
+
+        return new ContestChatMessageSnapshot(FormatContestRole(message.Role), content);
+    }
+
+    private static string FormatContestRole(ChatRole role)
+    {
+        if (role == ChatRole.System) return "System";
+        if (role == ChatRole.User) return "User";
+        if (role == ChatRole.Assistant) return "Assistant";
+        if (role == ChatRole.Tool) return "Tool";
+        return role.ToString();
+    }
+
+    private static string FormatContestContents(IEnumerable<AIContent> contents)
+    {
+        var sb = new StringBuilder();
+        foreach (var content in contents)
+        {
+            switch (content)
+            {
+                case TextContent textContent when !string.IsNullOrEmpty(textContent.Text):
+                    sb.Append(textContent.Text);
+                    break;
+                case FunctionCallContent functionCall:
+                    if (sb.Length > 0) sb.AppendLine();
+                    sb.AppendLine($"[Tool call: {functionCall.Name} ({functionCall.CallId})]");
+                    sb.AppendLine("Arguments:");
+                    sb.AppendLine(functionCall.Arguments is null ? "{}" : JsonSerializer.Serialize(functionCall.Arguments));
+                    break;
+                case FunctionResultContent functionResult:
+                    if (sb.Length > 0) sb.AppendLine();
+                    sb.AppendLine($"[Tool result ({functionResult.CallId})]");
+                    sb.AppendLine(functionResult.Result?.ToString() ?? string.Empty);
+                    break;
+            }
+        }
+
+        return sb.ToString().Trim();
+    }
 
     private static ChatMessage BuildAssistantReplay(EditorMessage message)
     {

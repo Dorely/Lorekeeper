@@ -1,4 +1,3 @@
-using System.Text.Json.Serialization;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.EditorChat;
@@ -10,29 +9,14 @@ public sealed record EditorContestSettings(
     int? ProviderSlot3Id);
 
 public sealed record EditorContestStartRequest(
-    Guid ChapterId,
-    string OperationKind,
-    string UserGoal,
-    string MutationInstructions,
-    string TargetRangesJson);
+    Guid ChapterId);
 
 public sealed record ContestTurnSnapshot(
-    string UserMessage,
-    IReadOnlyList<ContestContextItemSnapshot> ContextItems,
-    IReadOnlyList<ContestToolTrace> ToolTraces,
-    string AssistantText);
+    IReadOnlyList<ContestChatMessageSnapshot> Messages);
 
-public sealed record ContestContextItemSnapshot(
-    string Kind,
-    string Label,
-    string Body);
-
-public sealed record ContestToolTrace(
-    string CallId,
-    string ToolName,
-    string ArgumentsJson,
-    string? Result,
-    string? Error);
+public sealed record ContestChatMessageSnapshot(
+    string Role,
+    string Content);
 
 public abstract record EditorContestRunUpdate;
 
@@ -64,34 +48,3 @@ public sealed record ContestCandidateProvider(
     int Id,
     string Name,
     string ModelName);
-
-public sealed class ContestTurnCollector(
-    string userMessage,
-    IReadOnlyList<ContestContextItemSnapshot> contextItems)
-{
-    private readonly List<ContestToolTrace> _toolTraces = [];
-    private readonly Dictionary<string, PendingToolTrace> _pendingTools = new(StringComparer.Ordinal);
-    private readonly System.Text.StringBuilder _assistantText = new();
-
-    public void AppendAssistantText(string text)
-    {
-        if (!string.IsNullOrEmpty(text))
-            _assistantText.Append(text);
-    }
-
-    public void ToolStarted(string callId, string toolName, string argumentsJson)
-    {
-        _pendingTools[callId] = new PendingToolTrace(toolName, argumentsJson);
-    }
-
-    public void ToolCompleted(string callId, string? result, string? error)
-    {
-        if (!_pendingTools.Remove(callId, out var pending)) return;
-        _toolTraces.Add(new ContestToolTrace(callId, pending.ToolName, pending.ArgumentsJson, result, error));
-    }
-
-    public ContestTurnSnapshot Snapshot() =>
-        new(userMessage, contextItems, _toolTraces, _assistantText.ToString());
-
-    private sealed record PendingToolTrace(string ToolName, string ArgumentsJson);
-}

@@ -76,14 +76,12 @@ public sealed class EditorChatTools(
         if (mode == EditorChatToolMode.ContestPreparation)
         {
             tools.Add(AIFunctionFactory.Create(
-                method: (Guid chapterId, string operationKind, string userGoal, string mutationInstructions, string targetRangesJson) =>
-                    StartContestAsync(context, chapterId, operationKind, userGoal, mutationInstructions, targetRangesJson),
+                method: (Guid chapterId) => StartContestAsync(context, chapterId),
                 name: "start_contest",
                 description:
                     "Start a terminal Contest Mode generation job for chapter-body mutations. " +
                     "Call this exactly once after gathering enough read-only context. " +
-                    "Do not pass gathered context; the backend automatically captures the current turn's Context Feed, assistant notes, read-only tool calls, and read-only tool results. " +
-                    "targetRangesJson must be a JSON array, or [] when no exact ranges apply."));
+                    "Do not summarize, rephrase, or decide mutation instructions for the candidates; the backend snapshots the full current chat context for them."));
             return tools;
         }
 
@@ -93,9 +91,9 @@ public sealed class EditorChatTools(
             name: "edit_chapter",
             description:
                 "Edit a chapter using line-based semantics. " +
-                "If both startLine and endLine are null: replace the entire body with `content`. " +
+                "If both startLine and endLine are null: append `content` to the end of the chapter. " +
                 "If only startLine is provided: insert `content` BEFORE that line (1-based). " +
-                "If both startLine and endLine are provided: replace the inclusive line range with `content`. " +
+                "If both startLine and endLine are provided: replace the inclusive range of existing numbered lines with `content`; use startLine=1 and endLine=last numbered line to rewrite the full body. " +
                 "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
                 "After editing, call read_chapter to verify the current body before finalizing. " +
                 "Returns the new line-numbered body and a short change summary."));
@@ -348,22 +346,36 @@ public sealed class EditorChatTools(
         string newBody;
         string summary;
 
+        string InsertBeforeLine(int insertLine)
+        {
+            var merged = new List<string>(existingLines.Count + contentLines.Count);
+            merged.AddRange(existingLines.Take(insertLine - 1));
+            merged.AddRange(contentLines);
+            merged.AddRange(existingLines.Skip(insertLine - 1));
+            return ChapterFormatting.JoinLines(merged);
+        }
+
+        string InsertSummary(int insertLine) => insertLine == existingLines.Count + 1
+            ? existingLines.Count == 0
+                ? $"Inserted {contentLines.Count} line(s) into the empty chapter."
+                : $"Appended {contentLines.Count} line(s) after line {existingLines.Count}."
+            : $"Inserted {contentLines.Count} line(s) before line {insertLine}.";
+
         if (startLine is null && endLine is null)
         {
-            newBody = content;
-            summary = $"Full overwrite ({existingLines.Count} -> {contentLines.Count} lines).";
+            var appendLine = existingLines.Count + 1;
+            newBody = InsertBeforeLine(appendLine);
+            summary = existingLines.Count == 0
+                ? $"Appended {contentLines.Count} line(s) to the empty chapter."
+                : $"Appended {contentLines.Count} line(s) after line {existingLines.Count}.";
         }
         else if (startLine is int insertLine && endLine is null)
         {
             if (insertLine < 1 || insertLine > existingLines.Count + 1)
                 return $"Error: startLine {insertLine} out of range (1..{existingLines.Count + 1}).";
 
-            var merged = new List<string>(existingLines.Count + contentLines.Count);
-            merged.AddRange(existingLines.Take(insertLine - 1));
-            merged.AddRange(contentLines);
-            merged.AddRange(existingLines.Skip(insertLine - 1));
-            newBody = ChapterFormatting.JoinLines(merged);
-            summary = $"Inserted {contentLines.Count} line(s) before line {insertLine}.";
+            newBody = InsertBeforeLine(insertLine);
+            summary = InsertSummary(insertLine);
         }
         else if (startLine is int replaceStart && endLine is int replaceEnd)
         {
@@ -378,7 +390,9 @@ public sealed class EditorChatTools(
             merged.AddRange(contentLines);
             merged.AddRange(existingLines.Skip(replaceEnd));
             newBody = ChapterFormatting.JoinLines(merged);
-            summary = $"Replaced lines {replaceStart}-{replaceEnd} ({replacedCount} -> {contentLines.Count} lines).";
+            summary = replaceStart == 1 && replaceEnd == existingLines.Count
+                ? $"Full rewrite ({existingLines.Count} -> {contentLines.Count} lines)."
+                : $"Replaced lines {replaceStart}-{replaceEnd} ({replacedCount} -> {contentLines.Count} lines).";
         }
         else
         {
@@ -401,25 +415,12 @@ public sealed class EditorChatTools(
 
     private Task<string> StartContestAsync(
         EditorChatContext ctx,
-        Guid chapterId,
-        string operationKind,
-        string userGoal,
-        string mutationInstructions,
-        string targetRangesJson)
+        Guid chapterId)
     {
         if (chapterId == Guid.Empty)
             return Task.FromResult("Error: chapterId is required.");
-        if (string.IsNullOrWhiteSpace(operationKind))
-            return Task.FromResult("Error: operationKind is required.");
-        if (string.IsNullOrWhiteSpace(userGoal))
-            return Task.FromResult("Error: userGoal is required.");
 
-        ctx.RequestContest(new EditorContestStartRequest(
-            chapterId,
-            operationKind.Trim(),
-            userGoal.Trim(),
-            (mutationInstructions ?? string.Empty).Trim(),
-            string.IsNullOrWhiteSpace(targetRangesJson) ? "[]" : targetRangesJson.Trim()));
+        ctx.RequestContest(new EditorContestStartRequest(chapterId));
 
         return Task.FromResult("Contest started. Candidate responses will stream into the review modal.");
     }

@@ -17,14 +17,6 @@ public class ContestBatch
 
     public string OriginalChapterBody { get; set; } = string.Empty;
 
-    public string OperationKind { get; set; } = string.Empty;
-
-    public string UserGoal { get; set; } = string.Empty;
-
-    public string MutationInstructions { get; set; } = string.Empty;
-
-    public string TargetRangesJson { get; set; } = "[]";
-
     public string ContextSnapshotJson { get; set; } = "{}";
 
     public ContestBatchStatus Status { get; set; } = ContestBatchStatus.Running;
