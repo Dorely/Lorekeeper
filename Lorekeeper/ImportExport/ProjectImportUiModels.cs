@@ -1,0 +1,67 @@
+using Lorekeeper.Models;
+
+namespace Lorekeeper.ImportExport;
+
+public sealed record ProjectImportJobListItem(
+    Guid Id,
+    Guid ProjectId,
+    string FileName,
+    string ExportKind,
+    ProjectImportJobStatus Status,
+    int TotalSteps,
+    int CompletedSteps,
+    int CreatedNodeCount,
+    int MergedNodeCount,
+    int CreatedEdgeCount,
+    int MergedEdgeCount,
+    int CreatedActCount,
+    int CreatedChapterCount,
+    int CreatedBeatCount,
+    int WarningCount,
+    string? CurrentMessage,
+    string? ErrorMessage,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public sealed record ProjectImportJobDetailView(
+    Guid Id,
+    Guid ProjectId,
+    string FileName,
+    string FormatId,
+    int FormatVersion,
+    string ExportKind,
+    ProjectImportJobStatus Status,
+    int TotalSteps,
+    int CompletedSteps,
+    int CreatedNodeCount,
+    int MergedNodeCount,
+    int CreatedEdgeCount,
+    int MergedEdgeCount,
+    int CreatedActCount,
+    int CreatedChapterCount,
+    int CreatedBeatCount,
+    int WarningCount,
+    string? CurrentMessage,
+    string? ErrorMessage,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    DateTime? StartedAt,
+    DateTime? CompletedAt,
+    IReadOnlyList<ProjectImportReportItemView> ReportItems);
+
+public sealed record ProjectImportReportItemView(
+    Guid Id,
+    ProjectImportReportItemKind Kind,
+    ProjectImportReportItemStatus Status,
+    string Title,
+    string Summary,
+    string Notes,
+    string ResourceType,
+    string ResourceKey,
+    Guid? EntityId,
+    long? GraphNodeId,
+    long? GraphEdgeId,
+    string PayloadJson,
+    string ErrorMessage,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);

@@ -1,0 +1,450 @@
+@using Lorekeeper.ImportExport
+@using Lorekeeper.Models
+@implements IAsyncDisposable
+@inject IProjectImportExportService Transfers
+@inject IProjectImportJobNotifier Notifier
+@inject IJSRuntime JS
+
+@if (Project is null)
+{
+    <p class="text-muted"><em>Loading...</em></p>
+}
+else
+{
+    <div class="transfer-pane">
+        <section class="transfer-column transfer-sidebar">
+            <div class="transfer-card">
+                <div class="transfer-section-title">Export</div>
+                @if (!string.IsNullOrWhiteSpace(_exportError))
+                {
+                    <div class="alert alert-danger py-2 small">@_exportError</div>
+                }
+
+                <div class="transfer-export-group">
+                    <div>
+                        <div class="transfer-export-title">Graph package</div>
+                        <div class="transfer-export-actions">
+                            <button type="button" class="btn btn-sm btn-primary" disabled="@_exporting" @onclick="() => ExportGraphAsync(ProjectExportKind.Full)">Full JSON</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_exporting" @onclick="() => ExportGraphAsync(ProjectExportKind.NonStructural)">Non-structural JSON</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="transfer-export-group">
+                    <div class="transfer-export-title">Manuscript</div>
+                    <div class="transfer-inline">
+                        <select class="form-select form-select-sm" @bind="_manuscriptFormat">
+                            <option value="@ManuscriptExportFormat.PlainText">TXT</option>
+                            <option value="@ManuscriptExportFormat.Markdown">Markdown</option>
+                        </select>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_exporting" @onclick="ExportManuscriptAsync">Download</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="transfer-card">
+                <div class="transfer-section-title">Import</div>
+                <InputFile OnChange="OnFileSelectedAsync" class="form-control form-control-sm mb-2" />
+                @if (!string.IsNullOrWhiteSpace(_importFileName))
+                {
+                    <div class="transfer-file-name">@_importFileName</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(_formError))
+                {
+                    <div class="alert alert-danger py-2 small">@_formError</div>
+                }
+                <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanStartImport)" @onclick="CreateImportJobAsync">@ImportButtonText</button>
+            </div>
+
+            <div class="transfer-card transfer-jobs">
+                <div class="transfer-section-title">Import jobs</div>
+                @if (_loadingJobs)
+                {
+                    <p class="text-muted small"><em>Loading jobs...</em></p>
+                }
+                else if (_jobs.Count == 0)
+                {
+                    <p class="text-muted small">No import jobs yet.</p>
+                }
+                else
+                {
+                    <div class="transfer-job-list">
+                        @foreach (var job in _jobs)
+                        {
+                            var selected = _selectedJob?.Id == job.Id;
+                            <button type="button" class="transfer-job-row @(selected ? "selected" : null)" @onclick="() => SelectJobAsync(job.Id)">
+                                <span class="transfer-job-title">@job.FileName</span>
+                                <span class="transfer-job-meta">@job.Status - @ProgressLabel(job.CompletedSteps, job.TotalSteps)</span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </section>
+
+        <section class="transfer-column transfer-detail">
+            @if (_selectedJob is null)
+            {
+                <div class="text-muted small"><em>Select an import job to inspect progress.</em></div>
+            }
+            else
+            {
+                <div class="transfer-detail-header">
+                    <div>
+                        <div class="transfer-section-title mb-1">@_selectedJob.FileName</div>
+                        <div class="small text-muted">@_selectedJob.Status - @_selectedJob.CurrentMessage</div>
+                        @if (!string.IsNullOrWhiteSpace(_selectedJob.ExportKind))
+                        {
+                            <div class="small text-muted">@_selectedJob.ExportKind export</div>
+                        }
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_selectedJob.Status == ProjectImportJobStatus.Running)" @onclick="DeleteSelectedJobAsync">Delete</button>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_jobActionError))
+                {
+                    <div class="alert alert-danger py-2 small">@_jobActionError</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(_selectedJob.ErrorMessage))
+                {
+                    <div class="alert alert-danger py-2 small">@_selectedJob.ErrorMessage</div>
+                }
+
+                <div class="transfer-progress">
+                    <div class="progress" role="progressbar" aria-valuenow="@ProgressPercent(_selectedJob.CompletedSteps, _selectedJob.TotalSteps)" aria-valuemin="0" aria-valuemax="100">
+                        <div class="progress-bar" style="width: @ProgressPercent(_selectedJob.CompletedSteps, _selectedJob.TotalSteps)%"></div>
+                    </div>
+                    <span>@ProgressLabel(_selectedJob.CompletedSteps, _selectedJob.TotalSteps)</span>
+                </div>
+
+                <div class="transfer-stats">
+                    <span>Nodes +@_selectedJob.CreatedNodeCount / @_selectedJob.MergedNodeCount merged</span>
+                    <span>Links +@_selectedJob.CreatedEdgeCount / @_selectedJob.MergedEdgeCount merged</span>
+                    <span>Acts +@_selectedJob.CreatedActCount</span>
+                    <span>Chapters +@_selectedJob.CreatedChapterCount</span>
+                    <span>Beats +@_selectedJob.CreatedBeatCount</span>
+                    <span>Warnings @_selectedJob.WarningCount</span>
+                </div>
+
+                <div class="transfer-report">
+                    <div class="transfer-section-title">Report</div>
+                    @if (_selectedJob.ReportItems.Count == 0)
+                    {
+                        <p class="text-muted small">No report items yet.</p>
+                    }
+                    else
+                    {
+                        <div class="transfer-report-list">
+                            @foreach (var item in _selectedJob.ReportItems)
+                            {
+                                <details class="transfer-report-item @(item.Kind == ProjectImportReportItemKind.Warning ? "warning" : null) @(item.Status == ProjectImportReportItemStatus.Failed ? "failed" : null)" @key="item.Id">
+                                    <summary>
+                                        <span>@item.Title</span>
+                                        <span>@item.Kind</span>
+                                    </summary>
+                                    @if (!string.IsNullOrWhiteSpace(item.Summary))
+                                    {
+                                        <p>@item.Summary</p>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(item.ResourceType) || !string.IsNullOrWhiteSpace(item.ResourceKey))
+                                    {
+                                        <div class="transfer-report-meta">@item.ResourceType @item.ResourceKey</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(item.ErrorMessage))
+                                    {
+                                        <div class="transfer-report-error">@item.ErrorMessage</div>
+                                    }
+                                </details>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [CascadingParameter] public Project? Project { get; set; }
+
+    private const long MaxImportBytes = 64L * 1024 * 1024;
+
+    private List<ProjectImportJobListItem> _jobs = [];
+    private ProjectImportJobDetailView? _selectedJob;
+    private Guid? _loadedProjectId;
+    private bool _loadingJobs;
+    private bool _exporting;
+    private bool _readingFile;
+    private bool _creatingJob;
+    private string _importFileName = string.Empty;
+    private string _importContent = string.Empty;
+    private string? _formError;
+    private string? _exportError;
+    private string? _jobActionError;
+    private ManuscriptExportFormat _manuscriptFormat = ManuscriptExportFormat.PlainText;
+    private IJSObjectReference? _downloadModule;
+    private IProjectImportJobUpdateSubscription? _subscription;
+    private CancellationTokenSource? _subscriptionCts;
+    private Task? _subscriptionTask;
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private bool _refreshAgain;
+
+    private bool CanStartImport => !_readingFile && !_creatingJob && !string.IsNullOrWhiteSpace(_importContent);
+
+    private string ImportButtonText =>
+        _readingFile ? "Reading..." : _creatingJob ? "Queueing..." : "Start import";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Project is null || _loadedProjectId == Project.Id) return;
+        _loadedProjectId = Project.Id;
+        await StopSubscriptionAsync();
+        StartSubscription(Project.Id);
+        await ReloadJobsAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownloads.js");
+    }
+
+    private void StartSubscription(Guid projectId)
+    {
+        _subscriptionCts = new CancellationTokenSource();
+        _subscription = Notifier.Subscribe(projectId);
+        _subscriptionTask = ListenForUpdatesAsync(_subscription, _subscriptionCts.Token);
+    }
+
+    private async Task ListenForUpdatesAsync(IProjectImportJobUpdateSubscription subscription, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var update in subscription.ReadAllAsync(cancellationToken))
+                await InvokeAsync(async () => await RefreshForUpdateAsync(update));
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RefreshForUpdateAsync(ProjectImportJobUpdate update)
+    {
+        if (Project is null || update.ProjectId != Project.Id) return;
+        if (!await _refreshLock.WaitAsync(0))
+        {
+            _refreshAgain = true;
+            return;
+        }
+
+        try
+        {
+            do
+            {
+                _refreshAgain = false;
+                await RefreshJobListAsync();
+                if (_selectedJob?.Id == update.JobId)
+                {
+                    if (update.Kind == ProjectImportJobUpdateKind.Deleted)
+                    {
+                        _selectedJob = null;
+                        if (_jobs.Count > 0)
+                            await SelectJobAsync(_jobs[0].Id);
+                    }
+                    else
+                    {
+                        await RefreshSelectedJobAsync();
+                    }
+                }
+                else if (_selectedJob is null && _jobs.Count > 0)
+                {
+                    await SelectJobAsync(_jobs[0].Id);
+                }
+            } while (_refreshAgain);
+
+            StateHasChanged();
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+    }
+
+    private async Task ReloadJobsAsync()
+    {
+        if (Project is null) return;
+        _loadingJobs = true;
+        try
+        {
+            await RefreshJobListAsync();
+            if (_selectedJob is not null && _jobs.Any(job => job.Id == _selectedJob.Id))
+                await RefreshSelectedJobAsync();
+            else if (_jobs.Count > 0)
+                await SelectJobAsync(_jobs[0].Id);
+            else
+                _selectedJob = null;
+        }
+        finally
+        {
+            _loadingJobs = false;
+        }
+    }
+
+    private async Task RefreshJobListAsync()
+    {
+        if (Project is null) return;
+        _jobs = (await Transfers.ListImportJobsAsync(Project.Id)).ToList();
+    }
+
+    private async Task SelectJobAsync(Guid jobId)
+    {
+        _jobActionError = null;
+        _selectedJob = await Transfers.GetImportJobDetailAsync(jobId);
+    }
+
+    private async Task RefreshSelectedJobAsync()
+    {
+        if (_selectedJob is null) return;
+        _selectedJob = await Transfers.GetImportJobDetailAsync(_selectedJob.Id);
+    }
+
+    private async Task ExportGraphAsync(ProjectExportKind kind)
+    {
+        if (Project is null || _downloadModule is null) return;
+        _exporting = true;
+        _exportError = null;
+        try
+        {
+            var file = await Transfers.ExportProjectAsync(Project.Id, kind);
+            await _downloadModule.InvokeVoidAsync("downloadBytes", file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
+        }
+        catch (Exception ex)
+        {
+            _exportError = ex.Message;
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private async Task ExportManuscriptAsync()
+    {
+        if (Project is null || _downloadModule is null) return;
+        _exporting = true;
+        _exportError = null;
+        try
+        {
+            var file = await Transfers.ExportManuscriptAsync(Project.Id, _manuscriptFormat);
+            await _downloadModule.InvokeVoidAsync("downloadBytes", file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
+        }
+        catch (Exception ex)
+        {
+            _exportError = ex.Message;
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private async Task OnFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _readingFile = true;
+        _formError = null;
+        try
+        {
+            var file = e.File;
+            await using var stream = file.OpenReadStream(maxAllowedSize: MaxImportBytes);
+            using var reader = new StreamReader(stream);
+            _importContent = await reader.ReadToEndAsync();
+            _importFileName = file.Name;
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.Message;
+            _importContent = string.Empty;
+            _importFileName = string.Empty;
+        }
+        finally
+        {
+            _readingFile = false;
+        }
+    }
+
+    private async Task CreateImportJobAsync()
+    {
+        if (Project is null || !CanStartImport) return;
+        _creatingJob = true;
+        _formError = null;
+        try
+        {
+            var job = await Transfers.CreateImportJobAsync(Project.Id, _importFileName, _importContent);
+            _importFileName = string.Empty;
+            _importContent = string.Empty;
+            await ReloadJobsAsync();
+            await SelectJobAsync(job.Id);
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.Message;
+        }
+        finally
+        {
+            _creatingJob = false;
+        }
+    }
+
+    private async Task DeleteSelectedJobAsync()
+    {
+        if (_selectedJob is null) return;
+        _jobActionError = null;
+        try
+        {
+            var deletedId = _selectedJob.Id;
+            await Transfers.DeleteImportJobAsync(deletedId);
+            _selectedJob = null;
+            await ReloadJobsAsync();
+        }
+        catch (Exception ex)
+        {
+            _jobActionError = ex.Message;
+        }
+    }
+
+    private async Task StopSubscriptionAsync()
+    {
+        if (_subscriptionCts is not null)
+        {
+            await _subscriptionCts.CancelAsync();
+            _subscriptionCts.Dispose();
+            _subscriptionCts = null;
+        }
+
+        if (_subscriptionTask is not null)
+        {
+            try { await _subscriptionTask; } catch (OperationCanceledException) { }
+            _subscriptionTask = null;
+        }
+
+        if (_subscription is not null)
+        {
+            await _subscription.DisposeAsync();
+            _subscription = null;
+        }
+    }
+
+    private static int ProgressPercent(int completed, int total) =>
+        total <= 0 ? 0 : Math.Clamp((int)Math.Round(completed * 100.0 / total), 0, 100);
+
+    private static string ProgressLabel(int completed, int total) =>
+        total <= 0 ? "Waiting" : $"{completed}/{total} steps";
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopSubscriptionAsync();
+        if (_downloadModule is not null)
+        {
+            try { await _downloadModule.DisposeAsync(); } catch (JSDisconnectedException) { }
+        }
+        _refreshLock.Dispose();
+    }
+}

@@ -23,7 +23,7 @@
 | File | Description |
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors. EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI 2.8, sqlite-vec, Microsoft.ML.Tokenizers, and patched Microsoft.Bcl.Memory. |
-| `Program.cs` | Host setup, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/token/ingest/writing/editor-chat/contest services, EF migrate at startup, sqlite-vec init, outline graph repair, Codex OAuth endpoints. |
+| `Program.cs` | Host setup, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/token/ingest/import-export/writing/editor-chat/contest services, EF migrate at startup, sqlite-vec init, outline graph repair, Codex OAuth endpoints. |
 | `appsettings.json` / `appsettings.Development.json` | Configuration: `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Embeddings:*`, `Agents:*`. |
 | `Properties/launchSettings.json` | Local launch profiles (HTTP pinned to `localhost:1455` for Codex OAuth redirect). |
 
@@ -74,6 +74,7 @@
 | `GraphContent.razor` (+ `.razor.css`, `.razor.js`) | Obsidian-inspired full-project graph workspace: loads graph snapshots, filters/searches nodes, bridges to the local `vis-network` renderer for pan/zoom/drag/select, and coordinates graph refreshes. |
 | `GraphDetailsPanel.razor` (+ `.razor.css`) | Selected-node graph editor side panel: create/edit/delete nodes, edit safe parent assignments, and create/edit/delete custom relationships while managed links stay protected. |
 | `IngestPage.razor` | Ingest tab at `/projects/{Slug}/ingest`; wraps `ProjectLayout` and hosts `Ingest.IngestContent`. |
+| `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
 
@@ -82,6 +83,12 @@
 | File | Description |
 |------|-------------|
 | `IngestContent.razor` (+ `.razor.css`) | Functional Ingest tab workspace: creates text/file ingest jobs with configured-model selection and optional instructions, shows start-readiness feedback, subscribes to live job updates, and supports stop/resume-with-model-change/restart/delete. |
+
+### Components/Pages/Projects/ImportExport/
+
+| File | Description |
+|------|-------------|
+| `ImportExportContent.razor` (+ `.razor.css`) | Combined project Import / Export workspace: downloads Full/Non-structural graph JSON and TXT/Markdown manuscript exports; uploads Lorekeeper export JSON, queues import jobs, subscribes to live job updates, and shows progress/report history. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -139,6 +146,8 @@
 | `IngestJobChunk.cs` | EF entity for per-source-chunk ingest processing status, timestamps, errors, and created item counters. |
 | `IngestReportItem.cs` | EF entity for the live/final ingest report: created/updated entities, relationships, source-chunk notes, evidence, graph ids, status, and payload JSON. |
 | `IngestJobEvent.cs` | EF entity for ingest progress/debug events such as tool calls and failures. |
+| `ProjectImportJob.cs` | EF entity for durable project import job state: uploaded JSON payload, source format metadata, status/progress counters, import counts, warnings, errors, and timestamps. |
+| `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
 | `GraphNode.cs` | Generic graph node: `(ProjectId, NodeType, Key)` unique, JSON properties bag. Cascade-deleted with its `Project`. |
 | `GraphEdge.cs` | Directed edge between graph nodes with type, JSON properties, optional relationship-specific `SortOrder`, and timestamps. |
 | `GraphEntityType.cs` | Lightweight project-scoped graph type registry entry for UI/LLM labels/defaults. Descriptive rather than restrictive; arbitrary node types remain valid. |
@@ -150,7 +159,7 @@
 | `AppDbContext.cs` | EF Core context for projects, outline/editor/writing chat, writing samples, graph, editor context preferences, AI change approval, and ingest queues. JSON value converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, and `RemoveContestBriefFields` for Contest Mode schema cleanup). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, and `RemoveContestBriefFields` for Contest Mode schema cleanup). |
 
 ### Persistence/Repositories/
 
@@ -172,6 +181,7 @@
 | `IContestRepository.cs` / `ContestRepository.cs` | Persistence for Editor Contest Mode batches and candidates, including current/history project batch listing, detail loading, candidate lookup, and status updates. |
 | `IEditorContextPreferenceRepository.cs` / `EditorContextPreferenceRepository.cs` | Persistence for active-chapter Context Feed include/exclude preferences, scoped by project, chapter, item kind, and item key. |
 | `IIngestRepository.cs` / `IngestRepository.cs` | Persistence for ingest sources, source chunks, vector fragments, jobs, job chunks, report items, and job events, including project source listing, tracked processor reads, and lightweight no-tracking UI projections/excerpts. |
+| `IProjectImportRepository.cs` / `ProjectImportRepository.cs` | Persistence for project import jobs and report items, including list/detail UI projections, queued/interrupted job lookup, and delete/save operations. |
 
 ### Knowledge/
 
@@ -260,6 +270,19 @@
 | `IngestJobProcessor.cs` | Runs one ingest job with the job-selected provider: vectorizes the full source into independent retrieval fragments, processes each source chunk with the LLM, invokes ingest tools, keeps source-chunk context vectors current, records progress/tool warning events, and notifies live UI listeners. |
 | `IngestAgentTools.cs` | Ingest LLM tools for project entity candidate search, source-scoped observations on new/existing entities, source-scoped relationship assertions, and source-chunk notes/provenance. |
 
+### ImportExport/
+
+| File | Description |
+|------|-------------|
+| `ProjectExportModels.cs` | Portable export DTOs/enums for Lorekeeper graph packages, stable graph node refs, and manuscript export file metadata. |
+| `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural graph JSON, TXT/Markdown manuscript downloads, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
+| `ManuscriptExportFormatters.cs` | Extensible manuscript formatter abstraction with TXT and Markdown implementations; preserves outline order and keeps future formats pluggable. |
+| `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
+| `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
+| `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
+| `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
+| `ProjectImportJobProcessor.cs` | Runs one import job: validates export JSON, appends structural Full imports, merges non-structural entities/relationships/provenance, repairs graph links, records report rows, and refreshes indexes best-effort. |
+
 ### Graph/
 
 | File | Description |
@@ -309,6 +332,7 @@
 |------|-------------|
 | `app.css` | App-wide CSS. |
 | `js/autosizeTextareas.js` | Small shared JS module that attaches to `textarea[data-autosize]`, grows each textarea to its `scrollHeight`, refreshes on input/change and width changes, and prevents nested textarea scrollbars. |
+| `js/fileDownloads.js` | Browser download helper used by Import / Export to save generated graph JSON and manuscript files. |
 | `favicon.png` | Site icon. |
 | `lib/bootstrap/` | Vendored Bootstrap distribution. |
 | `lib/vis-network/` | Vendored `vis-network` browser graph renderer assets and license files used by the Graph tab. |

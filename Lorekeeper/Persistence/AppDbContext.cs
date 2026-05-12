@@ -38,6 +38,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<IngestJobChunk> IngestJobChunks => Set<IngestJobChunk>();
     public DbSet<IngestReportItem> IngestReportItems => Set<IngestReportItem>();
     public DbSet<IngestJobEvent> IngestJobEvents => Set<IngestJobEvent>();
+    public DbSet<ProjectImportJob> ProjectImportJobs => Set<ProjectImportJob>();
+    public DbSet<ProjectImportReportItem> ProjectImportReportItems => Set<ProjectImportReportItem>();
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
         SaveChangesWithLockRetryAsync(acceptAllChangesOnSuccess: true, cancellationToken);
@@ -426,6 +428,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
             entity.HasOne(e => e.Job)
                 .WithMany(j => j.Events)
+                .HasForeignKey(e => e.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectImportJob>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.ProjectImportJobs)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectImportReportItem>(entity =>
+        {
+            entity.HasIndex(e => new { e.JobId, e.Kind, e.Status, e.CreatedAt });
+            entity.HasIndex(e => e.GraphNodeId);
+            entity.HasIndex(e => e.GraphEdgeId);
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Job)
+                .WithMany(j => j.ReportItems)
                 .HasForeignKey(e => e.JobId)
                 .OnDelete(DeleteBehavior.Cascade);
         });

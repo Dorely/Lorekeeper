@@ -4,6 +4,7 @@ using Lorekeeper.Components;
 using Lorekeeper.Context;
 using Lorekeeper.EditorChat;
 using Lorekeeper.Graph;
+using Lorekeeper.ImportExport;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
@@ -44,6 +45,7 @@ builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
 builder.Services.AddScoped<IContestRepository, ContestRepository>();
 builder.Services.AddScoped<IEditorContextPreferenceRepository, EditorContextPreferenceRepository>();
 builder.Services.AddScoped<IIngestRepository, IngestRepository>();
+builder.Services.AddScoped<IProjectImportRepository, ProjectImportRepository>();
 
 // Knowledge
 builder.Services.AddScoped<IVectorStore, SqliteVecVectorStore>();
@@ -98,6 +100,15 @@ builder.Services.AddScoped<IngestAgentTools>();
 builder.Services.AddScoped<IngestJobProcessor>();
 builder.Services.AddScoped<IIngestService, IngestService>();
 builder.Services.AddHostedService<IngestJobWorker>();
+
+// Import / export
+builder.Services.AddSingleton<IProjectImportJobQueue, ProjectImportJobQueue>();
+builder.Services.AddSingleton<IProjectImportJobNotifier, ProjectImportJobNotifier>();
+builder.Services.AddScoped<IManuscriptExportFormatter, PlainTextManuscriptFormatter>();
+builder.Services.AddScoped<IManuscriptExportFormatter, MarkdownManuscriptFormatter>();
+builder.Services.AddScoped<IProjectImportExportService, ProjectImportExportService>();
+builder.Services.AddScoped<ProjectImportJobProcessor>();
+builder.Services.AddHostedService<ProjectImportJobWorker>();
 
 // Context + editor chat
 builder.Services.AddScoped<ContextBuilder>();

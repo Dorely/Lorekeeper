@@ -1,0 +1,13 @@
+@page "/projects/{Slug}/import-export"
+@rendermode InteractiveServer
+@using Lorekeeper.Components.Pages.Projects.ImportExport
+
+<PageTitle>Import / Export</PageTitle>
+
+<ProjectLayout Slug="@Slug" Tab="import-export">
+    <ImportExportContent />
+</ProjectLayout>
+
+@code {
+    [Parameter] public string Slug { get; set; } = string.Empty;
+}
