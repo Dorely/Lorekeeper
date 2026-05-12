@@ -36,6 +36,7 @@ public static class EditorContextKeys
     public const string CurrentChapter = "current-chapter";
     public const string ProjectOutline = "project-outline";
     public const string ProjectFacts = "project-facts";
+    public const string GraphTraversalMap = "graph-traversal-map";
 
     public static string WritingSample(Guid sampleId) => $"writing-sample:{sampleId:N}";
     public static string Entity(Guid entityId) => $"entity:{entityId:N}";

@@ -33,14 +33,23 @@ public sealed class OutlineCollaborationTools(
     IVectorStore vectors,
     IEmbeddingService embeddings,
     IAiChangeRepository changes,
-    IProjectRepository projectRepository)
+    IProjectRepository projectRepository,
+    IEntityRelationContextService entityRelations)
 {
     private const string UnassignedSentinel = "unassigned";
     /// <summary>Canonical entity type for chapter-scoped beats.</summary>
     private const string EventNodeType = "Event";
 
+    private static readonly EntityRelationContextOptions EntityRelationOptions = new()
+    {
+        Depth = 2,
+        MaxDirectLinks = 8,
+        MaxTraversalPaths = 10,
+        MaxLinksPerNode = 8,
+    };
+
     public OutlineToolStagingContext CreateStagingContext(Guid projectId, Guid conversationId) =>
-        new(projectId, conversationId, changes, projectRepository, acts, chapters, entities, entityTypes);
+        new(projectId, conversationId, changes, projectRepository, acts, chapters, entities, entityTypes, entityRelations);
 
     public IList<AITool> Build(OutlineCollaborationContext context)
     {
@@ -165,6 +174,9 @@ public sealed class OutlineCollaborationTools(
         foreach (var c in allChapters)
             beatCounts[c.Id] = await entities.CountChildrenAsync(ctx.ProjectId, c.Id, EventNodeType);
         var facts = await projectFacts.ListAsync(ctx.ProjectId);
+        var factPayloads = new List<object>();
+        foreach (var fact in facts)
+            factPayloads.Add(await ProjectFactPayloadAsync(ctx.ProjectId, fact));
 
         object ProjectChapter(Chapter c) => new
         {
@@ -177,7 +189,7 @@ public sealed class OutlineCollaborationTools(
 
         var payload = new
         {
-            projectFacts = facts.Select(ProjectFactPayload),
+            projectFacts = factPayloads,
             acts = actList.Select(a => new
             {
                 id = a.Id,
@@ -398,6 +410,22 @@ public sealed class OutlineCollaborationTools(
                 sb.Append(" - ").Append(r.Metadata);
             sb.Append(" (distance ").Append(r.Distance.ToString("F4")).Append(")\n");
             sb.Append(r.Content).Append("\n\n");
+
+            if (string.Equals(r.SourceType, ContextVectorSourceTypes.Entity, StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(r.SourceId)
+                && Guid.TryParseExact(r.SourceId, "N", out var entityId))
+            {
+                var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, EntityRelationOptions);
+                if (relationContext.DirectLinks.Count > 0 || relationContext.TraversalMap.Count > 0)
+                {
+                    sb.AppendLine("Relation context:");
+                    foreach (var link in relationContext.DirectLinks)
+                        sb.Append("- ").AppendLine(link.Path);
+                    if (relationContext.TraversalMap.Count > 0)
+                        sb.AppendLine(entityRelations.FormatTraversalMap(relationContext.TraversalMap));
+                    sb.AppendLine();
+                }
+            }
         }
         return sb.ToString().TrimEnd();
     }
@@ -435,15 +463,11 @@ public sealed class OutlineCollaborationTools(
             return await ctx.Staging.ListEntitiesAsync(type.Trim(), parent);
 
         var list = await entities.ListAsync(ctx.ProjectId, type.Trim(), parent);
-        return JsonSerializer.Serialize(list.Select(e => new
-        {
-            id = e.Id,
-            type = e.Type,
-            name = e.Name,
-            order = e.Order,
-            parentId = e.ParentId,
-            properties = e.Properties,
-        }));
+        var payload = new List<object>();
+        foreach (var entity in list)
+            payload.Add(await EntityPayloadAsync(ctx.ProjectId, entity));
+
+        return JsonSerializer.Serialize(payload);
     }
 
     private async Task<string> CreateEntityAsync(
@@ -494,21 +518,13 @@ public sealed class OutlineCollaborationTools(
 
         var duplicate = await FindDuplicateForCreateAsync(ctx, trimmedType, name, properties, parent);
         if (duplicate is not null)
-            return DuplicateEntityResult(trimmedType, duplicate);
+            return await DuplicateEntityResultAsync(ctx.ProjectId, trimmedType, duplicate);
 
         try
         {
             var created = await entities.CreateAsync(ctx.ProjectId, trimmedType, name.Trim(), properties, parent, order);
             ctx.OnMutated();
-            return JsonSerializer.Serialize(new
-            {
-                id = created.Id,
-                type = created.Type,
-                name = created.Name,
-                order = created.Order,
-                parentId = created.ParentId,
-                properties = created.Properties,
-            });
+            return JsonSerializer.Serialize(await EntityPayloadAsync(ctx.ProjectId, created));
         }
         catch (Exception ex)
         {
@@ -516,21 +532,31 @@ public sealed class OutlineCollaborationTools(
         }
     }
 
-    private static object ProjectFactPayload(ProjectFact fact) => new
+    private async Task<object> ProjectFactPayloadAsync(Guid projectId, ProjectFact fact)
     {
-        id = fact.Id,
-        key = fact.Key,
-        name = fact.Name,
-        value = fact.Value,
-        linkedEntities = fact.LinkedEntities.Select(link => new
+        var linkedEntities = new List<object>();
+        foreach (var link in fact.LinkedEntities)
         {
-            edgeType = link.EdgeType,
-            direction = link.Direction.ToString(),
-            entityId = link.EntityId,
-            name = link.EntityName,
-            type = link.EntityType,
-        }),
-    };
+            linkedEntities.Add(new
+            {
+                edgeType = link.EdgeType,
+                direction = link.Direction.ToString(),
+                entityId = link.EntityId,
+                name = link.EntityName,
+                type = link.EntityType,
+                relationContext = await entityRelations.BuildForEntityAsync(projectId, link.EntityId, EntityRelationOptions),
+            });
+        }
+
+        return new
+        {
+            id = fact.Id,
+            key = fact.Key,
+            name = fact.Name,
+            value = fact.Value,
+            linkedEntities,
+        };
+    }
 
     private async Task<StoryEntity?> FindDuplicateForCreateAsync(
         OutlineCollaborationContext ctx,
@@ -554,23 +580,28 @@ public sealed class OutlineCollaborationTools(
         return candidates.FirstOrDefault(candidate => NormalizeForComparison(candidate.Name) == requestedName);
     }
 
-    private static string DuplicateEntityResult(string requestedType, StoryEntity duplicate) =>
+    private async Task<string> DuplicateEntityResultAsync(Guid projectId, string requestedType, StoryEntity duplicate) =>
         JsonSerializer.Serialize(new
         {
             status = "existing_match",
             message = $"No new {requestedType} was created because an existing {duplicate.Type} with the same name or key already exists. Use update_entity or link_entities for the existing entity, or create a more distinctly named entity if this is a separate story subject.",
-            existing = EntityPayload(duplicate),
+            existing = await EntityPayloadAsync(projectId, duplicate),
         });
 
-    private static object EntityPayload(StoryEntity entity) => new
+    private async Task<object> EntityPayloadAsync(Guid projectId, StoryEntity entity)
     {
-        id = entity.Id,
-        type = entity.Type,
-        name = entity.Name,
-        order = entity.Order,
-        parentId = entity.ParentId,
-        properties = entity.Properties,
-    };
+        var relationContext = await entityRelations.BuildForEntityAsync(projectId, entity.Id, EntityRelationOptions);
+        return new
+        {
+            id = entity.Id,
+            type = entity.Type,
+            name = entity.Name,
+            order = entity.Order,
+            parentId = entity.ParentId,
+            properties = entity.Properties,
+            relationContext,
+        };
+    }
 
     private static string? ReadProperty(IReadOnlyDictionary<string, string?>? properties, string key) =>
         properties is not null && properties.TryGetValue(key, out var value) ? value : null;
@@ -599,15 +630,7 @@ public sealed class OutlineCollaborationTools(
         {
             var updated = await entities.UpdateAsync(ctx.ProjectId, id, name?.Trim(), propertiesToSet, propertiesToRemove);
             ctx.OnMutated();
-            return JsonSerializer.Serialize(new
-            {
-                id = updated.Id,
-                type = updated.Type,
-                name = updated.Name,
-                order = updated.Order,
-                parentId = updated.ParentId,
-                properties = updated.Properties,
-            });
+            return JsonSerializer.Serialize(await EntityPayloadAsync(ctx.ProjectId, updated));
         }
         catch (Exception ex)
         {

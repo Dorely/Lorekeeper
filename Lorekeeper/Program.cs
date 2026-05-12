@@ -105,6 +105,7 @@ builder.Services.AddScoped<IContextBuilder>(sp => sp.GetRequiredService<ContextB
 builder.Services.AddScoped<IEditorContextService>(sp => sp.GetRequiredService<ContextBuilder>());
 builder.Services.AddScoped<IContextIndexingService, ContextIndexingService>();
 builder.Services.AddScoped<IContextRecommendationService, ContextRecommendationService>();
+builder.Services.AddScoped<IEntityRelationContextService, EntityRelationContextService>();
 builder.Services.AddScoped<EditorChatTools>();
 builder.Services.AddScoped<IEditorContestService, EditorContestService>();
 builder.Services.AddScoped<IEditorChatService, EditorChatService>();

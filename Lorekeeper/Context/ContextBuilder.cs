@@ -16,8 +16,17 @@ public sealed class ContextBuilder(
     IProjectFactService projectFacts,
     IWritingSampleService writingSamples,
     IEntityService entities,
+    IEntityRelationContextService entityRelations,
     IIngestRepository ingest) : IEditorContextService
 {
+    private static readonly EntityRelationContextOptions ContextFeedTraversalOptions = new()
+    {
+        Depth = 3,
+        MaxDirectLinks = 0,
+        MaxTraversalPaths = 60,
+        MaxLinksPerNode = 12,
+    };
+
     public async Task<ContextAssembly> BuildAsync(
         Project project,
         Chapter? currentChapter,
@@ -91,7 +100,18 @@ public sealed class ContextBuilder(
                 items.Add(item);
             }
 
-            foreach (var entity in await ListContextEntitiesAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken))
+            var contextEntities = await ListContextEntitiesAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken);
+            items.Add(new ContextItem(
+                Key: EditorContextKeys.GraphTraversalMap,
+                Kind: ContextItemKind.GraphTraversalMap,
+                Label: "Graph Traversal Map",
+                Body: await BuildGraphTraversalMapBlockAsync(project.Id, currentChapter.Id, contextEntities, cancellationToken),
+                IsEnabled: IsIncluded(preferenceMap, ContextItemKind.GraphTraversalMap, EditorContextKeys.GraphTraversalMap, defaultIncluded: true),
+                IsRemovable: true,
+                Badge: "Graph",
+                Reason: "Bounded graph paths from the current chapter, its beats, and selected entities"));
+
+            foreach (var entity in contextEntities)
             {
                 var key = EditorContextKeys.Entity(entity.Id);
                 items.Add(new ContextItem(
@@ -197,6 +217,7 @@ public sealed class ContextBuilder(
         keys.Add(EditorContextKeys.CurrentChapter);
         keys.Add(EditorContextKeys.ProjectOutline);
         keys.Add(EditorContextKeys.ProjectFacts);
+        keys.Add(EditorContextKeys.GraphTraversalMap);
         return keys;
     }
 
@@ -514,6 +535,24 @@ public sealed class ContextBuilder(
         }
 
         return sb.ToString().TrimEnd();
+    }
+
+    private async Task<string> BuildGraphTraversalMapBlockAsync(
+        Guid projectId,
+        Guid currentChapterId,
+        IReadOnlyList<StoryEntity> contextEntities,
+        CancellationToken cancellationToken)
+    {
+        var rootIds = new List<Guid> { currentChapterId };
+        rootIds.AddRange(contextEntities.Select(entity => entity.Id));
+
+        var traversalMap = await entityRelations.BuildTraversalMapAsync(
+            projectId,
+            rootIds.Distinct().ToList(),
+            ContextFeedTraversalOptions,
+            cancellationToken);
+
+        return entityRelations.FormatTraversalMap(traversalMap);
     }
 
     private async Task AppendChaptersAsync(

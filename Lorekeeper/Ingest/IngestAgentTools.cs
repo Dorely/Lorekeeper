@@ -17,8 +17,17 @@ public sealed class IngestAgentTools(
     IGraphNodeRepository nodes,
     IGraphEdgeRepository edges,
     IEntityTypeService entityTypes,
-    IContextIndexingService contextIndexing)
+    IContextIndexingService contextIndexing,
+    IEntityRelationContextService entityRelations)
 {
+    private static readonly EntityRelationContextOptions EntityRelationOptions = new()
+    {
+        Depth = 2,
+        MaxDirectLinks = 8,
+        MaxTraversalPaths = 10,
+        MaxLinksPerNode = 8,
+    };
+
     public IList<AITool> Build(IngestAgentContext context) =>
     [
         AIFunctionFactory.Create(
@@ -72,7 +81,15 @@ public sealed class IngestAgentTools(
             .Where(item => item.Kind == IngestReportItemKind.Entity && item.Status == IngestReportItemStatus.Active)
             .OrderBy(item => item.ResourceType)
             .ThenBy(item => item.Title)
-            .Select(item => new
+            .ToList();
+
+        var payload = new List<object>();
+        foreach (var item in items)
+        {
+            var relationContext = item.EntityId is Guid entityId
+                ? await BuildRelationContextAsync(context.ProjectId, entityId)
+                : EntityRelationContext.Empty;
+            payload.Add(new
             {
                 id = item.EntityId,
                 type = item.ResourceType,
@@ -82,9 +99,11 @@ public sealed class IngestAgentTools(
                 evidence = Truncate(item.Evidence, 600),
                 graphAction = IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson),
                 payload = SafeDeserialize(item.PayloadJson),
+                relationContext,
             });
+        }
 
-        return JsonSerializer.Serialize(items);
+        return JsonSerializer.Serialize(payload);
     }
 
     private async Task<string> GetJobEntityAsync(IngestAgentContext context, string entityId)
@@ -94,6 +113,7 @@ public sealed class IngestAgentTools(
         if (item is null) return $"Error: entity {parsed} has not been touched by this ingest job.";
 
         var node = await nodes.FindByKeyAsync(context.ProjectId, parsed.ToString("N"));
+        var relationContext = await BuildRelationContextAsync(context.ProjectId, parsed);
         return JsonSerializer.Serialize(new
         {
             id = parsed,
@@ -106,6 +126,7 @@ public sealed class IngestAgentTools(
             canonicalProperties = node is null ? new Dictionary<string, string?>() : VisibleProperties(node.Properties),
             sourceAssertions = node is null ? Array.Empty<IngestSourceAssertionSummary>() : IngestSourceAssertions.SummarizeEntityAssertions(node.Properties),
             payload = SafeDeserialize(item.PayloadJson),
+            relationContext,
         });
     }
 
@@ -150,12 +171,33 @@ public sealed class IngestAgentTools(
             }
         }
 
-        return JsonSerializer.Serialize(results
+        var payload = new List<object>();
+        foreach (var candidate in results
             .OrderByDescending(item => item.Score)
             .ThenBy(item => item.Type, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
-            .Take(25));
+            .Take(25))
+        {
+            payload.Add(await ProjectCandidatePayloadAsync(context.ProjectId, candidate));
+        }
+
+        return JsonSerializer.Serialize(payload);
     }
+
+    private async Task<object> ProjectCandidatePayloadAsync(Guid projectId, ProjectEntityCandidate candidate) => new
+    {
+        id = candidate.Id,
+        type = candidate.Type,
+        name = candidate.Name,
+        summary = candidate.Summary,
+        canonicalProperties = candidate.CanonicalProperties,
+        sourceAssertions = candidate.SourceAssertions,
+        score = candidate.Score,
+        relationContext = await BuildRelationContextAsync(projectId, candidate.Id),
+    };
+
+    private async Task<EntityRelationContext> BuildRelationContextAsync(Guid projectId, Guid entityId) =>
+        await entityRelations.BuildForEntityAsync(projectId, entityId, EntityRelationOptions);
 
     private async Task<string> RecordExistingEntityObservationAsync(
         IngestAgentContext context,
@@ -192,6 +234,7 @@ public sealed class IngestAgentTools(
             graphAction = IngestSourceAssertions.LinkedExistingEntityAction,
             canonicalProperties = VisibleProperties(node.Properties),
             sourceAssertions = IngestSourceAssertions.SummarizeEntityAssertions(node.Properties),
+            relationContext = await BuildRelationContextAsync(context.ProjectId, parsed),
         });
     }
 
@@ -243,6 +286,7 @@ public sealed class IngestAgentTools(
                 message = $"Reused existing {duplicateNode.NodeType} named '{duplicateNode.Label ?? duplicateNode.Key}' instead of creating a duplicate.",
                 canonicalProperties = VisibleProperties(duplicateNode.Properties),
                 sourceAssertions = IngestSourceAssertions.SummarizeEntityAssertions(duplicateNode.Properties),
+                relationContext = await BuildRelationContextAsync(context.ProjectId, duplicateId),
             });
         }
 
@@ -280,6 +324,7 @@ public sealed class IngestAgentTools(
             graphAction = IngestSourceAssertions.CreatedEntityAction,
             observedProperties,
             sourceAssertions = node is null ? Array.Empty<IngestSourceAssertionSummary>() : IngestSourceAssertions.SummarizeEntityAssertions(node.Properties),
+            relationContext = await BuildRelationContextAsync(context.ProjectId, created.Id),
         });
     }
 
@@ -334,6 +379,7 @@ public sealed class IngestAgentTools(
             graphAction = action,
             canonicalProperties = VisibleProperties(node.Properties),
             sourceAssertions = IngestSourceAssertions.SummarizeEntityAssertions(node.Properties),
+            relationContext = await BuildRelationContextAsync(context.ProjectId, parsed),
         });
     }
 

@@ -21,8 +21,25 @@ public sealed class EditorChatTools(
     IEmbeddingService embeddings,
     IProjectRepository projects,
     IEditorContextService editorContext,
+    IEntityRelationContextService entityRelations,
     OutlineCollaborationTools outlineTools)
 {
+    private static readonly EntityRelationContextOptions ListEntityRelationOptions = new()
+    {
+        Depth = 2,
+        MaxDirectLinks = 8,
+        MaxTraversalPaths = 10,
+        MaxLinksPerNode = 8,
+    };
+
+    private static readonly EntityRelationContextOptions DetailEntityRelationOptions = new()
+    {
+        Depth = 2,
+        MaxDirectLinks = 16,
+        MaxTraversalPaths = 24,
+        MaxLinksPerNode = 10,
+    };
+
     public IList<AITool> Build(EditorChatContext context, EditorChatToolMode mode = EditorChatToolMode.Normal)
     {
         var tools = new List<AITool>
@@ -61,11 +78,6 @@ public sealed class EditorChatTools(
                 method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
                 name: "list_entity_links",
                 description: "List all graph links adjacent to an entity, including structural HasChild links and semantic story relationships."),
-
-            AIFunctionFactory.Create(
-                method: (Guid entityId, int depth) => GraphNeighborsAsync(context, entityId, depth),
-                name: "graph_neighbors",
-                description: "Traverse graph neighbors from an entity for 1-3 degrees and return reached entities plus the edge used to reach each one."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId) => ReadChapterAsync(context, chapterId),
@@ -146,6 +158,22 @@ public sealed class EditorChatTools(
                 sb.Append(" - ").Append(result.Metadata);
             sb.Append(" (distance ").Append(result.Distance.ToString("F4")).Append(")\n");
             sb.Append(result.Content).Append("\n\n");
+
+            if (string.Equals(result.SourceType, ContextVectorSourceTypes.Entity, StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(result.SourceId)
+                && Guid.TryParseExact(result.SourceId, "N", out var entityId))
+            {
+                var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, ListEntityRelationOptions);
+                if (relationContext.DirectLinks.Count > 0 || relationContext.TraversalMap.Count > 0)
+                {
+                    sb.AppendLine("Relation context:");
+                    foreach (var link in relationContext.DirectLinks)
+                        sb.Append("- ").AppendLine(link.Path);
+                    if (relationContext.TraversalMap.Count > 0)
+                        sb.AppendLine(entityRelations.FormatTraversalMap(relationContext.TraversalMap));
+                    sb.AppendLine();
+                }
+            }
         }
         return sb.ToString().TrimEnd();
     }
@@ -170,21 +198,34 @@ public sealed class EditorChatTools(
     private async Task<string> ListProjectFactsAsync(EditorChatContext ctx)
     {
         var facts = await projectFacts.ListAsync(ctx.ProjectId);
-        return JsonSerializer.Serialize(facts.Select(fact => new
+        var payload = new List<object>();
+        foreach (var fact in facts)
         {
-            fact.Id,
-            fact.Key,
-            fact.Name,
-            fact.Value,
-            linkedEntities = fact.LinkedEntities.Select(link => new
+            var linkedEntities = new List<object>();
+            foreach (var link in fact.LinkedEntities)
             {
-                link.EdgeType,
-                direction = link.Direction.ToString(),
-                link.EntityId,
-                link.EntityName,
-                link.EntityType,
-            }),
-        }));
+                linkedEntities.Add(new
+                {
+                    link.EdgeType,
+                    direction = link.Direction.ToString(),
+                    link.EntityId,
+                    link.EntityName,
+                    link.EntityType,
+                    relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, link.EntityId, ListEntityRelationOptions),
+                });
+            }
+
+            payload.Add(new
+            {
+                fact.Id,
+                fact.Key,
+                fact.Name,
+                fact.Value,
+                linkedEntities,
+            });
+        }
+
+        return JsonSerializer.Serialize(payload);
     }
 
     private async Task<string> SearchEntitiesAsync(EditorChatContext ctx, string query, int topK)
@@ -200,18 +241,16 @@ public sealed class EditorChatTools(
             matches.AddRange(list.Where(entity => Matches(entity, query)));
         }
 
-        return JsonSerializer.Serialize(matches
+        var payload = new List<object>();
+        foreach (var entity in matches
             .OrderBy(entity => entity.Type, StringComparer.OrdinalIgnoreCase)
             .ThenBy(entity => entity.Name, StringComparer.OrdinalIgnoreCase)
-            .Take(topK)
-            .Select(entity => new
-            {
-                id = entity.Id,
-                type = entity.Type,
-                name = entity.Name,
-                parentId = entity.ParentId,
-                properties = entity.Properties,
-            }));
+            .Take(topK))
+        {
+            payload.Add(await EntityPayloadAsync(ctx.ProjectId, entity, ListEntityRelationOptions));
+        }
+
+        return JsonSerializer.Serialize(payload);
     }
 
     private async Task<string> ReadEntityAsync(EditorChatContext ctx, Guid entityId)
@@ -221,6 +260,7 @@ public sealed class EditorChatTools(
             return $"Error: entity {entityId} not found in this project.";
 
         var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
+        var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, DetailEntityRelationOptions);
         return JsonSerializer.Serialize(new
         {
             id = entity.Id,
@@ -240,58 +280,26 @@ public sealed class EditorChatTools(
                 link.SortOrder,
                 link.Properties,
             }),
+            relationContext,
         });
     }
 
-    private async Task<string> GraphNeighborsAsync(EditorChatContext ctx, Guid entityId, int depth)
+    private async Task<object> EntityPayloadAsync(
+        Guid projectId,
+        StoryEntity entity,
+        EntityRelationContextOptions relationOptions)
     {
-        depth = Math.Clamp(depth, 1, 3);
-        var start = await entities.GetAsync(ctx.ProjectId, entityId);
-        if (start is null)
-            return $"Error: entity {entityId} not found in this project.";
-
-        var visited = new HashSet<Guid> { entityId };
-        var frontier = new List<Guid> { entityId };
-        var rows = new List<object>();
-
-        for (var level = 1; level <= depth; level++)
+        var relationContext = await entityRelations.BuildForEntityAsync(projectId, entity.Id, relationOptions);
+        return new
         {
-            var next = new List<Guid>();
-            foreach (var current in frontier)
-            {
-                var links = await entities.ListLinksAsync(ctx.ProjectId, current);
-                foreach (var link in links)
-                {
-                    if (!visited.Add(link.OtherEntityId)) continue;
-                    var entity = await entities.GetAsync(ctx.ProjectId, link.OtherEntityId);
-                    if (entity is null) continue;
-
-                    rows.Add(new
-                    {
-                        depth = level,
-                        via = new
-                        {
-                            from = current,
-                            edgeType = link.EdgeType,
-                            direction = link.Direction.ToString(),
-                        },
-                        entity = new
-                        {
-                            id = entity.Id,
-                            type = entity.Type,
-                            name = entity.Name,
-                            properties = entity.Properties,
-                        },
-                    });
-                    next.Add(entity.Id);
-                }
-            }
-
-            frontier = next;
-            if (frontier.Count == 0) break;
-        }
-
-        return rows.Count == 0 ? "No neighbors." : JsonSerializer.Serialize(rows);
+            id = entity.Id,
+            type = entity.Type,
+            name = entity.Name,
+            order = entity.Order,
+            parentId = entity.ParentId,
+            properties = entity.Properties,
+            relationContext,
+        };
     }
 
     private async Task<string> ListEntityLinksAsync(EditorChatContext ctx, Guid entityId)

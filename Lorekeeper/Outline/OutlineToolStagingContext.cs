@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Context;
 using Lorekeeper.Chapters;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
@@ -13,9 +14,18 @@ public sealed class OutlineToolStagingContext(
     IActService acts,
     IChapterService chapters,
     IEntityService entities,
-    IEntityTypeService entityTypes)
+    IEntityTypeService entityTypes,
+    IEntityRelationContextService entityRelations)
 {
     private const string _eventNodeType = "Event";
+
+    private static readonly EntityRelationContextOptions EntityRelationOptions = new()
+    {
+        Depth = 2,
+        MaxDirectLinks = 8,
+        MaxTraversalPaths = 10,
+        MaxLinksPerNode = 8,
+    };
 
     private readonly Dictionary<Guid, ActState> _acts = [];
     private readonly Dictionary<Guid, ChapterState> _chapters = [];
@@ -131,15 +141,11 @@ public sealed class OutlineToolStagingContext(
             ? query.OrderBy(entity => entity.Name, StringComparer.OrdinalIgnoreCase)
             : query.OrderBy(entity => entity.Order ?? int.MaxValue).ThenBy(entity => entity.Name, StringComparer.OrdinalIgnoreCase);
 
-        return Serialize(query.Select(entity => new
-        {
-            id = entity.Id,
-            type = entity.Type,
-            name = entity.Name,
-            order = entity.Order,
-            parentId = entity.ParentId,
-            properties = entity.Properties,
-        }));
+        var payload = new List<object>();
+        foreach (var entity in query)
+            payload.Add(await EntityPayloadAsync(entity, cancellationToken));
+
+        return Serialize(payload);
     }
 
     public async Task<string> CreateActAsync(string title, string? synopsis, CancellationToken cancellationToken = default)
@@ -381,7 +387,7 @@ public sealed class OutlineToolStagingContext(
 
         var duplicate = FindDuplicateForCreate(trimmedType, name, properties, parentId);
         if (duplicate is not null)
-            return DuplicateEntityResult(trimmedType, duplicate);
+            return await DuplicateEntityResultAsync(trimmedType, duplicate, cancellationToken);
 
         EnsureType(trimmedType, parentId is not null);
         var resolvedOrder = parentId is null ? order : order ?? NextEntityOrder(trimmedType, parentId.Value);
@@ -396,7 +402,7 @@ public sealed class OutlineToolStagingContext(
         _entities[entity.Id] = entity;
 
         var after = entity.ToChange();
-        var result = Serialize(new { id = entity.Id, type = entity.Type, name = entity.Name, order = entity.Order, parentId = entity.ParentId, properties = entity.Properties });
+        var result = Serialize(await EntityPayloadAsync(entity, cancellationToken));
         var references = parentId is null ? [] : new List<string> { ResourceForExisting(parentId.Value) };
         await StageChangeAsync(
             summary: $"Create {entity.Type} '{entity.Name}'",
@@ -430,7 +436,7 @@ public sealed class OutlineToolStagingContext(
         }
 
         var after = entity.ToChange();
-        var result = Serialize(new { id = entity.Id, type = entity.Type, name = entity.Name, order = entity.Order, parentId = entity.ParentId, properties = entity.Properties });
+        var result = Serialize(await EntityPayloadAsync(entity, cancellationToken));
         await StageChangeAsync(
             summary: $"Update {entity.Type} '{entity.Name}'",
             before: before,
@@ -706,21 +712,28 @@ public sealed class OutlineToolStagingContext(
         return candidates.FirstOrDefault(entity => NormalizeForComparison(entity.Name) == requestedName);
     }
 
-    private static string DuplicateEntityResult(string requestedType, EntityState duplicate) =>
+    private async Task<string> DuplicateEntityResultAsync(string requestedType, EntityState duplicate, CancellationToken cancellationToken) =>
         Serialize(new
         {
             status = "existing_match",
             message = $"No new {requestedType} was created because an existing {duplicate.Type} with the same name or key already exists. Use update_entity or link_entities for the existing entity, or create a more distinctly named entity if this is a separate story subject.",
-            existing = new
-            {
-                id = duplicate.Id,
-                type = duplicate.Type,
-                name = duplicate.Name,
-                order = duplicate.Order,
-                parentId = duplicate.ParentId,
-                properties = duplicate.Properties,
-            },
+            existing = await EntityPayloadAsync(duplicate, cancellationToken),
         });
+
+    private async Task<object> EntityPayloadAsync(EntityState entity, CancellationToken cancellationToken)
+    {
+        var relationContext = await entityRelations.BuildForEntityAsync(ProjectId, entity.Id, EntityRelationOptions, cancellationToken);
+        return new
+        {
+            id = entity.Id,
+            type = entity.Type,
+            name = entity.Name,
+            order = entity.Order,
+            parentId = entity.ParentId,
+            properties = entity.Properties,
+            relationContext,
+        };
+    }
 
     private void EnsureType(string type, bool isChapterScoped)
     {

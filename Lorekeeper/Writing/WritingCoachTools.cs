@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Context;
 using Lorekeeper.Outline;
 using Microsoft.Extensions.AI;
 
@@ -9,8 +10,16 @@ public sealed record WritingCoachContext(
     string? CurrentSampleTitle,
     string? CurrentSampleBody);
 
-public sealed class WritingCoachTools(IProjectFactService projectFacts)
+public sealed class WritingCoachTools(IProjectFactService projectFacts, IEntityRelationContextService entityRelations)
 {
+    private static readonly EntityRelationContextOptions EntityRelationOptions = new()
+    {
+        Depth = 2,
+        MaxDirectLinks = 8,
+        MaxTraversalPaths = 10,
+        MaxLinksPerNode = 8,
+    };
+
     public IList<AITool> Build(WritingCoachContext context)
     {
         return new List<AITool>
@@ -45,20 +54,33 @@ public sealed class WritingCoachTools(IProjectFactService projectFacts)
     private async Task<string> ListProjectFactsAsync(WritingCoachContext context)
     {
         var facts = await projectFacts.ListAsync(context.ProjectId);
-        return JsonSerializer.Serialize(facts.Select(fact => new
+        var payload = new List<object>();
+        foreach (var fact in facts)
         {
-            fact.Id,
-            fact.Key,
-            fact.Name,
-            fact.Value,
-            linkedEntities = fact.LinkedEntities.Select(link => new
+            var linkedEntities = new List<object>();
+            foreach (var link in fact.LinkedEntities)
             {
-                link.EdgeType,
-                direction = link.Direction.ToString(),
-                link.EntityId,
-                link.EntityName,
-                link.EntityType,
-            }),
-        }));
+                linkedEntities.Add(new
+                {
+                    link.EdgeType,
+                    direction = link.Direction.ToString(),
+                    link.EntityId,
+                    link.EntityName,
+                    link.EntityType,
+                    relationContext = await entityRelations.BuildForEntityAsync(context.ProjectId, link.EntityId, EntityRelationOptions),
+                });
+            }
+
+            payload.Add(new
+            {
+                fact.Id,
+                fact.Key,
+                fact.Name,
+                fact.Value,
+                linkedEntities,
+            });
+        }
+
+        return JsonSerializer.Serialize(payload);
     }
 }
