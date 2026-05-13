@@ -31,7 +31,6 @@ public enum ContextItemKind
     CurrentChapter,
     ProjectOutline,
     ProjectFacts,
-    GraphTraversalMap,
     WritingSample,
     Entity,
     ChapterReference,

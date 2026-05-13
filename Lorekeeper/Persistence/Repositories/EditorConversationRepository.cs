@@ -13,6 +13,9 @@ public sealed class EditorConversationRepository(AppDbContext db) : IEditorConve
                          .OrderBy(message => message.Order)
                          .ToListAsync(cancellationToken);
 
+    public Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
+        db.EditorConversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
+
     public async Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
         var any = await db.EditorMessages.AnyAsync(message => message.ConversationId == conversationId, cancellationToken);

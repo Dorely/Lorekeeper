@@ -9,6 +9,7 @@ namespace Lorekeeper.Outline;
 public sealed class OutlineToolStagingContext(
     Guid projectId,
     Guid conversationId,
+    AiChangeConversationKind conversationKind,
     IAiChangeRepository changes,
     IProjectRepository projects,
     IActService acts,
@@ -44,6 +45,7 @@ public sealed class OutlineToolStagingContext(
 
     public Guid ProjectId { get; } = projectId;
     public Guid ConversationId { get; } = conversationId;
+    public AiChangeConversationKind ConversationKind { get; } = conversationKind;
 
     public void BeginToolCall(Guid assistantMessageId, string toolCallId, string toolName, string argumentsJson)
     {
@@ -132,20 +134,28 @@ public sealed class OutlineToolStagingContext(
             }));
     }
 
-    public async Task<string> ListEntitiesAsync(string type, Guid? parentId, CancellationToken cancellationToken = default)
+    public async Task<string> SearchEntitiesAsync(string query, int topK, string? type, Guid? parentId, CancellationToken cancellationToken = default)
     {
         await EnsureLoadedAsync(cancellationToken);
-        var query = _entities.Values
-            .Where(entity => !entity.Deleted && string.Equals(entity.Type, type, StringComparison.OrdinalIgnoreCase) && entity.ParentId == parentId);
-        query = parentId is null
-            ? query.OrderBy(entity => entity.Name, StringComparer.OrdinalIgnoreCase)
-            : query.OrderBy(entity => entity.Order ?? int.MaxValue).ThenBy(entity => entity.Name, StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
+        topK = Math.Clamp(topK, 1, 20);
 
-        var payload = new List<object>();
-        foreach (var entity in query)
-            payload.Add(await EntityPayloadAsync(entity, cancellationToken));
+        var searchTerms = SearchTerms(query);
+        var typeNames = SearchableTypeNames(type);
+        var matches = _entities.Values
+            .Where(entity =>
+                !entity.Deleted
+                && typeNames.Contains(entity.Type)
+                && (parentId is null || entity.ParentId == parentId))
+            .Select(entity => (Entity: entity, Score: SearchScore(entity, query, searchTerms)))
+            .Where(match => match.Score > 0)
+            .OrderByDescending(match => match.Score)
+            .ThenBy(match => match.Entity.Type, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(match => match.Entity.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(topK)
+            .Select(match => CompactEntitySearchPayload(match.Entity, match.Score));
 
-        return Serialize(payload);
+        return Serialize(matches);
     }
 
     public async Task<string> CreateActAsync(string title, string? synopsis, CancellationToken cancellationToken = default)
@@ -635,7 +645,7 @@ public sealed class OutlineToolStagingContext(
         _batch = new AiChangeBatch
         {
             ProjectId = ProjectId,
-            ConversationKind = AiChangeConversationKind.Outline,
+            ConversationKind = ConversationKind,
             ConversationId = ConversationId,
             AssistantMessageId = _currentAssistantMessageId,
         };
@@ -758,6 +768,92 @@ public sealed class OutlineToolStagingContext(
 
     private static string NormalizeForComparison(string value) =>
         string.Join(' ', value.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
+
+    private IReadOnlySet<string> SearchableTypeNames(string? type)
+    {
+        if (!string.IsNullOrWhiteSpace(type))
+            return new HashSet<string>([type.Trim()], StringComparer.OrdinalIgnoreCase);
+
+        return _entityTypes.Values
+            .Select(entityType => entityType.Type)
+            .Where(IsSearchableEntityType)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string[] SearchTerms(string query) =>
+        query.Split([' ', '\t', '\r', '\n', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(term => term.Trim('"', '\'', '`', '(', ')', '[', ']', '{', '}', '.', ':'))
+            .Where(term => term.Length >= 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static int SearchScore(EntityState entity, string query, IReadOnlyList<string> searchTerms)
+    {
+        var score = TextMatchScore(entity.Name, query, titleWeight: 80, detailWeight: 30);
+        score += TextMatchScore(entity.Type, query, titleWeight: 12, detailWeight: 8);
+        foreach (var property in entity.Properties)
+        {
+            score += TextMatchScore(property.Key, query, titleWeight: 8, detailWeight: 4);
+            score += TextMatchScore(property.Value, query, titleWeight: 8, detailWeight: 4);
+        }
+
+        foreach (var term in searchTerms)
+        {
+            score += TextMatchScore(entity.Name, term, titleWeight: 180, detailWeight: 60);
+            score += TextMatchScore(entity.Type, term, titleWeight: 16, detailWeight: 8);
+            foreach (var property in entity.Properties)
+            {
+                score += TextMatchScore(property.Key, term, titleWeight: 10, detailWeight: 5);
+                score += TextMatchScore(property.Value, term, titleWeight: 10, detailWeight: 5);
+            }
+        }
+
+        return score;
+    }
+
+    private static int TextMatchScore(string? value, string query, int titleWeight, int detailWeight)
+    {
+        if (string.IsNullOrWhiteSpace(value) || string.IsNullOrWhiteSpace(query)) return 0;
+        if (value.Equals(query, StringComparison.OrdinalIgnoreCase)) return titleWeight * 4;
+        if (value.StartsWith(query, StringComparison.OrdinalIgnoreCase)) return titleWeight * 2;
+        return value.Contains(query, StringComparison.OrdinalIgnoreCase) ? detailWeight : 0;
+    }
+
+    private static object CompactEntitySearchPayload(EntityState entity, int score) => new
+    {
+        id = entity.Id,
+        type = entity.Type,
+        name = entity.Name,
+        order = entity.Order,
+        parentId = entity.ParentId,
+        matchScore = score,
+        properties = CompactProperties(entity.Properties),
+    };
+
+    private static Dictionary<string, string?> CompactProperties(IReadOnlyDictionary<string, string?> properties)
+    {
+        var compact = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in properties
+            .Where(property => !string.Equals(property.Key, "order", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(8))
+        {
+            compact[property.Key] = TruncatePropertyValue(property.Value);
+        }
+
+        return compact;
+    }
+
+    private static string? TruncatePropertyValue(string? value) =>
+        string.IsNullOrEmpty(value) || value.Length <= 240 ? value : value[..240] + "...";
+
+    private static bool IsSearchableEntityType(string type) =>
+        !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
 
     private static string Serialize(object? value) => JsonSerializer.Serialize(value, JsonSerializerOptions.Default);
 

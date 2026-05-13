@@ -24,7 +24,7 @@ public sealed class EditorChatTools(
     IEntityRelationContextService entityRelations,
     OutlineCollaborationTools outlineTools)
 {
-    private static readonly EntityRelationContextOptions ListEntityRelationOptions = new()
+    private static readonly EntityRelationContextOptions _listEntityRelationOptions = new()
     {
         Depth = 2,
         MaxDirectLinks = 8,
@@ -32,7 +32,7 @@ public sealed class EditorChatTools(
         MaxLinksPerNode = 8,
     };
 
-    private static readonly EntityRelationContextOptions DetailEntityRelationOptions = new()
+    private static readonly EntityRelationContextOptions _detailEntityRelationOptions = new()
     {
         Depth = 2,
         MaxDirectLinks = 16,
@@ -50,7 +50,7 @@ public sealed class EditorChatTools(
                 description: "Read the currently assembled editor context exactly as the model sees it, including enabled outline, facts, writing samples, and selected entities."),
 
             AIFunctionFactory.Create(
-                method: (string query, int topK) => VectorSearchAsync(context, query, topK),
+                method: (string query, int topK = 8) => VectorSearchAsync(context, query, topK),
                 name: "vector_search",
                 description: "Semantic search over indexed chapters and lore for the current project. Returns the top matching snippets with their source metadata."),
 
@@ -65,7 +65,7 @@ public sealed class EditorChatTools(
                 description: "List project-level facts and their linked graph entities as JSON."),
 
             AIFunctionFactory.Create(
-                method: (string query, int topK) => SearchEntitiesAsync(context, query, topK),
+                method: (string query, int topK = 10) => SearchEntitiesAsync(context, query, topK),
                 name: "search_entities",
                 description: "Search story graph entities by name, type, and property text. Use this when you need a specific character, location, beat, or custom entity but do not know its id."),
 
@@ -91,23 +91,22 @@ public sealed class EditorChatTools(
                 method: (Guid chapterId) => StartContestAsync(context, chapterId),
                 name: "start_contest",
                 description:
-                    "Start a terminal Contest Mode generation job for chapter-body mutations. " +
-                    "Call this exactly once after gathering enough read-only context. " +
-                    "Do not summarize, rephrase, or decide mutation instructions for the candidates; the backend snapshots the full current chat context for them."));
+                    "Start a Contest Mode generation job for chapter-body mutations. " +
+                    "Call this exactly once after gathering enough read-only context. "));
             return tools;
         }
 
         tools.Add(AIFunctionFactory.Create(
-            method: (Guid chapterId, string content, int? startLine, int? endLine) =>
+            method: (Guid chapterId, string content, int? startLine = null, int? endLine = null) =>
                 EditChapterAsync(context, chapterId, content, startLine, endLine),
             name: "edit_chapter",
             description:
                 "Edit a chapter using line-based semantics. " +
-                "If both startLine and endLine are null: append `content` to the end of the chapter. " +
-                "If only startLine is provided: insert `content` BEFORE that line (1-based). " +
-                "If both startLine and endLine are provided: replace the inclusive range of existing numbered lines with `content`; use startLine=1 and endLine=last numbered line to rewrite the full body. " +
+                "To Append: Leave both startLine and endLine null: appends `content` to the end of the chapter. " +
+                "To Insert: Provide only startLine Leave endLine null: insert `content` BEFORE that line (1-based). " +
+                "To Replace: Provide both startLine and endLine: replace the inclusive range of existing numbered lines with `content`" +
                 "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
-                "After editing, call read_chapter to verify the current body before finalizing. " +
+                "`content` should not contain line numbers. "+
                 "Returns the new line-numbered body and a short change summary."));
 
         var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
@@ -163,7 +162,7 @@ public sealed class EditorChatTools(
                 && !string.IsNullOrWhiteSpace(result.SourceId)
                 && Guid.TryParseExact(result.SourceId, "N", out var entityId))
             {
-                var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, ListEntityRelationOptions);
+                var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, _listEntityRelationOptions);
                 if (relationContext.DirectLinks.Count > 0 || relationContext.TraversalMap.Count > 0)
                 {
                     sb.AppendLine("Relation context:");
@@ -211,7 +210,7 @@ public sealed class EditorChatTools(
                     link.EntityId,
                     link.EntityName,
                     link.EntityType,
-                    relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, link.EntityId, ListEntityRelationOptions),
+                    relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, link.EntityId, _listEntityRelationOptions),
                 });
             }
 
@@ -231,24 +230,25 @@ public sealed class EditorChatTools(
     private async Task<string> SearchEntitiesAsync(EditorChatContext ctx, string query, int topK)
     {
         if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
-        topK = Math.Clamp(topK, 1, 50);
+        topK = Math.Clamp(topK, 1, 20);
+        var searchTerms = SearchTerms(query);
 
-        var matches = new List<StoryEntity>();
+        var matches = new List<(StoryEntity Entity, int Score)>();
         var types = await entityTypes.ListAsync(ctx.ProjectId, includeStructural: true);
         foreach (var type in types.Where(type => IsSearchableEntityType(type.Type)))
         {
             var list = await entities.ListAsync(ctx.ProjectId, type.Type);
-            matches.AddRange(list.Where(entity => Matches(entity, query)));
+            matches.AddRange(list
+                .Select(entity => (Entity: entity, Score: SearchScore(entity, query, searchTerms)))
+                .Where(match => match.Score > 0));
         }
 
-        var payload = new List<object>();
-        foreach (var entity in matches
-            .OrderBy(entity => entity.Type, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(entity => entity.Name, StringComparer.OrdinalIgnoreCase)
-            .Take(topK))
-        {
-            payload.Add(await EntityPayloadAsync(ctx.ProjectId, entity, ListEntityRelationOptions));
-        }
+        var payload = matches
+            .OrderByDescending(match => match.Score)
+            .ThenBy(match => match.Entity.Type, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(match => match.Entity.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(topK)
+            .Select(match => CompactEntitySearchPayload(match.Entity, match.Score));
 
         return JsonSerializer.Serialize(payload);
     }
@@ -260,7 +260,7 @@ public sealed class EditorChatTools(
             return $"Error: entity {entityId} not found in this project.";
 
         var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
-        var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, DetailEntityRelationOptions);
+        var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, _detailEntityRelationOptions);
         return JsonSerializer.Serialize(new
         {
             id = entity.Id,
@@ -433,12 +433,72 @@ public sealed class EditorChatTools(
         return Task.FromResult("Contest started. Candidate responses will stream into the review modal.");
     }
 
-    private static bool Matches(StoryEntity entity, string query) =>
-        entity.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
-        || entity.Type.Contains(query, StringComparison.OrdinalIgnoreCase)
-        || entity.Properties.Any(property =>
-            property.Key.Contains(query, StringComparison.OrdinalIgnoreCase)
-            || (property.Value?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
+    private static string[] SearchTerms(string query) =>
+        query.Split([' ', '\t', '\r', '\n', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(term => term.Trim('"', '\'', '`', '(', ')', '[', ']', '{', '}', '.', ':'))
+            .Where(term => term.Length >= 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static int SearchScore(StoryEntity entity, string query, IReadOnlyList<string> searchTerms)
+    {
+        var score = TextMatchScore(entity.Name, query, titleWeight: 80, detailWeight: 30);
+        score += TextMatchScore(entity.Type, query, titleWeight: 12, detailWeight: 8);
+        foreach (var property in entity.Properties)
+        {
+            score += TextMatchScore(property.Key, query, titleWeight: 8, detailWeight: 4);
+            score += TextMatchScore(property.Value, query, titleWeight: 8, detailWeight: 4);
+        }
+
+        foreach (var term in searchTerms)
+        {
+            score += TextMatchScore(entity.Name, term, titleWeight: 180, detailWeight: 60);
+            score += TextMatchScore(entity.Type, term, titleWeight: 16, detailWeight: 8);
+            foreach (var property in entity.Properties)
+            {
+                score += TextMatchScore(property.Key, term, titleWeight: 10, detailWeight: 5);
+                score += TextMatchScore(property.Value, term, titleWeight: 10, detailWeight: 5);
+            }
+        }
+
+        return score;
+    }
+
+    private static int TextMatchScore(string? value, string query, int titleWeight, int detailWeight)
+    {
+        if (string.IsNullOrWhiteSpace(value) || string.IsNullOrWhiteSpace(query)) return 0;
+        if (value.Equals(query, StringComparison.OrdinalIgnoreCase)) return titleWeight * 4;
+        if (value.StartsWith(query, StringComparison.OrdinalIgnoreCase)) return titleWeight * 2;
+        return value.Contains(query, StringComparison.OrdinalIgnoreCase) ? detailWeight : 0;
+    }
+
+    private static object CompactEntitySearchPayload(StoryEntity entity, int score) => new
+    {
+        id = entity.Id,
+        type = entity.Type,
+        name = entity.Name,
+        order = entity.Order,
+        parentId = entity.ParentId,
+        matchScore = score,
+        properties = CompactProperties(entity.Properties),
+    };
+
+    private static Dictionary<string, string?> CompactProperties(IReadOnlyDictionary<string, string?> properties)
+    {
+        var compact = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in properties
+            .Where(property => !string.Equals(property.Key, "order", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(8))
+        {
+            compact[property.Key] = TruncatePropertyValue(property.Value);
+        }
+
+        return compact;
+    }
+
+    private static string? TruncatePropertyValue(string? value) =>
+        string.IsNullOrEmpty(value) || value.Length <= 240 ? value : value[..240] + "...";
 
     private static bool IsSearchableEntityType(string type) =>
         !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)

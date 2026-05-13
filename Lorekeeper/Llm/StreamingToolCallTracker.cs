@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.Llm;
@@ -56,7 +55,7 @@ public sealed class StreamingToolCallTracker
     }
 
     private static string SerializeArguments(IDictionary<string, object?>? arguments) =>
-        arguments is null ? "{}" : JsonSerializer.Serialize(arguments);
+        ToolCallArguments.Serialize(arguments);
 
     private sealed record PendingStreamingToolCall(string Name, int TextOffset)
     {

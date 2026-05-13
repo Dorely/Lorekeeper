@@ -10,6 +10,8 @@ public interface IOutlineConversationRepository
     /// <summary>Loads all messages for a conversation in <see cref="OutlineMessage.Order"/> ascending order.</summary>
     Task<List<OutlineMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
+    Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default);
+
     /// <summary>Returns the highest <see cref="OutlineMessage.Order"/> in the conversation, or -1 if empty.</summary>
     Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default);
 

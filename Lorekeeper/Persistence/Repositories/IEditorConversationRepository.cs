@@ -8,6 +8,8 @@ public interface IEditorConversationRepository
 
     Task<List<EditorMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
+    Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default);
+
     Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
     Task AddConversationAsync(EditorConversation conversation, CancellationToken cancellationToken = default);

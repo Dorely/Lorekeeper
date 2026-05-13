@@ -28,7 +28,9 @@ public sealed class EditorChatService(
     IOptions<AgentOptions> options,
     ILogger<EditorChatService> logger) : IEditorChatService
 {
-    private const string InitialAssistantGreeting =
+    private const int _maxToolResultCharsForModel = 12000;
+
+    private const string _initialAssistantGreeting =
         "I'm ready to work on the draft with you. Tell me what you want to shape, revise, or check in the current chapter.";
 
     public async Task<EditorConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
@@ -47,7 +49,7 @@ public sealed class EditorChatService(
             ConversationId = conversation.Id,
             Order = 0,
             Role = EditorMessageRole.Assistant,
-            Content = InitialAssistantGreeting,
+            Content = _initialAssistantGreeting,
             Status = EditorMessageStatus.Completed,
         }, cancellationToken);
         await conversations.SaveChangesAsync(cancellationToken);
@@ -166,7 +168,7 @@ public sealed class EditorChatService(
             EditorChatChangeStagingContext? editorStaging = null;
             if (project.AiChangeApprovalEnabled)
             {
-                outlineStaging = outlineTools.CreateStagingContext(projectId, conversation.Id);
+                outlineStaging = outlineTools.CreateStagingContext(projectId, conversation.Id, AiChangeConversationKind.Editor);
                 editorStaging = new EditorChatChangeStagingContext(projectId, conversation.Id, changes);
             }
 
@@ -349,7 +351,7 @@ public sealed class EditorChatService(
             activeAssistant.Status = EditorMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
 
-            messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantContents(textBuilder.ToString(), manifest)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantToolCallContents(manifest)));
 
             var resultContents = new List<AIContent>();
             foreach (var pendingCall in pendingCalls)
@@ -370,8 +372,9 @@ public sealed class EditorChatService(
                 {
                     var aiFunction = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name)
                         ?? throw new InvalidOperationException($"Unknown tool '{pendingCall.Name}'.");
-                    var argsDict = pendingCall.Content.Arguments ?? new Dictionary<string, object?>();
-                    var invokeResult = await aiFunction.InvokeAsync(new AIFunctionArguments(argsDict), cancellationToken);
+                    var invokeResult = await aiFunction.InvokeAsync(
+                        ToolCallArguments.Create(pendingCall.Content.Arguments, pendingCall.ArgumentsJson),
+                        cancellationToken);
                     toolResult = invokeResult?.ToString() ?? string.Empty;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -406,7 +409,9 @@ public sealed class EditorChatService(
                 await conversations.AddMessageAsync(toolMessage, CancellationToken.None);
                 await conversations.SaveChangesAsync(CancellationToken.None);
 
-                resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
+                resultContents.Add(new FunctionResultContent(
+                    pendingCall.CallId,
+                    BuildToolResultForModel(pendingCall.Name, toolResult ?? string.Empty)));
                 foreach (var pendingChange in editorContext.OutlineStaging?.DrainNewChanges() ?? [])
                 {
                     yield return new EditorChatPendingAiChangeCreated(
@@ -586,9 +591,29 @@ public sealed class EditorChatService(
         var calls = ReadPersistedToolCalls(message.ToolCallsJson);
         var contents = calls.Count == 0
             ? BuildTextOnlyAssistantContents(message.Content)
-            : BuildAssistantContents(message.Content, calls);
+            : BuildAssistantToolCallContents(calls);
 
         return new ChatMessage(ChatRole.Assistant, contents);
+    }
+
+    private static string BuildToolResultForModel(string toolName, string result)
+    {
+        if (string.Equals(toolName, "edit_chapter", StringComparison.Ordinal))
+        {
+            const string newBodyMarker = "\n\nNew body:\n";
+            var markerIndex = result.IndexOf(newBodyMarker, StringComparison.Ordinal);
+            if (markerIndex >= 0)
+            {
+                return result[..markerIndex]
+                    + "\n\nThe chapter was updated in the editor. Call read_chapter if you need to inspect the current body before responding.";
+            }
+        }
+
+        if (result.Length <= _maxToolResultCharsForModel)
+            return result;
+
+        return result[.._maxToolResultCharsForModel]
+            + "\n\n[Tool result truncated before returning it to the model.]";
     }
 
     private static List<AIContent> BuildTextOnlyAssistantContents(string text)
@@ -634,6 +659,9 @@ public sealed class EditorChatService(
         return contents;
     }
 
+    private static List<AIContent> BuildAssistantToolCallContents(IReadOnlyList<PersistedToolCall> calls) =>
+        calls.Select(call => (AIContent)ToFunctionCallContent(call)).ToList();
+
     private static List<PersistedToolCall> ReadPersistedToolCalls(string toolCallsJson)
     {
         if (string.IsNullOrWhiteSpace(toolCallsJson) || toolCallsJson == "[]") return [];
@@ -650,13 +678,7 @@ public sealed class EditorChatService(
 
     private static FunctionCallContent ToFunctionCallContent(PersistedToolCall call)
     {
-        IDictionary<string, object?>? args = null;
-        if (!string.IsNullOrWhiteSpace(call.ArgumentsJson) && call.ArgumentsJson != "{}")
-        {
-            try { args = JsonSerializer.Deserialize<Dictionary<string, object?>>(call.ArgumentsJson); }
-            catch { args = new Dictionary<string, object?> { ["raw"] = call.ArgumentsJson }; }
-        }
-
+        var args = ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson);
         return new FunctionCallContent(call.CallId, call.Name, args);
     }
 

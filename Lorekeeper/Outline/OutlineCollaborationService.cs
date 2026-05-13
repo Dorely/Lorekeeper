@@ -413,8 +413,9 @@ they commit to a direction, act on it without a second confirmation.
                 {
                     var aiFn = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name)
                         ?? throw new InvalidOperationException($"Unknown tool '{pendingCall.Name}'.");
-                    var argsDict = functionCall.Arguments ?? new Dictionary<string, object?>();
-                    var invokeResult = await aiFn.InvokeAsync(new AIFunctionArguments(argsDict), cancellationToken);
+                    var invokeResult = await aiFn.InvokeAsync(
+                        ToolCallArguments.Create(functionCall.Arguments, pendingCall.ArgumentsJson),
+                        cancellationToken);
                     toolResult = invokeResult?.ToString() ?? string.Empty;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -582,13 +583,7 @@ they commit to a direction, act on it without a second confirmation.
 
     private static FunctionCallContent ToFunctionCallContent(PersistedToolCall call)
     {
-        IDictionary<string, object?>? args = null;
-        if (!string.IsNullOrWhiteSpace(call.ArgumentsJson) && call.ArgumentsJson != "{}")
-        {
-            try { args = JsonSerializer.Deserialize<Dictionary<string, object?>>(call.ArgumentsJson); }
-            catch { args = new Dictionary<string, object?> { ["raw"] = call.ArgumentsJson }; }
-        }
-
+        var args = ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson);
         return new FunctionCallContent(call.CallId, call.Name, args);
     }
 

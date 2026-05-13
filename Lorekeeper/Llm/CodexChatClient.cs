@@ -464,6 +464,7 @@ public sealed class CodexChatClient : IChatClient
                         {
                             ["type"] = "object",
                             ["properties"] = new Dictionary<string, object>(),
+                            ["required"] = Array.Empty<string>(),
                             ["additionalProperties"] = false
                         };
                     }
@@ -518,7 +519,6 @@ public sealed class CodexChatClient : IChatClient
         var isObject = false;
         var hasProperties = false;
         var hasAdditionalProperties = false;
-        var hasRequired = false;
         var propertyNames = new List<string>();
 
         foreach (var prop in element.EnumerateObject())
@@ -541,8 +541,6 @@ public sealed class CodexChatClient : IChatClient
             }
             if (prop.Name == "additionalProperties")
                 hasAdditionalProperties = true;
-            if (prop.Name == "required")
-                hasRequired = true;
 
             var recurseAsProperties = prop.Name == "properties";
             dict[prop.Name] = prop.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array
@@ -553,7 +551,7 @@ public sealed class CodexChatClient : IChatClient
         if ((isObject || hasProperties) && !hasAdditionalProperties)
             dict["additionalProperties"] = false;
 
-        if ((isObject || hasProperties) && !hasRequired && propertyNames.Count > 0)
+        if (isObject || hasProperties)
             dict["required"] = propertyNames;
 
         return JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(dict));

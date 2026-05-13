@@ -48,8 +48,11 @@ public sealed class OutlineCollaborationTools(
         MaxLinksPerNode = 8,
     };
 
-    public OutlineToolStagingContext CreateStagingContext(Guid projectId, Guid conversationId) =>
-        new(projectId, conversationId, changes, projectRepository, acts, chapters, entities, entityTypes, entityRelations);
+    public OutlineToolStagingContext CreateStagingContext(
+        Guid projectId,
+        Guid conversationId,
+        AiChangeConversationKind conversationKind = AiChangeConversationKind.Outline) =>
+        new(projectId, conversationId, conversationKind, changes, projectRepository, acts, chapters, entities, entityTypes, entityRelations);
 
     public IList<AITool> Build(OutlineCollaborationContext context)
     {
@@ -66,7 +69,7 @@ public sealed class OutlineCollaborationTools(
                 description: "Create a new act at the end of the outline. Returns the new act's id and order."),
 
             AIFunctionFactory.Create(
-                method: (Guid actId, string? title, string? synopsis) => UpdateActAsync(context, actId, title, synopsis),
+                method: (Guid actId, string? title = null, string? synopsis = null) => UpdateActAsync(context, actId, title, synopsis),
                 name: "update_act",
                 description: "Update an act's title and/or synopsis. Pass null to leave a field unchanged."),
 
@@ -76,17 +79,17 @@ public sealed class OutlineCollaborationTools(
                 description: "Delete an act. Any chapters it owned move to the project's unassigned bucket."),
 
             AIFunctionFactory.Create(
-                method: (string? actId, string title, string synopsis) => CreateChapterAsync(context, actId, title, synopsis),
+                method: (string title, string synopsis, string? actId = null) => CreateChapterAsync(context, actId, title, synopsis),
                 name: "create_chapter",
                 description: "Create a chapter. Pass actId as the act's Guid to place it in that act, or omit/null/'unassigned' to land in the unassigned bucket. Order is auto-assigned to the end of the chosen bucket."),
 
             AIFunctionFactory.Create(
-                method: (Guid chapterId, string? title, string? synopsis, string? actId) => UpdateChapterAsync(context, chapterId, title, synopsis, actId),
+                method: (Guid chapterId, string? title = null, string? synopsis = null, string? actId = null) => UpdateChapterAsync(context, chapterId, title, synopsis, actId),
                 name: "update_chapter",
                 description: "Update a chapter's title/synopsis and/or move it between act buckets. Pass null to leave a field unchanged. For actId: omit/null = leave act unchanged; 'unassigned' = move to unassigned; or pass a Guid to move into that act."),
 
             AIFunctionFactory.Create(
-                method: (Guid chapterId, int? startLine, int? endLine) => ReadChapterAsync(context, chapterId, startLine, endLine),
+                method: (Guid chapterId, int? startLine = null, int? endLine = null) => ReadChapterAsync(context, chapterId, startLine, endLine),
                 name: "read_chapter",
                 description: "Read a chapter's persisted body with line numbers (0001: ...). Use list_outline to discover chapter ids. Pass optional startLine/endLine to read only part of a long chapter; omit both to read the full body."),
 
@@ -101,7 +104,7 @@ public sealed class OutlineCollaborationTools(
                 description: "Replace the act ordering with the given sequence of act ids. Any acts not in the list keep their relative order at the end."),
 
             AIFunctionFactory.Create(
-                method: (string? actId, Guid[] orderedIds) => ReorderChaptersAsync(context, actId, orderedIds),
+                method: (Guid[] orderedIds, string? actId = null) => ReorderChaptersAsync(context, actId, orderedIds),
                 name: "reorder_chapters",
                 description: "Replace chapter ordering within a single act bucket. Pass actId as a Guid for that act, or omit/null/'unassigned' for the unassigned bucket."),
 
@@ -113,18 +116,18 @@ public sealed class OutlineCollaborationTools(
                 description: "List registered and discovered graph entity types for this project, including structural types such as Project, Act, Chapter, and Event/Beat."),
 
             AIFunctionFactory.Create(
-                method: (string type, string? parentId) => ListEntitiesAsync(context, type, parentId),
-                name: "list_entities",
-                description: "List entities of a given graph type. Use list_entity_types when unsure which types exist. For chapter-scoped beats pass type='Event' and parentId=<chapter id>. For project-scoped types omit parentId. Results are alphabetical for project-scoped types, or by order for scoped child types."),
+                method: (string query, int topK = 10, string? type = null, string? parentId = null) => SearchEntitiesAsync(context, query, topK, type, parentId),
+                name: "search_entities",
+                description: "Bounded search for graph entities by name, type, and property text. Use type or parentId to narrow results when known. Returns compact matches; call read_entity or list_entity_links for details."),
 
             AIFunctionFactory.Create(
-                method: (string type, string name, string? propertiesJson, string? parentId, int? order) =>
+                method: (string type, string name, string? propertiesJson = null, string? parentId = null, int? order = null) =>
                     CreateEntityAsync(context, type, name, propertiesJson, parentId, order),
                 name: "create_entity",
                 description: "Create a new graph entity. type is the entity category ('Character', 'Location', 'Event' for beats, 'ProjectFact' for rare project-level guidance, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. Use ProjectFact only for premise, genre, tone, theme, scope, global rules, or other guidance with no better structural home; do not use it for rework notes, act/chapter plans, character roles, beats, relationships, or location details. For ProjectFact include key/value properties; it will be parented to the Project automatically. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). If an entity with the same name/key already exists, returns status='existing_match' and the existing id instead of creating a duplicate."),
 
             AIFunctionFactory.Create(
-                method: (string entityId, string? name, string? propertiesToSetJson, string? propertiesToRemoveJson) =>
+                method: (string entityId, string? name = null, string? propertiesToSetJson = null, string? propertiesToRemoveJson = null) =>
                     UpdateEntityAsync(context, entityId, name, propertiesToSetJson, propertiesToRemoveJson),
                 name: "update_entity",
                 description: "Update an entity's name and/or properties. Pass null for fields to leave unchanged. propertiesToSetJson is a JSON object string of keys to merge into the existing bag (e.g. '{\"role\":\"protagonist\"}'). propertiesToRemoveJson is a JSON array string of keys to delete (e.g. '[\"role\"]')."),
@@ -141,13 +144,13 @@ public sealed class OutlineCollaborationTools(
                 description: "Replace the ordering of a parent's children of a given type. orderedIdsJson is a JSON array string of entity ids (e.g. '[\"<guid1>\", \"<guid2>\"]') and must contain exactly the parent's current children of that type. Used primarily to reorder beats within a chapter."),
 
             AIFunctionFactory.Create(
-                method: (string fromId, string toId, string edgeType, string? propertiesJson) =>
+                method: (string fromId, string toId, string edgeType, string? propertiesJson = null) =>
                     LinkEntitiesAsync(context, fromId, toId, edgeType, propertiesJson),
                 name: "link_entities",
                 description: "Create a typed edge between two entities. propertiesJson is an optional JSON object string of edge metadata. Conventional edge types: 'AppearsIn' (Character -> Event/Chapter), 'LocatedAt' (Event -> Location), 'KnownTo' (Character -> Character). Other types are allowed; use camel-case verbs."),
 
             AIFunctionFactory.Create(
-                method: (string query, int topK) => VectorSearchAsync(context, query, topK),
+                method: (string query, int topK = 8) => VectorSearchAsync(context, query, topK),
                 name: "vector_search",
                 description: "Semantic search over indexed lore and chapters in the current project. Likely returns nothing during early outline work — that just means no lore has been indexed yet."),
         };
@@ -168,7 +171,7 @@ public sealed class OutlineCollaborationTools(
         var unassigned = allChapters.Where(c => c.ActId is null).OrderBy(c => c.Order).ToList();
 
         // Pre-resolve beat counts per chapter so the assistant can decide whether it needs to
-        // call list_entities; cheap because CountChildrenAsync short-circuits when the chapter
+        // search focused beat/entity details; cheap because CountChildrenAsync short-circuits when the chapter
         // has no graph node yet.
         var beatCounts = new Dictionary<Guid, int>();
         foreach (var c in allChapters)
@@ -449,9 +452,11 @@ public sealed class OutlineCollaborationTools(
         }));
     }
 
-    private async Task<string> ListEntitiesAsync(OutlineCollaborationContext ctx, string type, string? parentId)
+    private async Task<string> SearchEntitiesAsync(OutlineCollaborationContext ctx, string query, int topK, string? type, string? parentId)
     {
-        if (string.IsNullOrWhiteSpace(type)) return "Error: type is required.";
+        if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
+        topK = Math.Clamp(topK, 1, 20);
+
         Guid? parent = null;
         if (!string.IsNullOrWhiteSpace(parentId))
         {
@@ -460,14 +465,39 @@ public sealed class OutlineCollaborationTools(
         }
 
         if (ctx.Staging is not null)
-            return await ctx.Staging.ListEntitiesAsync(type.Trim(), parent);
+            return await ctx.Staging.SearchEntitiesAsync(query, topK, type, parent);
 
-        var list = await entities.ListAsync(ctx.ProjectId, type.Trim(), parent);
-        var payload = new List<object>();
-        foreach (var entity in list)
-            payload.Add(await EntityPayloadAsync(ctx.ProjectId, entity));
+        var searchTerms = SearchTerms(query);
+        var typeNames = await SearchableTypeNamesAsync(ctx.ProjectId, type);
+        var matches = new List<(StoryEntity Entity, int Score)>();
+        foreach (var typeName in typeNames)
+        {
+            var list = await entities.ListAsync(ctx.ProjectId, typeName, parent);
+            matches.AddRange(list
+                .Select(entity => (Entity: entity, Score: SearchScore(entity, query, searchTerms)))
+                .Where(match => match.Score > 0));
+        }
+
+        var payload = matches
+            .OrderByDescending(match => match.Score)
+            .ThenBy(match => match.Entity.Type, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(match => match.Entity.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(topK)
+            .Select(match => CompactEntitySearchPayload(match.Entity, match.Score));
 
         return JsonSerializer.Serialize(payload);
+    }
+
+    private async Task<IReadOnlyList<string>> SearchableTypeNamesAsync(Guid projectId, string? type)
+    {
+        if (!string.IsNullOrWhiteSpace(type))
+            return [type.Trim()];
+
+        var list = await entityTypes.ListAsync(projectId, includeStructural: true);
+        return list
+            .Where(typeDefinition => IsSearchableEntityType(typeDefinition.Type))
+            .Select(typeDefinition => typeDefinition.Type)
+            .ToList();
     }
 
     private async Task<string> CreateEntityAsync(
@@ -758,6 +788,81 @@ public sealed class OutlineCollaborationTools(
 
     private static string NormalizeForComparison(string value) =>
         string.Join(' ', value.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
+
+    private static string[] SearchTerms(string query) =>
+        query.Split([' ', '\t', '\r', '\n', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(term => term.Trim('"', '\'', '`', '(', ')', '[', ']', '{', '}', '.', ':'))
+            .Where(term => term.Length >= 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static int SearchScore(StoryEntity entity, string query, IReadOnlyList<string> searchTerms)
+    {
+        var score = TextMatchScore(entity.Name, query, titleWeight: 80, detailWeight: 30);
+        score += TextMatchScore(entity.Type, query, titleWeight: 12, detailWeight: 8);
+        foreach (var property in entity.Properties)
+        {
+            score += TextMatchScore(property.Key, query, titleWeight: 8, detailWeight: 4);
+            score += TextMatchScore(property.Value, query, titleWeight: 8, detailWeight: 4);
+        }
+
+        foreach (var term in searchTerms)
+        {
+            score += TextMatchScore(entity.Name, term, titleWeight: 180, detailWeight: 60);
+            score += TextMatchScore(entity.Type, term, titleWeight: 16, detailWeight: 8);
+            foreach (var property in entity.Properties)
+            {
+                score += TextMatchScore(property.Key, term, titleWeight: 10, detailWeight: 5);
+                score += TextMatchScore(property.Value, term, titleWeight: 10, detailWeight: 5);
+            }
+        }
+
+        return score;
+    }
+
+    private static int TextMatchScore(string? value, string query, int titleWeight, int detailWeight)
+    {
+        if (string.IsNullOrWhiteSpace(value) || string.IsNullOrWhiteSpace(query)) return 0;
+        if (value.Equals(query, StringComparison.OrdinalIgnoreCase)) return titleWeight * 4;
+        if (value.StartsWith(query, StringComparison.OrdinalIgnoreCase)) return titleWeight * 2;
+        return value.Contains(query, StringComparison.OrdinalIgnoreCase) ? detailWeight : 0;
+    }
+
+    private static object CompactEntitySearchPayload(StoryEntity entity, int score) => new
+    {
+        id = entity.Id,
+        type = entity.Type,
+        name = entity.Name,
+        order = entity.Order,
+        parentId = entity.ParentId,
+        matchScore = score,
+        properties = CompactProperties(entity.Properties),
+    };
+
+    private static Dictionary<string, string?> CompactProperties(IReadOnlyDictionary<string, string?> properties)
+    {
+        var compact = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in properties
+            .Where(property => !string.Equals(property.Key, "order", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(8))
+        {
+            compact[property.Key] = TruncatePropertyValue(property.Value);
+        }
+
+        return compact;
+    }
+
+    private static string? TruncatePropertyValue(string? value) =>
+        string.IsNullOrEmpty(value) || value.Length <= 240 ? value : value[..240] + "...";
+
+    private static bool IsSearchableEntityType(string type) =>
+        !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
 
     private static string? FormatLineRange(
         string body,

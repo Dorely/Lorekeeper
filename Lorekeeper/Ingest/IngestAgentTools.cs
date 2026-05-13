@@ -41,36 +41,36 @@ public sealed class IngestAgentTools(
             description: "Get details for one entity already touched by this ingest job. Pass the entity id from list_job_entities."),
 
         AIFunctionFactory.Create(
-            method: (string? type, string? query) => SearchProjectEntitiesAsync(context, type, query),
+            method: (string? type = null, string? query = null) => SearchProjectEntitiesAsync(context, type, query),
             name: "search_project_entities",
             description: "Search existing non-structural story entities in the project graph before creating a new entity. Use type when known; search exact names plus variants such as titles removed, aliases, alternate spellings, surnames, epithets, and descriptive terms."),
 
         AIFunctionFactory.Create(
-            method: (string existingEntityId, IngestObservationProperties? properties, string[]? aliases, string? evidence, string? notes) =>
+            method: (string existingEntityId, IngestObservationProperties? properties = null, string[]? aliases = null, string? evidence = null, string? notes = null) =>
                 RecordExistingEntityObservationAsync(context, existingEntityId, properties, aliases, evidence, notes),
             name: "record_existing_entity_observation",
             description: "Record source-scoped observations on an existing project entity without changing its canonical properties. Use this after search_project_entities finds a match. properties is an object with concise natural-language fields such as summary/status/history/significance; aliases is an array. Use {} for no properties and [] for no aliases."),
 
         AIFunctionFactory.Create(
-            method: (string type, string name, IngestObservationProperties? properties, string[]? aliases, string? evidence, string? notes) =>
+            method: (string type, string name, IngestObservationProperties? properties = null, string[]? aliases = null, string? evidence = null, string? notes = null) =>
                 CreateEntityAsync(context, type, name, properties, aliases, evidence, notes),
             name: "create_ingest_entity",
             description: "Create a new graph entity with source-scoped observations. Only use after list_job_entities and variant search_project_entities calls find no plausible same subject. properties is an object with concise natural-language fields such as summary/status/history/significance; aliases is an array. Use {} for no properties and [] for no aliases."),
 
         AIFunctionFactory.Create(
-            method: (string entityId, string? name, IngestObservationProperties? propertiesToSet, string[]? aliases, string? evidence, string? notes) =>
+            method: (string entityId, string? name = null, IngestObservationProperties? propertiesToSet = null, string[]? aliases = null, string? evidence = null, string? notes = null) =>
                 UpdateEntityAsync(context, entityId, name, propertiesToSet, aliases, evidence, notes),
             name: "update_ingest_entity",
             description: "Update source-scoped observations for an entity already touched by this ingest job. Canonical project properties are not changed; name is only used for entities newly created by this job. propertiesToSet is an object with concise natural-language fields such as summary/status/history/significance; aliases is an array. Use {} for no properties and [] for no aliases."),
 
         AIFunctionFactory.Create(
-            method: (string fromEntityId, string toEntityId, string edgeType, IngestObservationProperties? properties, string? evidence, string? notes) =>
+            method: (string fromEntityId, string toEntityId, string edgeType, IngestObservationProperties? properties = null, string? evidence = null, string? notes = null) =>
                 LinkEntitiesAsync(context, fromEntityId, toEntityId, edgeType, properties, evidence, notes),
             name: "link_ingest_entities",
             description: "Record a source-scoped relationship between two entities already touched by this ingest job. Record observations on existing project endpoints before linking them. properties is an object with concise natural-language relationship observations such as summary/status/history/significance."),
 
         AIFunctionFactory.Create(
-            method: (string summary, string? notes) => RecordSourceChunkNotesAsync(context, summary, notes),
+            method: (string summary, string? notes = null) => RecordSourceChunkNotesAsync(context, summary, notes),
             name: "record_source_chunk_notes",
             description: "Record a concise summary and optional extraction notes for the current source chunk."),
     ];

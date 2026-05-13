@@ -13,6 +13,9 @@ public class OutlineConversationRepository(AppDbContext db) : IOutlineConversati
                           .OrderBy(m => m.Order)
                           .ToListAsync(cancellationToken);
 
+    public Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
+        db.OutlineConversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
+
     public async Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
         var any = await db.OutlineMessages.AnyAsync(m => m.ConversationId == conversationId, cancellationToken);

@@ -275,34 +275,93 @@ public sealed class AiChangeApprovalService(
         {
             case AiChangeConversationKind.Outline:
             {
-                var order = await outlineConversations.GetMaxOrderAsync(batch.ConversationId, cancellationToken) + 1;
-                await outlineConversations.AddMessageAsync(new OutlineMessage
+                if (await outlineConversations.ExistsAsync(batch.ConversationId, cancellationToken))
                 {
-                    ConversationId = batch.ConversationId,
-                    Order = order,
-                    Role = OutlineMessageRole.System,
-                    Content = correction,
-                    Status = OutlineMessageStatus.Completed,
-                }, cancellationToken);
+                    await AddOutlineRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                    break;
+                }
+
+                if (await editorConversations.ExistsAsync(batch.ConversationId, cancellationToken))
+                {
+                    logger.LogWarning(
+                        "AI change batch {BatchId} was marked as Outline but conversation {ConversationId} is an editor conversation; routing rejection feedback to editor chat.",
+                        batch.Id,
+                        batch.ConversationId);
+                    batch.ConversationKind = AiChangeConversationKind.Editor;
+                    changes.UpdateBatch(batch);
+                    await AddEditorRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                    break;
+                }
+
+                LogMissingConversation(batch);
                 break;
             }
             case AiChangeConversationKind.Editor:
             {
-                var order = await editorConversations.GetMaxOrderAsync(batch.ConversationId, cancellationToken) + 1;
-                await editorConversations.AddMessageAsync(new EditorMessage
+                if (await editorConversations.ExistsAsync(batch.ConversationId, cancellationToken))
                 {
-                    ConversationId = batch.ConversationId,
-                    Order = order,
-                    Role = EditorMessageRole.System,
-                    Content = correction,
-                    Status = EditorMessageStatus.Completed,
-                }, cancellationToken);
+                    await AddEditorRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                    break;
+                }
+
+                if (await outlineConversations.ExistsAsync(batch.ConversationId, cancellationToken))
+                {
+                    logger.LogWarning(
+                        "AI change batch {BatchId} was marked as Editor but conversation {ConversationId} is an outline conversation; routing rejection feedback to outline chat.",
+                        batch.Id,
+                        batch.ConversationId);
+                    batch.ConversationKind = AiChangeConversationKind.Outline;
+                    changes.UpdateBatch(batch);
+                    await AddOutlineRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                    break;
+                }
+
+                LogMissingConversation(batch);
                 break;
             }
             default:
                 throw new InvalidOperationException($"Unsupported AI change conversation kind '{batch.ConversationKind}'.");
         }
     }
+
+    private async Task AddOutlineRejectionMessageAsync(
+        Guid conversationId,
+        string correction,
+        CancellationToken cancellationToken)
+    {
+        var order = await outlineConversations.GetMaxOrderAsync(conversationId, cancellationToken) + 1;
+        await outlineConversations.AddMessageAsync(new OutlineMessage
+        {
+            ConversationId = conversationId,
+            Order = order,
+            Role = OutlineMessageRole.System,
+            Content = correction,
+            Status = OutlineMessageStatus.Completed,
+        }, cancellationToken);
+    }
+
+    private async Task AddEditorRejectionMessageAsync(
+        Guid conversationId,
+        string correction,
+        CancellationToken cancellationToken)
+    {
+        var order = await editorConversations.GetMaxOrderAsync(conversationId, cancellationToken) + 1;
+        await editorConversations.AddMessageAsync(new EditorMessage
+        {
+            ConversationId = conversationId,
+            Order = order,
+            Role = EditorMessageRole.System,
+            Content = correction,
+            Status = EditorMessageStatus.Completed,
+        }, cancellationToken);
+    }
+
+    private void LogMissingConversation(AiChangeBatch batch) =>
+        logger.LogWarning(
+            "Skipped rejection feedback message for AI change batch {BatchId} because conversation {ConversationId} ({ConversationKind}) no longer exists. Rejection status will still be saved.",
+            batch.Id,
+            batch.ConversationId,
+            batch.ConversationKind);
 
     private void UpdateBatchStatus(AiChangeBatch batch)
     {

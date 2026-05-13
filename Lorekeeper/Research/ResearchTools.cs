@@ -19,7 +19,7 @@ public sealed class ResearchTools(
     public IList<AITool> Build(ResearchToolContext context) =>
     [
         AIFunctionFactory.Create(
-            method: (string query, int count) => WebSearchAsync(context, query, count),
+            method: (string query, int count = 5) => WebSearchAsync(context, query, count),
             name: "web_search",
             description: "Search the public web with the active configured search provider. Persists each result as a page candidate and returns stable page ids plus title, URL, and snippet."),
 
@@ -34,7 +34,7 @@ public sealed class ResearchTools(
             description: "Read and extract text from a specific webpage URL supplied by the user or discovered from another page's links. Returns a stable page id, excerpt, diagnostics, and outgoing links."),
 
         AIFunctionFactory.Create(
-            method: (Guid pageId, int count, bool sameDomainOnly) => FollowPageLinksAsync(context, pageId, count, sameDomainOnly),
+            method: (Guid pageId, int count = 5, bool sameDomainOnly = true) => FollowPageLinksAsync(context, pageId, count, sameDomainOnly),
             name: "follow_page_links",
             description: "Read outgoing links from an already-read page, persisting each followed link as a page candidate. Use this when a promising source exposes relevant wiki/article/reference links."),
 

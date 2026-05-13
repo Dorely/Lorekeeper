@@ -238,7 +238,7 @@ public sealed class IngestJobProcessor(
 
     private async Task<string> InvokeToolAsync(IList<AITool> aiTools, FunctionCallContent functionCall, Guid projectId, Guid jobId, CancellationToken cancellationToken)
     {
-        var argsJson = functionCall.Arguments is null ? "{}" : JsonSerializer.Serialize(functionCall.Arguments);
+        var argsJson = ToolCallArguments.Serialize(functionCall.Arguments);
         var startedAt = DateTime.UtcNow;
         try
         {
@@ -260,7 +260,7 @@ public sealed class IngestJobProcessor(
                 return $"Error: {unknownToolMessage}";
             }
 
-            var result = await aiFunction.InvokeAsync(new AIFunctionArguments(functionCall.Arguments ?? new Dictionary<string, object?>()), cancellationToken);
+            var result = await aiFunction.InvokeAsync(ToolCallArguments.Create(functionCall.Arguments), cancellationToken);
             var text = result?.ToString() ?? string.Empty;
             var returnedError = text.StartsWith("Error:", StringComparison.OrdinalIgnoreCase);
             if (returnedError)
