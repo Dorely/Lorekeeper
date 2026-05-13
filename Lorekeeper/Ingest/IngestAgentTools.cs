@@ -147,7 +147,7 @@ public sealed class IngestAgentTools(
         }
 
         var queryText = query?.Trim() ?? string.Empty;
-        var terms = SplitTerms(queryText).ToList();
+        var terms = SplitSearchTerms(queryText).ToList();
         var results = new List<ProjectEntityCandidate>();
         foreach (var searchType in searchTypes.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
         {
@@ -261,29 +261,14 @@ public sealed class IngestAgentTools(
         var duplicateNode = await FindDuplicateEntityByNameAsync(context.ProjectId, resolvedType.Type, trimmedName);
         if (duplicateNode is not null && Guid.TryParseExact(duplicateNode.Key, "N", out var duplicateId))
         {
-            var duplicateItem = await FindActiveEntityReportItemAsync(context.JobId, duplicateId);
-            var action = duplicateItem is null
-                ? IngestSourceAssertions.LinkedExistingEntityAction
-                : IngestSourceAssertions.ReadEntityGraphAction(duplicateItem.PayloadJson) ?? IngestSourceAssertions.LinkedExistingEntityAction;
-            await RecordEntityObservationAsync(
-                context,
-                duplicateNode,
-                duplicateId,
-                duplicateItem,
-                action,
-                observedProperties,
-                normalizedAliases,
-                evidence,
-                notes);
-
             return JsonSerializer.Serialize(new
             {
+                created = false,
                 id = duplicateId,
                 type = duplicateNode.NodeType,
                 name = duplicateNode.Label ?? duplicateNode.Key,
-                graphAction = action,
-                duplicateNameReused = true,
-                message = $"Reused existing {duplicateNode.NodeType} named '{duplicateNode.Label ?? duplicateNode.Key}' instead of creating a duplicate.",
+                exactNameMatch = true,
+                message = $"An existing {duplicateNode.NodeType} named '{duplicateNode.Label ?? duplicateNode.Key}' already exists. If this is the same subject, call record_existing_entity_observation with this id. If it is a distinct subject, create it with a more specific name.",
                 canonicalProperties = VisibleProperties(duplicateNode.Properties),
                 sourceAssertions = IngestSourceAssertions.SummarizeEntityAssertions(duplicateNode.Properties),
                 relationContext = await BuildRelationContextAsync(context.ProjectId, duplicateId),
@@ -715,12 +700,10 @@ public sealed class IngestAgentTools(
         var nodeTypes = await GetEquivalentEntityTypeNamesAsync(projectId, nodeType);
         foreach (var candidateType in nodeTypes)
         {
-            var stripTitles = ShouldStripEntityTitles(candidateType);
-            var nameVariants = BuildEntityNameVariants(name, stripTitles);
             var existing = await nodes.ListByTypeAsync(projectId, candidateType);
             var duplicate = existing.FirstOrDefault(node =>
                 node.Id != excludeNodeId
-                && EntityNameVariantsOverlap(nameVariants, node.Label ?? node.Key, stripTitles));
+                && string.Equals(NormalizeEntityName(node.Label ?? node.Key), normalizedName, StringComparison.Ordinal));
             if (duplicate is not null) return duplicate;
         }
 
@@ -971,11 +954,27 @@ public sealed class IngestAgentTools(
             yield return kv.Value!;
     }
 
+    private static IEnumerable<string> SplitSearchTerms(string? query)
+    {
+        var terms = SplitTerms(query).ToList();
+        if (terms.Count <= 1) return terms;
+
+        var strongTerms = terms.Where(term => !IsWeakEntitySearchTerm(term)).ToList();
+        return strongTerms.Count > 0 ? strongTerms : terms;
+    }
+
     private static IEnumerable<string> SplitTerms(string? query) =>
         (query ?? string.Empty)
             .Split([' ', '\t', '\r', '\n', ',', ';', ':', '.', '"', '\''], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(term => term.Length > 1)
             .Distinct(StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsWeakEntitySearchTerm(string term)
+    {
+        var normalized = NormalizeEntityName(term);
+        return HonorificTitleWords.Contains(normalized)
+            || WeakSearchTerms.Contains(normalized);
+    }
 
     private static bool IsDisallowedEntityType(string type) =>
         string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
@@ -1115,6 +1114,15 @@ public sealed class IngestAgentTools(
         "sir",
         "st",
         "warchief",
+    ];
+
+    private static readonly HashSet<string> WeakSearchTerms =
+    [
+        "and",
+        "from",
+        "of",
+        "the",
+        "with",
     ];
 
     private static IReadOnlyDictionary<string, string?> VisibleProperties(IReadOnlyDictionary<string, object?> properties)

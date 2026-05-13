@@ -37,9 +37,10 @@ public sealed class IngestJobProcessor(
         Process rules:
         - Call list_job_entities before creating or linking entities, and compare each source mention against the same-job roster first.
         - Before every create_ingest_entity call, call search_project_entities for the source mention and its likely variants.
+        - Treat search_project_entities results as candidate matches for your judgment, not automatic identity decisions. A shared title, honorific, role, or epithet such as queen, prince, lord, commander, or similar is not enough by itself to reuse an entity.
         - Search broadly, not just exactly: use the canonical singular type plus the exact mention, base name with titles/honorifics removed, known aliases, surnames, epithets, alternate spellings, and descriptive terms from the local context. For example, "Prince Kael'thas" should search both "Prince Kael'thas" and "Kael'thas".
         - Treat title/honorific differences, punctuation/case differences, shortened names, aliases, and obvious same-subject references as the same entity when the source context supports it.
-        - Do not create an entity when list_job_entities or search_project_entities returns a plausible same subject. Use update_ingest_entity or record_existing_entity_observation instead.
+        - Do not create an entity when list_job_entities or search_project_entities returns a clear same subject with matching names, aliases, or source-grounded identity details. Use update_ingest_entity or record_existing_entity_observation instead.
         - Use record_existing_entity_observation when a source mention matches an existing project entity.
         - Use update_ingest_entity when a source mention matches an entity already touched by this ingest job.
         - Create a new entity only when no existing project entity or same-job entity matches after variant searches. The tool will reject duplicate names; treat that as instruction to reuse the returned/existing entity.

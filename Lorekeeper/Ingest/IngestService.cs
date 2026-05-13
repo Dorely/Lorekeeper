@@ -67,6 +67,12 @@ public sealed class IngestService(
             UserInstructions = instructions,
             SourceText = sourceText,
             SourceHash = ComputeHash(sourceText),
+            SourceUrl = request.SourceUrl?.Trim() ?? string.Empty,
+            FinalUrl = request.FinalUrl?.Trim() ?? string.Empty,
+            CanonicalUrl = request.CanonicalUrl?.Trim() ?? string.Empty,
+            FetchedAt = request.FetchedAt,
+            ContentType = request.ContentType?.Trim() ?? string.Empty,
+            SourceMetadataJson = string.IsNullOrWhiteSpace(request.SourceMetadataJson) ? "{}" : request.SourceMetadataJson.Trim(),
             VectorIndexState = VectorIndexState.Stale,
         };
 

@@ -1,0 +1,275 @@
+@page "/settings/search-providers"
+@using Lorekeeper.Models
+@using Lorekeeper.Search
+@rendermode InteractiveServer
+@inject ISearchProviderService SearchProviderService
+
+<PageTitle>Search Providers</PageTitle>
+
+<h3>Search Providers</h3>
+<p class="text-muted">Configure the web search API used by Research Mode.</p>
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-@_statusKind alert-dismissible fade show mt-2" role="alert">
+        @_statusMessage
+        <button type="button" class="btn-close" @onclick="ClearStatus"></button>
+    </div>
+}
+
+@if (_loading)
+{
+    <p class="text-muted"><em>Loading search providers...</em></p>
+}
+else
+{
+    <h5>Configured Providers</h5>
+    @if (_providers.Count == 0)
+    {
+        <div class="alert alert-info">No search providers configured yet. Add SerpApi or Brave below.</div>
+    }
+    else
+    {
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Provider</th>
+                    <th>API Key</th>
+                    <th>Active</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var provider in _providers)
+                {
+                    <tr>
+                        <td>
+                            <div class="d-flex flex-column gap-1">
+                                <input class="form-control form-control-sm" @bind="provider.Name" />
+                                <input class="form-control form-control-sm" placeholder="Display name" @bind="provider.DisplayName" />
+                            </div>
+                        </td>
+                        <td>
+                            <select class="form-select form-select-sm" @bind="provider.ProviderKind">
+                                @foreach (var kind in SupportedKinds)
+                                {
+                                    <option value="@kind">@ProviderKindLabel(kind)</option>
+                                }
+                            </select>
+                        </td>
+                        <td style="min-width:16rem">
+                            <input type="password" class="form-control form-control-sm" @bind="provider.ApiKey" />
+                        </td>
+                        <td>
+                            @if (provider.IsActive)
+                            {
+                                <span class="badge bg-primary">Active</span>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => SetActiveAsync(provider.Id)">Set Active</button>
+                            }
+                        </td>
+                        <td>
+                            <div class="d-flex flex-wrap gap-1">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveAsync(provider)">Save</button>
+                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@(_testingProviderId is not null)" @onclick="() => TestExistingAsync(provider)">
+                                    @(_testingProviderId == provider.Id ? "Testing..." : "Test")
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(provider)">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <h5 class="mt-4">Add Provider</h5>
+    <div class="card">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label form-label-sm">Name</label>
+                    <input class="form-control form-control-sm" placeholder="serpapi" @bind="_newProvider.Name" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label form-label-sm">Display Name</label>
+                    <input class="form-control form-control-sm" placeholder="SerpApi" @bind="_newProvider.DisplayName" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label form-label-sm">Provider</label>
+                    <select class="form-select form-select-sm" @bind="_newProvider.ProviderKind">
+                        @foreach (var kind in SupportedKinds)
+                        {
+                            <option value="@kind">@ProviderKindLabel(kind)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label form-label-sm">API Key</label>
+                    <input type="password" class="form-control form-control-sm" @bind="_newProvider.ApiKey" />
+                </div>
+                <div class="col-md-2 form-check ms-3">
+                    <input type="checkbox" class="form-check-input" id="newSearchActive" @bind="_newProvider.IsActive" />
+                    <label class="form-check-label" for="newSearchActive">Active</label>
+                </div>
+                <div class="col-12">
+                    <button type="button" class="btn btn-outline-info btn-sm me-2" disabled="@_testingNew" @onclick="TestNewAsync">
+                        @(_testingNew ? "Testing..." : "Test")
+                    </button>
+                    <button type="button" class="btn btn-primary btn-sm" disabled="@(!CanCreate)" @onclick="CreateAsync">Add Provider</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly SearchProviderKind[] SupportedKinds = [SearchProviderKind.SerpApi, SearchProviderKind.Brave];
+
+    private List<SearchProvider> _providers = [];
+    private SearchProviderDraft _newProvider = new();
+    private bool _loading = true;
+    private bool _testingNew;
+    private int? _testingProviderId;
+    private string? _statusMessage;
+    private string _statusKind = "success";
+
+    private bool CanCreate =>
+        !string.IsNullOrWhiteSpace(_newProvider.Name)
+        && !string.IsNullOrWhiteSpace(_newProvider.ApiKey)
+        && !_testingNew;
+
+    protected override async Task OnInitializedAsync() =>
+        await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _providers = await SearchProviderService.GetAllAsync();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            await SearchProviderService.CreateAsync(BuildProvider(_newProvider));
+            SetStatus($"Search provider '{_newProvider.Name}' created.", "success");
+            _newProvider = new SearchProviderDraft();
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Create failed: {ex.Message}", "danger");
+        }
+    }
+
+    private async Task SaveAsync(SearchProvider provider)
+    {
+        try
+        {
+            await SearchProviderService.UpdateAsync(provider);
+            SetStatus($"Search provider '{provider.DisplayName ?? provider.Name}' updated.", "success");
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Save failed: {ex.Message}", "danger");
+        }
+    }
+
+    private async Task SetActiveAsync(int id)
+    {
+        try
+        {
+            await SearchProviderService.SetActiveAsync(id);
+            SetStatus("Active search provider updated.", "success");
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Could not set active provider: {ex.Message}", "danger");
+        }
+    }
+
+    private async Task DeleteAsync(SearchProvider provider)
+    {
+        await SearchProviderService.DeleteAsync(provider.Id);
+        SetStatus($"Search provider '{provider.DisplayName ?? provider.Name}' deleted.", "success");
+        await ReloadAsync();
+    }
+
+    private async Task TestExistingAsync(SearchProvider provider)
+    {
+        _testingProviderId = provider.Id;
+        try
+        {
+            var result = await SearchProviderService.TestAsync(provider);
+            SetStatus(result.Message, result.Success ? "success" : "danger");
+        }
+        finally
+        {
+            _testingProviderId = null;
+        }
+    }
+
+    private async Task TestNewAsync()
+    {
+        _testingNew = true;
+        try
+        {
+            var result = await SearchProviderService.TestAsync(BuildProvider(_newProvider));
+            SetStatus(result.Message, result.Success ? "success" : "danger");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Test failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _testingNew = false;
+        }
+    }
+
+    private static SearchProvider BuildProvider(SearchProviderDraft draft) => new()
+    {
+        Name = draft.Name?.Trim() ?? string.Empty,
+        DisplayName = string.IsNullOrWhiteSpace(draft.DisplayName) ? null : draft.DisplayName.Trim(),
+        ProviderKind = draft.ProviderKind,
+        ApiKey = draft.ApiKey?.Trim(),
+        IsActive = draft.IsActive,
+    };
+
+    private static string ProviderKindLabel(SearchProviderKind kind) => kind switch
+    {
+        SearchProviderKind.SerpApi => "SerpApi",
+        SearchProviderKind.Brave => "Brave Search",
+        _ => kind.ToString(),
+    };
+
+    private void SetStatus(string message, string kind)
+    {
+        _statusMessage = message;
+        _statusKind = kind;
+    }
+
+    private void ClearStatus() => _statusMessage = null;
+
+    private sealed class SearchProviderDraft
+    {
+        public string? Name { get; set; }
+        public string? DisplayName { get; set; }
+        public SearchProviderKind ProviderKind { get; set; } = SearchProviderKind.SerpApi;
+        public string? ApiKey { get; set; }
+        public bool IsActive { get; set; }
+    }
+}

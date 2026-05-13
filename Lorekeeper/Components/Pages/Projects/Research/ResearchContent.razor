@@ -1,0 +1,239 @@
+@using Lorekeeper.Llm
+@using Lorekeeper.Models
+@using Lorekeeper.Research
+@using Lorekeeper.Search
+@inject ISearchProviderService SearchProviders
+@inject IWebIngestCandidateService Candidates
+@inject ILlmProviderService LlmProviders
+
+@if (Project is null)
+{
+    <p class="text-muted"><em>Loading...</em></p>
+}
+else if (_loading)
+{
+    <p class="text-muted"><em>Loading research workspace...</em></p>
+}
+else if (_activeSearchProvider is null)
+{
+    <div class="alert alert-warning">
+        <strong>Research Mode needs an active search provider.</strong>
+        <a class="alert-link ms-2" href="/settings/search-providers">Configure Search Providers</a>
+    </div>
+}
+else
+{
+    <div class="research-pane">
+        <section class="research-chat-pane">
+            <ResearchChatPanel ProjectId="Project.Id" OnCandidatesChanged="ReloadCandidatesAsync" />
+        </section>
+
+        <section class="research-pages-pane">
+            <div class="research-side-head">
+                <div>
+                    <div class="research-section-title">Research Pages</div>
+                    <div class="small text-muted">Search: @(_activeSearchProvider.DisplayName ?? _activeSearchProvider.Name)</div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ReloadCandidatesAsync">Refresh</button>
+            </div>
+
+            <div class="mb-2">
+                <label class="form-label small text-muted">Ingest model</label>
+                <select class="form-select form-select-sm" value="@(_ingestProviderId?.ToString() ?? string.Empty)" @onchange="OnIngestProviderChanged">
+                    <option value="">Default model</option>
+                    @foreach (var provider in _llmProviders)
+                    {
+                        <option value="@provider.Id">@ProviderLabel(provider)</option>
+                    }
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label small text-muted">Ingest instructions</label>
+                <textarea class="form-control form-control-sm" rows="3" @bind="_queueInstructions" @bind:event="oninput"></textarea>
+            </div>
+
+            <div class="research-batch-actions">
+                <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanQueueStaged || _queueingStaged)" @onclick="QueueStagedAsync">
+                    @(_queueingStaged ? "Queueing..." : "Queue staged pages")
+                </button>
+                <span class="small text-muted">@StagedQueueLabel</span>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_actionError))
+            {
+                <div class="alert alert-danger py-2 small">@_actionError</div>
+            }
+
+            @if (_candidates.Count == 0)
+            {
+                <p class="text-muted small"><em>No research pages yet.</em></p>
+            }
+            else
+            {
+                <div class="research-page-list">
+                    @foreach (var candidate in _candidates)
+                    {
+                        <article class="research-page-item @candidate.Status.ToString().ToLowerInvariant()">
+                            <div class="research-page-head">
+                                <span>@candidate.Title</span>
+                                <span class="badge bg-@StatusColor(candidate.Status)">@candidate.Status</span>
+                            </div>
+                            <a class="research-page-url" href="@BestUrl(candidate)" target="_blank" rel="noreferrer">@BestUrl(candidate)</a>
+                            @if (!string.IsNullOrWhiteSpace(candidate.SearchQuery))
+                            {
+                                <div class="small text-muted">@candidate.SourceProviderName - @candidate.SearchQuery</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(candidate.Excerpt))
+                            {
+                                <p>@candidate.Excerpt</p>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(candidate.StageRationale))
+                            {
+                                <div class="small"><strong>Rationale:</strong> @candidate.StageRationale</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(candidate.Diagnostics))
+                            {
+                                <div class="small text-danger">@candidate.Diagnostics</div>
+                            }
+                            <div class="research-page-actions">
+                                @if (candidate.Status == WebIngestCandidateStatus.Staged)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => UnstageAsync(candidate.Id)">Unstage</button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RemoveAsync(candidate.Id)">Remove</button>
+                                }
+                                else if (candidate.Status == WebIngestCandidateStatus.Queued)
+                                {
+                                    <span class="small text-muted">Queued job @candidate.IngestJobId</span>
+                                }
+                                else
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RemoveAsync(candidate.Id)">Remove</button>
+                                }
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [CascadingParameter] public Project? Project { get; set; }
+
+    private SearchProvider? _activeSearchProvider;
+    private List<WebIngestCandidateView> _candidates = [];
+    private List<LlmProvider> _llmProviders = [];
+    private Guid? _loadedProjectId;
+    private bool _loading = true;
+    private int? _ingestProviderId;
+    private bool _queueingStaged;
+    private string _queueInstructions = string.Empty;
+    private string? _actionError;
+
+    private int StagedCount => _candidates.Count(candidate => candidate.Status == WebIngestCandidateStatus.Staged);
+
+    private bool CanQueueStaged => StagedCount > 0 && !_queueingStaged;
+
+    private string StagedQueueLabel => StagedCount == 0
+        ? "No staged pages ready."
+        : $"{StagedCount} staged page{(StagedCount == 1 ? string.Empty : "s")} will become one ingest job.";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Project is null || _loadedProjectId == Project.Id) return;
+        _loadedProjectId = Project.Id;
+        _loading = true;
+        _activeSearchProvider = await SearchProviders.GetActiveAsync();
+        _llmProviders = await LlmProviders.GetAllAsync();
+        _ingestProviderId = (_llmProviders.FirstOrDefault(provider => provider.IsDefault) ?? _llmProviders.FirstOrDefault())?.Id;
+        await ReloadCandidatesAsync();
+        _loading = false;
+    }
+
+    private async Task ReloadCandidatesAsync()
+    {
+        if (Project is null) return;
+        _candidates = (await Candidates.ListResearchAsync(Project.Id)).ToList();
+        StateHasChanged();
+    }
+
+    private async Task QueueStagedAsync()
+    {
+        if (Project is null) return;
+        var stagedIds = _candidates
+            .Where(candidate => candidate.Status == WebIngestCandidateStatus.Staged)
+            .Select(candidate => candidate.Id)
+            .ToArray();
+        if (stagedIds.Length == 0) return;
+
+        _queueingStaged = true;
+        _actionError = null;
+        try
+        {
+            await Candidates.QueueBatchAsync(Project.Id, stagedIds, _ingestProviderId, _queueInstructions, "Research pages");
+            await ReloadCandidatesAsync();
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _queueingStaged = false;
+        }
+    }
+
+    private async Task UnstageAsync(Guid candidateId)
+    {
+        _actionError = null;
+        try
+        {
+            await Candidates.UnstageAsync(candidateId);
+            await ReloadCandidatesAsync();
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+    }
+
+    private async Task RemoveAsync(Guid candidateId)
+    {
+        _actionError = null;
+        try
+        {
+            await Candidates.DeleteAsync(candidateId);
+            await ReloadCandidatesAsync();
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+    }
+
+    private void OnIngestProviderChanged(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        _ingestProviderId = int.TryParse(value, out var id) ? id : null;
+    }
+
+    private static string ProviderLabel(LlmProvider provider) =>
+        string.IsNullOrWhiteSpace(provider.DisplayName) ? provider.Name : $"{provider.DisplayName} ({provider.ModelId})";
+
+    private static string BestUrl(WebIngestCandidateView candidate) =>
+        FirstNonEmpty(candidate.CanonicalUrl, candidate.FinalUrl, candidate.Url);
+
+    private static string FirstNonEmpty(params string[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
+    private static string StatusColor(WebIngestCandidateStatus status) => status switch
+    {
+        WebIngestCandidateStatus.Staged => "success",
+        WebIngestCandidateStatus.Queued => "primary",
+        WebIngestCandidateStatus.Failed => "danger",
+        WebIngestCandidateStatus.Skipped => "warning",
+        WebIngestCandidateStatus.Read => "info text-dark",
+        _ => "secondary",
+    };
+}

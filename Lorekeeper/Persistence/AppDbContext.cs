@@ -9,9 +9,10 @@ namespace Lorekeeper.Persistence;
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
-    private const int MaxLockedSaveAttempts = 6;
+    private const int _maxLockedSaveAttempts = 6;
 
     public DbSet<LlmProvider> LlmProviders => Set<LlmProvider>();
+    public DbSet<SearchProvider> SearchProviders => Set<SearchProvider>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<Act> Acts => Set<Act>();
@@ -26,6 +27,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<WritingSample> WritingSamples => Set<WritingSample>();
     public DbSet<WritingCoachConversation> WritingCoachConversations => Set<WritingCoachConversation>();
     public DbSet<WritingCoachMessage> WritingCoachMessages => Set<WritingCoachMessage>();
+    public DbSet<ResearchConversation> ResearchConversations => Set<ResearchConversation>();
+    public DbSet<ResearchMessage> ResearchMessages => Set<ResearchMessage>();
     public DbSet<AiChangeBatch> AiChangeBatches => Set<AiChangeBatch>();
     public DbSet<AiChange> AiChanges => Set<AiChange>();
     public DbSet<ContestBatch> ContestBatches => Set<ContestBatch>();
@@ -38,6 +41,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<IngestJobChunk> IngestJobChunks => Set<IngestJobChunk>();
     public DbSet<IngestReportItem> IngestReportItems => Set<IngestReportItem>();
     public DbSet<IngestJobEvent> IngestJobEvents => Set<IngestJobEvent>();
+    public DbSet<WebIngestCandidate> WebIngestCandidates => Set<WebIngestCandidate>();
     public DbSet<ProjectImportJob> ProjectImportJobs => Set<ProjectImportJob>();
     public DbSet<ProjectImportReportItem> ProjectImportReportItems => Set<ProjectImportReportItem>();
 
@@ -56,7 +60,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
             }
-            catch (DbUpdateException ex) when (IsSqliteLocked(ex) && attempt < MaxLockedSaveAttempts && !cancellationToken.IsCancellationRequested)
+            catch (DbUpdateException ex) when (IsSqliteLocked(ex) && attempt < _maxLockedSaveAttempts && !cancellationToken.IsCancellationRequested)
             {
                 await Task.Delay(delay + TimeSpan.FromMilliseconds(Random.Shared.Next(0, 75)), cancellationToken);
                 delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 2_000));
@@ -195,6 +199,28 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<ResearchConversation>(entity =>
+        {
+            entity.HasIndex(e => e.ProjectId).IsUnique();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.ResearchConversations)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ResearchMessage>(entity =>
+        {
+            entity.HasIndex(e => new { e.ConversationId, e.Order });
+            entity.Property(e => e.Role).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Conversation)
+                .WithMany(c => c.Messages)
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<AiChangeBatch>(entity =>
         {
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
@@ -267,6 +293,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .WithMany(e => e.ChildModels)
                 .HasForeignKey(e => e.CredentialSourceId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<SearchProvider>(entity =>
+        {
+            entity.HasIndex(e => e.Name).IsUnique();
+            entity.HasIndex(e => e.IsActive);
+            entity.Property(e => e.ProviderKind).HasConversion<string>();
         });
 
         modelBuilder.Entity<OAuthToken>(entity =>
@@ -429,6 +462,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasOne(e => e.Job)
                 .WithMany(j => j.Events)
                 .HasForeignKey(e => e.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WebIngestCandidate>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
+            entity.HasIndex(e => new { e.ResearchConversationId, e.CreatedAt });
+            entity.HasIndex(e => e.IngestJobId);
+            entity.Property(e => e.DiscoveryKind).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.WebIngestCandidates)
+                .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

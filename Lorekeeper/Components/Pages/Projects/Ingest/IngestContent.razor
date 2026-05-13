@@ -1,10 +1,12 @@
 @using Lorekeeper.Ingest
 @using Lorekeeper.Llm
 @using Lorekeeper.Models
+@using Lorekeeper.Research
 @implements IAsyncDisposable
 @inject IIngestService Ingest
 @inject ILlmProviderService Providers
 @inject IIngestJobNotifier Notifier
+@inject IWebIngestCandidateService WebCandidates
 
 @if (Project is null)
 {
@@ -43,6 +45,64 @@ else
                 <label class="form-label small text-muted">Extraction instructions (optional)</label>
                 <textarea class="form-control form-control-sm" rows="4" @bind="_instructions" @bind:event="oninput"></textarea>
             </div>
+            <div class="ingest-section-title mt-3">Webpage</div>
+            <div class="mb-2">
+                <label class="form-label small text-muted">URL</label>
+                <input type="url" class="form-control form-control-sm" placeholder="https://example.com/page" @bind="_webUrl" @bind:event="oninput" />
+            </div>
+            <div class="ingest-web-controls">
+                <label class="form-check small">
+                    <input class="form-check-input" type="checkbox" @bind="_webFollowLinks" />
+                    <span class="form-check-label">Follow same-domain links</span>
+                </label>
+                <div>
+                    <label class="form-label small text-muted">Depth</label>
+                    <input type="number" class="form-control form-control-sm" min="0" max="3" @bind="_webFollowDepth" />
+                </div>
+                <div>
+                    <label class="form-label small text-muted">Max pages</label>
+                    <input type="number" class="form-control form-control-sm" min="1" max="25" @bind="_webMaxPages" />
+                </div>
+            </div>
+            <div class="ingest-web-actions">
+                <button type="button" class="btn btn-outline-primary btn-sm" disabled="@(!CanCreateWebpage || _webReading)" @onclick="IngestWebpageAsync">
+                    @StartWebIngestButtonText
+                </button>
+                @if (!_webReading && WebCreateBlockedReason is { Length: > 0 } webBlockedReason)
+                {
+                    <span class="form-text small text-muted">@webBlockedReason</span>
+                }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_webStatus))
+            {
+                <div class="alert alert-success py-2 small mt-2">@_webStatus</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_webError))
+            {
+                <div class="alert alert-danger py-2 small mt-2">@_webError</div>
+            }
+            @if (_webCrawlResults.Count > 0)
+            {
+                <div class="ingest-web-results">
+                    <div class="ingest-web-results-head">
+                        <span>Web crawl results</span>
+                        <button type="button" class="btn btn-link btn-sm" @onclick="ClearWebResults">Clear</button>
+                    </div>
+                    @foreach (var result in _webCrawlResults)
+                    {
+                        <div class="ingest-web-result @(result.Success ? "success" : "failed")">
+                            <div class="ingest-web-result-main">
+                                <span class="badge bg-@(result.Success ? "success" : "danger")">@(result.Success ? "Read" : "Failed")</span>
+                                <span>@result.Url</span>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(result.Message))
+                            {
+                                <div class="small text-muted">@result.Message</div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
             <div class="mb-2">
                 <label class="form-label small text-muted">Source text</label>
                 <InputFile OnChange="OnFileSelectedAsync" class="form-control form-control-sm mb-2" />
@@ -309,6 +369,7 @@ else
     private bool _loadingReport;
     private bool _creating;
     private bool _readingFile;
+    private bool _webReading;
     private bool _followCurrentChunk = true;
     private string? _formError;
     private string? _jobActionError;
@@ -330,6 +391,13 @@ else
     private string _description = string.Empty;
     private string _instructions = string.Empty;
     private string _sourceText = string.Empty;
+    private string _webUrl = string.Empty;
+    private bool _webFollowLinks;
+    private int _webFollowDepth = 1;
+    private int _webMaxPages = 5;
+    private string? _webStatus;
+    private string? _webError;
+    private List<WebCrawlPageResult> _webCrawlResults = [];
     private string _editTitle = string.Empty;
     private string _editResourceType = string.Empty;
     private string _editSummary = string.Empty;
@@ -341,6 +409,9 @@ else
     private string StartIngestButtonText =>
         _readingFile ? "Reading file..." : _creating ? "Starting..." : "Start ingest";
 
+    private string StartWebIngestButtonText =>
+        _webReading ? "Reading webpage..." : "Ingest webpage";
+
     private string? CreateBlockedReason
     {
         get
@@ -349,6 +420,20 @@ else
             if (_providerId is null) return _providers.Count == 0 ? "Configure a model before starting ingest." : "Select a model.";
             if (string.IsNullOrWhiteSpace(_title)) return "Add a source title.";
             if (string.IsNullOrWhiteSpace(_sourceText)) return "Add source text or choose a source file.";
+            return null;
+        }
+    }
+
+    private bool CanCreateWebpage => WebCreateBlockedReason is null;
+
+    private string? WebCreateBlockedReason
+    {
+        get
+        {
+            if (_webReading) return "Reading webpage.";
+            if (_providerId is null) return _providers.Count == 0 ? "Configure a model before starting ingest." : "Select a model.";
+            if (string.IsNullOrWhiteSpace(_webUrl)) return "Add a webpage URL.";
+            if (!TryNormalizeWebUrl(_webUrl, out _, out _)) return "Enter a valid http or https URL.";
             return null;
         }
     }
@@ -505,6 +590,114 @@ else
         {
             _creating = false;
         }
+    }
+
+    private async Task IngestWebpageAsync()
+    {
+        if (Project is null) return;
+        var blockedReason = WebCreateBlockedReason;
+        if (blockedReason is not null)
+        {
+            _webError = blockedReason;
+            return;
+        }
+
+        _webReading = true;
+        _webStatus = null;
+        _webError = null;
+        _webCrawlResults = [];
+        try
+        {
+            _ = TryNormalizeWebUrl(_webUrl, out var startUrl, out var startHost);
+            var followDepth = _webFollowLinks ? Math.Clamp(_webFollowDepth, 0, 3) : 0;
+            var maxPages = Math.Clamp(_webMaxPages, 1, 25);
+            var pending = new Queue<(string Url, int Depth, string ParentUrl)>();
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var successfulCandidateIds = new List<Guid>();
+
+            pending.Enqueue((startUrl, 0, string.Empty));
+            while (pending.Count > 0 && visited.Count < maxPages)
+            {
+                var item = pending.Dequeue();
+                if (!visited.Add(item.Url)) continue;
+
+                var read = await WebCandidates.ReadUrlAsync(
+                    Project.Id,
+                    null,
+                    item.Url,
+                    item.Depth == 0 ? WebIngestCandidateDiscoveryKind.DirectUrl : WebIngestCandidateDiscoveryKind.PageLink,
+                    parentUrl: item.ParentUrl,
+                    crawlDepth: item.Depth);
+                if (read.Candidate.Status == WebIngestCandidateStatus.Failed || string.IsNullOrWhiteSpace(read.Candidate.ExtractedText))
+                {
+                    _webCrawlResults.Add(new WebCrawlPageResult(
+                        item.Url,
+                        item.Depth,
+                        item.ParentUrl,
+                        Success: false,
+                        string.IsNullOrWhiteSpace(read.Candidate.Diagnostics) ? "No readable text was extracted." : read.Candidate.Diagnostics));
+                    continue;
+                }
+
+                await WebCandidates.StageAsync(read.Candidate.Id, item.Depth == 0
+                    ? "Manual webpage ingestion."
+                    : $"Manual webpage ingestion from {item.ParentUrl}.");
+                successfulCandidateIds.Add(read.Candidate.Id);
+                _webCrawlResults.Add(new WebCrawlPageResult(
+                    item.Url,
+                    item.Depth,
+                    item.ParentUrl,
+                    Success: true,
+                    $"Read {read.Candidate.ExtractedText.Length:N0} characters."));
+
+                if (item.Depth >= followDepth) continue;
+                foreach (var link in read.Links)
+                {
+                    if (pending.Count + visited.Count >= maxPages) break;
+                    if (!TryNormalizeWebUrl(link.Url, out var normalizedLink, out var linkHost)) continue;
+                    if (!string.Equals(startHost, linkHost, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (visited.Contains(normalizedLink)) continue;
+                    pending.Enqueue((normalizedLink, item.Depth + 1, item.Url));
+                }
+            }
+
+            var failedCount = _webCrawlResults.Count(result => !result.Success);
+            if (successfulCandidateIds.Count == 0)
+            {
+                _webError = failedCount > 0
+                    ? $"No webpages were queued. {failedCount} page{(failedCount == 1 ? string.Empty : "s")} failed to read."
+                    : "No webpages were queued.";
+                return;
+            }
+
+            var job = await WebCandidates.QueueBatchAsync(
+                Project.Id,
+                successfulCandidateIds,
+                _providerId,
+                _instructions,
+                $"{startHost} webpage crawl");
+
+            _webStatus = $"Queued {successfulCandidateIds.Count} webpage{(successfulCandidateIds.Count == 1 ? string.Empty : "s")} into one ingest job" +
+                (failedCount > 0 ? $"; {failedCount} failed to read." : ".");
+            _webUrl = string.Empty;
+            await ReloadJobsAsync();
+            await SelectJobAsync(job.Id);
+        }
+        catch (Exception ex)
+        {
+            _webError = ex.Message;
+        }
+        finally
+        {
+            _webReading = false;
+        }
+    }
+
+    private void ClearWebResults()
+    {
+        _webCrawlResults = [];
+        _webStatus = null;
+        _webError = null;
     }
 
     private async Task SelectJobAsync(Guid jobId)
@@ -737,6 +930,27 @@ else
     private static int? ParseProviderId(object? value) =>
         int.TryParse(value?.ToString(), out var providerId) ? providerId : null;
 
+    private static bool TryNormalizeWebUrl(string value, out string normalizedUrl, out string hostKey)
+    {
+        normalizedUrl = string.Empty;
+        hostKey = string.Empty;
+        if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme is not ("http" or "https")) return false;
+
+        var builder = new UriBuilder(uri) { Fragment = string.Empty };
+        if ((builder.Scheme == "http" && builder.Port == 80) ||
+            (builder.Scheme == "https" && builder.Port == 443))
+        {
+            builder.Port = -1;
+        }
+
+        normalizedUrl = builder.Uri.AbsoluteUri;
+        hostKey = uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase)
+            ? uri.Host[4..].ToLowerInvariant()
+            : uri.Host.ToLowerInvariant();
+        return true;
+    }
+
     private static Guid? FollowChunkId(IngestJobDetailView job) =>
         job.Chunks.FirstOrDefault(chunk => chunk.Status == IngestJobChunkStatus.Running)?.SourceChunkId
         ?? job.Chunks.FirstOrDefault(chunk => chunk.Status is IngestJobChunkStatus.Pending or IngestJobChunkStatus.Stopped or IngestJobChunkStatus.Failed)?.SourceChunkId
@@ -761,6 +975,8 @@ else
     }
 
     private static bool IsBusy(IngestJobDetailView job) => job.Status is IngestJobStatus.Queued or IngestJobStatus.Running or IngestJobStatus.StopRequested;
+
+    private sealed record WebCrawlPageResult(string Url, int Depth, string ParentUrl, bool Success, string Message);
 
     private static string? ReportGraphActionLabel(IngestReportItemView item)
     {

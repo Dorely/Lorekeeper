@@ -61,6 +61,8 @@ public class Project
 
     public ICollection<WritingCoachConversation> WritingCoachConversations { get; set; } = [];
 
+    public ICollection<ResearchConversation> ResearchConversations { get; set; } = [];
+
     public ICollection<AiChangeBatch> AiChangeBatches { get; set; } = [];
 
     public ICollection<ContestBatch> ContestBatches { get; set; } = [];
@@ -68,6 +70,8 @@ public class Project
     public ICollection<EditorContextPreference> EditorContextPreferences { get; set; } = [];
 
     public ICollection<IngestSource> IngestSources { get; set; } = [];
+
+    public ICollection<WebIngestCandidate> WebIngestCandidates { get; set; } = [];
 
     public ICollection<IngestJob> IngestJobs { get; set; } = [];
 

@@ -1,0 +1,12 @@
+@page "/projects/{Slug}/research"
+@rendermode InteractiveServer
+
+<PageTitle>Research</PageTitle>
+
+<ProjectLayout Slug="@Slug" Tab="research">
+    <Lorekeeper.Components.Pages.Projects.Research.ResearchContent />
+</ProjectLayout>
+
+@code {
+    [Parameter] public string Slug { get; set; } = string.Empty;
+}

@@ -13,6 +13,12 @@ public class IngestSource
     public required string UserInstructions { get; set; }
     public required string SourceText { get; set; }
     public string SourceHash { get; set; } = string.Empty;
+    public string SourceUrl { get; set; } = string.Empty;
+    public string FinalUrl { get; set; } = string.Empty;
+    public string CanonicalUrl { get; set; } = string.Empty;
+    public DateTime? FetchedAt { get; set; }
+    public string ContentType { get; set; } = string.Empty;
+    public string SourceMetadataJson { get; set; } = "{}";
 
     public VectorIndexState VectorIndexState { get; set; } = VectorIndexState.Stale;
     public DateTime? VectorIndexedAt { get; set; }

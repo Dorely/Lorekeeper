@@ -12,6 +12,8 @@ using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
+using Lorekeeper.Research;
+using Lorekeeper.Search;
 using Lorekeeper.Tokens;
 using Lorekeeper.Writing;
 using Microsoft.EntityFrameworkCore;
@@ -30,6 +32,7 @@ builder.Services.AddHttpClient();
 // Persistence
 builder.Services.AddLorekeeperPersistence(builder.Configuration);
 builder.Services.AddScoped<ILlmProviderRepository, LlmProviderRepository>();
+builder.Services.AddScoped<ISearchProviderRepository, SearchProviderRepository>();
 builder.Services.AddScoped<IOAuthTokenRepository, OAuthTokenRepository>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
 builder.Services.AddScoped<IGraphNodeRepository, GraphNodeRepository>();
@@ -41,10 +44,12 @@ builder.Services.AddScoped<IOutlineConversationRepository, OutlineConversationRe
 builder.Services.AddScoped<IEditorConversationRepository, EditorConversationRepository>();
 builder.Services.AddScoped<IWritingSampleRepository, WritingSampleRepository>();
 builder.Services.AddScoped<IWritingCoachConversationRepository, WritingCoachConversationRepository>();
+builder.Services.AddScoped<IResearchConversationRepository, ResearchConversationRepository>();
 builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
 builder.Services.AddScoped<IContestRepository, ContestRepository>();
 builder.Services.AddScoped<IEditorContextPreferenceRepository, EditorContextPreferenceRepository>();
 builder.Services.AddScoped<IIngestRepository, IngestRepository>();
+builder.Services.AddScoped<IWebIngestCandidateRepository, WebIngestCandidateRepository>();
 builder.Services.AddScoped<IProjectImportRepository, ProjectImportRepository>();
 
 // Knowledge
@@ -57,6 +62,12 @@ builder.Services.AddSingleton<ITextChunker, OverlappingTextChunker>();
 builder.Services.AddScoped<IEmbeddingService, OllamaEmbeddingService>();
 builder.Services.AddScoped<ILlmProviderService, LlmProviderService>();
 builder.Services.AddScoped<ICodexAuthService, CodexAuthService>();
+
+// Search providers
+builder.Services.AddScoped<IWebSearchClient, SerpApiWebSearchClient>();
+builder.Services.AddScoped<IWebSearchClient, BraveWebSearchClient>();
+builder.Services.AddScoped<IWebSearchProviderFactory, WebSearchProviderFactory>();
+builder.Services.AddScoped<ISearchProviderService, SearchProviderService>();
 
 // Token counting + prompt budgets
 builder.Services.Configure<TokenCountingOptions>(builder.Configuration.GetSection(TokenCountingOptions.SectionName));
@@ -100,6 +111,13 @@ builder.Services.AddScoped<IngestAgentTools>();
 builder.Services.AddScoped<IngestJobProcessor>();
 builder.Services.AddScoped<IIngestService, IngestService>();
 builder.Services.AddHostedService<IngestJobWorker>();
+
+// Research
+builder.Services.Configure<WebResearchOptions>(builder.Configuration.GetSection(WebResearchOptions.SectionName));
+builder.Services.AddScoped<IWebPageReader, HttpWebPageReader>();
+builder.Services.AddScoped<IWebIngestCandidateService, WebIngestCandidateService>();
+builder.Services.AddScoped<ResearchTools>();
+builder.Services.AddScoped<IResearchService, ResearchService>();
 
 // Import / export
 builder.Services.AddSingleton<IProjectImportJobQueue, ProjectImportJobQueue>();

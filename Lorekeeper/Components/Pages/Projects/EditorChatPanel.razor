@@ -1,4 +1,3 @@
-@using System.Text
 @using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.EditorChat
 @using Lorekeeper.Llm
@@ -10,8 +9,8 @@
 @inject ITokenCounter TokenCounter
 
 <ChatSurface Title="Editor Chat"
-             TokenText="@ConversationTokenText()"
-             TokenTitle="@ConversationTokenTitle()"
+             TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel)"
+             TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel)"
              Loading="@_loading"
              Messages="@_renderable"
              Live="@_live"
@@ -103,6 +102,9 @@
                        OnChanged="HandlePendingChangesChangedAsync" />
 
 @code {
+    private const string ConversationTokenUnitLabel = "chat tokens";
+    private const string ConversationTokenTitleLabel = "chat transcript token count";
+
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid? CurrentChapterId { get; set; }
     [Parameter] public EventCallback OnAiTurnStarting { get; set; }
@@ -132,8 +134,7 @@
     private List<ContestBatch> _contestHistoryBatches = [];
     private List<LlmProvider> _providers = [];
     private string? _pendingUserText;
-    private int _conversationTokenCount;
-    private bool _conversationTokenIsExact = true;
+    private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private bool _contestEnabled;
     private bool _showContestReview;
     private bool _showContestHistory;
@@ -510,51 +511,21 @@
 
     private void UpdateConversationTokenCount()
     {
-        var result = TokenCounter.Count(BuildConversationTokenText());
-        _conversationTokenCount = result.TokenCount;
-        _conversationTokenIsExact = result.IsExact;
+        _conversationTokens = ChatTranscriptTokenCounter.Count(
+            TokenCounter,
+            _messages,
+            ToTokenMessage,
+            _live,
+            _pendingUserText);
     }
 
-    private string BuildConversationTokenText()
-    {
-        var sb = new StringBuilder();
-        foreach (var message in _messages)
-            AppendMessageForTokenCount(sb, message);
-
-        if (!string.IsNullOrWhiteSpace(_pendingUserText))
-        {
-            sb.AppendLine("User:");
-            sb.AppendLine(_pendingUserText);
-        }
-
-        ChatTranscriptHelpers.AppendLiveTurnForTokenCount(sb, _live);
-        return sb.ToString();
-    }
-
-    private static void AppendMessageForTokenCount(StringBuilder sb, EditorMessage message)
-    {
-        sb.Append(message.Role).AppendLine(":");
-        if (!string.IsNullOrEmpty(message.Content))
-            sb.AppendLine(message.Content);
-        if (!string.IsNullOrWhiteSpace(message.ToolCallsJson) && message.ToolCallsJson != "[]")
-        {
-            sb.AppendLine("Tool calls:");
-            sb.AppendLine(message.ToolCallsJson);
-        }
-        if (!string.IsNullOrWhiteSpace(message.ToolName) || !string.IsNullOrWhiteSpace(message.ToolCallId))
-            sb.Append("Tool: ").Append(message.ToolName).Append(' ').AppendLine(message.ToolCallId);
-        if (!string.IsNullOrWhiteSpace(message.ErrorMessage))
-            sb.Append("Error: ").AppendLine(message.ErrorMessage);
-    }
-
-    private string ConversationTokenText() =>
-        $"{TokenPrefix(_conversationTokenIsExact)}{_conversationTokenCount:N0} chat tokens";
-
-    private string ConversationTokenTitle() => _conversationTokenIsExact
-        ? "Current chat transcript token count"
-        : "Current chat transcript token count is estimated";
-
-    private static string TokenPrefix(bool isExact) => isExact ? string.Empty : "~";
+    private static ChatTranscriptTokenMessage ToTokenMessage(EditorMessage message) => new(
+        message.Role.ToString(),
+        message.Content,
+        message.ToolCallsJson,
+        message.ToolCallId,
+        message.ToolName,
+        message.ErrorMessage);
 
     private static List<ChatMessagePart> BuildMessageParts(EditorMessage message, IReadOnlyDictionary<string, EditorMessage> byCallId)
     {

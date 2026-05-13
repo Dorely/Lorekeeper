@@ -23,8 +23,8 @@
 | File | Description |
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors. EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI 2.8, sqlite-vec, Microsoft.ML.Tokenizers, and patched Microsoft.Bcl.Memory. |
-| `Program.cs` | Host setup, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/token/ingest/import-export/writing/editor-chat/contest services, EF migrate at startup, sqlite-vec init, outline graph repair, Codex OAuth endpoints. |
-| `appsettings.json` / `appsettings.Development.json` | Configuration: `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Embeddings:*`, `Agents:*`. |
+| `Program.cs` | Host setup, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/writing/editor-chat/contest services, EF migrate at startup, sqlite-vec init, outline graph repair, Codex OAuth endpoints. |
+| `appsettings.json` / `appsettings.Development.json` | Configuration: `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
 | `Properties/launchSettings.json` | Local launch profiles (HTTP pinned to `localhost:1455` for Codex OAuth redirect). |
 
 ### Components/
@@ -40,6 +40,7 @@
 | File | Description |
 |------|-------------|
 | `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text parts, tool-call chips, and transcript token-count helpers. |
+| `ChatTranscriptTokenCounter.cs` | Shared transcript token-count adapter for `ChatSurface` panels: projects domain messages into a common token-count shape, includes pending/live turns, and formats exact/estimated count labels. |
 | `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell for transcript rendering, live-turn rendering, composer controls, scrolling, and textarea autosize behavior. |
 | `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments, result/error details, and in-progress state. |
 
@@ -74,6 +75,7 @@
 | `GraphContent.razor` (+ `.razor.css`, `.razor.js`) | Obsidian-inspired full-project graph workspace: loads graph snapshots, filters/searches nodes, bridges to the local `vis-network` renderer for pan/zoom/drag/select, and coordinates graph refreshes. |
 | `GraphDetailsPanel.razor` (+ `.razor.css`) | Selected-node graph editor side panel: create/edit/delete nodes, edit safe parent assignments, and create/edit/delete custom relationships while managed links stay protected. |
 | `IngestPage.razor` | Ingest tab at `/projects/{Slug}/ingest`; wraps `ProjectLayout` and hosts `Ingest.IngestContent`. |
+| `ResearchPage.razor` | Research tab at `/projects/{Slug}/research`; wraps `ProjectLayout` and hosts `Research.ResearchContent` when an active search provider is configured. |
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
@@ -82,7 +84,14 @@
 
 | File | Description |
 |------|-------------|
-| `IngestContent.razor` (+ `.razor.css`) | Functional Ingest tab workspace: creates text/file ingest jobs with configured-model selection and optional instructions, shows start-readiness feedback, subscribes to live job updates, and supports stop/resume-with-model-change/restart/delete. |
+| `IngestContent.razor` (+ `.razor.css`) | Functional Ingest tab workspace: creates text/file/manual-webpage ingest jobs with configured-model selection and optional instructions, batches same-domain webpage crawls into one job, shows crawl diagnostics, subscribes to live job updates, and supports stop/resume-with-model-change/restart/delete. |
+
+### Components/Pages/Projects/Research/
+
+| File | Description |
+|------|-------------|
+| `ResearchContent.razor` (+ `.razor.css`) | Research workspace: hides behind active search-provider readiness, hosts autonomous research chat plus research-only discovered/staged page review, batches staged pages into normal ingest jobs, and supports clearing unqueued candidates. |
+| `ResearchChatPanel.razor` (+ `.razor.css`) | Research chat domain adapter over shared `ChatSurface`; streams search/read/stage tool calls, persists the project research transcript, and refreshes staged-page state after tool turns. |
 
 ### Components/Pages/Projects/ImportExport/
 
@@ -116,6 +125,7 @@
 | File | Description |
 |------|-------------|
 | `Providers.razor` | LLM provider configuration UI: Codex OAuth connect, parent providers + child models, set default, inline edit, model test. |
+| `SearchProviders.razor` | Search provider configuration UI for Research Mode: add/edit/delete SerpApi or Brave providers, save API keys, test connectivity, and choose the single active provider. |
 
 ### Models/
 
@@ -135,11 +145,14 @@
 | `WritingSample.cs` | EF entity for a project-scoped prose sample used as a future style reference. Stores title/body plus created/updated timestamps. |
 | `WritingCoachConversation.cs` | EF entity — one resettable Writing Coach transcript per `Project` (unique on `ProjectId`). Owns ordered `WritingCoachMessage`s; cascade-deleted with the project. |
 | `WritingCoachMessage.cs` | EF entity for a single Writing Coach chat row with monotonic `Order`, role (`System`/`User`/`Assistant`/`Tool`), text content, assistant `ToolCallsJson`, tool result metadata, status, optional error, and creation timestamp. |
+| `SearchProvider.cs` | EF entity for configured web search providers used by Research Mode. Supports SerpApi and Brave in v1, stores API key/config JSON, and tracks the single active provider. |
+| `ResearchConversation.cs` | EF entity — one persistent project research chat per `Project` (unique on `ProjectId`). Owns ordered `ResearchMessage`s; cascade-deleted with the project. |
+| `ResearchMessage.cs` | EF entity for a single Research chat row with monotonic `Order`, role (`System`/`User`/`Assistant`/`Tool`), text content, assistant tool-call JSON, tool result metadata, status, optional error, and creation timestamp. |
 | `AiChangeBatch.cs` | EF entity grouping AI-proposed tool mutations from one assistant turn while they await approval/resolution. Tracks whether the owning transcript is Outline or Editor chat. |
 | `AiChange.cs` | EF entity for one queued AI tool mutation: tool metadata, before/after/result JSON, dependency metadata, status, rejection/error notes, timestamps. |
 | `ContestBatch.cs` | EF entity for one Editor Contest Mode run: captured turn/context snapshot, target chapter/body snapshot, operation metadata, status, and model candidates. |
 | `ContestCandidate.cs` | EF entity for one model's contest proposal: provider/model labels, validated mutation JSON, proposed chapter body, raw response, status, timing, and errors. |
-| `IngestSource.cs` | EF entity for one ingested source: full source text, source metadata/instructions, content hash, and independent vector-index state/source id. |
+| `IngestSource.cs` | EF entity for one ingested source: full source text, source metadata/instructions, content hash, optional webpage URL/fetch provenance, and independent vector-index state/source id. |
 | `IngestSourceChunk.cs` | EF entity for a large logical source chunk used as extraction checkpoint; tracks character bounds, token count metadata, summaries, and structure status. |
 | `IngestVectorFragment.cs` | EF entity mapping small retrieval vector fragments back to an ingest source with vector row id, char bounds, and metadata. |
 | `IngestJob.cs` | EF entity for durable async ingest job state, progress counters, selected provider/model snapshot, encoding metadata, and source/job relationships. |
@@ -148,6 +161,7 @@
 | `IngestJobEvent.cs` | EF entity for ingest progress/debug events such as tool calls and failures. |
 | `ProjectImportJob.cs` | EF entity for durable project import job state: uploaded JSON payload, source format metadata, status/progress counters, import counts, warnings, errors, and timestamps. |
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
+| `WebIngestCandidate.cs` | EF entity for discovered/read/staged webpage candidates before ingestion. Stores search provenance, fetch diagnostics, extracted text/excerpt, staging rationale, and queued ingest job id. |
 | `GraphNode.cs` | Generic graph node: `(ProjectId, NodeType, Key)` unique, JSON properties bag. Cascade-deleted with its `Project`. |
 | `GraphEdge.cs` | Directed edge between graph nodes with type, JSON properties, optional relationship-specific `SortOrder`, and timestamps. |
 | `GraphEntityType.cs` | Lightweight project-scoped graph type registry entry for UI/LLM labels/defaults. Descriptive rather than restrictive; arbitrary node types remain valid. |
@@ -156,10 +170,10 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context for projects, outline/editor/writing chat, writing samples, graph, editor context preferences, AI change approval, and ingest queues. JSON value converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
+| `AppDbContext.cs` | EF Core context for projects, outline/editor/writing/research chat, search providers, writing samples, graph, editor context preferences, AI change approval, ingest queues, and webpage candidates. JSON value converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, and `RemoveContestBriefFields` for Contest Mode schema cleanup). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, and Contest Mode schema cleanup). |
 
 ### Persistence/Repositories/
 
@@ -177,10 +191,13 @@
 | `IEditorConversationRepository.cs` / `EditorConversationRepository.cs` | Persistence for project-wide `EditorConversation` + ordered `EditorMessage`s: get/create support, message loading/order lookup, add/update/remove, and save. |
 | `IWritingSampleRepository.cs` / `WritingSampleRepository.cs` | Project-scoped writing sample persistence: list by project (newest updated first), get/count, add/update/remove, and save. |
 | `IWritingCoachConversationRepository.cs` / `WritingCoachConversationRepository.cs` | Persistence for the resettable project-level Writing Coach conversation + ordered messages, including assistant tool-call manifests and tool result rows. |
+| `ISearchProviderRepository.cs` / `SearchProviderRepository.cs` | CRUD plus active-provider selection for Research Mode search providers. |
+| `IResearchConversationRepository.cs` / `ResearchConversationRepository.cs` | Persistence for project-wide Research conversation + ordered messages, including assistant tool-call manifests and tool result rows. |
 | `IAiChangeRepository.cs` / `AiChangeRepository.cs` | Persistence for pending AI change batches and changes, including eager-loaded pending batch listing and change lookup for approval actions. |
 | `IContestRepository.cs` / `ContestRepository.cs` | Persistence for Editor Contest Mode batches and candidates, including current/history project batch listing, detail loading, candidate lookup, and status updates. |
 | `IEditorContextPreferenceRepository.cs` / `EditorContextPreferenceRepository.cs` | Persistence for active-chapter Context Feed include/exclude preferences, scoped by project, chapter, item kind, and item key. |
 | `IIngestRepository.cs` / `IngestRepository.cs` | Persistence for ingest sources, source chunks, vector fragments, jobs, job chunks, report items, and job events, including project source listing, tracked processor reads, and lightweight no-tracking UI projections/excerpts. |
+| `IWebIngestCandidateRepository.cs` / `WebIngestCandidateRepository.cs` | Persistence for project-scoped webpage candidates discovered by Research Mode or manual URL reading, including staged-page listing and URL de-duplication. |
 | `IProjectImportRepository.cs` / `ProjectImportRepository.cs` | Persistence for project import jobs and report items, including list/detail UI projections, queued/interrupted job lookup, and delete/save operations. |
 
 ### Knowledge/
@@ -209,6 +226,29 @@
 | `AssistantWorkflowInstructions.cs` | Code-owned, non-editable AI workflow/tool-use instructions appended to project guidance and reused by editor/outline chat, including Contest Mode preparation rules. |
 | `AgentOptions.cs` | Shared tool-loop options bound from `Agents:*`; `MaxToolIterations` caps iterative tool-call rounds for chat, writing coach, and ingest agents. |
 | `SeedSystemPrompt.cs` | Hardcoded default system prompt seeded into every newly-created `Project`. |
+
+### Search/
+
+| File | Description |
+|------|-------------|
+| `WebSearchModels.cs` | Normalized web-search request/response/result records shared by Research tools and concrete providers. |
+| `IWebSearchClient.cs` | Interface implemented by concrete API-backed search providers. |
+| `IWebSearchProviderFactory.cs` / `WebSearchProviderFactory.cs` | Resolves the concrete search client for a configured `SearchProviderKind`. |
+| `ISearchProviderService.cs` / `SearchProviderService.cs` | Application service for search-provider CRUD, active-provider readiness, provider tests, and active-provider search execution. |
+| `SerpApiWebSearchClient.cs` | SerpApi Google-search client; maps `organic_results` into normalized `WebSearchResult`s. |
+| `BraveWebSearchClient.cs` | Brave Search API client; maps `web.results` into normalized `WebSearchResult`s. |
+
+### Research/
+
+| File | Description |
+|------|-------------|
+| `IResearchService.cs` / `ResearchService.cs` | Persistent streaming Research chat: requires an active search provider, streams text/tool-call arguments, persists messages/tool results, and lets the assistant autonomously search/read/stage useful webpages. |
+| `ResearchTools.cs` | Research LLM tools: `web_search`, `read_search_result`, `read_webpage`, `follow_page_links`, `stage_page_for_ingestion`, and `list_staged_pages`. Search results and read pages are persisted as webpage candidates. |
+| `ResearchTurnUpdate.cs` | Streaming update records consumed by `ResearchChatPanel`: text deltas, tool-call start/argument/completion updates, assistant completion, and turn errors/cancellation. |
+| `WebResearchOptions.cs` | Configurable webpage read limits and HTTP defaults such as user agent, timeout, max bytes, max links, and private-network target blocking. |
+| `WebPageReader.cs` | HTTP webpage reader/extractor for Research Mode: fetches HTML/text pages, blocks local/private targets by default, extracts title/text/canonical URL/outgoing links, and returns diagnostics. |
+| `IWebIngestCandidateService.cs` / `WebIngestCandidateService.cs` | Application service for discovered/read/staged webpage candidates, including search-result persistence, URL reading, research-only listing, staging/unstaging, clearing, and single/batch queueing into ingest jobs. |
+| `WebIngestCandidateModels.cs` | UI/read helper records for webpage candidate lists and read results. |
 
 ### Auth/
 
@@ -258,9 +298,10 @@
 | File | Description |
 |------|-------------|
 | `IIngestService.cs` / `IngestService.cs` | Application service for ingest job lifecycle/UI reads/provider resolution/queueing/notifications; restart/delete subtracts source-scoped graph assertions, removes ingest-owned orphan graph output, and refreshes targeted context vectors. |
+| `IngestCreateJobRequest.cs` | Request DTO for creating ingest jobs with source text, metadata, model choice, encoding/chunk-size override, and optional webpage fetch provenance. |
 | `IIngestSourceStructureBuilder.cs` / `IngestSourceStructureBuilder.cs` | Splits raw source text into logical source chunks using headings/scene breaks, then merges adjacent sections with configurable target/soft token limits; source chunks are independent from vector fragments. |
 | `IngestSourceStructureOptions.cs` | Configurable source sectioning defaults for ingest chunk target tokens, soft max ratio, and small-section merge threshold. |
-| `IIngestGraphSync.cs` / `IngestGraphSync.cs` | Projects ingest sources and source chunks into structural graph nodes and ordered `HasChild` edges. |
+| `IIngestGraphSync.cs` / `IngestGraphSync.cs` | Projects ingest sources and source chunks into structural graph nodes and ordered `HasChild` edges, including webpage provenance on source nodes when present. |
 | `IIngestGraphCleanup.cs` / `IngestGraphCleanup.cs` | Source-scoped graph cleanup for ingest restart/delete: subtracts one source's node/edge assertions and provenance, deleting only ingest-owned orphan output and returning affected entities for targeted context-vector cleanup. |
 | `IIngestJobQueue.cs` / `IngestJobQueue.cs` | In-process queue plus cancellation registry for durable ingest jobs. |
 | `IIngestJobNotifier.cs` / `IngestJobNotifier.cs` | In-process pub/sub for live ingest job update signals consumed by Blazor Server components over the existing SignalR circuit. |
@@ -268,7 +309,7 @@
 | `IngestSourceAssertions.cs` | Shared helper/model for protected source-scoped node/edge assertion JSON, ingest-created graph origin markers, report graph-action payloads, and source-subtraction operations. |
 | `IngestJobWorker.cs` | Hosted background worker that marks interrupted jobs stopped at startup and drains queued ingest jobs in scoped processors. |
 | `IngestJobProcessor.cs` | Runs one ingest job with the job-selected provider: vectorizes the full source into independent retrieval fragments, processes each source chunk with the LLM, invokes ingest tools, keeps source-chunk context vectors current, records progress/tool warning events, and notifies live UI listeners. |
-| `IngestAgentTools.cs` | Ingest LLM tools for project entity candidate search, source-scoped observations on new/existing entities, source-scoped relationship assertions, and source-chunk notes/provenance. |
+| `IngestAgentTools.cs` | Ingest LLM tools for advisory project entity candidate search, source-scoped observations on new/existing entities, source-scoped relationship assertions, and source-chunk notes/provenance. Exact duplicate creation returns an existing candidate instead of auto-merging. |
 
 ### ImportExport/
 
