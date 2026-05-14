@@ -27,22 +27,26 @@
              AutoFollowKey="@_autoFollowKey"
              ResetComposerKey="@_resetComposerKey">
     <HeaderActions>
-            @if (PendingChangeCount > 0)
-            {
-                <button type="button" class="btn btn-link btn-sm outline-chat-review" @onclick="OpenPendingChanges">
-                    Review @PendingChangeCount
-                </button>
-            }
             <button type="button" class="btn btn-link btn-sm outline-chat-reset" title="Start over"
                     disabled="@(_running || PendingChangeCount > 0)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
-    <ComposerOptions>
-        <label class="outline-chat-approval" title="Queue AI tool edits for review before applying them">
-            <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
-                   disabled="@_running" @onchange="OnApprovalChangedAsync" />
-            <span>Review edits</span>
-        </label>
-    </ComposerOptions>
+    <ExtraControls>
+        <div class="outline-chat-controls">
+            <div class="outline-chat-controls-row">
+                <label class="outline-chat-approval" title="Queue AI tool edits for review before applying them">
+                    <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
+                           disabled="@_running" @onchange="OnApprovalChangedAsync" />
+                    <span>Review edits</span>
+                </label>
+                @if (PendingChangeCount > 0)
+                {
+                    <button type="button" class="btn btn-link btn-sm outline-chat-pending" @onclick="OpenPendingChanges">
+                        Pending changes @PendingChangeCount
+                    </button>
+                }
+            </div>
+        </div>
+    </ExtraControls>
 </ChatSurface>
 
 <PendingAiChangesModal ProjectId="@ProjectId"

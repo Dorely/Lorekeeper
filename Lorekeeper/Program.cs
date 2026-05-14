@@ -73,6 +73,7 @@ builder.Services.AddScoped<ISearchProviderService, SearchProviderService>();
 builder.Services.Configure<TokenCountingOptions>(builder.Configuration.GetSection(TokenCountingOptions.SectionName));
 builder.Services.Configure<TokenBudgetOptions>(builder.Configuration.GetSection(TokenBudgetOptions.SectionName));
 builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.SectionName));
+builder.Services.Configure<EditorChatOptions>(builder.Configuration.GetSection(EditorChatOptions.SectionName));
 builder.Services.AddSingleton<TiktokenTokenCounter>();
 builder.Services.AddSingleton<CharEstimateTokenCounter>();
 builder.Services.AddSingleton<ITokenCounter, CompositeTokenCounter>();

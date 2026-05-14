@@ -29,34 +29,31 @@
              AutoFollowKey="@_autoFollowKey"
              ResetComposerKey="@_resetComposerKey">
     <HeaderActions>
-            @if (PendingChangeCount > 0)
-            {
-                <button type="button" class="btn btn-link btn-sm editor-chat-review" @onclick="OpenPendingChanges">
-                    Review @PendingChangeCount
-                </button>
-            }
-            @if (ContestCandidateCount > 0)
-            {
-                <button type="button" class="btn btn-link btn-sm editor-chat-review" @onclick="OpenContestReview">
-                    Contest @ContestCandidateCount
-                </button>
-            }
-            @if (ContestHistoryBatchCount > 0)
-            {
-                <button type="button" class="btn btn-link btn-sm editor-chat-review" title="Review previous Contest Mode turns" @onclick="OpenContestHistory">
-                    History @ContestHistoryBatchCount
-                </button>
-            }
             <button type="button" class="btn btn-link btn-sm editor-chat-reset" title="Start over"
                     disabled="@(_running || PendingChangeCount > 0)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
     <ExtraControls>
-        <div class="editor-chat-contest-config @(_contestEnabled ? "enabled" : null)">
-            <label class="editor-chat-contest-toggle" title="Use read-only chat preparation, then compare up to three model candidates before staging one edit">
-                <input class="form-check-input" type="checkbox" checked="@_contestEnabled"
-                       disabled="@_running" @onchange="OnContestEnabledChangedAsync" />
-                <span>Contest Mode</span>
-            </label>
+        <div class="editor-chat-controls">
+            <div class="editor-chat-controls-row">
+                <label class="editor-chat-approval" title="Queue AI tool edits for review before applying them">
+                    <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
+                           disabled="@_running" @onchange="OnApprovalChangedAsync" />
+                    <span>Review edits</span>
+                </label>
+
+                <label class="editor-chat-contest-toggle" title="Use read-only chat preparation, then compare up to three model candidates before staging one edit">
+                    <input class="form-check-input" type="checkbox" checked="@_contestEnabled"
+                           disabled="@_running" @onchange="OnContestEnabledChangedAsync" />
+                    <span>Contest Mode</span>
+                </label>
+
+                @if (PendingReviewCount > 0)
+                {
+                    <button type="button" class="btn btn-link btn-sm editor-chat-pending" title="@PendingReviewTitle" @onclick="OpenPendingChanges">
+                        Pending changes @PendingReviewCount
+                    </button>
+                }
+            </div>
             @if (_contestEnabled)
             {
                 <div class="editor-chat-contest-slots" aria-label="Contest models">
@@ -67,13 +64,6 @@
             }
         </div>
     </ExtraControls>
-    <ComposerOptions>
-        <label class="editor-chat-approval" title="Queue AI tool edits for review before applying them">
-            <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
-                   disabled="@_running" @onchange="OnApprovalChangedAsync" />
-            <span>Review edits</span>
-        </label>
-    </ComposerOptions>
 </ChatSurface>
 
 <ContestReviewModal ProjectId="@ProjectId"
@@ -83,16 +73,6 @@
                     Subtitle="Compare candidate chapter edits from the current contest turn, then stage one for normal change review."
                     EmptyText="No current contest candidates yet."
                     OnClose="CloseContestReview"
-                    OnChanged="HandleContestChangedAsync" />
-
-<ContestReviewModal ProjectId="@ProjectId"
-                    Batches="@_contestHistoryBatches"
-                    IsOpen="@_showContestHistory"
-                    Title="Contest History"
-                    Subtitle="Review candidate chapter edits from previous contest turns."
-                    EmptyText="No previous contest candidates yet."
-                    ShowBatchDetails="true"
-                    OnClose="CloseContestHistory"
                     OnChanged="HandleContestChangedAsync" />
 
 <PendingAiChangesModal ProjectId="@ProjectId"
@@ -131,21 +111,21 @@
     private Guid? _loadedProjectId;
     private List<AiChangeBatch> _pendingBatches = [];
     private List<ContestBatch> _contestBatches = [];
-    private List<ContestBatch> _contestHistoryBatches = [];
     private List<LlmProvider> _providers = [];
     private string? _pendingUserText;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private bool _contestEnabled;
     private bool _showContestReview;
-    private bool _showContestHistory;
     private int? _contestProviderSlot1Id;
     private int? _contestProviderSlot2Id;
     private int? _contestProviderSlot3Id;
 
     private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
     private int ContestCandidateCount => _contestBatches.Sum(batch => batch.Candidates.Count);
-    private int ContestHistoryBatchCount => _contestHistoryBatches.Count;
-    private int ContestHistoryCandidateCount => _contestHistoryBatches.Sum(batch => batch.Candidates.Count);
+    private int PendingReviewCount => PendingChangeCount > 0 ? PendingChangeCount : ContestCandidateCount;
+    private string PendingReviewTitle => PendingChangeCount > 0
+        ? "Review pending AI edits"
+        : "Review pending Contest Mode candidates";
     private bool ContestCanSend => !_contestEnabled || ContestProviderIds().Any();
 
     protected override async Task OnParametersSetAsync()
@@ -196,8 +176,18 @@
         }
         if (PendingChangeCount > 0)
         {
-            _showPendingChanges = true;
+            OpenPendingChanges();
             return;
+        }
+        if (_contestBatches.Any(batch => batch.Status == ContestBatchStatus.Running))
+        {
+            OpenPendingChanges();
+            return;
+        }
+        if (ContestCandidateCount > 0)
+        {
+            _contestBatches = [];
+            _showContestReview = false;
         }
 
         _input = string.Empty;
@@ -289,6 +279,7 @@
                     case EditorChatAssistantMessageCompleted:
                         await ReloadFromDbAsync();
                         await LoadPendingChangesAsync(openIfPending: true);
+                        await LoadContestBatchesAsync(openIfAvailable: false);
                         _live = null;
                         RequestScroll();
                         StateHasChanged();
@@ -298,6 +289,7 @@
                         _error = error.Cancelled ? null : error.Message;
                         await ReloadFromDbAsync();
                         await LoadPendingChangesAsync(openIfPending: false);
+                        await LoadContestBatchesAsync(openIfAvailable: false);
                         _live = null;
                         RequestScroll();
                         StateHasChanged();
@@ -347,7 +339,10 @@
     {
         _pendingBatches = (await Chat.ListPendingChangesAsync(ProjectId)).ToList();
         if (openIfPending && PendingChangeCount > 0)
+        {
+            _showContestReview = false;
             _showPendingChanges = true;
+        }
         if (PendingChangeCount == 0)
             _showPendingChanges = false;
     }
@@ -355,16 +350,18 @@
     private async Task LoadContestBatchesAsync(bool openIfAvailable)
     {
         _contestBatches = (await Chat.ListCurrentContestBatchesAsync(ProjectId)).ToList();
-        _contestHistoryBatches = (await Chat.ListContestHistoryAsync(ProjectId)).ToList();
+        if (PendingChangeCount > 0)
+        {
+            _showContestReview = false;
+            return;
+        }
         if (openIfAvailable && ContestCandidateCount > 0)
         {
-            _showContestHistory = false;
+            _showPendingChanges = false;
             _showContestReview = true;
         }
         if (ContestCandidateCount == 0)
             _showContestReview = false;
-        if (ContestHistoryCandidateCount == 0)
-            _showContestHistory = false;
     }
 
     private void ApplyContestCandidateRawResponseDelta(Guid candidateId, string rawResponse)
@@ -403,25 +400,25 @@
         await Chat.SetContestProviderAsync(ProjectId, slot, providerId);
     }
 
-    private void OpenPendingChanges() => _showPendingChanges = true;
+    private void OpenPendingChanges()
+    {
+        if (PendingChangeCount > 0)
+        {
+            _showContestReview = false;
+            _showPendingChanges = true;
+            return;
+        }
+
+        if (ContestCandidateCount > 0)
+        {
+            _showPendingChanges = false;
+            _showContestReview = true;
+        }
+    }
 
     private void ClosePendingChanges() => _showPendingChanges = false;
 
-    private void OpenContestReview()
-    {
-        _showContestHistory = false;
-        _showContestReview = true;
-    }
-
     private void CloseContestReview() => _showContestReview = false;
-
-    private void OpenContestHistory()
-    {
-        _showContestReview = false;
-        _showContestHistory = true;
-    }
-
-    private void CloseContestHistory() => _showContestHistory = false;
 
     private async Task HandlePendingChangesChangedAsync()
     {
@@ -437,7 +434,6 @@
         await LoadContestBatchesAsync(openIfAvailable: false);
         await LoadPendingChangesAsync(openIfPending: true);
         _showContestReview = false;
-        _showContestHistory = false;
         StateHasChanged();
     }
 

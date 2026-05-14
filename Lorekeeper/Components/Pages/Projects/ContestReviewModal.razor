@@ -42,10 +42,6 @@
                                 <span class="contest-review-status">@StatusText(item.Candidate.Status)</span>
                             </div>
                             <div class="contest-review-model-subtitle">@item.Candidate.ModelName</div>
-                            @if (ShowBatchDetails)
-                            {
-                                <div class="contest-review-batch-meta">@BatchMeta(item.Batch)</div>
-                            }
                             @if (!string.IsNullOrWhiteSpace(item.Candidate.Summary))
                             {
                                 <div class="contest-review-summary">@item.Candidate.Summary</div>
@@ -73,10 +69,6 @@
                             <div>
                                 <div class="contest-review-model large">@SelectedItem.Candidate.ProviderName</div>
                                 <div class="contest-review-model-subtitle">@SelectedItem.Candidate.ModelName</div>
-                                @if (ShowBatchDetails)
-                                {
-                                    <div class="contest-review-batch-meta detail">@BatchMeta(SelectedItem.Batch)</div>
-                                }
                             </div>
                             <button type="button" class="btn btn-primary btn-sm"
                                     disabled="@(_busy || SelectedItem.Candidate.Status != ContestCandidateStatus.Completed)"
@@ -167,7 +159,6 @@
     [Parameter] public string Title { get; set; } = "Contest Review";
     [Parameter] public string Subtitle { get; set; } = "Compare candidate chapter edits, then stage one for normal change review.";
     [Parameter] public string EmptyText { get; set; } = "No contest candidates yet.";
-    [Parameter] public bool ShowBatchDetails { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
 
@@ -257,23 +248,6 @@
         ContestCandidateStatus.Rejected => "rejected",
         ContestCandidateStatus.Running => "running",
         _ => string.Empty,
-    };
-
-    private static string BatchMeta(ContestBatch batch)
-    {
-        var chapterTitle = string.IsNullOrWhiteSpace(batch.ChapterTitle) ? "Untitled chapter" : batch.ChapterTitle;
-        var createdAt = batch.CreatedAt.ToLocalTime().ToString("g");
-        return $"{chapterTitle} - {createdAt} - {BatchStatusText(batch.Status)}";
-    }
-
-    private static string BatchStatusText(ContestBatchStatus status) => status switch
-    {
-        ContestBatchStatus.Running => "Running",
-        ContestBatchStatus.Completed => "Completed",
-        ContestBatchStatus.Staged => "Staged",
-        ContestBatchStatus.Failed => "Failed",
-        ContestBatchStatus.Cancelled => "Cancelled",
-        _ => status.ToString(),
     };
 
     private RenderFragment RenderSegments(IReadOnlyList<DiffSegment>? segments) => __builder =>

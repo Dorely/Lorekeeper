@@ -26,10 +26,9 @@ public sealed class EditorChatService(
     IAiChangeApprovalService changeApproval,
     IAiChangeRepository changes,
     IOptions<AgentOptions> options,
+    IOptions<EditorChatOptions> editorOptions,
     ILogger<EditorChatService> logger) : IEditorChatService
 {
-    private const int _maxToolResultCharsForModel = 12000;
-
     private const string _initialAssistantGreeting =
         "I'm ready to work on the draft with you. Tell me what you want to shape, revise, or check in the current chapter.";
 
@@ -92,14 +91,12 @@ public sealed class EditorChatService(
     public async Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await contestService.ListCurrentContestBatchesAsync(projectId, cancellationToken);
 
-    public async Task<IReadOnlyList<ContestBatch>> ListContestHistoryAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await contestService.ListContestHistoryAsync(projectId, cancellationToken);
-
     public Task StageContestCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default) =>
         contestService.StageCandidateAsync(candidateId, cancellationToken);
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await contestService.DiscardInactiveContestBatchesAsync(projectId, cancellationToken);
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
         conversations.RemoveConversation(existing);
@@ -123,6 +120,14 @@ public sealed class EditorChatService(
             yield return new EditorChatTurnError("Review the pending AI changes before sending another editor chat message.", Cancelled: false);
             yield break;
         }
+
+        var currentContestBatches = await contestService.ListCurrentContestBatchesAsync(projectId, cancellationToken);
+        if (currentContestBatches.Any(batch => batch.Status == ContestBatchStatus.Running))
+        {
+            yield return new EditorChatTurnError("Wait for the running contest to finish before sending another editor chat message.", Cancelled: false);
+            yield break;
+        }
+        await contestService.DiscardInactiveContestBatchesAsync(projectId, cancellationToken);
 
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
         var userMessage = new EditorMessage
@@ -411,7 +416,7 @@ public sealed class EditorChatService(
 
                 resultContents.Add(new FunctionResultContent(
                     pendingCall.CallId,
-                    BuildToolResultForModel(pendingCall.Name, toolResult ?? string.Empty)));
+                    BuildToolResultForModel(pendingCall.Name, toolResult ?? string.Empty, EffectiveMaxToolResultCharsForModel())));
                 foreach (var pendingChange in editorContext.OutlineStaging?.DrainNewChanges() ?? [])
                 {
                     yield return new EditorChatPendingAiChangeCreated(
@@ -596,7 +601,9 @@ public sealed class EditorChatService(
         return new ChatMessage(ChatRole.Assistant, contents);
     }
 
-    private static string BuildToolResultForModel(string toolName, string result)
+    private int EffectiveMaxToolResultCharsForModel() => Math.Max(1000, editorOptions.Value.MaxToolResultCharsForModel);
+
+    private static string BuildToolResultForModel(string toolName, string result, int maxToolResultCharsForModel)
     {
         if (string.Equals(toolName, "edit_chapter", StringComparison.Ordinal))
         {
@@ -609,11 +616,15 @@ public sealed class EditorChatService(
             }
         }
 
-        if (result.Length <= _maxToolResultCharsForModel)
+        if (result.Length <= maxToolResultCharsForModel)
             return result;
 
-        return result[.._maxToolResultCharsForModel]
-            + "\n\n[Tool result truncated before returning it to the model.]";
+        var message = string.Equals(toolName, "read_chapter", StringComparison.Ordinal)
+            ? "[Tool result exceeded the model-facing limit after pagination. Call read_chapter again with a narrower startLine/endLine range, or request a specific page from the returned pagination metadata.]"
+            : "[Tool result truncated before returning it to the model.]";
+
+        return result[..maxToolResultCharsForModel]
+            + "\n\n" + message;
     }
 
     private static List<AIContent> BuildTextOnlyAssistantContents(string text)

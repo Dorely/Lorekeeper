@@ -14,7 +14,6 @@ public interface IEditorChatService
     Task SetContestProviderAsync(Guid projectId, int slot, int? providerId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<ContestBatch>> ListContestHistoryAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task StageContestCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default);
     IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(Guid projectId, Guid? currentChapterId, string userText, CancellationToken cancellationToken = default);
     Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default);

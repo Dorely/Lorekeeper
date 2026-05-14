@@ -8,30 +8,24 @@ public sealed class ContestRepository(AppDbContext db) : IContestRepository
     public Task<List<ContestBatch>> ListCurrentByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         db.ContestBatches
             .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
-            .Where(batch => batch.ProjectId == projectId && batch.Status != ContestBatchStatus.Cancelled)
+            .Where(batch => batch.ProjectId == projectId
+                && (batch.Status == ContestBatchStatus.Running || batch.Status == ContestBatchStatus.Completed))
             .OrderByDescending(batch => batch.CreatedAt)
             .Take(1)
             .ToListAsync(cancellationToken);
 
-    public async Task<List<ContestBatch>> ListHistoryByProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
+    public async Task DeleteInactiveByProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
-        var latestBatchId = await db.ContestBatches
-            .Where(batch => batch.ProjectId == projectId && batch.Status != ContestBatchStatus.Cancelled)
-            .OrderByDescending(batch => batch.CreatedAt)
-            .Select(batch => (Guid?)batch.Id)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (latestBatchId is null)
-            return [];
-
-        return await db.ContestBatches
+        var batches = await db.ContestBatches
             .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
             .Where(batch => batch.ProjectId == projectId
-                && batch.Status != ContestBatchStatus.Cancelled
-                && batch.Id != latestBatchId.Value)
-            .OrderByDescending(batch => batch.CreatedAt)
-            .Take(10)
+                && batch.Status != ContestBatchStatus.Running)
             .ToListAsync(cancellationToken);
+
+        if (batches.Count == 0) return;
+
+        db.ContestBatches.RemoveRange(batches);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public Task<ContestBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>

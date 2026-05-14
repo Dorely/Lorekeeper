@@ -339,7 +339,8 @@
 |------|-------------|
 | `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` captured by editor tools, staging helpers, and Contest Mode settings/actions. |
 | `EditorChatService.cs` | Persistent streaming editor chat: assembles the active Context Feed into the system prompt, resolves the default model, streams text/tool-call arguments, persists user/assistant/tool messages, stages Review edits, emits UI refresh events, and routes Contest Mode terminal tool calls into async candidate generation. |
-| `EditorChatTools.cs` | Editor chat LLM tools for assembled context, semantic search, chapters, facts, entities, graph neighbors, chapter reads, normal line-based `edit_chapter`/outline mutations, and read-only Contest preparation with terminal `start_contest`. |
+| `EditorChatOptions.cs` | Configuration for editor-chat-specific tool behavior, including paginated chapter-read size and the model-facing tool-result safety cap. |
+| `EditorChatTools.cs` | Editor chat LLM tools for assembled context, semantic search, chapter listing plus paginated chapter reads, facts, entities, graph neighbors, normal line-based `edit_chapter`/outline mutations, and read-only Contest preparation with terminal `start_contest`. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
 | `EditorContestModels.cs` | DTOs and helper records for Contest Mode settings, start requests, captured chat-context snapshots, model responses, mutation JSON, and streaming contest status/raw-response updates. |

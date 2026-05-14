@@ -9,6 +9,7 @@ using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.EditorChat;
 
@@ -22,7 +23,8 @@ public sealed class EditorChatTools(
     IProjectRepository projects,
     IEditorContextService editorContext,
     IEntityRelationContextService entityRelations,
-    OutlineCollaborationTools outlineTools)
+    OutlineCollaborationTools outlineTools,
+    IOptions<EditorChatOptions> editorOptions)
 {
     private static readonly EntityRelationContextOptions _listEntityRelationOptions = new()
     {
@@ -57,7 +59,7 @@ public sealed class EditorChatTools(
             AIFunctionFactory.Create(
                 method: () => ListChaptersAsync(context),
                 name: "list_chapters",
-                description: "List every chapter in the current project (id, order, title, synopsis)."),
+                description: "List every chapter in the current project (id, order, title, synopsis, body line count, and read_chapter page count)."),
 
             AIFunctionFactory.Create(
                 method: () => ListProjectFactsAsync(context),
@@ -80,9 +82,14 @@ public sealed class EditorChatTools(
                 description: "List all graph links adjacent to an entity, including structural HasChild links and semantic story relationships."),
 
             AIFunctionFactory.Create(
-                method: (Guid chapterId) => ReadChapterAsync(context, chapterId),
+                method: (Guid chapterId, int? startLine = null, int? endLine = null, int? pageNumber = null) =>
+                    ReadChapterAsync(context, chapterId, startLine, endLine, pageNumber),
                 name: "read_chapter",
-                description: "Read a chapter's current body with line numbers (0001: ...). Use list_chapters to discover ids. If this turn already staged an edit to the chapter, returns the latest staged body for this turn."),
+                description:
+                    "Read one paginated page of a chapter's current body with line numbers (0001: ...). " +
+                    "Use list_chapters to discover ids and page counts. Omit startLine/endLine to page through the full chapter; " +
+                    "provide startLine and/or endLine for an inclusive line range; provide pageNumber to read a specific page within that requested full/range scope. " +
+                    "Always returns content plus pagination metadata. If this turn already staged an edit to the chapter, returns the latest staged body for this turn."),
         };
 
         if (mode == EditorChatToolMode.ContestPreparation)
@@ -103,10 +110,10 @@ public sealed class EditorChatTools(
             description:
                 "Edit a chapter using line-based semantics. " +
                 "To Append: Leave both startLine and endLine null: appends `content` to the end of the chapter. " +
-                "To Insert: Provide only startLine Leave endLine null: insert `content` BEFORE that line (1-based). " +
-                "To Replace: Provide both startLine and endLine: replace the inclusive range of existing numbered lines with `content`" +
+                "To Insert: Provide only startLine and leave endLine null: insert `content` BEFORE that line (1-based). " +
+                "To Replace: Provide both startLine and endLine: replace the inclusive range of existing numbered lines with `content`. " +
                 "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
-                "`content` should not contain line numbers. "+
+                "`content` should not contain line numbers. " +
                 "Returns the new line-numbered body and a short change summary."));
 
         var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
@@ -185,8 +192,14 @@ public sealed class EditorChatTools(
         var sb = new StringBuilder();
         foreach (var chapter in list)
         {
+            var lineCount = ChapterFormatting.SplitLines(chapter.Body).Count;
+            var pageCount = CountReadChapterPages(chapter.Body, EffectiveReadChapterPageMaxChars());
+
             sb.Append(chapter.Order + 1).Append(". ").Append(chapter.Title)
-              .Append(" - id=").Append(chapter.Id);
+              .Append(" - id=").Append(chapter.Id)
+              .Append(" - lines=").Append(lineCount)
+              .Append(" - bodyChars=").Append(chapter.Body.Length)
+              .Append(" - readChapterPages=").Append(pageCount);
             if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
                 sb.Append(" - ").Append(chapter.Synopsis);
             sb.Append('\n');
@@ -318,18 +331,290 @@ public sealed class EditorChatTools(
         }));
     }
 
-    private async Task<string> ReadChapterAsync(EditorChatContext ctx, Guid chapterId)
+    private async Task<string> ReadChapterAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        int? startLine,
+        int? endLine,
+        int? pageNumber)
     {
         var chapter = await chapters.GetAsync(chapterId);
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
         var body = chapter.Body;
+        var source = "persisted";
         if (ctx.ReviewEdits && ctx.EditorStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
+        {
             body = draftBody;
+            source = "stagedDraft";
+        }
 
-        var numbered = ChapterFormatting.WithLineNumbers(body);
-        return $"# {chapter.Title}\n\n{(numbered.Length == 0 ? "(empty)" : numbered)}";
+        var requestedPageNumber = pageNumber ?? 1;
+        if (requestedPageNumber < 1)
+            return "Error: pageNumber must be 1 or greater.";
+
+        var pageMaxChars = EffectiveReadChapterPageMaxChars();
+        var lines = ChapterFormatting.SplitLines(body);
+        var rangeError = TryResolveReadChapterRange(lines, startLine, endLine, out var range);
+        if (rangeError is not null)
+            return rangeError;
+
+        if (lines.Count == 0)
+        {
+            if (requestedPageNumber > 1)
+                return "Error: pageNumber 1 is the only page available for an empty chapter.";
+
+            return JsonSerializer.Serialize(new
+            {
+                chapter = new
+                {
+                    id = chapter.Id,
+                    chapter.Title,
+                    chapter.Synopsis,
+                    source,
+                },
+                request = new
+                {
+                    startLine,
+                    endLine,
+                    pageNumber = requestedPageNumber,
+                },
+                range = new
+                {
+                    rangeStartLine = 0,
+                    rangeEndLine = 0,
+                    rangeLineCount = 0,
+                    totalChapterLines = 0,
+                },
+                pagination = new
+                {
+                    pageStartLine = 0,
+                    pageEndLine = 0,
+                    pageStartColumn = 0,
+                    pageEndColumn = 0,
+                    currentPage = 1,
+                    pageCount = 1,
+                    pageMaxChars,
+                    contentCharCount = 7,
+                    hasPreviousPage = false,
+                    hasNextPage = false,
+                    previousPageNumber = (int?)null,
+                    nextPageNumber = (int?)null,
+                    startsInsideLine = false,
+                    endsInsideLine = false,
+                    containsPartialLine = false,
+                },
+                previousPageArguments = (object?)null,
+                nextPageArguments = (object?)null,
+                content = "(empty)",
+            });
+        }
+
+        var pages = BuildReadChapterPages(lines, range.StartLine, range.EndLine, pageMaxChars);
+        if (requestedPageNumber > pages.Count)
+            return $"Error: pageNumber {requestedPageNumber} is beyond the {pages.Count} page(s) available for lines {range.StartLine}-{range.EndLine}.";
+
+        var selectedPage = pages[requestedPageNumber - 1];
+        var lineNumberWidth = Math.Max(4, lines.Count.ToString().Length);
+        var content = FormatReadChapterPageContent(selectedPage, lineNumberWidth);
+
+        return JsonSerializer.Serialize(new
+        {
+            chapter = new
+            {
+                id = chapter.Id,
+                chapter.Title,
+                chapter.Synopsis,
+                source,
+            },
+            request = new
+            {
+                startLine,
+                endLine,
+                pageNumber = requestedPageNumber,
+            },
+            range = new
+            {
+                rangeStartLine = range.StartLine,
+                rangeEndLine = range.EndLine,
+                rangeLineCount = range.LineCount,
+                totalChapterLines = lines.Count,
+            },
+            pagination = new
+            {
+                pageStartLine = selectedPage.PageStartLine,
+                pageEndLine = selectedPage.PageEndLine,
+                pageStartColumn = selectedPage.PageStartColumn,
+                pageEndColumn = selectedPage.PageEndColumn,
+                currentPage = requestedPageNumber,
+                pageCount = pages.Count,
+                pageMaxChars,
+                contentCharCount = content.Length,
+                hasPreviousPage = requestedPageNumber > 1,
+                hasNextPage = requestedPageNumber < pages.Count,
+                previousPageNumber = requestedPageNumber > 1 ? requestedPageNumber - 1 : (int?)null,
+                nextPageNumber = requestedPageNumber < pages.Count ? requestedPageNumber + 1 : (int?)null,
+                startsInsideLine = selectedPage.StartsInsideLine,
+                endsInsideLine = selectedPage.EndsInsideLine,
+                containsPartialLine = selectedPage.ContainsPartialLine,
+            },
+            previousPageArguments = requestedPageNumber > 1
+                ? new { chapterId = chapter.Id, startLine = range.StartLine, endLine = range.EndLine, pageNumber = requestedPageNumber - 1 }
+                : null,
+            nextPageArguments = requestedPageNumber < pages.Count
+                ? new { chapterId = chapter.Id, startLine = range.StartLine, endLine = range.EndLine, pageNumber = requestedPageNumber + 1 }
+                : null,
+            content,
+        });
+    }
+
+    private int EffectiveReadChapterPageMaxChars() => Math.Max(256, editorOptions.Value.ReadChapterPageMaxChars);
+
+    private static int CountReadChapterPages(string body, int pageMaxChars)
+    {
+        var lines = ChapterFormatting.SplitLines(body);
+        return lines.Count == 0
+            ? 1
+            : BuildReadChapterPages(lines, 1, lines.Count, pageMaxChars).Count;
+    }
+
+    private static string? TryResolveReadChapterRange(
+        IReadOnlyList<string> lines,
+        int? startLine,
+        int? endLine,
+        out ReadChapterRange range)
+    {
+        range = new ReadChapterRange(0, 0, 0);
+
+        if (lines.Count == 0)
+        {
+            if (startLine is not null || endLine is not null)
+                return "Error: chapter is empty; no line range can be read.";
+
+            return null;
+        }
+
+        var start = startLine ?? 1;
+        var end = endLine ?? lines.Count;
+        if (start < 1) return "Error: startLine must be 1 or greater.";
+        if (end < 1) return "Error: endLine must be 1 or greater.";
+        if (start > end) return "Error: startLine must be less than or equal to endLine.";
+        if (start > lines.Count) return $"Error: startLine {start} is beyond the chapter's {lines.Count} lines.";
+
+        end = Math.Min(end, lines.Count);
+        range = new ReadChapterRange(start, end, end - start + 1);
+        return null;
+    }
+
+    private static List<ReadChapterPage> BuildReadChapterPages(
+        IReadOnlyList<string> lines,
+        int startLine,
+        int endLine,
+        int pageMaxChars)
+    {
+        var pages = new List<ReadChapterPage>();
+        var currentPage = new ReadChapterPage();
+        var lineNumberWidth = Math.Max(4, lines.Count.ToString().Length);
+        var prefixLength = lineNumberWidth + 2;
+
+        for (var lineNumber = startLine; lineNumber <= endLine; lineNumber++)
+        {
+            var text = lines[lineNumber - 1];
+            var fullLineLength = prefixLength + text.Length;
+            if (fullLineLength <= pageMaxChars)
+            {
+                var addLength = fullLineLength + (currentPage.Segments.Count == 0 ? 0 : 1);
+                if (currentPage.Segments.Count > 0 && currentPage.ContentCharCount + addLength > pageMaxChars)
+                {
+                    pages.Add(currentPage);
+                    currentPage = new ReadChapterPage();
+                }
+
+                currentPage.Add(new ReadChapterLineSegment(
+                    lineNumber,
+                    text,
+                    StartColumn: 1,
+                    EndColumn: text.Length,
+                    LineLength: text.Length,
+                    IsFullLine: true), lineNumberWidth);
+                continue;
+            }
+
+            if (currentPage.Segments.Count > 0)
+            {
+                pages.Add(currentPage);
+                currentPage = new ReadChapterPage();
+            }
+
+            var maxTextChars = Math.Max(1, pageMaxChars - prefixLength);
+            for (var offset = 0; offset < text.Length; offset += maxTextChars)
+            {
+                var length = Math.Min(maxTextChars, text.Length - offset);
+                var segment = new ReadChapterLineSegment(
+                    lineNumber,
+                    text.Substring(offset, length),
+                    StartColumn: offset + 1,
+                    EndColumn: offset + length,
+                    LineLength: text.Length,
+                    IsFullLine: false);
+
+                var partialPage = new ReadChapterPage();
+                partialPage.Add(segment, lineNumberWidth);
+                pages.Add(partialPage);
+            }
+        }
+
+        if (currentPage.Segments.Count > 0)
+            pages.Add(currentPage);
+
+        return pages;
+    }
+
+    private static string FormatReadChapterPageContent(ReadChapterPage page, int lineNumberWidth)
+    {
+        var sb = new StringBuilder(page.ContentCharCount);
+        for (var i = 0; i < page.Segments.Count; i++)
+        {
+            var segment = page.Segments[i];
+            sb.Append(segment.LineNumber.ToString().PadLeft(lineNumberWidth, '0'));
+            sb.Append(": ");
+            sb.Append(segment.Text);
+            if (i < page.Segments.Count - 1) sb.Append('\n');
+        }
+
+        return sb.ToString();
+    }
+
+    private sealed record ReadChapterRange(int StartLine, int EndLine, int LineCount);
+
+    private sealed record ReadChapterLineSegment(
+        int LineNumber,
+        string Text,
+        int StartColumn,
+        int EndColumn,
+        int LineLength,
+        bool IsFullLine);
+
+    private sealed class ReadChapterPage
+    {
+        public List<ReadChapterLineSegment> Segments { get; } = [];
+        public int ContentCharCount { get; private set; }
+
+        public int PageStartLine => Segments[0].LineNumber;
+        public int PageEndLine => Segments[^1].LineNumber;
+        public int PageStartColumn => Segments[0].StartColumn;
+        public int PageEndColumn => Segments[^1].EndColumn;
+        public bool StartsInsideLine => Segments[0].StartColumn > 1;
+        public bool EndsInsideLine => Segments[^1].EndColumn < Segments[^1].LineLength;
+        public bool ContainsPartialLine => Segments.Any(segment => !segment.IsFullLine);
+
+        public void Add(ReadChapterLineSegment segment, int lineNumberWidth)
+        {
+            if (Segments.Count > 0) ContentCharCount++;
+            ContentCharCount += lineNumberWidth + 2 + segment.Text.Length;
+            Segments.Add(segment);
+        }
     }
 
     private async Task<string> EditChapterAsync(

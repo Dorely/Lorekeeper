@@ -8,7 +8,7 @@ public interface IEditorContestService
     Task SetContestModeEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default);
     Task SetContestProviderAsync(Guid projectId, int slot, int? providerId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<ContestBatch>> ListContestHistoryAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task DiscardInactiveContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default);
     IAsyncEnumerable<EditorContestRunUpdate> StartContestAsync(
         Guid projectId,
         Guid conversationId,

@@ -1,14 +1,31 @@
-.outline-chat-review,
+.outline-chat-pending,
 .outline-chat-reset {
     padding: 0;
     font-size: 0.85rem;
+}
+
+.outline-chat-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 0.45rem 0.5rem;
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+    background: var(--bs-body-bg, #fff);
+}
+
+.outline-chat-controls-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.75rem;
+    min-height: 1.8rem;
 }
 
 .outline-chat-approval {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    min-height: 2.25rem;
+    min-height: 1.8rem;
     margin: 0;
     color: var(--bs-secondary-color, #6c757d);
     font-size: 0.82rem;
@@ -17,4 +34,9 @@
 
 .outline-chat-approval input {
     margin: 0;
+}
+
+.outline-chat-pending {
+    min-height: 1.8rem;
+    white-space: nowrap;
 }
