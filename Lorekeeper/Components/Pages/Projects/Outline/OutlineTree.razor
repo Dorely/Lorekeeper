@@ -28,20 +28,21 @@
                 var actIdx = i;
                 var act = Acts[actIdx];
                 var actChapters = ChaptersByAct.TryGetValue(act.Id, out var list) ? list : [];
-                <div class="outline-act @(_draggingActId == act.Id ? "dragging" : "")"
-                     draggable="true"
+                 <div class="outline-act @(_draggingActId == act.Id ? "dragging" : "")"
                      @key="act.Id"
-                     @ondragstart="() => OnActDragStart(act.Id)"
                      @ondragover:preventDefault="true"
                      @ondragover="() => OnActDragOver(act.Id)"
-                     @ondrop="OnActDropAsync"
-                     @ondragend="OnActDragEnd">
+                     @ondrop="OnActDropAsync">
                     <div class="outline-act-header">
                         <button type="button" class="outline-collapse"
                                 @onclick="() => ToggleAct(act.Id)">
                             <span class="caret">@(IsCollapsed(act.Id) ? "▸" : "▾")</span>
                         </button>
-                        <div class="outline-handle" title="Drag to reorder act">☰</div>
+                            <div class="outline-handle"
+                                draggable="true"
+                                title="Drag to reorder act"
+                                @ondragstart="() => OnActDragStart(act.Id)"
+                                @ondragend="OnActDragEnd">☰</div>
                         <div class="outline-act-order">Act @(actIdx + 1)</div>
                         <div class="outline-act-fields">
                             <input class="form-control form-control-sm outline-act-title"
@@ -384,13 +385,10 @@
             var beatCount = _beatCounts.TryGetValue(ch.Id, out var n) ? n : 0;
             var beatsOpen = IsBeatsOpen(ch.Id);
             <div class="outline-chapter-wrap" @key="ch.Id">
-            <div class="outline-chapter @(isFocus ? "focus" : "") @(isDragging ? "dragging" : "")"
-                 draggable="true"
-                 @ondragstart="() => OnChapterDragStart(ch.Id, actId)"
-                 @ondragover:preventDefault="true"
-                 @ondragover="() => OnChapterDragOver(ch.Id, actId, bucket)"
-                 @ondrop="() => OnChapterDropAsync(actId, bucket)"
-                 @ondragend="OnChapterDragEnd">
+              <div class="outline-chapter @(isFocus ? "focus" : "") @(isDragging ? "dragging" : "")"
+                  @ondragover:preventDefault="true"
+                  @ondragover="() => OnChapterDragOver(ch.Id, actId, bucket)"
+                  @ondrop="() => OnChapterDropAsync(actId, bucket)">
                 <button type="button" class="outline-collapse outline-chapter-beats-toggle"
                         title="@(beatsOpen ? "Hide beats" : "Show beats")"
                         @onclick="() => ToggleBeats(ch.Id)">
@@ -400,7 +398,11 @@
                         <span class="outline-chapter-beat-count" title="@beatCount beat(s)">@beatCount</span>
                     }
                 </button>
-                <div class="outline-handle" title="Drag to reorder">☰</div>
+                 <div class="outline-handle"
+                     draggable="true"
+                     title="Drag to reorder"
+                     @ondragstart="() => OnChapterDragStart(ch.Id, actId)"
+                     @ondragend="OnChapterDragEnd">☰</div>
                 <div class="outline-chapter-order">@(idx + 1)</div>
                 <div class="outline-chapter-fields">
                     <input class="form-control form-control-sm outline-chapter-title"

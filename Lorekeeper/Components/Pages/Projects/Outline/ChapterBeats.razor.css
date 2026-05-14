@@ -43,6 +43,10 @@
     line-height: 1.6;
 }
 
+.chapter-beat-handle:active {
+    cursor: grabbing;
+}
+
 .chapter-beat-order {
     color: var(--bs-secondary-color);
     font-variant-numeric: tabular-nums;

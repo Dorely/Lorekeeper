@@ -28,14 +28,15 @@
                     var isEditing = _editingId == b.Id;
                     var isDragging = _draggingId == b.Id;
                     <li class="chapter-beat @(isDragging ? "dragging" : "") @(isEditing ? "editing" : "")"
-                        draggable="true"
                         @key="b.Id"
-                        @ondragstart="() => OnDragStart(b.Id)"
                         @ondragover:preventDefault="true"
                         @ondragover="() => OnDragOver(b.Id)"
-                        @ondrop="OnDropAsync"
-                        @ondragend="OnDragEnd">
-                        <div class="chapter-beat-handle" title="Drag to reorder">☰</div>
+                        @ondrop="OnDropAsync">
+                        <div class="chapter-beat-handle"
+                             draggable="true"
+                             title="Drag to reorder"
+                             @ondragstart="() => OnDragStart(b.Id)"
+                             @ondragend="OnDragEnd">☰</div>
                         <div class="chapter-beat-order">@(idx + 1)</div>
                         <div class="chapter-beat-body">
                             @if (isEditing)

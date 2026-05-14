@@ -61,6 +61,10 @@
     align-self: center;
 }
 
+.outline-handle:active {
+    cursor: grabbing;
+}
+
 .outline-act-order {
     align-self: center;
     font-weight: 600;
