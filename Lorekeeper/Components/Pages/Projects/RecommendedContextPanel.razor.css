@@ -27,6 +27,23 @@
     background: var(--bs-body-bg, #fff);
 }
 
+.recommended-open {
+    display: block;
+    margin: -0.2rem -0.2rem 0 -0.2rem;
+    padding: 0.2rem;
+    border-radius: 0.3rem;
+    cursor: pointer;
+    outline: none;
+}
+
+.recommended-open:hover {
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.recommended-open:focus-visible {
+    box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.25);
+}
+
 .recommended-item-head {
     display: flex;
     align-items: flex-start;

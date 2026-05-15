@@ -182,6 +182,7 @@ public sealed class EditorChatService(
                 currentChapterId,
                 OnToolMutated,
                 project.AiChangeApprovalEnabled,
+                autoPinReadEntities: !contestModeEnabled,
                 outlineStaging,
                 editorStaging);
             aiTools = tools.Build(editorContext, contestModeEnabled ? EditorChatToolMode.ContestPreparation : EditorChatToolMode.Normal);
@@ -205,7 +206,7 @@ public sealed class EditorChatService(
 
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
-        messages.AddRange(history.Select(ToChatMessage));
+        messages.AddRange(BuildModelHistory(history));
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -518,13 +519,22 @@ public sealed class EditorChatService(
         }
     }
 
-    private static ChatMessage ToChatMessage(EditorMessage message) => message.Role switch
+    private static IEnumerable<ChatMessage> BuildModelHistory(IEnumerable<EditorMessage> history)
     {
-        EditorMessageRole.System => new ChatMessage(ChatRole.System, message.Content),
+        foreach (var message in history)
+        {
+            var chatMessage = ToModelHistoryMessage(message);
+            if (chatMessage is not null)
+                yield return chatMessage;
+        }
+    }
+
+    private static ChatMessage? ToModelHistoryMessage(EditorMessage message) => message.Role switch
+    {
+        EditorMessageRole.System when !string.IsNullOrWhiteSpace(message.Content) => new ChatMessage(ChatRole.System, message.Content),
         EditorMessageRole.User => new ChatMessage(ChatRole.User, message.Content),
-        EditorMessageRole.Assistant => BuildAssistantReplay(message),
-        EditorMessageRole.Tool => new ChatMessage(ChatRole.Tool, [new FunctionResultContent(message.ToolCallId ?? string.Empty, message.Content)]),
-        _ => new ChatMessage(ChatRole.User, message.Content),
+        EditorMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new ChatMessage(ChatRole.Assistant, message.Content),
+        _ => null,
     };
 
     private static IReadOnlyList<ContestChatMessageSnapshot> BuildContestSnapshotMessages(
@@ -591,16 +601,6 @@ public sealed class EditorChatService(
         return sb.ToString().Trim();
     }
 
-    private static ChatMessage BuildAssistantReplay(EditorMessage message)
-    {
-        var calls = ReadPersistedToolCalls(message.ToolCallsJson);
-        var contents = calls.Count == 0
-            ? BuildTextOnlyAssistantContents(message.Content)
-            : BuildAssistantToolCallContents(calls);
-
-        return new ChatMessage(ChatRole.Assistant, contents);
-    }
-
     private int EffectiveMaxToolResultCharsForModel() => Math.Max(1000, editorOptions.Value.MaxToolResultCharsForModel);
 
     private static string BuildToolResultForModel(string toolName, string result, int maxToolResultCharsForModel)
@@ -627,65 +627,8 @@ public sealed class EditorChatService(
             + "\n\n" + message;
     }
 
-    private static List<AIContent> BuildTextOnlyAssistantContents(string text)
-    {
-        var contents = new List<AIContent>();
-        if (!string.IsNullOrEmpty(text)) contents.Add(new TextContent(text));
-        if (contents.Count == 0) contents.Add(new TextContent(string.Empty));
-        return contents;
-    }
-
-    private static List<AIContent> BuildAssistantContents(string text, IReadOnlyList<PersistedToolCall> calls)
-    {
-        if (calls.Count == 0) return BuildTextOnlyAssistantContents(text);
-
-        if (calls.Any(call => call.TextOffset is null))
-        {
-            var fallbackContents = BuildTextOnlyAssistantContents(text);
-            foreach (var call in calls)
-                fallbackContents.Add(ToFunctionCallContent(call));
-            return fallbackContents;
-        }
-
-        var contents = new List<AIContent>();
-        var cursor = 0;
-        foreach (var item in calls
-            .Select((call, index) => new { Call = call, Index = index })
-            .OrderBy(item => item.Call.TextOffset!.Value)
-            .ThenBy(item => item.Index))
-        {
-            var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, text.Length);
-            if (offset > cursor)
-            {
-                contents.Add(new TextContent(text[cursor..offset]));
-                cursor = offset;
-            }
-            contents.Add(ToFunctionCallContent(item.Call));
-        }
-
-        if (cursor < text.Length)
-            contents.Add(new TextContent(text[cursor..]));
-
-        if (contents.Count == 0) contents.Add(new TextContent(string.Empty));
-        return contents;
-    }
-
     private static List<AIContent> BuildAssistantToolCallContents(IReadOnlyList<PersistedToolCall> calls) =>
         calls.Select(call => (AIContent)ToFunctionCallContent(call)).ToList();
-
-    private static List<PersistedToolCall> ReadPersistedToolCalls(string toolCallsJson)
-    {
-        if (string.IsNullOrWhiteSpace(toolCallsJson) || toolCallsJson == "[]") return [];
-
-        try
-        {
-            return JsonSerializer.Deserialize<List<PersistedToolCall>>(toolCallsJson) ?? [];
-        }
-        catch
-        {
-            return [];
-        }
-    }
 
     private static FunctionCallContent ToFunctionCallContent(PersistedToolCall call)
     {

@@ -1,0 +1,285 @@
+.context-detail-modal .modal-dialog {
+    max-width: min(72rem, calc(100vw - 2rem));
+}
+
+.context-detail-title-wrap {
+    min-width: 0;
+}
+
+.context-detail-kicker {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.7rem;
+}
+
+.context-detail-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-width: 0;
+}
+
+.context-detail-reasons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.75rem;
+}
+
+.context-detail-reasons span,
+.context-detail-link-badge {
+    border: 1px solid var(--bs-border-color-translucent, #e9ecef);
+    border-radius: 999px;
+    padding: 0.08rem 0.45rem;
+    font-size: 0.72rem;
+    color: var(--bs-secondary-color, #6c757d);
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.context-detail-alert {
+    font-size: 0.85rem;
+}
+
+.context-detail-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.5rem;
+}
+
+.context-detail-meta div,
+.context-detail-key-value {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid var(--bs-border-color-translucent, #e9ecef);
+    border-radius: 0.35rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.context-detail-meta span,
+.context-detail-key-value span {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.context-detail-meta strong,
+.context-detail-key-value strong {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.context-detail-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.context-detail-section h6,
+.context-detail-ingest h6 {
+    margin: 0;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.context-detail-section p,
+.context-detail-list p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.context-detail-text {
+    margin: 0;
+    max-height: min(38rem, 58vh);
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+    border: 1px solid var(--bs-border-color-translucent, #e9ecef);
+    border-radius: 0.35rem;
+    padding: 0.65rem;
+}
+
+.context-detail-key-values {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: 0.45rem;
+}
+
+.context-detail-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 0;
+    padding-left: 1.25rem;
+}
+
+.context-detail-list li {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.context-detail-field {
+    min-width: 0;
+}
+
+.context-detail-props-edit {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.context-detail-prop-row {
+    display: grid;
+    grid-template-columns: minmax(7rem, 12rem) minmax(0, 1fr) auto;
+    gap: 0.4rem;
+    align-items: start;
+}
+
+.context-detail-prop-row textarea {
+    resize: vertical;
+}
+
+.context-detail-prop-remove {
+    align-self: start;
+    padding-top: 0.25rem;
+}
+
+.context-detail-add-prop {
+    align-self: flex-start;
+}
+
+.context-detail-links {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.context-detail-link {
+    display: grid;
+    grid-template-columns: 1.75rem auto minmax(0, 1fr) auto auto;
+    gap: 0.5rem;
+    align-items: baseline;
+    padding: 0.35rem 0.45rem;
+    border-radius: 0.35rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.context-detail-link-dir {
+    font-weight: 700;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.context-detail-link-edge {
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.82rem;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.context-detail-link-other {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.context-detail-link-observations {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
+}
+
+.context-detail-ingest {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.context-detail-ingest-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.context-detail-ingest-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.55rem;
+    border: 1px solid rgba(13, 202, 240, 0.35);
+    border-radius: 0.4rem;
+    background: rgba(13, 202, 240, 0.06);
+    font-size: 0.86rem;
+}
+
+.context-detail-ingest-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.context-detail-ingest-head span,
+.context-detail-ingest-line span,
+.context-detail-ingest-notes {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.context-detail-ingest-item p,
+.context-detail-ingest-item blockquote {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.context-detail-ingest-item blockquote {
+    padding-left: 0.6rem;
+    border-left: 3px solid rgba(13, 202, 240, 0.45);
+}
+
+.context-detail-ingest-line {
+    display: grid;
+    grid-template-columns: minmax(6rem, 9rem) minmax(0, 1fr);
+    gap: 0.35rem;
+}
+
+.context-detail-ingest-line strong {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.context-detail-edit-textarea {
+    min-height: min(34rem, 56vh);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.82rem;
+    resize: vertical;
+}
+
+@media (max-width: 720px) {
+    .context-detail-modal .modal-dialog {
+        max-width: calc(100vw - 1rem);
+        margin: 0.5rem;
+    }
+
+    .context-detail-prop-row,
+    .context-detail-link {
+        grid-template-columns: 1fr;
+    }
+
+    .context-detail-link-observations {
+        grid-column: auto;
+    }
+}

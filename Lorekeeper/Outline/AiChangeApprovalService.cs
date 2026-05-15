@@ -26,6 +26,35 @@ public sealed class AiChangeApprovalService(
     public Task<AiChangeBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>
         changes.GetBatchAsync(batchId, cancellationToken);
 
+    public async Task SaveReviewDraftAsync(Guid changeId, string? draftAfterJson, string? reviewStateJson, CancellationToken cancellationToken = default)
+    {
+        var change = await changes.GetChangeAsync(changeId, cancellationToken)
+            ?? throw new InvalidOperationException($"AI change {changeId} not found.");
+        if (change.Status != AiChangeStatus.Pending)
+            throw new InvalidOperationException("Only pending AI changes can be edited in review.");
+
+        if (string.IsNullOrWhiteSpace(draftAfterJson))
+        {
+            change.DraftAfterJson = null;
+            change.ReviewStateJson = null;
+        }
+        else
+        {
+            if (!AiChangeReviewDrafts.TryValidateDraftAfterJson(change, draftAfterJson, out var error))
+                throw new InvalidOperationException(error ?? "The review draft is not valid for this AI change.");
+
+            change.DraftAfterJson = draftAfterJson;
+            change.ReviewStateJson = string.IsNullOrWhiteSpace(reviewStateJson) ? null : reviewStateJson;
+        }
+
+        change.UpdatedAt = DateTime.UtcNow;
+        changes.UpdateChange(change);
+        await changes.SaveChangesAsync(cancellationToken);
+    }
+
+    public Task ClearReviewDraftAsync(Guid changeId, CancellationToken cancellationToken = default) =>
+        SaveReviewDraftAsync(changeId, draftAfterJson: null, reviewStateJson: null, cancellationToken);
+
     public async Task ApplyBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
     {
         var batch = await changes.GetBatchAsync(batchId, cancellationToken)
@@ -130,17 +159,18 @@ public sealed class AiChangeApprovalService(
 
     private async Task ApplyStoredToolChangeAsync(Guid projectId, AiChange change, CancellationToken cancellationToken)
     {
+        var afterJson = AiChangeReviewDrafts.EffectiveAfterJson(change);
         switch (change.ToolName)
         {
             case "create_act":
             {
-                var after = ReadRequired<OutlineActChange>(change.AfterJson);
+                var after = ReadRequired<OutlineActChange>(afterJson);
                 await acts.CreateAsync(projectId, after.Title, after.Synopsis, after.Id, cancellationToken);
                 break;
             }
             case "update_act":
             {
-                var after = ReadRequired<OutlineActChange>(change.AfterJson);
+                var after = ReadRequired<OutlineActChange>(afterJson);
                 await acts.UpdateAsync(after.Id, after.Title, after.Synopsis, cancellationToken);
                 break;
             }
@@ -149,25 +179,25 @@ public sealed class AiChangeApprovalService(
                 break;
             case "reorder_acts":
             {
-                var after = ReadRequired<OutlineReorderChange>(change.AfterJson);
+                var after = ReadRequired<OutlineReorderChange>(afterJson);
                 await acts.ReorderAsync(projectId, after.OrderedIds, cancellationToken);
                 break;
             }
             case "create_chapter":
             {
-                var after = ReadRequired<OutlineChapterChange>(change.AfterJson);
+                var after = ReadRequired<OutlineChapterChange>(afterJson);
                 await chapters.CreateAsync(projectId, after.ActId, after.Title, after.Synopsis, after.Id, cancellationToken);
                 break;
             }
             case "update_chapter":
             {
-                var after = ReadRequired<OutlineChapterChange>(change.AfterJson);
+                var after = ReadRequired<OutlineChapterChange>(afterJson);
                 await chapters.UpdateAsync(after.Id, after.Title, body: null, after.Synopsis, new ChapterActAssignment(after.ActId), cancellationToken);
                 break;
             }
             case "edit_chapter":
             {
-                var after = ReadRequired<ChapterBodyChange>(change.AfterJson);
+                var after = ReadRequired<ChapterBodyChange>(afterJson);
                 await chapters.UpdateAsync(after.Id, body: after.Body, cancellationToken: cancellationToken);
                 break;
             }
@@ -176,20 +206,20 @@ public sealed class AiChangeApprovalService(
                 break;
             case "reorder_chapters":
             {
-                var after = ReadRequired<OutlineReorderChange>(change.AfterJson);
+                var after = ReadRequired<OutlineReorderChange>(afterJson);
                 await chapters.ReorderAsync(projectId, after.ParentId, after.OrderedIds, cancellationToken);
                 break;
             }
             case "create_entity":
             {
-                var after = ReadRequired<OutlineEntityChange>(change.AfterJson);
+                var after = ReadRequired<OutlineEntityChange>(afterJson);
                 await entities.CreateAsync(projectId, after.Type, after.Name, after.Properties, after.ParentId, after.Order, after.Id, cancellationToken);
                 break;
             }
             case "update_entity":
             {
                 var before = ReadOptional<OutlineEntityChange>(change.BeforeJson);
-                var after = ReadRequired<OutlineEntityChange>(change.AfterJson);
+                var after = ReadRequired<OutlineEntityChange>(afterJson);
                 var propertiesToRemove = before?.Properties.Keys
                     .Where(key => !after.Properties.ContainsKey(key))
                     .ToArray();
@@ -201,13 +231,13 @@ public sealed class AiChangeApprovalService(
                 break;
             case "reorder_entities":
             {
-                var after = ReadRequired<OutlineEntityReorderChange>(change.AfterJson);
+                var after = ReadRequired<OutlineEntityReorderChange>(afterJson);
                 await entities.ReorderAsync(projectId, after.Type, after.ParentId, after.OrderedIds, cancellationToken);
                 break;
             }
             case "link_entities":
             {
-                var after = ReadRequired<OutlineEntityLinkChange>(change.AfterJson);
+                var after = ReadRequired<OutlineEntityLinkChange>(afterJson);
                 await entities.LinkAsync(projectId, after.FromId, after.ToId, after.EdgeType, after.Properties, cancellationToken);
                 break;
             }

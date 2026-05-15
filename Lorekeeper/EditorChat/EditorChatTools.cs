@@ -7,7 +7,6 @@ using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
-using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
@@ -20,7 +19,6 @@ public sealed class EditorChatTools(
     IProjectFactService projectFacts,
     IVectorStore vectors,
     IEmbeddingService embeddings,
-    IProjectRepository projects,
     IEditorContextService editorContext,
     IEntityRelationContextService entityRelations,
     OutlineCollaborationTools outlineTools,
@@ -47,11 +45,6 @@ public sealed class EditorChatTools(
         var tools = new List<AITool>
         {
             AIFunctionFactory.Create(
-                method: () => ListContextAsync(context),
-                name: "list_context",
-                description: "Read the currently assembled editor context exactly as the model sees it, including enabled outline, facts, writing samples, and selected entities."),
-
-            AIFunctionFactory.Create(
                 method: (string query, int topK = 8) => VectorSearchAsync(context, query, topK),
                 name: "vector_search",
                 description: "Semantic search over indexed chapters and lore for the current project. Returns the top matching snippets with their source metadata."),
@@ -64,7 +57,7 @@ public sealed class EditorChatTools(
             AIFunctionFactory.Create(
                 method: () => ListProjectFactsAsync(context),
                 name: "list_project_facts",
-                description: "List project-level facts and their linked graph entities as JSON."),
+                description: "Read project-level fact ids, keys/values, linked entity ids, and relation context as JSON. The fact text is already in the Context Feed; use this for structured ids, linked-entity grounding, or fact-change verification."),
 
             AIFunctionFactory.Create(
                 method: (string query, int topK = 10) => SearchEntitiesAsync(context, query, topK),
@@ -74,7 +67,7 @@ public sealed class EditorChatTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ReadEntityAsync(context, entityId),
                 name: "read_entity",
-                description: "Read one graph entity by id, including properties and adjacent links."),
+                description: "Read one graph entity by id, including properties and adjacent links. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
@@ -124,18 +117,6 @@ public sealed class EditorChatTools(
         }
 
         return tools;
-    }
-
-    private async Task<string> ListContextAsync(EditorChatContext ctx)
-    {
-        var project = await projects.GetByIdAsync(ctx.ProjectId)
-            ?? throw new InvalidOperationException($"Project {ctx.ProjectId} not found.");
-        Chapter? currentChapter = null;
-        if (ctx.CurrentChapterId is { } chapterId)
-            currentChapter = await chapters.GetAsync(chapterId);
-
-        var assembly = await editorContext.BuildAsync(project, currentChapter);
-        return assembly.Assemble();
     }
 
     private async Task<string> VectorSearchAsync(
@@ -272,6 +253,19 @@ public sealed class EditorChatTools(
         if (entity is null)
             return $"Error: entity {entityId} not found in this project.";
 
+        var addedToContextFeed = false;
+        if (ctx.AutoPinReadEntities && ctx.CurrentChapterId is { } currentChapterId && IsSearchableEntityType(entity.Type))
+        {
+            await editorContext.SetItemIncludedAsync(
+                ctx.ProjectId,
+                currentChapterId,
+                ContextItemKind.Entity,
+                EditorContextKeys.Entity(entity.Id),
+                isIncluded: true);
+            ctx.OnMutated();
+            addedToContextFeed = true;
+        }
+
         var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
         var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, _detailEntityRelationOptions);
         return JsonSerializer.Serialize(new
@@ -281,6 +275,7 @@ public sealed class EditorChatTools(
             name = entity.Name,
             order = entity.Order,
             parentId = entity.ParentId,
+            addedToContextFeed,
             properties = entity.Properties,
             links = links.Select(link => new
             {

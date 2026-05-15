@@ -282,6 +282,17 @@
     font-weight: 700;
 }
 
+.pending-ai-draft-badge {
+    flex: 0 0 auto;
+    border-radius: 999px;
+    padding: 0.15rem 0.5rem;
+    background: rgba(13, 110, 253, 0.12);
+    color: var(--bs-primary, #0d6efd);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
 .pending-ai-diff-added {
     color: var(--bs-success, #198754);
 }
@@ -294,14 +305,37 @@
     border-top: 1px solid var(--bs-border-color, #dee2e6);
 }
 
-.pending-ai-diff-field {
+.pending-ai-diff-field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
     padding: 0.4rem 0.75rem;
     border-bottom: 1px solid var(--bs-border-color, #dee2e6);
     background: rgba(0, 0, 0, 0.025);
+}
+
+.pending-ai-diff-field {
     color: var(--bs-secondary-color, #6c757d);
     font-family: var(--bs-font-monospace, monospace);
     font-size: 0.78rem;
     font-weight: 700;
+}
+
+.pending-ai-field-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.pending-ai-field-actions .btn,
+.pending-ai-diff-line-actions .btn,
+.pending-ai-split-line-actions .btn {
+    --bs-btn-padding-y: 0.08rem;
+    --bs-btn-padding-x: 0.35rem;
+    --bs-btn-font-size: 0.7rem;
+    line-height: 1.25;
 }
 
 .pending-ai-diff-empty {
@@ -323,7 +357,7 @@
 
 .pending-ai-diff-row {
     display: grid;
-    grid-template-columns: 3.25rem 3.25rem 1.45rem minmax(0, 1fr);
+    grid-template-columns: 3.25rem 3.25rem 1.45rem minmax(0, 1fr) 5.75rem;
     min-width: 0;
     border-top: 1px solid rgba(0, 0, 0, 0.045);
     font-family: var(--bs-font-monospace, monospace);
@@ -345,7 +379,8 @@
 
 .pending-ai-diff-line-number,
 .pending-ai-diff-marker,
-.pending-ai-diff-line-text {
+.pending-ai-diff-line-text,
+.pending-ai-diff-line-actions {
     padding: 0.18rem 0.45rem;
 }
 
@@ -376,6 +411,35 @@
     overflow-wrap: anywhere;
 }
 
+.pending-ai-diff-line-actions {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    min-width: 0;
+}
+
+.pending-ai-line-editor {
+    display: block;
+    width: 100%;
+    min-height: 1.75rem;
+    margin: 0;
+    padding: 0.1rem 0.25rem;
+    border: 1px solid rgba(25, 135, 84, 0.32);
+    border-radius: 0.25rem;
+    background: rgba(255, 255, 255, 0.78);
+    color: inherit;
+    font: inherit;
+    line-height: 1.35;
+    resize: vertical;
+    white-space: pre-wrap;
+}
+
+.pending-ai-line-editor:focus {
+    border-color: var(--bs-primary, #0d6efd);
+    box-shadow: 0 0 0 0.12rem rgba(13, 110, 253, 0.14);
+    outline: none;
+}
+
 .pending-ai-diff-segment.added,
 .pending-ai-diff-segment.removed {
     border-radius: 0.18rem;
@@ -396,7 +460,7 @@
 
 .pending-ai-split-row {
     display: grid;
-    grid-template-columns: 3.25rem 1.45rem minmax(13rem, 1fr) 3.25rem 1.45rem minmax(13rem, 1fr);
+    grid-template-columns: 3.25rem 1.45rem minmax(13rem, 1fr) 3.25rem 1.45rem minmax(13rem, 1fr) 6rem;
     min-width: 0;
     border-top: 1px solid rgba(0, 0, 0, 0.045);
     font-family: var(--bs-font-monospace, monospace);
@@ -406,7 +470,8 @@
 
 .pending-ai-split-line-number,
 .pending-ai-split-marker,
-.pending-ai-split-line-text {
+.pending-ai-split-line-text,
+.pending-ai-split-line-actions {
     padding: 0.18rem 0.45rem;
 }
 
@@ -427,6 +492,15 @@
     min-width: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+}
+
+.pending-ai-split-line-actions {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    min-width: 0;
 }
 
 .pending-ai-split-line-text.old {
@@ -511,7 +585,7 @@
     }
 
     .pending-ai-diff-row {
-        grid-template-columns: 2.75rem 2.75rem 1.25rem minmax(0, 1fr);
+        grid-template-columns: 2.75rem 2.75rem 1.25rem minmax(0, 1fr) 5.35rem;
         font-size: 0.74rem;
     }
 
@@ -520,7 +594,7 @@
     }
 
     .pending-ai-split-row {
-        grid-template-columns: 2.75rem 1.25rem minmax(11rem, 1fr) 2.75rem 1.25rem minmax(11rem, 1fr);
+        grid-template-columns: 2.75rem 1.25rem minmax(11rem, 1fr) 2.75rem 1.25rem minmax(11rem, 1fr) 5.6rem;
         font-size: 0.74rem;
     }
 

@@ -1,0 +1,925 @@
+@using Lorekeeper.Chapters
+@using Lorekeeper.Context
+@using Lorekeeper.Ingest
+@using Lorekeeper.Models
+@using Lorekeeper.Outline
+@using Lorekeeper.Persistence.Repositories
+@using Lorekeeper.Projects
+@inject IEntityService Entities
+@inject IChapterService Chapters
+@inject IActService Acts
+@inject IIngestRepository Ingest
+@inject IProjectService Projects
+
+@if (IsOpen && CurrentKind is not null)
+{
+    <div class="modal-backdrop fade show" @onclick="CloseAsync"></div>
+    <div class="modal d-block context-detail-modal" tabindex="-1" role="dialog" aria-modal="true" @onclick="CloseAsync">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div class="context-detail-title-wrap">
+                        <div class="text-muted small context-detail-kicker">@HeaderKicker</div>
+                        <h5 class="modal-title">@HeaderTitle</h5>
+                    </div>
+                    <button type="button" class="btn-close" @onclick="CloseAsync" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    @if (DetailReasons().Any())
+                    {
+                        <div class="context-detail-reasons">
+                            @foreach (var reason in DetailReasons())
+                            {
+                                <span>@reason</span>
+                            }
+                        </div>
+                    }
+
+                    @if (_loading)
+                    {
+                        <p class="text-muted small mb-0"><em>Loading...</em></p>
+                    }
+                    else
+                    {
+                        @if (!string.IsNullOrWhiteSpace(_loadError))
+                        {
+                            <div class="alert alert-danger context-detail-alert">@_loadError</div>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(_actionError))
+                        {
+                            <div class="alert alert-danger alert-dismissible context-detail-alert">
+                                @_actionError
+                                <button type="button" class="btn-close" @onclick="() => _actionError = null"></button>
+                            </div>
+                        }
+
+                        @switch (CurrentKind.Value)
+                        {
+                            case ContextItemKind.Entity:
+                                @RenderEntityDetail()
+                                break;
+                            case ContextItemKind.ChapterReference:
+                                @RenderChapterDetail()
+                                break;
+                            case ContextItemKind.ActReference:
+                                @RenderActDetail()
+                                break;
+                            case ContextItemKind.IngestSourceReference:
+                                @RenderSourceDetail()
+                                break;
+                            case ContextItemKind.IngestSourceChunkReference:
+                                @RenderSourceChunkDetail()
+                                break;
+                            case ContextItemKind.SystemPrompt:
+                                @RenderSystemPromptDetail()
+                                break;
+                            default:
+                                @RenderContextBodyDetail()
+                                break;
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    @if (CanSaveSystemPrompt)
+                    {
+                        <button type="button" class="btn btn-link" disabled="@_saving" @onclick="CloseAsync">Close</button>
+                        <button type="button" class="btn btn-primary" disabled="@(_saving || string.IsNullOrWhiteSpace(_promptDraft))" @onclick="SaveSystemPromptAsync">
+                            @(_saving ? "Saving..." : "Save guidance")
+                        </button>
+                    }
+                    else if (CanSaveEntity)
+                    {
+                        <button type="button" class="btn btn-link" disabled="@_saving" @onclick="CloseAsync">Close</button>
+                        <button type="button" class="btn btn-primary" disabled="@(_saving || string.IsNullOrWhiteSpace(_editEntityName))" @onclick="SaveEntityAsync">
+                            @(_saving ? "Saving..." : "Save entity")
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-primary" @onclick="CloseAsync">Close</button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public Project? Project { get; set; }
+    [Parameter] public ContextItem? FeedItem { get; set; }
+    [Parameter] public ContextRecommendation? Recommendation { get; set; }
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public bool AllowSystemPromptEdit { get; set; }
+    [Parameter] public bool AllowEntityEdit { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private StoryEntity? _entity;
+    private List<EntityLink> _entityLinks = [];
+    private Chapter? _chapter;
+    private Act? _chapterAct;
+    private Act? _act;
+    private List<Chapter> _actChapters = [];
+    private IngestSource? _source;
+    private List<IngestSourceChunk> _sourceChunks = [];
+    private IngestSourceChunk? _sourceChunk;
+    private IngestSource? _chunkSource;
+    private IngestSourceChunkExcerpt? _sourceChunkExcerpt;
+
+    private string _promptDraft = string.Empty;
+    private bool _promptDirty;
+    private string _editEntityName = string.Empty;
+    private List<KeyValuePair<string, string>> _editProps = [];
+    private IReadOnlyDictionary<string, string?> _editOriginalProps = new Dictionary<string, string?>();
+
+    private string? _loadedSignature;
+    private bool _loading;
+    private bool _saving;
+    private string? _loadError;
+    private string? _actionError;
+
+    private ContextItemKind? CurrentKind => FeedItem?.Kind ?? Recommendation?.Kind;
+    private string CurrentKey => FeedItem?.Key ?? Recommendation?.Key ?? string.Empty;
+    private string HeaderKicker => FeedItem?.Badge ?? Recommendation?.Type ?? CurrentKind?.ToString() ?? "Context";
+    private string HeaderTitle => CurrentKind == ContextItemKind.Entity && _entity is not null
+        ? _entity.Name
+        : FeedItem?.Label ?? Recommendation?.Name ?? "Context item";
+
+    private bool CanSaveSystemPrompt =>
+        IsOpen && AllowSystemPromptEdit && CurrentKind == ContextItemKind.SystemPrompt;
+
+    private bool CanSaveEntity =>
+        IsOpen && AllowEntityEdit && CurrentKind == ContextItemKind.Entity && _entity is not null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!IsOpen || CurrentKind is null)
+        {
+            ResetLoadedState();
+            _loadedSignature = null;
+            return;
+        }
+
+        if (CurrentKind == ContextItemKind.SystemPrompt && !_promptDirty)
+        {
+            _promptDraft = FeedItem?.Body ?? Project?.SystemPrompt ?? string.Empty;
+        }
+
+        var signature = $"{ProjectId:N}|{CurrentKind}|{CurrentKey}|{AllowEntityEdit}|{AllowSystemPromptEdit}";
+        if (!string.Equals(signature, _loadedSignature, StringComparison.Ordinal))
+        {
+            _loadedSignature = signature;
+            await LoadDetailAsync();
+        }
+    }
+
+    private async Task LoadDetailAsync()
+    {
+        ResetLoadedState(keepPromptDraft: CurrentKind == ContextItemKind.SystemPrompt);
+        _loading = true;
+        _loadError = null;
+        _actionError = null;
+
+        try
+        {
+            switch (CurrentKind)
+            {
+                case ContextItemKind.Entity:
+                    await LoadEntityAsync();
+                    break;
+                case ContextItemKind.ChapterReference:
+                    await LoadChapterAsync();
+                    break;
+                case ContextItemKind.ActReference:
+                    await LoadActAsync();
+                    break;
+                case ContextItemKind.IngestSourceReference:
+                    await LoadSourceAsync();
+                    break;
+                case ContextItemKind.IngestSourceChunkReference:
+                    await LoadSourceChunkAsync();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadEntityAsync()
+    {
+        if (!EditorContextKeys.TryParseEntity(CurrentKey, out var entityId))
+        {
+            _loadError = "This context item does not contain a valid entity id.";
+            return;
+        }
+
+        _entity = await Entities.GetAsync(ProjectId, entityId);
+        if (_entity is null)
+        {
+            _loadError = "Entity not found.";
+            return;
+        }
+
+        _entityLinks = (await Entities.ListLinksAsync(ProjectId, _entity.Id)).ToList();
+        InitializeEntityEditState(_entity);
+    }
+
+    private async Task LoadChapterAsync()
+    {
+        if (!EditorContextKeys.TryParseChapterReference(CurrentKey, out var chapterId))
+        {
+            _loadError = "This context item does not contain a valid chapter id.";
+            return;
+        }
+
+        _chapter = await Chapters.GetAsync(chapterId);
+        if (_chapter is null || _chapter.ProjectId != ProjectId)
+        {
+            _chapter = null;
+            _loadError = "Chapter not found.";
+            return;
+        }
+
+        if (_chapter.ActId is { } actId)
+        {
+            _chapterAct = await Acts.GetAsync(actId);
+        }
+    }
+
+    private async Task LoadActAsync()
+    {
+        if (!EditorContextKeys.TryParseActReference(CurrentKey, out var actId))
+        {
+            _loadError = "This context item does not contain a valid act id.";
+            return;
+        }
+
+        _act = await Acts.GetAsync(actId);
+        if (_act is null || _act.ProjectId != ProjectId)
+        {
+            _act = null;
+            _loadError = "Act not found.";
+            return;
+        }
+
+        _actChapters = (await Chapters.ListAsync(ProjectId))
+            .Where(chapter => chapter.ActId == _act.Id)
+            .OrderBy(chapter => chapter.Order)
+            .ToList();
+    }
+
+    private async Task LoadSourceAsync()
+    {
+        if (!EditorContextKeys.TryParseIngestSourceReference(CurrentKey, out var sourceId))
+        {
+            _loadError = "This context item does not contain a valid source id.";
+            return;
+        }
+
+        _source = await Ingest.GetSourceAsync(sourceId);
+        if (_source is null || _source.ProjectId != ProjectId)
+        {
+            _source = null;
+            _loadError = "Source not found.";
+            return;
+        }
+
+        _sourceChunks = (await Ingest.ListSourceChunksAsync(_source.Id))
+            .OrderBy(chunk => chunk.Index)
+            .ToList();
+    }
+
+    private async Task LoadSourceChunkAsync()
+    {
+        if (!EditorContextKeys.TryParseIngestSourceChunkReference(CurrentKey, out var sourceChunkId))
+        {
+            _loadError = "This context item does not contain a valid source chunk id.";
+            return;
+        }
+
+        _sourceChunk = await Ingest.GetSourceChunkAsync(sourceChunkId);
+        if (_sourceChunk is null)
+        {
+            _loadError = "Source chunk not found.";
+            return;
+        }
+
+        _chunkSource = await Ingest.GetSourceAsync(_sourceChunk.SourceId);
+        if (_chunkSource is null || _chunkSource.ProjectId != ProjectId)
+        {
+            _sourceChunk = null;
+            _chunkSource = null;
+            _loadError = "Source chunk not found.";
+            return;
+        }
+
+        _sourceChunkExcerpt = await Ingest.GetSourceChunkExcerptAsync(_sourceChunk.Id, maxChars: 8_000);
+    }
+
+    private void ResetLoadedState(bool keepPromptDraft = false)
+    {
+        _entity = null;
+        _entityLinks = [];
+        _chapter = null;
+        _chapterAct = null;
+        _act = null;
+        _actChapters = [];
+        _source = null;
+        _sourceChunks = [];
+        _sourceChunk = null;
+        _chunkSource = null;
+        _sourceChunkExcerpt = null;
+        _editEntityName = string.Empty;
+        _editProps = [];
+        _editOriginalProps = new Dictionary<string, string?>();
+        _loading = false;
+        _saving = false;
+        _loadError = null;
+        _actionError = null;
+
+        if (!keepPromptDraft)
+        {
+            _promptDraft = string.Empty;
+            _promptDirty = false;
+        }
+    }
+
+    private IEnumerable<string> DetailReasons()
+    {
+        if (!string.IsNullOrWhiteSpace(FeedItem?.Reason))
+        {
+            yield return FeedItem.Reason;
+        }
+
+        if (Recommendation is not null)
+        {
+            foreach (var reason in Recommendation.Reasons.Where(reason => !string.IsNullOrWhiteSpace(reason)))
+            {
+                yield return reason;
+            }
+        }
+    }
+
+    private RenderFragment RenderEntityDetail() => @<div class="context-detail-stack">
+        @if (_entity is null)
+        {
+            @RenderContextBodyDetail()
+        }
+        else
+        {
+            @if (CanSaveEntity)
+            {
+                <div class="context-detail-field">
+                    <label class="form-label small text-muted">Name</label>
+                    <input type="text" class="form-control" value="@_editEntityName" @oninput="OnEntityNameInput" />
+                </div>
+
+                <div class="context-detail-field">
+                    <label class="form-label small text-muted">Properties</label>
+                    <div class="context-detail-props-edit">
+                        @for (var i = 0; i < _editProps.Count; i++)
+                        {
+                            var idx = i;
+                            <div class="context-detail-prop-row">
+                                <input type="text" class="form-control form-control-sm" placeholder="key" value="@_editProps[idx].Key" @onchange="@(ev => UpdatePropKey(idx, (string?)ev.Value))" />
+                                <textarea class="form-control form-control-sm" placeholder="value" rows="@RowsFor(_editProps[idx].Value)" @onchange="@(ev => UpdatePropVal(idx, (string?)ev.Value))">@_editProps[idx].Value</textarea>
+                                <button type="button" class="btn btn-sm btn-link text-danger context-detail-prop-remove" title="Remove" @onclick="() => RemoveProp(idx)">x</button>
+                            </div>
+                        }
+                        <button type="button" class="btn btn-sm btn-link context-detail-add-prop" @onclick="AddPropRow">+ property</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                @RenderProperties(_entity.Properties)
+            }
+
+            @RenderIngestObservations(_entity.IngestObservations, "Ingest observations")
+            @RenderEntityLinks()
+        }
+    </div>;
+
+    private RenderFragment RenderChapterDetail() => @<div class="context-detail-stack">
+        @if (_chapter is null)
+        {
+            @RenderContextBodyDetail()
+        }
+        else
+        {
+            <div class="context-detail-meta">
+                <div><span>Act</span><strong>@(_chapterAct?.Title ?? "Unassigned")</strong></div>
+                <div><span>Order</span><strong>@(_chapter.Order + 1)</strong></div>
+                <div><span>Vector index</span><strong>@_chapter.VectorIndexState</strong></div>
+                @if (_chapter.VectorIndexedAt is not null)
+                {
+                    <div><span>Indexed</span><strong>@FormatDate(_chapter.VectorIndexedAt)</strong></div>
+                }
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_chapter.Synopsis))
+            {
+                <section class="context-detail-section">
+                    <h6>Synopsis</h6>
+                    <p>@_chapter.Synopsis</p>
+                </section>
+            }
+
+            <section class="context-detail-section">
+                <h6>Body</h6>
+                <pre class="context-detail-text"><code>@(string.IsNullOrWhiteSpace(_chapter.Body) ? "(empty)" : ChapterFormatting.WithLineNumbers(_chapter.Body))</code></pre>
+            </section>
+        }
+    </div>;
+
+    private RenderFragment RenderActDetail() => @<div class="context-detail-stack">
+        @if (_act is null)
+        {
+            @RenderContextBodyDetail()
+        }
+        else
+        {
+            <div class="context-detail-meta">
+                <div><span>Order</span><strong>@(_act.Order + 1)</strong></div>
+                <div><span>Chapters</span><strong>@_actChapters.Count</strong></div>
+                <div><span>Updated</span><strong>@FormatDate(_act.UpdatedAt)</strong></div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_act.Synopsis))
+            {
+                <section class="context-detail-section">
+                    <h6>Synopsis</h6>
+                    <p>@_act.Synopsis</p>
+                </section>
+            }
+
+            <section class="context-detail-section">
+                <h6>Chapters</h6>
+                @if (_actChapters.Count == 0)
+                {
+                    <p class="text-muted small mb-0"><em>No chapters assigned.</em></p>
+                }
+                else
+                {
+                    <ol class="context-detail-list">
+                        @foreach (var chapter in _actChapters)
+                        {
+                            <li>
+                                <strong>@chapter.Title</strong>
+                                @if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
+                                {
+                                    <p>@chapter.Synopsis</p>
+                                }
+                            </li>
+                        }
+                    </ol>
+                }
+            </section>
+        }
+    </div>;
+
+    private RenderFragment RenderSourceDetail() => @<div class="context-detail-stack">
+        @if (_source is null)
+        {
+            @RenderContextBodyDetail()
+        }
+        else
+        {
+            <div class="context-detail-meta">
+                <div><span>Kind</span><strong>@BlankFallback(_source.SourceKind)</strong></div>
+                <div><span>Chunks</span><strong>@_sourceChunks.Count</strong></div>
+                <div><span>Vector index</span><strong>@_source.VectorIndexState</strong></div>
+                @if (_source.FetchedAt is not null)
+                {
+                    <div><span>Fetched</span><strong>@FormatDate(_source.FetchedAt)</strong></div>
+                }
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_source.Description))
+            {
+                <section class="context-detail-section">
+                    <h6>Description</h6>
+                    <p>@_source.Description</p>
+                </section>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_source.UserInstructions))
+            {
+                <section class="context-detail-section">
+                    <h6>Instructions</h6>
+                    <p>@_source.UserInstructions</p>
+                </section>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_source.SourceUrl) || !string.IsNullOrWhiteSpace(_source.FinalUrl) || !string.IsNullOrWhiteSpace(_source.CanonicalUrl))
+            {
+                <section class="context-detail-section">
+                    <h6>Source URLs</h6>
+                    <div class="context-detail-key-values">
+                        @RenderKeyValue("Original", _source.SourceUrl)
+                        @RenderKeyValue("Final", _source.FinalUrl)
+                        @RenderKeyValue("Canonical", _source.CanonicalUrl)
+                    </div>
+                </section>
+            }
+
+            <section class="context-detail-section">
+                <h6>Source Chunks</h6>
+                @if (_sourceChunks.Count == 0)
+                {
+                    <p class="text-muted small mb-0"><em>No source chunks.</em></p>
+                }
+                else
+                {
+                    <ol class="context-detail-list">
+                        @foreach (var chunk in _sourceChunks)
+                        {
+                            <li>
+                                <strong>Part @(chunk.Index + 1): @BlankFallback(chunk.Title)</strong>
+                                @if (!string.IsNullOrWhiteSpace(chunk.HeadingPath))
+                                {
+                                    <div class="text-muted small">@chunk.HeadingPath</div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(chunk.Summary))
+                                {
+                                    <p>@chunk.Summary</p>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(chunk.AgentNotes))
+                                {
+                                    <p class="text-muted">@chunk.AgentNotes</p>
+                                }
+                            </li>
+                        }
+                    </ol>
+                }
+            </section>
+
+            @if (!string.IsNullOrWhiteSpace(_source.SourceText))
+            {
+                <section class="context-detail-section">
+                    <h6>@(IsTruncated(_source.SourceText, 12_000) ? "Source text (truncated)" : "Source text")</h6>
+                    <pre class="context-detail-text"><code>@LimitText(_source.SourceText, 12_000)</code></pre>
+                </section>
+            }
+        }
+    </div>;
+
+    private RenderFragment RenderSourceChunkDetail() => @<div class="context-detail-stack">
+        @if (_sourceChunk is null || _chunkSource is null)
+        {
+            @RenderContextBodyDetail()
+        }
+        else
+        {
+            <div class="context-detail-meta">
+                <div><span>Source</span><strong>@_chunkSource.Title</strong></div>
+                <div><span>Part</span><strong>@(_sourceChunk.Index + 1)</strong></div>
+                <div><span>Tokens</span><strong>@TokenCountLabel(_sourceChunk)</strong></div>
+                <div><span>Status</span><strong>@_sourceChunk.StructureStatus</strong></div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_sourceChunk.HeadingPath))
+            {
+                <section class="context-detail-section">
+                    <h6>Heading</h6>
+                    <p>@_sourceChunk.HeadingPath</p>
+                </section>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_sourceChunk.Summary))
+            {
+                <section class="context-detail-section">
+                    <h6>Summary</h6>
+                    <p>@_sourceChunk.Summary</p>
+                </section>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_sourceChunk.AgentNotes))
+            {
+                <section class="context-detail-section">
+                    <h6>Notes</h6>
+                    <p>@_sourceChunk.AgentNotes</p>
+                </section>
+            }
+
+            @if (_sourceChunkExcerpt is not null)
+            {
+                <section class="context-detail-section">
+                    <h6>@(_sourceChunkExcerpt.IsTruncated ? "Excerpt (truncated)" : "Excerpt")</h6>
+                    <pre class="context-detail-text"><code>@_sourceChunkExcerpt.Text</code></pre>
+                </section>
+            }
+        }
+    </div>;
+
+    private RenderFragment RenderSystemPromptDetail() => @<div class="context-detail-stack">
+        @if (CanSaveSystemPrompt)
+        {
+            <textarea class="form-control context-detail-edit-textarea" rows="16" value="@_promptDraft" @oninput="OnPromptInput"></textarea>
+        }
+        else
+        {
+            @RenderContextBodyDetail()
+        }
+    </div>;
+
+    private RenderFragment RenderContextBodyDetail() => @<section class="context-detail-section">
+        @if (!string.IsNullOrWhiteSpace(FeedItem?.Body))
+        {
+            <pre class="context-detail-text"><code>@FeedItem.Body</code></pre>
+        }
+        else if (!string.IsNullOrWhiteSpace(Recommendation?.Preview))
+        {
+            <p>@Recommendation.Preview</p>
+        }
+        else
+        {
+            <p class="text-muted small mb-0"><em>No details available.</em></p>
+        }
+    </section>;
+
+    private RenderFragment RenderProperties(IReadOnlyDictionary<string, string?> properties) => @<section class="context-detail-section">
+        <h6>Properties</h6>
+        @if (properties.Count == 0)
+        {
+            <p class="text-muted small mb-0"><em>No properties.</em></p>
+        }
+        else
+        {
+            <div class="context-detail-key-values">
+                @foreach (var property in properties.OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    @RenderKeyValue(property.Key, property.Value)
+                }
+            </div>
+        }
+    </section>;
+
+    private RenderFragment RenderKeyValue(string label, string? value) => @<div class="context-detail-key-value">
+        <span>@label</span>
+        <strong>@BlankFallback(value)</strong>
+    </div>;
+
+    private RenderFragment RenderEntityLinks() => @<section class="context-detail-section">
+        <h6>Links</h6>
+        @if (_entityLinks.Count == 0)
+        {
+            <p class="text-muted small mb-0"><em>No graph links.</em></p>
+        }
+        else
+        {
+            <ul class="context-detail-links list-unstyled mb-0">
+                @foreach (var link in _entityLinks)
+                {
+                    <li class="context-detail-link" @key="link.EdgeId">
+                        <span class="context-detail-link-dir">@(link.Direction == EntityLinkDirection.Outgoing ? "->" : "<-")</span>
+                        <span class="context-detail-link-edge">@link.EdgeType</span>
+                        <span class="context-detail-link-other">@link.OtherEntityName</span>
+                        <span class="context-detail-link-type text-muted small">@link.OtherEntityType</span>
+                        @if (link.IngestSourceCount > 0)
+                        {
+                            <span class="context-detail-link-badge">@link.IngestSourceCount source@(PluralSuffix(link.IngestSourceCount))</span>
+                        }
+                        else if (link.IsIngestCreated)
+                        {
+                            <span class="context-detail-link-badge">ingest</span>
+                        }
+                        @if (link.IngestObservations.Count > 0)
+                        {
+                            <div class="context-detail-link-observations">
+                                @foreach (var observation in link.IngestObservations.Take(3))
+                                {
+                                    <div><strong>@observation.SourceTitle:</strong> @ObservationPreview(observation)</div>
+                                }
+                            </div>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </section>;
+
+    private RenderFragment RenderIngestObservations(IReadOnlyList<IngestSourceObservation> observations, string title) => @<section>
+        @if (observations.Count > 0)
+        {
+            <div class="context-detail-ingest">
+                <h6>@title</h6>
+                <div class="context-detail-ingest-list">
+                    @foreach (var observation in observations)
+                    {
+                        <div class="context-detail-ingest-item" @key="ObservationKey(observation)">
+                            <div class="context-detail-ingest-head">
+                                <strong>@observation.SourceTitle</strong>
+                                <span>@observation.SourceKind</span>
+                                <span>chunk @(observation.SourceChunkIndex + 1)</span>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(observation.Summary))
+                            {
+                                <p>@observation.Summary</p>
+                            }
+                            @if (observation.Aliases.Count > 0)
+                            {
+                                <div class="context-detail-ingest-line"><span>Aliases</span><strong>@string.Join(", ", observation.Aliases)</strong></div>
+                            }
+                            @foreach (var prop in observation.ObservedProperties.OrderBy(prop => prop.Key, StringComparer.OrdinalIgnoreCase))
+                            {
+                                <div class="context-detail-ingest-line">
+                                    <span>@prop.Key</span>
+                                    <strong>@BlankFallback(prop.Value)</strong>
+                                </div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(observation.Evidence))
+                            {
+                                <blockquote>@observation.Evidence</blockquote>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(observation.Notes))
+                            {
+                                <div class="context-detail-ingest-notes"><strong>Notes:</strong> @observation.Notes</div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </section>;
+
+    private void OnPromptInput(ChangeEventArgs e)
+    {
+        _promptDraft = e.Value?.ToString() ?? string.Empty;
+        _promptDirty = true;
+        _actionError = null;
+    }
+
+    private void OnEntityNameInput(ChangeEventArgs e)
+    {
+        _editEntityName = e.Value?.ToString() ?? string.Empty;
+        _actionError = null;
+    }
+
+    private void InitializeEntityEditState(StoryEntity entity)
+    {
+        _editEntityName = entity.Name;
+        _editOriginalProps = entity.Properties;
+        _editProps = entity.Properties
+            .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(property => new KeyValuePair<string, string>(property.Key, property.Value ?? string.Empty))
+            .ToList();
+    }
+
+    private void AddPropRow() => _editProps.Add(new KeyValuePair<string, string>(string.Empty, string.Empty));
+
+    private void RemoveProp(int idx)
+    {
+        if (idx >= 0 && idx < _editProps.Count)
+        {
+            _editProps.RemoveAt(idx);
+        }
+    }
+
+    private void UpdatePropKey(int idx, string? value)
+    {
+        _editProps[idx] = new KeyValuePair<string, string>(value ?? string.Empty, _editProps[idx].Value);
+        _actionError = null;
+    }
+
+    private void UpdatePropVal(int idx, string? value)
+    {
+        _editProps[idx] = new KeyValuePair<string, string>(_editProps[idx].Key, value ?? string.Empty);
+        _actionError = null;
+    }
+
+    private async Task SaveSystemPromptAsync()
+    {
+        if (!CanSaveSystemPrompt) return;
+        if (string.IsNullOrWhiteSpace(_promptDraft))
+        {
+            _actionError = "System prompt cannot be empty.";
+            return;
+        }
+
+        _saving = true;
+        _actionError = null;
+        try
+        {
+            var updated = await Projects.UpdateSystemPromptAsync(ProjectId, _promptDraft);
+            if (Project is not null)
+            {
+                Project.SystemPrompt = updated.SystemPrompt;
+            }
+
+            _promptDirty = false;
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task SaveEntityAsync()
+    {
+        if (!CanSaveEntity || _entity is null) return;
+
+        var next = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in _editProps)
+        {
+            var key = kv.Key.Trim();
+            if (key.Length == 0) continue;
+            next[key] = kv.Value;
+        }
+
+        var toSet = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in next)
+        {
+            if (!_editOriginalProps.TryGetValue(key, out var old) || (old ?? string.Empty) != (value ?? string.Empty))
+            {
+                toSet[key] = value;
+            }
+        }
+
+        var toRemove = _editOriginalProps.Keys.Where(key => !next.ContainsKey(key)).ToList();
+        var newName = _editEntityName.Trim();
+        var nameChanged = newName.Length > 0 && !string.Equals(newName, _entity.Name, StringComparison.Ordinal);
+
+        if (!nameChanged && toSet.Count == 0 && toRemove.Count == 0)
+        {
+            return;
+        }
+
+        _saving = true;
+        _actionError = null;
+        try
+        {
+            var updated = await Entities.UpdateAsync(
+                ProjectId,
+                _entity.Id,
+                name: nameChanged ? newName : null,
+                propertiesToSet: toSet.Count > 0 ? toSet : null,
+                propertiesToRemove: toRemove.Count > 0 ? toRemove : null);
+
+            _entity = updated;
+            _entityLinks = (await Entities.ListLinksAsync(ProjectId, updated.Id)).ToList();
+            InitializeEntityEditState(updated);
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        ResetLoadedState();
+        _loadedSignature = null;
+        if (OnClose.HasDelegate)
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+
+    private static int RowsFor(string value) => Math.Clamp(1 + value.Count(c => c == '\n'), 2, 10);
+
+    private static string ObservationPreview(IngestSourceObservation observation) =>
+        !string.IsNullOrWhiteSpace(observation.Summary) ? observation.Summary
+        : !string.IsNullOrWhiteSpace(observation.Evidence) ? observation.Evidence
+        : !string.IsNullOrWhiteSpace(observation.Notes) ? observation.Notes
+        : observation.ObservedProperties.Values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
+    private static string ObservationKey(IngestSourceObservation observation) =>
+        $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
+
+    private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
+
+    private static string FormatDate(DateTime? value) => value is null ? "-" : value.Value.ToLocalTime().ToString("g");
+
+    private static string BlankFallback(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();
+
+    private static bool IsTruncated(string? value, int maxChars) => value?.Length > maxChars;
+
+    private static string LimitText(string? value, int maxChars)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var text = value.Trim();
+        return text.Length <= maxChars ? text : text[..maxChars] + "...";
+    }
+
+    private static string TokenCountLabel(IngestSourceChunk chunk) =>
+        $"{(chunk.TokenCountIsExact ? string.Empty : "~")}{chunk.EstimatedTokenCount:N0}";
+}

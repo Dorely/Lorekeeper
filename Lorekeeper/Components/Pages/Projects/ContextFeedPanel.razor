@@ -1,8 +1,6 @@
 @using Lorekeeper.Context
 @using Lorekeeper.Models
-@using Lorekeeper.Projects
 @using Lorekeeper.Tokens
-@inject IProjectService Projects
 @inject IEditorContextService EditorContext
 @inject ITokenCounter TokenCounter
 
@@ -18,18 +16,21 @@ else
 
     @foreach (var item in _assembly.Items)
     {
-        var collapsed = IsCollapsed(item.Key);
         var canChange = CanChangeContextItem(item);
         <div class="ctx-card @(item.IsEnabled ? "" : "ctx-card--disabled")">
             <div class="ctx-card-head">
-                <button type="button" class="ctx-caret" @onclick="() => ToggleCollapsed(item.Key)">
-                    @(collapsed ? "▸" : "▾")
-                </button>
-                <span class="ctx-label">@item.Label</span>
-                @if (!string.IsNullOrWhiteSpace(item.Badge))
-                {
-                    <span class="ctx-badge">@item.Badge</span>
-                }
+                <div class="ctx-open"
+                     role="button"
+                     tabindex="0"
+                     aria-label="Open @item.Label details"
+                     @onclick="() => OpenDetail(item)"
+                     @onkeydown="e => OnOpenKeyDown(e, item)">
+                    <span class="ctx-label">@item.Label</span>
+                    @if (!string.IsNullOrWhiteSpace(item.Badge))
+                    {
+                        <span class="ctx-badge">@item.Badge</span>
+                    }
+                </div>
                 @if (canChange)
                 {
                     <button type="button"
@@ -39,42 +40,18 @@ else
                     </button>
                 }
             </div>
-            @if (!collapsed)
-            {
-                <div class="ctx-body">
-                    @if (!string.IsNullOrWhiteSpace(item.Reason))
-                    {
-                        <div class="ctx-reason">@item.Reason</div>
-                    }
-                    @if (item.Kind == ContextItemKind.SystemPrompt)
-                    {
-                        <textarea class="form-control ctx-prompt-edit"
-                                  rows="10"
-                                  value="@_promptDraft"
-                                  @oninput="OnPromptInput"
-                                  @onblur="SavePromptAsync"></textarea>
-                        @if (!string.IsNullOrEmpty(_promptError))
-                        {
-                            <div class="text-danger small mt-1">@_promptError</div>
-                        }
-                        else if (_promptSaving)
-                        {
-                            <div class="text-muted small mt-1"><em>Saving…</em></div>
-                        }
-                        else if (_promptDirty)
-                        {
-                            <div class="text-muted small mt-1"><em>Unsaved — blur to save.</em></div>
-                        }
-                    }
-                    else
-                    {
-                        <pre class="ctx-text-block"><code>@(string.IsNullOrEmpty(item.Body) ? "(empty)" : item.Body)</code></pre>
-                    }
-                </div>
-            }
         </div>
     }
 }
+
+<ContextItemDetailModal ProjectId="Project.Id"
+                        Project="Project"
+                        FeedItem="_selectedDetail"
+                        IsOpen="_detailOpen"
+                        AllowSystemPromptEdit="true"
+                        AllowEntityEdit="true"
+                        OnClose="CloseDetail"
+                        OnSaved="OnDetailSavedAsync" />
 
 @code {
     [Parameter, EditorRequired] public Project Project { get; set; } = null!;
@@ -82,19 +59,14 @@ else
     [Parameter] public EventCallback OnContextChanged { get; set; }
 
     private ContextAssembly? _assembly;
-    private readonly HashSet<string> _collapsed = [EditorContextKeys.CurrentChapter];
-
-    private string _promptDraft = string.Empty;
-    private bool _promptDirty;
-    private bool _promptSaving;
-    private string? _promptError;
+    private ContextItem? _selectedDetail;
+    private bool _detailOpen;
     private int _contextTokenCount;
     private bool _contextTokenIsExact = true;
 
     protected override async Task OnParametersSetAsync()
     {
         await RebuildAsync();
-        if (!_promptDirty) _promptDraft = Project.SystemPrompt;
     }
 
     /// <summary>Called by the editor when the chapter body changes so the preview stays current.</summary>
@@ -108,6 +80,19 @@ else
     {
         _assembly = await EditorContext.BuildAsync(Project, CurrentChapter);
         UpdateContextTokenCount();
+
+        if (_detailOpen && _selectedDetail is not null)
+        {
+            var updated = _assembly.Items.FirstOrDefault(item => IsSameContextItem(item, _selectedDetail));
+            if (updated is null)
+            {
+                CloseDetail();
+            }
+            else
+            {
+                _selectedDetail = updated;
+            }
+        }
     }
 
     private void UpdateContextTokenCount()
@@ -122,13 +107,6 @@ else
         : "Enabled context token count is estimated";
 
     private static string TokenPrefix(bool isExact) => isExact ? string.Empty : "~";
-
-    private bool IsCollapsed(string key) => _collapsed.Contains(key);
-
-    private void ToggleCollapsed(string key)
-    {
-        if (!_collapsed.Add(key)) _collapsed.Remove(key);
-    }
 
     private bool CanChangeContextItem(ContextItem item) =>
         CurrentChapter is not null && item.IsRemovable;
@@ -158,40 +136,32 @@ else
         await OnContextChanged.InvokeAsync();
     }
 
-    private void OnPromptInput(ChangeEventArgs e)
+    private void OpenDetail(ContextItem item)
     {
-        _promptDraft = e.Value?.ToString() ?? string.Empty;
-        _promptDirty = true;
-        _promptError = null;
+        _selectedDetail = item;
+        _detailOpen = true;
     }
 
-    private async Task SavePromptAsync()
+    private void CloseDetail()
     {
-        if (!_promptDirty) return;
-        if (string.IsNullOrWhiteSpace(_promptDraft))
-        {
-            _promptError = "System prompt cannot be empty.";
-            _promptDraft = Project.SystemPrompt;
-            _promptDirty = false;
-            return;
-        }
+        _detailOpen = false;
+        _selectedDetail = null;
+    }
 
-        _promptSaving = true;
-        try
+    private void OnOpenKeyDown(KeyboardEventArgs e, ContextItem item)
+    {
+        if (e.Key is "Enter" or " ")
         {
-            await Projects.UpdateSystemPromptAsync(Project.Id, _promptDraft);
-            Project.SystemPrompt = _promptDraft;
-            _promptDirty = false;
-            await RebuildAsync();
-            await OnContextChanged.InvokeAsync();
-        }
-        catch (Exception ex)
-        {
-            _promptError = ex.Message;
-        }
-        finally
-        {
-            _promptSaving = false;
+            OpenDetail(item);
         }
     }
+
+    private async Task OnDetailSavedAsync()
+    {
+        await RebuildAsync();
+        await OnContextChanged.InvokeAsync();
+    }
+
+    private static bool IsSameContextItem(ContextItem left, ContextItem right) =>
+        left.Kind == right.Kind && string.Equals(left.Key, right.Key, StringComparison.Ordinal);
 }

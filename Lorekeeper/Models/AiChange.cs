@@ -20,6 +20,8 @@ public class AiChange
     public string Summary { get; set; } = string.Empty;
     public string BeforeJson { get; set; } = "null";
     public string AfterJson { get; set; } = "null";
+    public string? DraftAfterJson { get; set; }
+    public string? ReviewStateJson { get; set; }
     public string ResultJson { get; set; } = "{}";
 
     public string ResourceKind { get; set; } = string.Empty;

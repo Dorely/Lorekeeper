@@ -61,7 +61,7 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: () => ListOutlineAsync(context),
                 name: "list_outline",
-                description: "Read the current outline as JSON: projectFacts, an ordered list of acts (each with id/title/synopsis and chapters), plus an 'unassigned' bucket for chapters without an act."),
+                description: "Read the outline as structured JSON with ids, ordering, projectFacts, chapter beat counts, and staged changes when Review edits is enabled. The outline text is already in the editor Context Feed; use this for mutations, staged-state verification, or missing/insufficient feed context."),
 
             AIFunctionFactory.Create(
                 method: (string title, string synopsis) => CreateActAsync(context, title, synopsis),

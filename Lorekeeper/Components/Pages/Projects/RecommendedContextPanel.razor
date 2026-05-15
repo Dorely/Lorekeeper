@@ -28,19 +28,26 @@
             @foreach (var item in _items)
             {
                 <article class="recommended-item" @key="item.Key">
-                    <div class="recommended-item-head">
-                        <div class="recommended-name">@item.Name</div>
-                        <span class="recommended-type">@item.Type</span>
-                    </div>
-                    @if (!string.IsNullOrWhiteSpace(item.Preview))
-                    {
-                        <div class="recommended-preview">@item.Preview</div>
-                    }
-                    <div class="recommended-reasons">
-                        @foreach (var reason in item.Reasons)
+                    <div class="recommended-open"
+                         role="button"
+                         tabindex="0"
+                         aria-label="Open @item.Name details"
+                         @onclick="() => OpenDetail(item)"
+                         @onkeydown="e => OnOpenKeyDown(e, item)">
+                        <div class="recommended-item-head">
+                            <div class="recommended-name">@item.Name</div>
+                            <span class="recommended-type">@item.Type</span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(item.Preview))
                         {
-                            <span>@reason</span>
+                            <div class="recommended-preview">@item.Preview</div>
                         }
+                        <div class="recommended-reasons">
+                            @foreach (var reason in item.Reasons)
+                            {
+                                <span>@reason</span>
+                            }
+                        </div>
                     </div>
                     <button type="button"
                             class="btn btn-sm btn-outline-primary recommended-add"
@@ -61,6 +68,11 @@
     }
 </div>
 
+<ContextItemDetailModal ProjectId="ProjectId"
+                        Recommendation="_selectedDetail"
+                        IsOpen="_detailOpen"
+                        OnClose="CloseDetail" />
+
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid? ChapterId { get; set; }
@@ -77,6 +89,8 @@
     private CancellationTokenSource? _reloadCts;
     private int _reloadVersion;
     private bool _disposed;
+    private ContextRecommendation? _selectedDetail;
+    private bool _detailOpen;
 
     protected override void OnParametersSet()
     {
@@ -194,6 +208,26 @@
         catch (Exception ex)
         {
             _error = ex.Message;
+        }
+    }
+
+    private void OpenDetail(ContextRecommendation item)
+    {
+        _selectedDetail = item;
+        _detailOpen = true;
+    }
+
+    private void CloseDetail()
+    {
+        _detailOpen = false;
+        _selectedDetail = null;
+    }
+
+    private void OnOpenKeyDown(KeyboardEventArgs e, ContextRecommendation item)
+    {
+        if (e.Key is "Enter" or " ")
+        {
+            OpenDetail(item);
         }
     }
 

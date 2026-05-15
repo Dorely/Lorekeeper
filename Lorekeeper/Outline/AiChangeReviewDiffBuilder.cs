@@ -41,11 +41,23 @@ public static class AiChangeReviewDiffBuilder
     {
         diff = null!;
 
+        if (AiChangeReviewDrafts.TryGetEditablePayload(change, out var editablePayload))
+        {
+            diff = Build(
+                editablePayload.Title,
+                editablePayload.Subtitle,
+                editablePayload.Fields
+                    .Select(field => new DiffFieldInput(field.Key, field.Label, field.OldText, field.NewText))
+                    .ToList(),
+                showSingleFieldLabel: editablePayload.Fields.Count != 1 || !string.Equals(editablePayload.Fields[0].Key, "Body", StringComparison.OrdinalIgnoreCase));
+            return true;
+        }
+
         if (string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase)
             || string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase))
         {
             if (!TryReadChange<ChapterBodyChange>(change.BeforeJson, out var before)
-                || !TryReadChange<ChapterBodyChange>(change.AfterJson, out var after))
+                || !TryReadChange<ChapterBodyChange>(AiChangeReviewDrafts.EffectiveAfterJson(change), out var after))
             {
                 return false;
             }
@@ -61,7 +73,7 @@ public static class AiChangeReviewDiffBuilder
         if (string.Equals(change.ToolName, "update_act", StringComparison.OrdinalIgnoreCase))
         {
             if (!TryReadChange<OutlineActChange>(change.BeforeJson, out var before)
-                || !TryReadChange<OutlineActChange>(change.AfterJson, out var after))
+                || !TryReadChange<OutlineActChange>(AiChangeReviewDrafts.EffectiveAfterJson(change), out var after))
             {
                 return false;
             }
@@ -79,7 +91,7 @@ public static class AiChangeReviewDiffBuilder
         if (string.Equals(change.ToolName, "update_chapter", StringComparison.OrdinalIgnoreCase))
         {
             if (!TryReadChange<OutlineChapterChange>(change.BeforeJson, out var before)
-                || !TryReadChange<OutlineChapterChange>(change.AfterJson, out var after))
+                || !TryReadChange<OutlineChapterChange>(AiChangeReviewDrafts.EffectiveAfterJson(change), out var after))
             {
                 return false;
             }
@@ -97,7 +109,7 @@ public static class AiChangeReviewDiffBuilder
         if (string.Equals(change.ToolName, "update_entity", StringComparison.OrdinalIgnoreCase))
         {
             if (!TryReadChange<OutlineEntityChange>(change.BeforeJson, out var before)
-                || !TryReadChange<OutlineEntityChange>(change.AfterJson, out var after))
+                || !TryReadChange<OutlineEntityChange>(AiChangeReviewDrafts.EffectiveAfterJson(change), out var after))
             {
                 return false;
             }
@@ -162,7 +174,7 @@ public static class AiChangeReviewDiffBuilder
             || string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase))
         {
             if (!TryReadChange<ChapterBodyChange>(change.BeforeJson, out var before)
-                || !TryReadChange<ChapterBodyChange>(change.AfterJson, out var after))
+                || !TryReadChange<ChapterBodyChange>(AiChangeReviewDrafts.EffectiveAfterJson(change), out var after))
             {
                 return false;
             }
@@ -176,7 +188,7 @@ public static class AiChangeReviewDiffBuilder
         if (IsTool(change, "create_act", "update_act", "delete_act"))
         {
             var before = ReadOptional<OutlineActChange>(change.BeforeJson);
-            var after = ReadOptional<OutlineActChange>(change.AfterJson);
+            var after = ReadOptional<OutlineActChange>(AiChangeReviewDrafts.EffectiveAfterJson(change));
             if (before is null && after is null) return false;
 
             SetTitle(ref title, "Act changes");
@@ -189,7 +201,7 @@ public static class AiChangeReviewDiffBuilder
         if (IsTool(change, "create_chapter", "update_chapter", "delete_chapter"))
         {
             var before = ReadOptional<OutlineChapterChange>(change.BeforeJson);
-            var after = ReadOptional<OutlineChapterChange>(change.AfterJson);
+            var after = ReadOptional<OutlineChapterChange>(AiChangeReviewDrafts.EffectiveAfterJson(change));
             if (before is null && after is null) return false;
 
             SetTitle(ref title, "Chapter changes");
@@ -202,7 +214,7 @@ public static class AiChangeReviewDiffBuilder
         if (IsTool(change, "create_entity", "update_entity", "delete_entity"))
         {
             var before = ReadOptional<OutlineEntityChange>(change.BeforeJson);
-            var after = ReadOptional<OutlineEntityChange>(change.AfterJson);
+            var after = ReadOptional<OutlineEntityChange>(AiChangeReviewDrafts.EffectiveAfterJson(change));
             if (before is null && after is null) return false;
 
             var type = after?.Type ?? before?.Type ?? "Entity";
@@ -309,7 +321,10 @@ public static class AiChangeReviewDiffBuilder
         var showLabels = showSingleFieldLabel || changedFields.Count > 1;
         var sections = changedFields
             .Select(field => new DiffSection(
+                field.Key,
                 showLabels ? field.Label : string.Empty,
+                field.OldText,
+                field.NewText,
                 BuildDiffHunks(BuildDiffRows(field.OldText, field.NewText))))
             .Where(section => section.Hunks.Count > 0)
             .ToList();
@@ -1084,7 +1099,7 @@ public sealed record ReviewDiff(string Title, string? Subtitle, IReadOnlyList<Di
     public int Deletions => Sections.Sum(section => section.Deletions);
 }
 
-public sealed record DiffSection(string Label, IReadOnlyList<DiffHunk> Hunks)
+public sealed record DiffSection(string Key, string Label, string OldText, string NewText, IReadOnlyList<DiffHunk> Hunks)
 {
     public int Additions => Hunks.Sum(hunk => hunk.Additions);
     public int Deletions => Hunks.Sum(hunk => hunk.Deletions);
@@ -1107,7 +1122,13 @@ public sealed record DiffRow(
 
 public sealed record DiffSegment(string Text, DiffSegmentKind Kind);
 
-public sealed record DiffFieldInput(string Label, string OldText, string NewText);
+public sealed record DiffFieldInput(string Key, string Label, string OldText, string NewText)
+{
+    public DiffFieldInput(string label, string oldText, string newText)
+        : this(label, label, oldText, newText)
+    {
+    }
+}
 
 public enum DiffRowKind
 {

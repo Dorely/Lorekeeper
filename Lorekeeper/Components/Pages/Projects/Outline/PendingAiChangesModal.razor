@@ -1,4 +1,5 @@
 @using System.Text.Json
+@using Lorekeeper.Context
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
 @inject IAiChangeApprovalService ChangeApproval
@@ -83,10 +84,16 @@
                     }
                     else
                     {
+                        var editableChange = EditableChangeFor(SelectedGroup);
+                        var hasReviewDraft = editableChange is not null && AiChangeReviewDrafts.HasDraft(editableChange);
                         <div class="pending-ai-detail-head">
                             <div>
                                 <div class="pending-ai-tool large">@GroupTitle(SelectedGroup)</div>
                                 <div class="pending-ai-summary">@GroupSummary(SelectedGroup)</div>
+                                @if (SelectedGroup.Changes.Count > 1)
+                                {
+                                    <div class="pending-ai-note">Line editing is available when a single text change is selected.</div>
+                                }
                             </div>
                             <span class="pending-ai-status">@SelectedGroup.StatusText</span>
                         </div>
@@ -110,6 +117,17 @@
                                         }
                                     </div>
                                     <div class="pending-ai-diff-header-actions">
+                                        @if (editableChange is not null)
+                                        {
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-secondary"
+                                                    disabled="@(_busy || !hasReviewDraft)"
+                                                    @onclick="() => ResetChangeDraftAsync(editableChange)">Reset draft</button>
+                                            @if (hasReviewDraft)
+                                            {
+                                                <span class="pending-ai-draft-badge">Draft edited</span>
+                                            }
+                                        }
                                         <div class="pending-ai-diff-view-toggle" role="group" aria-label="Diff view">
                                             <button type="button"
                                                     class="@DiffViewButtonClass(DiffViewMode.Inline)"
@@ -138,7 +156,20 @@
                                         <section class="pending-ai-diff-section">
                                             @if (!string.IsNullOrWhiteSpace(diffSection.Label))
                                             {
-                                                <div class="pending-ai-diff-field">@diffSection.Label</div>
+                                                <div class="pending-ai-diff-field-row">
+                                                    <div class="pending-ai-diff-field">@diffSection.Label</div>
+                                                    @if (editableChange is not null)
+                                                    {
+                                                        <div class="pending-ai-field-actions">
+                                                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                                    disabled="@_busy"
+                                                                    @onclick="() => ResetFieldToOriginalProposalAsync(editableChange, diffSection.Key)">Reset field</button>
+                                                            <button type="button" class="btn btn-sm btn-outline-danger"
+                                                                    disabled="@_busy"
+                                                                    @onclick="() => RejectFieldAsync(editableChange, diffSection)">Reject field</button>
+                                                        </div>
+                                                    }
+                                                </div>
                                             }
 
                                             @if (diffSection.Hunks.Count == 0)
@@ -160,7 +191,25 @@
                                                                 <span class="pending-ai-diff-line-number">@(row.OldLineNumber?.ToString() ?? string.Empty)</span>
                                                                 <span class="pending-ai-diff-line-number">@(row.NewLineNumber?.ToString() ?? string.Empty)</span>
                                                                 <span class="pending-ai-diff-marker">@row.Marker</span>
-                                                                <span class="pending-ai-diff-line-text">@RenderSegments(row.Segments)</span>
+                                                                <span class="pending-ai-diff-line-text">
+                                                                    @if (editableChange is not null && CanEditNewLine(row))
+                                                                    {
+                                                                        <textarea class="pending-ai-line-editor" rows="1" value="@row.Text"
+                                                                                  @onchange="args => UpdateLineTextAsync(editableChange, diffSection, row.NewLineNumber!.Value, args.Value?.ToString() ?? string.Empty)"></textarea>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        @RenderSegments(row.Segments)
+                                                                    }
+                                                                </span>
+                                                                <span class="pending-ai-diff-line-actions">
+                                                                    @if (editableChange is not null && CanRejectDiffRow(row))
+                                                                    {
+                                                                        <button type="button" class="btn btn-sm btn-outline-danger"
+                                                                                disabled="@_busy"
+                                                                                @onclick="() => RejectLineAsync(editableChange, diffSection, row, hunk.Rows)">Reject line</button>
+                                                                    }
+                                                                </span>
                                                             </div>
                                                         }
                                                     }
@@ -175,7 +224,31 @@
                                                                     <span class="pending-ai-split-line-text old @SplitCellClass(splitRow.Old)">@RenderSegments(splitRow.Old?.Segments)</span>
                                                                     <span class="pending-ai-split-line-number new @SplitCellClass(splitRow.New)">@(splitRow.New?.NewLineNumber?.ToString() ?? string.Empty)</span>
                                                                     <span class="pending-ai-split-marker new @SplitCellClass(splitRow.New)">@(splitRow.New?.Marker ?? string.Empty)</span>
-                                                                    <span class="pending-ai-split-line-text new @SplitCellClass(splitRow.New)">@RenderSegments(splitRow.New?.Segments)</span>
+                                                                    <span class="pending-ai-split-line-text new @SplitCellClass(splitRow.New)">
+                                                                        @if (editableChange is not null && splitRow.New is { } newRow && CanEditNewLine(newRow))
+                                                                        {
+                                                                            <textarea class="pending-ai-line-editor" rows="1" value="@newRow.Text"
+                                                                                      @onchange="args => UpdateLineTextAsync(editableChange, diffSection, newRow.NewLineNumber!.Value, args.Value?.ToString() ?? string.Empty)"></textarea>
+                                                                        }
+                                                                        else
+                                                                        {
+                                                                            @RenderSegments(splitRow.New?.Segments)
+                                                                        }
+                                                                    </span>
+                                                                    <span class="pending-ai-split-line-actions">
+                                                                        @if (editableChange is not null && splitRow.Old is { } oldRow && CanRejectDiffRow(oldRow))
+                                                                        {
+                                                                            <button type="button" class="btn btn-sm btn-outline-danger"
+                                                                                    disabled="@_busy"
+                                                                                    @onclick="() => RejectLineAsync(editableChange, diffSection, oldRow, hunk.Rows)">Reject line</button>
+                                                                        }
+                                                                        @if (editableChange is not null && splitRow.New is { } actionNewRow && CanRejectDiffRow(actionNewRow))
+                                                                        {
+                                                                            <button type="button" class="btn btn-sm btn-outline-danger"
+                                                                                    disabled="@_busy"
+                                                                                    @onclick="() => RejectLineAsync(editableChange, diffSection, actionNewRow, hunk.Rows)">Reject line</button>
+                                                                        }
+                                                                    </span>
                                                                 </div>
                                                             }
                                                         </div>
@@ -199,7 +272,7 @@
                                     </section>
                                     <section>
                                         <div class="pending-ai-section-label">New</div>
-                                        <pre>@FormatJson(rawChange.AfterJson)</pre>
+                                        <pre>@FormatJson(AiChangeReviewDrafts.EffectiveAfterJson(rawChange))</pre>
                                     </section>
                                 </div>
                             }
@@ -218,7 +291,7 @@
                                                 </section>
                                                 <section>
                                                     <div class="pending-ai-section-label">New</div>
-                                                    <pre>@FormatJson(rawChange.AfterJson)</pre>
+                                                    <pre>@FormatJson(AiChangeReviewDrafts.EffectiveAfterJson(rawChange))</pre>
                                                 </section>
                                             </div>
                                         </section>
@@ -250,7 +323,7 @@
                         <div class="pending-ai-detail-actions">
                             <button type="button" class="btn btn-primary"
                                     disabled="@(_busy || !SelectedGroup.HasPending)"
-                                    @onclick="() => ApplyGroupAsync(SelectedGroup.Key)">Keep</button>
+                                    @onclick="() => ApplyGroupAsync(SelectedGroup.Key)">@KeepButtonText(SelectedGroup)</button>
                             <button type="button" class="btn btn-outline-danger"
                                     disabled="@(_busy || !SelectedGroup.HasPending)"
                                     @onclick="() => RejectGroupAsync(SelectedGroup.Key)">Reject</button>
@@ -373,6 +446,159 @@
         }
     }
 
+    private static AiChange? EditableChangeFor(PendingChangeGroup group)
+    {
+        if (group.Changes.Count != 1) return null;
+
+        var change = group.Changes[0];
+        return change.Status == AiChangeStatus.Pending && AiChangeReviewDrafts.TryGetEditablePayload(change, out _)
+            ? change
+            : null;
+    }
+
+    private async Task ResetChangeDraftAsync(AiChange change)
+    {
+        await RunDraftAsync(async () =>
+        {
+            await ChangeApproval.ClearReviewDraftAsync(change.Id);
+            change.DraftAfterJson = null;
+            change.ReviewStateJson = null;
+        });
+    }
+
+    private async Task RejectFieldAsync(AiChange change, DiffSection section) =>
+        await UpdateFieldDraftAsync(change, section.Key, section.OldText);
+
+    private async Task ResetFieldToOriginalProposalAsync(AiChange change, string fieldKey)
+    {
+        if (!AiChangeReviewDrafts.TryResetFieldToOriginalProposal(change, fieldKey, out var draftAfterJson, out var error))
+        {
+            _error = error;
+            return;
+        }
+
+        await SaveDraftAsync(change, draftAfterJson);
+    }
+
+    private async Task UpdateLineTextAsync(AiChange change, DiffSection section, int newLineNumber, string text)
+    {
+        var lines = ChapterFormatting.SplitLines(section.NewText);
+        var index = newLineNumber - 1;
+        if (index < 0 || index >= lines.Count) return;
+
+        lines[index] = NormalizeLineEditText(text);
+        await UpdateFieldDraftAsync(change, section.Key, ChapterFormatting.JoinLines(lines));
+    }
+
+    private async Task RejectLineAsync(AiChange change, DiffSection section, DiffRow row, IReadOnlyList<DiffRow> hunkRows)
+    {
+        var newText = RejectLine(section, row, hunkRows);
+        await UpdateFieldDraftAsync(change, section.Key, newText);
+    }
+
+    private async Task UpdateFieldDraftAsync(AiChange change, string fieldKey, string newText)
+    {
+        if (!AiChangeReviewDrafts.TryUpdateField(change, fieldKey, newText, out var draftAfterJson, out var error))
+        {
+            _error = error;
+            return;
+        }
+
+        await SaveDraftAsync(change, draftAfterJson);
+    }
+
+    private async Task SaveDraftAsync(AiChange change, string draftAfterJson)
+    {
+        await RunDraftAsync(async () =>
+        {
+            if (string.Equals(draftAfterJson, change.AfterJson, StringComparison.Ordinal))
+            {
+                await ChangeApproval.ClearReviewDraftAsync(change.Id);
+                change.DraftAfterJson = null;
+                change.ReviewStateJson = null;
+                return;
+            }
+
+            var reviewStateJson = BuildReviewStateJson();
+            await ChangeApproval.SaveReviewDraftAsync(change.Id, draftAfterJson, reviewStateJson);
+            change.DraftAfterJson = draftAfterJson;
+            change.ReviewStateJson = reviewStateJson;
+        });
+    }
+
+    private async Task RunDraftAsync(Func<Task> action)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string RejectLine(DiffSection section, DiffRow row, IReadOnlyList<DiffRow> hunkRows)
+    {
+        var lines = ChapterFormatting.SplitLines(section.NewText);
+        if (row.Kind == DiffRowKind.Added && row.NewLineNumber is int newLineNumber)
+        {
+            var index = newLineNumber - 1;
+            if (index < 0 || index >= lines.Count) return section.NewText;
+
+            var pairedOld = row.PairId is int pairId
+                ? hunkRows.FirstOrDefault(candidate => candidate.PairId == pairId && candidate.Kind == DiffRowKind.Removed)
+                : null;
+            if (pairedOld is not null)
+                lines[index] = pairedOld.Text;
+            else
+                lines.RemoveAt(index);
+
+            return ChapterFormatting.JoinLines(lines);
+        }
+
+        if (row.Kind == DiffRowKind.Removed && row.OldLineNumber is int oldLineNumber)
+        {
+            var pairedNew = row.PairId is int pairId
+                ? hunkRows.FirstOrDefault(candidate => candidate.PairId == pairId && candidate.Kind == DiffRowKind.Added)
+                : null;
+            if (pairedNew?.NewLineNumber is int pairedNewLineNumber)
+            {
+                var pairedIndex = pairedNewLineNumber - 1;
+                if (pairedIndex >= 0 && pairedIndex < lines.Count)
+                {
+                    lines[pairedIndex] = row.Text;
+                    return ChapterFormatting.JoinLines(lines);
+                }
+            }
+
+            lines.Insert(Math.Clamp(oldLineNumber - 1, 0, lines.Count), row.Text);
+            return ChapterFormatting.JoinLines(lines);
+        }
+
+        return section.NewText;
+    }
+
+    private static bool CanEditNewLine(DiffRow row) =>
+        row.Kind == DiffRowKind.Added && row.NewLineNumber.HasValue;
+
+    private static bool CanRejectDiffRow(DiffRow row) => row.Kind != DiffRowKind.Context;
+
+    private static string NormalizeLineEditText(string text) =>
+        text.Replace("\r\n", "\n").Replace('\r', '\n');
+
+    private static string BuildReviewStateJson() =>
+        JsonSerializer.Serialize(new ReviewDraftState(DateTime.UtcNow), JsonSerializerOptions.Default);
+
+    private static string KeepButtonText(PendingChangeGroup group) =>
+        group.Changes.Any(AiChangeReviewDrafts.HasDraft) ? "Keep reviewed" : "Keep";
+
     private int CountDependentPendingChanges(IReadOnlyCollection<Guid> changeIds)
     {
         if (changeIds.Count == 0) return 0;
@@ -397,7 +623,9 @@
     }
 
     private static string GroupKey(AiChange change) =>
-        string.IsNullOrWhiteSpace(change.ResourceId)
+        AiChangeReviewDrafts.TryGetEditablePayload(change, out _)
+            ? change.Id.ToString("N")
+            : string.IsNullOrWhiteSpace(change.ResourceId)
             ? change.Id.ToString("N")
             : change.ResourceId;
 
@@ -591,6 +819,8 @@
     }
 
     private sealed record SplitDiffRow(DiffRow? Old, DiffRow? New);
+
+    private sealed record ReviewDraftState(DateTime UpdatedAt);
 
     private enum DiffViewMode
     {

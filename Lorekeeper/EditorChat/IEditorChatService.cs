@@ -24,6 +24,7 @@ public sealed class EditorChatContext(
     Guid? currentChapterId,
     Action onMutated,
     bool reviewEdits,
+    bool autoPinReadEntities,
     OutlineToolStagingContext? outlineStaging,
     EditorChatChangeStagingContext? editorStaging)
 {
@@ -33,6 +34,7 @@ public sealed class EditorChatContext(
     public Guid? CurrentChapterId { get; } = currentChapterId;
     public Action OnMutated { get; } = onMutated;
     public bool ReviewEdits { get; } = reviewEdits;
+    public bool AutoPinReadEntities { get; } = autoPinReadEntities;
     public OutlineToolStagingContext? OutlineStaging { get; } = outlineStaging;
     public EditorChatChangeStagingContext? EditorStaging { get; } = editorStaging;
 

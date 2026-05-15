@@ -1,10 +1,16 @@
 @using Lorekeeper.Components.Pages.Projects.Outline
+@using Lorekeeper.Chapters
+@using Lorekeeper.Context
 @using Lorekeeper.EditorChat
 @using Lorekeeper.Llm
 @using Lorekeeper.Models
+@using Lorekeeper.Persistence.Repositories
 @using Lorekeeper.Tokens
 @implements IAsyncDisposable
 @inject IEditorChatService Chat
+@inject IContextBuilder ContextBuilder
+@inject IProjectRepository Projects
+@inject IChapterService Chapters
 @inject ILlmProviderService ProviderService
 @inject ITokenCounter TokenCounter
 
@@ -83,10 +89,11 @@
 
 @code {
     private const string ConversationTokenUnitLabel = "chat tokens";
-    private const string ConversationTokenTitleLabel = "chat transcript token count";
+    private const string ConversationTokenTitleLabel = "model input token count";
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid? CurrentChapterId { get; set; }
+    [Parameter] public int ContextRefreshSignal { get; set; }
     [Parameter] public EventCallback OnAiTurnStarting { get; set; }
     [Parameter] public EventCallback OnAiTurnCompleted { get; set; }
     [Parameter] public EventCallback OnAiChangesApplied { get; set; }
@@ -109,10 +116,13 @@
     private string? _error;
     private CancellationTokenSource? _cts;
     private Guid? _loadedProjectId;
+    private Guid? _loadedChapterId;
+    private int _loadedContextRefreshSignal;
     private List<AiChangeBatch> _pendingBatches = [];
     private List<ContestBatch> _contestBatches = [];
     private List<LlmProvider> _providers = [];
     private string? _pendingUserText;
+    private string _systemPrompt = string.Empty;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private bool _contestEnabled;
     private bool _showContestReview;
@@ -131,9 +141,21 @@
     protected override async Task OnParametersSetAsync()
     {
         if (ProjectId == Guid.Empty) return;
-        if (_loadedProjectId == ProjectId) return;
+        if (_loadedProjectId == ProjectId)
+        {
+            if (_loadedChapterId != CurrentChapterId || _loadedContextRefreshSignal != ContextRefreshSignal)
+            {
+                _loadedChapterId = CurrentChapterId;
+                _loadedContextRefreshSignal = ContextRefreshSignal;
+                await RefreshSystemPromptAsync();
+                UpdateConversationTokenCount();
+            }
+            return;
+        }
 
         _loadedProjectId = ProjectId;
+        _loadedChapterId = CurrentChapterId;
+        _loadedContextRefreshSignal = ContextRefreshSignal;
         await LoadAsync();
     }
 
@@ -151,6 +173,7 @@
             _contestProviderSlot1Id = contestSettings.ProviderSlot1Id;
             _contestProviderSlot2Id = contestSettings.ProviderSlot2Id;
             _contestProviderSlot3Id = contestSettings.ProviderSlot3Id;
+            await RefreshSystemPromptAsync();
             await LoadPendingChangesAsync(openIfPending: false);
             await LoadContestBatchesAsync(openIfAvailable: false);
             RebuildRenderable();
@@ -249,6 +272,9 @@
                     case EditorChatMutated:
                         if (OnAiChangesApplied.HasDelegate)
                             await OnAiChangesApplied.InvokeAsync();
+                        await RefreshSystemPromptAsync();
+                        UpdateConversationTokenCount();
+                        StateHasChanged();
                         break;
 
                     case EditorChatPendingAiChangeCreated:
@@ -305,11 +331,12 @@
         {
             _running = false;
             _live = null;
-            UpdateConversationTokenCount();
             _cts?.Dispose();
             _cts = null;
             if (OnAiTurnCompleted.HasDelegate)
                 await OnAiTurnCompleted.InvokeAsync();
+            await RefreshSystemPromptAsync();
+            UpdateConversationTokenCount();
             RequestScroll();
             StateHasChanged();
         }
@@ -391,6 +418,8 @@
             : bool.TryParse(args.Value?.ToString(), out var parsed) && parsed;
         _contestEnabled = enabled;
         await Chat.SetContestModeEnabledAsync(ProjectId, enabled);
+        await RefreshSystemPromptAsync();
+        UpdateConversationTokenCount();
     }
 
     private async Task OnContestProviderChangedAsync(int slot, ChangeEventArgs args)
@@ -426,6 +455,8 @@
         await ReloadFromDbAsync();
         if (OnAiChangesApplied.HasDelegate)
             await OnAiChangesApplied.InvokeAsync();
+        await RefreshSystemPromptAsync();
+        UpdateConversationTokenCount();
         StateHasChanged();
     }
 
@@ -509,19 +540,48 @@
     {
         _conversationTokens = ChatTranscriptTokenCounter.Count(
             TokenCounter,
-            _messages,
-            ToTokenMessage,
+            ModelReplayTokenMessages(),
+            message => message,
             _live,
-            _pendingUserText);
+            _pendingUserText,
+            systemPrompt: _systemPrompt);
     }
 
-    private static ChatTranscriptTokenMessage ToTokenMessage(EditorMessage message) => new(
-        message.Role.ToString(),
-        message.Content,
-        message.ToolCallsJson,
-        message.ToolCallId,
-        message.ToolName,
-        message.ErrorMessage);
+    private async Task RefreshSystemPromptAsync()
+    {
+        _systemPrompt = string.Empty;
+        var project = await Projects.GetByIdAsync(ProjectId);
+        if (project is null) return;
+
+        Chapter? currentChapter = null;
+        if (CurrentChapterId is { } chapterId)
+        {
+            currentChapter = await Chapters.GetAsync(chapterId);
+            if (currentChapter is null || currentChapter.ProjectId != ProjectId)
+                currentChapter = null;
+        }
+
+        var assembly = await ContextBuilder.BuildAsync(project, currentChapter);
+        _systemPrompt = assembly.Assemble(_contestEnabled ? AssistantWorkflowInstructions.EditorContestPreparation : null);
+    }
+
+    private IEnumerable<ChatTranscriptTokenMessage> ModelReplayTokenMessages()
+    {
+        foreach (var message in _messages)
+        {
+            var tokenMessage = ToModelReplayTokenMessage(message);
+            if (tokenMessage is not null)
+                yield return tokenMessage;
+        }
+    }
+
+    private static ChatTranscriptTokenMessage? ToModelReplayTokenMessage(EditorMessage message) => message.Role switch
+    {
+        EditorMessageRole.System when !string.IsNullOrWhiteSpace(message.Content) => new(message.Role.ToString(), message.Content),
+        EditorMessageRole.User => new(message.Role.ToString(), message.Content),
+        EditorMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new(message.Role.ToString(), message.Content),
+        _ => null,
+    };
 
     private static List<ChatMessagePart> BuildMessageParts(EditorMessage message, IReadOnlyDictionary<string, EditorMessage> byCallId)
     {
