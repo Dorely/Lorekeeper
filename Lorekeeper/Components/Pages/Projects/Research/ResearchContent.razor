@@ -128,7 +128,7 @@ else
     private bool _loading = true;
     private int? _ingestProviderId;
     private bool _queueingStaged;
-    private string _queueInstructions = string.Empty;
+    private string _queueInstructions = "Extract source-grounded fact sheets for lore, characters, settings, factions, timelines, relationships, terminology, and world-building facts. Use evidence from the page for each fact and skip unsupported or merely similar subjects.";
     private string? _actionError;
 
     private int StagedCount => _candidates.Count(candidate => candidate.Status == WebIngestCandidateStatus.Staged);

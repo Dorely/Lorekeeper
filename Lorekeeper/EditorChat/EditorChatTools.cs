@@ -103,6 +103,7 @@ public sealed class EditorChatTools(
             description:
                 "Edit a chapter using line-based semantics. " +
                 "To Append: Leave both startLine and endLine null: appends `content` to the end of the chapter. " +
+                "For an empty chapter, leave both startLine and endLine null to write the first content. " +
                 "To Insert: Provide only startLine and leave endLine null: insert `content` BEFORE that line (1-based). " +
                 "To Replace: Provide both startLine and endLine: replace the inclusive range of existing numbered lines with `content`. " +
                 "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
@@ -667,20 +668,28 @@ public sealed class EditorChatTools(
         }
         else if (startLine is int replaceStart && endLine is int replaceEnd)
         {
-            if (replaceStart < 1 || replaceStart > existingLines.Count)
-                return $"Error: startLine {replaceStart} out of range (1..{existingLines.Count}).";
-            if (replaceEnd < replaceStart || replaceEnd > existingLines.Count)
-                return $"Error: endLine {replaceEnd} out of range ({replaceStart}..{existingLines.Count}).";
+            if (existingLines.Count == 0 && replaceStart == 1 && replaceEnd == 1)
+            {
+                newBody = ChapterFormatting.JoinLines(contentLines);
+                summary = $"Wrote {contentLines.Count} line(s) into the empty chapter.";
+            }
+            else
+            {
+                if (replaceStart < 1 || replaceStart > existingLines.Count)
+                    return $"Error: startLine {replaceStart} out of range (1..{existingLines.Count}).";
+                if (replaceEnd < replaceStart || replaceEnd > existingLines.Count)
+                    return $"Error: endLine {replaceEnd} out of range ({replaceStart}..{existingLines.Count}).";
 
-            var replacedCount = replaceEnd - replaceStart + 1;
-            var merged = new List<string>(existingLines.Count - replacedCount + contentLines.Count);
-            merged.AddRange(existingLines.Take(replaceStart - 1));
-            merged.AddRange(contentLines);
-            merged.AddRange(existingLines.Skip(replaceEnd));
-            newBody = ChapterFormatting.JoinLines(merged);
-            summary = replaceStart == 1 && replaceEnd == existingLines.Count
-                ? $"Full rewrite ({existingLines.Count} -> {contentLines.Count} lines)."
-                : $"Replaced lines {replaceStart}-{replaceEnd} ({replacedCount} -> {contentLines.Count} lines).";
+                var replacedCount = replaceEnd - replaceStart + 1;
+                var merged = new List<string>(existingLines.Count - replacedCount + contentLines.Count);
+                merged.AddRange(existingLines.Take(replaceStart - 1));
+                merged.AddRange(contentLines);
+                merged.AddRange(existingLines.Skip(replaceEnd));
+                newBody = ChapterFormatting.JoinLines(merged);
+                summary = replaceStart == 1 && replaceEnd == existingLines.Count
+                    ? $"Full rewrite ({existingLines.Count} -> {contentLines.Count} lines)."
+                    : $"Replaced lines {replaceStart}-{replaceEnd} ({replacedCount} -> {contentLines.Count} lines).";
+            }
         }
         else
         {

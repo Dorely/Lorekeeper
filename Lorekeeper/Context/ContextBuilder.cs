@@ -485,17 +485,26 @@ public sealed class ContextBuilder(
                 sb.Append("- ").Append(property.Key).Append(": ").AppendLine(property.Value ?? string.Empty);
         }
 
-        if (entity.IngestObservations.Count > 0)
+        var factSheet = IngestSourceAssertions.BuildFactSheet(entity.IngestObservations);
+        if (factSheet.Aliases.Count > 0)
         {
-            sb.AppendLine("Ingest observations:");
-            foreach (var observation in entity.IngestObservations.Take(5))
+            sb.AppendLine("Aliases:");
+            sb.Append("- ").AppendLine(string.Join(", ", factSheet.Aliases));
+        }
+
+        if (factSheet.Fields.Count > 0)
+        {
+            sb.AppendLine("Source-grounded fact sheet:");
+            foreach (var field in factSheet.Fields.Take(8))
             {
-                var text = !string.IsNullOrWhiteSpace(observation.Summary)
-                    ? observation.Summary
-                    : !string.IsNullOrWhiteSpace(observation.Evidence)
-                        ? observation.Evidence
-                        : observation.Notes;
-                sb.Append("- ").Append(observation.SourceTitle).Append(": ").AppendLine(text);
+                sb.Append("- ").Append(field.Label).Append(": ").AppendLine(field.Value);
+                foreach (var evidence in field.Evidence.Take(2))
+                {
+                    sb.Append("  Source: ").Append(evidence.SourceTitle).Append(" chunk ").Append(evidence.SourceChunkIndex + 1).AppendLine();
+                    AppendOptionalIndented(sb, "Evidence", evidence.Evidence, 2);
+                    if (string.IsNullOrWhiteSpace(evidence.Evidence))
+                        AppendOptionalIndented(sb, "Source summary", evidence.Summary, 2);
+                }
             }
         }
 

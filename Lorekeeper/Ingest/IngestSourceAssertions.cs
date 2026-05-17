@@ -38,6 +38,38 @@ public static class IngestSourceAssertions
         "notes",
     ];
 
+    private static readonly string[] FactSheetFieldOrder =
+    [
+        "summary",
+        "description",
+        "role",
+        "status",
+        "affiliation",
+        "history",
+        "motivation",
+        "significance",
+        "relationship",
+        "details",
+    ];
+
+    private static readonly string[] DisallowedExtractionRationalePhrases =
+    [
+        "not mentioned",
+        "not explicitly mentioned",
+        "does not mention",
+        "doesn't mention",
+        "did not mention",
+        "didn't mention",
+        "no mention of",
+        "no information",
+        "not enough information",
+        "semantically similar",
+        "semantic similarity",
+        "came back as semantically",
+        "because it was similar",
+        "because it matched semantically",
+    ];
+
     public static bool IsProtectedProperty(string key) =>
         ProtectedProperties.Contains(key);
 
@@ -119,6 +151,64 @@ public static class IngestSourceAssertions
         IReadOnlyDictionary<string, object?> properties,
         int maxObservations = 20) =>
         ListObservations(properties, RelationshipAssertionsProperty, maxObservations);
+
+    public static IngestEntityFactSheet BuildEntityFactSheet(
+        IReadOnlyDictionary<string, object?> properties,
+        int maxObservations = 20) =>
+        BuildFactSheet(ListEntityObservations(properties, maxObservations));
+
+    public static IngestEntityFactSheet BuildFactSheet(IReadOnlyList<IngestSourceObservation> observations)
+    {
+        var fieldBuilders = new Dictionary<string, FactSheetFieldBuilder>(StringComparer.OrdinalIgnoreCase);
+        foreach (var observation in observations.OrderBy(observation => observation.SourceTitle, StringComparer.OrdinalIgnoreCase).ThenBy(observation => observation.SourceChunkIndex))
+        {
+            AddFactSheetField(fieldBuilders, "summary", observation.Summary, observation);
+            foreach (var property in observation.ObservedProperties)
+                AddFactSheetField(fieldBuilders, property.Key, property.Value, observation);
+        }
+
+        var fields = fieldBuilders.Values
+            .OrderBy(builder => FactSheetFieldRank(builder.Key))
+            .ThenBy(builder => builder.Label, StringComparer.OrdinalIgnoreCase)
+            .Select(builder => new IngestFactSheetField(
+                builder.Key,
+                builder.Label,
+                string.Join("\n", builder.Values),
+                builder.Evidence
+                    .OrderBy(evidence => evidence.SourceTitle, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(evidence => evidence.SourceChunkIndex)
+                    .ThenByDescending(evidence => evidence.UpdatedAt)
+                    .ToArray()))
+            .ToArray();
+
+        var aliases = observations
+            .SelectMany(observation => observation.Aliases)
+            .Select(NormalizeFactText)
+            .Where(alias => alias.Length > 0 && !ContainsDisallowedExtractionRationale(alias))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var sources = observations
+            .GroupBy(observation => observation.SourceId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new IngestFactSheetSource(
+                group.Key,
+                group.Select(observation => observation.SourceTitle).FirstOrDefault(title => !string.IsNullOrWhiteSpace(title)) ?? string.Empty,
+                group.Select(observation => observation.SourceKind).FirstOrDefault(kind => !string.IsNullOrWhiteSpace(kind)) ?? string.Empty,
+                group.Count(),
+                group.Max(observation => observation.UpdatedAt)))
+            .OrderBy(source => source.SourceTitle, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return new IngestEntityFactSheet(fields, aliases, sources);
+    }
+
+    public static bool ContainsDisallowedExtractionRationale(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var normalized = NormalizeFactText(value).ToLowerInvariant();
+        return DisallowedExtractionRationalePhrases.Any(phrase => normalized.Contains(phrase, StringComparison.Ordinal));
+    }
 
     public static bool TryReadPayloadString(string payloadJson, string propertyName, out string? value)
     {
@@ -380,6 +470,82 @@ public static class IngestSourceAssertions
             values.Add(value);
     }
 
+    private static void AddFactSheetField(
+        IDictionary<string, FactSheetFieldBuilder> builders,
+        string key,
+        string? value,
+        IngestSourceObservation observation)
+    {
+        var normalizedKey = NormalizeFactKey(key);
+        var normalizedValue = NormalizeFactText(value);
+        if (normalizedKey.Length == 0 || normalizedValue.Length == 0) return;
+        if (IsProtectedProperty(normalizedKey) || ContainsDisallowedExtractionRationale(normalizedValue)) return;
+
+        if (!builders.TryGetValue(normalizedKey, out var builder))
+        {
+            builder = new FactSheetFieldBuilder(normalizedKey, HumanizeFactKey(normalizedKey));
+            builders[normalizedKey] = builder;
+        }
+
+        if (!builder.Values.Contains(normalizedValue, StringComparer.OrdinalIgnoreCase))
+            builder.Values.Add(normalizedValue);
+
+        var evidenceText = ContainsDisallowedExtractionRationale(observation.Evidence)
+            ? string.Empty
+            : NormalizeFactText(observation.Evidence);
+        var summaryText = ContainsDisallowedExtractionRationale(observation.Summary)
+            ? string.Empty
+            : NormalizeFactText(observation.Summary);
+        var evidenceKey = $"{observation.SourceId}:{observation.SourceChunkId}:{normalizedKey}:{evidenceText}:{summaryText}";
+        if (builder.EvidenceKeys.Add(evidenceKey))
+        {
+            builder.Evidence.Add(new IngestFactSheetEvidence(
+                observation.SourceId,
+                observation.SourceTitle,
+                observation.SourceKind,
+                observation.SourceChunkId,
+                observation.SourceChunkIndex,
+                evidenceText,
+                summaryText,
+                observation.UpdatedAt));
+        }
+    }
+
+    private static int FactSheetFieldRank(string key)
+    {
+        var index = Array.FindIndex(FactSheetFieldOrder, ordered => string.Equals(ordered, key, StringComparison.OrdinalIgnoreCase));
+        return index < 0 ? FactSheetFieldOrder.Length : index;
+    }
+
+    private static string NormalizeFactKey(string key) =>
+        (key ?? string.Empty).Trim();
+
+    private static string NormalizeFactText(string? value) =>
+        string.Join(' ', (value ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    private static string HumanizeFactKey(string key)
+    {
+        var normalized = key.Trim();
+        if (normalized.Length == 0) return string.Empty;
+        var chars = new List<char> { char.ToUpperInvariant(normalized[0]) };
+        for (var index = 1; index < normalized.Length; index++)
+        {
+            var current = normalized[index];
+            var previous = normalized[index - 1];
+            if ((current == '_' || current == '-') && chars[^1] != ' ')
+            {
+                chars.Add(' ');
+                continue;
+            }
+
+            if (char.IsUpper(current) && char.IsLower(previous) && chars[^1] != ' ')
+                chars.Add(' ');
+            chars.Add(current);
+        }
+
+        return new string(chars.ToArray());
+    }
+
     private static bool LooksLikeJsonRoot(string json, char rootChar)
     {
         foreach (var ch in json)
@@ -419,6 +585,15 @@ public static class IngestSourceAssertions
         public string Notes { get; set; } = string.Empty;
         public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    private sealed class FactSheetFieldBuilder(string key, string label)
+    {
+        public string Key { get; } = key;
+        public string Label { get; } = label;
+        public List<string> Values { get; } = [];
+        public List<IngestFactSheetEvidence> Evidence { get; } = [];
+        public HashSet<string> EvidenceKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 }
 
@@ -468,4 +643,32 @@ public sealed record IngestSourceObservation(
     string Evidence,
     string Notes,
     DateTime RecordedAt,
+    DateTime UpdatedAt);
+
+public sealed record IngestEntityFactSheet(
+    IReadOnlyList<IngestFactSheetField> Fields,
+    IReadOnlyList<string> Aliases,
+    IReadOnlyList<IngestFactSheetSource> Sources);
+
+public sealed record IngestFactSheetField(
+    string Key,
+    string Label,
+    string Value,
+    IReadOnlyList<IngestFactSheetEvidence> Evidence);
+
+public sealed record IngestFactSheetEvidence(
+    string SourceId,
+    string SourceTitle,
+    string SourceKind,
+    string SourceChunkId,
+    int SourceChunkIndex,
+    string Evidence,
+    string Summary,
+    DateTime UpdatedAt);
+
+public sealed record IngestFactSheetSource(
+    string SourceId,
+    string SourceTitle,
+    string SourceKind,
+    int ObservationCount,
     DateTime UpdatedAt);

@@ -30,7 +30,8 @@ public sealed class ResearchService(
         - Use web_search for open-ended topics. Do not claim web knowledge from memory when search would answer it.
         - Read pages before judging them. Never stage an unread page.
         - Use follow_page_links or read_webpage to follow links from read pages when the link text or surrounding result suggests stronger source material.
-        - Stage pages after reading them when they contain information likely to help project memory, canon, lore, setting details, timelines, characters, factions, places, or terminology.
+        - Stage pages after reading them when they contain information likely to help project memory, canon, lore, setting details, timelines, characters, factions, places, relationships, or terminology.
+        - In staging rationales, name the expected extraction focus: lore, characters, settings, factions, timelines, relationships, terminology, or source-grounded facts. Do not stage a page only because it is vaguely or semantically similar to the topic.
         - Do not ask the user to approve individual pages before staging; staging is your research output. The user queues ingestion jobs later.
         - When a page cannot be accessed, report that briefly and move on.
         - End each turn with a concise report: what you searched, what you read, what you staged, and what you would investigate next.

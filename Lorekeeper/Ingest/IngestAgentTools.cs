@@ -49,25 +49,25 @@ public sealed class IngestAgentTools(
             method: (string existingEntityId, IngestObservationProperties? properties = null, string[]? aliases = null, string? evidence = null, string? notes = null) =>
                 RecordExistingEntityObservationAsync(context, existingEntityId, properties, aliases, evidence, notes),
             name: "record_existing_entity_observation",
-            description: "Record source-scoped observations on an existing project entity without changing its canonical properties. Use this after search_project_entities finds a match. properties is an object with concise natural-language fields such as summary/status/history/significance; aliases is an array. Use {} for no properties and [] for no aliases."),
+            description: "Record source-scoped, evidence-backed fact-sheet fields on an existing project entity without changing its canonical properties. Use this after search_project_entities finds a source-grounded identity match. properties is an object with concise natural-language fields such as summary/status/history/significance; evidence is required for fact fields. Use {} for no properties and [] for no aliases."),
 
         AIFunctionFactory.Create(
             method: (string type, string name, IngestObservationProperties? properties = null, string[]? aliases = null, string? evidence = null, string? notes = null) =>
                 CreateEntityAsync(context, type, name, properties, aliases, evidence, notes),
             name: "create_ingest_entity",
-            description: "Create a new graph entity with source-scoped observations. Only use after list_job_entities and variant search_project_entities calls find no plausible same subject. properties is an object with concise natural-language fields such as summary/status/history/significance; aliases is an array. Use {} for no properties and [] for no aliases."),
+            description: "Create a new graph entity with source-scoped, evidence-backed fact-sheet fields. Only use after list_job_entities and variant search_project_entities calls find no plausible same subject. properties is an object with concise natural-language fields such as summary/status/history/significance; evidence is required for fact fields. Use {} for no properties and [] for no aliases."),
 
         AIFunctionFactory.Create(
             method: (string entityId, string? name = null, IngestObservationProperties? propertiesToSet = null, string[]? aliases = null, string? evidence = null, string? notes = null) =>
                 UpdateEntityAsync(context, entityId, name, propertiesToSet, aliases, evidence, notes),
             name: "update_ingest_entity",
-            description: "Update source-scoped observations for an entity already touched by this ingest job. Canonical project properties are not changed; name is only used for entities newly created by this job. propertiesToSet is an object with concise natural-language fields such as summary/status/history/significance; aliases is an array. Use {} for no properties and [] for no aliases."),
+            description: "Update source-scoped, evidence-backed fact-sheet fields for an entity already touched by this ingest job. Canonical project properties are not changed; name is only used for entities newly created by this job. propertiesToSet is an object with concise natural-language fields such as summary/status/history/significance; evidence is required for fact fields. Use {} for no properties and [] for no aliases."),
 
         AIFunctionFactory.Create(
             method: (string fromEntityId, string toEntityId, string edgeType, IngestObservationProperties? properties = null, string? evidence = null, string? notes = null) =>
                 LinkEntitiesAsync(context, fromEntityId, toEntityId, edgeType, properties, evidence, notes),
             name: "link_ingest_entities",
-            description: "Record a source-scoped relationship between two entities already touched by this ingest job. Record observations on existing project endpoints before linking them. properties is an object with concise natural-language relationship observations such as summary/status/history/significance."),
+            description: "Record an evidence-backed source-scoped relationship between two entities already touched by this ingest job. Record observations on existing project endpoints before linking them. properties is an object with concise natural-language relationship facts such as summary/status/history/significance; evidence is required."),
 
         AIFunctionFactory.Create(
             method: (string summary, string? notes = null) => RecordSourceChunkNotesAsync(context, summary, notes),
@@ -210,6 +210,8 @@ public sealed class IngestAgentTools(
         if (!Guid.TryParse(existingEntityId, out var parsed)) return $"Error: existingEntityId '{existingEntityId}' is not a valid Guid.";
         var observedProperties = NormalizeProperties(properties);
         var normalizedAliases = NormalizeAliases(aliases);
+        var validationError = ValidateSourceGroundedObservation(observedProperties, normalizedAliases, evidence, notes);
+        if (validationError is not null) return validationError;
 
         var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, parsed);
         if (node is null) return $"Error: entity {parsed} is not a non-structural project story entity.";
@@ -257,6 +259,8 @@ public sealed class IngestAgentTools(
 
         var observedProperties = NormalizeProperties(properties);
         var normalizedAliases = NormalizeAliases(aliases);
+        var validationError = ValidateSourceGroundedObservation(observedProperties, normalizedAliases, evidence, notes);
+        if (validationError is not null) return validationError;
 
         var duplicateNode = await FindDuplicateEntityByNameAsync(context.ProjectId, resolvedType.Type, trimmedName);
         if (duplicateNode is not null && Guid.TryParseExact(duplicateNode.Key, "N", out var duplicateId))
@@ -325,6 +329,16 @@ public sealed class IngestAgentTools(
         if (!Guid.TryParse(entityId, out var parsed)) return $"Error: entityId '{entityId}' is not a valid Guid.";
         var observedProperties = NormalizeProperties(propertiesToSet);
         var normalizedAliases = NormalizeAliases(aliases);
+        var normalizedName = NormalizeText(name).Trim();
+        var hasObservationInput = observedProperties.Count > 0
+            || normalizedAliases.Length > 0
+            || !string.IsNullOrWhiteSpace(evidence)
+            || !string.IsNullOrWhiteSpace(notes);
+        if (hasObservationInput || string.IsNullOrWhiteSpace(normalizedName))
+        {
+            var validationError = ValidateSourceGroundedObservation(observedProperties, normalizedAliases, evidence, notes);
+            if (validationError is not null) return validationError;
+        }
 
         var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, parsed);
         if (node is null) return $"Error: entity {parsed} is not a non-structural project story entity.";
@@ -334,7 +348,6 @@ public sealed class IngestAgentTools(
             ? IngestSourceAssertions.LinkedExistingEntityAction
             : IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson) ?? IngestSourceAssertions.LinkedExistingEntityAction;
 
-        var normalizedName = NormalizeText(name).Trim();
         if (string.Equals(action, IngestSourceAssertions.CreatedEntityAction, StringComparison.Ordinal)
             && !string.IsNullOrWhiteSpace(normalizedName))
         {
@@ -390,6 +403,8 @@ public sealed class IngestAgentTools(
             return "Error: both relationship endpoints must be entities already touched by this ingest job. Use record_existing_entity_observation for existing project entities first.";
 
         var observedProperties = NormalizeProperties(properties);
+    var validationError = ValidateSourceGroundedObservation(observedProperties, [], evidence, notes);
+    if (validationError is not null) return validationError;
 
         var fromNode = await nodes.FindByKeyAsync(context.ProjectId, from.ToString("N"));
         var toNode = await nodes.FindByKeyAsync(context.ProjectId, to.ToString("N"));
@@ -1194,6 +1209,36 @@ public sealed class IngestAgentTools(
                 .Where(alias => !string.IsNullOrWhiteSpace(alias))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+
+    private static string? ValidateSourceGroundedObservation(
+        IReadOnlyDictionary<string, string?> observedProperties,
+        IReadOnlyList<string> aliases,
+        string? evidence,
+        string? notes)
+    {
+        foreach (var property in observedProperties)
+        {
+            if (IngestSourceAssertions.ContainsDisallowedExtractionRationale(property.Value))
+                return $"Error: property '{property.Key}' contains extraction process rationale instead of a source-grounded fact. Record only facts supported by the current source chunk.";
+        }
+
+        if (aliases.Any(IngestSourceAssertions.ContainsDisallowedExtractionRationale))
+            return "Error: aliases must be source-mentioned names, not extraction process rationale.";
+        if (IngestSourceAssertions.ContainsDisallowedExtractionRationale(evidence))
+            return "Error: evidence must quote or summarize source support, not semantic-similarity or absence rationale.";
+        if (IngestSourceAssertions.ContainsDisallowedExtractionRationale(notes))
+            return "Error: notes must not record that the source lacked support or was only semantically similar. Skip the fact or provide source evidence instead.";
+
+        var hasFactFields = observedProperties.Values.Any(value => !string.IsNullOrWhiteSpace(value));
+        var hasAliases = aliases.Any(alias => !string.IsNullOrWhiteSpace(alias));
+        var hasEvidence = !string.IsNullOrWhiteSpace(evidence);
+        if (hasFactFields && !hasEvidence)
+            return "Error: evidence is required when recording fact-sheet fields. Quote or closely summarize the current source chunk text that supports the fact.";
+        if (!hasFactFields && !hasAliases && !hasEvidence)
+            return "Error: record at least one source-grounded fact, alias, or evidence item; otherwise skip this entity or relationship.";
+
+        return null;
+    }
 
     private static bool LooksLikeJsonRoot(string json, char rootChar)
     {

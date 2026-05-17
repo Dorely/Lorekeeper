@@ -13,6 +13,13 @@ public sealed class WebIngestCandidateService(
     IWebPageReader pageReader,
     IIngestService ingest) : IWebIngestCandidateService
 {
+    private const string WebFactSheetIngestGuidance = """
+        Web research extraction guidance:
+        - Extract source-grounded fact sheets for lore, characters, settings, factions, timelines, relationships, terminology, and world-building facts.
+        - Update existing entities only when the page explicitly supports a fact about the same subject. Semantic similarity is a discovery hint, not evidence.
+        - Include evidence from the page for each fact. Skip unsupported, absent, or merely similar subjects instead of recording process rationale.
+        """;
+
     public async Task<IReadOnlyList<WebIngestCandidateView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         (await candidates.ListByProjectAsync(projectId, cancellationToken)).Select(ToView).ToList();
 
@@ -167,7 +174,7 @@ public sealed class WebIngestCandidateService(
         var job = await ingest.CreateJobAsync(candidate.ProjectId, new IngestCreateJobRequest(
             SourceTitle(candidate),
             BuildSourceText(candidate),
-            instructions?.Trim() ?? string.Empty,
+            BuildWebIngestInstructions(instructions, [candidate]),
             "Webpage",
             BuildDescription(candidate),
             providerId,
@@ -237,7 +244,7 @@ public sealed class WebIngestCandidateService(
         var job = await ingest.CreateJobAsync(projectId, new IngestCreateJobRequest(
             sourceTitle,
             BuildBatchSourceText(candidatesToQueue),
-            instructions?.Trim() ?? string.Empty,
+            BuildWebIngestInstructions(instructions, candidatesToQueue),
             "Webpages",
             BuildBatchDescription(candidatesToQueue),
             providerId,
@@ -327,6 +334,24 @@ public sealed class WebIngestCandidateService(
             candidate.QueuedAt,
             candidate.CreatedAt,
             candidate.UpdatedAt);
+
+    private static string BuildWebIngestInstructions(string? instructions, IReadOnlyList<WebIngestCandidate> queuedCandidates)
+    {
+        var guidance = WebFactSheetIngestGuidance.Trim();
+        var rationales = queuedCandidates
+            .Select(candidate => candidate.StageRationale?.Trim())
+            .Where(rationale => !string.IsNullOrWhiteSpace(rationale))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        if (rationales.Count > 0)
+            guidance += "\n\nStaged page rationales:\n" + string.Join("\n", rationales.Select(rationale => $"- {rationale}"));
+
+        var userInstructions = instructions?.Trim() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(userInstructions)
+            ? guidance
+            : userInstructions + "\n\n" + guidance;
+    }
 
     private static string BuildSourceText(WebIngestCandidate candidate)
     {

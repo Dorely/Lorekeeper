@@ -240,7 +240,8 @@
             </div>
         </form>
 
-        @RenderIngestObservations(selected.IngestObservations, "Ingest observations")
+        @RenderEntityFactSheet(selected.IngestObservations)
+        @RenderIngestObservations(selected.IngestObservations, "Raw ingest observations")
 
         <div class="graph-links-section">
             <div class="graph-links-header">
@@ -317,6 +318,43 @@
                 </div>
             }
         </div>
+    </div>;
+
+    private RenderFragment RenderEntityFactSheet(IReadOnlyList<IngestSourceObservation> observations) => @<div>
+        @{
+            var factSheet = IngestSourceAssertions.BuildFactSheet(observations);
+        }
+        @if (factSheet.Fields.Count > 0 || factSheet.Aliases.Count > 0)
+        {
+            <div class="graph-fact-section">
+                <div class="graph-section-title">Source-grounded fact sheet</div>
+                @if (factSheet.Aliases.Count > 0)
+                {
+                    <div class="graph-fact-aliases"><span>Aliases</span><strong>@string.Join(", ", factSheet.Aliases)</strong></div>
+                }
+                @foreach (var field in factSheet.Fields)
+                {
+                    <article class="graph-fact" @key="field.Key">
+                        <div class="graph-fact-head">@field.Label</div>
+                        <p>@field.Value</p>
+                        @foreach (var evidence in field.Evidence.Take(3))
+                        {
+                            <div class="graph-fact-evidence" @key="FactEvidenceKey(field, evidence)">
+                                <div><strong>@evidence.SourceTitle</strong> <span>@evidence.SourceKind</span> <span>chunk @(evidence.SourceChunkIndex + 1)</span></div>
+                                @if (!string.IsNullOrWhiteSpace(evidence.Evidence))
+                                {
+                                    <blockquote>@evidence.Evidence</blockquote>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(evidence.Summary))
+                                {
+                                    <blockquote>@evidence.Summary</blockquote>
+                                }
+                            </div>
+                        }
+                    </article>
+                }
+            </div>
+        }
     </div>;
 
     private RenderFragment RenderIngestObservations(IReadOnlyList<IngestSourceObservation> observations, string title) => @<div>
@@ -687,6 +725,9 @@
 
     private static string ObservationKey(IngestSourceObservation observation) =>
         $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
+
+    private static string FactEvidenceKey(IngestFactSheetField field, IngestFactSheetEvidence evidence) =>
+        $"{field.Key}:{evidence.SourceId}:{evidence.SourceChunkId}:{evidence.UpdatedAt:o}";
 
     private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
 

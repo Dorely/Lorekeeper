@@ -186,7 +186,7 @@ public sealed class ContextRecommendationService(
     {
         if (string.IsNullOrWhiteSpace(match.SourceId) || !Guid.TryParseExact(match.SourceId, "N", out var sourceId)) return;
 
-        var reason = isSearchResult ? "Matched semantic search" : "Semantically matched chapter context";
+        var reason = isSearchResult ? "Matched context search" : "Recommended from chapter context";
         ContextRecommendation? recommendation = match.SourceType switch
         {
             ContextVectorSourceTypes.Entity => await BuildEntityRecommendationAsync(projectId, sourceId, reason, isSearchResult, match.Distance, cancellationToken),

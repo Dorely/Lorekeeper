@@ -139,7 +139,8 @@
                         </div>
                     </div>
 
-                    @RenderIngestObservations(_modalEntity.IngestObservations, "Ingest observations")
+                    @RenderEntityFactSheet(_modalEntity.IngestObservations)
+                    @RenderIngestObservations(_modalEntity.IngestObservations, "Raw ingest observations")
 
                     <div class="mb-0">
                         <label class="form-label small text-muted">Links</label>
@@ -407,6 +408,45 @@
     private static int RowsFor(string value) =>
         Math.Clamp(1 + value.Count(c => c == '\n'), 2, 10);
 
+    private RenderFragment RenderEntityFactSheet(IReadOnlyList<IngestSourceObservation> observations) => @<div>
+        @{
+            var factSheet = IngestSourceAssertions.BuildFactSheet(observations);
+        }
+        @if (factSheet.Fields.Count > 0 || factSheet.Aliases.Count > 0)
+        {
+            <div class="entities-modal-facts mb-3">
+                <label class="form-label small text-muted">Source-grounded fact sheet</label>
+                @if (factSheet.Aliases.Count > 0)
+                {
+                    <div class="entities-modal-fact-aliases"><span>Aliases</span><strong>@string.Join(", ", factSheet.Aliases)</strong></div>
+                }
+                <div class="entities-modal-fact-list">
+                    @foreach (var field in factSheet.Fields)
+                    {
+                        <article class="entities-modal-fact" @key="field.Key">
+                            <div class="entities-modal-fact-head">@field.Label</div>
+                            <p>@field.Value</p>
+                            @foreach (var evidence in field.Evidence.Take(3))
+                            {
+                                <div class="entities-modal-fact-evidence" @key="FactEvidenceKey(field, evidence)">
+                                    <div><strong>@evidence.SourceTitle</strong> <span>@evidence.SourceKind</span> <span>chunk @(evidence.SourceChunkIndex + 1)</span></div>
+                                    @if (!string.IsNullOrWhiteSpace(evidence.Evidence))
+                                    {
+                                        <blockquote>@evidence.Evidence</blockquote>
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(evidence.Summary))
+                                    {
+                                        <blockquote>@evidence.Summary</blockquote>
+                                    }
+                                </div>
+                            }
+                        </article>
+                    }
+                </div>
+            </div>
+        }
+    </div>;
+
     private RenderFragment RenderIngestObservations(IReadOnlyList<IngestSourceObservation> observations, string title) => @<div>
         @if (observations.Count > 0)
         {
@@ -458,6 +498,14 @@
         if (entity.Properties.TryGetValue("role", out var role) && !string.IsNullOrWhiteSpace(role))
             return role;
 
+        var factSheet = IngestSourceAssertions.BuildFactSheet(entity.IngestObservations);
+        foreach (var key in new[] { "summary", "role", "description", "significance", "details" })
+        {
+            var field = factSheet.Fields.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.OrdinalIgnoreCase));
+            if (field is not null && !string.IsNullOrWhiteSpace(field.Value))
+                return field.Value;
+        }
+
         return entity.IngestObservations.Select(ObservationPreview).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
             ?? entity.IngestSources.Select(source => source.Summary).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
             ?? string.Empty;
@@ -471,6 +519,9 @@
 
     private static string ObservationKey(IngestSourceObservation observation) =>
         $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
+
+    private static string FactEvidenceKey(IngestFactSheetField field, IngestFactSheetEvidence evidence) =>
+        $"{field.Key}:{evidence.SourceId}:{evidence.SourceChunkId}:{evidence.UpdatedAt:o}";
 
     private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
 

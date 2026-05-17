@@ -448,6 +448,7 @@ public sealed class EditorContestService(
         Rules:
         - Output JSON only. Do not wrap it in Markdown.
         - Use replace_whole_body for full-chapter drafts or full-body rewrites.
+        - When the current chapter body is empty, use replace_whole_body for the first draft because there are no existing numbered lines.
         - Use replace_range for exact inclusive line ranges.
         - Use insert_before_line or insert_after_line for insertions.
         - Use only chapter-body mutations. Do not propose outline, fact, entity, or relationship changes.
@@ -546,6 +547,12 @@ public sealed class EditorContestService(
             switch (operation.Kind)
             {
                 case "replace_range":
+                    if (lines.Count == 0 && operation.StartLine == 1 && operation.EndLine == 1)
+                    {
+                        lines.InsertRange(0, replacementLines);
+                        break;
+                    }
+
                     if (operation.StartLine < 1 || operation.EndLine > lines.Count || operation.EndLine < operation.StartLine)
                         throw new ContestCandidateInvalidException($"Invalid replace_range lines {operation.StartLine}-{operation.EndLine}.", string.Empty);
                     lines.RemoveRange(operation.StartLine - 1, operation.EndLine - operation.StartLine + 1);

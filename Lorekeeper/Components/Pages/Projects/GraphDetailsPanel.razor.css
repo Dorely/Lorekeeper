@@ -231,6 +231,71 @@
     font-size: 0.72rem;
 }
 
+.graph-fact-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-top: 0.25rem;
+}
+
+.graph-fact-aliases,
+.graph-fact {
+    padding: 0.55rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.4rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.graph-fact-aliases {
+    display: grid;
+    grid-template-columns: minmax(5rem, 8rem) minmax(0, 1fr);
+    gap: 0.45rem;
+    font-size: 0.82rem;
+}
+
+.graph-fact-aliases span,
+.graph-fact-evidence span {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.graph-fact-aliases strong {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.graph-fact {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    font-size: 0.82rem;
+}
+
+.graph-fact-head {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.graph-fact p,
+.graph-fact blockquote {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.graph-fact-evidence {
+    padding-top: 0.35rem;
+    border-top: 1px solid rgba(108, 117, 125, 0.18);
+}
+
+.graph-fact-evidence blockquote {
+    margin-top: 0.25rem;
+    padding-left: 0.6rem;
+    border-left: 3px solid rgba(108, 117, 125, 0.32);
+    color: var(--bs-secondary-color, #6c757d);
+}
+
 .graph-ingest-section {
     display: flex;
     flex-direction: column;

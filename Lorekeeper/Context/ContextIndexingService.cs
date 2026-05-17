@@ -253,18 +253,26 @@ public sealed class ContextIndexingService(
 
         AppendProperties(sb, node.Properties);
 
-        var observations = IngestSourceAssertions.ListEntityObservations(node.Properties, MaxEntityObservations);
-        if (observations.Count > 0)
+        var factSheet = IngestSourceAssertions.BuildEntityFactSheet(node.Properties, MaxEntityObservations);
+        if (factSheet.Aliases.Count > 0)
         {
-            sb.AppendLine("Ingest observations:");
-            foreach (var observation in observations)
+            sb.AppendLine("Aliases:");
+            sb.Append("- ").AppendLine(string.Join(", ", factSheet.Aliases));
+        }
+
+        if (factSheet.Fields.Count > 0)
+        {
+            sb.AppendLine("Source-grounded fact sheet:");
+            foreach (var field in factSheet.Fields)
             {
-                sb.Append("- ").Append(observation.SourceTitle).Append(" chunk ").Append(observation.SourceChunkIndex + 1).AppendLine();
-                AppendOptional(sb, "  Summary", observation.Summary);
-                AppendObservedProperties(sb, observation.ObservedProperties, "  ");
-                AppendOptional(sb, "  Aliases", string.Join(", ", observation.Aliases));
-                AppendOptional(sb, "  Evidence", observation.Evidence);
-                AppendOptional(sb, "  Notes", observation.Notes);
+                sb.Append("- ").Append(field.Label).Append(": ").AppendLine(field.Value);
+                foreach (var evidence in field.Evidence.Take(3))
+                {
+                    sb.Append("  Source: ").Append(evidence.SourceTitle).Append(" chunk ").Append(evidence.SourceChunkIndex + 1).AppendLine();
+                    AppendOptional(sb, "  Evidence", evidence.Evidence);
+                    if (string.IsNullOrWhiteSpace(evidence.Evidence))
+                        AppendOptional(sb, "  Source summary", evidence.Summary);
+                }
             }
         }
 
