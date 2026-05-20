@@ -19,21 +19,26 @@ public static class AiChangeReviewDiffBuilder
     {
         diff = null!;
         if (changes.Count == 0) return false;
-        if (changes.Count == 1) return TryBuild(changes[0], out diff);
 
         var orderedChanges = changes
             .OrderBy(change => change.Batch.CreatedAt)
             .ThenBy(change => change.Order)
             .ToList();
+        if (orderedChanges.Count == 1 && TryBuild(orderedChanges[0], out diff))
+            return true;
+
         if (!TryBuildGrouped(orderedChanges, out diff))
             return false;
 
-        diff = diff with
+        if (orderedChanges.Count > 1)
         {
-            Subtitle = string.IsNullOrWhiteSpace(diff.Subtitle)
-                ? $"{orderedChanges.Count} tool changes"
-                : $"{diff.Subtitle} ({orderedChanges.Count} tool changes)",
-        };
+            diff = diff with
+            {
+                Subtitle = string.IsNullOrWhiteSpace(diff.Subtitle)
+                    ? $"{orderedChanges.Count} tool changes"
+                    : $"{diff.Subtitle} ({orderedChanges.Count} tool changes)",
+            };
+        }
         return true;
     }
 
@@ -47,7 +52,7 @@ public static class AiChangeReviewDiffBuilder
                 editablePayload.Title,
                 editablePayload.Subtitle,
                 editablePayload.Fields
-                    .Select(field => new DiffFieldInput(field.Key, field.Label, field.OldText, field.NewText))
+                    .Select(field => new DiffFieldInput(field.Key, field.Label, field.OldText, field.NewText, EditableOwnerChangeId(change, hasAfterPayload: true)))
                     .ToList(),
                 showSingleFieldLabel: editablePayload.Fields.Count != 1 || !string.Equals(editablePayload.Fields[0].Key, "Body", StringComparison.OrdinalIgnoreCase));
             return true;
@@ -65,7 +70,7 @@ public static class AiChangeReviewDiffBuilder
             diff = Build(
                 "Chapter body",
                 after.Title,
-                [new DiffFieldInput("Body", before.Body, after.Body)],
+                [new DiffFieldInput("Body", before.Body, after.Body, EditableOwnerChangeId(change, hasAfterPayload: true))],
                 showSingleFieldLabel: false);
             return true;
         }
@@ -82,8 +87,8 @@ public static class AiChangeReviewDiffBuilder
                 "Act edit",
                 after.Title,
                 [
-                    new DiffFieldInput("Title", before.Title, after.Title),
-                    new DiffFieldInput("Synopsis", before.Synopsis, after.Synopsis),
+                    new DiffFieldInput("Title", before.Title, after.Title, EditableOwnerChangeId(change, hasAfterPayload: true)),
+                    new DiffFieldInput("Synopsis", before.Synopsis, after.Synopsis, EditableOwnerChangeId(change, hasAfterPayload: true)),
                 ]);
             return true;
         }
@@ -100,8 +105,8 @@ public static class AiChangeReviewDiffBuilder
                 "Chapter edit",
                 after.Title,
                 [
-                    new DiffFieldInput("Title", before.Title, after.Title),
-                    new DiffFieldInput("Synopsis", before.Synopsis, after.Synopsis),
+                    new DiffFieldInput("Title", before.Title, after.Title, EditableOwnerChangeId(change, hasAfterPayload: true)),
+                    new DiffFieldInput("Synopsis", before.Synopsis, after.Synopsis, EditableOwnerChangeId(change, hasAfterPayload: true)),
                 ]);
             return true;
         }
@@ -116,7 +121,7 @@ public static class AiChangeReviewDiffBuilder
 
             var fields = new List<DiffFieldInput>
             {
-                new("Name", before.Name, after.Name),
+                new("Name", before.Name, after.Name, EditableOwnerChangeId(change, hasAfterPayload: true)),
             };
             var propertyNames = before.Properties.Keys
                 .Concat(after.Properties.Keys)
@@ -132,7 +137,8 @@ public static class AiChangeReviewDiffBuilder
                 fields.Add(new DiffFieldInput(
                     $"properties.{propertyName}",
                     beforeExists ? beforeValue ?? string.Empty : "(not set)",
-                    afterExists ? afterValue ?? string.Empty : "(not set)"));
+                    afterExists ? afterValue ?? string.Empty : "(not set)",
+                    EditableOwnerChangeId(change, hasAfterPayload: true)));
             }
 
             diff = Build("Entity edit", after.Name, fields);
@@ -181,7 +187,7 @@ public static class AiChangeReviewDiffBuilder
 
             SetTitle(ref title, "Chapter changes");
             SetSubtitle(ref subtitle, after.Title);
-            AddOrUpdateField(fields, "Body", before.Body, after.Body);
+            AddOrUpdateField(fields, "Body", before.Body, after.Body, EditableOwnerChangeId(change, hasAfterPayload: true));
             return true;
         }
 
@@ -193,8 +199,9 @@ public static class AiChangeReviewDiffBuilder
 
             SetTitle(ref title, "Act changes");
             SetSubtitle(ref subtitle, after?.Title ?? before?.Title ?? string.Empty);
-            AddOrUpdateField(fields, "Title", before?.Title ?? string.Empty, after?.Title ?? string.Empty);
-            AddOrUpdateField(fields, "Synopsis", before?.Synopsis ?? string.Empty, after?.Synopsis ?? string.Empty);
+            var ownerChangeId = EditableOwnerChangeId(change, after is not null);
+            AddOrUpdateField(fields, "Title", before?.Title ?? string.Empty, after?.Title ?? string.Empty, ownerChangeId);
+            AddOrUpdateField(fields, "Synopsis", before?.Synopsis ?? string.Empty, after?.Synopsis ?? string.Empty, ownerChangeId);
             return true;
         }
 
@@ -206,8 +213,9 @@ public static class AiChangeReviewDiffBuilder
 
             SetTitle(ref title, "Chapter changes");
             SetSubtitle(ref subtitle, after?.Title ?? before?.Title ?? string.Empty);
-            AddOrUpdateField(fields, "Title", before?.Title ?? string.Empty, after?.Title ?? string.Empty);
-            AddOrUpdateField(fields, "Synopsis", before?.Synopsis ?? string.Empty, after?.Synopsis ?? string.Empty);
+            var ownerChangeId = EditableOwnerChangeId(change, after is not null);
+            AddOrUpdateField(fields, "Title", before?.Title ?? string.Empty, after?.Title ?? string.Empty, ownerChangeId);
+            AddOrUpdateField(fields, "Synopsis", before?.Synopsis ?? string.Empty, after?.Synopsis ?? string.Empty, ownerChangeId);
             return true;
         }
 
@@ -220,7 +228,8 @@ public static class AiChangeReviewDiffBuilder
             var type = after?.Type ?? before?.Type ?? "Entity";
             SetTitle(ref title, $"{type} changes");
             SetSubtitle(ref subtitle, after?.Name ?? before?.Name ?? string.Empty);
-            AddOrUpdateField(fields, "Name", before?.Name ?? string.Empty, after?.Name ?? string.Empty);
+            var ownerChangeId = EditableOwnerChangeId(change, after is not null);
+            AddOrUpdateField(fields, "Name", before?.Name ?? string.Empty, after?.Name ?? string.Empty, ownerChangeId);
 
             var beforePropertyNames = before?.Properties.Keys ?? Enumerable.Empty<string>();
             var afterPropertyNames = after?.Properties.Keys ?? Enumerable.Empty<string>();
@@ -236,7 +245,8 @@ public static class AiChangeReviewDiffBuilder
                     fields,
                     $"properties.{propertyName}",
                     beforeExists ? beforeValue : "(not set)",
-                    afterExists ? afterValue : "(not set)");
+                    afterExists ? afterValue : "(not set)",
+                    ownerChangeId);
             }
 
             return true;
@@ -267,15 +277,22 @@ public static class AiChangeReviewDiffBuilder
         subtitle = candidate;
     }
 
-    private static void AddOrUpdateField(Dictionary<string, DiffFieldInput> fields, string label, string oldText, string newText)
+    private static Guid? EditableOwnerChangeId(AiChange change, bool hasAfterPayload) =>
+        hasAfterPayload
+        && change.Status == AiChangeStatus.Pending
+        && AiChangeReviewDrafts.TryGetEditablePayload(change, out _)
+            ? change.Id
+            : null;
+
+    private static void AddOrUpdateField(Dictionary<string, DiffFieldInput> fields, string key, string oldText, string newText, Guid? ownerChangeId)
     {
-        if (fields.TryGetValue(label, out var existing))
+        if (fields.TryGetValue(key, out var existing))
         {
-            fields[label] = existing with { NewText = newText };
+            fields[key] = existing with { NewText = newText, OwnerChangeId = ownerChangeId };
             return;
         }
 
-        fields[label] = new DiffFieldInput(label, oldText, newText);
+        fields[key] = new DiffFieldInput(key, oldText, newText, ownerChangeId);
     }
 
     private static string GetPropertyValue(Dictionary<string, string?>? properties, string propertyName, out bool exists)
@@ -325,7 +342,8 @@ public static class AiChangeReviewDiffBuilder
                 showLabels ? field.Label : string.Empty,
                 field.OldText,
                 field.NewText,
-                BuildDiffHunks(BuildDiffRows(field.OldText, field.NewText))))
+                BuildDiffHunks(BuildDiffRows(field.OldText, field.NewText)),
+                field.OwnerChangeId))
             .Where(section => section.Hunks.Count > 0)
             .ToList();
 
@@ -1099,7 +1117,13 @@ public sealed record ReviewDiff(string Title, string? Subtitle, IReadOnlyList<Di
     public int Deletions => Sections.Sum(section => section.Deletions);
 }
 
-public sealed record DiffSection(string Key, string Label, string OldText, string NewText, IReadOnlyList<DiffHunk> Hunks)
+public sealed record DiffSection(
+    string Key,
+    string Label,
+    string OldText,
+    string NewText,
+    IReadOnlyList<DiffHunk> Hunks,
+    Guid? OwnerChangeId = null)
 {
     public int Additions => Hunks.Sum(hunk => hunk.Additions);
     public int Deletions => Hunks.Sum(hunk => hunk.Deletions);
@@ -1122,10 +1146,10 @@ public sealed record DiffRow(
 
 public sealed record DiffSegment(string Text, DiffSegmentKind Kind);
 
-public sealed record DiffFieldInput(string Key, string Label, string OldText, string NewText)
+public sealed record DiffFieldInput(string Key, string Label, string OldText, string NewText, Guid? OwnerChangeId = null)
 {
-    public DiffFieldInput(string label, string oldText, string newText)
-        : this(label, label, oldText, newText)
+    public DiffFieldInput(string label, string oldText, string newText, Guid? ownerChangeId = null)
+        : this(label, label, oldText, newText, ownerChangeId)
     {
     }
 }

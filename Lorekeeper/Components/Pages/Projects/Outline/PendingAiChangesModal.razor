@@ -2,12 +2,14 @@
 @using Lorekeeper.Context
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
+@implements IAsyncDisposable
 @inject IAiChangeApprovalService ChangeApproval
+@inject IJSRuntime JS
 
 @if (IsOpen)
 {
     <div class="pending-ai-backdrop" role="presentation" @onclick="CloseAsync"></div>
-    <section class="pending-ai-modal" role="dialog" aria-modal="true" aria-label="Pending AI changes">
+    <section class="pending-ai-modal" role="dialog" aria-modal="true" aria-label="Pending AI changes" @ref="_modalEl">
         <header class="pending-ai-header">
             <div>
                 <div class="pending-ai-title">Pending AI Changes</div>
@@ -84,15 +86,15 @@
                     }
                     else
                     {
-                        var editableChange = EditableChangeFor(SelectedGroup);
-                        var hasReviewDraft = editableChange is not null && AiChangeReviewDrafts.HasDraft(editableChange);
+                        var hasEditableChange = SelectedGroup.Changes.Any(IsEditableChange);
+                        var hasReviewDraft = SelectedGroup.Changes.Any(AiChangeReviewDrafts.HasDraft);
                         <div class="pending-ai-detail-head">
                             <div>
                                 <div class="pending-ai-tool large">@GroupTitle(SelectedGroup)</div>
                                 <div class="pending-ai-summary">@GroupSummary(SelectedGroup)</div>
                                 @if (SelectedGroup.Changes.Count > 1)
                                 {
-                                    <div class="pending-ai-note">Line editing is available when a single text change is selected.</div>
+                                    <div class="pending-ai-note">This preview combines the pending changes into the final proposed state.</div>
                                 }
                             </div>
                             <span class="pending-ai-status">@SelectedGroup.StatusText</span>
@@ -117,12 +119,12 @@
                                         }
                                     </div>
                                     <div class="pending-ai-diff-header-actions">
-                                        @if (editableChange is not null)
+                                        @if (hasEditableChange)
                                         {
                                             <button type="button"
                                                     class="btn btn-sm btn-outline-secondary"
                                                     disabled="@(_busy || !hasReviewDraft)"
-                                                    @onclick="() => ResetChangeDraftAsync(editableChange)">Reset draft</button>
+                                                    @onclick="() => ResetGroupDraftsAsync(SelectedGroup.Key)">Reset drafts</button>
                                             @if (hasReviewDraft)
                                             {
                                                 <span class="pending-ai-draft-badge">Draft edited</span>
@@ -153,20 +155,21 @@
                                 {
                                     @foreach (var diffSection in reviewDiff.Sections)
                                     {
+                                        var sectionOwner = EditableChangeFor(SelectedGroup, diffSection);
                                         <section class="pending-ai-diff-section">
                                             @if (!string.IsNullOrWhiteSpace(diffSection.Label))
                                             {
                                                 <div class="pending-ai-diff-field-row">
                                                     <div class="pending-ai-diff-field">@diffSection.Label</div>
-                                                    @if (editableChange is not null)
+                                                    @if (sectionOwner is not null)
                                                     {
                                                         <div class="pending-ai-field-actions">
                                                             <button type="button" class="btn btn-sm btn-outline-secondary"
                                                                     disabled="@_busy"
-                                                                    @onclick="() => ResetFieldToOriginalProposalAsync(editableChange, diffSection.Key)">Reset field</button>
+                                                                    @onclick="() => ResetFieldToOriginalProposalAsync(sectionOwner, diffSection.Key)">Reset field</button>
                                                             <button type="button" class="btn btn-sm btn-outline-danger"
                                                                     disabled="@_busy"
-                                                                    @onclick="() => RejectFieldAsync(editableChange, diffSection)">Reject field</button>
+                                                                    @onclick="() => RejectFieldAsync(sectionOwner, diffSection)">Reject field</button>
                                                         </div>
                                                     }
                                                 </div>
@@ -192,10 +195,10 @@
                                                                 <span class="pending-ai-diff-line-number">@(row.NewLineNumber?.ToString() ?? string.Empty)</span>
                                                                 <span class="pending-ai-diff-marker">@row.Marker</span>
                                                                 <span class="pending-ai-diff-line-text">
-                                                                    @if (editableChange is not null && CanEditNewLine(row))
+                                                                    @if (sectionOwner is not null && CanEditNewLine(row))
                                                                     {
-                                                                        <textarea class="pending-ai-line-editor" rows="1" value="@row.Text"
-                                                                                  @onchange="args => UpdateLineTextAsync(editableChange, diffSection, row.NewLineNumber!.Value, args.Value?.ToString() ?? string.Empty)"></textarea>
+                                                                        <textarea class="pending-ai-line-editor" data-autosize data-autosize-resize="vertical" rows="1" value="@row.Text"
+                                                                                  @onchange="args => UpdateLineTextAsync(sectionOwner, diffSection, row.NewLineNumber!.Value, args.Value?.ToString() ?? string.Empty)"></textarea>
                                                                     }
                                                                     else
                                                                     {
@@ -203,11 +206,11 @@
                                                                     }
                                                                 </span>
                                                                 <span class="pending-ai-diff-line-actions">
-                                                                    @if (editableChange is not null && CanRejectDiffRow(row))
+                                                                    @if (sectionOwner is not null && CanRejectDiffRow(row))
                                                                     {
                                                                         <button type="button" class="btn btn-sm btn-outline-danger"
                                                                                 disabled="@_busy"
-                                                                                @onclick="() => RejectLineAsync(editableChange, diffSection, row, hunk.Rows)">Reject line</button>
+                                                                                @onclick="() => RejectLineAsync(sectionOwner, diffSection, row, hunk.Rows)">Reject line</button>
                                                                     }
                                                                 </span>
                                                             </div>
@@ -225,10 +228,10 @@
                                                                     <span class="pending-ai-split-line-number new @SplitCellClass(splitRow.New)">@(splitRow.New?.NewLineNumber?.ToString() ?? string.Empty)</span>
                                                                     <span class="pending-ai-split-marker new @SplitCellClass(splitRow.New)">@(splitRow.New?.Marker ?? string.Empty)</span>
                                                                     <span class="pending-ai-split-line-text new @SplitCellClass(splitRow.New)">
-                                                                        @if (editableChange is not null && splitRow.New is { } newRow && CanEditNewLine(newRow))
+                                                                        @if (sectionOwner is not null && splitRow.New is { } newRow && CanEditNewLine(newRow))
                                                                         {
-                                                                            <textarea class="pending-ai-line-editor" rows="1" value="@newRow.Text"
-                                                                                      @onchange="args => UpdateLineTextAsync(editableChange, diffSection, newRow.NewLineNumber!.Value, args.Value?.ToString() ?? string.Empty)"></textarea>
+                                                                            <textarea class="pending-ai-line-editor" data-autosize data-autosize-resize="vertical" rows="1" value="@newRow.Text"
+                                                                                      @onchange="args => UpdateLineTextAsync(sectionOwner, diffSection, newRow.NewLineNumber!.Value, args.Value?.ToString() ?? string.Empty)"></textarea>
                                                                         }
                                                                         else
                                                                         {
@@ -236,17 +239,17 @@
                                                                         }
                                                                     </span>
                                                                     <span class="pending-ai-split-line-actions">
-                                                                        @if (editableChange is not null && splitRow.Old is { } oldRow && CanRejectDiffRow(oldRow))
+                                                                        @if (sectionOwner is not null && splitRow.Old is { } oldRow && CanRejectDiffRow(oldRow))
                                                                         {
                                                                             <button type="button" class="btn btn-sm btn-outline-danger"
                                                                                     disabled="@_busy"
-                                                                                    @onclick="() => RejectLineAsync(editableChange, diffSection, oldRow, hunk.Rows)">Reject line</button>
+                                                                                    @onclick="() => RejectLineAsync(sectionOwner, diffSection, oldRow, hunk.Rows)">Reject line</button>
                                                                         }
-                                                                        @if (editableChange is not null && splitRow.New is { } actionNewRow && CanRejectDiffRow(actionNewRow))
+                                                                        @if (sectionOwner is not null && splitRow.New is { } actionNewRow && CanRejectDiffRow(actionNewRow))
                                                                         {
                                                                             <button type="button" class="btn btn-sm btn-outline-danger"
                                                                                     disabled="@_busy"
-                                                                                    @onclick="() => RejectLineAsync(editableChange, diffSection, actionNewRow, hunk.Rows)">Reject line</button>
+                                                                                    @onclick="() => RejectLineAsync(sectionOwner, diffSection, actionNewRow, hunk.Rows)">Reject line</button>
                                                                         }
                                                                     </span>
                                                                 </div>
@@ -347,6 +350,8 @@
     private string? _error;
     private bool _busy;
     private DiffViewMode _diffViewMode = DiffViewMode.Inline;
+    private ElementReference _modalEl;
+    private IJSObjectReference? _autoSizer;
 
     private List<PendingChangeItem> Flattened => Batches
         .SelectMany(batch => batch.Changes.OrderBy(change => change.Order).Select(change => new PendingChangeItem(
@@ -370,6 +375,15 @@
         .ToList();
 
     private PendingChangeGroup? SelectedGroup => Grouped.FirstOrDefault(group => group.Key == _selectedGroupKey) ?? Grouped.FirstOrDefault();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js");
+
+        if (IsOpen && _autoSizer is not null)
+            await _autoSizer.InvokeVoidAsync("refresh", _modalEl);
+    }
 
     protected override void OnParametersSet()
     {
@@ -446,23 +460,30 @@
         }
     }
 
-    private static AiChange? EditableChangeFor(PendingChangeGroup group)
+    private static AiChange? EditableChangeFor(PendingChangeGroup group, DiffSection section)
     {
-        if (group.Changes.Count != 1) return null;
+        if (section.OwnerChangeId is not Guid ownerChangeId) return null;
 
-        var change = group.Changes[0];
-        return change.Status == AiChangeStatus.Pending && AiChangeReviewDrafts.TryGetEditablePayload(change, out _)
-            ? change
-            : null;
+        var change = group.Changes.FirstOrDefault(candidate => candidate.Id == ownerChangeId);
+        return change is not null && IsEditableChange(change) ? change : null;
     }
 
-    private async Task ResetChangeDraftAsync(AiChange change)
+    private static bool IsEditableChange(AiChange change) =>
+        change.Status == AiChangeStatus.Pending && AiChangeReviewDrafts.TryGetEditablePayload(change, out _);
+
+    private async Task ResetGroupDraftsAsync(string groupKey)
     {
         await RunDraftAsync(async () =>
         {
-            await ChangeApproval.ClearReviewDraftAsync(change.Id);
-            change.DraftAfterJson = null;
-            change.ReviewStateJson = null;
+            var group = Grouped.FirstOrDefault(candidate => candidate.Key == groupKey);
+            if (group is null) return;
+
+            foreach (var change in group.Changes.Where(change => change.Status == AiChangeStatus.Pending && AiChangeReviewDrafts.HasDraft(change)))
+            {
+                await ChangeApproval.ClearReviewDraftAsync(change.Id);
+                change.DraftAfterJson = null;
+                change.ReviewStateJson = null;
+            }
         });
     }
 
@@ -623,11 +644,9 @@
     }
 
     private static string GroupKey(AiChange change) =>
-        AiChangeReviewDrafts.TryGetEditablePayload(change, out _)
+        string.IsNullOrWhiteSpace(change.ResourceId)
             ? change.Id.ToString("N")
-            : string.IsNullOrWhiteSpace(change.ResourceId)
-            ? change.Id.ToString("N")
-            : change.ResourceId;
+            : change.ResourceId.Trim();
 
     private static string GroupTitle(PendingChangeGroup group)
     {
@@ -826,5 +845,13 @@
     {
         Inline,
         SideBySide,
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_autoSizer is not null)
+        {
+            try { await _autoSizer.DisposeAsync(); } catch { }
+        }
     }
 }
