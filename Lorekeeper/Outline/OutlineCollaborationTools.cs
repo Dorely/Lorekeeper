@@ -91,7 +91,7 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int? startLine = null, int? endLine = null) => ReadChapterAsync(context, chapterId, startLine, endLine),
                 name: "read_chapter",
-                description: "Read a chapter's persisted body with line numbers (0001: ...). Use list_outline to discover chapter ids. Pass optional startLine/endLine to read only part of a long chapter; omit both to read the full body."),
+                description: "Read a chapter's persisted body with line numbers (0001: ...). Use chapter ids from the current outline context when available; otherwise use list_outline to discover chapter ids. Pass optional startLine/endLine to read only part of a long chapter; omit both to read the full body."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId) => DeleteChapterAsync(context, chapterId),

@@ -605,22 +605,11 @@ public sealed class EditorChatService(
 
     private static string BuildToolResultForModel(string toolName, string result, int maxToolResultCharsForModel)
     {
-        if (string.Equals(toolName, "edit_chapter", StringComparison.Ordinal))
-        {
-            const string newBodyMarker = "\n\nNew body:\n";
-            var markerIndex = result.IndexOf(newBodyMarker, StringComparison.Ordinal);
-            if (markerIndex >= 0)
-            {
-                return result[..markerIndex]
-                    + "\n\nThe chapter was updated in the editor. Call read_chapter if you need to inspect the current body before responding.";
-            }
-        }
-
         if (result.Length <= maxToolResultCharsForModel)
             return result;
 
         var message = string.Equals(toolName, "read_chapter", StringComparison.Ordinal)
-            ? "[Tool result exceeded the model-facing limit after pagination. Call read_chapter again with a narrower startLine/endLine range, or request a specific page from the returned pagination metadata.]"
+            ? "[Tool result exceeded the model-facing limit after pagination. Request a specific page from the returned pagination metadata.]"
             : "[Tool result truncated before returning it to the model.]";
 
         return result[..maxToolResultCharsForModel]

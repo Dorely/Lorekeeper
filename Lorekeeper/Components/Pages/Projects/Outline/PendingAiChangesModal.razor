@@ -134,11 +134,11 @@
                                             <button type="button"
                                                     class="@DiffViewButtonClass(DiffViewMode.Inline)"
                                                     aria-pressed="@(_diffViewMode == DiffViewMode.Inline)"
-                                                    @onclick="() => _diffViewMode = DiffViewMode.Inline">Inline</button>
+                                                    @onclick="() => SetDiffViewMode(DiffViewMode.Inline)">Inline</button>
                                             <button type="button"
                                                     class="@DiffViewButtonClass(DiffViewMode.SideBySide)"
                                                     aria-pressed="@(_diffViewMode == DiffViewMode.SideBySide)"
-                                                    @onclick="() => _diffViewMode = DiffViewMode.SideBySide">Side by side</button>
+                                                    @onclick="() => SetDiffViewMode(DiffViewMode.SideBySide)">Side by side</button>
                                         </div>
                                         <div class="pending-ai-diff-stats" aria-label="Diff stats">
                                             <span class="pending-ai-diff-added">+@reviewDiff.Additions</span>
@@ -352,8 +352,18 @@
     private DiffViewMode _diffViewMode = DiffViewMode.Inline;
     private ElementReference _modalEl;
     private IJSObjectReference? _autoSizer;
+    private bool _autosizeRefreshPending;
+    private bool _wasOpen;
+    private int _changeCacheHash;
+    private IReadOnlyList<PendingChangeItem> _flattened = [];
+    private IReadOnlyList<PendingChangeGroup> _grouped = [];
+    private PendingChangeGroup? _selectedGroup;
 
-    private List<PendingChangeItem> Flattened => Batches
+    private IReadOnlyList<PendingChangeItem> Flattened => _flattened;
+    private IReadOnlyList<PendingChangeGroup> Grouped => _grouped;
+    private PendingChangeGroup? SelectedGroup => _selectedGroup;
+
+    private static IReadOnlyList<PendingChangeItem> BuildFlattened(IReadOnlyList<AiChangeBatch> batches) => batches
         .SelectMany(batch => batch.Changes.OrderBy(change => change.Order).Select(change => new PendingChangeItem(
             batch,
             change,
@@ -364,7 +374,7 @@
         .ThenBy(item => item.Change.Order)
         .ToList();
 
-    private List<PendingChangeGroup> Grouped => Flattened
+    private static IReadOnlyList<PendingChangeGroup> BuildGrouped(IReadOnlyList<PendingChangeItem> flattened) => flattened
         .GroupBy(item => GroupKey(item.Change), StringComparer.OrdinalIgnoreCase)
         .Select(group => new PendingChangeGroup(group.Key, group
             .OrderBy(item => item.Batch.CreatedAt)
@@ -374,30 +384,97 @@
         .ThenBy(group => group.Order)
         .ToList();
 
-    private PendingChangeGroup? SelectedGroup => Grouped.FirstOrDefault(group => group.Key == _selectedGroupKey) ?? Grouped.FirstOrDefault();
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
-            _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js");
+        if ((firstRender || IsOpen) && _autoSizer is null)
+            await ImportAutoSizerAsync();
 
-        if (IsOpen && _autoSizer is not null)
-            await _autoSizer.InvokeVoidAsync("refresh", _modalEl);
+        if (IsOpen && _autosizeRefreshPending && _autoSizer is not null)
+        {
+            if (await RefreshAutoSizeAsync(_modalEl))
+                _autosizeRefreshPending = false;
+        }
     }
 
     protected override void OnParametersSet()
     {
-        if (SelectedGroup is null)
+        var previousSelectedGroupKey = _selectedGroupKey;
+        var previousChangeCacheHash = _changeCacheHash;
+
+        _flattened = BuildFlattened(Batches);
+        _grouped = BuildGrouped(_flattened);
+        _changeCacheHash = ComputeChangeCacheHash(_flattened);
+        _selectedGroup = _grouped.FirstOrDefault(group => group.Key == _selectedGroupKey) ?? _grouped.FirstOrDefault();
+        _selectedGroupKey = _selectedGroup?.Key;
+
+        if (IsOpen
+            && (!_wasOpen
+                || previousChangeCacheHash != _changeCacheHash
+                || !string.Equals(previousSelectedGroupKey, _selectedGroupKey, StringComparison.Ordinal)))
         {
-            _selectedGroupKey = Grouped.FirstOrDefault()?.Key;
+            QueueAutosizeRefresh();
         }
-        else
-        {
-            _selectedGroupKey = SelectedGroup.Key;
-        }
+
+        _wasOpen = IsOpen;
     }
 
-    private void SelectGroup(string groupKey) => _selectedGroupKey = groupKey;
+    private void SelectGroup(string groupKey)
+    {
+        if (string.Equals(_selectedGroupKey, groupKey, StringComparison.Ordinal)) return;
+
+        _selectedGroupKey = groupKey;
+        _selectedGroup = _grouped.FirstOrDefault(group => group.Key == groupKey);
+        QueueAutosizeRefresh();
+    }
+
+    private void SetDiffViewMode(DiffViewMode mode)
+    {
+        if (_diffViewMode == mode) return;
+
+        _diffViewMode = mode;
+        QueueAutosizeRefresh();
+    }
+
+    private void QueueAutosizeRefresh() => _autosizeRefreshPending = true;
+
+    private async Task ImportAutoSizerAsync()
+    {
+        try
+        {
+            _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js");
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task<bool> RefreshAutoSizeAsync(ElementReference root)
+    {
+        if (_autoSizer is null) return false;
+
+        try
+        {
+            await _autoSizer.InvokeVoidAsync("refresh", root);
+            return true;
+        }
+        catch (JSDisconnectedException) { return false; }
+        catch (OperationCanceledException) { return false; }
+    }
+
+    private static int ComputeChangeCacheHash(IReadOnlyList<PendingChangeItem> items)
+    {
+        var hash = new HashCode();
+        foreach (var item in items)
+        {
+            hash.Add(item.Batch.Id);
+            hash.Add(item.Batch.Status);
+            hash.Add(item.Batch.UpdatedAt);
+            hash.Add(item.Change.Id);
+            hash.Add(item.Change.Status);
+            hash.Add(item.Change.UpdatedAt);
+        }
+
+        return hash.ToHashCode();
+    }
 
     private async Task CloseAsync()
     {
@@ -457,6 +534,8 @@
         finally
         {
             _busy = false;
+            if (IsOpen)
+                QueueAutosizeRefresh();
         }
     }
 
@@ -562,6 +641,8 @@
         finally
         {
             _busy = false;
+            if (IsOpen)
+                QueueAutosizeRefresh();
         }
     }
 
@@ -803,9 +884,9 @@
     {
         public string Key { get; } = key;
         public IReadOnlyList<PendingChangeItem> Items { get; } = items;
-        public IReadOnlyList<AiChange> Changes => Items.Select(item => item.Change).ToList();
-        public IReadOnlyList<Guid> ChangeIds => Items.Select(item => item.Change.Id).ToList();
-        public IReadOnlyList<Guid> PendingChangeIds => Items
+        public IReadOnlyList<AiChange> Changes { get; } = items.Select(item => item.Change).ToList();
+        public IReadOnlyList<Guid> ChangeIds { get; } = items.Select(item => item.Change.Id).ToList();
+        public IReadOnlyList<Guid> PendingChangeIds { get; } = items
             .Where(item => item.Change.Status == AiChangeStatus.Pending)
             .Select(item => item.Change.Id)
             .ToList();
@@ -851,7 +932,9 @@
     {
         if (_autoSizer is not null)
         {
-            try { await _autoSizer.DisposeAsync(); } catch { }
+            try { await _autoSizer.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+            catch (OperationCanceledException) { }
         }
     }
 }

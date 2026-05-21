@@ -432,7 +432,8 @@ public sealed class ContextBuilder(
         var sb = new StringBuilder();
         foreach (var act in actList.OrderBy(act => act.Order))
         {
-            sb.Append("Act ").Append(act.Order + 1).Append(": ").AppendLine(act.Title);
+            sb.Append("Act ").Append(act.Order + 1).Append(": ").Append(act.Title)
+              .Append(" [id: ").Append(act.Id).AppendLine("]");
             AppendOptionalIndented(sb, "Synopsis", act.Synopsis, 2);
             await AppendChaptersAsync(sb, byAct.TryGetValue(act.Id, out var chaptersInAct) ? chaptersInAct : [], currentChapterId, cancellationToken);
             sb.AppendLine();
@@ -440,7 +441,7 @@ public sealed class ContextBuilder(
 
         if (unassigned.Count > 0)
         {
-            sb.AppendLine("Unassigned Chapters");
+            sb.AppendLine("Unassigned Chapters [actId: unassigned]");
             await AppendChaptersAsync(sb, unassigned, currentChapterId, cancellationToken);
         }
 
@@ -536,6 +537,7 @@ public sealed class ContextBuilder(
         {
             var beats = await entities.ListAsync(chapter.ProjectId, EntityTypeService.EventNodeType, chapter.Id, cancellationToken);
             sb.Append("  Chapter ").Append(chapter.Order + 1).Append(": ").Append(chapter.Title);
+            sb.Append(" [id: ").Append(chapter.Id).Append(']');
             if (chapter.Id == currentChapterId)
                 sb.Append(" (current)");
             sb.AppendLine();
@@ -552,7 +554,8 @@ public sealed class ContextBuilder(
         for (var i = 0; i < beats.Count; i++)
         {
             var beat = beats[i];
-            sb.Append(' ', 6).Append("Beat ").Append(i + 1).Append(": ").AppendLine(beat.Name);
+            sb.Append(' ', 6).Append("Beat ").Append(i + 1).Append(": ").Append(beat.Name)
+              .Append(" [id: ").Append(beat.Id).AppendLine("]");
             if (beat.Properties.TryGetValue("summary", out var summary))
                 AppendOptionalIndented(sb, "Summary", summary ?? string.Empty, 8);
         }

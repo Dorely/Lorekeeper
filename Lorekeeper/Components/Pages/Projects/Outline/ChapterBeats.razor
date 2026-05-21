@@ -148,15 +148,30 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (firstRender || _autoSizer is null)
+            await ImportAutoSizerAsync();
+
+        if (_autoSizer is not null)
+            await RefreshAutoSizeAsync(_rootEl);
+    }
+
+    private async Task ImportAutoSizerAsync()
+    {
+        try
         {
             _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js");
         }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+    }
 
-        if (_autoSizer is not null)
-        {
-            await _autoSizer.InvokeVoidAsync("refresh", _rootEl);
-        }
+    private async Task RefreshAutoSizeAsync(ElementReference root)
+    {
+        if (_autoSizer is null) return;
+
+        try { await _autoSizer.InvokeVoidAsync("refresh", root); }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
     }
 
     protected override async Task OnParametersSetAsync()
@@ -312,7 +327,9 @@
     {
         if (_autoSizer is not null)
         {
-            try { await _autoSizer.DisposeAsync(); } catch { }
+            try { await _autoSizer.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+            catch (OperationCanceledException) { }
         }
     }
 }

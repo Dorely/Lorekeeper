@@ -40,6 +40,8 @@ public sealed class EditorChatTools(
         MaxLinksPerNode = 10,
     };
 
+    private const int EditChapterExcerptContextLines = 3;
+
     public IList<AITool> Build(EditorChatContext context, EditorChatToolMode mode = EditorChatToolMode.Normal)
     {
         var tools = new List<AITool>
@@ -75,13 +77,13 @@ public sealed class EditorChatTools(
                 description: "List all graph links adjacent to an entity, including structural HasChild links and semantic story relationships."),
 
             AIFunctionFactory.Create(
-                method: (Guid chapterId, int? startLine = null, int? endLine = null, int? pageNumber = null) =>
-                    ReadChapterAsync(context, chapterId, startLine, endLine, pageNumber),
+                method: (Guid chapterId, int? pageNumber = null) =>
+                    ReadChapterAsync(context, chapterId, pageNumber),
                 name: "read_chapter",
                 description:
                     "Read one paginated page of a chapter's current body with line numbers (0001: ...). " +
-                    "Use list_chapters to discover ids and page counts. Omit startLine/endLine to page through the full chapter; " +
-                    "provide startLine and/or endLine for an inclusive line range; provide pageNumber to read a specific page within that requested full/range scope. " +
+                    "Use chapter ids from the Context Feed outline when available; use list_chapters for missing ids, line counts, and page counts. " +
+                    "Provide pageNumber to read a specific page of the full chapter; omit it to read page 1. " +
                     "Always returns content plus pagination metadata. If this turn already staged an edit to the chapter, returns the latest staged body for this turn."),
         };
 
@@ -108,7 +110,7 @@ public sealed class EditorChatTools(
                 "To Replace: Provide both startLine and endLine: replace the inclusive range of existing numbered lines with `content`. " +
                 "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
                 "`content` should not contain line numbers. " +
-                "Returns the new line-numbered body and a short change summary."));
+                "Returns a short change summary plus the edited line-numbered excerpt with nearby context lines."));
 
         var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var outlineTool in outlineTools.Build(new OutlineCollaborationContext(context.ProjectId, context.OnMutated, context.OutlineStaging)))
@@ -330,8 +332,6 @@ public sealed class EditorChatTools(
     private async Task<string> ReadChapterAsync(
         EditorChatContext ctx,
         Guid chapterId,
-        int? startLine,
-        int? endLine,
         int? pageNumber)
     {
         var chapter = await chapters.GetAsync(chapterId);
@@ -352,9 +352,6 @@ public sealed class EditorChatTools(
 
         var pageMaxChars = EffectiveReadChapterPageMaxChars();
         var lines = ChapterFormatting.SplitLines(body);
-        var rangeError = TryResolveReadChapterRange(lines, startLine, endLine, out var range);
-        if (rangeError is not null)
-            return rangeError;
 
         if (lines.Count == 0)
         {
@@ -372,16 +369,12 @@ public sealed class EditorChatTools(
                 },
                 request = new
                 {
-                    startLine,
-                    endLine,
                     pageNumber = requestedPageNumber,
                 },
-                range = new
+                chapterStats = new
                 {
-                    rangeStartLine = 0,
-                    rangeEndLine = 0,
-                    rangeLineCount = 0,
                     totalChapterLines = 0,
+                    totalChapterChars = body.Length,
                 },
                 pagination = new
                 {
@@ -407,9 +400,9 @@ public sealed class EditorChatTools(
             });
         }
 
-        var pages = BuildReadChapterPages(lines, range.StartLine, range.EndLine, pageMaxChars);
+        var pages = BuildReadChapterPages(lines, pageMaxChars);
         if (requestedPageNumber > pages.Count)
-            return $"Error: pageNumber {requestedPageNumber} is beyond the {pages.Count} page(s) available for lines {range.StartLine}-{range.EndLine}.";
+            return $"Error: pageNumber {requestedPageNumber} is beyond the chapter's {pages.Count} page(s).";
 
         var selectedPage = pages[requestedPageNumber - 1];
         var lineNumberWidth = Math.Max(4, lines.Count.ToString().Length);
@@ -426,16 +419,12 @@ public sealed class EditorChatTools(
             },
             request = new
             {
-                startLine,
-                endLine,
                 pageNumber = requestedPageNumber,
             },
-            range = new
+            chapterStats = new
             {
-                rangeStartLine = range.StartLine,
-                rangeEndLine = range.EndLine,
-                rangeLineCount = range.LineCount,
                 totalChapterLines = lines.Count,
+                totalChapterChars = body.Length,
             },
             pagination = new
             {
@@ -456,10 +445,10 @@ public sealed class EditorChatTools(
                 containsPartialLine = selectedPage.ContainsPartialLine,
             },
             previousPageArguments = requestedPageNumber > 1
-                ? new { chapterId = chapter.Id, startLine = range.StartLine, endLine = range.EndLine, pageNumber = requestedPageNumber - 1 }
+                ? new { chapterId = chapter.Id, pageNumber = requestedPageNumber - 1 }
                 : null,
             nextPageArguments = requestedPageNumber < pages.Count
-                ? new { chapterId = chapter.Id, startLine = range.StartLine, endLine = range.EndLine, pageNumber = requestedPageNumber + 1 }
+                ? new { chapterId = chapter.Id, pageNumber = requestedPageNumber + 1 }
                 : null,
             content,
         });
@@ -472,41 +461,11 @@ public sealed class EditorChatTools(
         var lines = ChapterFormatting.SplitLines(body);
         return lines.Count == 0
             ? 1
-            : BuildReadChapterPages(lines, 1, lines.Count, pageMaxChars).Count;
-    }
-
-    private static string? TryResolveReadChapterRange(
-        IReadOnlyList<string> lines,
-        int? startLine,
-        int? endLine,
-        out ReadChapterRange range)
-    {
-        range = new ReadChapterRange(0, 0, 0);
-
-        if (lines.Count == 0)
-        {
-            if (startLine is not null || endLine is not null)
-                return "Error: chapter is empty; no line range can be read.";
-
-            return null;
-        }
-
-        var start = startLine ?? 1;
-        var end = endLine ?? lines.Count;
-        if (start < 1) return "Error: startLine must be 1 or greater.";
-        if (end < 1) return "Error: endLine must be 1 or greater.";
-        if (start > end) return "Error: startLine must be less than or equal to endLine.";
-        if (start > lines.Count) return $"Error: startLine {start} is beyond the chapter's {lines.Count} lines.";
-
-        end = Math.Min(end, lines.Count);
-        range = new ReadChapterRange(start, end, end - start + 1);
-        return null;
+            : BuildReadChapterPages(lines, pageMaxChars).Count;
     }
 
     private static List<ReadChapterPage> BuildReadChapterPages(
         IReadOnlyList<string> lines,
-        int startLine,
-        int endLine,
         int pageMaxChars)
     {
         var pages = new List<ReadChapterPage>();
@@ -514,7 +473,7 @@ public sealed class EditorChatTools(
         var lineNumberWidth = Math.Max(4, lines.Count.ToString().Length);
         var prefixLength = lineNumberWidth + 2;
 
-        for (var lineNumber = startLine; lineNumber <= endLine; lineNumber++)
+        for (var lineNumber = 1; lineNumber <= lines.Count; lineNumber++)
         {
             var text = lines[lineNumber - 1];
             var fullLineLength = prefixLength + text.Length;
@@ -582,8 +541,6 @@ public sealed class EditorChatTools(
         return sb.ToString();
     }
 
-    private sealed record ReadChapterRange(int StartLine, int EndLine, int LineCount);
-
     private sealed record ReadChapterLineSegment(
         int LineNumber,
         string Text,
@@ -613,6 +570,100 @@ public sealed class EditorChatTools(
         }
     }
 
+    private static string BuildEditChapterResult(
+        string summary,
+        string newBody,
+        int? affectedStartLine,
+        int? affectedEndLine,
+        int anchorLine,
+        string anchorDescription)
+    {
+        var newLines = ChapterFormatting.SplitLines(newBody);
+        var (snippetStartLine, snippetEndLine) = ResolveEditChapterSnippetRange(
+            newLines.Count,
+            affectedStartLine,
+            affectedEndLine,
+            anchorLine);
+
+        var sb = new StringBuilder();
+        sb.Append("OK. ").AppendLine(summary);
+        sb.AppendLine();
+
+        if (affectedStartLine is int startLine && affectedEndLine is int endLine)
+        {
+            sb.Append("Affected new lines: ")
+              .Append(startLine)
+              .Append('-')
+              .Append(endLine)
+              .AppendLine(".");
+        }
+        else
+        {
+            sb.Append("Affected new lines: none; deletion/empty-edit anchor: ")
+              .Append(anchorDescription)
+              .AppendLine(".");
+        }
+
+        if (snippetStartLine == 0)
+        {
+            sb.AppendLine("Returned excerpt lines: none.");
+            sb.AppendLine();
+            sb.AppendLine("New body excerpt:");
+            sb.Append("(empty)");
+            return sb.ToString();
+        }
+
+        sb.Append("Returned excerpt lines: ")
+          .Append(snippetStartLine)
+          .Append('-')
+          .Append(snippetEndLine)
+          .AppendLine(".");
+        sb.AppendLine();
+        sb.AppendLine("New body excerpt:");
+        sb.Append(FormatNumberedLines(newLines, snippetStartLine, snippetEndLine));
+        return sb.ToString();
+    }
+
+    private static (int StartLine, int EndLine) ResolveEditChapterSnippetRange(
+        int lineCount,
+        int? affectedStartLine,
+        int? affectedEndLine,
+        int anchorLine)
+    {
+        if (lineCount == 0)
+            return (0, 0);
+
+        if (affectedStartLine is int startLine && affectedEndLine is int endLine)
+        {
+            return (
+                Math.Max(1, startLine - EditChapterExcerptContextLines),
+                Math.Min(lineCount, endLine + EditChapterExcerptContextLines));
+        }
+
+        var clampedAnchorLine = Math.Clamp(anchorLine, 1, lineCount + 1);
+        if (clampedAnchorLine > lineCount)
+            return (Math.Max(1, lineCount - EditChapterExcerptContextLines + 1), lineCount);
+
+        return (
+            Math.Max(1, clampedAnchorLine - EditChapterExcerptContextLines),
+            Math.Min(lineCount, clampedAnchorLine + EditChapterExcerptContextLines - 1));
+    }
+
+    private static string FormatNumberedLines(IReadOnlyList<string> lines, int startLine, int endLine)
+    {
+        var lineNumberWidth = Math.Max(4, lines.Count.ToString().Length);
+        var sb = new StringBuilder();
+        for (var lineNumber = startLine; lineNumber <= endLine; lineNumber++)
+        {
+            sb.Append(lineNumber.ToString().PadLeft(lineNumberWidth, '0'));
+            sb.Append(": ");
+            sb.Append(lines[lineNumber - 1]);
+            if (lineNumber < endLine) sb.Append('\n');
+        }
+
+        return sb.ToString();
+    }
+
     private async Task<string> EditChapterAsync(
         EditorChatContext ctx,
         Guid chapterId,
@@ -634,6 +685,10 @@ public sealed class EditorChatTools(
 
         string newBody;
         string summary;
+        int? affectedStartLine = null;
+        int? affectedEndLine = null;
+        var anchorLine = 1;
+        var anchorDescription = "chapter start";
 
         string InsertBeforeLine(int insertLine)
         {
@@ -657,6 +712,18 @@ public sealed class EditorChatTools(
             summary = existingLines.Count == 0
                 ? $"Appended {contentLines.Count} line(s) to the empty chapter."
                 : $"Appended {contentLines.Count} line(s) after line {existingLines.Count}.";
+            if (contentLines.Count > 0)
+            {
+                affectedStartLine = appendLine;
+                affectedEndLine = appendLine + contentLines.Count - 1;
+            }
+            else
+            {
+                anchorLine = appendLine;
+                anchorDescription = existingLines.Count == 0
+                    ? "chapter remains empty"
+                    : $"after line {existingLines.Count}";
+            }
         }
         else if (startLine is int insertLine && endLine is null)
         {
@@ -665,6 +732,18 @@ public sealed class EditorChatTools(
 
             newBody = InsertBeforeLine(insertLine);
             summary = InsertSummary(insertLine);
+            if (contentLines.Count > 0)
+            {
+                affectedStartLine = insertLine;
+                affectedEndLine = insertLine + contentLines.Count - 1;
+            }
+            else
+            {
+                anchorLine = insertLine;
+                anchorDescription = insertLine == existingLines.Count + 1
+                    ? existingLines.Count == 0 ? "chapter remains empty" : $"after line {existingLines.Count}"
+                    : $"before line {insertLine}";
+            }
         }
         else if (startLine is int replaceStart && endLine is int replaceEnd)
         {
@@ -672,6 +751,16 @@ public sealed class EditorChatTools(
             {
                 newBody = ChapterFormatting.JoinLines(contentLines);
                 summary = $"Wrote {contentLines.Count} line(s) into the empty chapter.";
+                if (contentLines.Count > 0)
+                {
+                    affectedStartLine = 1;
+                    affectedEndLine = contentLines.Count;
+                }
+                else
+                {
+                    anchorLine = 1;
+                    anchorDescription = "chapter is empty";
+                }
             }
             else
             {
@@ -689,6 +778,21 @@ public sealed class EditorChatTools(
                 summary = replaceStart == 1 && replaceEnd == existingLines.Count
                     ? $"Full rewrite ({existingLines.Count} -> {contentLines.Count} lines)."
                     : $"Replaced lines {replaceStart}-{replaceEnd} ({replacedCount} -> {contentLines.Count} lines).";
+                if (contentLines.Count > 0)
+                {
+                    affectedStartLine = replaceStart;
+                    affectedEndLine = replaceStart + contentLines.Count - 1;
+                }
+                else
+                {
+                    var newLineCount = existingLines.Count - replacedCount;
+                    anchorLine = replaceStart;
+                    anchorDescription = newLineCount == 0
+                        ? "chapter is now empty"
+                        : replaceStart <= newLineCount
+                            ? $"before line {replaceStart}"
+                            : $"after line {newLineCount}";
+                }
             }
         }
         else
@@ -696,8 +800,7 @@ public sealed class EditorChatTools(
             return "Error: endLine provided without startLine.";
         }
 
-        var newNumbered = ChapterFormatting.WithLineNumbers(newBody);
-        var result = $"OK. {summary}\n\nNew body:\n{(newNumbered.Length == 0 ? "(empty)" : newNumbered)}";
+        var result = BuildEditChapterResult(summary, newBody, affectedStartLine, affectedEndLine, anchorLine, anchorDescription);
 
         if (ctx.ReviewEdits && ctx.EditorStaging is not null)
         {
