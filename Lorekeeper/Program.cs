@@ -125,6 +125,7 @@ builder.Services.AddSingleton<IProjectImportJobQueue, ProjectImportJobQueue>();
 builder.Services.AddSingleton<IProjectImportJobNotifier, ProjectImportJobNotifier>();
 builder.Services.AddScoped<IManuscriptExportFormatter, PlainTextManuscriptFormatter>();
 builder.Services.AddScoped<IManuscriptExportFormatter, MarkdownManuscriptFormatter>();
+builder.Services.AddScoped<IManuscriptExportFormatter, EpubManuscriptFormatter>();
 builder.Services.AddScoped<IProjectImportExportService, ProjectImportExportService>();
 builder.Services.AddScoped<ProjectImportJobProcessor>();
 builder.Services.AddHostedService<ProjectImportJobWorker>();

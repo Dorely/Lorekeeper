@@ -14,6 +14,7 @@ public enum ManuscriptExportFormat
 {
     PlainText,
     Markdown,
+    Epub,
 }
 
 public sealed record ProjectExportFile(

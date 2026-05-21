@@ -55,6 +55,12 @@
     width: 9.5rem;
 }
 
+.transfer-check {
+    margin-top: 0.5rem;
+    color: #384152;
+    font-size: 0.85rem;
+}
+
 .transfer-file-name {
     font-size: 0.85rem;
     color: #566276;

@@ -49,6 +49,7 @@
 | File | Description |
 |------|-------------|
 | `MainLayout.razor` / `.css` | Top-level page layout with sidebar + main column. Locks the app shell to viewport height and gives `article.content` a flex/scroll context so workspace pages can create independently scrolling panes. |
+| `PrintLayout.razor` / `.css` | Minimal no-navigation layout used by print-oriented pages such as browser PDF manuscript export. |
 | `NavMenu.razor` / `.css` | Sidebar navigation (Home, Providers). |
 | `ReconnectModal.razor` / `.cs` / `.css` | UI shown when the SignalR circuit drops. |
 
@@ -78,6 +79,7 @@
 | `IngestPage.razor` | Ingest tab at `/projects/{Slug}/ingest`; wraps `ProjectLayout` and hosts `Ingest.IngestContent`. |
 | `ResearchPage.razor` | Research tab at `/projects/{Slug}/research`; wraps `ProjectLayout` and hosts `Research.ResearchContent` when an active search provider is configured. |
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
+| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Print/PDF manuscript route at `/projects/{Slug}/manuscript/print`; renders ordered manuscript content with optional synopses in a no-chrome print layout and can trigger browser print/save-to-PDF. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
 
@@ -98,7 +100,7 @@
 
 | File | Description |
 |------|-------------|
-| `ImportExportContent.razor` (+ `.razor.css`) | Combined project Import / Export workspace: downloads Full/Non-structural graph JSON and TXT/Markdown manuscript exports; uploads Lorekeeper export JSON, queues import jobs, subscribes to live job updates, and shows progress/report history. |
+| `ImportExportContent.razor` (+ `.razor.css`) | Combined project Import / Export workspace: downloads Full/Non-structural graph JSON and TXT/Markdown/EPUB manuscript exports, opens print/PDF view with optional synopses, uploads Lorekeeper export JSON, queues import jobs, subscribes to live job updates, and shows progress/report history. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -318,8 +320,9 @@
 | File | Description |
 |------|-------------|
 | `ProjectExportModels.cs` | Portable export DTOs/enums for Lorekeeper graph packages, stable graph node refs, and manuscript export file metadata. |
-| `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural graph JSON, TXT/Markdown manuscript downloads, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
-| `ManuscriptExportFormatters.cs` | Extensible manuscript formatter abstraction with TXT and Markdown implementations; preserves outline order and keeps future formats pluggable. |
+| `ManuscriptExportModels.cs` | Shared ordered manuscript export projection and options, including optional synopsis inclusion for downloads and print view. |
+| `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural graph JSON, ordered manuscript projections, TXT/Markdown/EPUB manuscript downloads, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
+| `ManuscriptExportFormatters.cs` | Extensible manuscript formatter abstraction with TXT, Markdown, and dependency-free EPUB implementations over the shared manuscript projection. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |

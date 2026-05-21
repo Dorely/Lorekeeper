@@ -1,0 +1,123 @@
+.print-status {
+    max-width: 48rem;
+    margin: 2rem auto;
+}
+
+.print-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #d8dee9;
+    background: #ffffff;
+}
+
+.print-toolbar-meta {
+    margin-left: auto;
+    color: #667085;
+    font-size: 0.85rem;
+}
+
+.manuscript-print {
+    max-width: 8.5in;
+    min-height: 11in;
+    margin: 1.5rem auto;
+    padding: 0.8in;
+    background: #ffffff;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+    color: #172033;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 12pt;
+    line-height: 1.55;
+}
+
+.manuscript-title-page {
+    min-height: 8.5in;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    break-after: page;
+}
+
+.manuscript-title-page h1 {
+    margin: 0;
+    color: #111827;
+    font-family: Arial, sans-serif;
+    font-size: 32pt;
+    font-weight: 700;
+    line-height: 1.15;
+}
+
+.manuscript-act,
+.manuscript-chapter,
+.manuscript-empty {
+    break-before: page;
+}
+
+.manuscript-act {
+    min-height: 8.5in;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+}
+
+.manuscript-act h2,
+.manuscript-chapter h2 {
+    margin: 0 0 0.75in;
+    color: #111827;
+    font-family: Arial, sans-serif;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.manuscript-act h2 {
+    font-size: 26pt;
+}
+
+.manuscript-chapter h2 {
+    font-size: 20pt;
+}
+
+.manuscript-synopsis {
+    margin: 0 0 0.4in;
+    color: #475467;
+    font-style: italic;
+}
+
+.manuscript-synopsis p,
+.manuscript-prose p {
+    margin: 0 0 0.12in;
+}
+
+.manuscript-prose p + p {
+    margin-top: 0.12in;
+}
+
+@page {
+    margin: 0.75in;
+}
+
+@media print {
+    .print-toolbar {
+        display: none !important;
+    }
+
+    .manuscript-print {
+        max-width: none;
+        min-height: auto;
+        margin: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+
+    .manuscript-title-page,
+    .manuscript-act {
+        min-height: 9in;
+    }
+}
+

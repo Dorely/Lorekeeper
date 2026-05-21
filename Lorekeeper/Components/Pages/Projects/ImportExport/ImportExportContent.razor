@@ -36,8 +36,14 @@ else
                         <select class="form-select form-select-sm" @bind="_manuscriptFormat">
                             <option value="@ManuscriptExportFormat.PlainText">TXT</option>
                             <option value="@ManuscriptExportFormat.Markdown">Markdown</option>
+                            <option value="@ManuscriptExportFormat.Epub">EPUB</option>
                         </select>
                         <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_exporting" @onclick="ExportManuscriptAsync">Download</button>
+                        <a class="btn btn-sm btn-outline-secondary" href="@PrintUrl" target="_blank" rel="noopener">Print / PDF</a>
+                    </div>
+                    <div class="form-check transfer-check">
+                        <input class="form-check-input" id="include-synopses" type="checkbox" @bind="_includeSynopses" />
+                        <label class="form-check-label" for="include-synopses">Include synopses</label>
                     </div>
                 </div>
             </div>
@@ -182,6 +188,7 @@ else
     private string? _exportError;
     private string? _jobActionError;
     private ManuscriptExportFormat _manuscriptFormat = ManuscriptExportFormat.PlainText;
+    private bool _includeSynopses;
     private IJSObjectReference? _downloadModule;
     private IProjectImportJobUpdateSubscription? _subscription;
     private CancellationTokenSource? _subscriptionCts;
@@ -193,6 +200,10 @@ else
 
     private string ImportButtonText =>
         _readingFile ? "Reading..." : _creatingJob ? "Queueing..." : "Start import";
+
+    private string PrintUrl => Project is null
+        ? "#"
+        : $"/projects/{Uri.EscapeDataString(Project.Slug)}/manuscript/print?includeSynopses={_includeSynopses.ToString().ToLowerInvariant()}&autoprint=true";
 
     protected override async Task OnParametersSetAsync()
     {
@@ -333,7 +344,7 @@ else
         _exportError = null;
         try
         {
-            var file = await Transfers.ExportManuscriptAsync(Project.Id, _manuscriptFormat);
+            var file = await Transfers.ExportManuscriptAsync(Project.Id, _manuscriptFormat, new ManuscriptExportOptions(_includeSynopses));
             await _downloadModule.InvokeVoidAsync("downloadBytes", file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
         }
         catch (Exception ex)
