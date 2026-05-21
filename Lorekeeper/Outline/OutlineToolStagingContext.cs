@@ -15,8 +15,7 @@ public sealed class OutlineToolStagingContext(
     IActService acts,
     IChapterService chapters,
     IEntityService entities,
-    IEntityTypeService entityTypes,
-    IEntityRelationContextService entityRelations)
+    IEntityTypeService entityTypes)
 {
     private const string _eventNodeType = "Event";
 
@@ -33,11 +32,13 @@ public sealed class OutlineToolStagingContext(
     private readonly Dictionary<Guid, EntityState> _entities = [];
     private readonly Dictionary<string, EntityTypeDefinition> _entityTypes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Guid> _createdResourceProducers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<LinkState> _links = [];
     private readonly List<AiChange> _newChanges = [];
 
     private AiChangeBatch? _batch;
     private bool _loaded;
     private int _nextOrder;
+    private long _nextSyntheticLinkId = -1;
     private Guid? _currentAssistantMessageId;
     private string _currentToolCallId = string.Empty;
     private string _currentToolName = string.Empty;
@@ -156,6 +157,59 @@ public sealed class OutlineToolStagingContext(
             .Select(match => CompactEntitySearchPayload(match.Entity, match.Score));
 
         return Serialize(matches);
+    }
+
+    public async Task<string?> GetEntityTypeAsync(Guid entityId, CancellationToken cancellationToken = default)
+    {
+        await EnsureLoadedAsync(cancellationToken);
+        return TryGetEntity(entityId, out var entity) ? entity.Type : null;
+    }
+
+    public async Task<string> ReadEntityAsync(
+        Guid entityId,
+        bool addedToContextFeed,
+        EntityRelationContextOptions? relationOptions = null,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureLoadedAsync(cancellationToken);
+        if (!TryGetEntity(entityId, out var entity))
+            return $"Error: entity {entityId} not found in this project.";
+
+        var links = await ListEntityLinksCoreAsync(entityId, cancellationToken);
+        var relationContext = await BuildRelationContextAsync(entityId, relationOptions ?? EntityRelationOptions, cancellationToken);
+
+        return Serialize(new
+        {
+            id = entity.Id,
+            type = entity.Type,
+            name = entity.Name,
+            order = entity.Order,
+            parentId = entity.ParentId,
+            addedToContextFeed,
+            properties = entity.Properties,
+            links = links.Select(link => new
+            {
+                link.EdgeId,
+                link.EdgeType,
+                direction = link.Direction.ToString(),
+                link.OtherEntityId,
+                link.OtherEntityName,
+                link.OtherEntityType,
+                link.SortOrder,
+                link.Properties,
+            }),
+            relationContext,
+        });
+    }
+
+    public async Task<string> ListEntityLinksAsync(Guid entityId, CancellationToken cancellationToken = default)
+    {
+        await EnsureLoadedAsync(cancellationToken);
+        if (!CanResolveEntityOrChapter(entityId))
+            return $"Error: entity {entityId} not found in this project.";
+
+        var links = await ListEntityLinksCoreAsync(entityId, cancellationToken);
+        return Serialize(links.Select(LinkPayload));
     }
 
     public async Task<string> CreateActAsync(string title, string? synopsis, CancellationToken cancellationToken = default)
@@ -466,8 +520,13 @@ public sealed class OutlineToolStagingContext(
         if (!TryGetEntity(entityId, out var entity)) return $"Error: entity {entityId} not found in this project.";
 
         var before = entity.ToChange();
+        var deleted = await EntityPayloadAsync(entity, cancellationToken);
         entity.Deleted = true;
-        var result = $"Deleted entity {entityId}.";
+        var result = Serialize(new
+        {
+            status = "deleted",
+            deleted,
+        });
         await StageChangeAsync(
             summary: $"Delete {entity.Type} '{entity.Name}'",
             before: before,
@@ -502,7 +561,17 @@ public sealed class OutlineToolStagingContext(
             _entities[orderedIds[orderIndex]].Order = orderIndex;
 
         var after = new OutlineEntityReorderChange(trimmedType, parentId, orderedIds.ToList());
-        var result = $"Reordered {orderedIds.Count} {trimmedType} entities under parent {parentId}.";
+        var orderedEntities = new List<object>();
+        foreach (var orderedId in orderedIds)
+            orderedEntities.Add(await EntityPayloadAsync(_entities[orderedId], cancellationToken));
+        var result = Serialize(new
+        {
+            status = "reordered",
+            type = trimmedType,
+            parentId,
+            orderedIds,
+            entities = orderedEntities,
+        });
         var references = orderedIds.Select(entityId => Resource("Entity", entityId)).ToList();
         references.Add(ResourceForExisting(parentId));
         await StageChangeAsync(
@@ -531,7 +600,26 @@ public sealed class OutlineToolStagingContext(
             toId,
             edgeType.Trim(),
             new Dictionary<string, string?>(properties ?? [], StringComparer.OrdinalIgnoreCase));
-        var result = $"Linked {fromId} -[{edgeType.Trim()}]-> {toId}.";
+        var linkState = new LinkState(
+            _nextSyntheticLinkId--,
+            link.FromId,
+            link.ToId,
+            link.EdgeType,
+            new Dictionary<string, string?>(link.Properties, StringComparer.OrdinalIgnoreCase));
+        _links.Add(linkState);
+        var result = Serialize(new
+        {
+            status = "linked",
+            link = new
+            {
+                fromId,
+                toId,
+                edgeType = link.EdgeType,
+                properties = link.Properties,
+            },
+            from = await EndpointPayloadAsync(fromId, cancellationToken),
+            to = await EndpointPayloadAsync(toId, cancellationToken),
+        });
         await StageChangeAsync(
             summary: $"Link {fromId} to {toId} as {edgeType.Trim()}",
             before: null,
@@ -732,7 +820,7 @@ public sealed class OutlineToolStagingContext(
 
     private async Task<object> EntityPayloadAsync(EntityState entity, CancellationToken cancellationToken)
     {
-        var relationContext = await entityRelations.BuildForEntityAsync(ProjectId, entity.Id, EntityRelationOptions, cancellationToken);
+        var relationContext = await BuildRelationContextAsync(entity.Id, EntityRelationOptions, cancellationToken);
         return new
         {
             id = entity.Id,
@@ -743,6 +831,282 @@ public sealed class OutlineToolStagingContext(
             properties = entity.Properties,
             relationContext,
         };
+    }
+
+    private async Task<object> EndpointPayloadAsync(Guid entityId, CancellationToken cancellationToken)
+    {
+        if (TryGetEntity(entityId, out var entity))
+            return await EntityPayloadAsync(entity, cancellationToken);
+
+        if (TryGetEndpoint(entityId, out var endpoint))
+        {
+            var relationContext = await BuildRelationContextAsync(entityId, EntityRelationOptions, cancellationToken);
+            return new
+            {
+                id = endpoint.Id,
+                type = endpoint.Type,
+                name = endpoint.Name,
+                relationContext,
+            };
+        }
+
+        return new
+        {
+            id = entityId,
+            status = "not_found",
+        };
+    }
+
+    private async Task<EntityRelationContext> BuildRelationContextAsync(
+        Guid entityId,
+        EntityRelationContextOptions options,
+        CancellationToken cancellationToken)
+    {
+        var resolvedOptions = NormalizeRelationOptions(options);
+        if (!TryGetEndpoint(entityId, out var root))
+            return EntityRelationContext.Empty;
+
+        var links = await ListEntityLinksCoreAsync(entityId, cancellationToken);
+        var directLinks = links
+            .Where(CanTraverse)
+            .Take(resolvedOptions.MaxDirectLinks)
+            .Select(link => ProjectDirectLink(root, link))
+            .ToList();
+        var traversalMap = await BuildTraversalMapAsync(entityId, resolvedOptions, cancellationToken);
+
+        return new EntityRelationContext(directLinks, traversalMap);
+    }
+
+    private async Task<IReadOnlyList<EntityTraversalPathContext>> BuildTraversalMapAsync(
+        Guid rootEntityId,
+        EntityRelationContextOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (options.Depth <= 0 || options.MaxTraversalPaths <= 0)
+            return [];
+
+        if (!TryGetEndpoint(rootEntityId, out var root))
+            return [];
+
+        var paths = new List<EntityTraversalPathContext>();
+        var visited = new HashSet<Guid> { root.Id };
+        var queue = new Queue<TraversalCursor>();
+        queue.Enqueue(new TraversalCursor(root.Id, Depth: 0, FormatEndpoint(root)));
+
+        while (queue.Count > 0 && paths.Count < options.MaxTraversalPaths)
+        {
+            var current = queue.Dequeue();
+            if (current.Depth >= options.Depth) continue;
+
+            var links = await ListEntityLinksCoreAsync(current.EntityId, cancellationToken);
+            foreach (var link in links.Take(options.MaxLinksPerNode))
+            {
+                if (!CanTraverse(link) || link.OtherEntityId == Guid.Empty || !visited.Add(link.OtherEntityId))
+                    continue;
+
+                var other = ResolveEndpoint(link.OtherEntityId, link.OtherEntityType, link.OtherEntityName);
+                var nextDepth = current.Depth + 1;
+                var nextPath = AppendHop(current.Path, link, other);
+                paths.Add(new EntityTraversalPathContext(nextDepth, other.Id, other.Type, other.Name, nextPath));
+                if (paths.Count >= options.MaxTraversalPaths) break;
+
+                queue.Enqueue(new TraversalCursor(other.Id, nextDepth, nextPath));
+            }
+        }
+
+        return paths;
+    }
+
+    private async Task<List<StagedEntityLink>> ListEntityLinksCoreAsync(Guid entityId, CancellationToken cancellationToken)
+    {
+        var overlayLinks = BuildOverlayLinks(entityId);
+        var overlayKeys = overlayLinks.Select(link => LinkKey(entityId, link)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var result = new List<StagedEntityLink>();
+
+        if (!IsCreatedEntity(entityId))
+        {
+            foreach (var link in await entities.ListLinksAsync(ProjectId, entityId, cancellationToken))
+            {
+                if (link.OtherEntityId == Guid.Empty || IsDeletedEndpoint(link.OtherEntityId))
+                    continue;
+
+                var fromId = link.Direction == EntityLinkDirection.Outgoing ? entityId : link.OtherEntityId;
+                var toId = link.Direction == EntityLinkDirection.Outgoing ? link.OtherEntityId : entityId;
+                if (overlayKeys.Contains(LinkKey(fromId, toId, link.EdgeType)))
+                    continue;
+
+                var other = ResolveEndpoint(link.OtherEntityId, link.OtherEntityType, link.OtherEntityName);
+                result.Add(new StagedEntityLink(
+                    link.EdgeId,
+                    link.EdgeType,
+                    link.Direction,
+                    other.Id,
+                    other.Name,
+                    other.Type,
+                    link.SortOrder,
+                    link.Properties));
+            }
+        }
+
+        result.AddRange(overlayLinks);
+        return result;
+    }
+
+    private List<StagedEntityLink> BuildOverlayLinks(Guid rootId)
+    {
+        var links = new List<StagedEntityLink>();
+
+        foreach (var child in _entities.Values.Where(entity => !entity.Deleted && entity.ParentId is not null))
+        {
+            var parentId = child.ParentId!.Value;
+            if (parentId != rootId && child.Id != rootId)
+                continue;
+            if (!TryGetEndpoint(parentId, out var parent))
+                continue;
+
+            var link = new LinkState(
+                SyntheticStructuralLinkId(parentId, child.Id),
+                parentId,
+                child.Id,
+                EntityService.HasChildEdgeType,
+                new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
+                child.Order);
+            links.Add(ProjectLink(link, rootId));
+        }
+
+        links.AddRange(_links
+            .Where(link => link.FromId == rootId || link.ToId == rootId)
+            .Where(link => !IsDeletedEndpoint(link.FromId) && !IsDeletedEndpoint(link.ToId))
+            .Select(link => ProjectLink(link, rootId)));
+
+        return links;
+    }
+
+    private StagedEntityLink ProjectLink(LinkState link, Guid rootId)
+    {
+        var isOutgoing = link.FromId == rootId;
+        var otherId = isOutgoing ? link.ToId : link.FromId;
+        var other = ResolveEndpoint(otherId, fallbackType: "Entity", fallbackName: otherId.ToString("N"));
+
+        return new StagedEntityLink(
+            link.EdgeId,
+            link.EdgeType,
+            isOutgoing ? EntityLinkDirection.Outgoing : EntityLinkDirection.Incoming,
+            other.Id,
+            other.Name,
+            other.Type,
+            link.SortOrder,
+            link.Properties);
+    }
+
+    private static object LinkPayload(StagedEntityLink link) => new
+    {
+        edgeId = link.EdgeId,
+        edgeType = link.EdgeType,
+        direction = link.Direction.ToString(),
+        otherEntityId = link.OtherEntityId,
+        otherEntityName = link.OtherEntityName,
+        otherEntityType = link.OtherEntityType,
+        sortOrder = link.SortOrder,
+        properties = link.Properties,
+    };
+
+    private static EntityDirectLinkContext ProjectDirectLink(EntityEndpoint root, StagedEntityLink link) => new(
+        link.EdgeId,
+        link.EdgeType,
+        link.Direction.ToString(),
+        link.OtherEntityId,
+        link.OtherEntityName,
+        link.OtherEntityType,
+        link.SortOrder,
+        link.Properties,
+        AppendHop(FormatEndpoint(root), link));
+
+    private static string AppendHop(string path, StagedEntityLink link, EntityEndpoint other) =>
+        AppendHop(path, link, FormatEndpoint(other));
+
+    private static string AppendHop(string path, StagedEntityLink link) =>
+        AppendHop(path, link, FormatEndpoint(link.OtherEntityType, link.OtherEntityName, link.OtherEntityId));
+
+    private static string AppendHop(string path, StagedEntityLink link, string other)
+    {
+        var relation = string.IsNullOrWhiteSpace(link.EdgeType) ? "related" : link.EdgeType;
+        return link.Direction == EntityLinkDirection.Outgoing
+            ? $"{path} -[{relation}]-> {other}"
+            : $"{path} <-[{relation}]- {other}";
+    }
+
+    private EntityEndpoint ResolveEndpoint(Guid id, string fallbackType, string fallbackName) =>
+        TryGetEndpoint(id, out var endpoint)
+            ? endpoint
+            : new EntityEndpoint(id, fallbackType, fallbackName);
+
+    private bool TryGetEndpoint(Guid id, out EntityEndpoint endpoint)
+    {
+        if (id == ProjectId)
+        {
+            endpoint = new EntityEndpoint(ProjectId, EntityTypeService.ProjectNodeType, "Project");
+            return true;
+        }
+
+        if (_entities.TryGetValue(id, out var entity) && !entity.Deleted)
+        {
+            endpoint = new EntityEndpoint(entity.Id, entity.Type, entity.Name);
+            return true;
+        }
+
+        if (_chapters.TryGetValue(id, out var chapter) && !chapter.Deleted)
+        {
+            endpoint = new EntityEndpoint(chapter.Id, EntityTypeService.ChapterNodeType, chapter.Title);
+            return true;
+        }
+
+        endpoint = null!;
+        return false;
+    }
+
+    private bool IsCreatedEntity(Guid entityId) =>
+        _createdResourceProducers.ContainsKey(Resource("Entity", entityId));
+
+    private bool IsDeletedEndpoint(Guid id) =>
+        (_entities.TryGetValue(id, out var entity) && entity.Deleted)
+        || (_chapters.TryGetValue(id, out var chapter) && chapter.Deleted);
+
+    private static bool CanTraverse(StagedEntityLink link) =>
+        !string.Equals(link.OtherEntityType, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(link.OtherEntityType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+
+    private static EntityRelationContextOptions NormalizeRelationOptions(EntityRelationContextOptions options) => new()
+    {
+        Depth = Math.Clamp(options.Depth, 0, 3),
+        MaxDirectLinks = Math.Clamp(options.MaxDirectLinks, 0, 30),
+        MaxTraversalPaths = Math.Clamp(options.MaxTraversalPaths, 0, 80),
+        MaxLinksPerNode = Math.Clamp(options.MaxLinksPerNode, 1, 30),
+    };
+
+    private static string FormatEndpoint(EntityEndpoint endpoint) => FormatEndpoint(endpoint.Type, endpoint.Name, endpoint.Id);
+
+    private static string FormatEndpoint(string type, string name, Guid id)
+    {
+        var label = string.IsNullOrWhiteSpace(name) ? id.ToString("N") : name.Trim();
+        return $"{type} \"{label}\" (id={id:N})";
+    }
+
+    private static string LinkKey(Guid rootId, StagedEntityLink link)
+    {
+        var fromId = link.Direction == EntityLinkDirection.Outgoing ? rootId : link.OtherEntityId;
+        var toId = link.Direction == EntityLinkDirection.Outgoing ? link.OtherEntityId : rootId;
+        return LinkKey(fromId, toId, link.EdgeType);
+    }
+
+    private static string LinkKey(Guid fromId, Guid toId, string edgeType) =>
+        $"{edgeType.ToUpperInvariant()}:{fromId:N}:{toId:N}";
+
+    private static long SyntheticStructuralLinkId(Guid parentId, Guid childId)
+    {
+        var bytes = parentId.ToByteArray().Concat(childId.ToByteArray()).ToArray();
+        var hash = BitConverter.ToInt64(bytes, 0) ^ BitConverter.ToInt64(bytes, 8) ^ BitConverter.ToInt64(bytes, 16) ^ BitConverter.ToInt64(bytes, 24);
+        return hash is 0 or long.MinValue ? -1 : -Math.Abs(hash);
     }
 
     private void EnsureType(string type, bool isChapterScoped)
@@ -894,4 +1258,26 @@ public sealed class OutlineToolStagingContext(
 
         public OutlineEntityChange ToChange() => new(Id, Type, Name, Order, ParentId, new Dictionary<string, string?>(Properties, StringComparer.OrdinalIgnoreCase));
     }
+
+    private sealed record LinkState(
+        long EdgeId,
+        Guid FromId,
+        Guid ToId,
+        string EdgeType,
+        IReadOnlyDictionary<string, string?> Properties,
+        int? SortOrder = null);
+
+    private sealed record StagedEntityLink(
+        long EdgeId,
+        string EdgeType,
+        EntityLinkDirection Direction,
+        Guid OtherEntityId,
+        string OtherEntityName,
+        string OtherEntityType,
+        int? SortOrder,
+        IReadOnlyDictionary<string, string?> Properties);
+
+    private sealed record EntityEndpoint(Guid Id, string Type, string Name);
+
+    private sealed record TraversalCursor(Guid EntityId, int Depth, string Path);
 }

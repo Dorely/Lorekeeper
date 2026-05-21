@@ -52,7 +52,7 @@ public sealed class OutlineCollaborationTools(
         Guid projectId,
         Guid conversationId,
         AiChangeConversationKind conversationKind = AiChangeConversationKind.Outline) =>
-        new(projectId, conversationId, conversationKind, changes, projectRepository, acts, chapters, entities, entityTypes, entityRelations);
+        new(projectId, conversationId, conversationKind, changes, projectRepository, acts, chapters, entities, entityTypes);
 
     public IList<AITool> Build(OutlineCollaborationContext context)
     {
@@ -118,36 +118,36 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: (string query, int topK = 10, string? type = null, string? parentId = null) => SearchEntitiesAsync(context, query, topK, type, parentId),
                 name: "search_entities",
-                description: "Bounded search for graph entities by name, type, and property text. Use type or parentId to narrow results when known. Returns compact matches; call read_entity or list_entity_links for details."),
+                description: "Bounded search for graph entities by name, type, and property text. Use type or parentId to narrow results when known. When Review edits is enabled, returns staged state. Returns compact matches; call read_entity or list_entity_links for details."),
 
             AIFunctionFactory.Create(
                 method: (string type, string name, string? propertiesJson = null, string? parentId = null, int? order = null) =>
                     CreateEntityAsync(context, type, name, propertiesJson, parentId, order),
                 name: "create_entity",
-                description: "Create a new graph entity. type is the entity category ('Character', 'Location', 'Event' for beats, 'ProjectFact' for rare project-level guidance, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. Use ProjectFact only for premise, genre, tone, theme, scope, global rules, or other guidance with no better structural home; do not use it for rework notes, act/chapter plans, character roles, beats, relationships, or location details. For ProjectFact include key/value properties; it will be parented to the Project automatically. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). If an entity with the same name/key already exists, returns status='existing_match' and the existing id instead of creating a duplicate."),
+                description: "Create a new graph entity. type is the entity category ('Character', 'Location', 'Event' for beats, 'ProjectFact' for rare project-level guidance, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. Use ProjectFact only for premise, genre, tone, theme, scope, global rules, or other guidance with no better structural home; do not use it for rework notes, act/chapter plans, character roles, beats, relationships, or location details. For ProjectFact include key/value properties; it will be parented to the Project automatically. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). If an entity with the same name/key already exists, returns status='existing_match' and the existing id instead of creating a duplicate. Returns the created or staged entity payload."),
 
             AIFunctionFactory.Create(
                 method: (string entityId, string? name = null, string? propertiesToSetJson = null, string? propertiesToRemoveJson = null) =>
                     UpdateEntityAsync(context, entityId, name, propertiesToSetJson, propertiesToRemoveJson),
                 name: "update_entity",
-                description: "Update an entity's name and/or properties. Pass null for fields to leave unchanged. propertiesToSetJson is a JSON object string of keys to merge into the existing bag (e.g. '{\"role\":\"protagonist\"}'). propertiesToRemoveJson is a JSON array string of keys to delete (e.g. '[\"role\"]')."),
+                description: "Update an entity's name and/or properties. Pass null for fields to leave unchanged. propertiesToSetJson is a JSON object string of keys to merge into the existing bag (e.g. '{\"role\":\"protagonist\"}'). propertiesToRemoveJson is a JSON array string of keys to delete (e.g. '[\"role\"]'). Returns the updated or staged entity payload."),
 
             AIFunctionFactory.Create(
                 method: (string entityId) => DeleteEntityAsync(context, entityId),
                 name: "delete_entity",
-                description: "Delete an entity and any edges connected to it."),
+                description: "Delete an entity and any edges connected to it. Returns a deleted status plus the deleted entity snapshot."),
 
             AIFunctionFactory.Create(
                 method: (string type, string parentId, string orderedIdsJson) =>
                     ReorderEntitiesAsync(context, type, parentId, orderedIdsJson),
                 name: "reorder_entities",
-                description: "Replace the ordering of a parent's children of a given type. orderedIdsJson is a JSON array string of entity ids (e.g. '[\"<guid1>\", \"<guid2>\"]') and must contain exactly the parent's current children of that type. Used primarily to reorder beats within a chapter."),
+                description: "Replace the ordering of a parent's children of a given type. orderedIdsJson is a JSON array string of entity ids (e.g. '[\"<guid1>\", \"<guid2>\"]') and must contain exactly the parent's current children of that type. Used primarily to reorder beats within a chapter. Returns ordered child payloads."),
 
             AIFunctionFactory.Create(
                 method: (string fromId, string toId, string edgeType, string? propertiesJson = null) =>
                     LinkEntitiesAsync(context, fromId, toId, edgeType, propertiesJson),
                 name: "link_entities",
-                description: "Create a typed edge between two entities. propertiesJson is an optional JSON object string of edge metadata. Conventional edge types: 'AppearsIn' (Character -> Event/Chapter), 'LocatedAt' (Event -> Location), 'KnownTo' (Character -> Character). Other types are allowed; use camel-case verbs."),
+                description: "Create a typed edge between two entities. propertiesJson is an optional JSON object string of edge metadata. Conventional edge types: 'AppearsIn' (Character -> Event/Chapter), 'LocatedAt' (Event -> Location), 'KnownTo' (Character -> Character). Other types are allowed; use camel-case verbs. Returns link details plus updated source and target payloads."),
 
             AIFunctionFactory.Create(
                 method: (string query, int topK = 8) => VectorSearchAsync(context, query, topK),
@@ -674,9 +674,25 @@ public sealed class OutlineCollaborationTools(
         if (ctx.Staging is not null)
             return await ctx.Staging.DeleteEntityAsync(id);
 
-        await entities.DeleteAsync(ctx.ProjectId, id);
-        ctx.OnMutated();
-        return $"Deleted entity {id}.";
+        try
+        {
+            var existing = await entities.GetAsync(ctx.ProjectId, id);
+            if (existing is null)
+                return $"Error: entity {id} not found in this project.";
+
+            var deleted = await EntityPayloadAsync(ctx.ProjectId, existing);
+            await entities.DeleteAsync(ctx.ProjectId, id);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                status = "deleted",
+                deleted,
+            });
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
     }
 
     private async Task<string> ReorderEntitiesAsync(
@@ -705,9 +721,24 @@ public sealed class OutlineCollaborationTools(
 
         try
         {
-            await entities.ReorderAsync(ctx.ProjectId, type.Trim(), parent, parsed);
+            var trimmedType = type.Trim();
+            await entities.ReorderAsync(ctx.ProjectId, trimmedType, parent, parsed);
+            var orderedEntities = new List<object>();
+            foreach (var id in parsed)
+            {
+                var entity = await entities.GetAsync(ctx.ProjectId, id);
+                if (entity is not null)
+                    orderedEntities.Add(await EntityPayloadAsync(ctx.ProjectId, entity));
+            }
             ctx.OnMutated();
-            return $"Reordered {parsed.Count} {type} entities under parent {parent}.";
+            return JsonSerializer.Serialize(new
+            {
+                status = "reordered",
+                type = trimmedType,
+                parentId = parent,
+                orderedIds = parsed,
+                entities = orderedEntities,
+            });
         }
         catch (Exception ex)
         {
@@ -735,9 +766,24 @@ public sealed class OutlineCollaborationTools(
 
         try
         {
-            await entities.LinkAsync(ctx.ProjectId, from, to, edgeType.Trim(), properties);
+            var trimmedEdgeType = edgeType.Trim();
+            await entities.LinkAsync(ctx.ProjectId, from, to, trimmedEdgeType, properties);
+            var fromEntity = await entities.GetAsync(ctx.ProjectId, from);
+            var toEntity = await entities.GetAsync(ctx.ProjectId, to);
             ctx.OnMutated();
-            return $"Linked {from} -[{edgeType.Trim()}]-> {to}.";
+            return JsonSerializer.Serialize(new
+            {
+                status = "linked",
+                link = new
+                {
+                    fromId = from,
+                    toId = to,
+                    edgeType = trimmedEdgeType,
+                    properties = properties ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
+                },
+                from = fromEntity is null ? null : await EntityPayloadAsync(ctx.ProjectId, fromEntity),
+                to = toEntity is null ? null : await EntityPayloadAsync(ctx.ProjectId, toEntity),
+            });
         }
         catch (Exception ex)
         {

@@ -62,19 +62,20 @@ public sealed class EditorChatTools(
                 description: "Read project-level fact ids, keys/values, linked entity ids, and relation context as JSON. The fact text is already in the Context Feed; use this for structured ids, linked-entity grounding, or fact-change verification."),
 
             AIFunctionFactory.Create(
-                method: (string query, int topK = 10) => SearchEntitiesAsync(context, query, topK),
+                method: (string query, int topK = 10, string? type = null, string? parentId = null) =>
+                    SearchEntitiesAsync(context, query, topK, type, parentId),
                 name: "search_entities",
-                description: "Search story graph entities by name, type, and property text. Use this when you need a specific character, location, beat, or custom entity but do not know its id."),
+                description: "Search story graph entities by name, type, and property text. Use optional type or parentId to narrow results. When Review edits is enabled, returns the latest staged entity state from this turn."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ReadEntityAsync(context, entityId),
                 name: "read_entity",
-                description: "Read one graph entity by id, including properties and adjacent links. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
+                description: "Read one graph entity by id, including properties and adjacent links. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
                 name: "list_entity_links",
-                description: "List all graph links adjacent to an entity, including structural HasChild links and semantic story relationships."),
+                description: "List all graph links adjacent to an entity, including structural HasChild links and semantic story relationships. When Review edits is enabled, includes staged entity and link changes from this turn."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int? pageNumber = null) =>
@@ -224,17 +225,34 @@ public sealed class EditorChatTools(
         return JsonSerializer.Serialize(payload);
     }
 
-    private async Task<string> SearchEntitiesAsync(EditorChatContext ctx, string query, int topK)
+    private async Task<string> SearchEntitiesAsync(
+        EditorChatContext ctx,
+        string query,
+        int topK,
+        string? type,
+        string? parentId)
     {
         if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
         topK = Math.Clamp(topK, 1, 20);
+
+        Guid? parent = null;
+        if (!string.IsNullOrWhiteSpace(parentId))
+        {
+            if (!Guid.TryParse(parentId, out var parsedParent))
+                return $"Error: parentId '{parentId}' is not a valid Guid.";
+            parent = parsedParent;
+        }
+
+        if (ctx.ReviewEdits && ctx.OutlineStaging is not null)
+            return await ctx.OutlineStaging.SearchEntitiesAsync(query, topK, type, parent);
+
         var searchTerms = SearchTerms(query);
 
         var matches = new List<(StoryEntity Entity, int Score)>();
-        var types = await entityTypes.ListAsync(ctx.ProjectId, includeStructural: true);
-        foreach (var type in types.Where(type => IsSearchableEntityType(type.Type)))
+        var typeNames = await SearchableTypeNamesAsync(ctx.ProjectId, type);
+        foreach (var typeName in typeNames)
         {
-            var list = await entities.ListAsync(ctx.ProjectId, type.Type);
+            var list = await entities.ListAsync(ctx.ProjectId, typeName, parent);
             matches.AddRange(list
                 .Select(entity => (Entity: entity, Score: SearchScore(entity, query, searchTerms)))
                 .Where(match => match.Score > 0));
@@ -250,8 +268,42 @@ public sealed class EditorChatTools(
         return JsonSerializer.Serialize(payload);
     }
 
+    private async Task<IReadOnlyList<string>> SearchableTypeNamesAsync(Guid projectId, string? type)
+    {
+        if (!string.IsNullOrWhiteSpace(type))
+            return [type.Trim()];
+
+        var list = await entityTypes.ListAsync(projectId, includeStructural: true);
+        return list
+            .Where(typeDefinition => IsSearchableEntityType(typeDefinition.Type))
+            .Select(typeDefinition => typeDefinition.Type)
+            .ToList();
+    }
+
     private async Task<string> ReadEntityAsync(EditorChatContext ctx, Guid entityId)
     {
+        if (ctx.ReviewEdits && ctx.OutlineStaging is not null)
+        {
+            var stagedEntityType = await ctx.OutlineStaging.GetEntityTypeAsync(entityId);
+            if (stagedEntityType is null)
+                return $"Error: entity {entityId} not found in this project.";
+
+            var stagedAddedToContextFeed = false;
+            if (ctx.AutoPinReadEntities && ctx.CurrentChapterId is { } stagedCurrentChapterId && IsSearchableEntityType(stagedEntityType))
+            {
+                await editorContext.SetItemIncludedAsync(
+                    ctx.ProjectId,
+                    stagedCurrentChapterId,
+                    ContextItemKind.Entity,
+                    EditorContextKeys.Entity(entityId),
+                    isIncluded: true);
+                ctx.OnMutated();
+                stagedAddedToContextFeed = true;
+            }
+
+            return await ctx.OutlineStaging.ReadEntityAsync(entityId, stagedAddedToContextFeed, _detailEntityRelationOptions);
+        }
+
         var entity = await entities.GetAsync(ctx.ProjectId, entityId);
         if (entity is null)
             return $"Error: entity {entityId} not found in this project.";
@@ -315,6 +367,9 @@ public sealed class EditorChatTools(
 
     private async Task<string> ListEntityLinksAsync(EditorChatContext ctx, Guid entityId)
     {
+        if (ctx.ReviewEdits && ctx.OutlineStaging is not null)
+            return await ctx.OutlineStaging.ListEntityLinksAsync(entityId);
+
         var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
         return JsonSerializer.Serialize(links.Select(link => new
         {
