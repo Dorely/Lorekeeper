@@ -1,10 +1,10 @@
-@using Lorekeeper.Llm
+@using Lorekeeper.Components.Pages.Projects
+@using Lorekeeper.Context
 @using Lorekeeper.Models
 @using Lorekeeper.Research
 @using Lorekeeper.Search
 @inject ISearchProviderService SearchProviders
-@inject IWebIngestCandidateService Candidates
-@inject ILlmProviderService LlmProviders
+@inject IResearchService Research
 
 @if (Project is null)
 {
@@ -25,38 +25,16 @@ else
 {
     <div class="research-pane">
         <section class="research-chat-pane">
-            <ResearchChatPanel ProjectId="Project.Id" OnCandidatesChanged="ReloadCandidatesAsync" />
+            <ResearchChatPanel @ref="_chatPanel" ProjectId="Project.Id" OnActivityChanged="ReloadActivityAsync" />
         </section>
 
         <section class="research-pages-pane">
             <div class="research-side-head">
                 <div>
-                    <div class="research-section-title">Research Pages</div>
+                    <div class="research-section-title">Research Activity</div>
                     <div class="small text-muted">Search: @(_activeSearchProvider.DisplayName ?? _activeSearchProvider.Name)</div>
                 </div>
-                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ReloadCandidatesAsync">Refresh</button>
-            </div>
-
-            <div class="mb-2">
-                <label class="form-label small text-muted">Ingest model</label>
-                <select class="form-select form-select-sm" value="@(_ingestProviderId?.ToString() ?? string.Empty)" @onchange="OnIngestProviderChanged">
-                    <option value="">Default model</option>
-                    @foreach (var provider in _llmProviders)
-                    {
-                        <option value="@provider.Id">@ProviderLabel(provider)</option>
-                    }
-                </select>
-            </div>
-            <div class="mb-3">
-                <label class="form-label small text-muted">Ingest instructions</label>
-                <textarea class="form-control form-control-sm" rows="3" @bind="_queueInstructions" @bind:event="oninput"></textarea>
-            </div>
-
-            <div class="research-batch-actions">
-                <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanQueueStaged || _queueingStaged)" @onclick="QueueStagedAsync">
-                    @(_queueingStaged ? "Queueing..." : "Queue staged pages")
-                </button>
-                <span class="small text-muted">@StagedQueueLabel</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ReloadActivityAsync">Refresh</button>
             </div>
 
             @if (!string.IsNullOrWhiteSpace(_actionError))
@@ -64,80 +42,262 @@ else
                 <div class="alert alert-danger py-2 small">@_actionError</div>
             }
 
-            @if (_candidates.Count == 0)
+            @if ((_activity?.Entities.Count ?? 0) == 0 && (_activity?.Sources.Count ?? 0) == 0)
             {
-                <p class="text-muted small"><em>No research pages yet.</em></p>
+                <p class="text-muted small"><em>No research activity yet.</em></p>
             }
-            else
+            else if (_activity is not null)
             {
-                <div class="research-page-list">
-                    @foreach (var candidate in _candidates)
+                <section class="research-activity-section">
+                    <div class="research-activity-heading">
+                        <span>Entities</span>
+                        <span>@_activity.Entities.Count</span>
+                    </div>
+                    @if (_activity.Entities.Count == 0)
                     {
-                        <article class="research-page-item @candidate.Status.ToString().ToLowerInvariant()">
-                            <div class="research-page-head">
-                                <span>@candidate.Title</span>
-                                <span class="badge bg-@StatusColor(candidate.Status)">@candidate.Status</span>
-                            </div>
-                            <a class="research-page-url" href="@BestUrl(candidate)" target="_blank" rel="noreferrer">@BestUrl(candidate)</a>
-                            @if (!string.IsNullOrWhiteSpace(candidate.SearchQuery))
-                            {
-                                <div class="small text-muted">@candidate.SourceProviderName - @candidate.SearchQuery</div>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(candidate.Excerpt))
-                            {
-                                <p>@candidate.Excerpt</p>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(candidate.StageRationale))
-                            {
-                                <div class="small"><strong>Rationale:</strong> @candidate.StageRationale</div>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(candidate.Diagnostics))
-                            {
-                                <div class="small text-danger">@candidate.Diagnostics</div>
-                            }
-                            <div class="research-page-actions">
-                                @if (candidate.Status == WebIngestCandidateStatus.Staged)
-                                {
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => UnstageAsync(candidate.Id)">Unstage</button>
-                                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RemoveAsync(candidate.Id)">Remove</button>
-                                }
-                                else if (candidate.Status == WebIngestCandidateStatus.Queued)
-                                {
-                                    <span class="small text-muted">Queued job @candidate.IngestJobId</span>
-                                }
-                                else
-                                {
-                                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RemoveAsync(candidate.Id)">Remove</button>
-                                }
-                            </div>
-                        </article>
+                        <p class="text-muted small"><em>No entities read or changed yet.</em></p>
                     }
-                </div>
+                    else
+                    {
+                        <div class="research-activity-list">
+                            @foreach (var entity in _activity.Entities)
+                            {
+                                <article class="research-activity-card entity @StateClass(entity.State) @(entity.Exists ? null : "pending-only")"
+                                         role="button"
+                                         tabindex="0"
+                                         aria-label="Open @entity.Name details"
+                                         @onclick="() => OpenEntityAsync(entity)"
+                                         @onkeydown="e => OnEntityKeyDownAsync(e, entity)">
+                                    <div class="research-activity-card-head">
+                                        <span>@entity.Name</span>
+                                        <span class="badge @StateBadgeClass(entity.State)">@StateLabel(entity.State)</span>
+                                    </div>
+                                    <div class="research-activity-meta">
+                                        <span>@entity.Type</span>
+                                        @if (entity.HasPendingChange)
+                                        {
+                                            <span>pending review</span>
+                                        }
+                                        @if (!entity.Exists)
+                                        {
+                                            <span>not yet applied</span>
+                                        }
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(entity.Preview))
+                                    {
+                                        <p>@entity.Preview</p>
+                                    }
+                                </article>
+                            }
+                        </div>
+                    }
+                </section>
+
+                <section class="research-activity-section">
+                    <div class="research-activity-heading">
+                        <span>URLs</span>
+                        <span>@_activity.Sources.Count</span>
+                    </div>
+                    @if (_activity.Sources.Count == 0)
+                    {
+                        <p class="text-muted small"><em>No pages read or attempted yet.</em></p>
+                    }
+                    else
+                    {
+                        <div class="research-activity-list">
+                            @foreach (var source in _activity.Sources)
+                            {
+                                <article class="research-activity-card source @source.Status.ToString().ToLowerInvariant()"
+                                         role="button"
+                                         tabindex="0"
+                                         aria-label="Open @source.Title details"
+                                         @onclick="() => OpenSourceAsync(source.Id)"
+                                         @onkeydown="e => OnSourceKeyDownAsync(e, source.Id)">
+                                    <div class="research-activity-card-head">
+                                        <span>@source.Title</span>
+                                        <span class="badge bg-@StatusColor(source.Status)">@source.Status</span>
+                                    </div>
+                                    <div class="research-activity-url">@source.Url</div>
+                                    @if (!string.IsNullOrWhiteSpace(source.SearchQuery))
+                                    {
+                                        <div class="research-activity-meta">
+                                            <span>@source.SourceProviderName</span>
+                                            <span>@source.SearchQuery</span>
+                                        </div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(source.Diagnostics))
+                                    {
+                                        <p class="text-danger">@source.Diagnostics</p>
+                                    }
+                                </article>
+                            }
+                        </div>
+                    }
+                </section>
             }
         </section>
     </div>
 }
 
+@if (Project is not null)
+{
+    <ContextItemDetailModal ProjectId="Project.Id"
+                            Project="Project"
+                            FeedItem="_selectedEntityContext"
+                            IsOpen="_entityDetailOpen"
+                            AllowEntityEdit="true"
+                            OnClose="CloseEntityDetail"
+                            OnSaved="HandleEntitySavedAsync" />
+}
+
+@if (_pendingEntityDetailOpen && _selectedPendingEntity is not null)
+{
+    <div class="modal-backdrop fade show" @onclick="ClosePendingEntityDetail"></div>
+    <div class="modal d-block research-detail-modal" tabindex="-1" role="dialog" aria-modal="true" @onclick="ClosePendingEntityDetail">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <div class="text-muted small">@_selectedPendingEntity.Type</div>
+                        <h5 class="modal-title">@_selectedPendingEntity.Name</h5>
+                    </div>
+                    <button type="button" class="btn-close" @onclick="ClosePendingEntityDetail" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="research-detail-meta">
+                        <div><span>Status</span><strong>@StateLabel(_selectedPendingEntity.State)</strong></div>
+                        <div><span>Review</span><strong>Pending</strong></div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_selectedPendingEntity.PendingSummary))
+                    {
+                        <section class="research-detail-section">
+                            <h6>Pending change</h6>
+                            <p>@_selectedPendingEntity.PendingSummary</p>
+                        </section>
+                    }
+                    @RenderProperties(_selectedPendingEntity.Properties)
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-link" @onclick="ClosePendingEntityDetail">Close</button>
+                    <button type="button" class="btn btn-primary" @onclick="OpenReviewFromPendingAsync">Review edits</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_sourceDetailOpen && _selectedSourceDetail is not null)
+{
+    <div class="modal-backdrop fade show" @onclick="CloseSourceDetail"></div>
+    <div class="modal d-block research-detail-modal" tabindex="-1" role="dialog" aria-modal="true" @onclick="CloseSourceDetail">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <div class="text-muted small">Cached web source</div>
+                        <h5 class="modal-title">@_selectedSourceDetail.Title</h5>
+                    </div>
+                    <button type="button" class="btn-close" @onclick="CloseSourceDetail" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="research-detail-meta">
+                        <div><span>Status</span><strong>@_selectedSourceDetail.Status</strong></div>
+                        <div><span>Fetched</span><strong>@FormatDate(_selectedSourceDetail.FetchedAt)</strong></div>
+                        <div><span>Content type</span><strong>@BlankFallback(_selectedSourceDetail.ContentType)</strong></div>
+                        <div><span>Hash</span><strong>@BlankFallback(_selectedSourceDetail.ContentHash)</strong></div>
+                    </div>
+
+                    <section class="research-detail-section">
+                        <h6>URLs</h6>
+                        <div class="research-detail-key-values">
+                            @RenderKeyValue("Original", _selectedSourceDetail.Url)
+                            @RenderKeyValue("Final", _selectedSourceDetail.FinalUrl)
+                            @RenderKeyValue("Canonical", _selectedSourceDetail.CanonicalUrl)
+                            @RenderKeyValue("Display", _selectedSourceDetail.DisplayUrl)
+                        </div>
+                    </section>
+
+                    @if (!string.IsNullOrWhiteSpace(_selectedSourceDetail.SearchQuery))
+                    {
+                        <section class="research-detail-section">
+                            <h6>Discovery</h6>
+                            <p>@_selectedSourceDetail.SourceProviderName - @_selectedSourceDetail.SearchQuery</p>
+                        </section>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(_selectedSourceDetail.Diagnostics))
+                    {
+                        <section class="research-detail-section">
+                            <h6>Diagnostics</h6>
+                            <p class="text-danger">@_selectedSourceDetail.Diagnostics</p>
+                        </section>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(_selectedSourceDetail.Excerpt))
+                    {
+                        <section class="research-detail-section">
+                            <h6>Excerpt</h6>
+                            <p>@_selectedSourceDetail.Excerpt</p>
+                        </section>
+                    }
+
+                    <section class="research-detail-section">
+                        <h6>Cached links</h6>
+                        @if (_selectedSourceDetail.Links.Count == 0)
+                        {
+                            <p class="text-muted small mb-0"><em>No cached links.</em></p>
+                        }
+                        else
+                        {
+                            <ul class="research-detail-links">
+                                @foreach (var link in _selectedSourceDetail.Links.Take(80))
+                                {
+                                    <li>
+                                        <a href="@link.Url" target="_blank" rel="noreferrer">@LinkLabel(link)</a>
+                                        <span>@link.Url</span>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </section>
+
+                    <section class="research-detail-section">
+                        <h6>@(IsTruncated(_selectedSourceDetail.ExtractedText, SourceTextDisplayLimit) ? "Cached text (truncated)" : "Cached text")</h6>
+                        @if (string.IsNullOrWhiteSpace(_selectedSourceDetail.ExtractedText))
+                        {
+                            <p class="text-muted small mb-0"><em>No extracted text cached.</em></p>
+                        }
+                        else
+                        {
+                            <pre class="research-detail-text"><code>@LimitText(_selectedSourceDetail.ExtractedText, SourceTextDisplayLimit)</code></pre>
+                        }
+                    </section>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" @onclick="CloseSourceDetail">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
+    private const int SourceTextDisplayLimit = 25_000;
+
     [CascadingParameter] public Project? Project { get; set; }
 
     private SearchProvider? _activeSearchProvider;
-    private List<WebIngestCandidateView> _candidates = [];
-    private List<LlmProvider> _llmProviders = [];
+    private ResearchActivity? _activity;
     private Guid? _loadedProjectId;
     private bool _loading = true;
-    private int? _ingestProviderId;
-    private bool _queueingStaged;
-    private string _queueInstructions = "Extract source-grounded fact sheets for lore, characters, settings, factions, timelines, relationships, terminology, and world-building facts. Use evidence from the page for each fact and skip unsupported or merely similar subjects.";
     private string? _actionError;
-
-    private int StagedCount => _candidates.Count(candidate => candidate.Status == WebIngestCandidateStatus.Staged);
-
-    private bool CanQueueStaged => StagedCount > 0 && !_queueingStaged;
-
-    private string StagedQueueLabel => StagedCount == 0
-        ? "No staged pages ready."
-        : $"{StagedCount} staged page{(StagedCount == 1 ? string.Empty : "s")} will become one ingest job.";
+    private ResearchChatPanel? _chatPanel;
+    private ContextItem? _selectedEntityContext;
+    private bool _entityDetailOpen;
+    private ResearchEntityActivityItem? _selectedPendingEntity;
+    private bool _pendingEntityDetailOpen;
+    private ResearchSourceDetail? _selectedSourceDetail;
+    private bool _sourceDetailOpen;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -145,87 +305,117 @@ else
         _loadedProjectId = Project.Id;
         _loading = true;
         _activeSearchProvider = await SearchProviders.GetActiveAsync();
-        _llmProviders = await LlmProviders.GetAllAsync();
-        _ingestProviderId = (_llmProviders.FirstOrDefault(provider => provider.IsDefault) ?? _llmProviders.FirstOrDefault())?.Id;
-        await ReloadCandidatesAsync();
+        await ReloadActivityAsync();
         _loading = false;
     }
 
-    private async Task ReloadCandidatesAsync()
+    private async Task ReloadActivityAsync()
     {
         if (Project is null) return;
-        _candidates = (await Candidates.ListResearchAsync(Project.Id)).ToList();
+        _activity = await Research.GetActivityAsync(Project.Id);
         StateHasChanged();
     }
 
-    private async Task QueueStagedAsync()
+    private Task OpenEntityAsync(ResearchEntityActivityItem entity)
+    {
+        _actionError = null;
+        if (!entity.Exists)
+        {
+            _selectedPendingEntity = entity;
+            _pendingEntityDetailOpen = true;
+            return Task.CompletedTask;
+        }
+
+        _selectedEntityContext = new ContextItem(
+            EditorContextKeys.Entity(entity.EntityId),
+            ContextItemKind.Entity,
+            entity.Name,
+            entity.Preview,
+            IsEnabled: true,
+            IsRemovable: false,
+            Badge: entity.Type,
+            Reason: StateLabel(entity.State));
+        _entityDetailOpen = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task OpenSourceAsync(Guid sourceId)
     {
         if (Project is null) return;
-        var stagedIds = _candidates
-            .Where(candidate => candidate.Status == WebIngestCandidateStatus.Staged)
-            .Select(candidate => candidate.Id)
-            .ToArray();
-        if (stagedIds.Length == 0) return;
-
-        _queueingStaged = true;
         _actionError = null;
-        try
+        var detail = await Research.GetSourceDetailAsync(Project.Id, sourceId);
+        if (detail is null)
         {
-            await Candidates.QueueBatchAsync(Project.Id, stagedIds, _ingestProviderId, _queueInstructions, "Research pages");
-            await ReloadCandidatesAsync();
+            _actionError = "Research source not found.";
+            return;
         }
-        catch (Exception ex)
-        {
-            _actionError = ex.Message;
-        }
-        finally
-        {
-            _queueingStaged = false;
-        }
+
+        _selectedSourceDetail = detail;
+        _sourceDetailOpen = true;
     }
 
-    private async Task UnstageAsync(Guid candidateId)
+    private async Task OnEntityKeyDownAsync(KeyboardEventArgs e, ResearchEntityActivityItem entity)
     {
-        _actionError = null;
-        try
-        {
-            await Candidates.UnstageAsync(candidateId);
-            await ReloadCandidatesAsync();
-        }
-        catch (Exception ex)
-        {
-            _actionError = ex.Message;
-        }
+        if (e.Key is "Enter" or " ")
+            await OpenEntityAsync(entity);
     }
 
-    private async Task RemoveAsync(Guid candidateId)
+    private async Task OnSourceKeyDownAsync(KeyboardEventArgs e, Guid sourceId)
     {
-        _actionError = null;
-        try
-        {
-            await Candidates.DeleteAsync(candidateId);
-            await ReloadCandidatesAsync();
-        }
-        catch (Exception ex)
-        {
-            _actionError = ex.Message;
-        }
+        if (e.Key is "Enter" or " ")
+            await OpenSourceAsync(sourceId);
     }
 
-    private void OnIngestProviderChanged(ChangeEventArgs e)
+    private void CloseEntityDetail()
     {
-        var value = e.Value?.ToString();
-        _ingestProviderId = int.TryParse(value, out var id) ? id : null;
+        _entityDetailOpen = false;
+        _selectedEntityContext = null;
     }
 
-    private static string ProviderLabel(LlmProvider provider) =>
-        string.IsNullOrWhiteSpace(provider.DisplayName) ? provider.Name : $"{provider.DisplayName} ({provider.ModelId})";
+    private void ClosePendingEntityDetail()
+    {
+        _pendingEntityDetailOpen = false;
+        _selectedPendingEntity = null;
+    }
 
-    private static string BestUrl(WebIngestCandidateView candidate) =>
-        FirstNonEmpty(candidate.CanonicalUrl, candidate.FinalUrl, candidate.Url);
+    private void CloseSourceDetail()
+    {
+        _sourceDetailOpen = false;
+        _selectedSourceDetail = null;
+    }
 
-    private static string FirstNonEmpty(params string[] values) =>
-        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+    private async Task HandleEntitySavedAsync()
+    {
+        await ReloadActivityAsync();
+    }
+
+    private async Task OpenReviewFromPendingAsync()
+    {
+        ClosePendingEntityDetail();
+        if (_chatPanel is not null)
+            await _chatPanel.OpenPendingChangesAsync();
+    }
+
+    private static string StateLabel(ResearchEntityActivityState state) => state switch
+    {
+        ResearchEntityActivityState.PendingCreated => "Pending create",
+        ResearchEntityActivityState.PendingUpdated => "Pending update",
+        ResearchEntityActivityState.PendingLinked => "Pending link",
+        ResearchEntityActivityState.Created => "Created",
+        ResearchEntityActivityState.Updated => "Updated",
+        ResearchEntityActivityState.Linked => "Linked",
+        _ => "Read",
+    };
+
+    private static string StateClass(ResearchEntityActivityState state) => state.ToString().ToLowerInvariant();
+
+    private static string StateBadgeClass(ResearchEntityActivityState state) => state switch
+    {
+        ResearchEntityActivityState.PendingCreated or ResearchEntityActivityState.PendingUpdated or ResearchEntityActivityState.PendingLinked => "bg-warning text-dark",
+        ResearchEntityActivityState.Created or ResearchEntityActivityState.Updated => "bg-success",
+        ResearchEntityActivityState.Linked => "bg-info text-dark",
+        _ => "bg-secondary",
+    };
 
     private static string StatusColor(WebIngestCandidateStatus status) => status switch
     {
@@ -236,4 +426,43 @@ else
         WebIngestCandidateStatus.Read => "info text-dark",
         _ => "secondary",
     };
+
+    private static RenderFragment RenderProperties(IReadOnlyDictionary<string, string?> properties) => @<section class="research-detail-section">
+        <h6>Properties</h6>
+        @if (properties.Count == 0)
+        {
+            <p class="text-muted small mb-0"><em>No properties.</em></p>
+        }
+        else
+        {
+            <div class="research-detail-key-values">
+                @foreach (var property in properties.OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    @RenderKeyValue(property.Key, property.Value)
+                }
+            </div>
+        }
+    </section>;
+
+    private static RenderFragment RenderKeyValue(string label, string? value) => @<div class="research-detail-key-value">
+        <span>@label</span>
+        <strong>@BlankFallback(value)</strong>
+    </div>;
+
+    private static string BlankFallback(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "(none)" : value.Trim();
+
+    private static string LinkLabel(ResearchSourceLink link) =>
+        string.IsNullOrWhiteSpace(link.Text) ? link.Url : link.Text.Trim();
+
+    private static string FormatDate(DateTime? value) =>
+        value is null ? "(none)" : value.Value.ToLocalTime().ToString("g");
+
+    private static bool IsTruncated(string text, int maxChars) =>
+        !string.IsNullOrEmpty(text) && text.Length > maxChars;
+
+    private static string LimitText(string text, int maxChars) =>
+        string.IsNullOrEmpty(text) || text.Length <= maxChars
+            ? text
+            : text[..maxChars].TrimEnd() + "\n\n[Truncated for display.]";
 }

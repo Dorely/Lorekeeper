@@ -29,4 +29,7 @@ public sealed record WebIngestCandidateView(
     DateTime CreatedAt,
     DateTime UpdatedAt);
 
-public sealed record WebIngestCandidateReadResult(WebIngestCandidate Candidate, IReadOnlyList<WebPageLink> Links);
+public sealed record WebIngestCandidateReadResult(
+    WebIngestCandidate Candidate,
+    IReadOnlyList<WebPageLink> Links,
+    bool FromCache = false);

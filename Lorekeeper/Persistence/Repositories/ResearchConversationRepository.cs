@@ -13,6 +13,9 @@ public sealed class ResearchConversationRepository(AppDbContext db) : IResearchC
                            .OrderBy(message => message.Order)
                            .ToListAsync(cancellationToken);
 
+    public Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
+        db.ResearchConversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
+
     public async Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
         var any = await db.ResearchMessages.AnyAsync(message => message.ConversationId == conversationId, cancellationToken);

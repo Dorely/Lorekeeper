@@ -25,6 +25,8 @@ public class WebIngestCandidate
     public string Snippet { get; set; } = string.Empty;
     public string Excerpt { get; set; } = string.Empty;
     public string ExtractedText { get; set; } = string.Empty;
+    public string CachedLinksJson { get; set; } = "[]";
+    public string ContentHash { get; set; } = string.Empty;
     public string ContentType { get; set; } = string.Empty;
 
     public string SourceProviderName { get; set; } = string.Empty;

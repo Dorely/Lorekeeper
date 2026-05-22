@@ -2,8 +2,10 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Context;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
@@ -17,28 +19,38 @@ public sealed class ResearchService(
     ISearchProviderService searchProviders,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
+    IContextBuilder contextBuilder,
+    OutlineCollaborationTools outlineTools,
+    IAiChangeApprovalService changeApproval,
+    IWebIngestCandidateService webCandidates,
+    IEntityService entities,
     ResearchTools tools,
     IOptions<AgentOptions> options,
     ILogger<ResearchService> logger) : IResearchService
 {
-    public const string ResearchSystemPrompt = """
+    public const string ResearchWorkflowInstructions = """
         You are Lorekeeper's Research Mode for a long-form fiction project.
 
-        Your job is to autonomously research a user-provided topic on the public web, discover useful sources, read the pages you find, follow relevant links when they look promising, and stage only pages worth ingesting into the project.
+        Your job is to research user-provided topics, explain what you found, and help the user decide what belongs in the structured story graph.
 
         How to work:
-        - Use web_search for open-ended topics. Do not claim web knowledge from memory when search would answer it.
-        - Read pages before judging them. Never stage an unread page.
+        - Use the Project Guidance, Project Facts, and Outline context for project-local references. Do not search the web just to understand already-stored project details.
+        - Use web_search for external canon, lore, quotes, or facts that need public-source grounding. Do not claim web knowledge from memory when search would answer it.
+        - Read pages before relying on them. read_webpage and read_search_result are cache-first and paginated: repeated reads may reuse stored full-page text without a new web request, and you can use pageNumber or nextPageArguments to inspect later page text.
+        - If a read result has pagination.hasNextPage true and the current page does not contain enough useful evidence, request the next page instead of treating the source as incomplete.
         - Use follow_page_links or read_webpage to follow links from read pages when the link text or surrounding result suggests stronger source material.
-        - Stage pages after reading them when they contain information likely to help project memory, canon, lore, setting details, timelines, characters, factions, places, relationships, or terminology.
-        - In staging rationales, name the expected extraction focus: lore, characters, settings, factions, timelines, relationships, terminology, or source-grounded facts. Do not stage a page only because it is vaguely or semantically similar to the topic.
-        - Do not ask the user to approve individual pages before staging; staging is your research output. The user queues ingestion jobs later.
+        - Tool results are not replayed into future turns. Before ending a turn, summarize the important source-backed findings, source titles/URLs, and any unresolved questions in your assistant message.
+        - Do not create or update graph entities until the user confirms what should be stored.
+        - When the user confirms storage, use search_entities/read_entity/list_entity_links first to avoid duplicates, then create_entity, update_entity, or link_entities.
+        - Keep graph properties concise, source-grounded, and useful for future writing context. Include source URLs or source labels inside properties when they are needed to evaluate provenance.
         - When a page cannot be accessed, report that briefly and move on.
-        - End each turn with a concise report: what you searched, what you read, what you staged, and what you would investigate next.
+        - End research turns with a concise report: what you searched, what you read, what you found, what you recommend storing, and what you would investigate next.
         """;
 
     private const string InitialAssistantGreeting =
-        "What should I research? Give me a topic, question, or canon area and I’ll go find useful source pages to stage.";
+        "What should I research? Give me a topic, question, canon area, or character and I'll find source-backed details we can turn into graph memory.";
+
+    private bool _mutatedSinceYield;
 
     public async Task<ResearchConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -64,6 +76,107 @@ public sealed class ResearchService(
 
     public async Task<IReadOnlyList<ResearchMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
         await conversations.LoadMessagesAsync(conversationId, cancellationToken);
+
+    public async Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+        return await BuildSystemPromptAsync(project, cancellationToken);
+    }
+
+    public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+        return project.AiChangeApprovalEnabled;
+    }
+
+    public async Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default)
+    {
+        var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+        if (project.AiChangeApprovalEnabled == enabled) return;
+
+        project.AiChangeApprovalEnabled = enabled;
+        project.UpdatedAt = DateTime.UtcNow;
+        projects.Update(project);
+        await projects.SaveChangesAsync(cancellationToken);
+    }
+
+    public Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
+
+    public async Task<ResearchActivity> GetActivityAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var conversation = await GetOrCreateAsync(projectId, cancellationToken);
+        var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
+        var toolCalls = BuildToolCallLookup(history);
+        var entityTouches = new Dictionary<Guid, EntityTouch>();
+
+        foreach (var message in history.Where(message => message.Role == ResearchMessageRole.Tool))
+            AddToolEntityTouches(entityTouches, message, toolCalls);
+
+        var pendingBatches = (await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken))
+            .Where(batch => batch.ConversationKind == AiChangeConversationKind.Research
+                && batch.ConversationId == conversation.Id)
+            .ToList();
+        foreach (var batch in pendingBatches)
+        {
+            foreach (var change in batch.Changes.Where(change => change.Status == AiChangeStatus.Pending))
+                AddPendingEntityTouches(entityTouches, batch, change);
+        }
+
+        var entityItems = new List<ResearchEntityActivityItem>();
+        foreach (var touch in entityTouches.Values.OrderByDescending(touch => touch.LastTouchedAt))
+        {
+            var entity = await entities.GetAsync(projectId, touch.EntityId, cancellationToken);
+            if (entity is null && !touch.HasPendingChange)
+                continue;
+
+            var properties = entity?.Properties
+                ?? touch.Properties
+                ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            var type = FirstNonEmpty(entity?.Type, touch.Type, "Entity");
+            var name = FirstNonEmpty(entity?.Name, touch.Name, touch.EntityId.ToString("N"));
+            entityItems.Add(new ResearchEntityActivityItem(
+                touch.EntityId,
+                type,
+                name,
+                touch.State,
+                Exists: entity is not null,
+                touch.HasPendingChange,
+                touch.PendingBatchId,
+                touch.PendingChangeId,
+                touch.PendingSummary,
+                FirstNonEmpty(touch.Preview, BuildPropertyPreview(properties), touch.PendingSummary, string.Empty),
+                touch.LastTouchedAt,
+                new Dictionary<string, string?>(properties, StringComparer.OrdinalIgnoreCase)));
+        }
+
+        var sourceItems = (await webCandidates.ListResearchAsync(projectId, cancellationToken))
+            .Where(source => source.ResearchConversationId == conversation.Id
+                && (source.FetchedAt is not null || source.Status == WebIngestCandidateStatus.Failed))
+            .OrderByDescending(source => source.UpdatedAt)
+            .Select(source => new ResearchSourceActivityItem(
+                source.Id,
+                source.Status,
+                source.Title,
+                BestUrl(source),
+                source.SearchQuery,
+                source.SourceProviderName,
+                source.Diagnostics,
+                source.FetchedAt,
+                source.UpdatedAt))
+            .ToList();
+
+        return new ResearchActivity(entityItems, sourceItems);
+    }
+
+    public Task<ResearchSourceDetail?> GetSourceDetailAsync(
+        Guid projectId,
+        Guid sourceId,
+        CancellationToken cancellationToken = default) =>
+        webCandidates.GetCachedDetailAsync(projectId, sourceId, cancellationToken);
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -97,17 +210,22 @@ public sealed class ResearchService(
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
+        OutlineToolStagingContext? staging = null;
+        string systemPrompt = string.Empty;
         string? setupError = null;
         try
         {
-            _ = await projects.GetByIdAsync(projectId, cancellationToken)
+            var project = await projects.GetByIdAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
             if (!await searchProviders.HasActiveProviderAsync(cancellationToken))
                 throw new InvalidOperationException("No active search provider is configured.");
             var defaultProvider = await providerService.GetDefaultAsync(cancellationToken)
                 ?? throw new InvalidOperationException("No default LLM provider configured.");
             chat = await chatClientFactory.CreateChatClientAsync(defaultProvider.Id, cancellationToken);
-            aiTools = tools.Build(new ResearchToolContext(projectId, conversation.Id));
+            systemPrompt = await BuildSystemPromptAsync(project, cancellationToken);
+            if (project.AiChangeApprovalEnabled)
+                staging = outlineTools.CreateStagingContext(projectId, conversation.Id, AiChangeConversationKind.Research);
+            aiTools = tools.Build(new ResearchToolContext(projectId, conversation.Id, OnToolMutated, staging));
         }
         catch (Exception ex)
         {
@@ -128,8 +246,8 @@ public sealed class ResearchService(
             ToolMode = ChatToolMode.Auto,
         };
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
-        var messages = new List<ChatMessage> { new(ChatRole.System, ResearchSystemPrompt) };
-        messages.AddRange(history.Select(ToChatMessage));
+        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
+        messages.AddRange(BuildModelHistory(history));
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -216,6 +334,8 @@ public sealed class ResearchService(
                 await enumerator.DisposeAsync();
             }
 
+            DrainMutated();
+
             if (cancelled)
             {
                 activeAssistant.Content = textBuilder.ToString();
@@ -275,6 +395,7 @@ public sealed class ResearchService(
                 var toolCancelled = false;
                 try
                 {
+                    staging?.BeginToolCall(activeAssistant.Id, pendingCall.CallId, pendingCall.Name, pendingCall.ArgumentsJson);
                     var aiFn = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name)
                         ?? throw new InvalidOperationException($"Unknown tool '{pendingCall.Name}'.");
                     var invokeResult = await aiFn.InvokeAsync(
@@ -315,12 +436,27 @@ public sealed class ResearchService(
                 await conversations.SaveChangesAsync(CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
+                if (staging is not null)
+                {
+                    foreach (var pendingChange in staging.DrainNewChanges())
+                    {
+                        yield return new ResearchPendingAiChangeCreated(
+                            pendingChange.BatchId,
+                            pendingChange.Id,
+                            pendingChange.ToolCallId,
+                            pendingChange.ToolName,
+                            pendingChange.Summary);
+                    }
+                }
                 yield return new ResearchToolCallCompleted(
                     pendingCall.CallId,
                     pendingCall.Name,
                     toolError is null ? toolResult : null,
                     toolError,
                     sw.Elapsed.TotalMilliseconds);
+
+                if (DrainMutated())
+                    yield return new ResearchGraphMutated();
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
@@ -335,23 +471,431 @@ public sealed class ResearchService(
         }
     }
 
-    private static ChatMessage ToChatMessage(ResearchMessage message) => message.Role switch
+    private static Dictionary<string, PersistedToolCall> BuildToolCallLookup(IEnumerable<ResearchMessage> history)
     {
-        ResearchMessageRole.System => new ChatMessage(ChatRole.System, message.Content),
-        ResearchMessageRole.User => new ChatMessage(ChatRole.User, message.Content),
-        ResearchMessageRole.Assistant => BuildAssistantReplay(message),
-        ResearchMessageRole.Tool => new ChatMessage(ChatRole.Tool, [new FunctionResultContent(message.ToolCallId ?? string.Empty, message.Content)]),
-        _ => new ChatMessage(ChatRole.User, message.Content),
+        var result = new Dictionary<string, PersistedToolCall>(StringComparer.Ordinal);
+        foreach (var message in history.Where(message => message.Role == ResearchMessageRole.Assistant))
+        {
+            foreach (var call in ReadPersistedToolCalls(message.ToolCallsJson))
+                result[call.CallId] = call;
+        }
+
+        return result;
+    }
+
+    private static void AddToolEntityTouches(
+        IDictionary<Guid, EntityTouch> touches,
+        ResearchMessage message,
+        IReadOnlyDictionary<string, PersistedToolCall> toolCalls)
+    {
+        var toolName = message.ToolName ?? string.Empty;
+        if (!IsEntityActivityTool(toolName)) return;
+
+        toolCalls.TryGetValue(message.ToolCallId ?? string.Empty, out var call);
+        JsonDocument? argsDoc = null;
+        JsonDocument? resultDoc = null;
+        try
+        {
+            var hasArgs = TryParseJsonObject(call?.ArgumentsJson, out argsDoc);
+            var hasResult = TryParseJsonObject(message.Content, out resultDoc);
+            var args = hasArgs ? argsDoc!.RootElement : default;
+            var result = hasResult ? resultDoc!.RootElement : default;
+
+            switch (toolName)
+            {
+                case "read_entity":
+                    if (hasResult && TryAddEntityPayload(touches, result, ResearchEntityActivityState.Read, "Read entity", message.CreatedAt))
+                        break;
+                    if (hasArgs && TryReadGuid(args, "entityId", out var readId))
+                        UpsertEntityTouch(touches, readId, string.Empty, string.Empty, ResearchEntityActivityState.Read, "Read entity", message.CreatedAt);
+                    break;
+                case "list_entity_links":
+                    if (hasArgs && TryReadGuid(args, "entityId", out var linksId))
+                        UpsertEntityTouch(touches, linksId, string.Empty, string.Empty, ResearchEntityActivityState.Read, "Listed entity links", message.CreatedAt);
+                    break;
+                case "create_entity":
+                    if (hasResult && TryGetPropertyObject(result, "existing", out var existing))
+                    {
+                        TryAddEntityPayload(touches, existing, ResearchEntityActivityState.Read, "Found existing entity", message.CreatedAt);
+                    }
+                    else if (hasResult)
+                    {
+                        TryAddEntityPayload(touches, result, ResearchEntityActivityState.Created, "Created entity", message.CreatedAt);
+                    }
+                    break;
+                case "update_entity":
+                    if (hasResult && TryAddEntityPayload(touches, result, ResearchEntityActivityState.Updated, "Updated entity", message.CreatedAt))
+                        break;
+                    if (hasArgs && TryReadGuid(args, "entityId", out var updateId))
+                        UpsertEntityTouch(touches, updateId, string.Empty, string.Empty, ResearchEntityActivityState.Updated, "Updated entity", message.CreatedAt);
+                    break;
+                case "link_entities":
+                    if (hasResult)
+                    {
+                        if (TryGetPropertyObject(result, "from", out var fromEntity))
+                            TryAddEntityPayload(touches, fromEntity, ResearchEntityActivityState.Linked, "Linked entity", message.CreatedAt);
+                        if (TryGetPropertyObject(result, "to", out var toEntity))
+                            TryAddEntityPayload(touches, toEntity, ResearchEntityActivityState.Linked, "Linked entity", message.CreatedAt);
+                    }
+                    if (hasArgs)
+                    {
+                        if (TryReadGuid(args, "fromId", out var fromId))
+                            UpsertEntityTouch(touches, fromId, string.Empty, string.Empty, ResearchEntityActivityState.Linked, "Linked entity", message.CreatedAt);
+                        if (TryReadGuid(args, "toId", out var toId))
+                            UpsertEntityTouch(touches, toId, string.Empty, string.Empty, ResearchEntityActivityState.Linked, "Linked entity", message.CreatedAt);
+                    }
+                    break;
+            }
+        }
+        finally
+        {
+            argsDoc?.Dispose();
+            resultDoc?.Dispose();
+        }
+    }
+
+    private static void AddPendingEntityTouches(
+        IDictionary<Guid, EntityTouch> touches,
+        AiChangeBatch batch,
+        AiChange change)
+    {
+        if (TryReadEntityChange(change.AfterJson, out var entityChange))
+        {
+            var state = string.Equals(change.BeforeJson, "null", StringComparison.OrdinalIgnoreCase)
+                ? ResearchEntityActivityState.PendingCreated
+                : ResearchEntityActivityState.PendingUpdated;
+            UpsertEntityTouch(
+                touches,
+                entityChange.Id,
+                entityChange.Type,
+                entityChange.Name,
+                state,
+                change.Summary,
+                change.CreatedAt,
+                pendingBatchId: batch.Id,
+                pendingChangeId: change.Id,
+                pendingSummary: change.Summary,
+                properties: entityChange.Properties);
+            return;
+        }
+
+        if (TryReadEntityLinkChange(change.AfterJson, out var linkChange))
+        {
+            UpsertEntityTouch(
+                touches,
+                linkChange.FromId,
+                string.Empty,
+                string.Empty,
+                ResearchEntityActivityState.PendingLinked,
+                change.Summary,
+                change.CreatedAt,
+                pendingBatchId: batch.Id,
+                pendingChangeId: change.Id,
+                pendingSummary: change.Summary);
+            UpsertEntityTouch(
+                touches,
+                linkChange.ToId,
+                string.Empty,
+                string.Empty,
+                ResearchEntityActivityState.PendingLinked,
+                change.Summary,
+                change.CreatedAt,
+                pendingBatchId: batch.Id,
+                pendingChangeId: change.Id,
+                pendingSummary: change.Summary);
+            return;
+        }
+
+        if (TryParseEntityResource(change.ResourceId, out var entityId))
+        {
+            UpsertEntityTouch(
+                touches,
+                entityId,
+                string.Empty,
+                string.Empty,
+                ResearchEntityActivityState.PendingUpdated,
+                change.Summary,
+                change.CreatedAt,
+                pendingBatchId: batch.Id,
+                pendingChangeId: change.Id,
+                pendingSummary: change.Summary);
+        }
+    }
+
+    private static bool IsEntityActivityTool(string toolName) =>
+        toolName is "read_entity"
+            or "list_entity_links"
+            or "create_entity"
+            or "update_entity"
+            or "link_entities";
+
+    private static bool TryAddEntityPayload(
+        IDictionary<Guid, EntityTouch> touches,
+        JsonElement element,
+        ResearchEntityActivityState state,
+        string activity,
+        DateTime touchedAt)
+    {
+        if (!TryReadEntityPayload(element, out var id, out var type, out var name, out var properties))
+            return false;
+
+        UpsertEntityTouch(touches, id, type, name, state, activity, touchedAt, properties: properties);
+        return true;
+    }
+
+    private static bool TryReadEntityPayload(
+        JsonElement element,
+        out Guid id,
+        out string type,
+        out string name,
+        out Dictionary<string, string?> properties)
+    {
+        id = Guid.Empty;
+        type = string.Empty;
+        name = string.Empty;
+        properties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+        if (!TryReadGuid(element, "id", out id))
+            return false;
+
+        type = ReadString(element, "type");
+        name = ReadString(element, "name");
+        if (TryGetPropertyObject(element, "properties", out var propertyElement))
+            properties = ReadProperties(propertyElement);
+        return true;
+    }
+
+    private static void UpsertEntityTouch(
+        IDictionary<Guid, EntityTouch> touches,
+        Guid entityId,
+        string type,
+        string name,
+        ResearchEntityActivityState state,
+        string preview,
+        DateTime touchedAt,
+        Guid? pendingBatchId = null,
+        Guid? pendingChangeId = null,
+        string? pendingSummary = null,
+        IReadOnlyDictionary<string, string?>? properties = null)
+    {
+        if (!touches.TryGetValue(entityId, out var touch))
+        {
+            touch = new EntityTouch(entityId);
+            touches[entityId] = touch;
+        }
+
+        if (!string.IsNullOrWhiteSpace(type)) touch.Type = type.Trim();
+        if (!string.IsNullOrWhiteSpace(name)) touch.Name = name.Trim();
+        if (!string.IsNullOrWhiteSpace(preview)) touch.Preview = preview.Trim();
+        if (StatePriority(state) >= StatePriority(touch.State)) touch.State = state;
+        if (touchedAt > touch.LastTouchedAt) touch.LastTouchedAt = touchedAt;
+
+        if (pendingChangeId is not null)
+        {
+            touch.HasPendingChange = true;
+            touch.PendingBatchId = pendingBatchId;
+            touch.PendingChangeId = pendingChangeId;
+            touch.PendingSummary = pendingSummary;
+        }
+
+        if (properties is not null)
+        {
+            touch.Properties ??= new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in properties)
+                touch.Properties[property.Key] = property.Value;
+        }
+    }
+
+    private static int StatePriority(ResearchEntityActivityState state) => state switch
+    {
+        ResearchEntityActivityState.PendingCreated => 70,
+        ResearchEntityActivityState.PendingUpdated => 65,
+        ResearchEntityActivityState.PendingLinked => 60,
+        ResearchEntityActivityState.Created => 50,
+        ResearchEntityActivityState.Updated => 40,
+        ResearchEntityActivityState.Linked => 30,
+        _ => 10,
     };
 
-    private static ChatMessage BuildAssistantReplay(ResearchMessage message)
+    private static bool TryParseJsonObject(string? json, out JsonDocument? document)
     {
-        var calls = ReadPersistedToolCalls(message.ToolCallsJson);
-        var contents = calls.Count == 0
-            ? BuildTextOnlyAssistantContents(message.Content)
-            : BuildAssistantContents(message.Content, calls);
+        document = null;
+        if (string.IsNullOrWhiteSpace(json) || !json.TrimStart().StartsWith('{')) return false;
+        try
+        {
+            document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Object;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
-        return new ChatMessage(ChatRole.Assistant, contents);
+    private static bool TryGetPropertyObject(JsonElement element, string propertyName, out JsonElement property)
+    {
+        if (TryGetPropertyIgnoreCase(element, propertyName, out property)
+            && property.ValueKind == JsonValueKind.Object)
+        {
+            return true;
+        }
+
+        property = default;
+        return false;
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string propertyName, out JsonElement property)
+    {
+        if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty(propertyName, out property))
+            return true;
+
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var item in element.EnumerateObject())
+            {
+                if (string.Equals(item.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    property = item.Value;
+                    return true;
+                }
+            }
+        }
+
+        property = default;
+        return false;
+    }
+
+    private static bool TryReadGuid(JsonElement element, string propertyName, out Guid value)
+    {
+        value = Guid.Empty;
+        return TryGetPropertyIgnoreCase(element, propertyName, out var property)
+            && property.ValueKind == JsonValueKind.String
+            && Guid.TryParse(property.GetString(), out value);
+    }
+
+    private static string ReadString(JsonElement element, string propertyName) =>
+        TryGetPropertyIgnoreCase(element, propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString() ?? string.Empty
+            : string.Empty;
+
+    private static Dictionary<string, string?> ReadProperties(JsonElement element)
+    {
+        var result = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in element.EnumerateObject())
+        {
+            result[property.Name] = property.Value.ValueKind switch
+            {
+                JsonValueKind.String => property.Value.GetString(),
+                JsonValueKind.Null => null,
+                _ => property.Value.GetRawText(),
+            };
+        }
+
+        return result;
+    }
+
+    private static bool TryReadEntityChange(string json, out OutlineEntityChange value)
+    {
+        value = default!;
+        if (string.IsNullOrWhiteSpace(json) || string.Equals(json.Trim(), "null", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        try
+        {
+            value = JsonSerializer.Deserialize<OutlineEntityChange>(json) ?? default!;
+            return value is not null && value.Id != Guid.Empty;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadEntityLinkChange(string json, out OutlineEntityLinkChange value)
+    {
+        value = default!;
+        if (string.IsNullOrWhiteSpace(json) || string.Equals(json.Trim(), "null", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        try
+        {
+            value = JsonSerializer.Deserialize<OutlineEntityLinkChange>(json) ?? default!;
+            return value is not null && value.FromId != Guid.Empty && value.ToId != Guid.Empty;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryParseEntityResource(string resourceId, out Guid entityId)
+    {
+        entityId = Guid.Empty;
+        const string prefix = "Entity:";
+        return resourceId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(resourceId[prefix.Length..], out entityId);
+    }
+
+    private static string BuildPropertyPreview(IReadOnlyDictionary<string, string?> properties)
+    {
+        foreach (var key in new[] { "summary", "description", "role", "voiceNotes", "quoteExamples", "value" })
+        {
+            if (properties.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+                return value.Length <= 220 ? value : value[..220].TrimEnd() + "...";
+        }
+
+        var first = properties.OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(property => property.Value)
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        return string.IsNullOrWhiteSpace(first)
+            ? string.Empty
+            : first.Length <= 220 ? first : first[..220].TrimEnd() + "...";
+    }
+
+    private static List<PersistedToolCall> ReadPersistedToolCalls(string toolCallsJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolCallsJson) || toolCallsJson == "[]") return [];
+        try { return JsonSerializer.Deserialize<List<PersistedToolCall>>(toolCallsJson) ?? []; }
+        catch { return []; }
+    }
+
+    private static string BestUrl(WebIngestCandidateView source) =>
+        FirstNonEmpty(source.CanonicalUrl, source.FinalUrl, source.Url);
+
+    private static string FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
+    private static IEnumerable<ChatMessage> BuildModelHistory(IEnumerable<ResearchMessage> history)
+    {
+        foreach (var message in history)
+        {
+            var chatMessage = ToModelHistoryMessage(message);
+            if (chatMessage is not null)
+                yield return chatMessage;
+        }
+    }
+
+    private static ChatMessage? ToModelHistoryMessage(ResearchMessage message) => message.Role switch
+    {
+        ResearchMessageRole.System when !string.IsNullOrWhiteSpace(message.Content) => new ChatMessage(ChatRole.System, message.Content),
+        ResearchMessageRole.User => new ChatMessage(ChatRole.User, message.Content),
+        ResearchMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new ChatMessage(ChatRole.Assistant, message.Content),
+        _ => null,
+    };
+
+    private async Task<string> BuildSystemPromptAsync(Project project, CancellationToken cancellationToken)
+    {
+        var assembly = await contextBuilder.BuildProjectAsync(project, ResearchWorkflowInstructions, cancellationToken);
+        return assembly.Assemble();
+    }
+
+    private void OnToolMutated() => _mutatedSinceYield = true;
+
+    private bool DrainMutated()
+    {
+        var value = _mutatedSinceYield;
+        _mutatedSinceYield = false;
+        return value;
     }
 
     private static List<AIContent> BuildTextOnlyAssistantContents(string text)
@@ -394,13 +938,6 @@ public sealed class ResearchService(
         return contents;
     }
 
-    private static List<PersistedToolCall> ReadPersistedToolCalls(string toolCallsJson)
-    {
-        if (string.IsNullOrWhiteSpace(toolCallsJson) || toolCallsJson == "[]") return [];
-        try { return JsonSerializer.Deserialize<List<PersistedToolCall>>(toolCallsJson) ?? []; }
-        catch { return []; }
-    }
-
     private static FunctionCallContent ToFunctionCallContent(PersistedToolCall call)
     {
         var args = ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson);
@@ -438,6 +975,21 @@ public sealed class ResearchService(
         {
             logger.LogError(ex, "Failed to persist Research message {MessageId}", message.Id);
         }
+    }
+
+    private sealed class EntityTouch(Guid entityId)
+    {
+        public Guid EntityId { get; } = entityId;
+        public string Type { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public ResearchEntityActivityState State { get; set; } = ResearchEntityActivityState.Read;
+        public bool HasPendingChange { get; set; }
+        public Guid? PendingBatchId { get; set; }
+        public Guid? PendingChangeId { get; set; }
+        public string? PendingSummary { get; set; }
+        public string Preview { get; set; } = string.Empty;
+        public DateTime LastTouchedAt { get; set; } = DateTime.MinValue;
+        public Dictionary<string, string?>? Properties { get; set; }
     }
 
     private sealed record PendingToolCall(

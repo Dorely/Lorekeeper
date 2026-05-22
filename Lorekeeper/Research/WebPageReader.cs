@@ -49,24 +49,51 @@ public sealed class HttpWebPageReader(
 
         var client = httpClientFactory.CreateClient(nameof(HttpWebPageReader));
         client.Timeout = TimeSpan.FromSeconds(Math.Clamp(options.Value.RequestTimeoutSeconds, 5, 180));
+        var maxAttempts = Math.Clamp(options.Value.RetryAttempts, 0, 5) + 1;
+        var retryDelay = TimeSpan.FromMilliseconds(Math.Clamp(options.Value.RetryDelayMilliseconds, 0, 30_000));
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.TryAddWithoutValidation("User-Agent", options.Value.UserAgent);
-        request.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.2");
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var attemptResult = await TryReadOnceAsync(client, url, uri, cancellationToken);
+            if (attemptResult.Result.Success || !attemptResult.Retryable || attempt == maxAttempts)
+                return attemptResult.Retryable && !attemptResult.Result.Success
+                    ? WithAttemptDiagnostics(attemptResult.Result, attempt)
+                    : attemptResult.Result;
 
+            if (retryDelay > TimeSpan.Zero)
+                await Task.Delay(retryDelay + TimeSpan.FromMilliseconds(Random.Shared.Next(0, 250)), cancellationToken);
+        }
+
+        return Failed(url, uri.ToString(), "Page read failed before an HTTP request was completed.");
+    }
+
+    private async Task<WebPageReadAttemptResult> TryReadOnceAsync(
+        HttpClient client,
+        string url,
+        Uri uri,
+        CancellationToken cancellationToken)
+    {
         try
         {
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.TryAddWithoutValidation("User-Agent", options.Value.UserAgent);
+            request.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.2");
+
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             var finalUrl = response.RequestMessage?.RequestUri?.ToString() ?? uri.ToString();
             if (!response.IsSuccessStatusCode)
-                return Failed(url, finalUrl, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}".Trim());
+                return new WebPageReadAttemptResult(
+                    Failed(url, finalUrl, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}".Trim()),
+                    IsRetryableStatusCode(response.StatusCode));
 
             var contentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
             if (!IsReadableContentType(contentType))
-                return Failed(url, finalUrl, $"Unsupported content type '{contentType}'.");
+                return new WebPageReadAttemptResult(Failed(url, finalUrl, $"Unsupported content type '{contentType}'."), Retryable: false);
 
             if (response.Content.Headers.ContentLength is long length && length > options.Value.MaxPageBytes)
-                return Failed(url, finalUrl, $"Page is larger than the configured {options.Value.MaxPageBytes:N0} byte limit.");
+                return new WebPageReadAttemptResult(
+                    Failed(url, finalUrl, $"Page is larger than the configured {options.Value.MaxPageBytes:N0} byte limit."),
+                    Retryable: false);
 
             var bytes = await ReadLimitedBytesAsync(response, cancellationToken);
             var raw = Decode(bytes, response.Content.Headers.ContentType?.CharSet);
@@ -77,17 +104,57 @@ public sealed class HttpWebPageReader(
             var text = isHtml ? ExtractText(raw) : NormalizePlainText(raw);
             var excerpt = Truncate(text, 2_000);
 
-            return new WebPageReadResult(url, finalUrl, title, canonical, contentType, text, excerpt, links, true, string.Empty);
+            return new WebPageReadAttemptResult(
+                new WebPageReadResult(url, finalUrl, title, canonical, contentType, text, excerpt, links, true, string.Empty),
+                Retryable: false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
+        catch (TaskCanceledException ex)
+        {
+            logger.LogWarning(ex, "Timed out while reading webpage {Url}", url);
+            return new WebPageReadAttemptResult(Failed(url, uri.ToString(), "The request timed out."), Retryable: true);
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogWarning(ex, "HTTP request failed while reading webpage {Url}", url);
+            return new WebPageReadAttemptResult(Failed(url, uri.ToString(), ex.Message), Retryable: true);
+        }
+        catch (IOException ex)
+        {
+            logger.LogWarning(ex, "Network stream failed while reading webpage {Url}", url);
+            return new WebPageReadAttemptResult(Failed(url, uri.ToString(), ex.Message), Retryable: true);
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning(ex, "Failed to read webpage {Url}", url);
+            return new WebPageReadAttemptResult(Failed(url, uri.ToString(), ex.Message), Retryable: false);
+        }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to read webpage {Url}", url);
-            return Failed(url, uri.ToString(), ex.Message);
+            return new WebPageReadAttemptResult(Failed(url, uri.ToString(), ex.Message), Retryable: false);
         }
+    }
+
+    private static bool IsRetryableStatusCode(HttpStatusCode statusCode)
+    {
+        var code = (int)statusCode;
+        return code is 403 or 408 or 425 or 429 or 500 or 502 or 503 or 504;
+    }
+
+    private static WebPageReadResult WithAttemptDiagnostics(WebPageReadResult result, int attemptCount)
+    {
+        var diagnostics = result.Diagnostics.Trim().TrimEnd('.');
+        var attemptLabel = attemptCount == 1 ? "1 attempt" : $"{attemptCount} attempts";
+        return result with
+        {
+            Diagnostics = string.IsNullOrWhiteSpace(diagnostics)
+                ? $"Failed after {attemptLabel}."
+                : $"{diagnostics} after {attemptLabel}.",
+        };
     }
 
     private async Task<byte[]> ReadLimitedBytesAsync(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -231,4 +298,6 @@ public sealed class HttpWebPageReader(
 
     private static WebPageReadResult Failed(string url, string finalUrl, string diagnostics) =>
         new(url, finalUrl, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, [], false, diagnostics);
+
+    private sealed record WebPageReadAttemptResult(WebPageReadResult Result, bool Retryable);
 }

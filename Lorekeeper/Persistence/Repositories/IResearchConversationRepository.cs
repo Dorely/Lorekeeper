@@ -6,6 +6,7 @@ public interface IResearchConversationRepository
 {
     Task<ResearchConversation?> GetByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<List<ResearchMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task AddConversationAsync(ResearchConversation conversation, CancellationToken cancellationToken = default);
     Task AddMessageAsync(ResearchMessage message, CancellationToken cancellationToken = default);

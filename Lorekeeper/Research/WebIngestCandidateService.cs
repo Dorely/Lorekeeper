@@ -32,6 +32,14 @@ public sealed class WebIngestCandidateService(
     public async Task<IReadOnlyList<WebIngestCandidateView>> ListStagedAsync(Guid projectId, Guid? researchConversationId, CancellationToken cancellationToken = default) =>
         (await candidates.ListStagedByProjectAsync(projectId, researchConversationId, cancellationToken)).Select(ToView).ToList();
 
+    public async Task<ResearchSourceDetail?> GetCachedDetailAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default)
+    {
+        var candidate = await candidates.GetByIdAsync(candidateId, cancellationToken);
+        return candidate is null || candidate.ProjectId != projectId
+            ? null
+            : ToDetail(candidate);
+    }
+
     public async Task<WebIngestCandidate> CreateFromSearchResultAsync(
         Guid projectId,
         Guid? conversationId,
@@ -57,7 +65,7 @@ public sealed class WebIngestCandidateService(
             };
         }
 
-        candidate.ResearchConversationId ??= conversationId;
+        AssignConversation(candidate, conversationId);
         candidate.SearchProviderId = searchProviderId;
         candidate.SourceProviderName = providerName;
         candidate.SearchQuery = query;
@@ -78,8 +86,17 @@ public sealed class WebIngestCandidateService(
 
     public async Task<WebIngestCandidateReadResult> ReadCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        return await ReadCandidateForConversationAsync(candidateId, conversationId: null, cancellationToken);
+    }
+
+    public async Task<WebIngestCandidateReadResult> ReadCandidateForConversationAsync(
+        Guid candidateId,
+        Guid? conversationId,
+        CancellationToken cancellationToken = default)
+    {
         var candidate = await candidates.GetByIdAsync(candidateId, cancellationToken)
             ?? throw new InvalidOperationException($"Web ingest candidate {candidateId} was not found.");
+        AssignConversation(candidate, conversationId);
         return await ReadIntoCandidateAsync(candidate, candidate.Url, cancellationToken);
     }
 
@@ -113,7 +130,7 @@ public sealed class WebIngestCandidateService(
             await candidates.SaveChangesAsync(cancellationToken);
         }
 
-        candidate.ResearchConversationId ??= conversationId;
+        AssignConversation(candidate, conversationId);
         candidate.DiscoveryKind = discoveryKind;
         if (!string.IsNullOrWhiteSpace(searchQuery)) candidate.SearchQuery = searchQuery.Trim();
         candidate.SearchRank = searchRank ?? candidate.SearchRank;
@@ -281,9 +298,19 @@ public sealed class WebIngestCandidateService(
 
     private async Task<WebIngestCandidateReadResult> ReadIntoCandidateAsync(WebIngestCandidate candidate, string url, CancellationToken cancellationToken)
     {
+        if (!string.IsNullOrWhiteSpace(candidate.ExtractedText))
+        {
+            if (string.IsNullOrWhiteSpace(candidate.ContentHash))
+                candidate.ContentHash = ContentHash(candidate.ExtractedText);
+            candidate.UpdatedAt = DateTime.UtcNow;
+            candidates.Update(candidate);
+            await candidates.SaveChangesAsync(cancellationToken);
+            return new WebIngestCandidateReadResult(candidate, ReadCachedLinks(candidate.CachedLinksJson), FromCache: true);
+        }
+
         var result = await pageReader.ReadAsync(url, cancellationToken);
-        candidate.FinalUrl = result.FinalUrl;
-        candidate.CanonicalUrl = result.CanonicalUrl;
+        candidate.FinalUrl = NormalizeUrl(result.FinalUrl);
+        candidate.CanonicalUrl = NormalizeUrl(result.CanonicalUrl);
         candidate.ContentType = result.ContentType;
         candidate.Diagnostics = result.Diagnostics;
         candidate.FetchedAt = DateTime.UtcNow;
@@ -293,6 +320,8 @@ public sealed class WebIngestCandidateService(
         {
             candidate.Title = string.IsNullOrWhiteSpace(result.Title) ? candidate.Title : result.Title;
             candidate.ExtractedText = result.Text;
+            candidate.CachedLinksJson = JsonSerializer.Serialize(result.Links);
+            candidate.ContentHash = ContentHash(result.Text);
             candidate.Excerpt = result.Excerpt;
             if (candidate.Status is not WebIngestCandidateStatus.Staged and not WebIngestCandidateStatus.Queued)
                 candidate.Status = WebIngestCandidateStatus.Read;
@@ -304,7 +333,26 @@ public sealed class WebIngestCandidateService(
 
         candidates.Update(candidate);
         await candidates.SaveChangesAsync(cancellationToken);
-        return new WebIngestCandidateReadResult(candidate, result.Links);
+        return new WebIngestCandidateReadResult(candidate, result.Links, FromCache: false);
+    }
+
+    private static IReadOnlyList<WebPageLink> ReadCachedLinks(string linksJson)
+    {
+        if (string.IsNullOrWhiteSpace(linksJson) || linksJson == "[]") return [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<WebPageLink>>(linksJson) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static void AssignConversation(WebIngestCandidate candidate, Guid? conversationId)
+    {
+        if (conversationId is not null && candidate.ResearchConversationId != conversationId)
+            candidate.ResearchConversationId = conversationId;
     }
 
     private static WebIngestCandidateView ToView(WebIngestCandidate candidate) =>
@@ -334,6 +382,28 @@ public sealed class WebIngestCandidateService(
             candidate.QueuedAt,
             candidate.CreatedAt,
             candidate.UpdatedAt);
+
+    private static ResearchSourceDetail ToDetail(WebIngestCandidate candidate) =>
+        new(
+            candidate.Id,
+            candidate.Status,
+            SourceTitle(candidate),
+            candidate.Url,
+            candidate.FinalUrl,
+            candidate.CanonicalUrl,
+            candidate.DisplayUrl,
+            candidate.SearchQuery,
+            candidate.SourceProviderName,
+            candidate.ContentType,
+            candidate.ContentHash,
+            candidate.Excerpt,
+            candidate.Diagnostics,
+            candidate.FetchedAt,
+            candidate.UpdatedAt,
+            candidate.ExtractedText,
+            ReadCachedLinks(candidate.CachedLinksJson)
+                .Select(link => new ResearchSourceLink(link.Url, link.Text))
+                .ToList());
 
     private static string BuildWebIngestInstructions(string? instructions, IReadOnlyList<WebIngestCandidate> queuedCandidates)
     {

@@ -93,8 +93,8 @@
 
 | File | Description |
 |------|-------------|
-| `ResearchContent.razor` (+ `.razor.css`) | Research workspace: hides behind active search-provider readiness, hosts autonomous research chat plus research-only discovered/staged page review, batches staged pages into normal ingest jobs, and supports clearing unqueued candidates. |
-| `ResearchChatPanel.razor` (+ `.razor.css`) | Research chat domain adapter over shared `ChatSurface`; streams search/read/stage tool calls, persists the project research transcript, and refreshes staged-page state after tool turns. |
+| `ResearchContent.razor` (+ `.razor.css`) | Research workspace: hides behind active search-provider readiness, hosts entity-first research chat plus a Research Activity sidebar for touched entities and accessed URLs with detail modals. |
+| `ResearchChatPanel.razor` (+ `.razor.css`) | Research chat domain adapter over shared `ChatSurface`; streams cache-first web/search and graph tool calls, persists the project research transcript, and exposes Review edits + pending-change modal integration. |
 
 ### Components/Pages/Projects/ImportExport/
 
@@ -151,7 +151,7 @@
 | `SearchProvider.cs` | EF entity for configured web search providers used by Research Mode. Supports SerpApi and Brave in v1, stores API key/config JSON, and tracks the single active provider. |
 | `ResearchConversation.cs` | EF entity — one persistent project research chat per `Project` (unique on `ProjectId`). Owns ordered `ResearchMessage`s; cascade-deleted with the project. |
 | `ResearchMessage.cs` | EF entity for a single Research chat row with monotonic `Order`, role (`System`/`User`/`Assistant`/`Tool`), text content, assistant tool-call JSON, tool result metadata, status, optional error, and creation timestamp. |
-| `AiChangeBatch.cs` | EF entity grouping AI-proposed tool mutations from one assistant turn while they await approval/resolution. Tracks whether the owning transcript is Outline or Editor chat. |
+| `AiChangeBatch.cs` | EF entity grouping AI-proposed tool mutations from one assistant turn while they await approval/resolution. Tracks whether the owning transcript is Outline, Editor, or Research chat. |
 | `AiChange.cs` | EF entity for one queued AI tool mutation: tool metadata, before/after/result JSON, dependency metadata, status, rejection/error notes, timestamps. |
 | `ContestBatch.cs` | EF entity for one Editor Contest Mode run: captured turn/context snapshot, target chapter/body snapshot, operation metadata, status, and model candidates. |
 | `ContestCandidate.cs` | EF entity for one model's contest proposal: provider/model labels, validated mutation JSON, proposed chapter body, raw response, status, timing, and errors. |
@@ -164,7 +164,7 @@
 | `IngestJobEvent.cs` | EF entity for ingest progress/debug events such as tool calls and failures. |
 | `ProjectImportJob.cs` | EF entity for durable project import job state: uploaded JSON payload, source format metadata, status/progress counters, import counts, warnings, errors, and timestamps. |
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
-| `WebIngestCandidate.cs` | EF entity for discovered/read/staged webpage candidates before ingestion. Stores search provenance, fetch diagnostics, extracted text/excerpt, staging rationale, and queued ingest job id. |
+| `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
 | `GraphNode.cs` | Generic graph node: `(ProjectId, NodeType, Key)` unique, JSON properties bag. Cascade-deleted with its `Project`. |
 | `GraphEdge.cs` | Directed edge between graph nodes with type, JSON properties, optional relationship-specific `SortOrder`, and timestamps. |
 | `GraphEntityType.cs` | Lightweight project-scoped graph type registry entry for UI/LLM labels/defaults. Descriptive rather than restrictive; arbitrary node types remain valid. |
@@ -176,7 +176,7 @@
 | `AppDbContext.cs` | EF Core context for projects, outline/editor/writing/research chat, search providers, writing samples, graph, editor context preferences, AI change approval, ingest queues, and webpage candidates. JSON value converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, and Contest Mode schema cleanup). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, Contest Mode cleanup, and web research cache metadata). |
 
 ### Persistence/Repositories/
 
@@ -200,7 +200,7 @@
 | `IContestRepository.cs` / `ContestRepository.cs` | Persistence for Editor Contest Mode batches and candidates, including current/history project batch listing, detail loading, candidate lookup, and status updates. |
 | `IEditorContextPreferenceRepository.cs` / `EditorContextPreferenceRepository.cs` | Persistence for active-chapter Context Feed include/exclude preferences, scoped by project, chapter, item kind, and item key. |
 | `IIngestRepository.cs` / `IngestRepository.cs` | Persistence for ingest sources, source chunks, vector fragments, jobs, job chunks, report items, and job events, including project source listing, tracked processor reads, and lightweight no-tracking UI projections/excerpts. |
-| `IWebIngestCandidateRepository.cs` / `WebIngestCandidateRepository.cs` | Persistence for project-scoped webpage candidates discovered by Research Mode or manual URL reading, including staged-page listing and URL de-duplication. |
+| `IWebIngestCandidateRepository.cs` / `WebIngestCandidateRepository.cs` | Persistence for project-scoped cached webpage sources discovered by Research Mode or manual URL reading, including staged-page listing for Ingest and URL de-duplication. |
 | `IProjectImportRepository.cs` / `ProjectImportRepository.cs` | Persistence for project import jobs and report items, including list/detail UI projections, queued/interrupted job lookup, and delete/save operations. |
 
 ### Knowledge/
@@ -246,12 +246,13 @@
 
 | File | Description |
 |------|-------------|
-| `IResearchService.cs` / `ResearchService.cs` | Persistent streaming Research chat: requires an active search provider, streams text/tool-call arguments, persists messages/tool results, and lets the assistant autonomously search/read/stage useful webpages. |
-| `ResearchTools.cs` | Research LLM tools: `web_search`, `read_search_result`, `read_webpage`, `follow_page_links`, `stage_page_for_ingestion`, and `list_staged_pages`. Search results and read pages are persisted as webpage candidates. |
-| `ResearchTurnUpdate.cs` | Streaming update records consumed by `ResearchChatPanel`: text deltas, tool-call start/argument/completion updates, assistant completion, and turn errors/cancellation. |
-| `WebResearchOptions.cs` | Configurable webpage read limits and HTTP defaults such as user agent, timeout, max bytes, max links, and private-network target blocking. |
-| `WebPageReader.cs` | HTTP webpage reader/extractor for Research Mode: fetches HTML/text pages, blocks local/private targets by default, extracts title/text/canonical URL/outgoing links, and returns diagnostics. |
-| `IWebIngestCandidateService.cs` / `WebIngestCandidateService.cs` | Application service for discovered/read/staged webpage candidates, including search-result persistence, URL reading, research-only listing, staging/unstaging, clearing, and single/batch queueing into ingest jobs. |
+| `IResearchService.cs` / `ResearchService.cs` | Persistent streaming Research chat: builds project-level guidance/facts/outline context, replays text-only history to the model, streams cache-first web + graph tool calls, stages Review edits, and derives current-conversation activity. |
+| `ResearchTools.cs` | Research LLM tools: cache-first `web_search`, paginated `read_search_result`/`read_webpage`, `follow_page_links`, read-only entity detail/link tools, and selected graph create/update/link tools reused from outline collaboration. |
+| `ResearchTurnUpdate.cs` | Streaming update records consumed by `ResearchChatPanel`: text/tool updates, pending AI change creation, graph mutation refreshes, assistant completion, and turn errors/cancellation. |
+| `ResearchActivityModels.cs` | Read models for Research Activity sidebar entity/source summaries and cache-only source detail modals. |
+| `WebResearchOptions.cs` | Configurable webpage read limits and HTTP defaults such as user agent, timeout, max bytes, read-page size, retry timing, max links, and private-network target blocking. |
+| `WebPageReader.cs` | HTTP webpage reader/extractor for Research Mode: fetches HTML/text pages with short transient retries, blocks local/private targets by default, extracts title/text/canonical URL/outgoing links, and returns diagnostics. |
+| `IWebIngestCandidateService.cs` / `WebIngestCandidateService.cs` | Application service for cached webpage sources: search-result persistence, conversation-aware cache-first URL/page reading, cache-only source details, and manual Ingest queueing support. |
 | `WebIngestCandidateModels.cs` | UI/read helper records for webpage candidate lists and read results. |
 
 ### Auth/
@@ -279,7 +280,7 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Async context assembly for the Context Feed and editor chat prompt. Builds keyed `ContextItem`s for guidance, current/previous chapters, outline, facts, writing samples, selected/auto-related entities, and selected structural references; `Assemble()` returns the literal system message and can override the assistant workflow block for modes like Contest preparation. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Async context assembly for Context Feed/editor chat plus project-level Research context. Builds keyed `ContextItem`s for guidance, outline, facts, current/previous chapters, writing samples, selected/auto-related entities, and structural references; `Assemble()` returns the literal system message. |
 | `IEditorContextService.cs` | Editor context facade extending `IContextBuilder`; persists per-chapter context item inclusion and exposes auto/included entity/context key sets for recommendations. |
 | `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
 | `IContextIndexingService.cs` / `ContextIndexingService.cs` | Maintains targeted direct vector rows for addable context items: graph entities, chapters, acts, ingest sources, and ingest source chunks. |
@@ -357,7 +358,7 @@
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt`, keeps Act graph nodes/structural edges synchronized, and updates targeted act context vectors on mutations. |
 | `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Multi-turn collaborative outline chat. Streams LLM text/tool updates, persists chat history, stages mutating tool calls when project approval is enabled, blocks new turns while pending changes remain, and instructs the LLM to persist project-level truths as `ProjectFact` graph nodes. |
 | `OutlineCollaborationTools.cs` | `AIFunction` definitions exposed to the outline LLM. `list_outline` includes `projectFacts`; ProjectFact creation uses generic entity tools and is parented to the Project graph node. Read/mutating tools either operate directly or route through `OutlineToolStagingContext` so approval-mode turns see staged changes as current state. |
-| `IAiChangeApprovalService.cs` / `AiChangeApprovalService.cs` | Applies or rejects queued AI changes from outline/editor chat, including outline/entity mutations and editor chapter-body edits; enforces dependency application/rejection cascading and writes hidden correction messages to the owning transcript. |
+| `IAiChangeApprovalService.cs` / `AiChangeApprovalService.cs` | Applies or rejects queued AI changes from outline/editor/research chat, including outline/entity mutations and editor chapter-body edits; enforces dependency application/rejection cascading and writes hidden correction messages to the owning transcript. |
 | `AiChangeReviewDrafts.cs` | Typed helper for persisted pending-change review drafts: reads editable text fields, updates draft payload JSON, validates draft metadata, and resolves effective after-payloads. |
 | `OutlineToolStagingContext.cs` | Per-turn working snapshot for approval mode: overlays staged acts, chapters, ProjectFact/entities, reorders, and links; persists `AiChange` rows with dependency metadata. |
 | `OutlineChangePayloads.cs` | JSON payload records shared by staging and approval application for acts, chapters, entities, links, and reorders. |

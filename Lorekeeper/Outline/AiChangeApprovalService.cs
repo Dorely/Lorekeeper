@@ -10,6 +10,7 @@ public sealed class AiChangeApprovalService(
     IAiChangeRepository changes,
     IOutlineConversationRepository outlineConversations,
     IEditorConversationRepository editorConversations,
+    IResearchConversationRepository researchConversations,
     IActService acts,
     IChapterService chapters,
     IEntityService entities,
@@ -349,6 +350,17 @@ public sealed class AiChangeApprovalService(
                 LogMissingConversation(batch);
                 break;
             }
+            case AiChangeConversationKind.Research:
+            {
+                if (await researchConversations.ExistsAsync(batch.ConversationId, cancellationToken))
+                {
+                    await AddResearchRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                    break;
+                }
+
+                LogMissingConversation(batch);
+                break;
+            }
             default:
                 throw new InvalidOperationException($"Unsupported AI change conversation kind '{batch.ConversationKind}'.");
         }
@@ -383,6 +395,22 @@ public sealed class AiChangeApprovalService(
             Role = EditorMessageRole.System,
             Content = correction,
             Status = EditorMessageStatus.Completed,
+        }, cancellationToken);
+    }
+
+    private async Task AddResearchRejectionMessageAsync(
+        Guid conversationId,
+        string correction,
+        CancellationToken cancellationToken)
+    {
+        var order = await researchConversations.GetMaxOrderAsync(conversationId, cancellationToken) + 1;
+        await researchConversations.AddMessageAsync(new ResearchMessage
+        {
+            ConversationId = conversationId,
+            Order = order,
+            Role = ResearchMessageRole.System,
+            Content = correction,
+            Status = ResearchMessageStatus.Completed,
         }, cancellationToken);
     }
 

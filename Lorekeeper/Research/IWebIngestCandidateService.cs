@@ -10,6 +10,7 @@ public interface IWebIngestCandidateService
     Task<IReadOnlyList<WebIngestCandidateView>> ListResearchAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<WebIngestCandidateView>> ListStagedAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<WebIngestCandidateView>> ListStagedAsync(Guid projectId, Guid? researchConversationId, CancellationToken cancellationToken = default);
+    Task<ResearchSourceDetail?> GetCachedDetailAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default);
     Task<WebIngestCandidate> CreateFromSearchResultAsync(
         Guid projectId,
         Guid? conversationId,
@@ -19,6 +20,7 @@ public interface IWebIngestCandidateService
         WebSearchResult result,
         CancellationToken cancellationToken = default);
     Task<WebIngestCandidateReadResult> ReadCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default);
+    Task<WebIngestCandidateReadResult> ReadCandidateForConversationAsync(Guid candidateId, Guid? conversationId, CancellationToken cancellationToken = default);
     Task<WebIngestCandidateReadResult> ReadUrlAsync(
         Guid projectId,
         Guid? conversationId,

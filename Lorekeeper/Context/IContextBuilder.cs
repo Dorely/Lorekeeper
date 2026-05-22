@@ -11,6 +11,9 @@ public interface IContextBuilder
 {
     /// <summary>Build the assembly for the given project + (optional) currently-open chapter.</summary>
     Task<ContextAssembly> BuildAsync(Project project, Chapter? currentChapter, CancellationToken cancellationToken = default);
+
+    /// <summary>Build a project-level assembly for chat modes that are not tied to one chapter.</summary>
+    Task<ContextAssembly> BuildProjectAsync(Project project, string assistantWorkflow, CancellationToken cancellationToken = default);
 }
 
 /// <summary>One renderable item in the Context Feed.</summary>

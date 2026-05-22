@@ -1,3 +1,29 @@
 .research-reset {
     padding: 0;
 }
+
+.research-chat-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.research-chat-controls-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.research-chat-approval {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.82rem;
+}
+
+.research-chat-pending {
+    padding: 0;
+}

@@ -36,4 +36,5 @@ public enum AiChangeConversationKind
 {
     Outline,
     Editor,
+    Research,
 }

@@ -118,6 +118,46 @@ public sealed class ContextBuilder(
         return new ContextAssembly(items);
     }
 
+    public async Task<ContextAssembly> BuildProjectAsync(
+        Project project,
+        string assistantWorkflow,
+        CancellationToken cancellationToken = default)
+    {
+        var items = new List<ContextItem>
+        {
+            new(
+                Key: EditorContextKeys.SystemPrompt,
+                Kind: ContextItemKind.SystemPrompt,
+                Label: "Project Guidance",
+                Body: project.SystemPrompt,
+                IsEnabled: true,
+                IsRemovable: false),
+            new(
+                Key: EditorContextKeys.ProjectOutline,
+                Kind: ContextItemKind.ProjectOutline,
+                Label: "Outline Structure and Synopses",
+                Body: await BuildOutlineBlockAsync(project.Id, Guid.Empty, cancellationToken),
+                IsEnabled: true,
+                IsRemovable: false),
+            new(
+                Key: EditorContextKeys.ProjectFacts,
+                Kind: ContextItemKind.ProjectFacts,
+                Label: "Project Facts",
+                Body: await BuildProjectFactsBlockAsync(project.Id, cancellationToken),
+                IsEnabled: true,
+                IsRemovable: false),
+            new(
+                Key: EditorContextKeys.AssistantWorkflow,
+                Kind: ContextItemKind.AssistantWorkflow,
+                Label: "Assistant Workflow",
+                Body: assistantWorkflow,
+                IsEnabled: true,
+                IsRemovable: false),
+        };
+
+        return new ContextAssembly(items);
+    }
+
     public async Task SetItemIncludedAsync(
         Guid projectId,
         Guid chapterId,
