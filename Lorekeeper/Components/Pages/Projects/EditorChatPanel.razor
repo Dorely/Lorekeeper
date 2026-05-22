@@ -232,11 +232,11 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        if (OnAiTurnStarting.HasDelegate)
-            await OnAiTurnStarting.InvokeAsync();
-
         try
         {
+            if (OnAiTurnStarting.HasDelegate)
+                await OnAiTurnStarting.InvokeAsync();
+
             await foreach (var update in Chat.SendAsync(ProjectId, CurrentChapterId, text, _cts.Token))
             {
                 switch (update)
@@ -333,8 +333,7 @@
             _live = null;
             _cts?.Dispose();
             _cts = null;
-            if (OnAiTurnCompleted.HasDelegate)
-                await OnAiTurnCompleted.InvokeAsync();
+            await NotifyAiTurnCompletedAsync();
             await RefreshSystemPromptAsync();
             UpdateConversationTokenCount();
             RequestScroll();
@@ -343,6 +342,23 @@
     }
 
     private void CancelAsync() => _cts?.Cancel();
+
+    private async Task NotifyAiTurnCompletedAsync()
+    {
+        if (!OnAiTurnCompleted.HasDelegate)
+            return;
+
+        try
+        {
+            await OnAiTurnCompleted.InvokeAsync();
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _error ??= ex.Message;
+        }
+    }
 
     private async Task ResetAsync()
     {

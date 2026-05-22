@@ -57,6 +57,14 @@ public sealed class ContextBuilder(
                 IsEnabled: IsIncluded(preferenceMap, ContextItemKind.CurrentChapter, EditorContextKeys.CurrentChapter, defaultIncluded: true),
                 IsRemovable: true));
 
+            var structuralReferenceKeysToSkip = new HashSet<string>(StringComparer.Ordinal);
+            var previousChapterItem = await BuildPreviousChapterReferenceItemAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken);
+            if (previousChapterItem is not null)
+            {
+                items.Add(previousChapterItem);
+                structuralReferenceKeysToSkip.Add(previousChapterItem.Key);
+            }
+
             items.Add(new ContextItem(
                 Key: EditorContextKeys.ProjectOutline,
                 Kind: ContextItemKind.ProjectOutline,
@@ -86,7 +94,7 @@ public sealed class ContextBuilder(
                     Badge: "Style"));
             }
 
-            foreach (var item in await ListStructuralReferenceItemsAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken))
+            foreach (var item in await ListStructuralReferenceItemsAsync(project.Id, currentChapter.Id, preferenceMap, structuralReferenceKeysToSkip, cancellationToken))
             {
                 items.Add(item);
             }
@@ -198,6 +206,14 @@ public sealed class ContextBuilder(
         keys.Add(EditorContextKeys.CurrentChapter);
         keys.Add(EditorContextKeys.ProjectOutline);
         keys.Add(EditorContextKeys.ProjectFacts);
+        var previousChapter = await FindPreviousChapterAsync(projectId, chapterId, cancellationToken);
+        if (previousChapter is not null)
+        {
+            var previousChapterKey = EditorContextKeys.ChapterReference(previousChapter.Id);
+            if (IsIncluded(preferenceMap, ContextItemKind.ChapterReference, previousChapterKey, defaultIncluded: true))
+                keys.Add(previousChapterKey);
+        }
+
         return keys;
     }
 
@@ -257,11 +273,14 @@ public sealed class ContextBuilder(
         Guid projectId,
         Guid currentChapterId,
         IReadOnlyDictionary<string, EditorContextPreference> preferenceMap,
+        IReadOnlySet<string> keysToSkip,
         CancellationToken cancellationToken)
     {
         var items = new List<ContextItem>();
         foreach (var preference in preferenceMap.Values.Where(preference => preference.IsIncluded))
         {
+            if (keysToSkip.Contains(preference.Key)) continue;
+
             if (string.Equals(preference.Kind, ContextItemKind.ChapterReference.ToString(), StringComparison.Ordinal)
                 && EditorContextKeys.TryParseChapterReference(preference.Key, out var chapterId))
             {
@@ -289,6 +308,58 @@ public sealed class ContextBuilder(
         }
 
         return items;
+    }
+
+    private async Task<ContextItem?> BuildPreviousChapterReferenceItemAsync(
+        Guid projectId,
+        Guid currentChapterId,
+        IReadOnlyDictionary<string, EditorContextPreference> preferenceMap,
+        CancellationToken cancellationToken)
+    {
+        var previousChapter = await FindPreviousChapterAsync(projectId, currentChapterId, cancellationToken);
+        if (previousChapter is null) return null;
+
+        var key = EditorContextKeys.ChapterReference(previousChapter.Id);
+        if (!IsIncluded(preferenceMap, ContextItemKind.ChapterReference, key, defaultIncluded: true))
+            return null;
+
+        var item = await BuildChapterReferenceItemAsync(projectId, currentChapterId, previousChapter.Id, cancellationToken);
+        return item is null
+            ? null
+            : item with
+            {
+                Label = $"Previous Chapter - {previousChapter.Title}",
+                Reason = "Previous chapter",
+            };
+    }
+
+    private async Task<Chapter?> FindPreviousChapterAsync(
+        Guid projectId,
+        Guid currentChapterId,
+        CancellationToken cancellationToken)
+    {
+        var actList = await acts.ListAsync(projectId, cancellationToken);
+        var allChapters = await chapters.ListAsync(projectId, cancellationToken);
+        var orderedChapters = new List<Chapter>();
+
+        foreach (var act in actList.OrderBy(act => act.Order))
+        {
+            orderedChapters.AddRange(allChapters
+                .Where(chapter => chapter.ActId == act.Id)
+                .OrderBy(chapter => chapter.Order));
+        }
+
+        orderedChapters.AddRange(allChapters
+            .Where(chapter => chapter.ActId is null)
+            .OrderBy(chapter => chapter.Order));
+
+        for (var i = 1; i < orderedChapters.Count; i++)
+        {
+            if (orderedChapters[i].Id == currentChapterId)
+                return orderedChapters[i - 1];
+        }
+
+        return null;
     }
 
     private async Task<ContextItem?> BuildChapterReferenceItemAsync(

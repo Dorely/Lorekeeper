@@ -279,7 +279,7 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Async context assembly for the Context Feed and editor chat prompt. Builds keyed `ContextItem`s for guidance, current chapter, outline, facts, writing samples, selected/auto-related entities, and selected structural references; `Assemble()` returns the literal system message and can override the assistant workflow block for modes like Contest preparation. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Async context assembly for the Context Feed and editor chat prompt. Builds keyed `ContextItem`s for guidance, current/previous chapters, outline, facts, writing samples, selected/auto-related entities, and selected structural references; `Assemble()` returns the literal system message and can override the assistant workflow block for modes like Contest preparation. |
 | `IEditorContextService.cs` | Editor context facade extending `IContextBuilder`; persists per-chapter context item inclusion and exposes auto/included entity/context key sets for recommendations. |
 | `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
 | `IContextIndexingService.cs` / `ContextIndexingService.cs` | Maintains targeted direct vector rows for addable context items: graph entities, chapters, acts, ingest sources, and ingest source chunks. |

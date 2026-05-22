@@ -238,11 +238,7 @@ else
         _saveError = null;
         _pendingRememberChapterId = targetId;
 
-        if (_editorHandle is not null)
-        {
-            try { await _editorHandle.InvokeVoidAsync("setValue", _current.Body); }
-            catch (JSDisconnectedException) { }
-        }
+        await InvokeEditorVoidAsync("setValue", _current.Body);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -268,6 +264,7 @@ else
             _focusTitleNext = false;
             try { await _titleInput.FocusAsync(); }
             catch (JSDisconnectedException) { }
+            catch (OperationCanceledException) { }
         }
 
         if (_current is not null && _editorModule is not null && _editorHandle is null)
@@ -280,6 +277,7 @@ else
                     _selfRef, 1000, _current.Body);
             }
             catch (JSDisconnectedException) { }
+            catch (OperationCanceledException) { }
         }
 
         if (_pendingRememberChapterId is { } chapterId)
@@ -298,6 +296,7 @@ else
                 "./Components/Pages/Projects/EditorContent.razor.js");
         }
         catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
     }
 
     private async Task RestoreRememberedChapterAsync()
@@ -325,6 +324,11 @@ else
             _restoreChapterAfterRender = true;
             return;
         }
+        catch (OperationCanceledException)
+        {
+            _restoreChapterAfterRender = true;
+            return;
+        }
         catch (JSException) { }
 
         Nav.NavigateTo($"/projects/{Project.Slug}/editor/{targetId}", replace: true);
@@ -347,6 +351,10 @@ else
             _pendingRememberChapterId = null;
         }
         catch (JSDisconnectedException)
+        {
+            _pendingRememberChapterId = chapterId;
+        }
+        catch (OperationCanceledException)
         {
             _pendingRememberChapterId = chapterId;
         }
@@ -411,13 +419,19 @@ else
 
     private async Task FlushAsync()
     {
+        await InvokeEditorVoidAsync("flush");
+    }
+
+    private async Task InvokeEditorVoidAsync(string identifier, params object?[] args)
+    {
         if (_editorHandle is null) return;
+
         try
         {
-            await _editorHandle.InvokeVoidAsync("flush");
+            await _editorHandle.InvokeVoidAsync(identifier, args);
         }
         catch (JSDisconnectedException) { }
-        catch (JSException) { }
+        catch (OperationCanceledException) { }
     }
 
     private async ValueTask OnLocationChangingAsync(LocationChangingContext ctx)
@@ -556,11 +570,7 @@ else
         _saveGate.Release();
 
         _chapterLocked = true;
-        if (_editorHandle is not null)
-        {
-            try { await _editorHandle.InvokeVoidAsync("setReadOnly", true); }
-            catch (JSDisconnectedException) { }
-        }
+        await InvokeEditorVoidAsync("setReadOnly", true);
         StateHasChanged();
     }
 
@@ -570,15 +580,16 @@ else
     /// </summary>
     private async Task OnAiTurnCompletedAsync()
     {
-        await ReloadCurrentChapterAfterAiAsync();
-
-        _chapterLocked = false;
-        if (_editorHandle is not null)
+        try
         {
-            try { await _editorHandle.InvokeVoidAsync("setReadOnly", false); }
-            catch (JSDisconnectedException) { }
+            await ReloadCurrentChapterAfterAiAsync();
         }
-        StateHasChanged();
+        finally
+        {
+            _chapterLocked = false;
+            await InvokeEditorVoidAsync("setReadOnly", false);
+            StateHasChanged();
+        }
     }
 
     private async Task OnAiChangesAppliedAsync()
@@ -596,11 +607,7 @@ else
             {
                 _current = fresh;
                 UpdateChapterMetrics(fresh.Body);
-                if (_editorHandle is not null)
-                {
-                    try { await _editorHandle.InvokeVoidAsync("setValue", fresh.Body); }
-                    catch (JSDisconnectedException) { }
-                }
+                await InvokeEditorVoidAsync("setValue", fresh.Body);
                 await RefreshContextSurfacesAsync();
             }
         }
