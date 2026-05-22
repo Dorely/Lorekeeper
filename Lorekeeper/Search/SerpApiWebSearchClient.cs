@@ -6,6 +6,8 @@ namespace Lorekeeper.Search;
 
 public sealed class SerpApiWebSearchClient(IHttpClientFactory httpClientFactory) : IWebSearchClient
 {
+    private const string NoResultsError = "Google hasn't returned any results for this query.";
+
     public SearchProviderKind ProviderKind => SearchProviderKind.SerpApi;
 
     public async Task<WebSearchResponse> SearchAsync(SearchProvider provider, WebSearchRequest request, CancellationToken cancellationToken = default)
@@ -25,7 +27,13 @@ public sealed class SerpApiWebSearchClient(IHttpClientFactory httpClientFactory)
 
         using var doc = JsonDocument.Parse(json);
         if (doc.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String)
-            throw new InvalidOperationException(error.GetString() ?? "SerpApi returned an error.");
+        {
+            var errorMessage = error.GetString();
+            if (string.Equals(errorMessage?.Trim(), NoResultsError, StringComparison.Ordinal))
+                return new WebSearchResponse(provider.ProviderKind, provider.DisplayName ?? provider.Name, request.Query, [], json);
+
+            throw new InvalidOperationException(errorMessage ?? "SerpApi returned an error.");
+        }
 
         var results = new List<WebSearchResult>();
         if (doc.RootElement.TryGetProperty("organic_results", out var organic) && organic.ValueKind == JsonValueKind.Array)
