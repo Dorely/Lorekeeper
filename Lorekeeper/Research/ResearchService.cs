@@ -300,37 +300,61 @@ public sealed class ResearchService(
 
                     if (!hasNext) break;
 
-                    foreach (var content in enumerator.Current.Contents)
+                    var updatesToYield = new List<ResearchTurnUpdate>();
+                    try
                     {
-                        if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
+                        var contents = enumerator.Current?.Contents;
+                        if (contents is null) continue;
+
+                        foreach (var content in contents)
                         {
-                            textBuilder.Append(textContent.Text);
-                            yield return new ResearchTextDelta(textContent.Text);
-                        }
-                        else
-                        {
-                            foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
+                            if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
                             {
-                                switch (toolUpdate)
+                                textBuilder.Append(textContent.Text);
+                                updatesToYield.Add(new ResearchTextDelta(textContent.Text));
+                            }
+                            else
+                            {
+                                foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
                                 {
-                                    case StreamingToolCallStartedUpdate started:
-                                        yield return new ResearchToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
-                                        break;
-                                    case StreamingToolCallArgumentsDeltaUpdate delta:
-                                        yield return new ResearchToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
-                                        break;
-                                    case StreamingToolCallReadyUpdate ready:
-                                        pendingCalls.Add(new PendingToolCall(
-                                            ready.Content,
-                                            ready.CallId,
-                                            ready.ToolName,
-                                            ready.ArgumentsJson,
-                                            ready.TextOffset));
-                                        break;
+                                    switch (toolUpdate)
+                                    {
+                                        case StreamingToolCallStartedUpdate started:
+                                            updatesToYield.Add(new ResearchToolCallStarted(
+                                                started.CallId,
+                                                started.ToolName,
+                                                started.ArgumentsJson,
+                                                started.ArgumentsComplete));
+                                            break;
+                                        case StreamingToolCallArgumentsDeltaUpdate delta:
+                                            updatesToYield.Add(new ResearchToolCallArgumentsDelta(
+                                                delta.CallId,
+                                                delta.ArgumentsDelta,
+                                                delta.ArgumentsComplete));
+                                            break;
+                                        case StreamingToolCallReadyUpdate ready:
+                                            pendingCalls.Add(new PendingToolCall(
+                                                ready.Content,
+                                                ready.CallId,
+                                                ready.ToolName,
+                                                ready.ArgumentsJson,
+                                                ready.TextOffset));
+                                            break;
+                                    }
                                 }
                             }
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Research streaming update processing failed");
+                        streamFailed = true;
+                        streamError = ex.Message;
+                        break;
+                    }
+
+                    foreach (var update in updatesToYield)
+                        yield return update;
                 }
             }
             finally
