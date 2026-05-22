@@ -16,6 +16,9 @@ public static class IngestSourceAssertions
     public const string LinkedExistingEdgeAction = "LinkedExistingEdge";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly IReadOnlyDictionary<string, string?> EmptyObservedProperties =
+        new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+    private static readonly IReadOnlyList<string> EmptyAliases = [];
 
     private static readonly HashSet<string> ProtectedProperties =
     [
@@ -160,10 +163,13 @@ public static class IngestSourceAssertions
     public static IngestEntityFactSheet BuildFactSheet(IReadOnlyList<IngestSourceObservation> observations)
     {
         var fieldBuilders = new Dictionary<string, FactSheetFieldBuilder>(StringComparer.OrdinalIgnoreCase);
-        foreach (var observation in observations.OrderBy(observation => observation.SourceTitle, StringComparer.OrdinalIgnoreCase).ThenBy(observation => observation.SourceChunkIndex))
+        var safeObservations = observations.Where(observation => observation is not null).ToList();
+        foreach (var observation in safeObservations
+            .OrderBy(observation => observation.SourceTitle ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(observation => observation.SourceChunkIndex))
         {
             AddFactSheetField(fieldBuilders, "summary", observation.Summary, observation);
-            foreach (var property in observation.ObservedProperties)
+            foreach (var property in observation.ObservedProperties ?? EmptyObservedProperties)
                 AddFactSheetField(fieldBuilders, property.Key, property.Value, observation);
         }
 
@@ -181,15 +187,15 @@ public static class IngestSourceAssertions
                     .ToArray()))
             .ToArray();
 
-        var aliases = observations
-            .SelectMany(observation => observation.Aliases)
+        var aliases = safeObservations
+            .SelectMany(observation => observation.Aliases ?? EmptyAliases)
             .Select(NormalizeFactText)
             .Where(alias => alias.Length > 0 && !ContainsDisallowedExtractionRationale(alias))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        var sources = observations
+        var sources = safeObservations
             .GroupBy(observation => observation.SourceId, StringComparer.OrdinalIgnoreCase)
             .Select(group => new IngestFactSheetSource(
                 group.Key,
@@ -380,24 +386,24 @@ public static class IngestSourceAssertions
     {
         var document = ReadDocument(ReadRaw(properties, propertyKey));
         return document.Sources.Values
-            .OrderBy(source => source.SourceTitle, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(source => source.SourceTitle ?? string.Empty, StringComparer.OrdinalIgnoreCase)
             .SelectMany(source => source.Chunks.Values
                 .OrderBy(chunk => chunk.SourceChunkIndex)
                 .Select(chunk => new IngestSourceObservation(
-                    source.SourceId,
-                    source.SourceTitle,
-                    source.SourceKind,
-                    chunk.JobId,
-                    chunk.SourceChunkId,
+                    source.SourceId ?? string.Empty,
+                    source.SourceTitle ?? string.Empty,
+                    source.SourceKind ?? string.Empty,
+                    chunk.JobId ?? string.Empty,
+                    chunk.SourceChunkId ?? string.Empty,
                     chunk.SourceChunkIndex,
-                    chunk.Summary,
-                    new Dictionary<string, string?>(chunk.ObservedProperties, StringComparer.OrdinalIgnoreCase),
-                    chunk.Aliases
+                    chunk.Summary ?? string.Empty,
+                    new Dictionary<string, string?>(chunk.ObservedProperties ?? EmptyObservedProperties, StringComparer.OrdinalIgnoreCase),
+                    (chunk.Aliases ?? EmptyAliases)
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
                         .ToArray(),
-                    chunk.Evidence,
-                    chunk.Notes,
+                    chunk.Evidence ?? string.Empty,
+                    chunk.Notes ?? string.Empty,
                     chunk.RecordedAt,
                     chunk.UpdatedAt)))
             .Take(Math.Max(0, maxObservations))
@@ -411,13 +417,65 @@ public static class IngestSourceAssertions
 
         try
         {
-            return JsonSerializer.Deserialize<IngestSourceAssertionDocument>(rawJson, JsonOptions)
+            var document = JsonSerializer.Deserialize<IngestSourceAssertionDocument>(rawJson, JsonOptions)
                 ?? new IngestSourceAssertionDocument();
+            return SanitizeDocument(document);
         }
         catch (JsonException)
         {
             return new IngestSourceAssertionDocument();
         }
+    }
+
+    private static IngestSourceAssertionDocument SanitizeDocument(IngestSourceAssertionDocument document)
+    {
+        var sanitizedSources = new Dictionary<string, IngestSourceAssertion>(StringComparer.OrdinalIgnoreCase);
+
+        if (document.Sources is not null)
+        {
+            foreach (var (sourceKey, source) in document.Sources)
+            {
+                if (source is null) continue;
+
+                source.SourceId ??= string.Empty;
+                source.SourceTitle ??= string.Empty;
+                source.SourceKind ??= string.Empty;
+                source.JobIds ??= [];
+
+                var sanitizedChunks = new Dictionary<string, IngestSourceChunkAssertion>(StringComparer.OrdinalIgnoreCase);
+                if (source.Chunks is not null)
+                {
+                    foreach (var (chunkKey, chunk) in source.Chunks)
+                    {
+                        if (chunk is null) continue;
+
+                        chunk.JobId ??= string.Empty;
+                        chunk.SourceChunkId ??= string.Empty;
+                        chunk.Summary ??= string.Empty;
+                        chunk.ObservedProperties = new Dictionary<string, string?>(
+                            chunk.ObservedProperties ?? EmptyObservedProperties,
+                            StringComparer.OrdinalIgnoreCase);
+                        chunk.Aliases = (chunk.Aliases ?? [])
+                            .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                            .ToList();
+                        chunk.Evidence ??= string.Empty;
+                        chunk.Notes ??= string.Empty;
+
+                        var safeChunkKey = string.IsNullOrWhiteSpace(chunkKey) ? chunk.SourceChunkId : chunkKey;
+                        if (!string.IsNullOrWhiteSpace(safeChunkKey))
+                            sanitizedChunks[safeChunkKey] = chunk;
+                    }
+                }
+                source.Chunks = sanitizedChunks;
+
+                var safeSourceKey = string.IsNullOrWhiteSpace(sourceKey) ? source.SourceId : sourceKey;
+                if (!string.IsNullOrWhiteSpace(safeSourceKey))
+                    sanitizedSources[safeSourceKey] = source;
+            }
+        }
+
+        document.Sources = sanitizedSources;
+        return document;
     }
 
     private static string Serialize(IngestSourceAssertionDocument document) =>

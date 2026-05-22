@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Lorekeeper.Persistence;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbContext> logger) : DbContext(options)
 {
     private const int _maxLockedSaveAttempts = 6;
 
@@ -62,7 +62,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             }
             catch (DbUpdateException ex) when (IsSqliteLocked(ex) && attempt < _maxLockedSaveAttempts && !cancellationToken.IsCancellationRequested)
             {
-                await Task.Delay(delay + TimeSpan.FromMilliseconds(Random.Shared.Next(0, 75)), cancellationToken);
+                var retryDelay = delay + TimeSpan.FromMilliseconds(Random.Shared.Next(0, 75));
+                logger.LogWarning(
+                    ex,
+                    "SQLite database was locked during SaveChanges; retrying attempt {Attempt}/{MaxAttempts} after {DelayMs} ms.",
+                    attempt,
+                    _maxLockedSaveAttempts,
+                    retryDelay.TotalMilliseconds);
+                await Task.Delay(retryDelay, cancellationToken);
                 delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 2_000));
             }
         }

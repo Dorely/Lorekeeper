@@ -10,6 +10,7 @@
 @inject ITokenCounter TokenCounter
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject ILogger<EditorContent> Logger
 
 @if (Project is null)
 {
@@ -584,18 +585,45 @@ else
         {
             await ReloadCurrentChapterAfterAiAsync();
         }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            LogEditorRefreshFailure(ex, "AI turn completion reload");
+        }
         finally
         {
             _chapterLocked = false;
-            await InvokeEditorVoidAsync("setReadOnly", false);
+            try
+            {
+                await InvokeEditorVoidAsync("setReadOnly", false);
+            }
+            catch (JSDisconnectedException) { }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                LogEditorRefreshFailure(ex, "AI turn editor unlock");
+            }
             StateHasChanged();
         }
     }
 
     private async Task OnAiChangesAppliedAsync()
     {
-        await ReloadCurrentChapterAfterAiAsync();
-        StateHasChanged();
+        try
+        {
+            await ReloadCurrentChapterAfterAiAsync();
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            LogEditorRefreshFailure(ex, "AI changes applied reload");
+        }
+        finally
+        {
+            StateHasChanged();
+        }
     }
 
     private async Task ReloadCurrentChapterAfterAiAsync()
@@ -620,9 +648,28 @@ else
         _contextRefreshSignal++;
         if (_contextPanel is not null)
         {
-            await _contextPanel.RefreshAsync();
+            try
+            {
+                await _contextPanel.RefreshAsync();
+            }
+            catch (JSDisconnectedException) { }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                LogEditorRefreshFailure(ex, "Context Feed refresh");
+            }
         }
         StateHasChanged();
+    }
+
+    private void LogEditorRefreshFailure(Exception ex, string phase)
+    {
+        Logger.LogError(
+            ex,
+            "Editor content refresh failed during {Phase}. ProjectId={ProjectId}, ChapterId={ChapterId}",
+            phase,
+            Project?.Id,
+            _activeChapterId);
     }
 
     public async ValueTask DisposeAsync()
