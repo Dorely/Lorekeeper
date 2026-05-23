@@ -15,7 +15,7 @@
 | `Lorekeeper.sln` | Solution file containing the `Lorekeeper` project. |
 | `global.json` | Pins the .NET SDK version (`rollForward: latestFeature`). |
 | `.editorconfig` | C#/Razor formatting and naming rules. |
-| `.gitignore` | Standard .NET ignore patterns. |
+| `.gitignore` | Standard .NET ignore patterns; ClickOnce publish output is scoped to the repo-root `/publish/` folder so source folders named `Publish` remain trackable. |
 | `.github/copilot-instructions.md` | Project guidelines for AI assistants. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
@@ -23,7 +23,7 @@
 | File | Description |
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors. EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI 2.8, sqlite-vec, Microsoft.ML.Tokenizers, and patched Microsoft.Bcl.Memory. |
-| `Program.cs` | Host setup, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/writing/editor-chat/contest services, EF migrate at startup, sqlite-vec init, outline graph repair, Codex OAuth endpoints. |
+| `Program.cs` | Host setup, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/publish/writing/editor-chat/contest services, EF migrate at startup, sqlite-vec init, outline graph repair, Codex OAuth endpoints. |
 | `appsettings.json` / `appsettings.Development.json` | Configuration: `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
 | `Properties/launchSettings.json` | Local launch profiles (HTTP pinned to `localhost:1455` for Codex OAuth redirect). |
 
@@ -49,7 +49,7 @@
 | File | Description |
 |------|-------------|
 | `MainLayout.razor` / `.css` | Top-level page layout with sidebar + main column. Locks the app shell to viewport height and gives `article.content` a flex/scroll context so workspace pages can create independently scrolling panes. |
-| `PrintLayout.razor` / `.css` | Minimal no-navigation layout used by print-oriented pages such as browser PDF manuscript export. |
+| `PrintLayout.razor` / `.css` | Minimal no-navigation layout used by print-oriented pages such as Publish browser PDF export. |
 | `NavMenu.razor` / `.css` | Sidebar navigation (Home, Providers). |
 | `ReconnectModal.razor` / `.cs` / `.css` | UI shown when the SignalR circuit drops. |
 
@@ -65,7 +65,7 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectLayout.razor` (+ `.razor.css`) | Shared shell for project workspace pages: loads project by slug, renders title + horizontal tab strip (Editor / Graph / Ingest / Outline / Writing Sample), exposes `Project` via `CascadingValue`, and wraps routed page content in a flex-bounded `.project-body` so pages like Outline can own their internal scroll regions. |
+| `ProjectLayout.razor` (+ `.razor.css`) | Shared shell for project workspace pages: loads project by slug, renders title + horizontal tab strip including Editor, Outline, Writing Sample, Publish, Research, Ingest, Graph, and Import / Export; exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Three-column context-aware chapter editor: project-wide editor chat left, full-height JS-debounced line-numbered editor center, and right-column Recommended Context/Context Feed. Persists/reindexes body edits, remembers the selected chapter per browser/project, locks while AI runs, and refreshes editor/context/recommendations after AI turns or approved changes. |
 | `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat domain adapter over shared `ChatSurface`: loads the project's `EditorConversation`, streams text/tool/contest updates, exposes Review edits plus Contest Mode controls, and opens review modals for queued AI changes or candidates. |
@@ -79,7 +79,8 @@
 | `IngestPage.razor` | Ingest tab at `/projects/{Slug}/ingest`; wraps `ProjectLayout` and hosts `Ingest.IngestContent`. |
 | `ResearchPage.razor` | Research tab at `/projects/{Slug}/research`; wraps `ProjectLayout` and hosts `Research.ResearchContent` when an active search provider is configured. |
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
-| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Print/PDF manuscript route at `/projects/{Slug}/manuscript/print`; renders ordered manuscript content with optional synopses in a no-chrome print layout and can trigger browser print/save-to-PDF. |
+| `PublishPage.razor` | Publish tab at `/projects/{Slug}/publish`; wraps `ProjectLayout` and hosts `Publish.PublishContent`. |
+| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Print/PDF publish route at `/projects/{Slug}/manuscript/print`; renders the saved publish profile, cover, TOC, metadata, selected outline, and placed images in the no-chrome print layout. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
 
@@ -100,7 +101,13 @@
 
 | File | Description |
 |------|-------------|
-| `ImportExportContent.razor` (+ `.razor.css`) | Combined project Import / Export workspace: downloads Full/Non-structural graph JSON and TXT/Markdown/EPUB manuscript exports, opens print/PDF view with optional synopses, uploads Lorekeeper export JSON, queues import jobs, subscribes to live job updates, and shows progress/report history. |
+| `ImportExportContent.razor` (+ `.razor.css`) | Graph-focused Import / Export workspace: downloads Full/Non-structural Lorekeeper graph JSON, uploads export JSON, queues import jobs, subscribes to live job updates, and shows progress/report history. |
+
+### Components/Pages/Projects/Publish/
+
+| File | Description |
+|------|-------------|
+| `PublishContent.razor` (+ `.razor.css`) | Full Publish tab workspace for saved book metadata, outline act/chapter inclusion, TOC/headings/synopsis options, cover/interior image assets, Codex image generation, TXT/Markdown/EPUB downloads, and Print/PDF preview. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -137,7 +144,7 @@
 | `AuthType.cs` | Enum: None, ApiKey, OAuth. |
 | `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing via `CredentialSourceId`. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
-| `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; owns `SystemPrompt`, `IncludeCurrentChapterInContext`, persisted `AiChangeApprovalEnabled`, Contest Mode toggle/model slots, and child navigation collections including conversations, contests, and writing samples. Project-level story facts live in `ProjectFact` graph nodes. |
+| `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; owns project settings and child navigation collections including conversations, contests, writing samples, import jobs, publish profiles/assets/selections/placements, and graph rows. |
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF entity for a chapter (Title/Body/Synopsis/Order) under a `Project`, optionally assigned to an `Act` via nullable `ActId`. `Order` is scoped to the chapter's act bucket (or the project-level Unassigned bucket when `ActId` is null). Tracks `VectorIndexState` (UpToDate/Stale/Failed) + `VectorIndexedAt` + `VectorIndexError`; `VectorSourceId` returns the stable vector-store source id (`Id.ToString("N")`). |
 | `EditorContextPreference.cs` | EF entity for per-chapter Context Feed include/exclude preferences keyed by context item kind + stable item key. |
@@ -165,6 +172,10 @@
 | `ProjectImportJob.cs` | EF entity for durable project import job state: uploaded JSON payload, source format metadata, status/progress counters, import counts, warnings, errors, and timestamps. |
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
+| `PublishProfile.cs` | EF entity for one saved publish profile per project: book metadata, front/back matter, TOC/headings/synopsis/numbering options, and selected cover asset. |
+| `PublishAsset.cs` | EF entity for uploaded or Codex-generated PNG/JPEG publish assets with bytes, alt text, prompt/source metadata, and cover/placement navigation. |
+| `PublishOutlineSelection.cs` | EF entity for per-project act/chapter publish inclusion flags; act selection controls the act page while chapters remain independently selectable. |
+| `PublishImagePlacement.cs` | EF entity for cover-independent interior image placements before/after acts or chapters and chapter openings/endings, with captions and ordering. |
 | `GraphNode.cs` | Generic graph node: `(ProjectId, NodeType, Key)` unique, JSON properties bag. Cascade-deleted with its `Project`. |
 | `GraphEdge.cs` | Directed edge between graph nodes with type, JSON properties, optional relationship-specific `SortOrder`, and timestamps. |
 | `GraphEntityType.cs` | Lightweight project-scoped graph type registry entry for UI/LLM labels/defaults. Descriptive rather than restrictive; arbitrary node types remain valid. |
@@ -173,10 +184,10 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context for projects, outline/editor/writing/research chat, search providers, writing samples, graph, editor context preferences, AI change approval, ingest queues, and webpage candidates. JSON value converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
+| `AppDbContext.cs` | EF Core context for projects, outline/editor/writing/research chat, search providers, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, and publish profiles/assets. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, Contest Mode cleanup, and web research cache metadata). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, Contest Mode cleanup, and web research cache metadata). |
 
 ### Persistence/Repositories/
 
@@ -320,15 +331,22 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | Portable export DTOs/enums for Lorekeeper graph packages, stable graph node refs, and manuscript export file metadata. |
-| `ManuscriptExportModels.cs` | Shared ordered manuscript export projection and options, including optional synopsis inclusion for downloads and print view. |
-| `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural graph JSON, ordered manuscript projections, TXT/Markdown/EPUB manuscript downloads, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
-| `ManuscriptExportFormatters.cs` | Extensible manuscript formatter abstraction with TXT, Markdown, and dependency-free EPUB implementations over the shared manuscript projection. |
+| `ProjectExportModels.cs` | Portable export DTOs/enums for Lorekeeper graph packages, stable graph node refs, and downloadable export file metadata. |
+| `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural graph JSON, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
 | `ProjectImportJobProcessor.cs` | Runs one import job: validates export JSON, appends structural Full imports, merges non-structural entities/relationships/provenance, repairs graph links, records report rows, and refreshes indexes best-effort. |
+
+### Publish/
+
+| File | Description |
+|------|-------------|
+| `PublishModels.cs` | Publish UI/document/export records for profiles, section/chapter selections, assets, image placements, and resolved document projections. |
+| `IPublishService.cs` / `PublishService.cs` | Publish facade for profile persistence, outline selection, asset upload/delete, Codex image generation, image placement, document projection, and TXT/Markdown/EPUB export. |
+| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | Publish formatter abstraction plus TXT, Markdown, and dependency-free EPUB implementations with metadata, TOC, cover/interior images where supported. |
+| `ICodexImageGenerationService.cs` / `CodexImageGenerationService.cs` | Codex OAuth image generation client for `gpt-image-2` through the Codex Responses bridge; parses streamed image-generation output and returns PNG/JPEG bytes. |
 
 ### Graph/
 
@@ -381,7 +399,7 @@
 |------|-------------|
 | `app.css` | App-wide CSS. |
 | `js/autosizeTextareas.js` | Small shared JS module that attaches to `textarea[data-autosize]`, grows each textarea to its `scrollHeight`, refreshes on input/change and width changes, and prevents nested textarea scrollbars. |
-| `js/fileDownloads.js` | Browser download helper used by Import / Export to save generated graph JSON and manuscript files. |
+| `js/fileDownloads.js` | Browser download helper used by Import / Export and Publish to save generated graph JSON and publish export files. |
 | `favicon.png` | Site icon. |
 | `lib/bootstrap/` | Vendored Bootstrap distribution. |
 | `lib/vis-network/` | Vendored `vis-network` browser graph renderer assets and license files used by the Graph tab. |

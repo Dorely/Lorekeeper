@@ -1,0 +1,13 @@
+@page "/projects/{Slug}/publish"
+@rendermode InteractiveServer
+@using Lorekeeper.Components.Pages.Projects.Publish
+
+<PageTitle>Publish</PageTitle>
+
+<ProjectLayout Slug="@Slug" Tab="publish">
+    <PublishContent />
+</ProjectLayout>
+
+@code {
+    [Parameter] public string Slug { get; set; } = string.Empty;
+}

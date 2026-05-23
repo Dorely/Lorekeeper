@@ -12,6 +12,7 @@ using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
+using Lorekeeper.Publish;
 using Lorekeeper.Research;
 using Lorekeeper.Search;
 using Lorekeeper.Tokens;
@@ -123,12 +124,16 @@ builder.Services.AddScoped<IResearchService, ResearchService>();
 // Import / export
 builder.Services.AddSingleton<IProjectImportJobQueue, ProjectImportJobQueue>();
 builder.Services.AddSingleton<IProjectImportJobNotifier, ProjectImportJobNotifier>();
-builder.Services.AddScoped<IManuscriptExportFormatter, PlainTextManuscriptFormatter>();
-builder.Services.AddScoped<IManuscriptExportFormatter, MarkdownManuscriptFormatter>();
-builder.Services.AddScoped<IManuscriptExportFormatter, EpubManuscriptFormatter>();
 builder.Services.AddScoped<IProjectImportExportService, ProjectImportExportService>();
 builder.Services.AddScoped<ProjectImportJobProcessor>();
 builder.Services.AddHostedService<ProjectImportJobWorker>();
+
+// Publish
+builder.Services.AddScoped<IPublishExportFormatter, PlainTextPublishFormatter>();
+builder.Services.AddScoped<IPublishExportFormatter, MarkdownPublishFormatter>();
+builder.Services.AddScoped<IPublishExportFormatter, EpubPublishFormatter>();
+builder.Services.AddScoped<ICodexImageGenerationService, CodexImageGenerationService>();
+builder.Services.AddScoped<IPublishService, PublishService>();
 
 // Context + editor chat
 builder.Services.AddScoped<ContextBuilder>();

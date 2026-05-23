@@ -34,13 +34,22 @@
     line-height: 1.55;
 }
 
+.manuscript-cover-page,
 .manuscript-title-page {
     min-height: 8.5in;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
     break-after: page;
+}
+
+.manuscript-cover-page img {
+    display: block;
+    max-width: 100%;
+    max-height: 9in;
+    object-fit: contain;
 }
 
 .manuscript-title-page h1 {
@@ -52,9 +61,20 @@
     line-height: 1.15;
 }
 
+.manuscript-subtitle,
+.manuscript-byline,
+.manuscript-publisher {
+    color: #475467;
+    font-family: Arial, sans-serif;
+    margin: 0.2in 0 0;
+}
+
 .manuscript-act,
 .manuscript-chapter,
-.manuscript-empty {
+.manuscript-empty,
+.manuscript-matter,
+.manuscript-toc,
+.manuscript-figure {
     break-before: page;
 }
 
@@ -67,7 +87,9 @@
 }
 
 .manuscript-act h2,
-.manuscript-chapter h2 {
+.manuscript-chapter h2,
+.manuscript-matter h2,
+.manuscript-toc h2 {
     margin: 0 0 0.75in;
     color: #111827;
     font-family: Arial, sans-serif;
@@ -83,6 +105,32 @@
     font-size: 20pt;
 }
 
+.manuscript-matter h2,
+.manuscript-toc h2 {
+    font-size: 18pt;
+}
+
+.manuscript-centered-matter {
+    min-height: 8.5in;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+}
+
+.manuscript-toc ol {
+    margin: 0;
+    padding-left: 0.25in;
+}
+
+.manuscript-toc li {
+    margin-bottom: 0.08in;
+}
+
+.manuscript-toc li.chapter {
+    margin-left: 0.2in;
+}
+
 .manuscript-synopsis {
     margin: 0 0 0.4in;
     color: #475467;
@@ -90,11 +138,32 @@
 }
 
 .manuscript-synopsis p,
-.manuscript-prose p {
+.manuscript-prose p,
+.manuscript-matter p {
     margin: 0 0 0.12in;
 }
 
 .manuscript-prose p + p {
+    margin-top: 0.12in;
+}
+
+.manuscript-figure {
+    margin: 0;
+    text-align: center;
+}
+
+.manuscript-figure img {
+    display: block;
+    max-width: 100%;
+    max-height: 8.5in;
+    margin: 0 auto;
+    object-fit: contain;
+}
+
+.manuscript-figure figcaption {
+    color: #475467;
+    font-family: Arial, sans-serif;
+    font-size: 10pt;
     margin-top: 0.12in;
 }
 
@@ -115,9 +184,9 @@
         box-shadow: none;
     }
 
+    .manuscript-cover-page,
     .manuscript-title-page,
     .manuscript-act {
         min-height: 9in;
     }
 }
-

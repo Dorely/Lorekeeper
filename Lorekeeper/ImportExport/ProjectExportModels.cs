@@ -9,14 +9,6 @@ public enum ProjectExportKind
     NonStructural,
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<ManuscriptExportFormat>))]
-public enum ManuscriptExportFormat
-{
-    PlainText,
-    Markdown,
-    Epub,
-}
-
 public sealed record ProjectExportFile(
     string FileName,
     string ContentType,

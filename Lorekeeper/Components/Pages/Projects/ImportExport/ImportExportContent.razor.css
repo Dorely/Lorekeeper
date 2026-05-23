@@ -43,22 +43,11 @@
     margin-bottom: 0.4rem;
 }
 
-.transfer-export-actions,
-.transfer-inline {
+.transfer-export-actions {
     display: flex;
     gap: 0.5rem;
     align-items: center;
     flex-wrap: wrap;
-}
-
-.transfer-inline .form-select {
-    width: 9.5rem;
-}
-
-.transfer-check {
-    margin-top: 0.5rem;
-    color: #384152;
-    font-size: 0.85rem;
 }
 
 .transfer-file-name {

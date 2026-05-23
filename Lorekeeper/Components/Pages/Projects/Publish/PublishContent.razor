@@ -1,0 +1,667 @@
+@using Lorekeeper.Models
+@using Lorekeeper.Publish
+@implements IAsyncDisposable
+@inject IPublishService Publishing
+@inject IJSRuntime JS
+
+@if (Project is null)
+{
+    <p class="text-muted"><em>Loading...</em></p>
+}
+else if (_loading)
+{
+    <p class="text-muted"><em>Loading publish setup...</em></p>
+}
+else if (_workspace is null)
+{
+    <div class="alert alert-danger">Publish setup could not be loaded.</div>
+}
+else
+{
+    <div class="publish-pane">
+        <section class="publish-column publish-main">
+            <div class="publish-card">
+                <div class="publish-card-title">Book Details</div>
+                @if (!string.IsNullOrWhiteSpace(_profileError))
+                {
+                    <div class="alert alert-danger py-2 small">@_profileError</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(_profileStatus))
+                {
+                    <div class="alert alert-success py-2 small">@_profileStatus</div>
+                }
+
+                <div class="publish-form-grid">
+                    <label>
+                        <span>Title</span>
+                        <input class="form-control form-control-sm" @bind="_profile.TitleOverride" />
+                    </label>
+                    <label>
+                        <span>Subtitle</span>
+                        <input class="form-control form-control-sm" @bind="_profile.Subtitle" />
+                    </label>
+                    <label>
+                        <span>Author</span>
+                        <input class="form-control form-control-sm" @bind="_profile.Author" />
+                    </label>
+                    <label>
+                        <span>Language</span>
+                        <input class="form-control form-control-sm" @bind="_profile.Language" />
+                    </label>
+                    <label>
+                        <span>Publisher</span>
+                        <input class="form-control form-control-sm" @bind="_profile.Publisher" />
+                    </label>
+                    <label>
+                        <span>ISBN</span>
+                        <input class="form-control form-control-sm" @bind="_profile.Isbn" />
+                    </label>
+                </div>
+
+                <label class="publish-full">
+                    <span>Copyright</span>
+                    <input class="form-control form-control-sm" @bind="_profile.Copyright" />
+                </label>
+                <label class="publish-full">
+                    <span>Description</span>
+                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Description"></textarea>
+                </label>
+                <label class="publish-full">
+                    <span>Dedication</span>
+                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Dedication"></textarea>
+                </label>
+                <label class="publish-full">
+                    <span>Acknowledgments</span>
+                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Acknowledgments"></textarea>
+                </label>
+                <label class="publish-full">
+                    <span>References</span>
+                    <textarea class="form-control form-control-sm" rows="4" @bind="_profile.References"></textarea>
+                </label>
+
+                <div class="publish-check-grid">
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeTableOfContents" />
+                        <span class="form-check-label">Table of contents</span>
+                    </label>
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeVisibleTableOfContents" />
+                        <span class="form-check-label">Visible EPUB/print TOC page</span>
+                    </label>
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeActSynopses" />
+                        <span class="form-check-label">Act synopses</span>
+                    </label>
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeChapterSynopses" />
+                        <span class="form-check-label">Chapter synopses</span>
+                    </label>
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeActHeadings" />
+                        <span class="form-check-label">Act headings</span>
+                    </label>
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeChapterHeadings" />
+                        <span class="form-check-label">Chapter headings</span>
+                    </label>
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" @bind="_profile.NumberActs" />
+                        <span class="form-check-label">Number acts</span>
+                    </label>
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" @bind="_profile.NumberChapters" />
+                        <span class="form-check-label">Number chapters</span>
+                    </label>
+                </div>
+
+                <button type="button" class="btn btn-sm btn-primary" disabled="@_savingProfile" @onclick="SaveProfileAsync">
+                    @(_savingProfile ? "Saving..." : "Save book details")
+                </button>
+            </div>
+
+            <div class="publish-card">
+                <div class="publish-card-title">Outline</div>
+                @if (!string.IsNullOrWhiteSpace(_outlineError))
+                {
+                    <div class="alert alert-danger py-2 small">@_outlineError</div>
+                }
+                @foreach (var publishSection in _workspace.Sections)
+                {
+                    <div class="publish-outline-section">
+                        @if (publishSection.ActId is Guid actId)
+                        {
+                            <label class="form-check publish-outline-act">
+                                <input class="form-check-input" type="checkbox" checked="@publishSection.IsIncluded" @onchange="@(e => SetOutlineSelectionAsync(PublishOutlineTargetKind.Act, actId, e))" />
+                                <span class="form-check-label">@publishSection.Title</span>
+                            </label>
+                        }
+                        else
+                        {
+                            <div class="publish-outline-act text-muted">@publishSection.Title</div>
+                        }
+
+                        <div class="publish-outline-chapters">
+                            @foreach (var chapter in publishSection.Chapters)
+                            {
+                                <label class="form-check">
+                                    <input class="form-check-input" type="checkbox" checked="@chapter.IsIncluded" @onchange="@(e => SetOutlineSelectionAsync(PublishOutlineTargetKind.Chapter, chapter.Id, e))" />
+                                    <span class="form-check-label">@chapter.Title</span>
+                                </label>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </section>
+
+        <section class="publish-column publish-side">
+            <div class="publish-card">
+                <div class="publish-card-title">Export</div>
+                @if (!string.IsNullOrWhiteSpace(_exportError))
+                {
+                    <div class="alert alert-danger py-2 small">@_exportError</div>
+                }
+                <div class="publish-export-row">
+                    <select class="form-select form-select-sm" @bind="_exportFormat">
+                        <option value="@PublishExportFormat.PlainText">TXT</option>
+                        <option value="@PublishExportFormat.Markdown">Markdown</option>
+                        <option value="@PublishExportFormat.Epub">EPUB</option>
+                    </select>
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@_exporting" @onclick="ExportAsync">
+                        @(_exporting ? "Exporting..." : "Download")
+                    </button>
+                </div>
+                <a class="btn btn-sm btn-outline-secondary publish-print-link" href="@PrintUrl" target="_blank" rel="noopener">Print / PDF</a>
+            </div>
+
+            <div class="publish-card">
+                <div class="publish-card-title">Assets</div>
+                @if (!string.IsNullOrWhiteSpace(_assetError))
+                {
+                    <div class="alert alert-danger py-2 small">@_assetError</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(_assetStatus))
+                {
+                    <div class="alert alert-success py-2 small">@_assetStatus</div>
+                }
+
+                <label class="publish-full">
+                    <span>Upload alt text</span>
+                    <input class="form-control form-control-sm" @bind="_uploadAltText" />
+                </label>
+                <InputFile OnChange="OnAssetSelectedAsync" class="form-control form-control-sm mb-3" />
+
+                <label class="publish-full">
+                    <span>Image prompt</span>
+                    <textarea class="form-control form-control-sm" rows="4" @bind="_imagePrompt"></textarea>
+                </label>
+                <div class="publish-form-grid compact">
+                    <label>
+                        <span>Size</span>
+                        <select class="form-select form-select-sm" @bind="_imageSize">
+                            <option value="auto">Auto</option>
+                            <option value="1024x1024">Square</option>
+                            <option value="1024x1536">Portrait</option>
+                            <option value="1536x1024">Landscape</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Quality</span>
+                        <select class="form-select form-select-sm" @bind="_imageQuality">
+                            <option value="auto">Auto</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Format</span>
+                        <select class="form-select form-select-sm" @bind="_imageFormat">
+                            <option value="png">PNG</option>
+                            <option value="jpeg">JPEG</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>JPEG compression</span>
+                        <input class="form-control form-control-sm" type="number" min="0" max="100" @bind="_imageCompression" disabled="@(_imageFormat != "jpeg")" />
+                    </label>
+                </div>
+                <label class="publish-full">
+                    <span>Generated alt text</span>
+                    <input class="form-control form-control-sm" @bind="_generatedAltText" />
+                </label>
+                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_generatingImage" @onclick="GenerateImageAsync">
+                    @(_generatingImage ? "Generating..." : "Generate image")
+                </button>
+
+                <div class="publish-asset-list">
+                    @foreach (var asset in _workspace.Assets)
+                    {
+                        var isCover = _workspace.Profile.SelectedCoverAssetId == asset.Id;
+                        <div class="publish-asset-row">
+                            <img class="publish-asset-preview" src="@asset.PreviewDataUrl" alt="@AssetAlt(asset)" />
+                            <div>
+                                <strong>@asset.FileName</strong>
+                                <span>@asset.Source - @FormatBytes(asset.SizeBytes)</span>
+                            </div>
+                            <div class="publish-asset-actions">
+                                <button type="button" class="btn btn-sm @(isCover ? "btn-success" : "btn-outline-secondary")" @onclick="() => SetCoverAsync(asset.Id)">
+                                    @(isCover ? "Cover" : "Set cover")
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAssetAsync(asset.Id)">Delete</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="publish-card">
+                <div class="publish-card-title">Interior Images</div>
+                @if (!string.IsNullOrWhiteSpace(_placementError))
+                {
+                    <div class="alert alert-danger py-2 small">@_placementError</div>
+                }
+                @if (_workspace.Assets.Count == 0)
+                {
+                    <p class="text-muted small">Add an asset before placing images.</p>
+                }
+                else
+                {
+                    <label class="publish-full">
+                        <span>Asset</span>
+                        <select class="form-select form-select-sm" @bind="_placementAssetId">
+                            <option value="">Select asset</option>
+                            @foreach (var asset in _workspace.Assets)
+                            {
+                                <option value="@asset.Id">@asset.FileName</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="publish-full">
+                        <span>Target</span>
+                        <select class="form-select form-select-sm" @bind="_placementTargetKey">
+                            <option value="">Select target</option>
+                            @foreach (var publishSection in _workspace.Sections.Where(candidate => candidate.ActId is not null))
+                            {
+                                <option value="@TargetKey(PublishOutlineTargetKind.Act, publishSection.ActId!.Value)">Act: @publishSection.Title</option>
+                            }
+                            @foreach (var chapter in _workspace.Sections.SelectMany(candidate => candidate.Chapters))
+                            {
+                                <option value="@TargetKey(PublishOutlineTargetKind.Chapter, chapter.Id)">Chapter: @chapter.Title</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="publish-full">
+                        <span>Placement</span>
+                        <select class="form-select form-select-sm" @bind="_placementKind">
+                            <option value="@PublishImagePlacementKind.BeforeAct">Before act</option>
+                            <option value="@PublishImagePlacementKind.AfterAct">After act</option>
+                            <option value="@PublishImagePlacementKind.BeforeChapter">Before chapter</option>
+                            <option value="@PublishImagePlacementKind.ChapterOpening">Chapter opening</option>
+                            <option value="@PublishImagePlacementKind.ChapterEnding">Chapter ending</option>
+                            <option value="@PublishImagePlacementKind.AfterChapter">After chapter</option>
+                        </select>
+                    </label>
+                    <label class="publish-full">
+                        <span>Caption</span>
+                        <input class="form-control form-control-sm" @bind="_placementCaption" />
+                    </label>
+                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddPlacementAsync">Add placement</button>
+                }
+
+                <div class="publish-placement-list">
+                    @foreach (var placement in _workspace.Placements)
+                    {
+                        <div class="publish-placement-row">
+                            <div>
+                                <strong>@placement.PlacementKind</strong>
+                                <span>@placement.TargetKind: @placement.TargetTitle</span>
+                                <span>@placement.AssetFileName</span>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeletePlacementAsync(placement.Id)">Delete</button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    [CascadingParameter] public Project? Project { get; set; }
+
+    private const long MaxAssetBytes = 15L * 1024 * 1024;
+
+    private PublishWorkspaceView? _workspace;
+    private ProfileDraft _profile = new();
+    private Guid? _loadedProjectId;
+    private bool _loading;
+    private bool _savingProfile;
+    private bool _exporting;
+    private bool _generatingImage;
+    private string? _profileError;
+    private string? _profileStatus;
+    private string? _outlineError;
+    private string? _assetError;
+    private string? _assetStatus;
+    private string? _placementError;
+    private string? _exportError;
+    private string _uploadAltText = string.Empty;
+    private string _imagePrompt = string.Empty;
+    private string _imageSize = "auto";
+    private string _imageQuality = "auto";
+    private string _imageFormat = "png";
+    private int? _imageCompression = 75;
+    private string _generatedAltText = string.Empty;
+    private string _placementAssetId = string.Empty;
+    private string _placementTargetKey = string.Empty;
+    private PublishImagePlacementKind _placementKind = PublishImagePlacementKind.ChapterOpening;
+    private string _placementCaption = string.Empty;
+    private PublishExportFormat _exportFormat = PublishExportFormat.Epub;
+    private IJSObjectReference? _downloadModule;
+
+    private string PrintUrl => Project is null
+        ? "#"
+        : $"/projects/{Uri.EscapeDataString(Project.Slug)}/manuscript/print?autoprint=true";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Project is null || _loadedProjectId == Project.Id) return;
+        _loadedProjectId = Project.Id;
+        await ReloadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownloads.js");
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (Project is null) return;
+        _loading = true;
+        try
+        {
+            _workspace = await Publishing.GetWorkspaceAsync(Project.Id);
+            _profile = ProfileDraft.From(_workspace.Profile);
+            if (string.IsNullOrEmpty(_placementAssetId) && _workspace.Assets.Count > 0)
+                _placementAssetId = _workspace.Assets[0].Id.ToString();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveProfileAsync()
+    {
+        if (Project is null) return;
+        _savingProfile = true;
+        _profileError = null;
+        _profileStatus = null;
+        try
+        {
+            await Publishing.SaveProfileAsync(Project.Id, _profile.ToUpdate());
+            _profileStatus = "Book details saved.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _profileError = ex.Message;
+        }
+        finally
+        {
+            _savingProfile = false;
+        }
+    }
+
+    private async Task SetOutlineSelectionAsync(PublishOutlineTargetKind kind, Guid targetId, ChangeEventArgs e)
+    {
+        if (Project is null) return;
+        _outlineError = null;
+        try
+        {
+            var included = e.Value is bool value && value;
+            await Publishing.SetOutlineSelectionAsync(Project.Id, kind, targetId, included);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _outlineError = ex.Message;
+        }
+    }
+
+    private async Task OnAssetSelectedAsync(InputFileChangeEventArgs e)
+    {
+        if (Project is null) return;
+        _assetError = null;
+        _assetStatus = null;
+        try
+        {
+            var file = e.File;
+            await using var stream = file.OpenReadStream(maxAllowedSize: MaxAssetBytes);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            await Publishing.UploadAssetAsync(Project.Id, new PublishAssetUpload(file.Name, file.ContentType, memory.ToArray(), _uploadAltText));
+            _uploadAltText = string.Empty;
+            _assetStatus = "Asset uploaded.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _assetError = ex.Message;
+        }
+    }
+
+    private async Task GenerateImageAsync()
+    {
+        if (Project is null) return;
+        _generatingImage = true;
+        _assetError = null;
+        _assetStatus = null;
+        try
+        {
+            await Publishing.GenerateImageAsync(Project.Id, new PublishImageGenerationRequest(
+                _imagePrompt,
+                _imageSize,
+                _imageQuality,
+                _imageFormat,
+                _imageFormat == "jpeg" ? _imageCompression : null,
+                _generatedAltText));
+            _assetStatus = "Image generated.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _assetError = ex.Message;
+        }
+        finally
+        {
+            _generatingImage = false;
+        }
+    }
+
+    private async Task SetCoverAsync(Guid assetId)
+    {
+        if (Project is null) return;
+        _assetError = null;
+        try
+        {
+            await Publishing.SetCoverAssetAsync(Project.Id, assetId);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _assetError = ex.Message;
+        }
+    }
+
+    private async Task DeleteAssetAsync(Guid assetId)
+    {
+        if (Project is null) return;
+        _assetError = null;
+        try
+        {
+            await Publishing.DeleteAssetAsync(Project.Id, assetId);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _assetError = ex.Message;
+        }
+    }
+
+    private async Task AddPlacementAsync()
+    {
+        if (Project is null) return;
+        _placementError = null;
+        try
+        {
+            if (!Guid.TryParse(_placementAssetId, out var assetId))
+                throw new InvalidOperationException("Select an asset.");
+            var (targetKind, targetId) = ParseTargetKey(_placementTargetKey);
+            await Publishing.AddImagePlacementAsync(Project.Id, new PublishImagePlacementCreate(assetId, targetKind, targetId, _placementKind, _placementCaption));
+            _placementCaption = string.Empty;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _placementError = ex.Message;
+        }
+    }
+
+    private async Task DeletePlacementAsync(Guid placementId)
+    {
+        if (Project is null) return;
+        _placementError = null;
+        try
+        {
+            await Publishing.DeleteImagePlacementAsync(Project.Id, placementId);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _placementError = ex.Message;
+        }
+    }
+
+    private async Task ExportAsync()
+    {
+        if (Project is null || _downloadModule is null) return;
+        _exporting = true;
+        _exportError = null;
+        try
+        {
+            var file = await Publishing.ExportAsync(Project.Id, _exportFormat);
+            await _downloadModule.InvokeVoidAsync("downloadBytes", file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
+        }
+        catch (Exception ex)
+        {
+            _exportError = ex.Message;
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private static string TargetKey(PublishOutlineTargetKind kind, Guid id) =>
+        $"{kind}:{id:N}";
+
+    private static (PublishOutlineTargetKind Kind, Guid Id) ParseTargetKey(string value)
+    {
+        var parts = value.Split(':', 2);
+        if (parts.Length != 2
+            || !Enum.TryParse<PublishOutlineTargetKind>(parts[0], out var kind)
+            || !Guid.TryParseExact(parts[1], "N", out var id))
+        {
+            throw new InvalidOperationException("Select a target.");
+        }
+
+        return (kind, id);
+    }
+
+    private static string FormatBytes(long bytes) =>
+        bytes >= 1024 * 1024
+            ? $"{bytes / 1024.0 / 1024.0:0.0} MB"
+            : $"{Math.Max(1, bytes / 1024)} KB";
+
+    private static string AssetAlt(PublishAssetView asset) =>
+        string.IsNullOrWhiteSpace(asset.AltText) ? asset.FileName : asset.AltText;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_downloadModule is not null)
+        {
+            try { await _downloadModule.DisposeAsync(); } catch (JSDisconnectedException) { }
+        }
+    }
+
+    private sealed class ProfileDraft
+    {
+        public string TitleOverride { get; set; } = string.Empty;
+        public string Subtitle { get; set; } = string.Empty;
+        public string Author { get; set; } = string.Empty;
+        public string Language { get; set; } = "en";
+        public string Publisher { get; set; } = string.Empty;
+        public string Copyright { get; set; } = string.Empty;
+        public string Isbn { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Dedication { get; set; } = string.Empty;
+        public string Acknowledgments { get; set; } = string.Empty;
+        public string References { get; set; } = string.Empty;
+        public bool IncludeTableOfContents { get; set; } = true;
+        public bool IncludeVisibleTableOfContents { get; set; } = true;
+        public bool IncludeActSynopses { get; set; }
+        public bool IncludeChapterSynopses { get; set; }
+        public bool IncludeActHeadings { get; set; } = true;
+        public bool IncludeChapterHeadings { get; set; } = true;
+        public bool NumberActs { get; set; }
+        public bool NumberChapters { get; set; }
+
+        public static ProfileDraft From(PublishProfileView profile) => new()
+        {
+            TitleOverride = profile.TitleOverride,
+            Subtitle = profile.Subtitle,
+            Author = profile.Author,
+            Language = profile.Language,
+            Publisher = profile.Publisher,
+            Copyright = profile.Copyright,
+            Isbn = profile.Isbn,
+            Description = profile.Description,
+            Dedication = profile.Dedication,
+            Acknowledgments = profile.Acknowledgments,
+            References = profile.References,
+            IncludeTableOfContents = profile.IncludeTableOfContents,
+            IncludeVisibleTableOfContents = profile.IncludeVisibleTableOfContents,
+            IncludeActSynopses = profile.IncludeActSynopses,
+            IncludeChapterSynopses = profile.IncludeChapterSynopses,
+            IncludeActHeadings = profile.IncludeActHeadings,
+            IncludeChapterHeadings = profile.IncludeChapterHeadings,
+            NumberActs = profile.NumberActs,
+            NumberChapters = profile.NumberChapters,
+        };
+
+        public PublishProfileUpdate ToUpdate() => new(
+            TitleOverride,
+            Subtitle,
+            Author,
+            Language,
+            Publisher,
+            Copyright,
+            Isbn,
+            Description,
+            Dedication,
+            Acknowledgments,
+            References,
+            IncludeTableOfContents,
+            IncludeVisibleTableOfContents,
+            IncludeActSynopses,
+            IncludeChapterSynopses,
+            IncludeActHeadings,
+            IncludeChapterHeadings,
+            NumberActs,
+            NumberChapters);
+    }
+}

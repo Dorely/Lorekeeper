@@ -1,18 +1,19 @@
 @page "/projects/{Slug}/manuscript/print"
 @layout PrintLayout
 @rendermode InteractiveServer
-@using Lorekeeper.ImportExport
+@using Lorekeeper.Models
+@using Lorekeeper.Publish
 @using Lorekeeper.Projects
 @implements IAsyncDisposable
 @inject IProjectService Projects
-@inject IProjectImportExportService Transfers
+@inject IPublishService Publishing
 @inject IJSRuntime JS
 
 <PageTitle>@PageTitleText</PageTitle>
 
 @if (_loading)
 {
-    <div class="print-status text-muted"><em>Loading manuscript...</em></div>
+    <div class="print-status text-muted"><em>Loading publish preview...</em></div>
 }
 else if (_notFound)
 {
@@ -25,20 +26,73 @@ else if (!string.IsNullOrWhiteSpace(_error))
 {
     <div class="print-status alert alert-danger">@_error</div>
 }
-else if (_manuscript is not null)
+else if (_document is not null)
 {
     <div class="print-toolbar">
-        <a class="btn btn-sm btn-outline-secondary" href="/projects/@_manuscript.ProjectSlug/import-export">Back</a>
+        <a class="btn btn-sm btn-outline-secondary" href="/projects/@_document.ProjectSlug/publish">Back</a>
         <button type="button" class="btn btn-sm btn-primary" @onclick="PrintAsync">Print / Save PDF</button>
-        <span class="print-toolbar-meta">@(_manuscript.Options.IncludeSynopses ? "Synopses included" : "Clean manuscript")</span>
+        <span class="print-toolbar-meta">@_document.DisplayTitle</span>
     </div>
 
     <article class="manuscript-print">
+        @if (_document.CoverAsset is not null)
+        {
+            <section class="manuscript-cover-page">
+                <img src="@ImageDataUrl(_document.CoverAsset)" alt="@_document.CoverAsset.AltText" />
+            </section>
+        }
+
         <header class="manuscript-title-page">
-            <h1>@_manuscript.ProjectName</h1>
+            <h1>@_document.DisplayTitle</h1>
+            @if (!string.IsNullOrWhiteSpace(_document.Profile.Subtitle))
+            {
+                <p class="manuscript-subtitle">@_document.Profile.Subtitle</p>
+            }
+            @if (!string.IsNullOrWhiteSpace(_document.Profile.Author))
+            {
+                <p class="manuscript-byline">by @_document.Profile.Author</p>
+            }
+            @if (!string.IsNullOrWhiteSpace(_document.Profile.Publisher))
+            {
+                <p class="manuscript-publisher">@_document.Profile.Publisher</p>
+            }
         </header>
 
-        @if (_manuscript.Sections.Count == 0)
+        @if (!string.IsNullOrWhiteSpace(_document.Profile.Description))
+        {
+            <section class="manuscript-matter">
+                <h2>Description</h2>
+                @foreach (var paragraph in SplitParagraphs(_document.Profile.Description))
+                {
+                    <p>@RenderParagraph(paragraph)</p>
+                }
+            </section>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_document.Profile.Dedication))
+        {
+            <section class="manuscript-matter manuscript-centered-matter">
+                @foreach (var paragraph in SplitParagraphs(_document.Profile.Dedication))
+                {
+                    <p>@RenderParagraph(paragraph)</p>
+                }
+            </section>
+        }
+
+        @if (_document.Profile.IncludeTableOfContents && _document.Profile.IncludeVisibleTableOfContents)
+        {
+            <section class="manuscript-toc">
+                <h2>Table of Contents</h2>
+                <ol>
+                    @foreach (var entry in TocEntries(_document))
+                    {
+                        <li class="@entry.CssClass">@entry.Title</li>
+                    }
+                </ol>
+            </section>
+        }
+
+        @if (_document.Sections.Count == 0)
         {
             <section class="manuscript-empty">
                 <p>No chapters to print.</p>
@@ -46,26 +100,50 @@ else if (_manuscript is not null)
         }
         else
         {
-            @foreach (var section in _manuscript.Sections)
+            @foreach (var publishSection in _document.Sections)
             {
-                <section class="manuscript-act">
-                    <h2>@(section.Title)</h2>
-                    @if (_manuscript.Options.IncludeSynopses && !string.IsNullOrWhiteSpace(section.Synopsis))
-                    {
-                        <div class="manuscript-synopsis">
-                            @foreach (var paragraph in SplitParagraphs(section.Synopsis))
-                            {
-                                <p>@RenderParagraph(paragraph)</p>
-                            }
-                        </div>
-                    }
-                </section>
-
-                @foreach (var chapter in section.Chapters)
+                @foreach (var placement in Placements(PublishOutlineTargetKind.Act, publishSection.ActId, PublishImagePlacementKind.BeforeAct))
                 {
+                    @RenderFigure(placement)
+                }
+
+                @if (publishSection.IncludePage)
+                {
+                    <section class="manuscript-act">
+                        @if (publishSection.IncludeHeading)
+                        {
+                            <h2>@publishSection.Title</h2>
+                        }
+                        @if (_document.Profile.IncludeActSynopses && !string.IsNullOrWhiteSpace(publishSection.Synopsis))
+                        {
+                            <div class="manuscript-synopsis">
+                                @foreach (var paragraph in SplitParagraphs(publishSection.Synopsis))
+                                {
+                                    <p>@RenderParagraph(paragraph)</p>
+                                }
+                            </div>
+                        }
+                    </section>
+                }
+
+                @foreach (var placement in Placements(PublishOutlineTargetKind.Act, publishSection.ActId, PublishImagePlacementKind.AfterAct))
+                {
+                    @RenderFigure(placement)
+                }
+
+                @foreach (var chapter in publishSection.Chapters)
+                {
+                    @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.BeforeChapter))
+                    {
+                        @RenderFigure(placement)
+                    }
+
                     <section class="manuscript-chapter">
-                        <h2>@chapter.Title</h2>
-                        @if (_manuscript.Options.IncludeSynopses && !string.IsNullOrWhiteSpace(chapter.Synopsis))
+                        @if (chapter.IncludeHeading)
+                        {
+                            <h2>@chapter.Title</h2>
+                        }
+                        @if (_document.Profile.IncludeChapterSynopses && !string.IsNullOrWhiteSpace(chapter.Synopsis))
                         {
                             <div class="manuscript-synopsis">
                                 @foreach (var paragraph in SplitParagraphs(chapter.Synopsis))
@@ -74,25 +152,59 @@ else if (_manuscript is not null)
                                 }
                             </div>
                         }
+                        @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterOpening))
+                        {
+                            @RenderFigure(placement)
+                        }
                         <div class="manuscript-prose">
                             @foreach (var paragraph in SplitParagraphs(chapter.Body))
                             {
                                 <p>@RenderParagraph(paragraph)</p>
                             }
                         </div>
+                        @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding))
+                        {
+                            @RenderFigure(placement)
+                        }
                     </section>
+
+                    @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.AfterChapter))
+                    {
+                        @RenderFigure(placement)
+                    }
                 }
             }
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_document.Profile.Acknowledgments))
+        {
+            <section class="manuscript-matter">
+                <h2>Acknowledgments</h2>
+                @foreach (var paragraph in SplitParagraphs(_document.Profile.Acknowledgments))
+                {
+                    <p>@RenderParagraph(paragraph)</p>
+                }
+            </section>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_document.Profile.References))
+        {
+            <section class="manuscript-matter">
+                <h2>References</h2>
+                @foreach (var paragraph in SplitParagraphs(_document.Profile.References))
+                {
+                    <p>@RenderParagraph(paragraph)</p>
+                }
+            </section>
         }
     </article>
 }
 
 @code {
     [Parameter] public string Slug { get; set; } = string.Empty;
-    [SupplyParameterFromQuery(Name = "includeSynopses")] public bool IncludeSynopses { get; set; }
     [SupplyParameterFromQuery(Name = "autoprint")] public bool Autoprint { get; set; }
 
-    private ManuscriptExportDocument? _manuscript;
+    private PublishDocument? _document;
     private string? _loadedKey;
     private bool _loading = true;
     private bool _notFound;
@@ -100,20 +212,20 @@ else if (_manuscript is not null)
     private bool _printRequested;
     private IJSObjectReference? _module;
 
-    private string PageTitleText => _manuscript is null
-        ? "Manuscript"
-        : $"{_manuscript.ProjectName} - Manuscript";
+    private string PageTitleText => _document is null
+        ? "Publish Preview"
+        : $"{_document.DisplayTitle} - Publish Preview";
 
     protected override async Task OnParametersSetAsync()
     {
-        var key = $"{Slug}|{IncludeSynopses}";
+        var key = Slug;
         if (_loadedKey == key) return;
 
         _loadedKey = key;
         _loading = true;
         _notFound = false;
         _error = null;
-        _manuscript = null;
+        _document = null;
         _printRequested = false;
 
         try
@@ -125,7 +237,7 @@ else if (_manuscript is not null)
                 return;
             }
 
-            _manuscript = await Transfers.GetManuscriptAsync(project.Id, new ManuscriptExportOptions(IncludeSynopses));
+            _document = await Publishing.GetDocumentAsync(project.Id);
         }
         catch (Exception ex)
         {
@@ -139,7 +251,7 @@ else if (_manuscript is not null)
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_manuscript is null || !Autoprint || _printRequested) return;
+        if (_document is null || !Autoprint || _printRequested) return;
 
         _printRequested = true;
         await EnsureModuleAsync();
@@ -168,6 +280,21 @@ else if (_manuscript is not null)
                 "./Components/Pages/Projects/ManuscriptPrintPage.razor.js");
         }
         catch (JSDisconnectedException) { }
+    }
+
+    private IEnumerable<PublishImagePlacementDocument> Placements(
+        PublishOutlineTargetKind targetKind,
+        Guid? targetId,
+        PublishImagePlacementKind placementKind)
+    {
+        if (_document is null || targetId is null)
+            return [];
+
+        return _document.Placements
+            .Where(placement => placement.TargetKind == targetKind
+                && placement.TargetId == targetId
+                && placement.PlacementKind == placementKind)
+            .OrderBy(placement => placement.SortOrder);
     }
 
     private static IReadOnlyList<IReadOnlyList<string>> SplitParagraphs(string text)
@@ -211,6 +338,38 @@ else if (_manuscript is not null)
         }
     };
 
+    private static RenderFragment RenderFigure(PublishImagePlacementDocument placement) => builder =>
+    {
+        var sequence = 0;
+        builder.OpenElement(sequence++, "figure");
+        builder.AddAttribute(sequence++, "class", "manuscript-figure");
+        builder.OpenElement(sequence++, "img");
+        builder.AddAttribute(sequence++, "src", ImageDataUrl(placement.Asset));
+        builder.AddAttribute(sequence++, "alt", placement.Asset.AltText);
+        builder.CloseElement();
+        if (!string.IsNullOrWhiteSpace(placement.Caption))
+        {
+            builder.OpenElement(sequence++, "figcaption");
+            builder.AddContent(sequence++, placement.Caption);
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+    };
+
+    private static IEnumerable<TocEntry> TocEntries(PublishDocument document)
+    {
+        foreach (var section in document.Sections)
+        {
+            if (section.IncludePage)
+                yield return new TocEntry(section.Title, "act");
+            foreach (var chapter in section.Chapters)
+                yield return new TocEntry(chapter.Title, "chapter");
+        }
+    }
+
+    private static string ImageDataUrl(PublishAssetDocument asset) =>
+        $"data:{asset.ContentType};base64,{Convert.ToBase64String(asset.Data)}";
+
     public async ValueTask DisposeAsync()
     {
         if (_module is not null)
@@ -218,4 +377,7 @@ else if (_manuscript is not null)
             try { await _module.DisposeAsync(); } catch (JSDisconnectedException) { }
         }
     }
+
+    private sealed record TocEntry(string Title, string CssClass);
+
 }

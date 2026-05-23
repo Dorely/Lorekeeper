@@ -44,6 +44,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<WebIngestCandidate> WebIngestCandidates => Set<WebIngestCandidate>();
     public DbSet<ProjectImportJob> ProjectImportJobs => Set<ProjectImportJob>();
     public DbSet<ProjectImportReportItem> ProjectImportReportItems => Set<ProjectImportReportItem>();
+    public DbSet<PublishProfile> PublishProfiles => Set<PublishProfile>();
+    public DbSet<PublishAsset> PublishAssets => Set<PublishAsset>();
+    public DbSet<PublishOutlineSelection> PublishOutlineSelections => Set<PublishOutlineSelection>();
+    public DbSet<PublishImagePlacement> PublishImagePlacements => Set<PublishImagePlacement>();
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
         SaveChangesWithLockRetryAsync(acceptAllChangesOnSuccess: true, cancellationToken);
@@ -508,6 +512,62 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Job)
                 .WithMany(j => j.ReportItems)
                 .HasForeignKey(e => e.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublishProfile>(entity =>
+        {
+            entity.HasIndex(e => e.ProjectId).IsUnique();
+            entity.HasIndex(e => e.SelectedCoverAssetId);
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.PublishProfiles)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SelectedCoverAsset)
+                .WithMany(a => a.CoverProfiles)
+                .HasForeignKey(e => e.SelectedCoverAssetId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<PublishAsset>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.CreatedAt });
+            entity.Property(e => e.Source).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.PublishAssets)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublishOutlineSelection>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.TargetKind, e.TargetId }).IsUnique();
+            entity.Property(e => e.TargetKind).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.PublishOutlineSelections)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublishImagePlacement>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.TargetKind, e.TargetId, e.PlacementKind, e.SortOrder });
+            entity.HasIndex(e => e.AssetId);
+            entity.Property(e => e.TargetKind).HasConversion<string>();
+            entity.Property(e => e.PlacementKind).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.PublishImagePlacements)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Asset)
+                .WithMany(a => a.ImagePlacements)
+                .HasForeignKey(e => e.AssetId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

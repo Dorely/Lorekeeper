@@ -1,0 +1,719 @@
+using System.Globalization;
+using System.IO.Compression;
+using System.Net;
+using System.Text;
+using Lorekeeper.Models;
+
+namespace Lorekeeper.Publish;
+
+public sealed class PlainTextPublishFormatter : IPublishExportFormatter
+{
+    public PublishExportFormat Format => PublishExportFormat.PlainText;
+    public string FileExtension => ".txt";
+    public string ContentType => "text/plain; charset=utf-8";
+
+    public byte[] Render(PublishDocument document)
+    {
+        var sb = new StringBuilder();
+        AppendCenteredTitle(sb, document);
+        AppendMetadata(sb, document);
+        AppendMatter(sb, "Dedication", document.Profile.Dedication);
+
+        if (document.Profile.IncludeTableOfContents)
+            AppendPlainToc(sb, document);
+
+        foreach (var section in document.Sections)
+        {
+            if (section.IncludePage)
+            {
+                AppendGap(sb);
+                if (section.IncludeHeading)
+                    AppendHeading(sb, section.Title, '-');
+                if (document.Profile.IncludeActSynopses)
+                    AppendText(sb, section.Synopsis);
+            }
+
+            foreach (var chapter in section.Chapters)
+            {
+                AppendGap(sb);
+                if (chapter.IncludeHeading)
+                    AppendHeading(sb, chapter.Title, '=');
+                if (document.Profile.IncludeChapterSynopses)
+                    AppendText(sb, chapter.Synopsis);
+                AppendText(sb, chapter.Body);
+            }
+        }
+
+        AppendMatter(sb, "Acknowledgments", document.Profile.Acknowledgments);
+        AppendMatter(sb, "References", document.Profile.References);
+        return Encoding.UTF8.GetBytes(sb.ToString().TrimEnd() + Environment.NewLine);
+    }
+
+    private static void AppendCenteredTitle(StringBuilder sb, PublishDocument document)
+    {
+        AppendHeading(sb, document.DisplayTitle, '=');
+        if (!string.IsNullOrWhiteSpace(document.Profile.Subtitle))
+            sb.AppendLine(document.Profile.Subtitle.Trim());
+        if (!string.IsNullOrWhiteSpace(document.Profile.Author))
+            sb.AppendLine().Append("by ").AppendLine(document.Profile.Author.Trim());
+    }
+
+    private static void AppendMetadata(StringBuilder sb, PublishDocument document)
+    {
+        var lines = new[]
+        {
+            ("Publisher", document.Profile.Publisher),
+            ("Copyright", document.Profile.Copyright),
+            ("ISBN", document.Profile.Isbn),
+            ("Language", document.Profile.Language),
+            ("Description", document.Profile.Description),
+        };
+
+        foreach (var (label, value) in lines)
+        {
+            if (string.IsNullOrWhiteSpace(value)) continue;
+            sb.Append(label).Append(": ").AppendLine(value.Trim());
+        }
+    }
+
+    private static void AppendPlainToc(StringBuilder sb, PublishDocument document)
+    {
+        AppendMatterStart(sb, "Table of Contents");
+        foreach (var section in document.Sections)
+        {
+            if (section.IncludePage)
+                sb.AppendLine(section.Title);
+            foreach (var chapter in section.Chapters)
+                sb.Append("  ").AppendLine(chapter.Title);
+        }
+    }
+
+    private static void AppendMatter(StringBuilder sb, string title, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        AppendMatterStart(sb, title);
+        AppendText(sb, text);
+    }
+
+    private static void AppendMatterStart(StringBuilder sb, string title)
+    {
+        AppendGap(sb);
+        AppendHeading(sb, title, '-');
+    }
+
+    private static void AppendText(StringBuilder sb, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        sb.AppendLine();
+        sb.AppendLine(text.Trim());
+    }
+
+    private static void AppendGap(StringBuilder sb)
+    {
+        if (sb.Length > 0)
+            sb.AppendLine().AppendLine();
+    }
+
+    private static void AppendHeading(StringBuilder sb, string heading, char underline)
+    {
+        var title = CleanHeading(heading);
+        sb.AppendLine(title);
+        sb.AppendLine(new string(underline, Math.Max(3, title.Length)));
+    }
+
+    private static string CleanHeading(string heading) =>
+        heading.Replace("\r", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal).Trim();
+}
+
+public sealed class MarkdownPublishFormatter : IPublishExportFormatter
+{
+    public PublishExportFormat Format => PublishExportFormat.Markdown;
+    public string FileExtension => ".md";
+    public string ContentType => "text/markdown; charset=utf-8";
+
+    public byte[] Render(PublishDocument document)
+    {
+        var sb = new StringBuilder();
+        if (document.CoverAsset is not null)
+            AppendImage(sb, document.CoverAsset, "Cover");
+
+        sb.Append("# ").AppendLine(EscapeHeading(document.DisplayTitle));
+        if (!string.IsNullOrWhiteSpace(document.Profile.Subtitle))
+            sb.AppendLine().Append("## ").AppendLine(EscapeHeading(document.Profile.Subtitle));
+        if (!string.IsNullOrWhiteSpace(document.Profile.Author))
+            sb.AppendLine().Append("_by ").Append(EscapeInline(document.Profile.Author)).AppendLine("_");
+        AppendMetadata(sb, document);
+        AppendMatter(sb, "Dedication", document.Profile.Dedication);
+
+        if (document.Profile.IncludeTableOfContents)
+            AppendToc(sb, document);
+
+        foreach (var section in document.Sections)
+        {
+            AppendPlacements(sb, document, PublishOutlineTargetKind.Act, section.ActId, PublishImagePlacementKind.BeforeAct);
+            if (section.IncludePage)
+            {
+                if (section.IncludeHeading)
+                    sb.AppendLine().Append("## ").AppendLine(EscapeHeading(section.Title));
+                if (document.Profile.IncludeActSynopses)
+                    AppendBlockquote(sb, section.Synopsis);
+            }
+
+            AppendPlacements(sb, document, PublishOutlineTargetKind.Act, section.ActId, PublishImagePlacementKind.AfterAct);
+
+            foreach (var chapter in section.Chapters)
+            {
+                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.BeforeChapter);
+                sb.AppendLine();
+                if (chapter.IncludeHeading)
+                    sb.Append("### ").AppendLine(EscapeHeading(chapter.Title));
+                if (document.Profile.IncludeChapterSynopses)
+                    AppendBlockquote(sb, chapter.Synopsis);
+                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterOpening);
+                sb.AppendLine().AppendLine(chapter.Body.TrimEnd());
+                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding);
+                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.AfterChapter);
+            }
+        }
+
+        AppendMatter(sb, "Acknowledgments", document.Profile.Acknowledgments);
+        AppendMatter(sb, "References", document.Profile.References);
+        return Encoding.UTF8.GetBytes(sb.ToString().TrimEnd() + Environment.NewLine);
+    }
+
+    private static void AppendMetadata(StringBuilder sb, PublishDocument document)
+    {
+        var lines = new[]
+        {
+            ("Publisher", document.Profile.Publisher),
+            ("Copyright", document.Profile.Copyright),
+            ("ISBN", document.Profile.Isbn),
+            ("Language", document.Profile.Language),
+            ("Description", document.Profile.Description),
+        };
+
+        foreach (var (label, value) in lines)
+        {
+            if (string.IsNullOrWhiteSpace(value)) continue;
+            sb.AppendLine().Append("**").Append(label).Append(":** ").AppendLine(EscapeInline(value));
+        }
+    }
+
+    private static void AppendToc(StringBuilder sb, PublishDocument document)
+    {
+        sb.AppendLine().AppendLine("## Table of Contents");
+        foreach (var section in document.Sections)
+        {
+            if (section.IncludeHeading)
+                sb.Append("- [").Append(EscapeInline(section.Title)).Append("](#").Append(Anchor(section.Title)).AppendLine(")");
+            foreach (var chapter in section.Chapters)
+            {
+                if (chapter.IncludeHeading)
+                    sb.Append("  - [").Append(EscapeInline(chapter.Title)).Append("](#").Append(Anchor(chapter.Title)).AppendLine(")");
+            }
+        }
+    }
+
+    private static void AppendMatter(StringBuilder sb, string title, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        sb.AppendLine().Append("## ").AppendLine(title).AppendLine();
+        sb.AppendLine(text.TrimEnd());
+    }
+
+    private static void AppendBlockquote(StringBuilder sb, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        sb.AppendLine();
+        foreach (var line in SplitLines(text.Trim()))
+            sb.Append("> ").AppendLine(line);
+    }
+
+    private static void AppendPlacements(
+        StringBuilder sb,
+        PublishDocument document,
+        PublishOutlineTargetKind targetKind,
+        Guid? targetId,
+        PublishImagePlacementKind placementKind)
+    {
+        if (targetId is null) return;
+        foreach (var placement in document.Placements.Where(placement =>
+            placement.TargetKind == targetKind
+            && placement.TargetId == targetId
+            && placement.PlacementKind == placementKind).OrderBy(placement => placement.SortOrder))
+        {
+            AppendImage(sb, placement.Asset, placement.Caption);
+        }
+    }
+
+    private static void AppendImage(StringBuilder sb, PublishAssetDocument asset, string caption)
+    {
+        var alt = string.IsNullOrWhiteSpace(asset.AltText) ? caption : asset.AltText;
+        var dataUrl = $"data:{asset.ContentType};base64,{Convert.ToBase64String(asset.Data)}";
+        sb.AppendLine().Append("![").Append(EscapeInline(alt)).Append("](").Append(dataUrl).AppendLine(")");
+        if (!string.IsNullOrWhiteSpace(caption))
+            sb.Append("_").Append(EscapeInline(caption)).AppendLine("_");
+    }
+
+    private static string Anchor(string value)
+    {
+        var chars = value.Trim().ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
+            .ToArray();
+        return string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static IReadOnlyList<string> SplitLines(string text) =>
+        text.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
+
+    private static string EscapeHeading(string heading) =>
+        heading.Replace("\r", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal).Trim();
+
+    private static string EscapeInline(string value) =>
+        value.Replace("[", "\\[", StringComparison.Ordinal).Replace("]", "\\]", StringComparison.Ordinal).Trim();
+}
+
+public sealed class EpubPublishFormatter : IPublishExportFormatter
+{
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+    public PublishExportFormat Format => PublishExportFormat.Epub;
+    public string FileExtension => ".epub";
+    public string ContentType => "application/epub+zip";
+
+    public byte[] Render(PublishDocument document)
+    {
+        var imageItems = BuildImageItems(document);
+        var xhtmlItems = BuildXhtmlItems(document, imageItems);
+        using var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true, Encoding.UTF8))
+        {
+            WriteEntry(archive, "mimetype", ContentType, CompressionLevel.NoCompression, Encoding.ASCII);
+            WriteEntry(archive, "META-INF/container.xml", RenderContainer(), CompressionLevel.SmallestSize, Utf8NoBom);
+            WriteEntry(archive, "OEBPS/styles.css", RenderStylesheet(), CompressionLevel.SmallestSize, Utf8NoBom);
+            WriteEntry(archive, "OEBPS/package.opf", RenderPackage(document, xhtmlItems, imageItems), CompressionLevel.SmallestSize, Utf8NoBom);
+            WriteEntry(archive, "OEBPS/nav.xhtml", RenderNavigation(document, xhtmlItems), CompressionLevel.SmallestSize, Utf8NoBom);
+
+            foreach (var item in xhtmlItems)
+                WriteEntry(archive, $"OEBPS/{item.Href}", item.Content, CompressionLevel.SmallestSize, Utf8NoBom);
+            foreach (var item in imageItems)
+                WriteEntry(archive, $"OEBPS/{item.Href}", item.Asset.Data, CompressionLevel.SmallestSize);
+        }
+
+        return stream.ToArray();
+    }
+
+    private static List<EpubXhtmlItem> BuildXhtmlItems(PublishDocument document, IReadOnlyList<EpubImageItem> imageItems)
+    {
+        var items = new List<EpubXhtmlItem>();
+        if (document.CoverAsset is not null && ImageHref(imageItems, document.CoverAsset.Id) is string coverHref)
+        {
+            items.Add(new EpubXhtmlItem("cover-page", "cover.xhtml", "Cover", RenderXhtmlPage(document, "Cover",
+                $"<section class=\"cover-page\"><img alt=\"{Html(document.CoverAsset.AltText)}\" src=\"{coverHref}\" /></section>")));
+        }
+
+        items.Add(new EpubXhtmlItem("title", "title.xhtml", document.DisplayTitle, RenderXhtmlPage(document, document.DisplayTitle, RenderTitleBody(document))));
+        AddMatter(items, document, "dedication", "Dedication", document.Profile.Dedication);
+        if (document.Profile.IncludeTableOfContents && document.Profile.IncludeVisibleTableOfContents)
+            items.Add(new EpubXhtmlItem("toc-page", "toc.xhtml", "Table of Contents", RenderXhtmlPage(document, "Table of Contents", RenderVisibleToc(document))));
+
+        var actIndex = 0;
+        var chapterIndex = 0;
+        foreach (var section in document.Sections)
+        {
+            actIndex++;
+            var actPlacements = Placements(document, PublishOutlineTargetKind.Act, section.ActId);
+            if (section.IncludePage)
+            {
+                var actId = section.IsUnassigned ? "section-unassigned" : $"act-{actIndex.ToString(CultureInfo.InvariantCulture)}";
+                items.Add(new EpubXhtmlItem(
+                    actId,
+                    $"{actId}.xhtml",
+                    section.Title,
+                    RenderXhtmlPage(document, section.Title, RenderActBody(document, section, imageItems))));
+            }
+
+            foreach (var chapter in section.Chapters)
+            {
+                chapterIndex++;
+                var chapterId = $"chapter-{chapterIndex.ToString(CultureInfo.InvariantCulture)}";
+                items.Add(new EpubXhtmlItem(
+                    chapterId,
+                    $"{chapterId}.xhtml",
+                    chapter.Title,
+                    RenderXhtmlPage(document, chapter.Title, RenderChapterBody(document, chapter, imageItems))));
+            }
+        }
+
+        AddMatter(items, document, "acknowledgments", "Acknowledgments", document.Profile.Acknowledgments);
+        AddMatter(items, document, "references", "References", document.Profile.References);
+        return items;
+    }
+
+    private static List<EpubImageItem> BuildImageItems(PublishDocument document)
+    {
+        var assets = new Dictionary<Guid, PublishAssetDocument>();
+        if (document.CoverAsset is not null)
+            assets[document.CoverAsset.Id] = document.CoverAsset;
+        foreach (var placement in document.Placements)
+            assets[placement.Asset.Id] = placement.Asset;
+
+        return assets.Values
+            .Select(asset => new EpubImageItem($"img-{asset.Id:N}", $"images/{asset.Id:N}.{ImageExtension(asset.ContentType)}", asset))
+            .ToList();
+    }
+
+    private static void AddMatter(List<EpubXhtmlItem> items, PublishDocument document, string id, string title, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        items.Add(new EpubXhtmlItem(id, $"{id}.xhtml", title, RenderXhtmlPage(document, title, RenderMatterBody(title, text))));
+    }
+
+    private static string RenderTitleBody(PublishDocument document)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<section class=\"title-page\"><h1>").Append(Html(document.DisplayTitle)).AppendLine("</h1>");
+        if (!string.IsNullOrWhiteSpace(document.Profile.Subtitle))
+            sb.Append("<p class=\"subtitle\">").Append(Html(document.Profile.Subtitle)).AppendLine("</p>");
+        if (!string.IsNullOrWhiteSpace(document.Profile.Author))
+            sb.Append("<p class=\"byline\">by ").Append(Html(document.Profile.Author)).AppendLine("</p>");
+        if (!string.IsNullOrWhiteSpace(document.Profile.Publisher))
+            sb.Append("<p class=\"publisher\">").Append(Html(document.Profile.Publisher)).AppendLine("</p>");
+        sb.AppendLine("</section>");
+        if (!string.IsNullOrWhiteSpace(document.Profile.Description))
+        {
+            sb.AppendLine("<section class=\"description\">");
+            AppendTextBlocks(sb, document.Profile.Description, "prose");
+            sb.AppendLine("</section>");
+        }
+        return sb.ToString();
+    }
+
+    private static string RenderVisibleToc(PublishDocument document)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("""<nav epub:type="toc" id="visible-toc">""");
+        sb.AppendLine("<h1>Table of Contents</h1><ol>");
+        foreach (var link in TocLinks(document))
+            sb.Append("<li><a href=\"").Append(link.Href).Append("\">").Append(Html(link.Title)).AppendLine("</a></li>");
+        sb.AppendLine("</ol></nav>");
+        return sb.ToString();
+    }
+
+    private static string RenderActBody(PublishDocument document, PublishSectionDocument section, IReadOnlyList<EpubImageItem> imageItems)
+    {
+        var sb = new StringBuilder();
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Act, section.ActId, PublishImagePlacementKind.BeforeAct);
+        sb.AppendLine("<section class=\"act-page\">");
+        if (section.IncludeHeading)
+            sb.Append("<h1>").Append(Html(section.Title)).AppendLine("</h1>");
+        if (document.Profile.IncludeActSynopses)
+            AppendTextBlocks(sb, section.Synopsis, "synopsis");
+        sb.AppendLine("</section>");
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Act, section.ActId, PublishImagePlacementKind.AfterAct);
+        return sb.ToString();
+    }
+
+    private static string RenderChapterBody(PublishDocument document, PublishChapterDocument chapter, IReadOnlyList<EpubImageItem> imageItems)
+    {
+        var sb = new StringBuilder();
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.BeforeChapter);
+        sb.AppendLine("<article class=\"chapter-page\">");
+        if (chapter.IncludeHeading)
+            sb.Append("<h1>").Append(Html(chapter.Title)).AppendLine("</h1>");
+        if (document.Profile.IncludeChapterSynopses)
+            AppendTextBlocks(sb, chapter.Synopsis, "synopsis");
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterOpening);
+        sb.AppendLine("<div class=\"chapter-body\">");
+        AppendTextBlocks(sb, chapter.Body, "prose");
+        sb.AppendLine("</div>");
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding);
+        sb.AppendLine("</article>");
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.AfterChapter);
+        return sb.ToString();
+    }
+
+    private static string RenderMatterBody(string title, string text)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<section class=\"matter-page\"><h1>").Append(Html(title)).AppendLine("</h1>");
+        AppendTextBlocks(sb, text, "prose");
+        sb.AppendLine("</section>");
+        return sb.ToString();
+    }
+
+    private static void AppendFigures(
+        StringBuilder sb,
+        PublishDocument document,
+        IReadOnlyList<EpubImageItem> imageItems,
+        PublishOutlineTargetKind targetKind,
+        Guid? targetId,
+        PublishImagePlacementKind placementKind)
+    {
+        if (targetId is null) return;
+        foreach (var placement in document.Placements.Where(placement =>
+            placement.TargetKind == targetKind
+            && placement.TargetId == targetId
+            && placement.PlacementKind == placementKind).OrderBy(placement => placement.SortOrder))
+        {
+            var href = ImageHref(imageItems, placement.Asset.Id);
+            if (href is null) continue;
+            var alt = string.IsNullOrWhiteSpace(placement.Asset.AltText) ? placement.Caption : placement.Asset.AltText;
+            sb.Append("<figure><img alt=\"").Append(Html(alt)).Append("\" src=\"").Append(href).AppendLine("\" />");
+            if (!string.IsNullOrWhiteSpace(placement.Caption))
+                sb.Append("<figcaption>").Append(Html(placement.Caption)).AppendLine("</figcaption>");
+            sb.AppendLine("</figure>");
+        }
+    }
+
+    private static string RenderXhtmlPage(PublishDocument document, string title, string body) =>
+        $"""
+        <?xml version="1.0" encoding="utf-8"?>
+        <!DOCTYPE html>
+        <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{Html(Language(document))}" lang="{Html(Language(document))}">
+        <head>
+          <title>{Html(title)}</title>
+          <link rel="stylesheet" type="text/css" href="styles.css" />
+        </head>
+        <body>
+        {body}
+        </body>
+        </html>
+        """;
+
+    private static string RenderContainer() =>
+        """
+        <?xml version="1.0" encoding="utf-8"?>
+        <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+          <rootfiles>
+            <rootfile full-path="OEBPS/package.opf" media-type="application/oebps-package+xml" />
+          </rootfiles>
+        </container>
+        """;
+
+    private static string RenderPackage(PublishDocument document, IReadOnlyList<EpubXhtmlItem> xhtmlItems, IReadOnlyList<EpubImageItem> imageItems)
+    {
+        var modified = document.ExportedAtUtc.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+        var sb = new StringBuilder();
+        sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
+        sb.AppendLine("""<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">""");
+        sb.AppendLine("""  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">""");
+        sb.Append("    <dc:identifier id=\"book-id\">urn:uuid:").Append(document.ProjectId).AppendLine("</dc:identifier>");
+        if (!string.IsNullOrWhiteSpace(document.Profile.Isbn))
+            sb.Append("    <dc:identifier id=\"isbn\">urn:isbn:").Append(Html(document.Profile.Isbn)).AppendLine("</dc:identifier>");
+        sb.Append("    <dc:title>").Append(Html(document.DisplayTitle)).AppendLine("</dc:title>");
+        if (!string.IsNullOrWhiteSpace(document.Profile.Author))
+            sb.Append("    <dc:creator>").Append(Html(document.Profile.Author)).AppendLine("</dc:creator>");
+        if (!string.IsNullOrWhiteSpace(document.Profile.Publisher))
+            sb.Append("    <dc:publisher>").Append(Html(document.Profile.Publisher)).AppendLine("</dc:publisher>");
+        if (!string.IsNullOrWhiteSpace(document.Profile.Description))
+            sb.Append("    <dc:description>").Append(Html(document.Profile.Description)).AppendLine("</dc:description>");
+        if (!string.IsNullOrWhiteSpace(document.Profile.Copyright))
+            sb.Append("    <dc:rights>").Append(Html(document.Profile.Copyright)).AppendLine("</dc:rights>");
+        sb.Append("    <dc:language>").Append(Html(Language(document))).AppendLine("</dc:language>");
+        sb.Append("    <meta property=\"dcterms:modified\">").Append(modified).AppendLine("</meta>");
+        if (document.CoverAsset is not null)
+            sb.Append("    <meta name=\"cover\" content=\"").Append(ImageId(imageItems, document.CoverAsset.Id)).AppendLine("\" />");
+        sb.AppendLine("  </metadata>");
+        sb.AppendLine("  <manifest>");
+        sb.AppendLine("""    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav" />""");
+        sb.AppendLine("""    <item id="style" href="styles.css" media-type="text/css" />""");
+        foreach (var image in imageItems)
+        {
+            sb.Append("    <item id=\"").Append(image.Id).Append("\" href=\"").Append(image.Href)
+                .Append("\" media-type=\"").Append(image.Asset.ContentType).Append("\"");
+            if (document.CoverAsset?.Id == image.Asset.Id)
+                sb.Append(" properties=\"cover-image\"");
+            sb.AppendLine(" />");
+        }
+        foreach (var item in xhtmlItems)
+        {
+            sb.Append("    <item id=\"").Append(item.Id).Append("\" href=\"").Append(item.Href)
+                .AppendLine("\" media-type=\"application/xhtml+xml\" />");
+        }
+        sb.AppendLine("  </manifest>");
+        sb.AppendLine("  <spine>");
+        foreach (var item in xhtmlItems)
+            sb.Append("    <itemref idref=\"").Append(item.Id).AppendLine("\" />");
+        sb.AppendLine("  </spine>");
+        sb.AppendLine("</package>");
+        return sb.ToString();
+    }
+
+    private static string RenderNavigation(PublishDocument document, IReadOnlyList<EpubXhtmlItem> xhtmlItems)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
+        sb.AppendLine($"""<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{Html(Language(document))}" lang="{Html(Language(document))}">""");
+        sb.AppendLine("<head>");
+        sb.Append("  <title>").Append(Html(document.DisplayTitle)).AppendLine(" - Table of Contents</title>");
+        sb.AppendLine("""  <link rel="stylesheet" type="text/css" href="styles.css" />""");
+        sb.AppendLine("</head><body>");
+        sb.AppendLine("""<nav epub:type="toc" id="toc">""");
+        sb.AppendLine("<h1>Table of Contents</h1><ol>");
+        foreach (var item in xhtmlItems)
+            sb.Append("<li><a href=\"").Append(item.Href).Append("\">").Append(Html(item.Title)).AppendLine("</a></li>");
+        sb.AppendLine("</ol></nav>");
+        sb.AppendLine("</body></html>");
+        return sb.ToString();
+    }
+
+    private static IEnumerable<(string Title, string Href)> TocLinks(PublishDocument document)
+    {
+        var actIndex = 0;
+        var chapterIndex = 0;
+        foreach (var section in document.Sections)
+        {
+            actIndex++;
+            var actHref = section.IsUnassigned ? "section-unassigned.xhtml" : $"act-{actIndex.ToString(CultureInfo.InvariantCulture)}.xhtml";
+            if (section.IncludePage)
+                yield return (section.Title, actHref);
+            foreach (var chapter in section.Chapters)
+            {
+                chapterIndex++;
+                yield return (chapter.Title, $"chapter-{chapterIndex.ToString(CultureInfo.InvariantCulture)}.xhtml");
+            }
+        }
+    }
+
+    private static IReadOnlyList<PublishImagePlacementDocument> Placements(PublishDocument document, PublishOutlineTargetKind kind, Guid? targetId) =>
+        targetId is null
+            ? []
+            : document.Placements.Where(placement => placement.TargetKind == kind && placement.TargetId == targetId).ToList();
+
+    private static void AppendTextBlocks(StringBuilder sb, string text, string cssClass)
+    {
+        foreach (var paragraph in SplitParagraphs(text))
+        {
+            sb.Append("<p class=\"").Append(cssClass).Append("\">");
+            for (var i = 0; i < paragraph.Count; i++)
+            {
+                if (i > 0) sb.Append("<br />");
+                sb.Append(Html(paragraph[i]));
+            }
+            sb.AppendLine("</p>");
+        }
+    }
+
+    private static IReadOnlyList<IReadOnlyList<string>> SplitParagraphs(string text)
+    {
+        var paragraphs = new List<IReadOnlyList<string>>();
+        var current = new List<string>();
+        foreach (var line in text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n'))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                Flush();
+                continue;
+            }
+
+            current.Add(line.TrimEnd());
+        }
+
+        Flush();
+        return paragraphs;
+
+        void Flush()
+        {
+            if (current.Count == 0) return;
+            paragraphs.Add(current.ToList());
+            current.Clear();
+        }
+    }
+
+    private static string RenderStylesheet() =>
+        """
+        body {
+          color: #172033;
+          font-family: Georgia, "Times New Roman", serif;
+          line-height: 1.55;
+          margin: 5%;
+        }
+
+        h1 {
+          color: #111827;
+          font-family: Arial, sans-serif;
+          font-size: 1.8em;
+          line-height: 1.2;
+          margin: 0 0 1em;
+        }
+
+        .cover-page,
+        .title-page,
+        .act-page {
+          min-height: 80vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+        }
+
+        .cover-page img,
+        figure img {
+          display: block;
+          max-width: 100%;
+          max-height: 90vh;
+          margin: 0 auto;
+        }
+
+        .title-page h1 {
+          font-size: 2.4em;
+        }
+
+        .subtitle,
+        .byline,
+        .publisher,
+        figcaption {
+          color: #475467;
+          font-family: Arial, sans-serif;
+          margin: 0.35em 0;
+          text-align: center;
+        }
+
+        .synopsis {
+          color: #475467;
+          font-style: italic;
+          margin: 0 0 1.25em;
+        }
+
+        .chapter-body p,
+        .matter-page p,
+        .description p {
+          margin: 0 0 0.9em;
+        }
+        """;
+
+    private static void WriteEntry(ZipArchive archive, string name, string content, CompressionLevel compressionLevel, Encoding encoding)
+    {
+        var entry = archive.CreateEntry(name, compressionLevel);
+        using var stream = entry.Open();
+        stream.Write(encoding.GetBytes(content));
+    }
+
+    private static void WriteEntry(ZipArchive archive, string name, byte[] content, CompressionLevel compressionLevel)
+    {
+        var entry = archive.CreateEntry(name, compressionLevel);
+        using var stream = entry.Open();
+        stream.Write(content);
+    }
+
+    private static string? ImageHref(IReadOnlyList<EpubImageItem> images, Guid assetId) =>
+        images.FirstOrDefault(image => image.Asset.Id == assetId)?.Href;
+
+    private static string? ImageId(IReadOnlyList<EpubImageItem> images, Guid assetId) =>
+        images.FirstOrDefault(image => image.Asset.Id == assetId)?.Id;
+
+    private static string ImageExtension(string contentType) =>
+        contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ? "jpg" : "png";
+
+    private static string Language(PublishDocument document) =>
+        string.IsNullOrWhiteSpace(document.Profile.Language) ? "en" : document.Profile.Language.Trim();
+
+    private static string Html(string value) => WebUtility.HtmlEncode(value);
+
+    private sealed record EpubXhtmlItem(string Id, string Href, string Title, string Content);
+    private sealed record EpubImageItem(string Id, string Href, PublishAssetDocument Asset);
+}

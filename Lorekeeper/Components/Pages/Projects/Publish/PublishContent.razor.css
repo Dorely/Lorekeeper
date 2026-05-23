@@ -1,0 +1,147 @@
+.publish-pane {
+    display: grid;
+    grid-template-columns: minmax(520px, 1fr) minmax(340px, 420px);
+    gap: 1rem;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.publish-column {
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.publish-main,
+.publish-side {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+}
+
+.publish-card {
+    border: 1px solid #d8dee9;
+    border-radius: 8px;
+    background: #ffffff;
+    padding: 0.875rem;
+}
+
+.publish-card-title {
+    color: #566276;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    margin-bottom: 0.75rem;
+    text-transform: uppercase;
+}
+
+.publish-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+}
+
+.publish-form-grid.compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.publish-full {
+    display: block;
+    margin-top: 0.65rem;
+}
+
+.publish-form-grid span,
+.publish-full span {
+    color: #566276;
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin-bottom: 0.2rem;
+}
+
+.publish-check-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem 0.75rem;
+    margin: 0.75rem 0;
+}
+
+.publish-outline-section {
+    border: 1px solid #d8dee9;
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+    padding: 0.65rem;
+}
+
+.publish-outline-act {
+    font-weight: 700;
+    margin-bottom: 0.45rem;
+}
+
+.publish-outline-chapters {
+    display: grid;
+    gap: 0.25rem;
+    padding-left: 1.25rem;
+}
+
+.publish-export-row {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.publish-export-row .form-select {
+    max-width: 10rem;
+}
+
+.publish-print-link {
+    margin-top: 0.5rem;
+}
+
+.publish-asset-list,
+.publish-placement-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.publish-asset-row,
+.publish-placement-row {
+    align-items: flex-start;
+    border: 1px solid #d8dee9;
+    border-radius: 6px;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+    padding: 0.55rem;
+}
+
+.publish-asset-preview {
+    aspect-ratio: 1;
+    border: 1px solid #d8dee9;
+    border-radius: 6px;
+    flex: 0 0 4rem;
+    height: 4rem;
+    object-fit: cover;
+}
+
+.publish-asset-row span,
+.publish-placement-row span {
+    color: #667085;
+    display: block;
+    font-size: 0.78rem;
+}
+
+.publish-asset-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    justify-content: flex-end;
+}
+
+@media (max-width: 980px) {
+    .publish-pane {
+        grid-template-columns: minmax(520px, 1fr) minmax(340px, 420px);
+        overflow-x: auto;
+    }
+}

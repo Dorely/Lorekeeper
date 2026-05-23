@@ -77,6 +77,14 @@ public class Project
 
     public ICollection<ProjectImportJob> ProjectImportJobs { get; set; } = [];
 
+    public ICollection<PublishProfile> PublishProfiles { get; set; } = [];
+
+    public ICollection<PublishAsset> PublishAssets { get; set; } = [];
+
+    public ICollection<PublishOutlineSelection> PublishOutlineSelections { get; set; } = [];
+
+    public ICollection<PublishImagePlacement> PublishImagePlacements { get; set; } = [];
+
     /// <summary>Single source of truth for the vector-store scope key for a project.</summary>
     public static string ScopeKey(Guid id) => $"project:{id:N}";
 

@@ -15,8 +15,7 @@ public sealed class ProjectImportExportService(
     IEntityTypeService entityTypeService,
     IProjectImportRepository imports,
     IProjectImportJobQueue importQueue,
-    IProjectImportJobNotifier notifier,
-    IEnumerable<IManuscriptExportFormatter> manuscriptFormatters) : IProjectImportExportService
+    IProjectImportJobNotifier notifier) : IProjectImportExportService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -102,74 +101,6 @@ public sealed class ProjectImportExportService(
             FileName: $"{SafeFileName(project.Slug)}-{kind.ToString().ToLowerInvariant()}-graph.lorekeeper.json",
             ContentType: "application/json; charset=utf-8",
             Content: bytes);
-    }
-
-    public async Task<ProjectExportFile> ExportManuscriptAsync(
-        Guid projectId,
-        ManuscriptExportFormat format,
-        ManuscriptExportOptions options,
-        CancellationToken cancellationToken = default)
-    {
-        var formatter = manuscriptFormatters.FirstOrDefault(candidate => candidate.Format == format)
-            ?? throw new InvalidOperationException($"No manuscript formatter is registered for {format}.");
-        var manuscript = await GetManuscriptAsync(projectId, options, cancellationToken);
-
-        return new ProjectExportFile(
-            FileName: $"{SafeFileName(manuscript.ProjectSlug)}-manuscript{formatter.FileExtension}",
-            ContentType: formatter.ContentType,
-            Content: formatter.Render(manuscript));
-    }
-
-    public async Task<ManuscriptExportDocument> GetManuscriptAsync(
-        Guid projectId,
-        ManuscriptExportOptions options,
-        CancellationToken cancellationToken = default)
-    {
-        var project = await projects.GetByIdAsync(projectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {projectId} not found.");
-        var projectActs = await acts.ListByProjectAsync(projectId, cancellationToken);
-        var projectChapters = await chapters.ListByProjectAsync(projectId, cancellationToken);
-        var sections = new List<ManuscriptExportSection>();
-
-        foreach (var act in projectActs.OrderBy(act => act.Order))
-        {
-            var actChapters = projectChapters
-                .Where(chapter => chapter.ActId == act.Id)
-                .OrderBy(chapter => chapter.Order)
-                .Select(ManuscriptChapter)
-                .ToList();
-            if (actChapters.Count == 0) continue;
-
-            sections.Add(new ManuscriptExportSection(
-                act.Id,
-                act.Title,
-                act.Synopsis,
-                IsUnassigned: false,
-                actChapters));
-        }
-
-        var unassigned = projectChapters
-            .Where(chapter => chapter.ActId is null)
-            .OrderBy(chapter => chapter.Order)
-            .Select(ManuscriptChapter)
-            .ToList();
-        if (unassigned.Count > 0)
-        {
-            sections.Add(new ManuscriptExportSection(
-                null,
-                "Unassigned",
-                string.Empty,
-                IsUnassigned: true,
-                unassigned));
-        }
-
-        return new ManuscriptExportDocument(
-            project.Id,
-            project.Name,
-            project.Slug,
-            DateTime.UtcNow,
-            options,
-            sections);
     }
 
     public async Task<ProjectImportJobListItem> CreateImportJobAsync(
@@ -280,9 +211,6 @@ public sealed class ProjectImportExportService(
         new(act.Id, act.Title, act.Synopsis, act.Order);
 
     private static ProjectExportChapter ProjectChapter(Chapter chapter) =>
-        new(chapter.Id, chapter.ActId, chapter.Title, chapter.Body, chapter.Synopsis, chapter.Order);
-
-    private static ManuscriptExportChapter ManuscriptChapter(Chapter chapter) =>
         new(chapter.Id, chapter.ActId, chapter.Title, chapter.Body, chapter.Synopsis, chapter.Order);
 
     private static string NodeStableKey(GraphNode node) =>
