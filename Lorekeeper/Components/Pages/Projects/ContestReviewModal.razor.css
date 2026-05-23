@@ -282,11 +282,13 @@
 }
 
 .contest-review-segment.added {
-    background: rgba(25, 135, 84, 0.24);
+    background: rgba(25, 135, 84, 0.38);
+    box-shadow: 0 0 0 1px rgba(25, 135, 84, 0.22);
 }
 
 .contest-review-segment.removed {
-    background: rgba(220, 53, 69, 0.24);
+    background: rgba(220, 53, 69, 0.36);
+    box-shadow: 0 0 0 1px rgba(220, 53, 69, 0.2);
 }
 
 .contest-review-raw {

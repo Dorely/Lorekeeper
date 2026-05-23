@@ -195,10 +195,11 @@
                                                                 <span class="pending-ai-diff-line-number">@(row.NewLineNumber?.ToString() ?? string.Empty)</span>
                                                                 <span class="pending-ai-diff-marker">@row.Marker</span>
                                                                 <span class="pending-ai-diff-line-text">
-                                                                    @if (sectionOwner is not null && CanEditNewLine(row))
+                                                                    @if (sectionOwner is not null && IsEditingNewLine(sectionOwner, diffSection, row))
                                                                     {
-                                                                        <textarea class="pending-ai-line-editor" data-autosize data-autosize-resize="vertical" rows="1" value="@row.Text"
-                                                                                  @onchange="args => UpdateLineTextAsync(sectionOwner, diffSection, row.NewLineNumber!.Value, args.Value?.ToString() ?? string.Empty)"></textarea>
+                                                                        <textarea class="pending-ai-line-editor" data-autosize data-autosize-resize="vertical" rows="1"
+                                                                                  value="@(_lineEdit?.Text ?? row.Text)"
+                                                                                  @oninput="args => UpdateLineEditText(args.Value?.ToString() ?? string.Empty)"></textarea>
                                                                     }
                                                                     else
                                                                     {
@@ -211,6 +212,24 @@
                                                                         <button type="button" class="btn btn-sm btn-outline-danger"
                                                                                 disabled="@_busy"
                                                                                 @onclick="() => RejectLineAsync(sectionOwner, diffSection, row, hunk.Rows)">Reject line</button>
+                                                                    }
+                                                                    @if (sectionOwner is not null && CanEditNewLine(row))
+                                                                    {
+                                                                        @if (IsEditingNewLine(sectionOwner, diffSection, row))
+                                                                        {
+                                                                            <button type="button" class="btn btn-sm btn-outline-primary"
+                                                                                    disabled="@_busy"
+                                                                                    @onclick="() => SaveLineEditAsync(sectionOwner, diffSection)">Save</button>
+                                                                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                                                    disabled="@_busy"
+                                                                                    @onclick="CancelLineEdit">Cancel</button>
+                                                                        }
+                                                                        else
+                                                                        {
+                                                                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                                                    disabled="@_busy"
+                                                                                    @onclick="() => BeginLineEdit(sectionOwner, diffSection, row)">Edit</button>
+                                                                        }
                                                                     }
                                                                 </span>
                                                             </div>
@@ -228,10 +247,11 @@
                                                                     <span class="pending-ai-split-line-number new @SplitCellClass(splitRow.New)">@(splitRow.New?.NewLineNumber?.ToString() ?? string.Empty)</span>
                                                                     <span class="pending-ai-split-marker new @SplitCellClass(splitRow.New)">@(splitRow.New?.Marker ?? string.Empty)</span>
                                                                     <span class="pending-ai-split-line-text new @SplitCellClass(splitRow.New)">
-                                                                        @if (sectionOwner is not null && splitRow.New is { } newRow && CanEditNewLine(newRow))
+                                                                        @if (sectionOwner is not null && splitRow.New is { } newRow && IsEditingNewLine(sectionOwner, diffSection, newRow))
                                                                         {
-                                                                            <textarea class="pending-ai-line-editor" data-autosize data-autosize-resize="vertical" rows="1" value="@newRow.Text"
-                                                                                      @onchange="args => UpdateLineTextAsync(sectionOwner, diffSection, newRow.NewLineNumber!.Value, args.Value?.ToString() ?? string.Empty)"></textarea>
+                                                                            <textarea class="pending-ai-line-editor" data-autosize data-autosize-resize="vertical" rows="1"
+                                                                                      value="@(_lineEdit?.Text ?? newRow.Text)"
+                                                                                      @oninput="args => UpdateLineEditText(args.Value?.ToString() ?? string.Empty)"></textarea>
                                                                         }
                                                                         else
                                                                         {
@@ -250,6 +270,24 @@
                                                                             <button type="button" class="btn btn-sm btn-outline-danger"
                                                                                     disabled="@_busy"
                                                                                     @onclick="() => RejectLineAsync(sectionOwner, diffSection, actionNewRow, hunk.Rows)">Reject line</button>
+                                                                        }
+                                                                        @if (sectionOwner is not null && splitRow.New is { } editableNewRow && CanEditNewLine(editableNewRow))
+                                                                        {
+                                                                            @if (IsEditingNewLine(sectionOwner, diffSection, editableNewRow))
+                                                                            {
+                                                                                <button type="button" class="btn btn-sm btn-outline-primary"
+                                                                                        disabled="@_busy"
+                                                                                        @onclick="() => SaveLineEditAsync(sectionOwner, diffSection)">Save</button>
+                                                                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                                                        disabled="@_busy"
+                                                                                        @onclick="CancelLineEdit">Cancel</button>
+                                                                            }
+                                                                            else
+                                                                            {
+                                                                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                                                        disabled="@_busy"
+                                                                                        @onclick="() => BeginLineEdit(sectionOwner, diffSection, editableNewRow)">Edit</button>
+                                                                            }
                                                                         }
                                                                     </span>
                                                                 </div>
@@ -358,6 +396,7 @@
     private IReadOnlyList<PendingChangeItem> _flattened = [];
     private IReadOnlyList<PendingChangeGroup> _grouped = [];
     private PendingChangeGroup? _selectedGroup;
+    private PendingLineEdit? _lineEdit;
 
     private IReadOnlyList<PendingChangeItem> Flattened => _flattened;
     private IReadOnlyList<PendingChangeGroup> Grouped => _grouped;
@@ -407,6 +446,14 @@
         _selectedGroup = _grouped.FirstOrDefault(group => group.Key == _selectedGroupKey) ?? _grouped.FirstOrDefault();
         _selectedGroupKey = _selectedGroup?.Key;
 
+        if (_lineEdit is not null
+            && (!IsOpen
+                || previousChangeCacheHash != _changeCacheHash
+                || !string.Equals(previousSelectedGroupKey, _selectedGroupKey, StringComparison.Ordinal)))
+        {
+            _lineEdit = null;
+        }
+
         if (IsOpen
             && (!_wasOpen
                 || previousChangeCacheHash != _changeCacheHash
@@ -424,6 +471,7 @@
 
         _selectedGroupKey = groupKey;
         _selectedGroup = _grouped.FirstOrDefault(group => group.Key == groupKey);
+        _lineEdit = null;
         QueueAutosizeRefresh();
     }
 
@@ -478,6 +526,7 @@
 
     private async Task CloseAsync()
     {
+        _lineEdit = null;
         if (OnClose.HasDelegate)
             await OnClose.InvokeAsync();
     }
@@ -552,6 +601,7 @@
 
     private async Task ResetGroupDraftsAsync(string groupKey)
     {
+        _lineEdit = null;
         await RunDraftAsync(async () =>
         {
             var group = Grouped.FirstOrDefault(candidate => candidate.Key == groupKey);
@@ -566,11 +616,15 @@
         });
     }
 
-    private async Task RejectFieldAsync(AiChange change, DiffSection section) =>
+    private async Task RejectFieldAsync(AiChange change, DiffSection section)
+    {
+        _lineEdit = null;
         await UpdateFieldDraftAsync(change, section.Key, section.OldText);
+    }
 
     private async Task ResetFieldToOriginalProposalAsync(AiChange change, string fieldKey)
     {
+        _lineEdit = null;
         if (!AiChangeReviewDrafts.TryResetFieldToOriginalProposal(change, fieldKey, out var draftAfterJson, out var error))
         {
             _error = error;
@@ -592,8 +646,43 @@
 
     private async Task RejectLineAsync(AiChange change, DiffSection section, DiffRow row, IReadOnlyList<DiffRow> hunkRows)
     {
+        _lineEdit = null;
         var newText = RejectLine(section, row, hunkRows);
         await UpdateFieldDraftAsync(change, section.Key, newText);
+    }
+
+    private void BeginLineEdit(AiChange change, DiffSection section, DiffRow row)
+    {
+        if (row.NewLineNumber is not int newLineNumber) return;
+
+        _lineEdit = new PendingLineEdit(change.Id, section.Key, newLineNumber, row.Text);
+        QueueAutosizeRefresh();
+    }
+
+    private void UpdateLineEditText(string text)
+    {
+        if (_lineEdit is not null)
+            _lineEdit.Text = text;
+    }
+
+    private async Task SaveLineEditAsync(AiChange change, DiffSection section)
+    {
+        if (_lineEdit is not { } edit
+            || edit.ChangeId != change.Id
+            || !string.Equals(edit.SectionKey, section.Key, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        await UpdateLineTextAsync(change, section, edit.NewLineNumber, edit.Text);
+        if (_error is null && ReferenceEquals(_lineEdit, edit))
+            _lineEdit = null;
+    }
+
+    private void CancelLineEdit()
+    {
+        _lineEdit = null;
+        QueueAutosizeRefresh();
     }
 
     private async Task UpdateFieldDraftAsync(AiChange change, string fieldKey, string newText)
@@ -689,6 +778,13 @@
 
     private static bool CanEditNewLine(DiffRow row) =>
         row.Kind == DiffRowKind.Added && row.NewLineNumber.HasValue;
+
+    private bool IsEditingNewLine(AiChange change, DiffSection section, DiffRow row) =>
+        row.NewLineNumber is int newLineNumber
+        && _lineEdit is { } edit
+        && edit.ChangeId == change.Id
+        && edit.NewLineNumber == newLineNumber
+        && string.Equals(edit.SectionKey, section.Key, StringComparison.OrdinalIgnoreCase);
 
     private static bool CanRejectDiffRow(DiffRow row) => row.Kind != DiffRowKind.Context;
 
@@ -921,6 +1017,14 @@
     private sealed record SplitDiffRow(DiffRow? Old, DiffRow? New);
 
     private sealed record ReviewDraftState(DateTime UpdatedAt);
+
+    private sealed class PendingLineEdit(Guid changeId, string sectionKey, int newLineNumber, string text)
+    {
+        public Guid ChangeId { get; } = changeId;
+        public string SectionKey { get; } = sectionKey;
+        public int NewLineNumber { get; } = newLineNumber;
+        public string Text { get; set; } = text;
+    }
 
     private enum DiffViewMode
     {

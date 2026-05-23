@@ -414,8 +414,16 @@
 .pending-ai-diff-line-actions {
     display: flex;
     align-items: flex-start;
+    flex-direction: column;
     justify-content: flex-end;
+    gap: 0.25rem;
     min-width: 0;
+}
+
+.pending-ai-diff-line-actions .btn,
+.pending-ai-split-line-actions .btn {
+    width: 100%;
+    white-space: nowrap;
 }
 
 .pending-ai-line-editor {
@@ -447,11 +455,13 @@
 }
 
 .pending-ai-diff-segment.added {
-    background: rgba(25, 135, 84, 0.24);
+    background: rgba(25, 135, 84, 0.38);
+    box-shadow: 0 0 0 1px rgba(25, 135, 84, 0.22);
 }
 
 .pending-ai-diff-segment.removed {
-    background: rgba(220, 53, 69, 0.24);
+    background: rgba(220, 53, 69, 0.36);
+    box-shadow: 0 0 0 1px rgba(220, 53, 69, 0.2);
 }
 
 .pending-ai-diff-side-by-side {
@@ -497,8 +507,8 @@
 .pending-ai-split-line-actions {
     display: flex;
     align-items: flex-start;
+    flex-direction: column;
     justify-content: flex-end;
-    flex-wrap: wrap;
     gap: 0.25rem;
     min-width: 0;
 }
