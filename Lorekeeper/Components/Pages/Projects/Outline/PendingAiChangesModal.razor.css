@@ -448,20 +448,24 @@
     outline: none;
 }
 
-.pending-ai-diff-segment.added,
-.pending-ai-diff-segment.removed {
+.pending-ai-diff-line-text ::deep .pending-ai-diff-segment.added,
+.pending-ai-diff-line-text ::deep .pending-ai-diff-segment.removed,
+.pending-ai-split-line-text ::deep .pending-ai-diff-segment.added,
+.pending-ai-split-line-text ::deep .pending-ai-diff-segment.removed {
     border-radius: 0.18rem;
     padding: 0 0.05rem;
 }
 
-.pending-ai-diff-segment.added {
+.pending-ai-diff-line-text ::deep .pending-ai-diff-segment.added,
+.pending-ai-split-line-text ::deep .pending-ai-diff-segment.added {
     background: rgba(25, 135, 84, 0.38);
     box-shadow: 0 0 0 1px rgba(25, 135, 84, 0.22);
 }
 
-.pending-ai-diff-segment.removed {
-    background: rgba(220, 53, 69, 0.36);
-    box-shadow: 0 0 0 1px rgba(220, 53, 69, 0.2);
+.pending-ai-diff-line-text ::deep .pending-ai-diff-segment.removed,
+.pending-ai-split-line-text ::deep .pending-ai-diff-segment.removed {
+    background: rgba(220, 53, 69, 0.46);
+    box-shadow: 0 0 0 1px rgba(220, 53, 69, 0.28);
 }
 
 .pending-ai-diff-side-by-side {
