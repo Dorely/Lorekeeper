@@ -110,7 +110,8 @@ public sealed record PublishImageGenerationRequest(
     string Quality,
     string OutputFormat,
     int? OutputCompression,
-    string AltText);
+    string AltText,
+    IReadOnlyList<Guid> ReferenceAssetIds);
 
 public sealed record PublishImagePlacementCreate(
     Guid AssetId,

@@ -148,12 +148,31 @@ public sealed class PublishService(
         if (string.IsNullOrWhiteSpace(request.Prompt))
             throw new InvalidOperationException("Image prompt is required.");
 
+        var requestedReferenceIds = request.ReferenceAssetIds.Distinct().ToList();
+        if (requestedReferenceIds.Count > 4)
+            throw new InvalidOperationException("Select no more than 4 reference images.");
+        var referenceAssets = requestedReferenceIds.Count == 0
+            ? new List<PublishAsset>()
+            : await db.PublishAssets
+                .Where(asset => asset.ProjectId == projectId && requestedReferenceIds.Contains(asset.Id))
+                .ToListAsync(cancellationToken);
+        if (referenceAssets.Count != requestedReferenceIds.Count)
+            throw new InvalidOperationException("One or more selected reference images could not be found.");
+
+        var referencesById = referenceAssets.ToDictionary(asset => asset.Id);
+        var orderedReferences = requestedReferenceIds
+            .Select(id => referencesById[id])
+            .ToList();
+
         var generated = await codexImages.GenerateAsync(new CodexImageGenerationOptions(
             request.Prompt.Trim(),
             string.IsNullOrWhiteSpace(request.Size) ? "auto" : request.Size.Trim(),
             string.IsNullOrWhiteSpace(request.Quality) ? "auto" : request.Quality.Trim(),
             string.IsNullOrWhiteSpace(request.OutputFormat) ? "png" : request.OutputFormat.Trim(),
-            request.OutputCompression), cancellationToken);
+            request.OutputCompression,
+            orderedReferences
+                .Select(asset => new CodexImageReference(asset.FileName, asset.ContentType, asset.Data))
+                .ToList()), cancellationToken);
 
         var fileName = $"generated-{DateTime.UtcNow:yyyyMMddHHmmss}.{ExtensionForContentType(generated.ContentType)}";
         var asset = new PublishAsset
@@ -174,6 +193,12 @@ public sealed class PublishService(
                 generated.RevisedPrompt,
                 generated.ResponseId,
                 generated.CallId,
+                ReferenceAssets = orderedReferences.Select(asset => new
+                {
+                    asset.Id,
+                    asset.FileName,
+                    asset.ContentType,
+                }),
             }, JsonOptions),
         };
 

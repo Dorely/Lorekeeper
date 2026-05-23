@@ -34,49 +34,49 @@ else
                 <div class="publish-form-grid">
                     <label>
                         <span>Title</span>
-                        <input class="form-control form-control-sm" @bind="_profile.TitleOverride" />
+                        <input class="form-control form-control-sm" @bind="_profile.TitleOverride" @bind:event="oninput" />
                     </label>
                     <label>
                         <span>Subtitle</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Subtitle" />
+                        <input class="form-control form-control-sm" @bind="_profile.Subtitle" @bind:event="oninput" />
                     </label>
                     <label>
                         <span>Author</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Author" />
+                        <input class="form-control form-control-sm" @bind="_profile.Author" @bind:event="oninput" />
                     </label>
                     <label>
                         <span>Language</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Language" />
+                        <input class="form-control form-control-sm" @bind="_profile.Language" @bind:event="oninput" />
                     </label>
                     <label>
                         <span>Publisher</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Publisher" />
+                        <input class="form-control form-control-sm" @bind="_profile.Publisher" @bind:event="oninput" />
                     </label>
                     <label>
                         <span>ISBN</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Isbn" />
+                        <input class="form-control form-control-sm" @bind="_profile.Isbn" @bind:event="oninput" />
                     </label>
                 </div>
 
                 <label class="publish-full">
                     <span>Copyright</span>
-                    <input class="form-control form-control-sm" @bind="_profile.Copyright" />
+                    <input class="form-control form-control-sm" @bind="_profile.Copyright" @bind:event="oninput" />
                 </label>
                 <label class="publish-full">
                     <span>Description</span>
-                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Description"></textarea>
+                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Description" @bind:event="oninput"></textarea>
                 </label>
                 <label class="publish-full">
                     <span>Dedication</span>
-                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Dedication"></textarea>
+                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Dedication" @bind:event="oninput"></textarea>
                 </label>
                 <label class="publish-full">
                     <span>Acknowledgments</span>
-                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Acknowledgments"></textarea>
+                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Acknowledgments" @bind:event="oninput"></textarea>
                 </label>
                 <label class="publish-full">
                     <span>References</span>
-                    <textarea class="form-control form-control-sm" rows="4" @bind="_profile.References"></textarea>
+                    <textarea class="form-control form-control-sm" rows="4" @bind="_profile.References" @bind:event="oninput"></textarea>
                 </label>
 
                 <div class="publish-check-grid">
@@ -195,6 +195,21 @@ else
                     <span>Image prompt</span>
                     <textarea class="form-control form-control-sm" rows="4" @bind="_imagePrompt"></textarea>
                 </label>
+                @if (_workspace.Assets.Count > 0)
+                {
+                    <div class="publish-reference-list">
+                        <div class="publish-reference-title">Reference images</div>
+                        @foreach (var asset in _workspace.Assets)
+                        {
+                            var selected = IsReferenceSelected(asset.Id);
+                            <label class="form-check publish-reference-row">
+                                <input class="form-check-input" type="checkbox" checked="@selected" disabled="@(!selected && _selectedReferenceAssetIds.Count >= MaxReferenceAssets)" @onchange="@(e => SetReferenceSelection(asset.Id, e))" />
+                                <img src="@asset.PreviewDataUrl" alt="@AssetAlt(asset)" />
+                                <span>@asset.FileName</span>
+                            </label>
+                        }
+                    </div>
+                }
                 <div class="publish-form-grid compact">
                     <label>
                         <span>Size</span>
@@ -239,8 +254,10 @@ else
                     {
                         var isCover = _workspace.Profile.SelectedCoverAssetId == asset.Id;
                         <div class="publish-asset-row">
-                            <img class="publish-asset-preview" src="@asset.PreviewDataUrl" alt="@AssetAlt(asset)" />
-                            <div>
+                            <button type="button" class="publish-asset-preview-button" title="Open image" @onclick="() => OpenAssetModal(asset)">
+                                <img class="publish-asset-preview" src="@asset.PreviewDataUrl" alt="@AssetAlt(asset)" />
+                            </button>
+                            <div class="publish-asset-info">
                                 <strong>@asset.FileName</strong>
                                 <span>@asset.Source - @FormatBytes(asset.SizeBytes)</span>
                             </div>
@@ -325,15 +342,42 @@ else
             </div>
         </section>
     </div>
+
+    @if (_selectedAsset is not null)
+    {
+        <div class="modal-backdrop fade show" @onclick="CloseAssetModal"></div>
+        <div class="modal d-block publish-asset-modal" tabindex="-1" role="dialog" aria-modal="true" @onclick="CloseAssetModal">
+            <div class="modal-dialog modal-fullscreen" role="document" @onclick:stopPropagation="true">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <div class="publish-modal-title">
+                            <h5 class="modal-title">@_selectedAsset.FileName</h5>
+                            <span>@_selectedAsset.Source - @FormatBytes(_selectedAsset.SizeBytes)</span>
+                        </div>
+                        <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAssetModal"></button>
+                    </div>
+                    <div class="modal-body publish-asset-modal-body">
+                        <img src="@_selectedAsset.PreviewDataUrl" alt="@AssetAlt(_selectedAsset)" />
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" @onclick="CloseAssetModal">Close</button>
+                        <button type="button" class="btn btn-primary" @onclick="() => DownloadAssetAsync(_selectedAsset)">Download</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
 }
 
 @code {
     [CascadingParameter] public Project? Project { get; set; }
 
     private const long MaxAssetBytes = 15L * 1024 * 1024;
+    private const int MaxReferenceAssets = 4;
 
     private PublishWorkspaceView? _workspace;
     private ProfileDraft _profile = new();
+    private PublishAssetView? _selectedAsset;
     private Guid? _loadedProjectId;
     private bool _loading;
     private bool _savingProfile;
@@ -355,6 +399,7 @@ else
     private string _generatedAltText = string.Empty;
     private string _placementAssetId = string.Empty;
     private string _placementTargetKey = string.Empty;
+    private List<Guid> _selectedReferenceAssetIds = [];
     private PublishImagePlacementKind _placementKind = PublishImagePlacementKind.ChapterOpening;
     private string _placementCaption = string.Empty;
     private PublishExportFormat _exportFormat = PublishExportFormat.Epub;
@@ -368,7 +413,7 @@ else
     {
         if (Project is null || _loadedProjectId == Project.Id) return;
         _loadedProjectId = Project.Id;
-        await ReloadAsync();
+        await ReloadAsync(resetProfile: true);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -377,14 +422,16 @@ else
             _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownloads.js");
     }
 
-    private async Task ReloadAsync()
+    private async Task ReloadAsync(bool resetProfile)
     {
         if (Project is null) return;
         _loading = true;
         try
         {
             _workspace = await Publishing.GetWorkspaceAsync(Project.Id);
-            _profile = ProfileDraft.From(_workspace.Profile);
+            if (resetProfile)
+                _profile = ProfileDraft.From(_workspace.Profile);
+            PruneAssetSelections();
             if (string.IsNullOrEmpty(_placementAssetId) && _workspace.Assets.Count > 0)
                 _placementAssetId = _workspace.Assets[0].Id.ToString();
         }
@@ -404,7 +451,7 @@ else
         {
             await Publishing.SaveProfileAsync(Project.Id, _profile.ToUpdate());
             _profileStatus = "Book details saved.";
-            await ReloadAsync();
+            await ReloadAsync(resetProfile: true);
         }
         catch (Exception ex)
         {
@@ -424,7 +471,7 @@ else
         {
             var included = e.Value is bool value && value;
             await Publishing.SetOutlineSelectionAsync(Project.Id, kind, targetId, included);
-            await ReloadAsync();
+            await ReloadAsync(resetProfile: false);
         }
         catch (Exception ex)
         {
@@ -446,7 +493,7 @@ else
             await Publishing.UploadAssetAsync(Project.Id, new PublishAssetUpload(file.Name, file.ContentType, memory.ToArray(), _uploadAltText));
             _uploadAltText = string.Empty;
             _assetStatus = "Asset uploaded.";
-            await ReloadAsync();
+            await ReloadAsync(resetProfile: false);
         }
         catch (Exception ex)
         {
@@ -468,9 +515,10 @@ else
                 _imageQuality,
                 _imageFormat,
                 _imageFormat == "jpeg" ? _imageCompression : null,
-                _generatedAltText));
+                _generatedAltText,
+                _selectedReferenceAssetIds.ToList()));
             _assetStatus = "Image generated.";
-            await ReloadAsync();
+            await ReloadAsync(resetProfile: false);
         }
         catch (Exception ex)
         {
@@ -489,7 +537,7 @@ else
         try
         {
             await Publishing.SetCoverAssetAsync(Project.Id, assetId);
-            await ReloadAsync();
+            await ReloadAsync(resetProfile: false);
         }
         catch (Exception ex)
         {
@@ -504,7 +552,7 @@ else
         try
         {
             await Publishing.DeleteAssetAsync(Project.Id, assetId);
-            await ReloadAsync();
+            await ReloadAsync(resetProfile: false);
         }
         catch (Exception ex)
         {
@@ -523,7 +571,7 @@ else
             var (targetKind, targetId) = ParseTargetKey(_placementTargetKey);
             await Publishing.AddImagePlacementAsync(Project.Id, new PublishImagePlacementCreate(assetId, targetKind, targetId, _placementKind, _placementCaption));
             _placementCaption = string.Empty;
-            await ReloadAsync();
+            await ReloadAsync(resetProfile: false);
         }
         catch (Exception ex)
         {
@@ -538,7 +586,7 @@ else
         try
         {
             await Publishing.DeleteImagePlacementAsync(Project.Id, placementId);
-            await ReloadAsync();
+            await ReloadAsync(resetProfile: false);
         }
         catch (Exception ex)
         {
@@ -589,6 +637,52 @@ else
 
     private static string AssetAlt(PublishAssetView asset) =>
         string.IsNullOrWhiteSpace(asset.AltText) ? asset.FileName : asset.AltText;
+
+    private void OpenAssetModal(PublishAssetView asset) => _selectedAsset = asset;
+
+    private void CloseAssetModal() => _selectedAsset = null;
+
+    private async Task DownloadAssetAsync(PublishAssetView asset)
+    {
+        if (_downloadModule is null) return;
+        await _downloadModule.InvokeVoidAsync("downloadBytes", asset.FileName, asset.ContentType, AssetBase64(asset));
+    }
+
+    private bool IsReferenceSelected(Guid assetId) => _selectedReferenceAssetIds.Contains(assetId);
+
+    private void SetReferenceSelection(Guid assetId, ChangeEventArgs e)
+    {
+        var selected = e.Value is bool value && value;
+        if (selected)
+        {
+            if (!_selectedReferenceAssetIds.Contains(assetId) && _selectedReferenceAssetIds.Count < MaxReferenceAssets)
+                _selectedReferenceAssetIds.Add(assetId);
+            return;
+        }
+
+        _selectedReferenceAssetIds.Remove(assetId);
+    }
+
+    private void PruneAssetSelections()
+    {
+        if (_workspace is null) return;
+        var assetIds = _workspace.Assets.Select(asset => asset.Id).ToHashSet();
+        _selectedReferenceAssetIds = _selectedReferenceAssetIds.Where(assetIds.Contains).ToList();
+        if (!string.IsNullOrEmpty(_placementAssetId)
+            && (!Guid.TryParse(_placementAssetId, out var placementAssetId) || !assetIds.Contains(placementAssetId)))
+        {
+            _placementAssetId = _workspace.Assets.FirstOrDefault()?.Id.ToString() ?? string.Empty;
+        }
+
+        if (_selectedAsset is not null)
+            _selectedAsset = _workspace.Assets.FirstOrDefault(asset => asset.Id == _selectedAsset.Id);
+    }
+
+    private static string AssetBase64(PublishAssetView asset)
+    {
+        var comma = asset.PreviewDataUrl.IndexOf(',', StringComparison.Ordinal);
+        return comma < 0 ? asset.PreviewDataUrl : asset.PreviewDataUrl[(comma + 1)..];
+    }
 
     public async ValueTask DisposeAsync()
     {

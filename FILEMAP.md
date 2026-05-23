@@ -107,7 +107,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Full Publish tab workspace for saved book metadata, outline act/chapter inclusion, TOC/headings/synopsis options, cover/interior image assets, Codex image generation, TXT/Markdown/EPUB downloads, and Print/PDF preview. |
+| `PublishContent.razor` (+ `.razor.css`) | Full Publish tab workspace for saved book metadata, outline act/chapter inclusion, TOC/headings/synopsis options, cover/interior image assets, fullscreen asset preview/download, reference-image Codex generation, TXT/Markdown/EPUB downloads, and Print/PDF preview. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -344,9 +344,9 @@
 | File | Description |
 |------|-------------|
 | `PublishModels.cs` | Publish UI/document/export records for profiles, section/chapter selections, assets, image placements, and resolved document projections. |
-| `IPublishService.cs` / `PublishService.cs` | Publish facade for profile persistence, outline selection, asset upload/delete, Codex image generation, image placement, document projection, and TXT/Markdown/EPUB export. |
+| `IPublishService.cs` / `PublishService.cs` | Publish facade for profile persistence, outline selection, asset upload/delete, Codex image generation with optional reference assets, image placement, document projection, and TXT/Markdown/EPUB export. |
 | `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | Publish formatter abstraction plus TXT, Markdown, and dependency-free EPUB implementations with metadata, TOC, cover/interior images where supported. |
-| `ICodexImageGenerationService.cs` / `CodexImageGenerationService.cs` | Codex OAuth image generation client for `gpt-image-2` through the Codex Responses bridge; parses streamed image-generation output and returns PNG/JPEG bytes. |
+| `ICodexImageGenerationService.cs` / `CodexImageGenerationService.cs` | Codex OAuth image generation client for `gpt-image-2` through the Codex Responses bridge; sends optional reference image inputs, parses streamed image-generation output, and returns PNG/JPEG bytes. |
 
 ### Graph/
 

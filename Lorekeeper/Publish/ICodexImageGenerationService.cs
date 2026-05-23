@@ -10,7 +10,13 @@ public sealed record CodexImageGenerationOptions(
     string Size,
     string Quality,
     string OutputFormat,
-    int? OutputCompression);
+    int? OutputCompression,
+    IReadOnlyList<CodexImageReference> ReferenceImages);
+
+public sealed record CodexImageReference(
+    string FileName,
+    string ContentType,
+    byte[] Data);
 
 public sealed record CodexGeneratedImage(
     byte[] Data,

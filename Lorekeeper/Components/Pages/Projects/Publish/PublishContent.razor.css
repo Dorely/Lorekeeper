@@ -110,19 +110,53 @@
     align-items: flex-start;
     border: 1px solid #d8dee9;
     border-radius: 6px;
-    display: flex;
+    display: grid;
     gap: 0.5rem;
-    justify-content: space-between;
     padding: 0.55rem;
+}
+
+.publish-asset-row {
+    grid-template-columns: 4rem minmax(0, 1fr) auto;
+}
+
+.publish-placement-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.publish-asset-preview-button {
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+    flex: 0 0 4rem;
+    height: 4rem;
+    padding: 0;
+}
+
+.publish-asset-preview-button:focus-visible {
+    outline: 2px solid #4f78ff;
+    outline-offset: 2px;
 }
 
 .publish-asset-preview {
     aspect-ratio: 1;
     border: 1px solid #d8dee9;
     border-radius: 6px;
-    flex: 0 0 4rem;
+    display: block;
     height: 4rem;
     object-fit: cover;
+    width: 4rem;
+}
+
+.publish-asset-info,
+.publish-placement-row > div {
+    min-width: 0;
+}
+
+.publish-asset-info strong,
+.publish-placement-row strong {
+    display: block;
+    overflow-wrap: anywhere;
 }
 
 .publish-asset-row span,
@@ -137,6 +171,84 @@
     flex-wrap: wrap;
     gap: 0.35rem;
     justify-content: flex-end;
+    max-width: 7rem;
+}
+
+.publish-asset-actions .btn {
+    white-space: nowrap;
+}
+
+.publish-reference-list {
+    border: 1px solid #d8dee9;
+    border-radius: 6px;
+    display: grid;
+    gap: 0.35rem;
+    margin-top: 0.65rem;
+    padding: 0.55rem;
+}
+
+.publish-reference-title {
+    color: #566276;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.publish-reference-row {
+    align-items: center;
+    display: grid;
+    gap: 0.45rem;
+    grid-template-columns: auto 2.25rem minmax(0, 1fr);
+    margin: 0;
+}
+
+.publish-reference-row img {
+    aspect-ratio: 1;
+    border: 1px solid #d8dee9;
+    border-radius: 4px;
+    height: 2.25rem;
+    object-fit: cover;
+    width: 2.25rem;
+}
+
+.publish-reference-row span {
+    font-size: 0.82rem;
+    overflow-wrap: anywhere;
+}
+
+.publish-asset-modal .modal-content {
+    min-height: 100vh;
+}
+
+.publish-modal-title {
+    min-width: 0;
+}
+
+.publish-modal-title h5 {
+    overflow-wrap: anywhere;
+}
+
+.publish-modal-title span {
+    color: #667085;
+    display: block;
+    font-size: 0.85rem;
+}
+
+.publish-asset-modal-body {
+    align-items: center;
+    background: #111827;
+    display: flex;
+    justify-content: center;
+    min-height: 0;
+    overflow: auto;
+}
+
+.publish-asset-modal-body img {
+    display: block;
+    max-height: calc(100vh - 9rem);
+    max-width: 100%;
+    object-fit: contain;
 }
 
 @media (max-width: 980px) {

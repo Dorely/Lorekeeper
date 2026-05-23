@@ -159,6 +159,23 @@ public sealed class CodexImageGenerationService(
     private static Dictionary<string, object?> BuildPayload(CodexImageGenerationOptions options, string mainlineModel)
     {
         var outputFormat = NormalizeOutputFormat(options.OutputFormat);
+        var content = new List<Dictionary<string, object?>>
+        {
+            new()
+            {
+                ["type"] = "input_text",
+                ["text"] = options.Prompt,
+            },
+        };
+        foreach (var reference in options.ReferenceImages)
+        {
+            content.Add(new Dictionary<string, object?>
+            {
+                ["type"] = "input_image",
+                ["image_url"] = $"data:{reference.ContentType};base64,{Convert.ToBase64String(reference.Data)}",
+            });
+        }
+
         var tool = new Dictionary<string, object?>
         {
             ["type"] = "image_generation",
@@ -181,14 +198,7 @@ public sealed class CodexImageGenerationService(
                 new Dictionary<string, object?>
                 {
                     ["role"] = "user",
-                    ["content"] = new[]
-                    {
-                        new Dictionary<string, object?>
-                        {
-                            ["type"] = "input_text",
-                            ["text"] = options.Prompt,
-                        }
-                    }
+                    ["content"] = content,
                 }
             },
             ["tools"] = new[] { tool },
