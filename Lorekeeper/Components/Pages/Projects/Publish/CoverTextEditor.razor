@@ -1,0 +1,356 @@
+@using System.Globalization
+@using Lorekeeper.Publish
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="cover-text-editor">
+    @if (CoverAsset is null)
+    {
+        <p class="cover-text-empty text-muted small">Set an image as the cover before editing cover text.</p>
+    }
+    else if (_layout is not null)
+    {
+        <div class="cover-text-stage" @ref="_stageElement">
+            <img src="@CoverAsset.PreviewDataUrl" alt="@CoverAltText" />
+            @foreach (var layer in _layout.Layers)
+            {
+                var text = LayerText(layer.Kind);
+                if (!layer.IsVisible || string.IsNullOrWhiteSpace(text)) continue;
+
+                <button type="button"
+                        class="cover-text-layer @(layer.Kind == _selectedKind ? "selected" : null)"
+                        style="@LayerStyle(layer)"
+                        data-cover-layer="@layer.Kind"
+                        title="@LayerLabel(layer.Kind)"
+                        @onclick="() => SelectLayer(layer.Kind)">
+                    @text
+                </button>
+            }
+        </div>
+
+        <div class="cover-text-toolbar">
+            <div class="cover-layer-tabs" role="tablist" aria-label="Cover text layers">
+                @foreach (var layer in _layout.Layers)
+                {
+                    <button type="button"
+                            class="cover-layer-tab @(layer.Kind == _selectedKind ? "active" : null)"
+                            @onclick="() => SelectLayer(layer.Kind)">
+                        @LayerLabel(layer.Kind)
+                    </button>
+                }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(SaveStatus))
+            {
+                <span class="@SaveStatusClass">@SaveStatus</span>
+            }
+        </div>
+
+        <div class="cover-preset-row">
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ApplyPresetAsync(14, 70)">Top</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ApplyPresetAsync(28, 78)">Upper</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ApplyPresetAsync(50, 76)">Center</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ApplyPresetAsync(70, 70)">Lower</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ApplyPresetAsync(86, 68)">Bottom</button>
+        </div>
+
+        <div class="cover-control-grid">
+            <label class="form-check cover-visible-toggle">
+                <input class="form-check-input" type="checkbox" checked="@SelectedLayer.IsVisible" @onchange="SetSelectedVisibleAsync" />
+                <span class="form-check-label">Visible</span>
+            </label>
+            <label>
+                <span>Font</span>
+                <select class="form-select form-select-sm" @bind:get="SelectedLayer.FontFamily" @bind:set="SetSelectedFontFamilyAsync">
+                    <option value="@PublishCoverFontFamily.Serif">Serif</option>
+                    <option value="@PublishCoverFontFamily.Sans">Sans</option>
+                    <option value="@PublishCoverFontFamily.Display">Display</option>
+                    <option value="@PublishCoverFontFamily.Monospace">Mono</option>
+                </select>
+            </label>
+            <label>
+                <span>Align</span>
+                <select class="form-select form-select-sm" @bind:get="SelectedLayer.TextAlign" @bind:set="SetSelectedTextAlignAsync">
+                    <option value="@PublishCoverTextAlign.Left">Left</option>
+                    <option value="@PublishCoverTextAlign.Center">Center</option>
+                    <option value="@PublishCoverTextAlign.Right">Right</option>
+                </select>
+            </label>
+            <label>
+                <span>Shadow</span>
+                <select class="form-select form-select-sm" @bind:get="SelectedLayer.Shadow" @bind:set="SetSelectedShadowAsync">
+                    <option value="@PublishCoverShadow.None">None</option>
+                    <option value="@PublishCoverShadow.Soft">Soft</option>
+                    <option value="@PublishCoverShadow.Strong">Strong</option>
+                    <option value="@PublishCoverShadow.Glow">Glow</option>
+                </select>
+            </label>
+            <label>
+                <span>Size</span>
+                <input class="form-range" type="range" min="2" max="16" step="0.1" @bind:get="SelectedLayer.FontSizePercent" @bind:set="SetSelectedFontSizeAsync" @bind:event="oninput" />
+            </label>
+            <label>
+                <span>Width</span>
+                <input class="form-range" type="range" min="20" max="100" step="1" @bind:get="SelectedLayer.WidthPercent" @bind:set="SetSelectedWidthAsync" @bind:event="oninput" />
+            </label>
+            <label>
+                <span>Opacity</span>
+                <input class="form-range" type="range" min="0.1" max="1" step="0.05" @bind:get="SelectedLayer.Opacity" @bind:set="SetSelectedOpacityAsync" @bind:event="oninput" />
+            </label>
+            <label>
+                <span>Color</span>
+                <input class="form-control form-control-color form-control-sm" type="color" value="@SelectedLayer.Color" @oninput="SetSelectedColorAsync" />
+            </label>
+            <label class="form-check cover-style-toggle">
+                <input class="form-check-input" type="checkbox" checked="@SelectedLayer.IsBold" @onchange="SetSelectedBoldAsync" />
+                <span class="form-check-label">Bold</span>
+            </label>
+            <label class="form-check cover-style-toggle">
+                <input class="form-check-input" type="checkbox" checked="@SelectedLayer.IsItalic" @onchange="SetSelectedItalicAsync" />
+                <span class="form-check-label">Italic</span>
+            </label>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public PublishAssetView? CoverAsset { get; set; }
+    [Parameter] public PublishCoverLayoutView? Layout { get; set; }
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Subtitle { get; set; } = string.Empty;
+    [Parameter] public string Author { get; set; } = string.Empty;
+    [Parameter] public string SaveStatus { get; set; } = string.Empty;
+    [Parameter] public string SaveStatusClass { get; set; } = "small text-muted";
+    [Parameter] public EventCallback<PublishCoverLayoutView> LayoutChanged { get; set; }
+
+    private ElementReference _stageElement;
+    private PublishCoverLayoutView? _layout;
+    private PublishCoverLayoutView? _incomingLayout;
+    private PublishCoverLayerKind _selectedKind = PublishCoverLayerKind.Title;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<CoverTextEditor>? _selfReference;
+    private bool _dragAttached;
+    private Guid? _attachedCoverAssetId;
+
+    private string CoverAltText => CoverAsset is null || string.IsNullOrWhiteSpace(CoverAsset.AltText)
+        ? "Cover image"
+        : CoverAsset.AltText;
+
+    private PublishCoverLayerView SelectedLayer =>
+        _layout?.Layers.FirstOrDefault(layer => layer.Kind == _selectedKind)
+        ?? _layout?.Layers.FirstOrDefault()
+        ?? new PublishCoverLayerView(
+            PublishCoverLayerKind.Title,
+            IsVisible: true,
+            XPercent: 50,
+            YPercent: 28,
+            WidthPercent: 78,
+            FontSizePercent: 7.2,
+            PublishCoverFontFamily.Serif,
+            PublishCoverTextAlign.Center,
+            "#FFFFFF",
+            Opacity: 1,
+            IsBold: true,
+            IsItalic: false,
+            PublishCoverShadow.Strong);
+
+    protected override void OnParametersSet()
+    {
+        if (CoverAsset is null)
+        {
+            _dragAttached = false;
+            _attachedCoverAssetId = null;
+        }
+
+        if (Layout is not null && !ReferenceEquals(Layout, _incomingLayout))
+        {
+            _incomingLayout = Layout;
+            _layout = CloneLayout(Layout);
+            if (!_layout.Layers.Any(layer => layer.Kind == _selectedKind))
+                _selectedKind = _layout.Layers.FirstOrDefault()?.Kind ?? PublishCoverLayerKind.Title;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>(
+                "import",
+                "./Components/Pages/Projects/Publish/CoverTextEditor.razor.js");
+            _selfReference = DotNetObjectReference.Create(this);
+        }
+
+        if (CoverAsset is not null
+            && _module is not null
+            && _selfReference is not null
+            && (!_dragAttached || _attachedCoverAssetId != CoverAsset.Id))
+        {
+            await _module.InvokeVoidAsync("attachCoverTextDrag", _stageElement, _selfReference);
+            _dragAttached = true;
+            _attachedCoverAssetId = CoverAsset.Id;
+        }
+    }
+
+    [JSInvokable]
+    public async Task MoveCoverLayerAsync(string kind, double xPercent, double yPercent)
+    {
+        if (!Enum.TryParse<PublishCoverLayerKind>(kind, out var parsedKind))
+            return;
+
+        _selectedKind = parsedKind;
+        await UpdateLayerAsync(parsedKind, layer => layer with
+        {
+            XPercent = Clamp(xPercent, 0, 100),
+            YPercent = Clamp(yPercent, 0, 100),
+        });
+    }
+
+    private void SelectLayer(PublishCoverLayerKind kind) => _selectedKind = kind;
+
+    private Task ApplyPresetAsync(double yPercent, double widthPercent) =>
+        UpdateSelectedLayerAsync(layer => layer with
+        {
+            XPercent = 50,
+            YPercent = yPercent,
+            WidthPercent = widthPercent,
+            TextAlign = PublishCoverTextAlign.Center,
+        });
+
+    private Task SetSelectedVisibleAsync(ChangeEventArgs args) =>
+        UpdateSelectedLayerAsync(layer => layer with { IsVisible = args.Value is bool value && value });
+
+    private Task SetSelectedFontFamilyAsync(PublishCoverFontFamily value) =>
+        UpdateSelectedLayerAsync(layer => layer with { FontFamily = value });
+
+    private Task SetSelectedTextAlignAsync(PublishCoverTextAlign value) =>
+        UpdateSelectedLayerAsync(layer => layer with { TextAlign = value });
+
+    private Task SetSelectedShadowAsync(PublishCoverShadow value) =>
+        UpdateSelectedLayerAsync(layer => layer with { Shadow = value });
+
+    private Task SetSelectedFontSizeAsync(double value) =>
+        UpdateSelectedLayerAsync(layer => layer with { FontSizePercent = Clamp(value, 2, 16) });
+
+    private Task SetSelectedWidthAsync(double value) =>
+        UpdateSelectedLayerAsync(layer => layer with { WidthPercent = Clamp(value, 20, 100) });
+
+    private Task SetSelectedOpacityAsync(double value) =>
+        UpdateSelectedLayerAsync(layer => layer with { Opacity = Clamp(value, 0.1, 1) });
+
+    private Task SetSelectedColorAsync(ChangeEventArgs args) =>
+        UpdateSelectedLayerAsync(layer => layer with { Color = CleanColor(args.Value?.ToString(), layer.Color) });
+
+    private Task SetSelectedBoldAsync(ChangeEventArgs args) =>
+        UpdateSelectedLayerAsync(layer => layer with { IsBold = args.Value is bool value && value });
+
+    private Task SetSelectedItalicAsync(ChangeEventArgs args) =>
+        UpdateSelectedLayerAsync(layer => layer with { IsItalic = args.Value is bool value && value });
+
+    private Task UpdateSelectedLayerAsync(Func<PublishCoverLayerView, PublishCoverLayerView> update) =>
+        UpdateLayerAsync(_selectedKind, update);
+
+    private async Task UpdateLayerAsync(PublishCoverLayerKind kind, Func<PublishCoverLayerView, PublishCoverLayerView> update)
+    {
+        if (_layout is null) return;
+
+        var layers = _layout.Layers
+            .Select(layer => layer.Kind == kind ? update(layer) : layer)
+            .ToList();
+        _layout = _layout with { Layers = layers };
+        _incomingLayout = _layout;
+        await LayoutChanged.InvokeAsync(_layout);
+    }
+
+    private string LayerText(PublishCoverLayerKind kind) =>
+        kind switch
+        {
+            PublishCoverLayerKind.Title => string.IsNullOrWhiteSpace(Title) ? "Untitled" : Title.Trim(),
+            PublishCoverLayerKind.Subtitle => Subtitle.Trim(),
+            PublishCoverLayerKind.Author => Author.Trim(),
+            _ => string.Empty,
+        };
+
+    private static string LayerLabel(PublishCoverLayerKind kind) =>
+        kind switch
+        {
+            PublishCoverLayerKind.Title => "Title",
+            PublishCoverLayerKind.Subtitle => "Subtitle",
+            PublishCoverLayerKind.Author => "Author",
+            _ => kind.ToString(),
+        };
+
+    private static string LayerStyle(PublishCoverLayerView layer) =>
+        string.Join("; ", new[]
+        {
+            $"left: {Format(layer.XPercent)}%",
+            $"top: {Format(layer.YPercent)}%",
+            $"width: {Format(layer.WidthPercent)}%",
+            $"font-size: {Format(layer.FontSizePercent * 6)}px",
+            $"font-size: clamp(12px, {Format(layer.FontSizePercent)}cqw, 112px)",
+            $"font-family: {FontFamilyCss(layer.FontFamily)}",
+            $"text-align: {TextAlignCss(layer.TextAlign)}",
+            $"color: {CleanColor(layer.Color, "#FFFFFF")}",
+            $"opacity: {Format(layer.Opacity)}",
+            $"font-weight: {(layer.IsBold ? "700" : "400")}",
+            $"font-style: {(layer.IsItalic ? "italic" : "normal")}",
+            $"text-shadow: {ShadowCss(layer.Shadow)}",
+        });
+
+    private static PublishCoverLayoutView CloneLayout(PublishCoverLayoutView layout) =>
+        new(layout.Layers.Select(layer => layer with { }).ToList());
+
+    private static double Clamp(double value, double min, double max) =>
+        double.IsNaN(value) || double.IsInfinity(value)
+            ? min
+            : Math.Min(max, Math.Max(min, value));
+
+    private static string CleanColor(string? value, string fallback)
+    {
+        var trimmed = value?.Trim() ?? string.Empty;
+        return trimmed.Length == 7
+            && trimmed[0] == '#'
+            && trimmed.Skip(1).All(Uri.IsHexDigit)
+            ? trimmed.ToUpperInvariant()
+            : fallback;
+    }
+
+    private static string FontFamilyCss(PublishCoverFontFamily fontFamily) =>
+        fontFamily switch
+        {
+            PublishCoverFontFamily.Sans => "Arial, Helvetica, sans-serif",
+            PublishCoverFontFamily.Display => "\"Trebuchet MS\", \"Gill Sans\", Arial, sans-serif",
+            PublishCoverFontFamily.Monospace => "\"Courier New\", monospace",
+            _ => "Georgia, \"Times New Roman\", serif",
+        };
+
+    private static string TextAlignCss(PublishCoverTextAlign textAlign) =>
+        textAlign switch
+        {
+            PublishCoverTextAlign.Left => "left",
+            PublishCoverTextAlign.Right => "right",
+            _ => "center",
+        };
+
+    private static string ShadowCss(PublishCoverShadow shadow) =>
+        shadow switch
+        {
+            PublishCoverShadow.None => "none",
+            PublishCoverShadow.Strong => "0 3px 10px rgba(0,0,0,.72), 0 1px 2px rgba(0,0,0,.9)",
+            PublishCoverShadow.Glow => "0 0 8px rgba(255,255,255,.78), 0 2px 8px rgba(0,0,0,.55)",
+            _ => "0 2px 6px rgba(0,0,0,.58)",
+        };
+
+    private static string Format(double value) =>
+        value.ToString("0.###", CultureInfo.InvariantCulture);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try { await _module.InvokeVoidAsync("detachCoverTextDrag", _stageElement); } catch { }
+            try { await _module.DisposeAsync(); } catch { }
+        }
+
+        _selfReference?.Dispose();
+    }
+}

@@ -2,6 +2,7 @@
 @using Lorekeeper.Publish
 @implements IAsyncDisposable
 @inject IPublishService Publishing
+@inject NavigationManager Nav
 @inject IJSRuntime JS
 
 @if (Project is null)
@@ -26,97 +27,96 @@ else
                 {
                     <div class="alert alert-danger py-2 small">@_profileError</div>
                 }
-                @if (!string.IsNullOrWhiteSpace(_profileStatus))
-                {
-                    <div class="alert alert-success py-2 small">@_profileStatus</div>
-                }
 
                 <div class="publish-form-grid">
                     <label>
                         <span>Title</span>
-                        <input class="form-control form-control-sm" @bind="_profile.TitleOverride" @bind:event="oninput" />
+                        <input class="form-control form-control-sm" @bind="_profile.TitleOverride" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
                     </label>
                     <label>
                         <span>Subtitle</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Subtitle" @bind:event="oninput" />
+                        <input class="form-control form-control-sm" @bind="_profile.Subtitle" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
                     </label>
                     <label>
                         <span>Author</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Author" @bind:event="oninput" />
+                        <input class="form-control form-control-sm" @bind="_profile.Author" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
                     </label>
                     <label>
                         <span>Language</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Language" @bind:event="oninput" />
+                        <input class="form-control form-control-sm" @bind="_profile.Language" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
                     </label>
                     <label>
                         <span>Publisher</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Publisher" @bind:event="oninput" />
+                        <input class="form-control form-control-sm" @bind="_profile.Publisher" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
                     </label>
                     <label>
                         <span>ISBN</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Isbn" @bind:event="oninput" />
+                        <input class="form-control form-control-sm" @bind="_profile.Isbn" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
                     </label>
                 </div>
 
                 <label class="publish-full">
                     <span>Copyright</span>
-                    <input class="form-control form-control-sm" @bind="_profile.Copyright" @bind:event="oninput" />
+                    <input class="form-control form-control-sm" @bind="_profile.Copyright" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
                 </label>
                 <label class="publish-full">
                     <span>Description</span>
-                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Description" @bind:event="oninput"></textarea>
+                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Description" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
                 </label>
                 <label class="publish-full">
                     <span>Dedication</span>
-                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Dedication" @bind:event="oninput"></textarea>
+                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Dedication" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
                 </label>
                 <label class="publish-full">
                     <span>Acknowledgments</span>
-                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Acknowledgments" @bind:event="oninput"></textarea>
+                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Acknowledgments" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
                 </label>
                 <label class="publish-full">
                     <span>References</span>
-                    <textarea class="form-control form-control-sm" rows="4" @bind="_profile.References" @bind:event="oninput"></textarea>
+                    <textarea class="form-control form-control-sm" rows="4" @bind="_profile.References" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
                 </label>
 
                 <div class="publish-check-grid">
                     <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeTableOfContents" />
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeTableOfContents" @bind:after="ScheduleProfileAutosave" />
                         <span class="form-check-label">Table of contents</span>
                     </label>
                     <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeVisibleTableOfContents" />
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeVisibleTableOfContents" @bind:after="ScheduleProfileAutosave" />
                         <span class="form-check-label">Visible EPUB/print TOC page</span>
                     </label>
                     <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeActSynopses" />
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeActSynopses" @bind:after="ScheduleProfileAutosave" />
                         <span class="form-check-label">Act synopses</span>
                     </label>
                     <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeChapterSynopses" />
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeChapterSynopses" @bind:after="ScheduleProfileAutosave" />
                         <span class="form-check-label">Chapter synopses</span>
                     </label>
                     <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeActHeadings" />
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeActHeadings" @bind:after="ScheduleProfileAutosave" />
                         <span class="form-check-label">Act headings</span>
                     </label>
                     <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeChapterHeadings" />
+                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeChapterHeadings" @bind:after="ScheduleProfileAutosave" />
                         <span class="form-check-label">Chapter headings</span>
                     </label>
                     <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.NumberActs" />
+                        <input class="form-check-input" type="checkbox" @bind="_profile.NumberActs" @bind:after="ScheduleProfileAutosave" />
                         <span class="form-check-label">Number acts</span>
                     </label>
                     <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.NumberChapters" />
+                        <input class="form-check-input" type="checkbox" @bind="_profile.NumberChapters" @bind:after="ScheduleProfileAutosave" />
                         <span class="form-check-label">Number chapters</span>
                     </label>
                 </div>
 
-                <button type="button" class="btn btn-sm btn-primary" disabled="@_savingProfile" @onclick="SaveProfileAsync">
-                    @(_savingProfile ? "Saving..." : "Save book details")
-                </button>
+                <div class="d-flex align-items-center flex-wrap gap-2">
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@ProfileSaveInProgress" @onclick="SaveProfileAsync">
+                        @(ProfileSaveInProgress ? "Saving..." : "Save now")
+                    </button>
+                    <span class="@ProfileSaveStatusClass">@ProfileSaveStatusText()</span>
+                </div>
             </div>
 
             <div class="publish-card">
@@ -171,7 +171,23 @@ else
                         @(_exporting ? "Exporting..." : "Download")
                     </button>
                 </div>
-                <a class="btn btn-sm btn-outline-secondary publish-print-link" href="@PrintUrl" target="_blank" rel="noopener">Print / PDF</a>
+                <a class="btn btn-sm btn-outline-secondary publish-print-link" href="@PrintUrl" target="_blank" rel="noopener" @onclick="FlushAllSavesAsync">Print / PDF</a>
+            </div>
+
+            <div class="publish-card">
+                <div class="publish-card-title">Cover Text</div>
+                @if (!string.IsNullOrWhiteSpace(_coverLayoutError))
+                {
+                    <div class="alert alert-danger py-2 small">@_coverLayoutError</div>
+                }
+                <CoverTextEditor CoverAsset="SelectedCoverAsset"
+                                 Layout="CurrentCoverLayout"
+                                 Title="@CoverTitleText"
+                                 Subtitle="@_profile.Subtitle"
+                                 Author="@_profile.Author"
+                                 SaveStatus="@CoverLayoutSaveStatusText()"
+                                 SaveStatusClass="@CoverLayoutSaveStatusClass"
+                                 LayoutChanged="OnCoverLayoutChangedAsync" />
             </div>
 
             <div class="publish-card">
@@ -374,17 +390,21 @@ else
 
     private const long MaxAssetBytes = 15L * 1024 * 1024;
     private const int MaxReferenceAssets = 4;
+    private static readonly TimeSpan ProfileAutosaveDelay = TimeSpan.FromMilliseconds(900);
+    private static readonly TimeSpan CoverLayoutAutosaveDelay = TimeSpan.FromMilliseconds(500);
 
+    private readonly SemaphoreSlim _profileSaveGate = new(1, 1);
+    private readonly SemaphoreSlim _coverLayoutSaveGate = new(1, 1);
     private PublishWorkspaceView? _workspace;
     private ProfileDraft _profile = new();
+    private PublishCoverLayoutView? _coverLayout;
     private PublishAssetView? _selectedAsset;
     private Guid? _loadedProjectId;
     private bool _loading;
-    private bool _savingProfile;
     private bool _exporting;
     private bool _generatingImage;
     private string? _profileError;
-    private string? _profileStatus;
+    private string? _coverLayoutError;
     private string? _outlineError;
     private string? _assetError;
     private string? _assetStatus;
@@ -404,14 +424,82 @@ else
     private string _placementCaption = string.Empty;
     private PublishExportFormat _exportFormat = PublishExportFormat.Epub;
     private IJSObjectReference? _downloadModule;
+    private CancellationTokenSource? _profileAutosaveCts;
+    private CancellationTokenSource? _coverLayoutAutosaveCts;
+    private IDisposable? _navHandlerRegistration;
+    private long _profileDraftVersion;
+    private long _profileSavedVersion;
+    private long _coverLayoutDraftVersion;
+    private long _coverLayoutSavedVersion;
+    private ProfileSaveState _profileSaveState = ProfileSaveState.Idle;
+    private CoverLayoutSaveState _coverLayoutSaveState = CoverLayoutSaveState.Idle;
+    private DateTime? _profileLastSavedAt;
+    private DateTime? _coverLayoutLastSavedAt;
+    private bool _disposing;
+
+    private bool ProfileSaveInProgress => _profileSaveState == ProfileSaveState.Saving;
+
+    private string ProfileSaveStatusClass => _profileSaveState switch
+    {
+        ProfileSaveState.Dirty => "small text-warning",
+        ProfileSaveState.Saved => "small text-success",
+        ProfileSaveState.SaveFailed => "small text-danger",
+        _ => "small text-muted",
+    };
+
+    private string CoverLayoutSaveStatusClass => _coverLayoutSaveState switch
+    {
+        CoverLayoutSaveState.Dirty => "small text-warning",
+        CoverLayoutSaveState.Saved => "small text-success",
+        CoverLayoutSaveState.SaveFailed => "small text-danger",
+        _ => "small text-muted",
+    };
 
     private string PrintUrl => Project is null
         ? "#"
         : $"/projects/{Uri.EscapeDataString(Project.Slug)}/manuscript/print?autoprint=true";
 
+    private PublishCoverLayoutView? CurrentCoverLayout => _coverLayout ?? _workspace?.Profile.CoverLayout;
+
+    private PublishAssetView? SelectedCoverAsset =>
+        _workspace?.Profile.SelectedCoverAssetId is Guid coverId
+            ? _workspace.Assets.FirstOrDefault(asset => asset.Id == coverId)
+            : null;
+
+    private string CoverTitleText =>
+        string.IsNullOrWhiteSpace(_profile.TitleOverride)
+            ? _workspace?.Profile.ProjectName ?? string.Empty
+            : _profile.TitleOverride;
+
+    private string ProfileSaveStatusText() => _profileSaveState switch
+    {
+        ProfileSaveState.Dirty => "Unsaved changes",
+        ProfileSaveState.Saving => "Saving...",
+        ProfileSaveState.Saved when _profileLastSavedAt is { } savedAt => $"Saved {savedAt:HH:mm:ss}",
+        ProfileSaveState.SaveFailed when !string.IsNullOrWhiteSpace(_profileError) => $"Save failed: {_profileError}",
+        ProfileSaveState.SaveFailed => "Save failed",
+        _ => string.Empty,
+    };
+
+    private string CoverLayoutSaveStatusText() => _coverLayoutSaveState switch
+    {
+        CoverLayoutSaveState.Dirty => "Unsaved changes",
+        CoverLayoutSaveState.Saving => "Saving...",
+        CoverLayoutSaveState.Saved when _coverLayoutLastSavedAt is { } savedAt => $"Saved {savedAt:HH:mm:ss}",
+        CoverLayoutSaveState.SaveFailed when !string.IsNullOrWhiteSpace(_coverLayoutError) => $"Save failed: {_coverLayoutError}",
+        CoverLayoutSaveState.SaveFailed => "Save failed",
+        _ => string.Empty,
+    };
+
     protected override async Task OnParametersSetAsync()
     {
         if (Project is null || _loadedProjectId == Project.Id) return;
+        if (_loadedProjectId is not null)
+        {
+            await FlushProfileSaveAsync();
+            await FlushCoverLayoutSaveAsync();
+        }
+
         _loadedProjectId = Project.Id;
         await ReloadAsync(resetProfile: true);
     }
@@ -419,18 +507,39 @@ else
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
+        {
+            _navHandlerRegistration = Nav.RegisterLocationChangingHandler(OnLocationChangingAsync);
             _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownloads.js");
+        }
     }
 
     private async Task ReloadAsync(bool resetProfile)
     {
         if (Project is null) return;
+        if (!resetProfile)
+            await FlushCoverLayoutSaveAsync();
+
         _loading = true;
         try
         {
             _workspace = await Publishing.GetWorkspaceAsync(Project.Id);
+            CancelCoverLayoutAutosave();
+            _coverLayout = _workspace.Profile.CoverLayout;
+            _coverLayoutDraftVersion = 0;
+            _coverLayoutSavedVersion = 0;
+            _coverLayoutSaveState = CoverLayoutSaveState.Idle;
+            _coverLayoutLastSavedAt = null;
+            _coverLayoutError = null;
             if (resetProfile)
+            {
+                CancelProfileAutosave();
                 _profile = ProfileDraft.From(_workspace.Profile);
+                _profileDraftVersion = 0;
+                _profileSavedVersion = 0;
+                _profileSaveState = ProfileSaveState.Idle;
+                _profileLastSavedAt = null;
+                _profileError = null;
+            }
             PruneAssetSelections();
             if (string.IsNullOrEmpty(_placementAssetId) && _workspace.Assets.Count > 0)
                 _placementAssetId = _workspace.Assets[0].Id.ToString();
@@ -443,24 +552,191 @@ else
 
     private async Task SaveProfileAsync()
     {
-        if (Project is null) return;
-        _savingProfile = true;
+        await FlushProfileSaveAsync();
+    }
+
+    private void ScheduleProfileAutosave()
+    {
+        if (_loadedProjectId is null && Project is null) return;
+
+        _profileDraftVersion++;
         _profileError = null;
-        _profileStatus = null;
+        _profileSaveState = ProfileSaveState.Dirty;
+        CancelProfileAutosave();
+
+        _profileAutosaveCts = new CancellationTokenSource();
+        _ = DebouncedProfileSaveAsync(_profileAutosaveCts.Token);
+    }
+
+    private async Task DebouncedProfileSaveAsync(CancellationToken cancellationToken)
+    {
         try
         {
-            await Publishing.SaveProfileAsync(Project.Id, _profile.ToUpdate());
-            _profileStatus = "Book details saved.";
-            await ReloadAsync(resetProfile: true);
+            await Task.Delay(ProfileAutosaveDelay, cancellationToken);
+            if (_disposing) return;
+
+            await InvokeAsync(SaveProfileCoreAsync);
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+    }
+
+    private async Task FlushProfileSaveAsync()
+    {
+        CancelProfileAutosave();
+        await SaveProfileCoreAsync();
+    }
+
+    private async Task SaveProfileCoreAsync()
+    {
+        var projectId = _loadedProjectId ?? Project?.Id;
+        if (projectId is not Guid targetProjectId) return;
+
+        await _profileSaveGate.WaitAsync();
+        try
+        {
+            while (_profileSavedVersion != _profileDraftVersion)
+            {
+                var versionToSave = _profileDraftVersion;
+                var update = _profile.ToUpdate();
+                _profileError = null;
+                _profileSaveState = ProfileSaveState.Saving;
+                await NotifyProfileSaveStateChangedAsync();
+
+                await Publishing.SaveProfileAsync(targetProjectId, update);
+                _profileSavedVersion = versionToSave;
+                _profileLastSavedAt = DateTime.Now;
+                _profileSaveState = _profileSavedVersion == _profileDraftVersion
+                    ? ProfileSaveState.Saved
+                    : ProfileSaveState.Dirty;
+            }
         }
         catch (Exception ex)
         {
             _profileError = ex.Message;
+            _profileSaveState = ProfileSaveState.SaveFailed;
         }
         finally
         {
-            _savingProfile = false;
+            _profileSaveGate.Release();
+            await NotifyProfileSaveStateChangedAsync();
         }
+    }
+
+    private async ValueTask OnLocationChangingAsync(LocationChangingContext context)
+    {
+        await FlushProfileSaveAsync();
+        await FlushCoverLayoutSaveAsync();
+        if ((_profileSaveState == ProfileSaveState.SaveFailed && _profileSavedVersion != _profileDraftVersion)
+            || (_coverLayoutSaveState == CoverLayoutSaveState.SaveFailed && _coverLayoutSavedVersion != _coverLayoutDraftVersion))
+        {
+            context.PreventNavigation();
+        }
+    }
+
+    private async Task NotifyProfileSaveStateChangedAsync()
+    {
+        if (_disposing) return;
+
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException) { }
+    }
+
+    private void CancelProfileAutosave()
+    {
+        var cts = _profileAutosaveCts;
+        if (cts is null) return;
+
+        _profileAutosaveCts = null;
+        cts.Cancel();
+        cts.Dispose();
+    }
+
+    private Task OnCoverLayoutChangedAsync(PublishCoverLayoutView layout)
+    {
+        _coverLayout = layout;
+        _coverLayoutDraftVersion++;
+        _coverLayoutError = null;
+        _coverLayoutSaveState = CoverLayoutSaveState.Dirty;
+        CancelCoverLayoutAutosave();
+
+        _coverLayoutAutosaveCts = new CancellationTokenSource();
+        _ = DebouncedCoverLayoutSaveAsync(_coverLayoutAutosaveCts.Token);
+        return Task.CompletedTask;
+    }
+
+    private async Task DebouncedCoverLayoutSaveAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(CoverLayoutAutosaveDelay, cancellationToken);
+            if (_disposing) return;
+
+            await InvokeAsync(SaveCoverLayoutCoreAsync);
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+    }
+
+    private async Task FlushCoverLayoutSaveAsync()
+    {
+        CancelCoverLayoutAutosave();
+        await SaveCoverLayoutCoreAsync();
+    }
+
+    private async Task SaveCoverLayoutCoreAsync()
+    {
+        var projectId = _loadedProjectId ?? Project?.Id;
+        if (projectId is not Guid targetProjectId || _coverLayout is null) return;
+
+        await _coverLayoutSaveGate.WaitAsync();
+        try
+        {
+            while (_coverLayoutSavedVersion != _coverLayoutDraftVersion)
+            {
+                var versionToSave = _coverLayoutDraftVersion;
+                var layout = _coverLayout;
+                _coverLayoutError = null;
+                _coverLayoutSaveState = CoverLayoutSaveState.Saving;
+                await NotifyProfileSaveStateChangedAsync();
+
+                await Publishing.SaveCoverLayoutAsync(targetProjectId, layout);
+                _coverLayoutSavedVersion = versionToSave;
+                _coverLayoutLastSavedAt = DateTime.Now;
+                _coverLayoutSaveState = _coverLayoutSavedVersion == _coverLayoutDraftVersion
+                    ? CoverLayoutSaveState.Saved
+                    : CoverLayoutSaveState.Dirty;
+            }
+        }
+        catch (Exception ex)
+        {
+            _coverLayoutError = ex.Message;
+            _coverLayoutSaveState = CoverLayoutSaveState.SaveFailed;
+        }
+        finally
+        {
+            _coverLayoutSaveGate.Release();
+            await NotifyProfileSaveStateChangedAsync();
+        }
+    }
+
+    private void CancelCoverLayoutAutosave()
+    {
+        var cts = _coverLayoutAutosaveCts;
+        if (cts is null) return;
+
+        _coverLayoutAutosaveCts = null;
+        cts.Cancel();
+        cts.Dispose();
+    }
+
+    private async Task FlushAllSavesAsync()
+    {
+        await FlushProfileSaveAsync();
+        await FlushCoverLayoutSaveAsync();
     }
 
     private async Task SetOutlineSelectionAsync(PublishOutlineTargetKind kind, Guid targetId, ChangeEventArgs e)
@@ -601,6 +877,8 @@ else
         _exportError = null;
         try
         {
+            await FlushProfileSaveAsync();
+            await FlushCoverLayoutSaveAsync();
             var file = await Publishing.ExportAsync(Project.Id, _exportFormat);
             await _downloadModule.InvokeVoidAsync("downloadBytes", file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
         }
@@ -686,11 +964,19 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        _disposing = true;
+        _navHandlerRegistration?.Dispose();
+        try { await FlushProfileSaveAsync(); } catch { }
+        try { await FlushCoverLayoutSaveAsync(); } catch { }
+
         if (_downloadModule is not null)
         {
             try { await _downloadModule.DisposeAsync(); } catch (JSDisconnectedException) { }
         }
     }
+
+    private enum ProfileSaveState { Idle, Dirty, Saving, Saved, SaveFailed }
+    private enum CoverLayoutSaveState { Idle, Dirty, Saving, Saved, SaveFailed }
 
     private sealed class ProfileDraft
     {

@@ -7,6 +7,7 @@ public interface IPublishService
 {
     Task<PublishWorkspaceView> GetWorkspaceAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task SaveProfileAsync(Guid projectId, PublishProfileUpdate update, CancellationToken cancellationToken = default);
+    Task SaveCoverLayoutAsync(Guid projectId, PublishCoverLayoutView layout, CancellationToken cancellationToken = default);
     Task SetCoverAssetAsync(Guid projectId, Guid? assetId, CancellationToken cancellationToken = default);
     Task SetOutlineSelectionAsync(Guid projectId, PublishOutlineTargetKind targetKind, Guid targetId, bool isIncluded, CancellationToken cancellationToken = default);
     Task<PublishAssetView> UploadAssetAsync(Guid projectId, PublishAssetUpload upload, CancellationToken cancellationToken = default);

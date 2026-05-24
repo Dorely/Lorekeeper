@@ -40,7 +40,8 @@ public sealed record PublishProfileView(
     bool IncludeChapterHeadings,
     bool NumberActs,
     bool NumberChapters,
-    Guid? SelectedCoverAssetId);
+    Guid? SelectedCoverAssetId,
+    PublishCoverLayoutView CoverLayout);
 
 public sealed record PublishProfileUpdate(
     string TitleOverride,
@@ -62,6 +63,58 @@ public sealed record PublishProfileUpdate(
     bool IncludeChapterHeadings,
     bool NumberActs,
     bool NumberChapters);
+
+public sealed record PublishCoverLayoutView(
+    IReadOnlyList<PublishCoverLayerView> Layers);
+
+public sealed record PublishCoverLayerView(
+    PublishCoverLayerKind Kind,
+    bool IsVisible,
+    double XPercent,
+    double YPercent,
+    double WidthPercent,
+    double FontSizePercent,
+    PublishCoverFontFamily FontFamily,
+    PublishCoverTextAlign TextAlign,
+    string Color,
+    double Opacity,
+    bool IsBold,
+    bool IsItalic,
+    PublishCoverShadow Shadow);
+
+[JsonConverter(typeof(JsonStringEnumConverter<PublishCoverLayerKind>))]
+public enum PublishCoverLayerKind
+{
+    Title,
+    Subtitle,
+    Author,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PublishCoverFontFamily>))]
+public enum PublishCoverFontFamily
+{
+    Serif,
+    Sans,
+    Display,
+    Monospace,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PublishCoverTextAlign>))]
+public enum PublishCoverTextAlign
+{
+    Left,
+    Center,
+    Right,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PublishCoverShadow>))]
+public enum PublishCoverShadow
+{
+    None,
+    Soft,
+    Strong,
+    Glow,
+}
 
 public sealed record PublishSectionView(
     Guid? ActId,
@@ -127,6 +180,8 @@ public sealed record PublishDocument(
     DateTime ExportedAtUtc,
     PublishDocumentProfile Profile,
     PublishAssetDocument? CoverAsset,
+    PublishAssetDocument? RenderedCoverAsset,
+    PublishCoverLayoutView CoverLayout,
     IReadOnlyList<PublishSectionDocument> Sections,
     IReadOnlyList<PublishImagePlacementDocument> Placements)
 {

@@ -133,6 +133,7 @@ builder.Services.AddScoped<IPublishExportFormatter, PlainTextPublishFormatter>()
 builder.Services.AddScoped<IPublishExportFormatter, MarkdownPublishFormatter>();
 builder.Services.AddScoped<IPublishExportFormatter, EpubPublishFormatter>();
 builder.Services.AddScoped<ICodexImageGenerationService, CodexImageGenerationService>();
+builder.Services.AddScoped<IPublishCoverRenderer, SkiaPublishCoverRenderer>();
 builder.Services.AddScoped<IPublishService, PublishService>();
 
 // Context + editor chat

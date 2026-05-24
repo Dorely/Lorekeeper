@@ -134,8 +134,9 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
     public byte[] Render(PublishDocument document)
     {
         var sb = new StringBuilder();
-        if (document.CoverAsset is not null)
-            AppendImage(sb, document.CoverAsset, "Cover");
+        var cover = document.RenderedCoverAsset ?? document.CoverAsset;
+        if (cover is not null)
+            AppendImage(sb, cover, "Cover");
 
         sb.Append("# ").AppendLine(EscapeHeading(document.DisplayTitle));
         if (!string.IsNullOrWhiteSpace(document.Profile.Subtitle))
@@ -273,6 +274,7 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
 
     private static string EscapeInline(string value) =>
         value.Replace("[", "\\[", StringComparison.Ordinal).Replace("]", "\\]", StringComparison.Ordinal).Trim();
+
 }
 
 public sealed class EpubPublishFormatter : IPublishExportFormatter
@@ -308,10 +310,10 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     private static List<EpubXhtmlItem> BuildXhtmlItems(PublishDocument document, IReadOnlyList<EpubImageItem> imageItems)
     {
         var items = new List<EpubXhtmlItem>();
-        if (document.CoverAsset is not null && ImageHref(imageItems, document.CoverAsset.Id) is string coverHref)
+        if (CoverImageHref(imageItems) is string coverHref)
         {
             items.Add(new EpubXhtmlItem("cover-page", "cover.xhtml", "Cover", RenderXhtmlPage(document, "Cover",
-                $"<section class=\"cover-page\"><img alt=\"{Html(document.CoverAsset.AltText)}\" src=\"{coverHref}\" /></section>")));
+                RenderCoverBody(document, coverHref))));
         }
 
         items.Add(new EpubXhtmlItem("title", "title.xhtml", document.DisplayTitle, RenderXhtmlPage(document, document.DisplayTitle, RenderTitleBody(document))));
@@ -324,7 +326,6 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         foreach (var section in document.Sections)
         {
             actIndex++;
-            var actPlacements = Placements(document, PublishOutlineTargetKind.Act, section.ActId);
             if (section.IncludePage)
             {
                 var actId = section.IsUnassigned ? "section-unassigned" : $"act-{actIndex.ToString(CultureInfo.InvariantCulture)}";
@@ -354,15 +355,18 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
 
     private static List<EpubImageItem> BuildImageItems(PublishDocument document)
     {
+        var items = new List<EpubImageItem>();
+        var cover = document.RenderedCoverAsset ?? document.CoverAsset;
+        if (cover is not null)
+            items.Add(new EpubImageItem("cover-image", $"images/cover.{ImageExtension(cover.ContentType)}", cover, IsCover: true));
+
         var assets = new Dictionary<Guid, PublishAssetDocument>();
-        if (document.CoverAsset is not null)
-            assets[document.CoverAsset.Id] = document.CoverAsset;
         foreach (var placement in document.Placements)
             assets[placement.Asset.Id] = placement.Asset;
 
-        return assets.Values
-            .Select(asset => new EpubImageItem($"img-{asset.Id:N}", $"images/{asset.Id:N}.{ImageExtension(asset.ContentType)}", asset))
-            .ToList();
+        items.AddRange(assets.Values
+            .Select(asset => new EpubImageItem($"img-{asset.Id:N}", $"images/{asset.Id:N}.{ImageExtension(asset.ContentType)}", asset, IsCover: false)));
+        return items;
     }
 
     private static void AddMatter(List<EpubXhtmlItem> items, PublishDocument document, string id, string title, string text)
@@ -388,6 +392,19 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             AppendTextBlocks(sb, document.Profile.Description, "prose");
             sb.AppendLine("</section>");
         }
+        return sb.ToString();
+    }
+
+    private static string RenderCoverBody(PublishDocument document, string coverHref)
+    {
+        var cover = document.RenderedCoverAsset ?? document.CoverAsset;
+        if (cover is null) return string.Empty;
+
+        var alt = string.IsNullOrWhiteSpace(cover.AltText) ? "Cover" : cover.AltText;
+        var sb = new StringBuilder();
+        sb.AppendLine("<section class=\"cover-page\">");
+        sb.Append("<img alt=\"").Append(Html(alt)).Append("\" src=\"").Append(coverHref).AppendLine("\" />");
+        sb.AppendLine("</section>");
         return sb.ToString();
     }
 
@@ -514,8 +531,8 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             sb.Append("    <dc:rights>").Append(Html(document.Profile.Copyright)).AppendLine("</dc:rights>");
         sb.Append("    <dc:language>").Append(Html(Language(document))).AppendLine("</dc:language>");
         sb.Append("    <meta property=\"dcterms:modified\">").Append(modified).AppendLine("</meta>");
-        if (document.CoverAsset is not null)
-            sb.Append("    <meta name=\"cover\" content=\"").Append(ImageId(imageItems, document.CoverAsset.Id)).AppendLine("\" />");
+        if (CoverImageId(imageItems) is string coverImageId)
+            sb.Append("    <meta name=\"cover\" content=\"").Append(coverImageId).AppendLine("\" />");
         sb.AppendLine("  </metadata>");
         sb.AppendLine("  <manifest>");
         sb.AppendLine("""    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav" />""");
@@ -524,7 +541,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         {
             sb.Append("    <item id=\"").Append(image.Id).Append("\" href=\"").Append(image.Href)
                 .Append("\" media-type=\"").Append(image.Asset.ContentType).Append("\"");
-            if (document.CoverAsset?.Id == image.Asset.Id)
+            if (image.IsCover)
                 sb.Append(" properties=\"cover-image\"");
             sb.AppendLine(" />");
         }
@@ -701,10 +718,13 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     }
 
     private static string? ImageHref(IReadOnlyList<EpubImageItem> images, Guid assetId) =>
-        images.FirstOrDefault(image => image.Asset.Id == assetId)?.Href;
+        images.FirstOrDefault(image => !image.IsCover && image.Asset.Id == assetId)?.Href;
 
-    private static string? ImageId(IReadOnlyList<EpubImageItem> images, Guid assetId) =>
-        images.FirstOrDefault(image => image.Asset.Id == assetId)?.Id;
+    private static string? CoverImageHref(IReadOnlyList<EpubImageItem> images) =>
+        images.FirstOrDefault(image => image.IsCover)?.Href;
+
+    private static string? CoverImageId(IReadOnlyList<EpubImageItem> images) =>
+        images.FirstOrDefault(image => image.IsCover)?.Id;
 
     private static string ImageExtension(string contentType) =>
         contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ? "jpg" : "png";
@@ -715,5 +735,5 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     private static string Html(string value) => WebUtility.HtmlEncode(value);
 
     private sealed record EpubXhtmlItem(string Id, string Href, string Title, string Content);
-    private sealed record EpubImageItem(string Id, string Href, PublishAssetDocument Asset);
+    private sealed record EpubImageItem(string Id, string Href, PublishAssetDocument Asset, bool IsCover);
 }

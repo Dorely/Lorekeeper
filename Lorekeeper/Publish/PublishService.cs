@@ -9,8 +9,16 @@ namespace Lorekeeper.Publish;
 public sealed class PublishService(
     AppDbContext db,
     ICodexImageGenerationService codexImages,
+    IPublishCoverRenderer coverRenderer,
     IEnumerable<IPublishExportFormatter> formatters) : IPublishService
 {
+    private static readonly PublishCoverLayerKind[] CoverLayerOrder =
+    [
+        PublishCoverLayerKind.Title,
+        PublishCoverLayerKind.Subtitle,
+        PublishCoverLayerKind.Author,
+    ];
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -63,6 +71,15 @@ public sealed class PublishService(
         profile.IncludeChapterHeadings = update.IncludeChapterHeadings;
         profile.NumberActs = update.NumberActs;
         profile.NumberChapters = update.NumberChapters;
+        Touch(profile, project);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SaveCoverLayoutAsync(Guid projectId, PublishCoverLayoutView layout, CancellationToken cancellationToken = default)
+    {
+        var project = await GetProjectAsync(projectId, cancellationToken);
+        var profile = await EnsureProfileAsync(project, cancellationToken);
+        profile.CoverLayoutJson = JsonSerializer.Serialize(NormalizeCoverLayout(layout), JsonOptions);
         Touch(profile, project);
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -347,17 +364,32 @@ public sealed class PublishService(
                 placement.SortOrder))
             .ToList();
 
+        var profileDocument = ProfileDocument(profile);
+        var coverLayout = ReadCoverLayout(profile);
         var cover = profile.SelectedCoverAssetId is Guid coverId && assets.TryGetValue(coverId, out var coverAsset)
             ? AssetDocument(coverAsset)
             : null;
+        var displayTitle = string.IsNullOrWhiteSpace(profileDocument.TitleOverride)
+            ? project.Name
+            : profileDocument.TitleOverride.Trim();
+        var renderedCover = cover is null
+            ? null
+            : coverRenderer.Render(
+                cover,
+                coverLayout,
+                displayTitle,
+                profileDocument.Subtitle,
+                profileDocument.Author);
 
         return new PublishDocument(
             project.Id,
             project.Name,
             project.Slug,
             DateTime.UtcNow,
-            ProfileDocument(profile),
+            profileDocument,
             cover,
+            renderedCover,
+            coverLayout,
             sections,
             placementDocuments);
     }
@@ -406,7 +438,8 @@ public sealed class PublishService(
             profile.IncludeChapterHeadings,
             profile.NumberActs,
             profile.NumberChapters,
-            profile.SelectedCoverAssetId);
+            profile.SelectedCoverAssetId,
+            ReadCoverLayout(profile));
 
     private static PublishDocumentProfile ProfileDocument(PublishProfile profile) =>
         new(
@@ -513,6 +546,122 @@ public sealed class PublishService(
 
     private static PublishAssetDocument AssetDocument(PublishAsset asset) =>
         new(asset.Id, asset.FileName, asset.ContentType, asset.Data, asset.AltText);
+
+    private static PublishCoverLayoutView ReadCoverLayout(PublishProfile profile)
+    {
+        if (string.IsNullOrWhiteSpace(profile.CoverLayoutJson))
+            return DefaultCoverLayout();
+
+        try
+        {
+            return NormalizeCoverLayout(JsonSerializer.Deserialize<PublishCoverLayoutView>(profile.CoverLayoutJson, JsonOptions));
+        }
+        catch (JsonException)
+        {
+            return DefaultCoverLayout();
+        }
+    }
+
+    private static PublishCoverLayoutView NormalizeCoverLayout(PublishCoverLayoutView? layout)
+    {
+        var byKind = (layout?.Layers ?? [])
+            .GroupBy(layer => layer.Kind)
+            .ToDictionary(group => group.Key, group => group.Last());
+
+        return new PublishCoverLayoutView(CoverLayerOrder
+            .Select(kind => NormalizeCoverLayer(kind, byKind.TryGetValue(kind, out var layer) ? layer : null))
+            .ToList());
+    }
+
+    private static PublishCoverLayerView NormalizeCoverLayer(PublishCoverLayerKind kind, PublishCoverLayerView? layer)
+    {
+        var fallback = DefaultCoverLayer(kind);
+        if (layer is null || layer.Kind != kind)
+            return fallback;
+
+        return layer with
+        {
+            Kind = kind,
+            XPercent = Clamp(layer.XPercent, 0, 100, fallback.XPercent),
+            YPercent = Clamp(layer.YPercent, 0, 100, fallback.YPercent),
+            WidthPercent = Clamp(layer.WidthPercent, 20, 100, fallback.WidthPercent),
+            FontSizePercent = Clamp(layer.FontSizePercent, 2, 16, fallback.FontSizePercent),
+            FontFamily = Enum.IsDefined(layer.FontFamily) ? layer.FontFamily : fallback.FontFamily,
+            TextAlign = Enum.IsDefined(layer.TextAlign) ? layer.TextAlign : fallback.TextAlign,
+            Color = CleanColor(layer.Color, fallback.Color),
+            Opacity = Clamp(layer.Opacity, 0.1, 1, fallback.Opacity),
+            Shadow = Enum.IsDefined(layer.Shadow) ? layer.Shadow : fallback.Shadow,
+        };
+    }
+
+    private static PublishCoverLayoutView DefaultCoverLayout() =>
+        new(CoverLayerOrder.Select(DefaultCoverLayer).ToList());
+
+    private static PublishCoverLayerView DefaultCoverLayer(PublishCoverLayerKind kind) =>
+        kind switch
+        {
+            PublishCoverLayerKind.Title => new(
+                kind,
+                IsVisible: true,
+                XPercent: 50,
+                YPercent: 28,
+                WidthPercent: 78,
+                FontSizePercent: 7.2,
+                FontFamily: PublishCoverFontFamily.Serif,
+                TextAlign: PublishCoverTextAlign.Center,
+                Color: "#FFFFFF",
+                Opacity: 1,
+                IsBold: true,
+                IsItalic: false,
+                Shadow: PublishCoverShadow.Strong),
+            PublishCoverLayerKind.Subtitle => new(
+                kind,
+                IsVisible: true,
+                XPercent: 50,
+                YPercent: 39,
+                WidthPercent: 70,
+                FontSizePercent: 3.6,
+                FontFamily: PublishCoverFontFamily.Serif,
+                TextAlign: PublishCoverTextAlign.Center,
+                Color: "#FFFFFF",
+                Opacity: 0.95,
+                IsBold: false,
+                IsItalic: false,
+                Shadow: PublishCoverShadow.Soft),
+            PublishCoverLayerKind.Author => new(
+                kind,
+                IsVisible: true,
+                XPercent: 50,
+                YPercent: 74,
+                WidthPercent: 64,
+                FontSizePercent: 3.2,
+                FontFamily: PublishCoverFontFamily.Sans,
+                TextAlign: PublishCoverTextAlign.Center,
+                Color: "#FFFFFF",
+                Opacity: 0.95,
+                IsBold: true,
+                IsItalic: false,
+                Shadow: PublishCoverShadow.Soft),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+        };
+
+    private static double Clamp(double value, double min, double max, double fallback) =>
+        double.IsNaN(value) || double.IsInfinity(value)
+            ? fallback
+            : Math.Min(max, Math.Max(min, value));
+
+    private static string CleanColor(string? value, string fallback)
+    {
+        var trimmed = value?.Trim() ?? string.Empty;
+        if (trimmed.Length == 7
+            && trimmed[0] == '#'
+            && trimmed.Skip(1).All(Uri.IsHexDigit))
+        {
+            return trimmed.ToUpperInvariant();
+        }
+
+        return fallback;
+    }
 
     private static bool IsIncluded(IReadOnlyList<PublishOutlineSelection> selections, PublishOutlineTargetKind kind, Guid targetId) =>
         selections.FirstOrDefault(selection => selection.TargetKind == kind && selection.TargetId == targetId)?.IsIncluded ?? true;

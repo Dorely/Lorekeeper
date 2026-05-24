@@ -18,6 +18,7 @@ public class PublishProfile
     public string Dedication { get; set; } = string.Empty;
     public string Acknowledgments { get; set; } = string.Empty;
     public string References { get; set; } = string.Empty;
+    public string CoverLayoutJson { get; set; } = string.Empty;
 
     public bool IncludeTableOfContents { get; set; } = true;
     public bool IncludeVisibleTableOfContents { get; set; } = true;

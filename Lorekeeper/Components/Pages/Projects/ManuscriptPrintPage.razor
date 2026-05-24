@@ -35,10 +35,10 @@ else if (_document is not null)
     </div>
 
     <article class="manuscript-print">
-        @if (_document.CoverAsset is not null)
+        @if ((_document.RenderedCoverAsset ?? _document.CoverAsset) is { } cover)
         {
             <section class="manuscript-cover-page">
-                <img src="@ImageDataUrl(_document.CoverAsset)" alt="@_document.CoverAsset.AltText" />
+                <img src="@ImageDataUrl(cover)" alt="@cover.AltText" />
             </section>
         }
 
