@@ -51,8 +51,9 @@ public sealed class OutlineCollaborationTools(
     public OutlineToolStagingContext CreateStagingContext(
         Guid projectId,
         Guid conversationId,
-        AiChangeConversationKind conversationKind = AiChangeConversationKind.Outline) =>
-        new(projectId, conversationId, conversationKind, changes, projectRepository, acts, chapters, entities, entityTypes);
+        AiChangeConversationKind conversationKind = AiChangeConversationKind.Outline,
+        Action? onDirectMutationApplied = null) =>
+        new(projectId, conversationId, conversationKind, changes, projectRepository, acts, chapters, entities, entityTypes, onDirectMutationApplied);
 
     public IList<AITool> Build(OutlineCollaborationContext context)
     {

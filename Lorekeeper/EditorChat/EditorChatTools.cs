@@ -857,13 +857,15 @@ public sealed class EditorChatTools(
 
         var result = BuildEditChapterResult(summary, newBody, affectedStartLine, affectedEndLine, anchorLine, anchorDescription);
 
-        if (ctx.ReviewEdits && ctx.EditorStaging is not null)
+        if (ctx.ReviewEdits && ctx.EditorStaging is not null && !ctx.ShouldBypassReviewForChapterBody(chapter))
         {
             await ctx.EditorStaging.StageChapterBodyEditAsync(chapter, existingBody, newBody, summary, result);
             return result;
         }
 
         await chapters.UpdateAsync(chapterId, body: newBody);
+        if (ctx.ReviewEdits)
+            ctx.MarkChapterBodyDirectlyEdited(chapterId);
         ctx.OnMutated();
         return result;
     }

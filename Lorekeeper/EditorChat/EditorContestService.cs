@@ -280,6 +280,15 @@ public sealed class EditorContestService(
         if (!string.Equals(chapter.Body, batch.OriginalChapterBody, StringComparison.Ordinal))
             throw new InvalidOperationException("The chapter changed after this contest started. Start a new contest before staging a candidate.");
 
+        if (string.IsNullOrWhiteSpace(batch.OriginalChapterBody))
+        {
+            await chapters.UpdateAsync(chapter.Id, body: candidate.ProposedBody, cancellationToken: cancellationToken);
+            MarkSelectedCandidate(batch, candidate);
+            contests.UpdateBatch(batch);
+            await contests.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
         var changeBatch = new AiChangeBatch
         {
             ProjectId = batch.ProjectId,
@@ -312,9 +321,16 @@ public sealed class EditorContestService(
             ReferencedResourceIdsJson = JsonSerializer.Serialize(new[] { $"Chapter:{chapter.Id:N}" }, JsonSerializerOptions.Default),
         }, cancellationToken);
 
+        MarkSelectedCandidate(batch, candidate);
+        contests.UpdateBatch(batch);
+        await changes.SaveChangesAsync(cancellationToken);
+    }
+
+    private void MarkSelectedCandidate(ContestBatch batch, ContestCandidate selected)
+    {
         foreach (var batchCandidate in batch.Candidates)
         {
-            batchCandidate.Status = batchCandidate.Id == candidate.Id
+            batchCandidate.Status = batchCandidate.Id == selected.Id
                 ? ContestCandidateStatus.Selected
                 : batchCandidate.Status == ContestCandidateStatus.Completed
                     ? ContestCandidateStatus.Rejected
@@ -325,8 +341,6 @@ public sealed class EditorContestService(
 
         batch.Status = ContestBatchStatus.Staged;
         batch.UpdatedAt = DateTime.UtcNow;
-        contests.UpdateBatch(batch);
-        await changes.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<IReadOnlyList<ContestCandidateProvider>> ResolveContestProvidersAsync(Project project, CancellationToken cancellationToken)

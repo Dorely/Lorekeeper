@@ -42,7 +42,7 @@
     <ExtraControls>
         <div class="editor-chat-controls">
             <div class="editor-chat-controls-row">
-                <label class="editor-chat-approval" title="Queue AI tool edits for review before applying them">
+                <label class="editor-chat-approval" title="Queue AI changes to existing data for review before applying them">
                     <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
                            disabled="@_running" @onchange="OnApprovalChangedAsync" />
                     <span>Review edits</span>
@@ -77,7 +77,7 @@
                     Batches="@_contestBatches"
                     IsOpen="@_showContestReview"
                     Title="Contest Review"
-                    Subtitle="Compare candidate chapter edits from the current contest turn, then stage one for normal change review."
+                    Subtitle="Compare candidate chapter edits from the current contest turn, then apply or stage one."
                     EmptyText="No current contest candidates yet."
                     OnClose="CloseContestReview"
                     OnChanged="HandleContestChangedAsync" />
@@ -545,6 +545,10 @@
         await LoadContestBatchesAsync(openIfAvailable: false);
         await LoadPendingChangesAsync(openIfPending: true);
         _showContestReview = false;
+        if (OnAiChangesApplied.HasDelegate)
+            await OnAiChangesApplied.InvokeAsync();
+        await RefreshSystemPromptAsync();
+        UpdateConversationTokenCount();
         StateHasChanged();
     }
 

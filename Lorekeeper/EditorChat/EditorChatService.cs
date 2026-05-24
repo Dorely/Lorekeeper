@@ -173,7 +173,11 @@ public sealed class EditorChatService(
             EditorChatChangeStagingContext? editorStaging = null;
             if (project.AiChangeApprovalEnabled)
             {
-                outlineStaging = outlineTools.CreateStagingContext(projectId, conversation.Id, AiChangeConversationKind.Editor);
+                outlineStaging = outlineTools.CreateStagingContext(
+                    projectId,
+                    conversation.Id,
+                    AiChangeConversationKind.Editor,
+                    OnToolMutated);
                 editorStaging = new EditorChatChangeStagingContext(projectId, conversation.Id, changes);
             }
 

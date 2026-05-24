@@ -15,7 +15,8 @@ public sealed class OutlineToolStagingContext(
     IActService acts,
     IChapterService chapters,
     IEntityService entities,
-    IEntityTypeService entityTypes)
+    IEntityTypeService entityTypes,
+    Action? onDirectMutationApplied = null)
 {
     private const string _eventNodeType = "Event";
 
@@ -32,6 +33,7 @@ public sealed class OutlineToolStagingContext(
     private readonly Dictionary<Guid, EntityState> _entities = [];
     private readonly Dictionary<string, EntityTypeDefinition> _entityTypes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Guid> _createdResourceProducers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _directlyCreatedResources = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<LinkState> _links = [];
     private readonly List<AiChange> _newChanges = [];
 
@@ -217,22 +219,13 @@ public sealed class OutlineToolStagingContext(
         await EnsureLoadedAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(title)) return "Error: title is required.";
 
-        var nextOrder = _acts.Values.Where(act => !act.Deleted).Select(act => act.Order).DefaultIfEmpty(-1).Max() + 1;
-        var act = new ActState(Guid.NewGuid(), nextOrder, title.Trim(), synopsis?.Trim() ?? string.Empty, Deleted: false);
+        var created = await acts.CreateAsync(ProjectId, title.Trim(), synopsis?.Trim(), cancellationToken: cancellationToken);
+        var act = new ActState(created.Id, created.Order, created.Title, created.Synopsis, Deleted: false);
         _acts[act.Id] = act;
+        MarkDirectlyCreated(Resource("Act", act.Id));
+        onDirectMutationApplied?.Invoke();
 
-        var after = act.ToChange();
         var result = Serialize(new { id = act.Id, order = act.Order, title = act.Title, synopsis = act.Synopsis });
-        await StageChangeAsync(
-            summary: $"Create act '{act.Title}'",
-            before: null,
-            after: after,
-            resultJson: result,
-            resourceKind: "Act",
-            resourceId: Resource("Act", act.Id),
-            createdResources: [Resource("Act", act.Id)],
-            referencedResources: [],
-            cancellationToken);
         return result;
     }
 
@@ -240,6 +233,14 @@ public sealed class OutlineToolStagingContext(
     {
         await EnsureLoadedAsync(cancellationToken);
         if (!TryGetAct(actId, out var act)) return $"Error: act {actId} not found in this project.";
+
+        if (IsDirectlyCreated(Resource("Act", actId)))
+        {
+            var updated = await acts.UpdateAsync(actId, title?.Trim(), synopsis?.Trim(), cancellationToken);
+            _acts[updated.Id] = new ActState(updated.Id, updated.Order, updated.Title, updated.Synopsis, Deleted: false);
+            onDirectMutationApplied?.Invoke();
+            return Serialize(new { id = updated.Id, title = updated.Title, synopsis = updated.Synopsis });
+        }
 
         var before = act.ToChange();
         if (title is not null) act.Title = title.Trim();
@@ -263,6 +264,19 @@ public sealed class OutlineToolStagingContext(
     {
         await EnsureLoadedAsync(cancellationToken);
         if (!TryGetAct(actId, out var act)) return $"Error: act {actId} not found in this project.";
+
+        if (IsDirectlyCreated(Resource("Act", actId)))
+        {
+            await acts.DeleteAsync(actId, cancellationToken);
+            act.Deleted = true;
+            foreach (var chapter in _chapters.Values.Where(chapter => !chapter.Deleted && chapter.ActId == actId))
+            {
+                chapter.ActId = null;
+                chapter.Order = NextChapterOrder(null);
+            }
+            onDirectMutationApplied?.Invoke();
+            return $"Deleted act {actId}. Owned chapters were moved to the unassigned bucket.";
+        }
 
         var before = act.ToChange();
         act.Deleted = true;
@@ -292,21 +306,13 @@ public sealed class OutlineToolStagingContext(
         if (string.IsNullOrWhiteSpace(title)) return "Error: title is required.";
         if (actId is not null && !TryGetAct(actId.Value, out _)) return $"Error: act {actId} not found in this project.";
 
-        var chapter = new ChapterState(Guid.NewGuid(), actId, NextChapterOrder(actId), title.Trim(), synopsis?.Trim() ?? string.Empty, Deleted: false);
+        var created = await chapters.CreateAsync(ProjectId, actId, title.Trim(), synopsis?.Trim(), cancellationToken: cancellationToken);
+        var chapter = new ChapterState(created.Id, created.ActId, created.Order, created.Title, created.Synopsis, Deleted: false);
         _chapters[chapter.Id] = chapter;
+        MarkDirectlyCreated(Resource("Chapter", chapter.Id));
+        onDirectMutationApplied?.Invoke();
 
-        var after = chapter.ToChange();
         var result = Serialize(new { id = chapter.Id, order = chapter.Order, actId = chapter.ActId, title = chapter.Title, synopsis = chapter.Synopsis });
-        await StageChangeAsync(
-            summary: $"Create chapter '{chapter.Title}'",
-            before: null,
-            after: after,
-            resultJson: result,
-            resourceKind: "Chapter",
-            resourceId: Resource("Chapter", chapter.Id),
-            createdResources: [Resource("Chapter", chapter.Id)],
-            referencedResources: actId is null ? [] : [Resource("Act", actId.Value)],
-            cancellationToken);
         return result;
     }
 
@@ -315,6 +321,15 @@ public sealed class OutlineToolStagingContext(
         await EnsureLoadedAsync(cancellationToken);
         if (!TryGetChapter(chapterId, out var chapter)) return $"Error: chapter {chapterId} not found in this project.";
         if (moveChapter && newActId is not null && !TryGetAct(newActId.Value, out _)) return $"Error: act {newActId} not found in this project.";
+
+        if (IsDirectlyCreated(Resource("Chapter", chapterId)))
+        {
+            var assignment = moveChapter ? new ChapterActAssignment(newActId) : (ChapterActAssignment?)null;
+            var updated = await chapters.UpdateAsync(chapterId, title?.Trim(), body: null, synopsis?.Trim(), assignment, cancellationToken);
+            _chapters[updated.Id] = new ChapterState(updated.Id, updated.ActId, updated.Order, updated.Title, updated.Synopsis, Deleted: false);
+            onDirectMutationApplied?.Invoke();
+            return Serialize(new { id = updated.Id, actId = updated.ActId, order = updated.Order, title = updated.Title, synopsis = updated.Synopsis });
+        }
 
         var before = chapter.ToChange();
         if (title is not null) chapter.Title = title.Trim();
@@ -346,6 +361,16 @@ public sealed class OutlineToolStagingContext(
     {
         await EnsureLoadedAsync(cancellationToken);
         if (!TryGetChapter(chapterId, out var chapter)) return $"Error: chapter {chapterId} not found in this project.";
+
+        if (IsDirectlyCreated(Resource("Chapter", chapterId)))
+        {
+            await chapters.DeleteAsync(chapterId, cancellationToken);
+            chapter.Deleted = true;
+            foreach (var entity in _entities.Values.Where(entity => entity.ParentId == chapterId))
+                entity.Deleted = true;
+            onDirectMutationApplied?.Invoke();
+            return $"Deleted chapter {chapterId}.";
+        }
 
         var before = chapter.ToChange();
         chapter.Deleted = true;
@@ -455,29 +480,20 @@ public sealed class OutlineToolStagingContext(
 
         EnsureType(trimmedType, parentId is not null);
         var resolvedOrder = parentId is null ? order : order ?? NextEntityOrder(trimmedType, parentId.Value);
+        var created = await entities.CreateAsync(ProjectId, trimmedType, name.Trim(), properties, parentId, resolvedOrder, cancellationToken: cancellationToken);
         var entity = new EntityState(
-            Guid.NewGuid(),
-            trimmedType,
-            name.Trim(),
+            created.Id,
+            created.Type,
+            created.Name,
             resolvedOrder,
-            parentId,
-            new Dictionary<string, string?>(properties ?? [], StringComparer.OrdinalIgnoreCase),
+            created.ParentId,
+            new Dictionary<string, string?>(created.Properties, StringComparer.OrdinalIgnoreCase),
             Deleted: false);
         _entities[entity.Id] = entity;
+        MarkDirectlyCreated(Resource("Entity", entity.Id));
+        onDirectMutationApplied?.Invoke();
 
-        var after = entity.ToChange();
         var result = Serialize(await EntityPayloadAsync(entity, cancellationToken));
-        var references = parentId is null ? [] : new List<string> { ResourceForExisting(parentId.Value) };
-        await StageChangeAsync(
-            summary: $"Create {entity.Type} '{entity.Name}'",
-            before: null,
-            after: after,
-            resultJson: result,
-            resourceKind: entity.Type,
-            resourceId: Resource("Entity", entity.Id),
-            createdResources: [Resource("Entity", entity.Id)],
-            referencedResources: references,
-            cancellationToken);
         return result;
     }
 
@@ -485,6 +501,21 @@ public sealed class OutlineToolStagingContext(
     {
         await EnsureLoadedAsync(cancellationToken);
         if (!TryGetEntity(entityId, out var entity)) return $"Error: entity {entityId} not found in this project.";
+
+        if (IsDirectlyCreated(Resource("Entity", entityId)))
+        {
+            var updated = await entities.UpdateAsync(ProjectId, entityId, name?.Trim(), propertiesToSet, propertiesToRemove, cancellationToken);
+            _entities[updated.Id] = new EntityState(
+                updated.Id,
+                updated.Type,
+                updated.Name,
+                entity.Order,
+                entity.ParentId,
+                new Dictionary<string, string?>(updated.Properties, StringComparer.OrdinalIgnoreCase),
+                Deleted: false);
+            onDirectMutationApplied?.Invoke();
+            return Serialize(await EntityPayloadAsync(_entities[updated.Id], cancellationToken));
+        }
 
         var before = entity.ToChange();
         if (!string.IsNullOrWhiteSpace(name)) entity.Name = name.Trim();
@@ -518,6 +549,19 @@ public sealed class OutlineToolStagingContext(
     {
         await EnsureLoadedAsync(cancellationToken);
         if (!TryGetEntity(entityId, out var entity)) return $"Error: entity {entityId} not found in this project.";
+
+        if (IsDirectlyCreated(Resource("Entity", entityId)))
+        {
+            var directlyDeleted = await EntityPayloadAsync(entity, cancellationToken);
+            await entities.DeleteAsync(ProjectId, entityId, cancellationToken);
+            entity.Deleted = true;
+            onDirectMutationApplied?.Invoke();
+            return Serialize(new
+            {
+                status = "deleted",
+                deleted = directlyDeleted,
+            });
+        }
 
         var before = entity.ToChange();
         var deleted = await EntityPayloadAsync(entity, cancellationToken);
@@ -693,6 +737,11 @@ public sealed class OutlineToolStagingContext(
         IReadOnlyCollection<string> referencedResources,
         CancellationToken cancellationToken)
     {
+        var beforeJson = Serialize(before);
+        var afterJson = Serialize(after);
+        if (string.Equals(beforeJson, afterJson, StringComparison.Ordinal))
+            return;
+
         var batch = await EnsureBatchAsync(cancellationToken);
         var dependencies = referencedResources
             .Where(_createdResourceProducers.ContainsKey)
@@ -708,8 +757,8 @@ public sealed class OutlineToolStagingContext(
             ToolName = _currentToolName,
             ArgumentsJson = _currentArgumentsJson,
             Summary = summary,
-            BeforeJson = Serialize(before),
-            AfterJson = Serialize(after),
+            BeforeJson = beforeJson,
+            AfterJson = afterJson,
             ResultJson = resultJson,
             ResourceKind = resourceKind,
             ResourceId = resourceId,
@@ -1066,7 +1115,14 @@ public sealed class OutlineToolStagingContext(
     }
 
     private bool IsCreatedEntity(Guid entityId) =>
-        _createdResourceProducers.ContainsKey(Resource("Entity", entityId));
+        _createdResourceProducers.ContainsKey(Resource("Entity", entityId))
+        || IsDirectlyCreated(Resource("Entity", entityId));
+
+    private bool IsDirectlyCreated(string resource) =>
+        _directlyCreatedResources.Contains(resource);
+
+    private void MarkDirectlyCreated(string resource) =>
+        _directlyCreatedResources.Add(resource);
 
     private bool IsDeletedEndpoint(Guid id) =>
         (_entities.TryGetValue(id, out var entity) && entity.Deleted)

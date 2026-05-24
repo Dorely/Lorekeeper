@@ -29,6 +29,7 @@ public sealed class EditorChatContext(
     EditorChatChangeStagingContext? editorStaging)
 {
     private EditorContestStartRequest? _contestRequest;
+    private readonly HashSet<Guid> _directlyEditedChapterBodies = [];
 
     public Guid ProjectId { get; } = projectId;
     public Guid? CurrentChapterId { get; } = currentChapterId;
@@ -37,6 +38,13 @@ public sealed class EditorChatContext(
     public bool AutoPinReadEntities { get; } = autoPinReadEntities;
     public OutlineToolStagingContext? OutlineStaging { get; } = outlineStaging;
     public EditorChatChangeStagingContext? EditorStaging { get; } = editorStaging;
+
+    public bool ShouldBypassReviewForChapterBody(Chapter chapter) =>
+        _directlyEditedChapterBodies.Contains(chapter.Id)
+        || string.IsNullOrWhiteSpace(chapter.Body);
+
+    public void MarkChapterBodyDirectlyEdited(Guid chapterId) =>
+        _directlyEditedChapterBodies.Add(chapterId);
 
     public void BeginToolCall(Guid assistantMessageId, string toolCallId, string toolName, string argumentsJson)
     {

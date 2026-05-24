@@ -228,7 +228,11 @@ public sealed class ResearchService(
             chat = await chatClientFactory.CreateChatClientAsync(defaultProvider.Id, cancellationToken);
             systemPrompt = await BuildSystemPromptAsync(project, cancellationToken);
             if (project.AiChangeApprovalEnabled)
-                staging = outlineTools.CreateStagingContext(projectId, conversation.Id, AiChangeConversationKind.Research);
+                staging = outlineTools.CreateStagingContext(
+                    projectId,
+                    conversation.Id,
+                    AiChangeConversationKind.Research,
+                    OnToolMutated);
             aiTools = tools.Build(new ResearchToolContext(projectId, conversation.Id, OnToolMutated, staging));
         }
         catch (Exception ex)

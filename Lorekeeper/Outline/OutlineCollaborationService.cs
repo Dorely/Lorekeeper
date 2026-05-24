@@ -224,7 +224,7 @@ they commit to a direction, act on it without a second confirmation.
             chat = await chatClientFactory.CreateChatClientAsync(defaultProvider.Id, cancellationToken);
 
             if (project.AiChangeApprovalEnabled)
-                staging = tools.CreateStagingContext(projectId, conversation.Id);
+                staging = tools.CreateStagingContext(projectId, conversation.Id, onDirectMutationApplied: OnToolMutated);
 
             // OnMutated is captured by every mutating tool; we drain it via _mutatedSinceYield.
             aiTools = tools.Build(new OutlineCollaborationContext(projectId, OnToolMutated, staging));

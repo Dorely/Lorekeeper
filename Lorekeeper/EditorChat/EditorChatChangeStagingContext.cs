@@ -70,6 +70,11 @@ public sealed class EditorChatChangeStagingContext(
         IReadOnlyCollection<string> referencedResources,
         CancellationToken cancellationToken)
     {
+        var beforeJson = Serialize(before);
+        var afterJson = Serialize(after);
+        if (string.Equals(beforeJson, afterJson, StringComparison.Ordinal))
+            return;
+
         var batch = await EnsureBatchAsync(cancellationToken);
         var change = new AiChange
         {
@@ -79,8 +84,8 @@ public sealed class EditorChatChangeStagingContext(
             ToolName = _toolName,
             ArgumentsJson = _argumentsJson,
             Summary = summary,
-            BeforeJson = Serialize(before),
-            AfterJson = Serialize(after),
+            BeforeJson = beforeJson,
+            AfterJson = afterJson,
             ResultJson = resultJson,
             ResourceKind = resourceKind,
             ResourceId = resourceId,
