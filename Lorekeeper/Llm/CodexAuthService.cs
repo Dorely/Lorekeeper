@@ -51,7 +51,7 @@ public class CodexAuthService(
         return (url, state);
     }
 
-    public async Task HandleCallbackAsync(string code, string state, CancellationToken cancellationToken = default)
+    public async Task<int> HandleCallbackAsync(string code, string state, CancellationToken cancellationToken = default)
     {
         if (!_pendingFlows.TryRemove(state, out var pkce))
             throw new InvalidOperationException("Invalid or expired OAuth state.");
@@ -89,6 +89,8 @@ public class CodexAuthService(
             Scope = scope
         }, cancellationToken);
         await tokens.SaveChangesAsync(cancellationToken);
+
+        return pkce.ProviderId;
     }
 
     public async Task<string?> GetValidTokenAsync(int providerId, CancellationToken cancellationToken = default)

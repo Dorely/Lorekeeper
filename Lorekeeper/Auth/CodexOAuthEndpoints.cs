@@ -16,22 +16,42 @@ public static class CodexOAuthEndpoints
             return Results.Redirect(url);
         });
 
-        endpoints.MapGet("/auth/callback", async (string? code, string? state, ICodexAuthService authService, CancellationToken cancellationToken) =>
+        endpoints.MapGet("/auth/callback", async (
+            string? code,
+            string? state,
+            ICodexAuthService authService,
+            IEmbeddingConfigurationService embeddingConfiguration,
+            CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state))
-                return Results.Redirect("/settings/providers?message=" + Uri.EscapeDataString("OAuth callback missing code or state."));
+                return RedirectToProviders("OAuth callback missing code or state.", "danger");
 
             try
             {
-                await authService.HandleCallbackAsync(code, state, cancellationToken);
-                return Results.Redirect("/settings/providers?message=" + Uri.EscapeDataString("OpenAI account connected."));
+                var providerId = await authService.HandleCallbackAsync(code, state, cancellationToken);
+                try
+                {
+                    var configured = await embeddingConfiguration.ConfigureCodexDefaultIfUnsetAsync(providerId, cancellationToken);
+                    return configured
+                        ? RedirectToProviders($"OpenAI account connected. Codex embeddings configured with {CodexProvider.DefaultEmbeddingModel}.", "success")
+                        : RedirectToProviders("OpenAI account connected. Existing embedding model kept.", "info");
+                }
+                catch (Exception ex)
+                {
+                    return RedirectToProviders($"OpenAI account connected, but Codex embeddings were not configured: {ex.Message}", "warning");
+                }
             }
             catch (Exception ex)
             {
-                return Results.Redirect("/settings/providers?message=" + Uri.EscapeDataString("OAuth failed: " + ex.Message));
+                return RedirectToProviders("OAuth failed: " + ex.Message, "danger");
             }
         });
 
         return endpoints;
     }
+
+    private static IResult RedirectToProviders(string message, string statusKind) =>
+        Results.Redirect(
+            "/settings/providers?message=" + Uri.EscapeDataString(message)
+            + "&statusKind=" + Uri.EscapeDataString(statusKind));
 }

@@ -94,6 +94,39 @@ public sealed class EmbeddingConfigurationService(
         return new EmbeddingSaveResult(configuration, changed);
     }
 
+    public async Task<bool> ConfigureCodexDefaultIfUnsetAsync(int providerId, CancellationToken cancellationToken = default)
+    {
+        if (await configurations.GetAsync(cancellationToken) is not null)
+            return false;
+
+        var provider = await providers.GetByIdAsync(providerId, cancellationToken)
+            ?? throw new InvalidOperationException($"Provider connection {providerId} was not found.");
+        if (provider.CredentialSourceId is not null)
+            throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
+        if (!CodexProvider.IsCodex(provider))
+            throw new InvalidOperationException("Automatic Codex embeddings can only be configured for the OpenAI Codex provider.");
+
+        var test = await TestAsync(
+            new EmbeddingTestRequest(provider.Id, EmbeddingApiKind.OpenAICompatible, CodexProvider.DefaultEmbeddingModel),
+            cancellationToken);
+
+        if (await configurations.GetAsync(cancellationToken) is not null)
+            return false;
+
+        await SaveAsync(
+            new EmbeddingConfigurationDraft(
+                provider.Id,
+                EmbeddingApiKind.OpenAICompatible,
+                test.ModelId,
+                test.Dimensions,
+                test.ProviderId,
+                test.ApiKind,
+                test.ModelId),
+            cancellationToken);
+
+        return true;
+    }
+
     public async Task<EmbeddingUnsetResult> UnsetAsync(CancellationToken cancellationToken = default)
     {
         var existing = await configurations.GetAsync(cancellationToken);

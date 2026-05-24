@@ -346,12 +346,18 @@ else
     private void ConsumeStatusFromQuery()
     {
         var uri = new Uri(Nav.Uri);
-        if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("message", out var msg))
+        var query = QueryHelpers.ParseQuery(uri.Query);
+        if (query.TryGetValue("message", out var msg))
         {
             _statusMessage = msg.ToString();
-            _statusKind = _statusMessage.Contains("fail", StringComparison.OrdinalIgnoreCase) ? "danger" : "success";
+            _statusKind = query.TryGetValue("statusKind", out var kind) && IsSupportedStatusKind(kind.ToString())
+                ? kind.ToString()
+                : _statusMessage.Contains("fail", StringComparison.OrdinalIgnoreCase) ? "danger" : "success";
         }
     }
+
+    private static bool IsSupportedStatusKind(string statusKind) =>
+        statusKind is "success" or "info" or "warning" or "danger";
 
     private void ClearStatus()
     {
