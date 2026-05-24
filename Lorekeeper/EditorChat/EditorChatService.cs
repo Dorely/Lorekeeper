@@ -23,8 +23,11 @@ public sealed class EditorChatService(
     EditorChatTools tools,
     OutlineCollaborationTools outlineTools,
     IEditorContestService contestService,
+    IEditorRevisionJobNotifier revisionJobNotifier,
+    IEditorRevisionAgentService revisionAgents,
     IAiChangeApprovalService changeApproval,
     IAiChangeRepository changes,
+    IServiceScopeFactory scopeFactory,
     IOptions<AgentOptions> options,
     IOptions<EditorChatOptions> editorOptions,
     ILogger<EditorChatService> logger) : IEditorChatService
@@ -376,36 +379,103 @@ public sealed class EditorChatService(
                 editorContext.BeginToolCall(activeAssistant.Id, pendingCall.CallId, pendingCall.Name, pendingCall.ArgumentsJson);
 
                 var stopwatch = Stopwatch.StartNew();
-                string? toolResult = null;
-                string? toolError = null;
-                var toolCancelled = false;
-                try
+                var aiFunction = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name);
+                ToolInvocationOutcome toolOutcome;
+                if (aiFunction is null)
                 {
-                    var aiFunction = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name)
-                        ?? throw new InvalidOperationException($"Unknown tool '{pendingCall.Name}'.");
-                    var invokeResult = await aiFunction.InvokeAsync(
-                        ToolCallArguments.Create(pendingCall.Content.Arguments, pendingCall.ArgumentsJson),
-                        cancellationToken);
-                    toolResult = invokeResult?.ToString() ?? string.Empty;
+                    var message = $"Unknown tool '{pendingCall.Name}'.";
+                    logger.LogWarning("Editor chat tool '{Tool}' failed: {Message}", pendingCall.Name, message);
+                    toolOutcome = new ToolInvocationOutcome($"Error: {message}", message, Cancelled: false);
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                else if (IsRevisionAgentsTool(pendingCall.Name))
                 {
-                    toolCancelled = true;
+                    Guid? lastRevisionJobId = null;
+                    await using var subscription = revisionJobNotifier.Subscribe(projectId);
+                    await using var updateEnumerator = subscription.ReadAllAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
+                    var updateTask = updateEnumerator.MoveNextAsync().AsTask();
+                    var invokeTask = InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
+
+                    while (!invokeTask.IsCompleted)
+                    {
+                        var completed = await Task.WhenAny(invokeTask, updateTask);
+                        if (completed == invokeTask)
+                            break;
+
+                        bool hasUpdate;
+                        try
+                        {
+                            hasUpdate = await updateTask;
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            break;
+                        }
+
+                        if (!hasUpdate)
+                            break;
+
+                        if (await TryBuildRevisionJobUpdateAsync(
+                                updateEnumerator.Current,
+                                projectId,
+                                conversation.Id,
+                                pendingCall.CallId,
+                                cancellationToken) is { } revisionUpdate)
+                        {
+                            lastRevisionJobId = revisionUpdate.JobId;
+                            yield return revisionUpdate;
+                        }
+
+                        updateTask = updateEnumerator.MoveNextAsync().AsTask();
+                    }
+
+                    while (updateTask.IsCompletedSuccessfully && updateTask.Result)
+                    {
+                        if (await TryBuildRevisionJobUpdateAsync(
+                                updateEnumerator.Current,
+                                projectId,
+                                conversation.Id,
+                                pendingCall.CallId,
+                                cancellationToken) is { } revisionUpdate)
+                        {
+                            lastRevisionJobId = revisionUpdate.JobId;
+                            yield return revisionUpdate;
+                        }
+
+                        updateTask = updateEnumerator.MoveNextAsync().AsTask();
+                    }
+
+                    toolOutcome = await invokeTask;
+                    var finalJobId = TryReadRevisionJobId(toolOutcome.Result) ?? lastRevisionJobId;
+                    if (finalJobId is { } revisionJobId)
+                    {
+                        var finalJob = await revisionAgents.GetJobAsync(revisionJobId, CancellationToken.None);
+                        if (finalJob is not null)
+                        {
+                            var progress = EditorRevisionAgentService.ToProgress(finalJob);
+                            yield return new EditorChatRevisionJobUpdated(
+                                pendingCall.CallId,
+                                revisionJobId,
+                                SessionId: null,
+                                RevisionUpdateKindForStatus(progress.Status),
+                                DateTime.UtcNow,
+                                progress);
+                        }
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    logger.LogWarning(ex, "Editor chat tool '{Tool}' failed", pendingCall.Name);
-                    toolError = ex.Message;
-                    toolResult = $"Error: {ex.Message}";
+                    toolOutcome = await InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
                 }
                 stopwatch.Stop();
 
-                if (toolCancelled)
+                if (toolOutcome.Cancelled)
                 {
                     yield return new EditorChatTurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
 
+                var toolResult = toolOutcome.Result;
+                var toolError = toolOutcome.Error;
                 var toolMessage = new EditorMessage
                 {
                     ConversationId = conversation.Id,
@@ -624,6 +694,93 @@ public sealed class EditorChatService(
             + "\n\n" + message;
     }
 
+    private async Task<ToolInvocationOutcome> InvokeToolAsync(
+        AIFunction aiFunction,
+        PendingToolCall pendingCall,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var invokeResult = await aiFunction.InvokeAsync(
+                ToolCallArguments.Create(pendingCall.Content.Arguments, pendingCall.ArgumentsJson),
+                cancellationToken);
+            return new ToolInvocationOutcome(invokeResult?.ToString() ?? string.Empty, Error: null, Cancelled: false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new ToolInvocationOutcome(string.Empty, Error: null, Cancelled: true);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Editor chat tool '{Tool}' failed", pendingCall.Name);
+            return new ToolInvocationOutcome($"Error: {ex.Message}", ex.Message, Cancelled: false);
+        }
+    }
+
+    private async Task<EditorChatRevisionJobUpdated?> TryBuildRevisionJobUpdateAsync(
+        EditorRevisionJobUpdate update,
+        Guid projectId,
+        Guid conversationId,
+        string toolCallId,
+        CancellationToken cancellationToken)
+    {
+        if (update.ProjectId != projectId
+            || update.ConversationId != conversationId
+            || !string.Equals(update.ToolCallId, toolCallId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var progress = await ReadRevisionProgressInFreshScopeAsync(update.JobId, cancellationToken);
+        return progress is null
+            ? null
+            : new EditorChatRevisionJobUpdated(
+                toolCallId,
+                update.JobId,
+                update.SessionId,
+                update.Kind,
+                update.CreatedAtUtc,
+                progress);
+    }
+
+    private async Task<EditorRevisionJobProgress?> ReadRevisionProgressInFreshScopeAsync(
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var scopedRevisionAgents = scope.ServiceProvider.GetRequiredService<IEditorRevisionAgentService>();
+        var job = await scopedRevisionAgents.GetJobAsync(jobId, cancellationToken);
+        return job is null ? null : EditorRevisionAgentService.ToProgress(job);
+    }
+
+    private static bool IsRevisionAgentsTool(string toolName) =>
+        string.Equals(toolName, "start_revision_agents", StringComparison.Ordinal);
+
+    private static EditorRevisionJobUpdateKind RevisionUpdateKindForStatus(EditorRevisionJobStatus status) => status switch
+    {
+        EditorRevisionJobStatus.Completed => EditorRevisionJobUpdateKind.Completed,
+        EditorRevisionJobStatus.Failed => EditorRevisionJobUpdateKind.Failed,
+        EditorRevisionJobStatus.Cancelled => EditorRevisionJobUpdateKind.Cancelled,
+        _ => EditorRevisionJobUpdateKind.Progress,
+    };
+
+    private static Guid? TryReadRevisionJobId(string? result)
+    {
+        if (string.IsNullOrWhiteSpace(result)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(result);
+            if (document.RootElement.TryGetProperty("jobId", out var jobId)
+                && Guid.TryParse(jobId.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+        catch (JsonException) { }
+
+        return null;
+    }
+
     private static List<AIContent> BuildAssistantToolCallContents(IReadOnlyList<PersistedToolCall> calls) =>
         calls.Select(call => (AIContent)ToFunctionCallContent(call)).ToList();
 
@@ -639,6 +796,8 @@ public sealed class EditorChatService(
         string Name,
         string ArgumentsJson,
         int TextOffset);
+
+    private sealed record ToolInvocationOutcome(string Result, string? Error, bool Cancelled);
 
     private sealed record PersistedToolCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
 }

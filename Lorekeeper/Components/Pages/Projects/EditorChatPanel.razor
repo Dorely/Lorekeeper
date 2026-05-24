@@ -322,6 +322,12 @@
                         });
                         break;
 
+                    case EditorChatRevisionJobUpdated revision:
+                        LiveTurn().UpdateToolProgress(revision.ToolCallId, "start_revision_agents", ToChatToolProgress(revision.Progress));
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+
                     case EditorChatAssistantMessageCompleted:
                         await TryRunPostToolUiRefreshAsync("assistant completion refresh", async () =>
                         {
@@ -665,6 +671,30 @@
         EditorMessageRole.User => new(message.Role.ToString(), message.Content),
         EditorMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new(message.Role.ToString(), message.Content),
         _ => null,
+    };
+
+    private static ChatToolProgress ToChatToolProgress(EditorRevisionJobProgress progress) => new()
+    {
+        JobId = progress.JobId,
+        Status = progress.Status.ToString(),
+        UpdatedAt = progress.UpdatedAt,
+        TotalCount = progress.TotalSessions,
+        QueuedCount = progress.QueuedCount,
+        RunningCount = progress.RunningCount,
+        CompletedCount = progress.CompletedCount,
+        FailedCount = progress.FailedCount,
+        InvalidCount = progress.InvalidCount,
+        CancelledCount = progress.CancelledCount,
+        Rows = progress.Sessions
+            .OrderBy(session => session.Order)
+            .Select(session => new ChatToolProgressRow(
+                session.SessionId,
+                session.Order,
+                session.ChapterTitle,
+                session.Status.ToString(),
+                session.Summary,
+                session.ErrorMessage))
+            .ToList(),
     };
 
     private static List<ChatMessagePart> BuildMessageParts(EditorMessage message, IReadOnlyDictionary<string, EditorMessage> byCallId)

@@ -74,7 +74,14 @@ public sealed class EditorRevisionAgentService(
         }
 
         await revisions.SaveChangesAsync(cancellationToken);
-        notifier.Notify(new EditorRevisionJobUpdate(request.ProjectId, job.Id, null, EditorRevisionJobUpdateKind.Created, DateTime.UtcNow));
+        notifier.Notify(new EditorRevisionJobUpdate(
+            request.ProjectId,
+            request.ConversationId,
+            request.ToolCallId,
+            job.Id,
+            null,
+            EditorRevisionJobUpdateKind.Created,
+            DateTime.UtcNow));
 
         var created = await revisions.GetJobAsync(job.Id, cancellationToken)
             ?? throw new InvalidOperationException($"Revision job {job.Id} could not be reloaded.");
@@ -170,6 +177,14 @@ public sealed class EditorRevisionAgentService(
         session.UpdatedAt = DateTime.UtcNow;
         repo.UpdateSession(session);
         await repo.SaveChangesAsync(cancellationToken);
+        notifier.Notify(new EditorRevisionJobUpdate(
+            session.Job.ProjectId,
+            session.Job.ConversationId,
+            session.Job.ToolCallId,
+            session.Job.Id,
+            session.Id,
+            EditorRevisionJobUpdateKind.SessionCompleted,
+            DateTime.UtcNow));
     }
 
     private async Task<EditorRevisionAgentRunResult> FinalizeJobAsync(Guid jobId, bool cancelled, CancellationToken cancellationToken)
@@ -214,7 +229,14 @@ public sealed class EditorRevisionAgentService(
             EditorRevisionJobStatus.Cancelled => EditorRevisionJobUpdateKind.Cancelled,
             _ => EditorRevisionJobUpdateKind.Failed,
         };
-        scopedNotifier.Notify(new EditorRevisionJobUpdate(job.ProjectId, job.Id, null, updateKind, DateTime.UtcNow));
+        scopedNotifier.Notify(new EditorRevisionJobUpdate(
+            job.ProjectId,
+            job.ConversationId,
+            job.ToolCallId,
+            job.Id,
+            null,
+            updateKind,
+            DateTime.UtcNow));
 
         return ToRunResult(job);
     }
@@ -306,4 +328,33 @@ public sealed class EditorRevisionAgentService(
 
     public static string SerializeRunResult(EditorRevisionAgentRunResult result) =>
         JsonSerializer.Serialize(result, JsonOptions);
+
+    public static EditorRevisionJobProgress ToProgress(EditorRevisionJobDetail job)
+    {
+        var sessions = job.Sessions
+            .OrderBy(session => session.Order)
+            .Select(session => new EditorRevisionSessionProgress(
+                session.Id,
+                session.Order,
+                session.ChapterId,
+                session.ChapterTitle,
+                session.Status,
+                session.Summary,
+                session.ErrorMessage,
+                session.UpdatedAt))
+            .ToList();
+
+        return new EditorRevisionJobProgress(
+            job.Id,
+            job.Status,
+            sessions.Count,
+            sessions.Count(session => session.Status == EditorRevisionSessionStatus.Queued),
+            sessions.Count(session => session.Status == EditorRevisionSessionStatus.Running),
+            sessions.Count(session => session.Status == EditorRevisionSessionStatus.Completed),
+            sessions.Count(session => session.Status == EditorRevisionSessionStatus.Failed),
+            sessions.Count(session => session.Status == EditorRevisionSessionStatus.Invalid),
+            sessions.Count(session => session.Status == EditorRevisionSessionStatus.Cancelled),
+            job.UpdatedAt,
+            sessions);
+    }
 }

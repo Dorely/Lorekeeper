@@ -11,6 +11,7 @@ namespace Lorekeeper.EditorChat;
 [JsonDerivedType(typeof(EditorChatContestCandidateUpdated), typeDiscriminator: "contest-candidate")]
 [JsonDerivedType(typeof(EditorChatContestCandidateJsonDelta), typeDiscriminator: "contest-json")]
 [JsonDerivedType(typeof(EditorChatContestCompleted), typeDiscriminator: "contest-end")]
+[JsonDerivedType(typeof(EditorChatRevisionJobUpdated), typeDiscriminator: "revision-job")]
 [JsonDerivedType(typeof(EditorChatAssistantMessageCompleted), typeDiscriminator: "assistant-end")]
 [JsonDerivedType(typeof(EditorChatMutated), typeDiscriminator: "editor-mutated")]
 [JsonDerivedType(typeof(EditorChatTurnError), typeDiscriminator: "error")]
@@ -33,6 +34,14 @@ public sealed record EditorChatContestCandidateUpdated(Guid BatchId, Guid Candid
 public sealed record EditorChatContestCandidateJsonDelta(Guid BatchId, Guid CandidateId, string Delta, string RawResponse) : EditorChatTurnUpdate;
 
 public sealed record EditorChatContestCompleted(Guid BatchId, string Status) : EditorChatTurnUpdate;
+
+public sealed record EditorChatRevisionJobUpdated(
+    string ToolCallId,
+    Guid JobId,
+    Guid? SessionId,
+    EditorRevisionJobUpdateKind Kind,
+    DateTime UpdatedAtUtc,
+    EditorRevisionJobProgress Progress) : EditorChatTurnUpdate;
 
 public sealed record EditorChatAssistantMessageCompleted(Guid MessageId) : EditorChatTurnUpdate;
 

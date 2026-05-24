@@ -11,12 +11,60 @@
         {
             <span class="chat-chip-args">@ChatTranscriptHelpers.TruncateInline(Chip.ArgumentsJson, 96)</span>
         }
+        @if (Chip.Progress is { } summaryProgress)
+        {
+            <span class="chat-chip-progress-inline">@ProgressInlineSummary(summaryProgress)</span>
+        }
     </summary>
     <div class="chat-chip-body">
         @if (Chip.HasArguments || !Chip.ArgumentsComplete)
         {
             <div class="chat-chip-section">args</div>
             <pre class="chat-chip-pre">@Chip.ArgumentsJson@if (!Chip.ArgumentsComplete) { <span class="chat-cursor">|</span> }</pre>
+        }
+        @if (Chip.Progress is { } progress)
+        {
+            <div class="chat-chip-section">workers</div>
+            <div class="chat-chip-progress">
+                <div class="chat-chip-progress-counts">
+                    <span>@progress.CompletedCount completed of @progress.TotalCount</span>
+                    @if (progress.RunningCount > 0)
+                    {
+                        <span>@progress.RunningCount running</span>
+                    }
+                    @if (progress.QueuedCount > 0)
+                    {
+                        <span>@progress.QueuedCount queued</span>
+                    }
+                    @if (progress.FailedCount > 0)
+                    {
+                        <span>@progress.FailedCount failed</span>
+                    }
+                    @if (progress.InvalidCount > 0)
+                    {
+                        <span>@progress.InvalidCount invalid</span>
+                    }
+                    @if (progress.CancelledCount > 0)
+                    {
+                        <span>@progress.CancelledCount cancelled</span>
+                    }
+                </div>
+                <div class="chat-chip-progress-list">
+                    @foreach (var row in progress.Rows)
+                    {
+                        <div class="chat-chip-progress-row">
+                            <div class="chat-chip-progress-main">
+                                <span class="chat-chip-progress-title">@(row.Order + 1). @row.Title</span>
+                                <span class="@ProgressStatusClass(row.Status)">@row.Status</span>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(ProgressSubtext(row)))
+                            {
+                                <div class="chat-chip-progress-note">@ProgressSubtext(row)</div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
         }
         @if (Chip.Error is not null)
         {
@@ -27,16 +75,16 @@
         {
             <div class="chat-chip-section">result</div>
             <pre class="chat-chip-pre">@Chip.Result</pre>
-            @if (RevisionJobId is { } revisionJobId)
-            {
-                <button type="button" class="btn btn-link btn-sm chat-chip-action" @onclick="() => OpenRevisionJobAsync(revisionJobId)">
-                    Open worker transcripts
-                </button>
-            }
         }
-        else
+        else if (Chip.Progress is null)
         {
             <div class="chat-chip-section text-muted"><em>@PendingText</em></div>
+        }
+        @if (RevisionJobId is { } revisionJobId)
+        {
+            <button type="button" class="btn btn-link btn-sm chat-chip-action" @onclick="() => OpenRevisionJobAsync(revisionJobId)">
+                Open worker transcripts
+            </button>
         }
     </div>
 </details>
@@ -150,6 +198,20 @@
     private EditorRevisionJobDetail? _revisionJob;
     private EditorRevisionSessionTranscript? _revisionTranscript;
     private Guid? _selectedRevisionSessionId;
+    private int _seenRevisionProgressVersion;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_showRevisionJob || RevisionJobId is not { } jobId)
+            return;
+
+        var progressVersion = Chip.Progress?.Version ?? 0;
+        if (progressVersion == _seenRevisionProgressVersion)
+            return;
+
+        _seenRevisionProgressVersion = progressVersion;
+        await RefreshRevisionJobAsync(jobId, showLoading: false);
+    }
 
     private string StateClass => Chip.Error is not null
         ? "chat-chip-error"
@@ -170,22 +232,40 @@
     private string PendingText => Chip.ArgumentsComplete ? "running..." : "receiving args...";
 
     private Guid? RevisionJobId => string.Equals(Chip.Name, "start_revision_agents", StringComparison.Ordinal)
-        ? TryReadRevisionJobId(Chip.Result)
+        ? Chip.Progress?.JobId ?? TryReadRevisionJobId(Chip.Result)
         : null;
 
     private async Task OpenRevisionJobAsync(Guid jobId)
     {
         _showRevisionJob = true;
-        _revisionLoading = true;
+        _seenRevisionProgressVersion = Chip.Progress?.Version ?? 0;
+        await RefreshRevisionJobAsync(jobId, showLoading: true);
+    }
+
+    private async Task RefreshRevisionJobAsync(Guid jobId, bool showLoading)
+    {
+        if (showLoading)
+            _revisionLoading = true;
+
         _revisionError = null;
-        _revisionTranscript = null;
-        _selectedRevisionSessionId = null;
         try
         {
             _revisionJob = await RevisionAgents.GetJobAsync(jobId);
-            var firstSession = _revisionJob?.Sessions.FirstOrDefault();
-            if (firstSession is not null)
-                await SelectRevisionSessionAsync(firstSession.Id);
+            if (_revisionJob is null)
+            {
+                _revisionTranscript = null;
+                _selectedRevisionSessionId = null;
+                return;
+            }
+
+            var selectedSessionId = _selectedRevisionSessionId;
+            if (selectedSessionId is null || !_revisionJob.Sessions.Any(session => session.Id == selectedSessionId))
+                selectedSessionId = _revisionJob.Sessions.FirstOrDefault()?.Id;
+
+            _selectedRevisionSessionId = selectedSessionId;
+            _revisionTranscript = selectedSessionId is { } sessionId
+                ? await RevisionAgents.GetSessionTranscriptAsync(sessionId)
+                : null;
         }
         catch (Exception ex)
         {
@@ -193,7 +273,8 @@
         }
         finally
         {
-            _revisionLoading = false;
+            if (showLoading)
+                _revisionLoading = false;
         }
     }
 
@@ -236,4 +317,36 @@
             session.ReplacementText,
             session.Notes,
         }, new JsonSerializerOptions { WriteIndented = true });
+
+    private static string ProgressInlineSummary(ChatToolProgress progress)
+    {
+        if (progress.TotalCount <= 0)
+            return string.IsNullOrWhiteSpace(progress.Status) ? "running" : progress.Status;
+
+        var parts = new List<string> { $"{progress.CompletedCount}/{progress.TotalCount} completed" };
+        if (progress.RunningCount > 0)
+            parts.Add($"{progress.RunningCount} running");
+        if (progress.QueuedCount > 0)
+            parts.Add($"{progress.QueuedCount} queued");
+
+        var attention = progress.FailedCount + progress.InvalidCount + progress.CancelledCount;
+        if (attention > 0)
+            parts.Add($"{attention} attention");
+
+        return string.Join(" - ", parts);
+    }
+
+    private static string ProgressStatusClass(string status) => status switch
+    {
+        "Completed" => "chat-chip-progress-status chat-chip-progress-status-ok",
+        "Failed" or "Invalid" => "chat-chip-progress-status chat-chip-progress-status-error",
+        "Cancelled" => "chat-chip-progress-status chat-chip-progress-status-muted",
+        "Running" => "chat-chip-progress-status chat-chip-progress-status-running",
+        _ => "chat-chip-progress-status",
+    };
+
+    private static string ProgressSubtext(ChatToolProgressRow row) =>
+        !string.IsNullOrWhiteSpace(row.ErrorMessage)
+            ? row.ErrorMessage!
+            : row.Summary;
 }

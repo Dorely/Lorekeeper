@@ -73,7 +73,7 @@ public sealed class EditorRevisionAgentProcessor(
             session.UpdatedAt = DateTime.UtcNow;
             revisions.UpdateSession(session);
             await revisions.SaveChangesAsync(cancellationToken);
-            notifier.Notify(new EditorRevisionJobUpdate(job.ProjectId, job.Id, session.Id, EditorRevisionJobUpdateKind.Progress, DateTime.UtcNow));
+            NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
 
             var systemPrompt = (await contextBuilder.BuildAsync(project, chapter, cancellationToken))
                 .Assemble(AssistantWorkflowInstructions.EditorRevisionWorker);
@@ -96,6 +96,7 @@ public sealed class EditorRevisionAgentProcessor(
                 Status = EditorRevisionMessageStatus.Completed,
             }, cancellationToken);
             await revisions.SaveChangesAsync(cancellationToken);
+            NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
 
             var edit = new CapturedChapterEdit();
             var messages = new List<ChatMessage>
@@ -159,13 +160,14 @@ public sealed class EditorRevisionAgentProcessor(
                 assistant.Status = EditorRevisionMessageStatus.Completed;
                 revisions.UpdateMessage(assistant);
                 await revisions.SaveChangesAsync(cancellationToken);
+                NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
 
                 if (pendingCalls.Count == 0)
                 {
                     MarkInvalid(session, "Worker finished without editing the assigned chapter.", textBuilder.ToString(), stopwatch);
                     revisions.UpdateSession(session);
                     await revisions.SaveChangesAsync(cancellationToken);
-                    notifier.Notify(new EditorRevisionJobUpdate(job.ProjectId, job.Id, session.Id, EditorRevisionJobUpdateKind.SessionCompleted, DateTime.UtcNow));
+                    NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.SessionCompleted);
                     return;
                 }
 
@@ -206,6 +208,7 @@ public sealed class EditorRevisionAgentProcessor(
                         ErrorMessage = toolError,
                     }, cancellationToken);
                     await revisions.SaveChangesAsync(cancellationToken);
+                    NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
 
                     resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult));
                     if (string.Equals(pendingCall.Name, "edit_assigned_chapter", StringComparison.Ordinal))
@@ -216,7 +219,7 @@ public sealed class EditorRevisionAgentProcessor(
                             revisions.UpdateSession(session);
                             await revisions.SaveChangesAsync(cancellationToken);
                         }
-                        notifier.Notify(new EditorRevisionJobUpdate(job.ProjectId, job.Id, session.Id, EditorRevisionJobUpdateKind.SessionCompleted, DateTime.UtcNow));
+                        NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.SessionCompleted);
                         return;
                     }
                 }
@@ -227,7 +230,7 @@ public sealed class EditorRevisionAgentProcessor(
             MarkInvalid(session, $"Worker exceeded {maxIterations} tool iterations without editing the assigned chapter.", string.Empty, stopwatch);
             revisions.UpdateSession(session);
             await revisions.SaveChangesAsync(cancellationToken);
-            notifier.Notify(new EditorRevisionJobUpdate(job.ProjectId, job.Id, session.Id, EditorRevisionJobUpdateKind.SessionCompleted, DateTime.UtcNow));
+            NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.SessionCompleted);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -237,6 +240,7 @@ public sealed class EditorRevisionAgentProcessor(
             session.UpdatedAt = DateTime.UtcNow;
             revisions.UpdateSession(session);
             await revisions.SaveChangesAsync(CancellationToken.None);
+            NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Cancelled);
             throw;
         }
         catch (Exception ex)
@@ -249,9 +253,19 @@ public sealed class EditorRevisionAgentProcessor(
             session.DurationMs = stopwatch.Elapsed.TotalMilliseconds;
             revisions.UpdateSession(session);
             await revisions.SaveChangesAsync(CancellationToken.None);
-            notifier.Notify(new EditorRevisionJobUpdate(job.ProjectId, job.Id, session.Id, EditorRevisionJobUpdateKind.SessionCompleted, DateTime.UtcNow));
+            NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.SessionCompleted);
         }
     }
+
+    private void NotifyJob(EditorRevisionJob job, Guid? sessionId, EditorRevisionJobUpdateKind kind) =>
+        notifier.Notify(new EditorRevisionJobUpdate(
+            job.ProjectId,
+            job.ConversationId,
+            job.ToolCallId,
+            job.Id,
+            sessionId,
+            kind,
+            DateTime.UtcNow));
 
     private IList<AITool> BuildTools(Guid projectId, Guid assignedChapterId, CapturedChapterEdit edit)
     {

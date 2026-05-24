@@ -264,6 +264,7 @@ public sealed class AiChangeApprovalService(
                 break;
             }
             case "edit_chapter":
+            case "edit_assigned_chapter":
             {
                 var before = ReadOptional<ChapterBodyChange>(change.BeforeJson);
                 var after = ReadRequired<ChapterBodyChange>(afterJson);

@@ -7,6 +7,7 @@ public sealed class EditorRevisionRepository(AppDbContext db) : IEditorRevisionR
 {
     public Task<EditorRevisionJob?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default) =>
         db.EditorRevisionJobs
+            .AsNoTracking()
             .Include(job => job.Sessions.OrderBy(session => session.Order))
             .FirstOrDefaultAsync(job => job.Id == jobId, cancellationToken);
 
@@ -18,6 +19,7 @@ public sealed class EditorRevisionRepository(AppDbContext db) : IEditorRevisionR
 
     public Task<List<EditorRevisionJob>> ListCurrentByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         db.EditorRevisionJobs
+            .AsNoTracking()
             .Include(job => job.Sessions.OrderBy(session => session.Order))
             .Where(job => job.ProjectId == projectId
                 && (job.Status == EditorRevisionJobStatus.Queued

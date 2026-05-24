@@ -61,6 +61,8 @@ public sealed class ChatToolChip
 
     public string? Error { get; set; }
 
+    public ChatToolProgress? Progress { get; set; }
+
     public bool Completed { get; set; }
 
     public bool ArgumentsComplete { get; private set; }
@@ -90,6 +92,41 @@ public sealed class ChatToolChip
         ArgumentsComplete = true;
     }
 }
+
+public sealed class ChatToolProgress
+{
+    public Guid? JobId { get; set; }
+
+    public int Version { get; set; }
+
+    public string Status { get; set; } = string.Empty;
+
+    public DateTime? UpdatedAt { get; set; }
+
+    public int TotalCount { get; set; }
+
+    public int QueuedCount { get; set; }
+
+    public int RunningCount { get; set; }
+
+    public int CompletedCount { get; set; }
+
+    public int FailedCount { get; set; }
+
+    public int InvalidCount { get; set; }
+
+    public int CancelledCount { get; set; }
+
+    public List<ChatToolProgressRow> Rows { get; set; } = [];
+}
+
+public sealed record ChatToolProgressRow(
+    Guid Id,
+    int Order,
+    string Title,
+    string Status,
+    string Summary,
+    string? ErrorMessage);
 
 public sealed class ChatLiveTurn
 {
@@ -152,6 +189,24 @@ public sealed class ChatLiveTurn
 
         IsThinking = true;
         _startNewMessageOnNextPart = true;
+    }
+
+    public void UpdateToolProgress(string callId, string toolName, ChatToolProgress progress)
+    {
+        IsThinking = false;
+        var chip = FindToolChip(callId);
+        if (chip is null)
+        {
+            chip = new ChatToolChip(callId, toolName, string.Empty);
+            CurrentMessage().Parts.Add(new ChatToolPart(chip));
+        }
+        else
+        {
+            chip.Rename(toolName);
+        }
+
+        progress.Version = (chip.Progress?.Version ?? 0) + 1;
+        chip.Progress = progress;
     }
 
     private ChatToolChip? FindToolChip(string callId) => Messages

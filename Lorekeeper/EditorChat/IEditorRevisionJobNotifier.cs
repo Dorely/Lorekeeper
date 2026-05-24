@@ -16,6 +16,8 @@ public interface IEditorRevisionJobUpdateSubscription : IAsyncDisposable
 
 public sealed record EditorRevisionJobUpdate(
     Guid ProjectId,
+    Guid ConversationId,
+    string ToolCallId,
     Guid JobId,
     Guid? SessionId,
     EditorRevisionJobUpdateKind Kind,

@@ -57,6 +57,13 @@
     min-width: 0;
 }
 
+.chat-chip-progress-inline {
+    margin-left: auto;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
 .chat-chip-body {
     padding: 0.25rem 0.5rem 0.5rem;
     border-top: 1px solid var(--bs-border-color, #dee2e6);
@@ -89,6 +96,89 @@
 
 .chat-chip-action {
     padding-left: 0;
+}
+
+.chat-chip-progress {
+    margin-top: 0.2rem;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 0.35rem;
+    background: rgba(255, 255, 255, 0.5);
+    overflow: hidden;
+}
+
+.chat-chip-progress-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.65rem;
+    padding: 0.4rem 0.5rem;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.76rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.chat-chip-progress-counts span:first-child {
+    color: var(--bs-body-color, #212529);
+    font-weight: 600;
+}
+
+.chat-chip-progress-list {
+    max-height: 12rem;
+    overflow: auto;
+}
+
+.chat-chip-progress-row {
+    padding: 0.42rem 0.5rem;
+    border-top: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.chat-chip-progress-row:first-child {
+    border-top: 0;
+}
+
+.chat-chip-progress-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.chat-chip-progress-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-chip-progress-status {
+    flex: 0 0 auto;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.chat-chip-progress-status-ok {
+    color: var(--bs-success, #198754);
+}
+
+.chat-chip-progress-status-error {
+    color: var(--bs-danger, #dc3545);
+}
+
+.chat-chip-progress-status-running {
+    color: var(--bs-primary, #0d6efd);
+}
+
+.chat-chip-progress-status-muted {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.chat-chip-progress-note {
+    margin-top: 0.15rem;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.74rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .chat-revision-backdrop {

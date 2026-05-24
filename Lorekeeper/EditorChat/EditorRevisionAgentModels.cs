@@ -25,6 +25,29 @@ public sealed record EditorRevisionAgentRunResult(
     IReadOnlyList<EditorRevisionSessionResult> Sessions,
     string? ErrorMessage);
 
+public sealed record EditorRevisionJobProgress(
+    Guid JobId,
+    EditorRevisionJobStatus Status,
+    int TotalSessions,
+    int QueuedCount,
+    int RunningCount,
+    int CompletedCount,
+    int FailedCount,
+    int InvalidCount,
+    int CancelledCount,
+    DateTime UpdatedAt,
+    IReadOnlyList<EditorRevisionSessionProgress> Sessions);
+
+public sealed record EditorRevisionSessionProgress(
+    Guid SessionId,
+    int Order,
+    Guid ChapterId,
+    string ChapterTitle,
+    EditorRevisionSessionStatus Status,
+    string Summary,
+    string? ErrorMessage,
+    DateTime UpdatedAt);
+
 public sealed record EditorRevisionSessionResult(
     Guid SessionId,
     int Order,
