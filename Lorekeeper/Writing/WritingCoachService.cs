@@ -189,42 +189,72 @@ public sealed class WritingCoachService(
 
                     if (!hasNext) break;
 
-                    foreach (var content in enumerator.Current.Contents)
+                    var updatesToYield = new List<WritingCoachTurnUpdate>();
+                    try
                     {
-                        if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
+                        var contents = enumerator.Current?.Contents;
+                        if (contents is null) continue;
+
+                        foreach (var content in contents)
                         {
-                            textBuilder.Append(textContent.Text);
-                            yield return new WritingCoachTextDelta(textContent.Text);
-                        }
-                        else
-                        {
-                            foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
+                            if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
                             {
-                                switch (toolUpdate)
+                                textBuilder.Append(textContent.Text);
+                                updatesToYield.Add(new WritingCoachTextDelta(textContent.Text));
+                            }
+                            else
+                            {
+                                foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
                                 {
-                                    case StreamingToolCallStartedUpdate started:
-                                        yield return new WritingCoachToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
-                                        break;
-                                    case StreamingToolCallArgumentsDeltaUpdate delta:
-                                        yield return new WritingCoachToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
-                                        break;
-                                    case StreamingToolCallReadyUpdate ready:
-                                        pendingCalls.Add(new PendingToolCall(
-                                            ready.Content,
-                                            ready.CallId,
-                                            ready.ToolName,
-                                            ready.ArgumentsJson,
-                                            ready.TextOffset));
-                                        break;
+                                    switch (toolUpdate)
+                                    {
+                                        case StreamingToolCallStartedUpdate started:
+                                            updatesToYield.Add(new WritingCoachToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete));
+                                            break;
+                                        case StreamingToolCallArgumentsDeltaUpdate delta:
+                                            updatesToYield.Add(new WritingCoachToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete));
+                                            break;
+                                        case StreamingToolCallReadyUpdate ready:
+                                            pendingCalls.Add(new PendingToolCall(
+                                                ready.Content,
+                                                ready.CallId,
+                                                ready.ToolName,
+                                                ready.ArgumentsJson,
+                                                ready.TextOffset));
+                                            break;
+                                    }
                                 }
                             }
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Writing Coach streaming update processing failed");
+                        streamFailed = true;
+                        streamError = ex.Message;
+                        break;
+                    }
+
+                    foreach (var updateToYield in updatesToYield)
+                        yield return updateToYield;
                 }
             }
             finally
             {
-                await enumerator.DisposeAsync();
+                try
+                {
+                    await enumerator.DisposeAsync();
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    cancelled = true;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Writing Coach streaming enumerator disposal failed");
+                    streamFailed = true;
+                    streamError ??= ex.Message;
+                }
             }
 
             if (cancelled)

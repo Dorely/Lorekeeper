@@ -235,6 +235,17 @@
 
         var phase = "pre-turn editor flush/lock";
         var turnCts = _cts;
+        var completionNotified = false;
+        async Task ReleaseTurnAsync()
+        {
+            ReleaseRunningUi();
+            if (completionNotified)
+                return;
+
+            completionNotified = true;
+            await NotifyAiTurnCompletedAsync();
+        }
+
         try
         {
             if (OnAiTurnStarting.HasDelegate)
@@ -329,26 +340,26 @@
                         break;
 
                     case EditorChatAssistantMessageCompleted:
+                        await ReleaseTurnAsync();
                         await TryRunPostToolUiRefreshAsync("assistant completion refresh", async () =>
                         {
                             await ReloadFromDbAsync();
                             await LoadPendingChangesAsync(openIfPending: true);
                             await LoadContestBatchesAsync(openIfAvailable: false);
                         });
-                        _live = null;
                         RequestScroll();
                         StateHasChanged();
                         break;
 
                     case EditorChatTurnError error:
                         _error = error.Cancelled ? null : error.Message;
+                        await ReleaseTurnAsync();
                         await TryRunPostToolUiRefreshAsync("turn error refresh", async () =>
                         {
                             await ReloadFromDbAsync();
                             await LoadPendingChangesAsync(openIfPending: false);
                             await LoadContestBatchesAsync(openIfAvailable: false);
                         });
-                        _live = null;
                         RequestScroll();
                         StateHasChanged();
                         break;
@@ -373,11 +384,9 @@
         }
         finally
         {
-            _running = false;
-            _live = null;
+            await ReleaseTurnAsync();
             _cts?.Dispose();
             _cts = null;
-            await NotifyAiTurnCompletedAsync();
             await TryRunPostToolUiRefreshAsync("final prompt refresh", async () =>
             {
                 await RefreshSystemPromptAsync();
@@ -389,6 +398,18 @@
     }
 
     private void CancelAsync() => _cts?.Cancel();
+
+    private void ReleaseRunningUi()
+    {
+        var wasRunning = _running;
+        var hadLive = _live is not null;
+        _running = false;
+        _live = null;
+        UpdateConversationTokenCount();
+        RequestScroll();
+        if (wasRunning || hadLive)
+            StateHasChanged();
+    }
 
     private async Task NotifyAiTurnCompletedAsync()
     {

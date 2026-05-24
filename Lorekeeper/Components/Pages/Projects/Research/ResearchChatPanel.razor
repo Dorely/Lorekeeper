@@ -183,19 +183,19 @@
                         await OnActivityChanged.InvokeAsync();
                         break;
                     case ResearchAssistantMessageCompleted:
+                        ReleaseRunningUi();
                         await ReloadFromDbAsync();
                         await LoadPendingChangesAsync(openIfPending: true);
                         await OnActivityChanged.InvokeAsync();
-                        _live = null;
                         RequestScroll();
                         StateHasChanged();
                         break;
                     case ResearchTurnError error:
                         _error = error.Cancelled ? null : error.Message;
+                        ReleaseRunningUi();
                         await ReloadFromDbAsync();
                         await LoadPendingChangesAsync(openIfPending: false);
                         await OnActivityChanged.InvokeAsync();
-                        _live = null;
                         RequestScroll();
                         StateHasChanged();
                         break;
@@ -208,13 +208,9 @@
         }
         finally
         {
-            _running = false;
-            _live = null;
-            UpdateConversationTokenCount();
+            ReleaseRunningUi();
             _cts?.Dispose();
             _cts = null;
-            RequestScroll();
-            StateHasChanged();
         }
     }
 
@@ -227,6 +223,18 @@
     }
 
     private void CancelAsync() => _cts?.Cancel();
+
+    private void ReleaseRunningUi()
+    {
+        var wasRunning = _running;
+        var hadLive = _live is not null;
+        _running = false;
+        _live = null;
+        UpdateConversationTokenCount();
+        RequestScroll();
+        if (wasRunning || hadLive)
+            StateHasChanged();
+    }
 
     private async Task ReloadFromDbAsync()
     {

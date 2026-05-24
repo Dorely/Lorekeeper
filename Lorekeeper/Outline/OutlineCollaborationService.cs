@@ -302,43 +302,72 @@ they commit to a direction, act on it without a second confirmation.
                     }
                     if (!hasNext) break;
 
-                    var update = enumerator.Current;
-                    foreach (var content in update.Contents)
+                    var updatesToYield = new List<OutlineTurnUpdate>();
+                    try
                     {
-                        if (content is TextContent tc && !string.IsNullOrEmpty(tc.Text))
+                        var contents = enumerator.Current?.Contents;
+                        if (contents is null) continue;
+
+                        foreach (var content in contents)
                         {
-                            textBuilder.Append(tc.Text);
-                            yield return new TextDelta(tc.Text);
-                        }
-                        else
-                        {
-                            foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
+                            if (content is TextContent tc && !string.IsNullOrEmpty(tc.Text))
                             {
-                                switch (toolUpdate)
+                                textBuilder.Append(tc.Text);
+                                updatesToYield.Add(new TextDelta(tc.Text));
+                            }
+                            else
+                            {
+                                foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
                                 {
-                                    case StreamingToolCallStartedUpdate started:
-                                        yield return new ToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
-                                        break;
-                                    case StreamingToolCallArgumentsDeltaUpdate delta:
-                                        yield return new ToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
-                                        break;
-                                    case StreamingToolCallReadyUpdate ready:
-                                        pendingCalls.Add(new PendingToolCall(
-                                            ready.Content,
-                                            ready.CallId,
-                                            ready.ToolName,
-                                            ready.ArgumentsJson,
-                                            ready.TextOffset));
-                                        break;
+                                    switch (toolUpdate)
+                                    {
+                                        case StreamingToolCallStartedUpdate started:
+                                            updatesToYield.Add(new ToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete));
+                                            break;
+                                        case StreamingToolCallArgumentsDeltaUpdate delta:
+                                            updatesToYield.Add(new ToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete));
+                                            break;
+                                        case StreamingToolCallReadyUpdate ready:
+                                            pendingCalls.Add(new PendingToolCall(
+                                                ready.Content,
+                                                ready.CallId,
+                                                ready.ToolName,
+                                                ready.ArgumentsJson,
+                                                ready.TextOffset));
+                                            break;
+                                    }
                                 }
                             }
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Outline streaming update processing failed");
+                        streamFailed = true;
+                        streamError = ex.Message;
+                        break;
+                    }
+
+                    foreach (var updateToYield in updatesToYield)
+                        yield return updateToYield;
                 }
             }
             finally
             {
-                await enumerator.DisposeAsync();
+                try
+                {
+                    await enumerator.DisposeAsync();
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    cancelled = true;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Outline streaming enumerator disposal failed");
+                    streamFailed = true;
+                    streamError ??= ex.Message;
+                }
             }
 
             // Drain any in-flight mutation flags from text streaming (none expected, but cheap).

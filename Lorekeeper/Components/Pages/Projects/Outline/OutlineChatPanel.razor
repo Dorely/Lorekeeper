@@ -190,18 +190,18 @@
 
                     case AssistantMessageCompleted:
                         // Reload from DB so we render the canonical persisted state.
+                        ReleaseRunningUi();
                         await ReloadFromDbAsync();
                         await LoadPendingChangesAsync(openIfPending: true);
-                        _live = null;
                         RequestScroll();
                         StateHasChanged();
                         break;
 
                     case TurnError err:
                         _error = err.Cancelled ? null : err.Message;
+                        ReleaseRunningUi();
                         await ReloadFromDbAsync();
                         await LoadPendingChangesAsync(openIfPending: false);
-                        _live = null;
                         RequestScroll();
                         StateHasChanged();
                         break;
@@ -214,17 +214,25 @@
         }
         finally
         {
-            _running = false;
-            _live = null;
-            UpdateConversationTokenCount();
+            ReleaseRunningUi();
             _cts?.Dispose();
             _cts = null;
-            RequestScroll();
-            StateHasChanged();
         }
     }
 
     private void CancelAsync() => _cts?.Cancel();
+
+    private void ReleaseRunningUi()
+    {
+        var wasRunning = _running;
+        var hadLive = _live is not null;
+        _running = false;
+        _live = null;
+        UpdateConversationTokenCount();
+        RequestScroll();
+        if (wasRunning || hadLive)
+            StateHasChanged();
+    }
 
     private async Task ResetAsync()
     {

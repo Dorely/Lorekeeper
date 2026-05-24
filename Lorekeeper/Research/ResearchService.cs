@@ -363,7 +363,20 @@ public sealed class ResearchService(
             }
             finally
             {
-                await enumerator.DisposeAsync();
+                try
+                {
+                    await enumerator.DisposeAsync();
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    cancelled = true;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Research streaming enumerator disposal failed");
+                    streamFailed = true;
+                    streamError ??= ex.Message;
+                }
             }
 
             DrainMutated();

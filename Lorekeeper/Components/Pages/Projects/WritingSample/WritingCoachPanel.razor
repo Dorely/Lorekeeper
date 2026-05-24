@@ -150,16 +150,16 @@
                         break;
 
                     case WritingCoachAssistantMessageCompleted:
+                        ReleaseRunningUi();
                         await ReloadFromDbAsync();
-                        _live = null;
                         RequestScroll();
                         StateHasChanged();
                         break;
 
                     case WritingCoachTurnError error:
                         _error = error.Cancelled ? null : error.Message;
+                        ReleaseRunningUi();
                         await ReloadFromDbAsync();
-                        _live = null;
                         RequestScroll();
                         StateHasChanged();
                         break;
@@ -172,13 +172,9 @@
         }
         finally
         {
-            _running = false;
-            _live = null;
-            UpdateConversationTokenCount();
+            ReleaseRunningUi();
             _cts?.Dispose();
             _cts = null;
-            RequestScroll();
-            StateHasChanged();
         }
     }
 
@@ -191,6 +187,18 @@
     }
 
     private void CancelAsync() => _cts?.Cancel();
+
+    private void ReleaseRunningUi()
+    {
+        var wasRunning = _running;
+        var hadLive = _live is not null;
+        _running = false;
+        _live = null;
+        UpdateConversationTokenCount();
+        RequestScroll();
+        if (wasRunning || hadLive)
+            StateHasChanged();
+    }
 
     private async Task ReloadFromDbAsync()
     {
