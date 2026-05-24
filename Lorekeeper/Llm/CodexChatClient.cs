@@ -13,7 +13,6 @@ namespace Lorekeeper.Llm;
 /// </summary>
 public sealed class CodexChatClient : IChatClient
 {
-    private const string CodexEndpoint = "https://chatgpt.com/backend-api/codex/responses";
     private const string DefaultModel = "gpt-5.4-mini";
     private const int MaxBufferedResponseAttempts = 2;
 
@@ -28,7 +27,7 @@ public sealed class CodexChatClient : IChatClient
         _httpClient = httpClient;
         _accessToken = accessToken;
         _model = string.IsNullOrWhiteSpace(model) ? DefaultModel : model;
-        _accountId = ExtractAccountId(accessToken);
+        _accountId = CodexProvider.ExtractAccountId(accessToken);
         _logger = logger;
     }
 
@@ -109,7 +108,7 @@ public sealed class CodexChatClient : IChatClient
 
         _logger.LogDebug("Codex request body: {Body}", json);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, CodexEndpoint);
+        using var request = new HttpRequestMessage(HttpMethod.Post, CodexProvider.ResponsesEndpoint);
         request.Content = new StringContent(json, Encoding.UTF8);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
@@ -121,7 +120,7 @@ public sealed class CodexChatClient : IChatClient
 
         _logger.LogDebug(
             "Codex request: POST {Endpoint}, account={AccountId}, model={Model}, messages={MessageCount}, tools={ToolCount}, bodyChars={BodyChars}",
-            CodexEndpoint,
+            CodexProvider.ResponsesEndpoint,
             _accountId,
             _model,
             bufferedMessages.Count,
@@ -555,25 +554,5 @@ public sealed class CodexChatClient : IChatClient
             dict["required"] = propertyNames;
 
         return JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(dict));
-    }
-
-    private static string ExtractAccountId(string token)
-    {
-        var parts = token.Split('.');
-        if (parts.Length != 3)
-            throw new InvalidOperationException("OAuth token is not a valid JWT.");
-
-        var payload = parts[1];
-        payload += new string('=', (4 - payload.Length % 4) % 4);
-        var decoded = Convert.FromBase64String(payload.Replace('-', '+').Replace('_', '/'));
-        var json = JsonSerializer.Deserialize<JsonElement>(decoded);
-
-        if (json.TryGetProperty("https://api.openai.com/auth", out var authClaim) &&
-            authClaim.TryGetProperty("chatgpt_account_id", out var accountId))
-        {
-            return accountId.GetString() ?? throw new InvalidOperationException("chatgpt_account_id is null in token.");
-        }
-
-        throw new InvalidOperationException("OAuth token does not contain chatgpt_account_id. Make sure you signed in with your OpenAI account.");
     }
 }

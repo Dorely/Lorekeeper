@@ -12,8 +12,6 @@ public sealed class CodexImageGenerationService(
     IHttpClientFactory httpClientFactory,
     ILogger<CodexImageGenerationService> logger) : ICodexImageGenerationService
 {
-    private const string CodexProviderName = "openai-codex";
-    private const string CodexEndpoint = "https://chatgpt.com/backend-api/codex/responses";
     private const string DefaultMainlineModel = "gpt-5.5";
     private const string ImageModel = "gpt-image-2";
 
@@ -26,7 +24,7 @@ public sealed class CodexImageGenerationService(
         if (string.IsNullOrWhiteSpace(token))
             throw new InvalidOperationException("Connect OpenAI Codex in Settings before generating publish images.");
 
-        var accountId = ExtractAccountId(token);
+        var accountId = CodexProvider.ExtractAccountId(token);
         var preferredModel = DefaultMainlineModel;
         var fallbackModel = string.IsNullOrWhiteSpace(provider.ModelId) ? null : provider.ModelId.Trim();
 
@@ -45,7 +43,7 @@ public sealed class CodexImageGenerationService(
 
     private async Task<LlmProvider> ResolveCodexProviderAsync(CancellationToken cancellationToken)
     {
-        var provider = await providers.GetByNameAsync(CodexProviderName, cancellationToken);
+        var provider = await providers.GetByNameAsync(CodexProvider.Name, cancellationToken);
         if (provider is not null)
             return provider;
 
@@ -65,7 +63,7 @@ public sealed class CodexImageGenerationService(
         var payload = BuildPayload(options, mainlineModel);
         var json = JsonSerializer.Serialize(payload);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, CodexEndpoint);
+        using var request = new HttpRequestMessage(HttpMethod.Post, CodexProvider.ResponsesEndpoint);
         request.Content = new StringContent(json, Encoding.UTF8);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -233,23 +231,4 @@ public sealed class CodexImageGenerationService(
         return ReadString(evt, "message");
     }
 
-    private static string ExtractAccountId(string token)
-    {
-        var parts = token.Split('.');
-        if (parts.Length != 3)
-            throw new InvalidOperationException("OAuth token is not a valid JWT.");
-
-        var payload = parts[1];
-        payload += new string('=', (4 - payload.Length % 4) % 4);
-        var decoded = Convert.FromBase64String(payload.Replace('-', '+').Replace('_', '/'));
-        var json = JsonSerializer.Deserialize<JsonElement>(decoded);
-
-        if (json.TryGetProperty("https://api.openai.com/auth", out var authClaim) &&
-            authClaim.TryGetProperty("chatgpt_account_id", out var accountId))
-        {
-            return accountId.GetString() ?? throw new InvalidOperationException("chatgpt_account_id is null in token.");
-        }
-
-        throw new InvalidOperationException("OAuth token does not contain chatgpt_account_id. Make sure you signed in with your OpenAI account.");
-    }
 }

@@ -24,6 +24,7 @@ public sealed class EmbeddingConfigurationService(
             ?? throw new InvalidOperationException($"Provider connection {request.ProviderId} was not found.");
         if (provider.CredentialSourceId is not null)
             throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
+        ValidateProviderApiKind(provider, request.ApiKind);
 
         var modelId = NormalizeModelId(request.ModelId);
         var embeddings = await client.GenerateAsync(provider, request.ApiKind, modelId, ["Lorekeeper embedding test"], cancellationToken);
@@ -42,6 +43,7 @@ public sealed class EmbeddingConfigurationService(
             ?? throw new InvalidOperationException($"Provider connection {draft.ProviderId} was not found.");
         if (provider.CredentialSourceId is not null)
             throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
+        ValidateProviderApiKind(provider, draft.ApiKind);
 
         var existing = await configurations.GetAsync(cancellationToken);
         var changed = existing is null
@@ -132,4 +134,10 @@ public sealed class EmbeddingConfigurationService(
         string.IsNullOrWhiteSpace(modelId)
             ? throw new InvalidOperationException("Embedding model id is required.")
             : modelId.Trim();
+
+    private static void ValidateProviderApiKind(LlmProvider provider, EmbeddingApiKind apiKind)
+    {
+        if (CodexProvider.IsCodex(provider) && apiKind != EmbeddingApiKind.OpenAICompatible)
+            throw new InvalidOperationException("OpenAI Codex embeddings only support the OpenAI-compatible embedding API.");
+    }
 }

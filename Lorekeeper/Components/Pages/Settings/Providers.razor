@@ -291,8 +291,6 @@ else
 </div>
 
 @code {
-    private const string CodexProviderName = "openai-codex";
-
     private List<LlmProvider> _parents = [];
     private Dictionary<int, List<LlmProvider>> _children = [];
     private Dictionary<int, bool> _oauthStatus = [];
@@ -360,7 +358,7 @@ else
             _oauthStatus[p.Id] = token is not null;
         }
 
-        _codexProvider = _parents.FirstOrDefault(p => p.Name == CodexProviderName);
+        _codexProvider = _parents.FirstOrDefault(p => p.Name == CodexProvider.Name);
         _codexConnected = _codexProvider is not null
             && _oauthStatus.TryGetValue(_codexProvider.Id, out var c) && c;
     }
@@ -519,9 +517,9 @@ else
         {
             codex = new LlmProvider
             {
-                Name = CodexProviderName,
+                Name = CodexProvider.Name,
                 DisplayName = "OpenAI (Codex)",
-                EndpointUrl = "https://chatgpt.com/backend-api/codex/responses",
+                EndpointUrl = CodexProvider.ResponsesEndpoint,
                 ModelId = "gpt-5.4-mini",
                 AuthType = AuthType.OAuth,
                 IsDefault = !_parents.Any(p => p.IsDefault)

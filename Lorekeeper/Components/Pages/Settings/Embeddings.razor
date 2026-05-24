@@ -81,16 +81,26 @@ else
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Embedding API</label>
-                    <select class="form-select" @bind="_apiKind" @bind:after="DraftChanged">
-                        <option value="@EmbeddingApiKind.OllamaNative">Ollama native</option>
+                    <select class="form-select" @bind="_apiKind" @bind:after="DraftChanged" disabled="@SelectedConnectionIsCodex">
+                        @if (!SelectedConnectionIsCodex)
+                        {
+                            <option value="@EmbeddingApiKind.OllamaNative">Ollama native</option>
+                        }
                         <option value="@EmbeddingApiKind.OpenAICompatible">OpenAI compatible</option>
                     </select>
                 </div>
                 <div class="col-md-5">
                     <label class="form-label">Embedding model id</label>
-                    <input class="form-control" value="@_modelId" @oninput="OnModelChanged" placeholder="nomic-embed-text or text-embedding-3-small" />
+                    <input class="form-control" value="@_modelId" @oninput="OnModelChanged" placeholder="@ModelPlaceholder" />
                 </div>
             </div>
+
+            @if (SelectedConnectionIsCodex)
+            {
+                <div class="alert alert-info mt-3 mb-0">
+                    OpenAI Codex embeddings use @CodexProvider.PlatformEmbeddingsEndpoint automatically; the Codex chat endpoint stays unchanged.
+                </div>
+            }
 
             @if (_tested is not null && TestMatchesDraft)
             {
@@ -139,6 +149,14 @@ else
     private string _statusKind = "success";
 
     private bool Busy => _testing || _saving || _unsetting;
+    private LlmProvider? SelectedConnection =>
+        _connections.FirstOrDefault(connection => connection.Id == _providerId);
+    private bool SelectedConnectionIsCodex =>
+        SelectedConnection is { } selected && CodexProvider.IsCodex(selected);
+    private string ModelPlaceholder =>
+        SelectedConnectionIsCodex
+            ? CodexProvider.DefaultEmbeddingModel
+            : "nomic-embed-text or text-embedding-3-small";
 
     private bool TestMatchesDraft =>
         _tested is not null
@@ -191,8 +209,8 @@ else
         else if (_connections.FirstOrDefault() is { } first)
         {
             _providerId = first.Id;
-            _apiKind = GuessDefaultApiKind(first);
             _modelId = string.Empty;
+            ApplyProviderDefaults(first, defaultModelWhenEmpty: true);
             _tested = null;
         }
         else
@@ -209,6 +227,7 @@ else
 
     private async Task TestAsync()
     {
+        NormalizeSelectedProviderDraft();
         _testing = true;
         _tested = null;
         try
@@ -228,6 +247,7 @@ else
 
     private async Task SaveAsync()
     {
+        NormalizeSelectedProviderDraft();
         if (!CanSave)
             return;
 
@@ -293,9 +313,9 @@ else
     {
         if (int.TryParse(args.Value?.ToString(), out var providerId))
             _providerId = providerId;
-        DraftChanged();
         if (_connections.FirstOrDefault(connection => connection.Id == _providerId) is { } selected)
-            _apiKind = GuessDefaultApiKind(selected);
+            ApplyProviderDefaults(selected, defaultModelWhenEmpty: true);
+        DraftChanged();
     }
 
     private void OnModelChanged(ChangeEventArgs args)
@@ -306,16 +326,37 @@ else
 
     private void DraftChanged()
     {
+        NormalizeSelectedProviderDraft();
         _tested = null;
         _confirmReembed = false;
     }
 
     private static EmbeddingApiKind GuessDefaultApiKind(LlmProvider provider)
     {
+        if (CodexProvider.IsCodex(provider))
+            return EmbeddingApiKind.OpenAICompatible;
+
         var endpoint = provider.EndpointUrl.TrimEnd('/');
         return endpoint.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
             ? EmbeddingApiKind.OpenAICompatible
             : EmbeddingApiKind.OllamaNative;
+    }
+
+    private void ApplyProviderDefaults(LlmProvider provider, bool defaultModelWhenEmpty)
+    {
+        _apiKind = GuessDefaultApiKind(provider);
+        if (defaultModelWhenEmpty
+            && CodexProvider.IsCodex(provider)
+            && string.IsNullOrWhiteSpace(_modelId))
+        {
+            _modelId = CodexProvider.DefaultEmbeddingModel;
+        }
+    }
+
+    private void NormalizeSelectedProviderDraft()
+    {
+        if (SelectedConnection is { } selected && CodexProvider.IsCodex(selected))
+            ApplyProviderDefaults(selected, defaultModelWhenEmpty: true);
     }
 
     private static string ConnectionLabel(LlmProvider provider) =>

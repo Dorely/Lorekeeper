@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
@@ -30,6 +31,8 @@ public sealed class EmbeddingClient(
         if (texts.Count == 0) return [];
         if (string.IsNullOrWhiteSpace(modelId))
             throw new InvalidOperationException("Embedding model id is required.");
+        if (CodexProvider.IsCodex(provider) && apiKind != EmbeddingApiKind.OpenAICompatible)
+            throw new InvalidOperationException("OpenAI Codex embeddings only support the OpenAI-compatible embedding API.");
 
         return apiKind switch
         {
@@ -55,7 +58,7 @@ public sealed class EmbeddingClient(
 
         logger.LogDebug("Generating {Count} embedding(s) through Ollama ({Model})", texts.Count, modelId);
         var response = await client.PostAsJsonAsync(requestUrl, request, cancellationToken);
-        await EnsureSuccessAsync(response, "Ollama embed", cancellationToken);
+        await EnsureSuccessAsync(response, "Ollama embed", isCodex: false, cancellationToken: cancellationToken);
 
         var result = await response.Content.ReadFromJsonAsync<OllamaEmbedResponse>(cancellationToken)
             ?? throw new InvalidOperationException("Ollama returned null response.");
@@ -78,9 +81,20 @@ public sealed class EmbeddingClient(
             Input = texts.ToList(),
         };
 
-        logger.LogDebug("Generating {Count} embedding(s) through OpenAI-compatible API ({Model})", texts.Count, modelId);
-        var response = await client.PostAsJsonAsync(EmbeddingEndpointUrl(provider.EndpointUrl), request, cancellationToken);
-        await EnsureSuccessAsync(response, "OpenAI-compatible embed", cancellationToken);
+        var endpointUrl = OpenAICompatibleEmbeddingEndpointUrl(provider);
+        var isCodex = CodexProvider.IsCodex(provider);
+
+        logger.LogDebug(
+            "Generating {Count} embedding(s) through OpenAI-compatible API ({Model}) at {Endpoint}",
+            texts.Count,
+            modelId,
+            endpointUrl);
+        var response = await client.PostAsJsonAsync(endpointUrl, request, cancellationToken);
+        await EnsureSuccessAsync(
+            response,
+            isCodex ? "OpenAI Codex embedding test" : "OpenAI-compatible embed",
+            isCodex,
+            cancellationToken);
 
         var result = await response.Content.ReadFromJsonAsync<OpenAIEmbeddingResponse>(cancellationToken)
             ?? throw new InvalidOperationException("Embedding endpoint returned null response.");
@@ -108,15 +122,32 @@ public sealed class EmbeddingClient(
             if (string.IsNullOrWhiteSpace(apiKey))
                 throw new InvalidOperationException($"No valid API key or token for provider '{provider.Name}'.");
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            if (CodexProvider.IsCodex(provider))
+            {
+                client.DefaultRequestHeaders.TryAddWithoutValidation("chatgpt-account-id", CodexProvider.ExtractAccountId(apiKey));
+                client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Lorekeeper");
+            }
         }
 
         return client;
     }
 
-    private static async Task EnsureSuccessAsync(HttpResponseMessage response, string operation, CancellationToken cancellationToken)
+    private static async Task EnsureSuccessAsync(
+        HttpResponseMessage response,
+        string operation,
+        bool isCodex,
+        CancellationToken cancellationToken)
     {
         if (response.IsSuccessStatusCode) return;
         var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (isCodex && response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            throw new HttpRequestException(
+                $"{operation} failed ({response.StatusCode}): the Codex OAuth token was rejected by the OpenAI platform embeddings endpoint {CodexProvider.PlatformEmbeddingsEndpoint}. Reconnect OpenAI Codex and try again; if it still fails, this account token cannot be reused for platform embeddings. Response: {errorBody}",
+                null,
+                response.StatusCode);
+        }
+
         throw new HttpRequestException($"{operation} failed ({response.StatusCode}): {errorBody}", null, response.StatusCode);
     }
 
@@ -135,6 +166,11 @@ public sealed class EmbeddingClient(
             ? trimmed
             : $"{trimmed}/embeddings";
     }
+
+    private static string OpenAICompatibleEmbeddingEndpointUrl(LlmProvider provider) =>
+        CodexProvider.IsCodex(provider)
+            ? CodexProvider.PlatformEmbeddingsEndpoint
+            : EmbeddingEndpointUrl(provider.EndpointUrl);
 
     private sealed class OllamaEmbedRequest
     {
