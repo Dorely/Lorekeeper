@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Models;
@@ -288,7 +290,7 @@ public sealed class PublishService(
         var document = await GetDocumentAsync(projectId, cancellationToken);
 
         return new ProjectExportFile(
-            FileName: $"{SafeFileName(document.ProjectSlug)}-publish{formatter.FileExtension}",
+            FileName: ExportFileName(document, formatter.FileExtension),
             ContentType: formatter.ContentType,
             Content: formatter.Render(document));
     }
@@ -708,12 +710,51 @@ public sealed class PublishService(
 
     private static string Clean(string value) => value.Trim();
 
-    private static string SafeFileName(string input)
+    private static string ExportFileName(PublishDocument document, string extension)
+    {
+        var exportedDate = document.ExportedAtUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var fileName = string.Join(
+            '_',
+            new[]
+            {
+                document.DisplayTitle,
+                document.Profile.Author,
+                document.Profile.Language,
+                exportedDate,
+            }
+            .Select(SafeFileNameSegment)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment)));
+
+        return $"{(string.IsNullOrWhiteSpace(fileName) ? "project" : fileName)}{extension}";
+    }
+
+    private static string SafeFileNameSegment(string input)
     {
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
-        var chars = input.Select(ch => invalid.Contains(ch) ? '-' : ch).ToArray();
-        var result = new string(chars).Trim('-', ' ', '.');
-        return string.IsNullOrWhiteSpace(result) ? "project" : result;
+        var builder = new StringBuilder(input.Length);
+        var previousSeparator = false;
+
+        foreach (var ch in input.Trim())
+        {
+            var isSeparator = char.IsWhiteSpace(ch)
+                || invalid.Contains(ch)
+                || ch is '_' or '/' or '\\';
+            if (isSeparator)
+            {
+                if (builder.Length > 0 && !previousSeparator)
+                {
+                    builder.Append('_');
+                    previousSeparator = true;
+                }
+
+                continue;
+            }
+
+            builder.Append(ch);
+            previousSeparator = false;
+        }
+
+        return builder.ToString().Trim('_', ' ', '.');
     }
 
     private static void Touch(PublishProfile profile, Project project)
