@@ -102,21 +102,49 @@ else
             </div>
         </section>
 
-        <aside class="editor-side-pane">
-            <section class="panel panel-recommendations">
-                <h6 class="panel-title">Recommended Context</h6>
-                <RecommendedContextPanel ProjectId="Project.Id"
-                                         ChapterId="_activeChapterId"
-                                         RefreshSignal="_contextRefreshSignal"
-                                         OnChanged="OnContextChangedAsync" />
+        <aside class="@EditorSidePaneClass()">
+            <section class='@(PanelClass("panel-recommendations", _recommendedContextOpen))'>
+                <h6 class="panel-title">
+                    <button type="button"
+                            class="panel-title-toggle"
+                            title='@(PanelToggleTitle("Recommended Context", _recommendedContextOpen))'
+                            aria-expanded="@_recommendedContextOpen"
+                            aria-controls="recommended-context-panel-content"
+                            @onclick="ToggleRecommendedContext">
+                        <span class="caret">@PanelCaret(_recommendedContextOpen)</span>
+                        <span class="panel-title-text">Recommended Context</span>
+                    </button>
+                </h6>
+                <div id="recommended-context-panel-content"
+                     class="@PanelContentClass(_recommendedContextOpen)"
+                     aria-hidden="@AriaHidden(!_recommendedContextOpen)">
+                    <RecommendedContextPanel ProjectId="Project.Id"
+                                             ChapterId="_activeChapterId"
+                                             RefreshSignal="_contextRefreshSignal"
+                                             OnChanged="OnContextChangedAsync" />
+                </div>
             </section>
 
-            <section class="panel panel-context">
-                <h6 class="panel-title">Context Feed</h6>
-                <ContextFeedPanel @ref="_contextPanel"
-                                  Project="Project"
-                                  CurrentChapter="_current"
-                                  OnContextChanged="OnContextChangedAsync" />
+            <section class='@(PanelClass("panel-context", _contextFeedOpen))'>
+                <h6 class="panel-title">
+                    <button type="button"
+                            class="panel-title-toggle"
+                            title='@(PanelToggleTitle("Context Feed", _contextFeedOpen))'
+                            aria-expanded="@_contextFeedOpen"
+                            aria-controls="context-feed-panel-content"
+                            @onclick="ToggleContextFeed">
+                        <span class="caret">@PanelCaret(_contextFeedOpen)</span>
+                        <span class="panel-title-text">Context Feed</span>
+                    </button>
+                </h6>
+                <div id="context-feed-panel-content"
+                     class="@PanelContentClass(_contextFeedOpen)"
+                     aria-hidden="@AriaHidden(!_contextFeedOpen)">
+                    <ContextFeedPanel @ref="_contextPanel"
+                                      Project="Project"
+                                      CurrentChapter="_current"
+                                      OnContextChanged="OnContextChangedAsync" />
+                </div>
             </section>
         </aside>
     </div>
@@ -144,6 +172,8 @@ else
     private bool _focusTitleNext;
 
     private bool _menuOpen;
+    private bool _recommendedContextOpen = true;
+    private bool _contextFeedOpen = true;
 
     private ElementReference _bodyTextarea;
     private ElementReference _gutterRef;
@@ -442,6 +472,59 @@ else
 
     private void ToggleMenu() => _menuOpen = !_menuOpen;
     private void CloseMenu() => _menuOpen = false;
+
+    private string EditorSidePaneClass()
+    {
+        var classes = "editor-side-pane";
+        if (!_recommendedContextOpen)
+        {
+            classes += " editor-side-pane--recommendations-collapsed";
+        }
+
+        if (!_contextFeedOpen)
+        {
+            classes += " editor-side-pane--context-collapsed";
+        }
+
+        return classes;
+    }
+
+    private static string PanelClass(string panelName, bool isOpen) =>
+        $"panel {panelName}{(isOpen ? string.Empty : " panel--collapsed")}";
+
+    private static string PanelContentClass(bool isOpen) =>
+        isOpen ? "panel-content" : "panel-content panel-content--collapsed";
+
+    private static string PanelCaret(bool isOpen) => isOpen ? "▾" : "▸";
+
+    private static string AriaHidden(bool isHidden) => isHidden ? "true" : "false";
+
+    private static string PanelToggleTitle(string label, bool isOpen) =>
+        isOpen ? $"Collapse {label}" : $"Expand {label}";
+
+    private void ToggleRecommendedContext()
+    {
+        if (_recommendedContextOpen && !_contextFeedOpen)
+        {
+            _recommendedContextOpen = false;
+            _contextFeedOpen = true;
+            return;
+        }
+
+        _recommendedContextOpen = !_recommendedContextOpen;
+    }
+
+    private void ToggleContextFeed()
+    {
+        if (_contextFeedOpen && !_recommendedContextOpen)
+        {
+            _contextFeedOpen = false;
+            _recommendedContextOpen = true;
+            return;
+        }
+
+        _contextFeedOpen = !_contextFeedOpen;
+    }
 
     private void StartEditTitle()
     {
