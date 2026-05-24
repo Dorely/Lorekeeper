@@ -33,6 +33,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<AiChange> AiChanges => Set<AiChange>();
     public DbSet<ContestBatch> ContestBatches => Set<ContestBatch>();
     public DbSet<ContestCandidate> ContestCandidates => Set<ContestCandidate>();
+    public DbSet<EditorRevisionJob> EditorRevisionJobs => Set<EditorRevisionJob>();
+    public DbSet<EditorRevisionSession> EditorRevisionSessions => Set<EditorRevisionSession>();
+    public DbSet<EditorRevisionMessage> EditorRevisionMessages => Set<EditorRevisionMessage>();
     public DbSet<EditorContextPreference> EditorContextPreferences => Set<EditorContextPreference>();
     public DbSet<IngestSource> IngestSources => Set<IngestSource>();
     public DbSet<IngestSourceChunk> IngestSourceChunks => Set<IngestSourceChunk>();
@@ -276,6 +279,42 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Batch)
                 .WithMany(b => b.Candidates)
                 .HasForeignKey(e => e.BatchId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EditorRevisionJob>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
+            entity.HasIndex(e => new { e.ConversationId, e.CreatedAt });
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.EditorRevisionJobs)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EditorRevisionSession>(entity =>
+        {
+            entity.HasIndex(e => new { e.JobId, e.Order });
+            entity.HasIndex(e => new { e.ChapterId, e.CreatedAt });
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Job)
+                .WithMany(j => j.Sessions)
+                .HasForeignKey(e => e.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EditorRevisionMessage>(entity =>
+        {
+            entity.HasIndex(e => new { e.SessionId, e.Order });
+            entity.Property(e => e.Role).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Session)
+                .WithMany(s => s.Messages)
+                .HasForeignKey(e => e.SessionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

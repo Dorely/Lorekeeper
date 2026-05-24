@@ -183,6 +183,7 @@ public sealed class EditorChatService(
 
             editorContext = new EditorChatContext(
                 projectId,
+                conversation.Id,
                 currentChapterId,
                 OnToolMutated,
                 project.AiChangeApprovalEnabled,
@@ -609,6 +610,9 @@ public sealed class EditorChatService(
 
     private static string BuildToolResultForModel(string toolName, string result, int maxToolResultCharsForModel)
     {
+        if (string.Equals(toolName, "start_revision_agents", StringComparison.Ordinal))
+            return result;
+
         if (result.Length <= maxToolResultCharsForModel)
             return result;
 

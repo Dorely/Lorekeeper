@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorChatTools(
+    IActService acts,
     IChapterService chapters,
     IEntityService entities,
     IEntityTypeService entityTypes,
@@ -21,6 +22,7 @@ public sealed class EditorChatTools(
     IEmbeddingService embeddings,
     IEditorContextService editorContext,
     IEntityRelationContextService entityRelations,
+    IEditorRevisionAgentService revisionAgents,
     OutlineCollaborationTools outlineTools,
     IOptions<EditorChatOptions> editorOptions)
 {
@@ -55,6 +57,21 @@ public sealed class EditorChatTools(
                 method: () => ListChaptersAsync(context),
                 name: "list_chapters",
                 description: "List every chapter in the current project (id, order, title, synopsis, body line count, and read_chapter page count)."),
+
+            AIFunctionFactory.Create(
+                method: (
+                    string query,
+                    Guid? anchorChapterId = null,
+                    Guid[]? affectedEntityIds = null,
+                    Guid[]? eventIds = null,
+                    string[]? keywords = null,
+                    int topK = 20) =>
+                    FindImpactedChaptersAsync(context, query, anchorChapterId, affectedEntityIds, eventIds, keywords, topK),
+                name: "find_impacted_chapters",
+                description:
+                    "Read-only book-level impact map for continuity changes. " +
+                    "Combines outline order, chapter synopses, server-side keyword/body checks, context vector hits, affected entities/events, adjacency, and downstream chapters from an anchor chapter. " +
+                    "Use this before spawning revision agents or before deciding which chapters need body edits."),
 
             AIFunctionFactory.Create(
                 method: () => ListProjectFactsAsync(context),
@@ -112,6 +129,15 @@ public sealed class EditorChatTools(
                 "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
                 "`content` should not contain line numbers. " +
                 "Returns a short change summary plus the edited line-numbered excerpt with nearby context lines."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (EditorRevisionAgentAssignmentInput[] chapters) => StartRevisionAgentsAsync(context, chapters),
+            name: "start_revision_agents",
+            description:
+                "Run prose-only revision workers that edit their assigned chapter bodies for explicit chapter assignments. " +
+                "Each item must include chapterId, reason, and chapter-specific instructions. " +
+                "Workers can only alter chapter body text; this coordinator reviews their completed/staged changes and takes follow-up action only if needed. " +
+                "Before calling this, make any broader canon, outline, entity, beat, relationship, fact, or synopsis updates yourself."));
 
         var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var outlineTool in outlineTools.Build(new OutlineCollaborationContext(context.ProjectId, context.OnMutated, context.OutlineStaging)))
@@ -190,6 +216,114 @@ public sealed class EditorChatTools(
             sb.Append('\n');
         }
         return sb.ToString().TrimEnd();
+    }
+
+    private async Task<string> FindImpactedChaptersAsync(
+        EditorChatContext ctx,
+        string query,
+        Guid? anchorChapterId,
+        Guid[]? affectedEntityIds,
+        Guid[]? eventIds,
+        string[]? keywords,
+        int topK)
+    {
+        var terms = BuildImpactTerms(query, keywords);
+        if (terms.Count == 0)
+            return "Error: query or keywords are required.";
+
+        topK = Math.Clamp(topK, 1, 50);
+        var orderedChapters = await ListOrderedChaptersAsync(ctx.ProjectId);
+        if (orderedChapters.Count == 0)
+            return "No chapters in this project.";
+
+        var candidates = orderedChapters.ToDictionary(
+            item => item.Chapter.Id,
+            item => new ImpactCandidate(item.Chapter, item.GlobalOrder));
+
+        if (anchorChapterId is { } anchor && candidates.TryGetValue(anchor, out var anchorCandidate))
+        {
+            anchorCandidate.Add(45, "anchor", "Anchor chapter supplied by the coordinator.");
+            foreach (var candidate in candidates.Values.Where(candidate => candidate.GlobalOrder > anchorCandidate.GlobalOrder))
+            {
+                var distance = candidate.GlobalOrder - anchorCandidate.GlobalOrder;
+                var score = Math.Max(10, 35 - Math.Min(distance, 10) * 2);
+                candidate.Add(score, "downstream", $"Chapter is {distance} chapter(s) after the anchor chapter.");
+            }
+
+            foreach (var candidate in candidates.Values.Where(candidate => Math.Abs(candidate.GlobalOrder - anchorCandidate.GlobalOrder) == 1))
+                candidate.Add(20, "adjacent", "Chapter is adjacent to the anchor chapter.");
+        }
+
+        foreach (var candidate in candidates.Values)
+        {
+            ScoreText(candidate, "title", candidate.Chapter.Title, terms, 24);
+            ScoreText(candidate, "synopsis", candidate.Chapter.Synopsis, terms, 30);
+            ScoreText(candidate, "body-keyword", candidate.Chapter.Body, terms, 18);
+        }
+
+        await ScoreVectorHitsAsync(ctx.ProjectId, terms, candidates);
+        await ScoreEntityAnchorsAsync(ctx.ProjectId, affectedEntityIds, "affected-entity", candidates);
+        await ScoreEntityAnchorsAsync(ctx.ProjectId, eventIds, "affected-event", candidates);
+
+        var results = candidates.Values
+            .Where(candidate => candidate.Score > 0)
+            .OrderByDescending(candidate => candidate.Score)
+            .ThenBy(candidate => candidate.GlobalOrder)
+            .Take(topK)
+            .Select(candidate => new
+            {
+                chapterId = candidate.Chapter.Id,
+                title = candidate.Chapter.Title,
+                order = candidate.GlobalOrder,
+                synopsis = candidate.Chapter.Synopsis,
+                bodyStats = new
+                {
+                    lines = ChapterFormatting.SplitLines(candidate.Chapter.Body).Count,
+                    chars = candidate.Chapter.Body.Length,
+                    readChapterPages = CountReadChapterPages(candidate.Chapter.Body, EffectiveReadChapterPageMaxChars()),
+                },
+                score = candidate.Score,
+                impact = candidate.Score >= 90 ? "high" : candidate.Score >= 45 ? "medium" : "low",
+                reasons = candidate.Reasons,
+                evidence = candidate.Evidence.Take(6).ToList(),
+            })
+            .ToList();
+
+        if (results.Count == 0)
+            return JsonSerializer.Serialize(new
+            {
+                query,
+                message = "No impacted chapters found from the available outline, vector, entity, and keyword signals.",
+                candidates = Array.Empty<object>(),
+            });
+
+        return JsonSerializer.Serialize(new
+        {
+            query,
+            anchors = new
+            {
+                anchorChapterId,
+                affectedEntityIds = affectedEntityIds ?? [],
+                eventIds = eventIds ?? [],
+                keywords = keywords ?? [],
+            },
+            candidates = results,
+        });
+    }
+
+    private async Task<string> StartRevisionAgentsAsync(EditorChatContext ctx, EditorRevisionAgentAssignmentInput[] chapters)
+    {
+        var request = new EditorRevisionAgentRunRequest(
+            ctx.ProjectId,
+            ctx.ConversationId,
+            ctx.CurrentAssistantMessageId,
+            ctx.CurrentToolCallId,
+            ctx.CurrentArgumentsJson,
+            chapters);
+        var result = await revisionAgents.RunAsync(request);
+        if (!ctx.ReviewEdits && result.Sessions.Any(session => session.Status == EditorRevisionSessionStatus.Completed))
+            ctx.OnMutated();
+        return EditorRevisionAgentService.SerializeRunResult(result);
     }
 
     private async Task<string> ListProjectFactsAsync(EditorChatContext ctx)
@@ -882,6 +1016,155 @@ public sealed class EditorChatTools(
         return Task.FromResult("Contest started. Candidate responses will stream into the review modal.");
     }
 
+    private async Task<IReadOnlyList<OrderedChapter>> ListOrderedChaptersAsync(Guid projectId)
+    {
+        var actList = await acts.ListAsync(projectId);
+        var allChapters = await chapters.ListAsync(projectId);
+        var ordered = new List<OrderedChapter>();
+
+        foreach (var act in actList.OrderBy(act => act.Order))
+        {
+            foreach (var chapter in allChapters
+                .Where(chapter => chapter.ActId == act.Id)
+                .OrderBy(chapter => chapter.Order))
+            {
+                ordered.Add(new OrderedChapter(chapter, ordered.Count));
+            }
+        }
+
+        foreach (var chapter in allChapters
+            .Where(chapter => chapter.ActId is null)
+            .OrderBy(chapter => chapter.Order))
+        {
+            ordered.Add(new OrderedChapter(chapter, ordered.Count));
+        }
+
+        return ordered;
+    }
+
+    private async Task ScoreVectorHitsAsync(
+        Guid projectId,
+        IReadOnlyList<string> terms,
+        IReadOnlyDictionary<Guid, ImpactCandidate> candidates)
+    {
+        try
+        {
+            var queryText = string.Join(' ', terms);
+            var embedding = await embeddings.GenerateEmbeddingAsync(queryText);
+            var results = await vectors.SearchAsync(
+                embedding,
+                Project.ScopeKey(projectId),
+                topK: Math.Min(50, Math.Max(12, candidates.Count)));
+
+            foreach (var result in results)
+            {
+                if (!string.Equals(result.SourceType, ContextVectorSourceTypes.Chapter, StringComparison.Ordinal)
+                    || string.IsNullOrWhiteSpace(result.SourceId)
+                    || !Guid.TryParseExact(result.SourceId, "N", out var chapterId)
+                    || !candidates.TryGetValue(chapterId, out var candidate))
+                {
+                    continue;
+                }
+
+                var score = Math.Clamp((int)Math.Round(42 - result.Distance * 12), 8, 42);
+                candidate.Add(score, "vector", $"Semantic chapter/context hit: {result.Metadata ?? result.RowId.ToString()}.");
+                candidate.AddEvidence("vector", Truncate(result.Content, 420));
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            foreach (var candidate in candidates.Values.Take(1))
+                candidate.AddEvidence("vector-warning", $"Vector search was unavailable: {ex.Message}");
+        }
+    }
+
+    private async Task ScoreEntityAnchorsAsync(
+        Guid projectId,
+        IReadOnlyList<Guid>? entityIds,
+        string reasonKind,
+        IReadOnlyDictionary<Guid, ImpactCandidate> candidates)
+    {
+        if (entityIds is null || entityIds.Count == 0) return;
+
+        foreach (var entityId in entityIds.Distinct())
+        {
+            var entity = await entities.GetAsync(projectId, entityId);
+            if (entity is null) continue;
+
+            if (entity.ParentId is { } parentId && candidates.TryGetValue(parentId, out var parentCandidate))
+            {
+                parentCandidate.Add(38, reasonKind, $"{entity.Type} '{entity.Name}' is scoped to this chapter.");
+                parentCandidate.AddEvidence(reasonKind, $"{entity.Type}: {entity.Name}");
+            }
+
+            foreach (var link in await entities.ListLinksAsync(projectId, entityId))
+            {
+                if (candidates.TryGetValue(link.OtherEntityId, out var chapterCandidate))
+                {
+                    chapterCandidate.Add(34, reasonKind, $"{entity.Type} '{entity.Name}' links to this chapter via {link.EdgeType}.");
+                    chapterCandidate.AddEvidence(reasonKind, $"{entity.Name} {link.EdgeType} {link.OtherEntityName}");
+                    continue;
+                }
+
+                if (string.Equals(link.OtherEntityType, EntityTypeService.EventNodeType, StringComparison.OrdinalIgnoreCase))
+                {
+                    var linkedEvent = await entities.GetAsync(projectId, link.OtherEntityId);
+                    if (linkedEvent?.ParentId is { } eventChapterId && candidates.TryGetValue(eventChapterId, out var eventCandidate))
+                    {
+                        eventCandidate.Add(30, reasonKind, $"{entity.Type} '{entity.Name}' links to event '{linkedEvent.Name}' in this chapter.");
+                        eventCandidate.AddEvidence(reasonKind, $"{entity.Name} {link.EdgeType} {linkedEvent.Name}");
+                    }
+                }
+            }
+        }
+    }
+
+    private static IReadOnlyList<string> BuildImpactTerms(string query, IReadOnlyList<string>? keywords)
+    {
+        var terms = new List<string>();
+        if (!string.IsNullOrWhiteSpace(query))
+            terms.AddRange(SearchTerms(query));
+        if (keywords is not null)
+            terms.AddRange(keywords.SelectMany(SearchTerms));
+
+        return terms
+            .Where(term => term.Length >= 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(24)
+            .ToList();
+    }
+
+    private static void ScoreText(ImpactCandidate candidate, string source, string? text, IReadOnlyList<string> terms, int maxScore)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        var matches = terms
+            .Where(term => text.Contains(term, StringComparison.OrdinalIgnoreCase))
+            .Take(8)
+            .ToList();
+        if (matches.Count == 0) return;
+
+        var score = Math.Min(maxScore, matches.Count * 8);
+        candidate.Add(score, source, $"{source} matched: {string.Join(", ", matches)}.");
+        candidate.AddEvidence(source, ExtractEvidence(text, matches[0]));
+    }
+
+    private static string ExtractEvidence(string text, string term)
+    {
+        var index = text.IndexOf(term, StringComparison.OrdinalIgnoreCase);
+        if (index < 0) return Truncate(text, 240);
+
+        var start = Math.Max(0, index - 120);
+        var length = Math.Min(text.Length - start, term.Length + 240);
+        var snippet = text.Substring(start, length).ReplaceLineEndings(" ");
+        if (start > 0) snippet = "..." + snippet;
+        if (start + length < text.Length) snippet += "...";
+        return snippet;
+    }
+
+    private static string Truncate(string value, int max) =>
+        value.Length <= max ? value : value[..max] + "...";
+
     private static string[] SearchTerms(string query) =>
         query.Split([' ', '\t', '\r', '\n', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(term => term.Trim('"', '\'', '`', '(', ')', '[', ']', '{', '}', '.', ':'))
@@ -956,6 +1239,32 @@ public sealed class EditorChatTools(
         && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+
+    private sealed record OrderedChapter(Chapter Chapter, int GlobalOrder);
+
+    private sealed class ImpactCandidate(Chapter chapter, int globalOrder)
+    {
+        private readonly HashSet<string> _reasonKeys = new(StringComparer.OrdinalIgnoreCase);
+
+        public Chapter Chapter { get; } = chapter;
+        public int GlobalOrder { get; } = globalOrder;
+        public int Score { get; private set; }
+        public List<string> Reasons { get; } = [];
+        public List<object> Evidence { get; } = [];
+
+        public void Add(int score, string key, string reason)
+        {
+            Score += score;
+            if (_reasonKeys.Add($"{key}:{reason}"))
+                Reasons.Add(reason);
+        }
+
+        public void AddEvidence(string label, string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return;
+            Evidence.Add(new { label, text });
+        }
+    }
 }
 
 public enum EditorChatToolMode

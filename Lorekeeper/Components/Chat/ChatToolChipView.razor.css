@@ -87,6 +87,118 @@
     color: var(--bs-danger, #dc3545);
 }
 
+.chat-chip-action {
+    padding-left: 0;
+}
+
+.chat-revision-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1050;
+    background: rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.chat-revision-modal {
+    width: min(72rem, 96vw);
+    max-height: 88vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: var(--bs-body-bg, #fff);
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.22);
+}
+
+.chat-revision-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+}
+
+.chat-revision-title {
+    font-weight: 700;
+}
+
+.chat-revision-meta {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.78rem;
+}
+
+.chat-revision-grid {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(14rem, 20rem) minmax(0, 1fr);
+    gap: 0;
+    overflow: hidden;
+}
+
+.chat-revision-list {
+    overflow: auto;
+    border-right: 1px solid var(--bs-border-color, #dee2e6);
+    padding: 0.5rem;
+}
+
+.chat-revision-session {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.15rem;
+    border: 1px solid transparent;
+    border-radius: 0.35rem;
+    background: transparent;
+    padding: 0.45rem 0.55rem;
+    text-align: left;
+    font-size: 0.8rem;
+}
+
+.chat-revision-session.selected {
+    border-color: var(--bs-primary, #0d6efd);
+    background: rgba(13, 110, 253, 0.08);
+}
+
+.chat-revision-session span:last-child {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.72rem;
+}
+
+.chat-revision-detail {
+    min-width: 0;
+    overflow: auto;
+    padding: 0.75rem 1rem 1rem;
+    font-size: 0.84rem;
+}
+
+.chat-revision-section {
+    margin-top: 0.5rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.chat-revision-message {
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+    padding: 0.4rem 0;
+}
+
+.chat-revision-message > summary {
+    cursor: pointer;
+    display: flex;
+    gap: 0.5rem;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.78rem;
+}
+
 .chat-cursor {
     display: inline-block;
     margin-left: 1px;

@@ -49,6 +49,7 @@ builder.Services.AddScoped<IResearchConversationRepository, ResearchConversation
 builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
 builder.Services.AddScoped<IContestRepository, ContestRepository>();
 builder.Services.AddScoped<IEditorContextPreferenceRepository, EditorContextPreferenceRepository>();
+builder.Services.AddScoped<IEditorRevisionRepository, EditorRevisionRepository>();
 builder.Services.AddScoped<IIngestRepository, IngestRepository>();
 builder.Services.AddScoped<IWebIngestCandidateRepository, WebIngestCandidateRepository>();
 builder.Services.AddScoped<IProjectImportRepository, ProjectImportRepository>();
@@ -146,6 +147,9 @@ builder.Services.AddScoped<IContextRecommendationService, ContextRecommendationS
 builder.Services.AddScoped<IEntityRelationContextService, EntityRelationContextService>();
 builder.Services.AddScoped<EditorChatTools>();
 builder.Services.AddScoped<IEditorContestService, EditorContestService>();
+builder.Services.AddSingleton<IEditorRevisionJobNotifier, EditorRevisionJobNotifier>();
+builder.Services.AddScoped<EditorRevisionAgentProcessor>();
+builder.Services.AddScoped<IEditorRevisionAgentService, EditorRevisionAgentService>();
 builder.Services.AddScoped<IEditorChatService, EditorChatService>();
 
 var app = builder.Build();

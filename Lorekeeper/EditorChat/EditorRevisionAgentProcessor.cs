@@ -1,0 +1,971 @@
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+using Lorekeeper.Chapters;
+using Lorekeeper.Context;
+using Lorekeeper.Knowledge;
+using Lorekeeper.Llm;
+using Lorekeeper.Models;
+using Lorekeeper.Outline;
+using Lorekeeper.Persistence.Repositories;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Options;
+
+namespace Lorekeeper.EditorChat;
+
+public sealed class EditorRevisionAgentProcessor(
+    IProjectRepository projects,
+    IChapterService chapters,
+    IEditorConversationRepository conversations,
+    IEditorRevisionRepository revisions,
+    IContextBuilder contextBuilder,
+    ILlmProviderService providerService,
+    IChatClientFactory chatClientFactory,
+    IVectorStore vectors,
+    IEmbeddingService embeddings,
+    IAiChangeRepository changes,
+    IProjectFactService projectFacts,
+    IEntityService entities,
+    IEntityTypeService entityTypes,
+    IEntityRelationContextService entityRelations,
+    IOptions<EditorChatOptions> options,
+    IEditorRevisionJobNotifier notifier,
+    ILogger<EditorRevisionAgentProcessor> logger)
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true,
+    };
+
+    private static readonly EntityRelationContextOptions EntityRelationOptions = new()
+    {
+        Depth = 2,
+        MaxDirectLinks = 8,
+        MaxTraversalPaths = 10,
+        MaxLinksPerNode = 8,
+    };
+
+    public async Task RunSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        var session = await revisions.GetSessionAsync(sessionId, cancellationToken)
+            ?? throw new InvalidOperationException($"Revision session {sessionId} not found.");
+        var job = session.Job;
+
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            var project = await projects.GetByIdAsync(job.ProjectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {job.ProjectId} not found.");
+            var chapter = await chapters.GetAsync(session.ChapterId, cancellationToken)
+                ?? throw new InvalidOperationException($"Chapter {session.ChapterId} not found.");
+            if (chapter.ProjectId != job.ProjectId)
+                throw new InvalidOperationException($"Chapter {session.ChapterId} does not belong to project {job.ProjectId}.");
+
+            var provider = await providerService.GetDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("No default LLM provider configured.");
+            var chat = await chatClientFactory.CreateChatClientAsync(provider.Id, cancellationToken);
+
+            session.Status = EditorRevisionSessionStatus.Running;
+            session.ProviderId = provider.Id;
+            session.ProviderName = provider.DisplayName ?? provider.Name;
+            session.ModelName = provider.ModelId;
+            session.UpdatedAt = DateTime.UtcNow;
+            revisions.UpdateSession(session);
+            await revisions.SaveChangesAsync(cancellationToken);
+            notifier.Notify(new EditorRevisionJobUpdate(job.ProjectId, job.Id, session.Id, EditorRevisionJobUpdateKind.Progress, DateTime.UtcNow));
+
+            var systemPrompt = (await contextBuilder.BuildAsync(project, chapter, cancellationToken))
+                .Assemble(AssistantWorkflowInstructions.EditorRevisionWorker);
+            var userPrompt = await BuildWorkerUserPromptAsync(job, session, cancellationToken);
+            var nextOrder = await revisions.GetMaxMessageOrderAsync(session.Id, cancellationToken) + 1;
+            await revisions.AddMessageAsync(new EditorRevisionMessage
+            {
+                SessionId = session.Id,
+                Order = nextOrder++,
+                Role = EditorRevisionMessageRole.System,
+                Content = systemPrompt,
+                Status = EditorRevisionMessageStatus.Completed,
+            }, cancellationToken);
+            await revisions.AddMessageAsync(new EditorRevisionMessage
+            {
+                SessionId = session.Id,
+                Order = nextOrder++,
+                Role = EditorRevisionMessageRole.User,
+                Content = userPrompt,
+                Status = EditorRevisionMessageStatus.Completed,
+            }, cancellationToken);
+            await revisions.SaveChangesAsync(cancellationToken);
+
+            var edit = new CapturedChapterEdit();
+            var messages = new List<ChatMessage>
+            {
+                new(ChatRole.System, systemPrompt),
+                new(ChatRole.User, userPrompt),
+            };
+            var tools = BuildTools(job.ProjectId, session.ChapterId, edit);
+            var chatOptions = new ChatOptions
+            {
+                Tools = tools,
+                ToolMode = ChatToolMode.Auto,
+            };
+
+            var maxIterations = Math.Clamp(options.Value.RevisionAgents.MaxToolIterations, 1, 50);
+            for (var iteration = 0; iteration < maxIterations; iteration++)
+            {
+                var assistant = new EditorRevisionMessage
+                {
+                    SessionId = session.Id,
+                    Order = nextOrder++,
+                    Role = EditorRevisionMessageRole.Assistant,
+                    Content = string.Empty,
+                    Status = EditorRevisionMessageStatus.Pending,
+                };
+                await revisions.AddMessageAsync(assistant, cancellationToken);
+                await revisions.SaveChangesAsync(cancellationToken);
+
+                var textBuilder = new StringBuilder();
+                var pendingCalls = new List<PendingToolCall>();
+                var toolTracker = new StreamingToolCallTracker();
+                await foreach (var update in chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken))
+                {
+                    foreach (var content in update.Contents)
+                    {
+                        if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
+                        {
+                            textBuilder.Append(textContent.Text);
+                            continue;
+                        }
+
+                        foreach (var toolUpdate in toolTracker.Process(content, textBuilder.Length))
+                        {
+                            if (toolUpdate is StreamingToolCallReadyUpdate ready)
+                            {
+                                pendingCalls.Add(new PendingToolCall(
+                                    ready.Content,
+                                    ready.CallId,
+                                    ready.ToolName,
+                                    ready.ArgumentsJson,
+                                    ready.TextOffset));
+                            }
+                        }
+                    }
+                }
+
+                assistant.Content = textBuilder.ToString();
+                assistant.ToolCallsJson = JsonSerializer.Serialize(
+                    pendingCalls.Select(call => new PersistedToolCall(call.CallId, call.Name, call.ArgumentsJson, call.TextOffset)),
+                    JsonSerializerOptions.Default);
+                assistant.Status = EditorRevisionMessageStatus.Completed;
+                revisions.UpdateMessage(assistant);
+                await revisions.SaveChangesAsync(cancellationToken);
+
+                if (pendingCalls.Count == 0)
+                {
+                    MarkInvalid(session, "Worker finished without editing the assigned chapter.", textBuilder.ToString(), stopwatch);
+                    revisions.UpdateSession(session);
+                    await revisions.SaveChangesAsync(cancellationToken);
+                    notifier.Notify(new EditorRevisionJobUpdate(job.ProjectId, job.Id, session.Id, EditorRevisionJobUpdateKind.SessionCompleted, DateTime.UtcNow));
+                    return;
+                }
+
+                messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantToolCallContents(pendingCalls)));
+                var resultContents = new List<AIContent>();
+                foreach (var pendingCall in pendingCalls)
+                {
+                    var toolResult = string.Empty;
+                    string? toolError = null;
+                    try
+                    {
+                        var function = tools.OfType<AIFunction>().FirstOrDefault(tool => tool.Name == pendingCall.Name)
+                            ?? throw new InvalidOperationException($"Unknown tool '{pendingCall.Name}'.");
+                        var invokeResult = await function.InvokeAsync(
+                            ToolCallArguments.Create(pendingCall.Content.Arguments, pendingCall.ArgumentsJson),
+                            cancellationToken);
+                        toolResult = invokeResult?.ToString() ?? string.Empty;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        logger.LogWarning(ex, "Revision worker tool '{Tool}' failed for session {SessionId}", pendingCall.Name, session.Id);
+                        toolError = ex.Message;
+                        toolResult = $"Error: {ex.Message}";
+                    }
+
+                    if (string.Equals(pendingCall.Name, "edit_assigned_chapter", StringComparison.Ordinal) && toolError is null)
+                        toolResult = await ApplyCapturedEditAsync(project, session, edit, pendingCall, stopwatch, cancellationToken);
+
+                    await revisions.AddMessageAsync(new EditorRevisionMessage
+                    {
+                        SessionId = session.Id,
+                        Order = nextOrder++,
+                        Role = EditorRevisionMessageRole.Tool,
+                        Content = toolResult,
+                        ToolCallId = pendingCall.CallId,
+                        ToolName = pendingCall.Name,
+                        Status = toolError is null ? EditorRevisionMessageStatus.Completed : EditorRevisionMessageStatus.Failed,
+                        ErrorMessage = toolError,
+                    }, cancellationToken);
+                    await revisions.SaveChangesAsync(cancellationToken);
+
+                    resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult));
+                    if (string.Equals(pendingCall.Name, "edit_assigned_chapter", StringComparison.Ordinal))
+                    {
+                        if (toolError is not null)
+                        {
+                            MarkInvalid(session, toolError, JsonSerializer.Serialize(edit, JsonOptions), stopwatch);
+                            revisions.UpdateSession(session);
+                            await revisions.SaveChangesAsync(cancellationToken);
+                        }
+                        notifier.Notify(new EditorRevisionJobUpdate(job.ProjectId, job.Id, session.Id, EditorRevisionJobUpdateKind.SessionCompleted, DateTime.UtcNow));
+                        return;
+                    }
+                }
+
+                messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+            }
+
+            MarkInvalid(session, $"Worker exceeded {maxIterations} tool iterations without editing the assigned chapter.", string.Empty, stopwatch);
+            revisions.UpdateSession(session);
+            await revisions.SaveChangesAsync(cancellationToken);
+            notifier.Notify(new EditorRevisionJobUpdate(job.ProjectId, job.Id, session.Id, EditorRevisionJobUpdateKind.SessionCompleted, DateTime.UtcNow));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            session.Status = EditorRevisionSessionStatus.Cancelled;
+            session.ErrorMessage = "Cancelled.";
+            session.CompletedAt = DateTime.UtcNow;
+            session.UpdatedAt = DateTime.UtcNow;
+            revisions.UpdateSession(session);
+            await revisions.SaveChangesAsync(CancellationToken.None);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Revision worker session {SessionId} failed", session.Id);
+            session.Status = EditorRevisionSessionStatus.Failed;
+            session.ErrorMessage = ex.Message;
+            session.CompletedAt = DateTime.UtcNow;
+            session.UpdatedAt = DateTime.UtcNow;
+            session.DurationMs = stopwatch.Elapsed.TotalMilliseconds;
+            revisions.UpdateSession(session);
+            await revisions.SaveChangesAsync(CancellationToken.None);
+            notifier.Notify(new EditorRevisionJobUpdate(job.ProjectId, job.Id, session.Id, EditorRevisionJobUpdateKind.SessionCompleted, DateTime.UtcNow));
+        }
+    }
+
+    private IList<AITool> BuildTools(Guid projectId, Guid assignedChapterId, CapturedChapterEdit edit)
+    {
+        return
+        [
+            AIFunctionFactory.Create(
+                method: (string query, int topK = 8) => VectorSearchAsync(projectId, query, topK),
+                name: "vector_search",
+                description: "Semantic search over indexed chapters and lore for the current project. Use focused queries for continuity evidence not already in the Context Feed."),
+
+            AIFunctionFactory.Create(
+                method: () => ListChaptersAsync(projectId),
+                name: "list_chapters",
+                description: "List project chapters with ids, order, synopsis, line counts, and read_chapter page counts."),
+
+            AIFunctionFactory.Create(
+                method: (Guid chapterId, int? pageNumber = null) => ReadChapterAsync(projectId, chapterId, pageNumber),
+                name: "read_chapter",
+                description: "Read one paginated page of a chapter with line numbers. Use this only for read-only grounding."),
+
+            AIFunctionFactory.Create(
+                method: () => ListProjectFactsAsync(projectId),
+                name: "list_project_facts",
+                description: "Read project facts and linked entities as JSON."),
+
+            AIFunctionFactory.Create(
+                method: (string query, int topK = 10, string? type = null, string? parentId = null) =>
+                    SearchEntitiesAsync(projectId, query, topK, type, parentId),
+                name: "search_entities",
+                description: "Search story graph entities by name, type, and property text."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId) => ReadEntityAsync(projectId, entityId),
+                name: "read_entity",
+                description: "Read one graph entity with properties, links, and relation context."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId) => ListEntityLinksAsync(projectId, entityId),
+                name: "list_entity_links",
+                description: "List graph links adjacent to an entity."),
+
+            AIFunctionFactory.Create(
+                method: (
+                    string summary,
+                    string rationale,
+                    string mutationKind,
+                    string replacementText,
+                    int? startLine = null,
+                    int? endLine = null,
+                    string? notes = null) =>
+                    EditAssignedChapterAsync(edit, assignedChapterId, summary, rationale, mutationKind, replacementText, startLine, endLine, notes),
+                name: "edit_assigned_chapter",
+                description:
+                    "Terminal mutating tool. Edit only the assigned chapter body. " +
+                    "mutationKind must be replace_whole_body, replace_range, insert_before_line, or insert_after_line. " +
+                    "Use line numbers from read_chapter or the Context Feed. replacementText must be prose only with no line numbers. " +
+                    "Do not call any more tools after this."),
+        ];
+    }
+
+    private async Task<string> BuildWorkerUserPromptAsync(EditorRevisionJob job, EditorRevisionSession session, CancellationToken cancellationToken)
+    {
+        var history = await conversations.LoadMessagesAsync(job.ConversationId, cancellationToken);
+        var sb = new StringBuilder();
+        sb.AppendLine("# Chapter Revision Assignment");
+        sb.AppendLine("You are one prose-only worker. Edit the assigned chapter body directly with edit_assigned_chapter; do not mutate any other project state.");
+        sb.AppendLine();
+        sb.AppendLine("Assigned chapter:");
+        sb.AppendLine($"- {session.ChapterTitle} (id={session.ChapterId})");
+        sb.AppendLine();
+        sb.AppendLine("Reason this chapter is affected:");
+        sb.AppendLine(session.Reason);
+        sb.AppendLine();
+        sb.AppendLine("Chapter-specific instructions:");
+        sb.AppendLine(session.Instructions);
+        sb.AppendLine();
+        sb.AppendLine("# Parent Editor Chat Context");
+        foreach (var message in history
+            .Where(message => message.Role is EditorMessageRole.User or EditorMessageRole.Assistant or EditorMessageRole.Tool)
+            .OrderBy(message => message.Order)
+            .TakeLast(24))
+        {
+            sb.Append("## ").Append(message.Role);
+            if (!string.IsNullOrWhiteSpace(message.ToolName))
+                sb.Append(" - ").Append(message.ToolName);
+            sb.AppendLine();
+            if (!string.IsNullOrWhiteSpace(message.Content))
+                sb.AppendLine(TruncateForPrompt(message.Content.Trim(), 8000));
+            if (!string.IsNullOrWhiteSpace(message.ToolCallsJson) && message.ToolCallsJson != "[]")
+            {
+                sb.AppendLine("Tool calls:");
+                sb.AppendLine(TruncateForPrompt(message.ToolCallsJson, 8000));
+            }
+            if (!string.IsNullOrWhiteSpace(message.ErrorMessage))
+            {
+                sb.AppendLine("Error:");
+                sb.AppendLine(message.ErrorMessage);
+            }
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("# Output Requirement");
+        sb.AppendLine("Call edit_assigned_chapter exactly once when ready. The coordinator will review the completed/staged change and decide whether any follow-up action is needed.");
+        return sb.ToString().TrimEnd();
+    }
+
+    private async Task<string> VectorSearchAsync(Guid projectId, string query, int topK)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
+        topK = Math.Clamp(topK, 1, 20);
+
+        var embedding = await embeddings.GenerateEmbeddingAsync(query);
+        var results = await vectors.SearchAsync(embedding, Project.ScopeKey(projectId), topK);
+        if (results.Count == 0) return "No matches.";
+
+        var sb = new StringBuilder();
+        for (var i = 0; i < results.Count; i++)
+        {
+            var result = results[i];
+            sb.Append('[').Append(i + 1).Append("] ")
+              .Append(result.SourceType).Append('/').Append(result.SourceId ?? "?")
+              .Append(" row=").Append(result.RowId);
+            if (result.ChunkIndex is not null)
+                sb.Append(" fragment=").Append(result.ChunkIndex.Value + 1);
+            if (!string.IsNullOrWhiteSpace(result.Metadata))
+                sb.Append(" - ").Append(result.Metadata);
+            sb.Append(" (distance ").Append(result.Distance.ToString("F4")).AppendLine(")");
+            sb.AppendLine(result.Content);
+            sb.AppendLine();
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private async Task<string> ListChaptersAsync(Guid projectId)
+    {
+        var list = await chapters.ListAsync(projectId);
+        if (list.Count == 0) return "No chapters in this project.";
+
+        var sb = new StringBuilder();
+        foreach (var chapter in list)
+        {
+            var lineCount = ChapterFormatting.SplitLines(chapter.Body).Count;
+            sb.Append(chapter.Order + 1).Append(". ").Append(chapter.Title)
+              .Append(" - id=").Append(chapter.Id)
+              .Append(" - lines=").Append(lineCount)
+              .Append(" - bodyChars=").Append(chapter.Body.Length)
+              .Append(" - readChapterPages=").Append(CountReadChapterPages(chapter.Body, EffectiveReadChapterPageMaxChars()));
+            if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
+                sb.Append(" - ").Append(chapter.Synopsis);
+            sb.AppendLine();
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private async Task<string> ReadChapterAsync(Guid projectId, Guid chapterId, int? pageNumber)
+    {
+        var chapter = await chapters.GetAsync(chapterId);
+        if (chapter is null || chapter.ProjectId != projectId)
+            return $"Error: chapter {chapterId} not found in this project.";
+
+        var requestedPageNumber = pageNumber ?? 1;
+        if (requestedPageNumber < 1)
+            return "Error: pageNumber must be 1 or greater.";
+
+        var pageMaxChars = EffectiveReadChapterPageMaxChars();
+        var lines = ChapterFormatting.SplitLines(chapter.Body);
+        if (lines.Count == 0)
+        {
+            if (requestedPageNumber > 1)
+                return "Error: pageNumber 1 is the only page available for an empty chapter.";
+
+            return JsonSerializer.Serialize(new
+            {
+                chapter = new { id = chapter.Id, chapter.Title, chapter.Synopsis },
+                pagination = new { currentPage = 1, pageCount = 1, pageMaxChars },
+                content = "(empty)",
+            });
+        }
+
+        var pages = BuildReadChapterPages(lines, pageMaxChars);
+        if (requestedPageNumber > pages.Count)
+            return $"Error: pageNumber {requestedPageNumber} is beyond the chapter's {pages.Count} page(s).";
+
+        var selectedPage = pages[requestedPageNumber - 1];
+        var lineNumberWidth = Math.Max(4, lines.Count.ToString().Length);
+        var content = FormatReadChapterPageContent(selectedPage, lineNumberWidth);
+        return JsonSerializer.Serialize(new
+        {
+            chapter = new { id = chapter.Id, chapter.Title, chapter.Synopsis },
+            chapterStats = new { totalChapterLines = lines.Count, totalChapterChars = chapter.Body.Length },
+            pagination = new
+            {
+                pageStartLine = selectedPage.PageStartLine,
+                pageEndLine = selectedPage.PageEndLine,
+                currentPage = requestedPageNumber,
+                pageCount = pages.Count,
+                pageMaxChars,
+                hasPreviousPage = requestedPageNumber > 1,
+                hasNextPage = requestedPageNumber < pages.Count,
+                previousPageNumber = requestedPageNumber > 1 ? requestedPageNumber - 1 : (int?)null,
+                nextPageNumber = requestedPageNumber < pages.Count ? requestedPageNumber + 1 : (int?)null,
+            },
+            content,
+        });
+    }
+
+    private async Task<string> ListProjectFactsAsync(Guid projectId)
+    {
+        var facts = await projectFacts.ListAsync(projectId);
+        var payload = new List<object>();
+        foreach (var fact in facts)
+        {
+            payload.Add(new
+            {
+                fact.Id,
+                fact.Key,
+                fact.Name,
+                fact.Value,
+                linkedEntities = fact.LinkedEntities.Select(link => new
+                {
+                    link.EdgeType,
+                    direction = link.Direction.ToString(),
+                    link.EntityId,
+                    link.EntityName,
+                    link.EntityType,
+                }),
+            });
+        }
+
+        return JsonSerializer.Serialize(payload);
+    }
+
+    private async Task<string> SearchEntitiesAsync(Guid projectId, string query, int topK, string? type, string? parentId)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
+        topK = Math.Clamp(topK, 1, 20);
+
+        Guid? parent = null;
+        if (!string.IsNullOrWhiteSpace(parentId))
+        {
+            if (!Guid.TryParse(parentId, out var parsedParent))
+                return $"Error: parentId '{parentId}' is not a valid Guid.";
+            parent = parsedParent;
+        }
+
+        var searchTerms = SearchTerms(query);
+        var typeNames = await SearchableTypeNamesAsync(projectId, type);
+        var matches = new List<(StoryEntity Entity, int Score)>();
+        foreach (var typeName in typeNames)
+        {
+            var list = await entities.ListAsync(projectId, typeName, parent);
+            matches.AddRange(list
+                .Select(entity => (Entity: entity, Score: SearchScore(entity, query, searchTerms)))
+                .Where(match => match.Score > 0));
+        }
+
+        return JsonSerializer.Serialize(matches
+            .OrderByDescending(match => match.Score)
+            .ThenBy(match => match.Entity.Type, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(match => match.Entity.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(topK)
+            .Select(match => new
+            {
+                id = match.Entity.Id,
+                type = match.Entity.Type,
+                name = match.Entity.Name,
+                order = match.Entity.Order,
+                parentId = match.Entity.ParentId,
+                matchScore = match.Score,
+                properties = match.Entity.Properties,
+            }));
+    }
+
+    private async Task<string> ReadEntityAsync(Guid projectId, Guid entityId)
+    {
+        var entity = await entities.GetAsync(projectId, entityId);
+        if (entity is null)
+            return $"Error: entity {entityId} not found in this project.";
+
+        var links = await entities.ListLinksAsync(projectId, entityId);
+        var relationContext = await entityRelations.BuildForEntityAsync(projectId, entityId, EntityRelationOptions);
+        return JsonSerializer.Serialize(new
+        {
+            id = entity.Id,
+            type = entity.Type,
+            name = entity.Name,
+            order = entity.Order,
+            parentId = entity.ParentId,
+            properties = entity.Properties,
+            links = links.Select(link => new
+            {
+                link.EdgeId,
+                link.EdgeType,
+                direction = link.Direction.ToString(),
+                link.OtherEntityId,
+                link.OtherEntityName,
+                link.OtherEntityType,
+                link.SortOrder,
+                link.Properties,
+            }),
+            relationContext,
+        });
+    }
+
+    private async Task<string> ListEntityLinksAsync(Guid projectId, Guid entityId)
+    {
+        var links = await entities.ListLinksAsync(projectId, entityId);
+        return JsonSerializer.Serialize(links.Select(link => new
+        {
+            edgeId = link.EdgeId,
+            edgeType = link.EdgeType,
+            direction = link.Direction.ToString(),
+            otherEntityId = link.OtherEntityId,
+            otherEntityName = link.OtherEntityName,
+            otherEntityType = link.OtherEntityType,
+            sortOrder = link.SortOrder,
+            properties = link.Properties,
+        }));
+    }
+
+    private Task<string> EditAssignedChapterAsync(
+        CapturedChapterEdit edit,
+        Guid assignedChapterId,
+        string summary,
+        string rationale,
+        string mutationKind,
+        string replacementText,
+        int? startLine,
+        int? endLine,
+        string? notes)
+    {
+        edit.ChapterId = assignedChapterId;
+        edit.Summary = summary?.Trim() ?? string.Empty;
+        edit.Rationale = rationale?.Trim() ?? string.Empty;
+        edit.MutationKind = NormalizeMutationKind(mutationKind);
+        edit.ReplacementText = replacementText ?? string.Empty;
+        edit.StartLine = startLine;
+        edit.EndLine = endLine;
+        edit.Notes = notes?.Trim() ?? string.Empty;
+        return Task.FromResult("Chapter edit recorded. The system is applying or staging it now. Do not call any more tools.");
+    }
+
+    private async Task<string> ApplyCapturedEditAsync(
+        Project project,
+        EditorRevisionSession session,
+        CapturedChapterEdit edit,
+        PendingToolCall pendingCall,
+        Stopwatch stopwatch,
+        CancellationToken cancellationToken)
+    {
+        var validationError = ValidateEdit(session, edit);
+        if (validationError is not null)
+        {
+            MarkInvalid(session, validationError, JsonSerializer.Serialize(edit, JsonOptions), stopwatch);
+            revisions.UpdateSession(session);
+            await revisions.SaveChangesAsync(cancellationToken);
+            return $"Error: {validationError}";
+        }
+
+        var chapter = await chapters.GetAsync(session.ChapterId, cancellationToken)
+            ?? throw new InvalidOperationException($"Chapter {session.ChapterId} not found.");
+        if (!string.Equals(chapter.Body, session.OriginalChapterBody, StringComparison.Ordinal))
+        {
+            var error = "The assigned chapter body changed after this worker session started. No worker edit was applied.";
+            MarkInvalid(session, error, JsonSerializer.Serialize(edit, JsonOptions), stopwatch);
+            revisions.UpdateSession(session);
+            await revisions.SaveChangesAsync(cancellationToken);
+            return $"Error: {error}";
+        }
+
+        var newBody = BuildEditedBody(session.OriginalChapterBody, edit);
+        var result = BuildEditResult(session.ChapterTitle, session.OriginalChapterBody, newBody, edit);
+
+        if (project.AiChangeApprovalEnabled)
+        {
+            var changeId = await StageChapterBodyEditAsync(project, session, edit, pendingCall, newBody, result, cancellationToken);
+            edit.Notes = AppendNote(edit.Notes, $"Staged pending change {changeId:N} for review.");
+            result = AppendResultLine(result, $"Staged pending change {changeId:N} for review.");
+        }
+        else
+        {
+            await chapters.UpdateAsync(session.ChapterId, body: newBody, cancellationToken: cancellationToken);
+            edit.Notes = AppendNote(edit.Notes, "Applied directly to the chapter body.");
+            result = AppendResultLine(result, "Applied directly to the chapter body.");
+        }
+
+        session.Status = EditorRevisionSessionStatus.Completed;
+        session.Summary = edit.Summary;
+        session.Rationale = edit.Rationale;
+        session.MutationKind = edit.MutationKind;
+        session.StartLine = edit.StartLine;
+        session.EndLine = edit.EndLine;
+        session.ReplacementText = edit.ReplacementText;
+        session.Notes = edit.Notes;
+        session.ProposalJson = JsonSerializer.Serialize(edit, JsonOptions);
+        session.RawResponse = result;
+        session.DurationMs = stopwatch.Elapsed.TotalMilliseconds;
+        session.CompletedAt = DateTime.UtcNow;
+        session.UpdatedAt = DateTime.UtcNow;
+        revisions.UpdateSession(session);
+        await revisions.SaveChangesAsync(cancellationToken);
+        return result;
+    }
+
+    private async Task<Guid> StageChapterBodyEditAsync(
+        Project project,
+        EditorRevisionSession session,
+        CapturedChapterEdit edit,
+        PendingToolCall pendingCall,
+        string newBody,
+        string result,
+        CancellationToken cancellationToken)
+    {
+        var batch = new AiChangeBatch
+        {
+            ProjectId = project.Id,
+            ConversationKind = AiChangeConversationKind.Editor,
+            ConversationId = session.Job.ConversationId,
+            AssistantMessageId = session.Job.AssistantMessageId,
+        };
+        await changes.AddBatchAsync(batch, cancellationToken);
+        await changes.SaveChangesAsync(cancellationToken);
+
+        var change = new AiChange
+        {
+            BatchId = batch.Id,
+            Order = 0,
+            ToolCallId = pendingCall.CallId,
+            ToolName = "edit_assigned_chapter",
+            ArgumentsJson = pendingCall.ArgumentsJson,
+            Summary = edit.Summary,
+            BeforeJson = JsonSerializer.Serialize(new ChapterBodyChange(session.ChapterId, session.ChapterTitle, session.OriginalChapterBody)),
+            AfterJson = JsonSerializer.Serialize(new ChapterBodyChange(session.ChapterId, session.ChapterTitle, newBody)),
+            ResultJson = JsonSerializer.Serialize(new { result }),
+            ResourceKind = "ChapterBody",
+            ResourceId = Resource("Chapter", session.ChapterId),
+            CreatedResourceIdsJson = "[]",
+            ReferencedResourceIdsJson = JsonSerializer.Serialize(new[] { Resource("Chapter", session.ChapterId) }),
+            DependsOnChangeIdsJson = "[]",
+        };
+        await changes.AddChangeAsync(change, cancellationToken);
+        await changes.SaveChangesAsync(cancellationToken);
+        return change.Id;
+    }
+
+    private static string? ValidateEdit(EditorRevisionSession session, CapturedChapterEdit edit)
+    {
+        if (edit.ChapterId != session.ChapterId)
+            return "Edit targeted a chapter other than the assigned chapter.";
+        if (string.IsNullOrWhiteSpace(edit.Summary))
+            return "Edit summary is required.";
+        if (string.IsNullOrWhiteSpace(edit.Rationale))
+            return "Edit rationale is required.";
+        if (string.IsNullOrWhiteSpace(edit.MutationKind))
+            return "mutationKind is required.";
+
+        var lines = ChapterFormatting.SplitLines(session.OriginalChapterBody);
+        return edit.MutationKind switch
+        {
+            "replace_whole_body" when edit.StartLine is not null || edit.EndLine is not null
+                => "replace_whole_body must not specify startLine or endLine.",
+            "replace_whole_body" => null,
+            "replace_range" when edit.StartLine is null || edit.EndLine is null
+                => "replace_range requires startLine and endLine.",
+            "replace_range" when edit.StartLine < 1 || edit.EndLine < edit.StartLine || edit.EndLine > Math.Max(1, lines.Count)
+                => $"replace_range line range must fit the assigned chapter (1..{Math.Max(1, lines.Count)}).",
+            "replace_range" => null,
+            "insert_before_line" when edit.StartLine is null || edit.EndLine is not null
+                => "insert_before_line requires startLine and must not specify endLine.",
+            "insert_before_line" when edit.StartLine < 1 || edit.StartLine > lines.Count + 1
+                => $"insert_before_line target must be in range 1..{lines.Count + 1}.",
+            "insert_before_line" => null,
+            "insert_after_line" when edit.StartLine is null || edit.EndLine is not null
+                => "insert_after_line requires startLine and must not specify endLine.",
+            "insert_after_line" when edit.StartLine < 0 || edit.StartLine > lines.Count
+                => $"insert_after_line target must be in range 0..{lines.Count}.",
+            "insert_after_line" => null,
+            _ => "mutationKind must be replace_whole_body, replace_range, insert_before_line, or insert_after_line.",
+        };
+    }
+
+    private static string BuildEditedBody(string originalBody, CapturedChapterEdit edit)
+    {
+        var originalLines = ChapterFormatting.SplitLines(originalBody);
+        var replacementLines = ChapterFormatting.SplitLines(edit.ReplacementText);
+
+        return edit.MutationKind switch
+        {
+            "replace_whole_body" => ChapterFormatting.JoinLines(replacementLines),
+            "replace_range" => ReplaceRange(originalLines, replacementLines, edit.StartLine!.Value, edit.EndLine!.Value),
+            "insert_before_line" => InsertBefore(originalLines, replacementLines, edit.StartLine!.Value),
+            "insert_after_line" => InsertBefore(originalLines, replacementLines, edit.StartLine!.Value + 1),
+            _ => originalBody,
+        };
+    }
+
+    private static string ReplaceRange(IReadOnlyList<string> originalLines, IReadOnlyList<string> replacementLines, int startLine, int endLine)
+    {
+        if (originalLines.Count == 0 && startLine == 1 && endLine == 1)
+            return ChapterFormatting.JoinLines(replacementLines);
+
+        var merged = new List<string>(originalLines.Count - (endLine - startLine + 1) + replacementLines.Count);
+        merged.AddRange(originalLines.Take(startLine - 1));
+        merged.AddRange(replacementLines);
+        merged.AddRange(originalLines.Skip(endLine));
+        return ChapterFormatting.JoinLines(merged);
+    }
+
+    private static string InsertBefore(IReadOnlyList<string> originalLines, IReadOnlyList<string> replacementLines, int insertLine)
+    {
+        var clampedInsertLine = Math.Clamp(insertLine, 1, originalLines.Count + 1);
+        var merged = new List<string>(originalLines.Count + replacementLines.Count);
+        merged.AddRange(originalLines.Take(clampedInsertLine - 1));
+        merged.AddRange(replacementLines);
+        merged.AddRange(originalLines.Skip(clampedInsertLine - 1));
+        return ChapterFormatting.JoinLines(merged);
+    }
+
+    private static string BuildEditResult(string chapterTitle, string originalBody, string newBody, CapturedChapterEdit edit)
+    {
+        var beforeLines = ChapterFormatting.SplitLines(originalBody).Count;
+        var afterLines = ChapterFormatting.SplitLines(newBody).Count;
+        var sb = new StringBuilder();
+        sb.Append("Edited ").Append(chapterTitle)
+            .Append(": ").Append(edit.Summary)
+            .Append(" (").Append(edit.MutationKind)
+            .Append(", ").Append(beforeLines).Append(" -> ").Append(afterLines).AppendLine(" lines).");
+        sb.AppendLine("Rationale:");
+        sb.AppendLine(edit.Rationale);
+        if (!string.IsNullOrWhiteSpace(edit.Notes))
+        {
+            sb.AppendLine("Notes:");
+            sb.AppendLine(edit.Notes);
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string AppendNote(string notes, string extra) =>
+        string.IsNullOrWhiteSpace(notes) ? extra : $"{notes}\n{extra}";
+
+    private static string AppendResultLine(string result, string extra) =>
+        string.IsNullOrWhiteSpace(result) ? extra : $"{result}\n{extra}";
+
+    private static string Resource(string kind, Guid id) => $"{kind}:{id:N}";
+
+    private static void MarkInvalid(EditorRevisionSession session, string error, string rawResponse, Stopwatch stopwatch)
+    {
+        session.Status = EditorRevisionSessionStatus.Invalid;
+        session.ErrorMessage = error;
+        session.RawResponse = rawResponse;
+        session.DurationMs = stopwatch.Elapsed.TotalMilliseconds;
+        session.CompletedAt = DateTime.UtcNow;
+        session.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private int EffectiveReadChapterPageMaxChars() => Math.Max(256, options.Value.ReadChapterPageMaxChars);
+
+    private static int CountReadChapterPages(string body, int pageMaxChars)
+    {
+        var lines = ChapterFormatting.SplitLines(body);
+        return lines.Count == 0 ? 1 : BuildReadChapterPages(lines, pageMaxChars).Count;
+    }
+
+    private static List<ReadChapterPage> BuildReadChapterPages(IReadOnlyList<string> lines, int pageMaxChars)
+    {
+        var pages = new List<ReadChapterPage>();
+        var currentPage = new ReadChapterPage();
+        var lineNumberWidth = Math.Max(4, lines.Count.ToString().Length);
+        var prefixLength = lineNumberWidth + 2;
+
+        for (var lineNumber = 1; lineNumber <= lines.Count; lineNumber++)
+        {
+            var text = lines[lineNumber - 1];
+            var fullLineLength = prefixLength + text.Length;
+            var addLength = fullLineLength + (currentPage.Segments.Count == 0 ? 0 : 1);
+            if (currentPage.Segments.Count > 0 && currentPage.ContentCharCount + addLength > pageMaxChars)
+            {
+                pages.Add(currentPage);
+                currentPage = new ReadChapterPage();
+            }
+
+            currentPage.Add(new ReadChapterLineSegment(lineNumber, text), lineNumberWidth);
+        }
+
+        if (currentPage.Segments.Count > 0)
+            pages.Add(currentPage);
+
+        return pages;
+    }
+
+    private static string FormatReadChapterPageContent(ReadChapterPage page, int lineNumberWidth)
+    {
+        var sb = new StringBuilder(page.ContentCharCount);
+        for (var i = 0; i < page.Segments.Count; i++)
+        {
+            var segment = page.Segments[i];
+            sb.Append(segment.LineNumber.ToString().PadLeft(lineNumberWidth, '0'));
+            sb.Append(": ");
+            sb.Append(segment.Text);
+            if (i < page.Segments.Count - 1) sb.Append('\n');
+        }
+
+        return sb.ToString();
+    }
+
+    private async Task<IReadOnlyList<string>> SearchableTypeNamesAsync(Guid projectId, string? type)
+    {
+        if (!string.IsNullOrWhiteSpace(type))
+            return [type.Trim()];
+
+        var list = await entityTypes.ListAsync(projectId, includeStructural: true);
+        return list
+            .Where(typeDefinition => IsSearchableEntityType(typeDefinition.Type))
+            .Select(typeDefinition => typeDefinition.Type)
+            .ToList();
+    }
+
+    private static string[] SearchTerms(string query) =>
+        query.Split([' ', '\t', '\r', '\n', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(term => term.Trim('"', '\'', '`', '(', ')', '[', ']', '{', '}', '.', ':'))
+            .Where(term => term.Length >= 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static int SearchScore(StoryEntity entity, string query, IReadOnlyList<string> searchTerms)
+    {
+        var score = TextMatchScore(entity.Name, query, titleWeight: 80, detailWeight: 30);
+        score += TextMatchScore(entity.Type, query, titleWeight: 12, detailWeight: 8);
+        foreach (var property in entity.Properties)
+        {
+            score += TextMatchScore(property.Key, query, titleWeight: 8, detailWeight: 4);
+            score += TextMatchScore(property.Value, query, titleWeight: 8, detailWeight: 4);
+        }
+
+        foreach (var term in searchTerms)
+        {
+            score += TextMatchScore(entity.Name, term, titleWeight: 180, detailWeight: 60);
+            score += TextMatchScore(entity.Type, term, titleWeight: 16, detailWeight: 8);
+            foreach (var property in entity.Properties)
+            {
+                score += TextMatchScore(property.Key, term, titleWeight: 10, detailWeight: 5);
+                score += TextMatchScore(property.Value, term, titleWeight: 10, detailWeight: 5);
+            }
+        }
+
+        return score;
+    }
+
+    private static int TextMatchScore(string? value, string query, int titleWeight, int detailWeight)
+    {
+        if (string.IsNullOrWhiteSpace(value) || string.IsNullOrWhiteSpace(query)) return 0;
+        if (value.Equals(query, StringComparison.OrdinalIgnoreCase)) return titleWeight * 4;
+        if (value.StartsWith(query, StringComparison.OrdinalIgnoreCase)) return titleWeight * 2;
+        return value.Contains(query, StringComparison.OrdinalIgnoreCase) ? detailWeight : 0;
+    }
+
+    private static bool IsSearchableEntityType(string type) =>
+        !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+
+    private static List<AIContent> BuildAssistantToolCallContents(IReadOnlyList<PendingToolCall> calls) =>
+        calls.Select(call => (AIContent)new FunctionCallContent(
+            call.CallId,
+            call.Name,
+            ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson))).ToList();
+
+    private static string NormalizeMutationKind(string? mutationKind) =>
+        (mutationKind ?? string.Empty).Trim().ToLowerInvariant().Replace('-', '_');
+
+    private static string TruncateForPrompt(string value, int maxChars) =>
+        value.Length <= maxChars ? value : value[..maxChars] + "\n[truncated]";
+
+    private sealed record PendingToolCall(
+        FunctionCallContent Content,
+        string CallId,
+        string Name,
+        string ArgumentsJson,
+        int TextOffset);
+
+    private sealed record PersistedToolCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
+
+    private sealed record ReadChapterLineSegment(int LineNumber, string Text);
+
+    private sealed class ReadChapterPage
+    {
+        public List<ReadChapterLineSegment> Segments { get; } = [];
+        public int ContentCharCount { get; private set; }
+        public int PageStartLine => Segments[0].LineNumber;
+        public int PageEndLine => Segments[^1].LineNumber;
+
+        public void Add(ReadChapterLineSegment segment, int lineNumberWidth)
+        {
+            if (Segments.Count > 0) ContentCharCount++;
+            ContentCharCount += lineNumberWidth + 2 + segment.Text.Length;
+            Segments.Add(segment);
+        }
+    }
+
+    private sealed class CapturedChapterEdit
+    {
+        public Guid ChapterId { get; set; }
+        public string Summary { get; set; } = string.Empty;
+        public string Rationale { get; set; } = string.Empty;
+        public string MutationKind { get; set; } = string.Empty;
+        public int? StartLine { get; set; }
+        public int? EndLine { get; set; }
+        public string ReplacementText { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+    }
+}

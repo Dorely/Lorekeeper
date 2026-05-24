@@ -265,7 +265,15 @@ public sealed class AiChangeApprovalService(
             }
             case "edit_chapter":
             {
+                var before = ReadOptional<ChapterBodyChange>(change.BeforeJson);
                 var after = ReadRequired<ChapterBodyChange>(afterJson);
+                if (before is not null)
+                {
+                    var current = await chapters.GetAsync(after.Id, cancellationToken)
+                        ?? throw new InvalidOperationException($"Chapter {after.Id} not found.");
+                    if (!string.Equals(current.Body, before.Body, StringComparison.Ordinal))
+                        throw new InvalidOperationException("The chapter body changed after this AI edit was staged. Reject this change and rerun the edit against the current chapter text.");
+                }
                 await chapters.UpdateAsync(after.Id, body: after.Body, cancellationToken: cancellationToken);
                 break;
             }

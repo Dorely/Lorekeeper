@@ -21,6 +21,7 @@ public interface IEditorChatService
 
 public sealed class EditorChatContext(
     Guid projectId,
+    Guid conversationId,
     Guid? currentChapterId,
     Action onMutated,
     bool reviewEdits,
@@ -32,12 +33,17 @@ public sealed class EditorChatContext(
     private readonly HashSet<Guid> _directlyEditedChapterBodies = [];
 
     public Guid ProjectId { get; } = projectId;
+    public Guid ConversationId { get; } = conversationId;
     public Guid? CurrentChapterId { get; } = currentChapterId;
     public Action OnMutated { get; } = onMutated;
     public bool ReviewEdits { get; } = reviewEdits;
     public bool AutoPinReadEntities { get; } = autoPinReadEntities;
     public OutlineToolStagingContext? OutlineStaging { get; } = outlineStaging;
     public EditorChatChangeStagingContext? EditorStaging { get; } = editorStaging;
+    public Guid? CurrentAssistantMessageId { get; private set; }
+    public string CurrentToolCallId { get; private set; } = string.Empty;
+    public string CurrentToolName { get; private set; } = string.Empty;
+    public string CurrentArgumentsJson { get; private set; } = "{}";
 
     public bool ShouldBypassReviewForChapterBody(Chapter chapter) =>
         _directlyEditedChapterBodies.Contains(chapter.Id)
@@ -48,6 +54,10 @@ public sealed class EditorChatContext(
 
     public void BeginToolCall(Guid assistantMessageId, string toolCallId, string toolName, string argumentsJson)
     {
+        CurrentAssistantMessageId = assistantMessageId;
+        CurrentToolCallId = toolCallId;
+        CurrentToolName = toolName;
+        CurrentArgumentsJson = string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson;
         OutlineStaging?.BeginToolCall(assistantMessageId, toolCallId, toolName, argumentsJson);
         EditorStaging?.BeginToolCall(assistantMessageId, toolCallId, toolName, argumentsJson);
     }

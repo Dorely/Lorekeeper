@@ -67,6 +67,8 @@ public class Project
 
     public ICollection<ContestBatch> ContestBatches { get; set; } = [];
 
+    public ICollection<EditorRevisionJob> EditorRevisionJobs { get; set; } = [];
+
     public ICollection<EditorContextPreference> EditorContextPreferences { get; set; } = [];
 
     public ICollection<IngestSource> IngestSources { get; set; } = [];

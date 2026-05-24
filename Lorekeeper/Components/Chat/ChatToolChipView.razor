@@ -1,4 +1,7 @@
 @namespace Lorekeeper.Components.Chat
+@using System.Text.Json
+@using Lorekeeper.EditorChat
+@inject IEditorRevisionAgentService RevisionAgents
 
 <details class="chat-chip @StateClass">
     <summary>
@@ -24,6 +27,12 @@
         {
             <div class="chat-chip-section">result</div>
             <pre class="chat-chip-pre">@Chip.Result</pre>
+            @if (RevisionJobId is { } revisionJobId)
+            {
+                <button type="button" class="btn btn-link btn-sm chat-chip-action" @onclick="() => OpenRevisionJobAsync(revisionJobId)">
+                    Open worker transcripts
+                </button>
+            }
         }
         else
         {
@@ -32,8 +41,115 @@
     </div>
 </details>
 
+@if (_showRevisionJob)
+{
+    <div class="chat-revision-backdrop" @onclick="CloseRevisionJob">
+        <div class="chat-revision-modal" @onclick:stopPropagation="true">
+            <div class="chat-revision-head">
+                <div>
+                    <div class="chat-revision-title">Revision Workers</div>
+                    @if (_revisionJob is not null)
+                    {
+                        <div class="chat-revision-meta">@_revisionJob.Status - @_revisionJob.Sessions.Count session(s)</div>
+                    }
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseRevisionJob">Close</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_revisionError))
+            {
+                <div class="alert alert-danger py-2 small">@_revisionError</div>
+            }
+            else if (_revisionLoading)
+            {
+                <p class="text-muted small"><em>Loading...</em></p>
+            }
+            else if (_revisionJob is null)
+            {
+                <p class="text-muted small"><em>No revision job found.</em></p>
+            }
+            else
+            {
+                <div class="chat-revision-grid">
+                    <div class="chat-revision-list">
+                        @foreach (var session in _revisionJob.Sessions)
+                        {
+                            <button type="button"
+                                    class="chat-revision-session @(_selectedRevisionSessionId == session.Id ? "selected" : null)"
+                                    @onclick="() => SelectRevisionSessionAsync(session.Id)">
+                                <span>@(session.Order + 1). @session.ChapterTitle</span>
+                                <span>@session.Status</span>
+                            </button>
+                        }
+                    </div>
+                    <div class="chat-revision-detail">
+                        @if (_revisionTranscript is null)
+                        {
+                            <p class="text-muted small"><em>Select a worker session.</em></p>
+                        }
+                        else
+                        {
+                            <div class="chat-revision-section">Assignment</div>
+                            <p><strong>Reason:</strong> @_revisionTranscript.Session.Reason</p>
+                            <p><strong>Instructions:</strong> @_revisionTranscript.Session.Instructions</p>
+
+                            <div class="chat-revision-section">Change</div>
+                            @if (_revisionTranscript.Session.Status == Lorekeeper.Models.EditorRevisionSessionStatus.Completed)
+                            {
+                                <p><strong>@_revisionTranscript.Session.Summary</strong></p>
+                                <p>@_revisionTranscript.Session.Rationale</p>
+                                <pre class="chat-chip-pre">@FormatChange(_revisionTranscript.Session)</pre>
+                            }
+                            else
+                            {
+                                <p class="text-danger small">@_revisionTranscript.Session.ErrorMessage</p>
+                            }
+
+                            <div class="chat-revision-section">Transcript</div>
+                            @foreach (var message in _revisionTranscript.Messages)
+                            {
+                                <details class="chat-revision-message">
+                                    <summary>
+                                        <span>@message.Role</span>
+                                        <span>@message.Status</span>
+                                        @if (!string.IsNullOrWhiteSpace(message.ToolName))
+                                        {
+                                            <span>@message.ToolName</span>
+                                        }
+                                    </summary>
+                                    @if (!string.IsNullOrWhiteSpace(message.Content))
+                                    {
+                                        <pre class="chat-chip-pre">@message.Content</pre>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(message.ToolCallsJson) && message.ToolCallsJson != "[]")
+                                    {
+                                        <div class="chat-chip-section">tool calls</div>
+                                        <pre class="chat-chip-pre">@message.ToolCallsJson</pre>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(message.ErrorMessage))
+                                    {
+                                        <div class="chat-chip-section">error</div>
+                                        <pre class="chat-chip-pre chat-chip-pre-error">@message.ErrorMessage</pre>
+                                    }
+                                </details>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
 @code {
     [Parameter, EditorRequired] public ChatToolChip Chip { get; set; } = null!;
+
+    private bool _showRevisionJob;
+    private bool _revisionLoading;
+    private string? _revisionError;
+    private EditorRevisionJobDetail? _revisionJob;
+    private EditorRevisionSessionTranscript? _revisionTranscript;
+    private Guid? _selectedRevisionSessionId;
 
     private string StateClass => Chip.Error is not null
         ? "chat-chip-error"
@@ -52,4 +168,72 @@
                 : "...";
 
     private string PendingText => Chip.ArgumentsComplete ? "running..." : "receiving args...";
+
+    private Guid? RevisionJobId => string.Equals(Chip.Name, "start_revision_agents", StringComparison.Ordinal)
+        ? TryReadRevisionJobId(Chip.Result)
+        : null;
+
+    private async Task OpenRevisionJobAsync(Guid jobId)
+    {
+        _showRevisionJob = true;
+        _revisionLoading = true;
+        _revisionError = null;
+        _revisionTranscript = null;
+        _selectedRevisionSessionId = null;
+        try
+        {
+            _revisionJob = await RevisionAgents.GetJobAsync(jobId);
+            var firstSession = _revisionJob?.Sessions.FirstOrDefault();
+            if (firstSession is not null)
+                await SelectRevisionSessionAsync(firstSession.Id);
+        }
+        catch (Exception ex)
+        {
+            _revisionError = ex.Message;
+        }
+        finally
+        {
+            _revisionLoading = false;
+        }
+    }
+
+    private async Task SelectRevisionSessionAsync(Guid sessionId)
+    {
+        _selectedRevisionSessionId = sessionId;
+        _revisionTranscript = await RevisionAgents.GetSessionTranscriptAsync(sessionId);
+    }
+
+    private void CloseRevisionJob()
+    {
+        _showRevisionJob = false;
+        _revisionTranscript = null;
+        _selectedRevisionSessionId = null;
+    }
+
+    private static Guid? TryReadRevisionJobId(string? result)
+    {
+        if (string.IsNullOrWhiteSpace(result)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(result);
+            if (document.RootElement.TryGetProperty("jobId", out var jobId)
+                && Guid.TryParse(jobId.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+        catch (JsonException) { }
+
+        return null;
+    }
+
+    private static string FormatChange(EditorRevisionSessionDetail session) =>
+        JsonSerializer.Serialize(new
+        {
+            session.MutationKind,
+            session.StartLine,
+            session.EndLine,
+            session.ReplacementText,
+            session.Notes,
+        }, new JsonSerializerOptions { WriteIndented = true });
 }
