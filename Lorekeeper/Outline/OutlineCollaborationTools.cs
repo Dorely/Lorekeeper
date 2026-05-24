@@ -55,9 +55,11 @@ public sealed class OutlineCollaborationTools(
         Action? onDirectMutationApplied = null) =>
         new(projectId, conversationId, conversationKind, changes, projectRepository, acts, chapters, entities, entityTypes, onDirectMutationApplied);
 
-    public IList<AITool> Build(OutlineCollaborationContext context)
+    public async Task<IList<AITool>> BuildAsync(
+        OutlineCollaborationContext context,
+        CancellationToken cancellationToken = default)
     {
-        return new List<AITool>
+        var tools = new List<AITool>
         {
             AIFunctionFactory.Create(
                 method: () => ListOutlineAsync(context),
@@ -155,6 +157,11 @@ public sealed class OutlineCollaborationTools(
                 name: "vector_search",
                 description: "Semantic search over indexed lore and chapters in the current project. Likely returns nothing during early outline work — that just means no lore has been indexed yet."),
         };
+
+        if (!await embeddings.IsAvailableAsync(cancellationToken))
+            tools.RemoveAll(tool => tool is AIFunction function && string.Equals(function.Name, "vector_search", StringComparison.Ordinal));
+
+        return tools;
     }
 
     // ---- list ------------------------------------------------------------

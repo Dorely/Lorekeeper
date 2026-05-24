@@ -51,3 +51,9 @@ public interface IVectorStore
 
     Task DeleteByScopeAsync(string scopeKey, CancellationToken cancellationToken = default);
 }
+
+public interface IVectorStoreMaintenance
+{
+    void Initialize(int? dimensions);
+    Task RecreateAsync(int dimensions, CancellationToken cancellationToken = default);
+}

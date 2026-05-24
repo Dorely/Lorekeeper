@@ -233,7 +233,7 @@ public sealed class ResearchService(
                     conversation.Id,
                     AiChangeConversationKind.Research,
                     OnToolMutated);
-            aiTools = tools.Build(new ResearchToolContext(projectId, conversation.Id, OnToolMutated, staging));
+            aiTools = await tools.BuildAsync(new ResearchToolContext(projectId, conversation.Id, OnToolMutated, staging), cancellationToken);
         }
         catch (Exception ex)
         {

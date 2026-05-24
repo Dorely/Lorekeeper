@@ -44,15 +44,26 @@ public sealed class EditorChatTools(
 
     private const int EditChapterExcerptContextLines = 3;
 
-    public IList<AITool> Build(EditorChatContext context, EditorChatToolMode mode = EditorChatToolMode.Normal)
+    public async Task<IList<AITool>> BuildAsync(
+        EditorChatContext context,
+        EditorChatToolMode mode = EditorChatToolMode.Normal,
+        CancellationToken cancellationToken = default)
     {
-        var tools = new List<AITool>
+        var tools = new List<AITool>();
+        var vectorSearchAvailable = await embeddings.IsAvailableAsync(cancellationToken);
+        if (vectorSearchAvailable)
         {
-            AIFunctionFactory.Create(
+            tools.Add(AIFunctionFactory.Create(
                 method: (string query, int topK = 8) => VectorSearchAsync(context, query, topK),
                 name: "vector_search",
-                description: "Semantic search over indexed chapters and lore for the current project. Returns the top matching snippets with their source metadata."),
+                description: "Semantic search over indexed chapters and lore for the current project. Returns the top matching snippets with their source metadata."));
+        }
 
+        var impactDescription = vectorSearchAvailable
+            ? "Read-only book-level impact map for continuity changes. Combines outline order, chapter synopses, server-side keyword/body checks, context vector hits, affected entities/events, adjacency, and downstream chapters from an anchor chapter. Use this before spawning revision agents or before deciding which chapters need body edits."
+            : "Read-only book-level impact map for continuity changes. Combines outline order, chapter synopses, server-side keyword/body checks, affected entities/events, adjacency, and downstream chapters from an anchor chapter. Use this before spawning revision agents or before deciding which chapters need body edits.";
+
+        tools.AddRange([
             AIFunctionFactory.Create(
                 method: () => ListChaptersAsync(context),
                 name: "list_chapters",
@@ -68,10 +79,7 @@ public sealed class EditorChatTools(
                     int topK = 20) =>
                     FindImpactedChaptersAsync(context, query, anchorChapterId, affectedEntityIds, eventIds, keywords, topK),
                 name: "find_impacted_chapters",
-                description:
-                    "Read-only book-level impact map for continuity changes. " +
-                    "Combines outline order, chapter synopses, server-side keyword/body checks, context vector hits, affected entities/events, adjacency, and downstream chapters from an anchor chapter. " +
-                    "Use this before spawning revision agents or before deciding which chapters need body edits."),
+                description: impactDescription),
 
             AIFunctionFactory.Create(
                 method: () => ListProjectFactsAsync(context),
@@ -103,7 +111,7 @@ public sealed class EditorChatTools(
                     "Use chapter ids from the Context Feed outline when available; use list_chapters for missing ids, line counts, and page counts. " +
                     "Provide pageNumber to read a specific page of the full chapter; omit it to read page 1. " +
                     "Always returns content plus pagination metadata. If this turn already staged an edit to the chapter, returns the latest staged body for this turn."),
-        };
+        ]);
 
         if (mode == EditorChatToolMode.ContestPreparation)
         {
@@ -140,7 +148,7 @@ public sealed class EditorChatTools(
                 "Before calling this, make any broader canon, outline, entity, beat, relationship, fact, or synopsis updates yourself."));
 
         var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var outlineTool in outlineTools.Build(new OutlineCollaborationContext(context.ProjectId, context.OnMutated, context.OutlineStaging)))
+        foreach (var outlineTool in await outlineTools.BuildAsync(new OutlineCollaborationContext(context.ProjectId, context.OnMutated, context.OutlineStaging), cancellationToken))
         {
             if (outlineTool is AIFunction function && existingNames.Add(function.Name))
                 tools.Add(outlineTool);
@@ -293,7 +301,7 @@ public sealed class EditorChatTools(
             return JsonSerializer.Serialize(new
             {
                 query,
-                message = "No impacted chapters found from the available outline, vector, entity, and keyword signals.",
+                message = "No impacted chapters found from the available outline, entity, keyword, and optional vector signals.",
                 candidates = Array.Empty<object>(),
             });
 
@@ -1047,6 +1055,9 @@ public sealed class EditorChatTools(
         IReadOnlyList<string> terms,
         IReadOnlyDictionary<Guid, ImpactCandidate> candidates)
     {
+        if (!await embeddings.IsAvailableAsync())
+            return;
+
         try
         {
             var queryText = string.Join(' ', terms);

@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Context;
-using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -17,9 +16,7 @@ public sealed class IngestJobProcessor(
     IChatClientFactory chatClientFactory,
     IngestAgentTools tools,
     IEntityTypeService entityTypes,
-    IVectorStore vectors,
-    IEmbeddingService embeddings,
-    ITextChunker chunker,
+    IIngestVectorIndexingService ingestVectorIndexing,
     IIngestGraphSync graphSync,
     IIngestJobNotifier notifier,
     IContextIndexingService contextIndexing,
@@ -81,7 +78,7 @@ public sealed class IngestJobProcessor(
 
             var provider = await ResolveJobProviderAsync(job, cancellationToken);
 
-            await EnsureVectorFragmentsAsync(job.Source, cancellationToken);
+            await ingestVectorIndexing.EnsureVectorFragmentsAsync(job.Source, cancellationToken: cancellationToken);
             var sourceChunks = job.Chunks.Select(chunk => chunk.SourceChunk).OrderBy(chunk => chunk.Index).ToList();
             await graphSync.EnsureSourceAsync(job.Source, sourceChunks, cancellationToken);
 
@@ -432,76 +429,6 @@ public sealed class IngestJobProcessor(
         return summaries.Count == 0 ? "None yet." : string.Join("\n", summaries);
     }
 
-    private async Task EnsureVectorFragmentsAsync(IngestSource source, CancellationToken cancellationToken)
-    {
-        var existingFragments = await ingest.ListVectorFragmentsAsync(source.Id, cancellationToken);
-        if (source.VectorIndexState == VectorIndexState.UpToDate && existingFragments.Count > 0)
-            return;
-
-        try
-        {
-            await vectors.DeleteBySourceAsync("ingest_source", source.VectorSourceId, Project.ScopeKey(source.ProjectId), cancellationToken);
-            foreach (var fragment in existingFragments)
-                ingest.RemoveVectorFragment(fragment);
-            await ingest.SaveChangesAsync(cancellationToken);
-
-            var chunks = chunker.Chunk(source.SourceText);
-            if (chunks.Count > 0)
-            {
-                var contents = chunks.Select(item => item.Content).ToList();
-                var embeddingVectors = await embeddings.GenerateEmbeddingsAsync(contents, cancellationToken);
-                var cursor = 0;
-                for (var index = 0; index < chunks.Count; index++)
-                {
-                    var text = chunks[index].Content;
-                    var start = FindFragmentStart(source.SourceText, text, cursor);
-                    var end = Math.Min(source.SourceText.Length, start + text.Length);
-                    cursor = Math.Min(source.SourceText.Length, Math.Max(start + 1, end - 200));
-                    var metadata = $"Source {source.Title} - Vector fragment {index + 1}/{chunks.Count}";
-                    var rowId = await vectors.StoreAsync(
-                        content: text,
-                        embedding: embeddingVectors[index],
-                        sourceType: "ingest_source",
-                        scopeKey: Project.ScopeKey(source.ProjectId),
-                        sourceId: source.VectorSourceId,
-                        metadata: metadata,
-                        chunkIndex: index,
-                        cancellationToken: cancellationToken);
-
-                    await ingest.AddVectorFragmentAsync(new IngestVectorFragment
-                    {
-                        SourceId = source.Id,
-                        Index = index,
-                        VectorRowId = rowId,
-                        StartChar = start,
-                        EndChar = end,
-                        Metadata = metadata,
-                    }, cancellationToken);
-                }
-            }
-
-            source.VectorIndexState = VectorIndexState.UpToDate;
-            source.VectorIndexedAt = DateTime.UtcNow;
-            source.VectorIndexError = null;
-            source.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateSource(source);
-            await ingest.SaveChangesAsync(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            source.VectorIndexState = VectorIndexState.Failed;
-            source.VectorIndexError = ex.Message;
-            source.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateSource(source);
-            await ingest.SaveChangesAsync(CancellationToken.None);
-            throw;
-        }
-    }
-
     private async Task MarkStoppedAsync(Guid jobId, IngestJobChunk? activeChunk)
     {
         var job = await ingest.GetJobAsync(jobId, CancellationToken.None);
@@ -548,13 +475,6 @@ public sealed class IngestJobProcessor(
 
     private void Notify(Guid projectId, Guid jobId, IngestJobUpdateKind kind) =>
         notifier.Notify(new IngestJobUpdate(projectId, jobId, kind, DateTime.UtcNow));
-
-    private static int FindFragmentStart(string sourceText, string fragmentText, int cursor)
-    {
-        var searchStart = Math.Max(0, cursor - 500);
-        var found = sourceText.IndexOf(fragmentText, searchStart, StringComparison.Ordinal);
-        return found < 0 ? Math.Clamp(cursor, 0, sourceText.Length) : found;
-    }
 
     private static string Truncate(string? value, int max)
     {

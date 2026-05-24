@@ -218,6 +218,19 @@ public class ChapterService(
         {
             await vectors.DeleteBySourceAsync("chapter", sourceId, scopeKey, cancellationToken);
 
+            if (!await embeddings.IsAvailableAsync(cancellationToken))
+            {
+                chapter.VectorIndexState = VectorIndexState.Disabled;
+                chapter.VectorIndexedAt = null;
+                chapter.VectorIndexError = null;
+                repo.Update(chapter);
+                await repo.SaveChangesAsync(cancellationToken);
+                await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
+                await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
+                logger.LogDebug("Skipped chapter vector indexing for {ChapterId}; no embedding model is configured.", chapter.Id);
+                return;
+            }
+
             var chunks = chunker.Chunk(chapter.Body);
             if (chunks.Count > 0)
             {

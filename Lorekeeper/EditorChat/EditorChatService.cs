@@ -20,6 +20,7 @@ public sealed class EditorChatService(
     IContextBuilder contextBuilder,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
+    IEmbeddingService embeddings,
     EditorChatTools tools,
     OutlineCollaborationTools outlineTools,
     IEditorContestService contestService,
@@ -166,7 +167,10 @@ public sealed class EditorChatService(
 
             var assembly = await contextBuilder.BuildAsync(project, currentChapter, cancellationToken);
             contestModeEnabled = project.ContestModeEnabled;
-            systemPrompt = assembly.Assemble(contestModeEnabled ? AssistantWorkflowInstructions.EditorContestPreparation : null);
+            var vectorSearchAvailable = await embeddings.IsAvailableAsync(cancellationToken);
+            systemPrompt = assembly.Assemble(contestModeEnabled
+                ? AssistantWorkflowInstructions.EditorContestPreparation
+                : AssistantWorkflowInstructions.EditorChatFor(vectorSearchAvailable));
 
             var defaultProvider = await providerService.GetDefaultAsync(cancellationToken)
                 ?? throw new InvalidOperationException("No default LLM provider configured.");
@@ -193,7 +197,7 @@ public sealed class EditorChatService(
                 autoPinReadEntities: !contestModeEnabled,
                 outlineStaging,
                 editorStaging);
-            aiTools = tools.Build(editorContext, contestModeEnabled ? EditorChatToolMode.ContestPreparation : EditorChatToolMode.Normal);
+            aiTools = await tools.BuildAsync(editorContext, contestModeEnabled ? EditorChatToolMode.ContestPreparation : EditorChatToolMode.Normal, cancellationToken);
         }
         catch (Exception ex)
         {

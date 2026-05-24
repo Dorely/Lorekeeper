@@ -33,6 +33,7 @@ builder.Services.AddHttpClient();
 // Persistence
 builder.Services.AddLorekeeperPersistence(builder.Configuration);
 builder.Services.AddScoped<ILlmProviderRepository, LlmProviderRepository>();
+builder.Services.AddScoped<IEmbeddingConfigurationRepository, EmbeddingConfigurationRepository>();
 builder.Services.AddScoped<ISearchProviderRepository, SearchProviderRepository>();
 builder.Services.AddScoped<IOAuthTokenRepository, OAuthTokenRepository>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
@@ -55,15 +56,23 @@ builder.Services.AddScoped<IWebIngestCandidateRepository, WebIngestCandidateRepo
 builder.Services.AddScoped<IProjectImportRepository, ProjectImportRepository>();
 
 // Knowledge
-builder.Services.AddScoped<IVectorStore, SqliteVecVectorStore>();
+builder.Services.AddScoped<SqliteVecVectorStore>();
+builder.Services.AddScoped<IVectorStore>(sp => sp.GetRequiredService<SqliteVecVectorStore>());
+builder.Services.AddScoped<IVectorStoreMaintenance>(sp => sp.GetRequiredService<SqliteVecVectorStore>());
 builder.Services.AddScoped<IGraphStore, RelationalGraphStore>();
 builder.Services.AddScoped<IProjectGraphService, ProjectGraphService>();
 builder.Services.AddSingleton<ITextChunker, OverlappingTextChunker>();
 
 // LLM
-builder.Services.AddScoped<IEmbeddingService, OllamaEmbeddingService>();
+builder.Services.Configure<EmbeddingRebuildOptions>(builder.Configuration.GetSection(EmbeddingRebuildOptions.SectionName));
+builder.Services.AddSingleton<IEmbeddingRebuildQueue, EmbeddingRebuildQueue>();
+builder.Services.AddScoped<IEmbeddingClient, EmbeddingClient>();
+builder.Services.AddScoped<IEmbeddingConfigurationService, EmbeddingConfigurationService>();
+builder.Services.AddScoped<IEmbeddingService, ProviderEmbeddingService>();
+builder.Services.AddScoped<EmbeddingRebuildService>();
 builder.Services.AddScoped<ILlmProviderService, LlmProviderService>();
 builder.Services.AddScoped<ICodexAuthService, CodexAuthService>();
+builder.Services.AddHostedService<EmbeddingRebuildWorker>();
 
 // Search providers
 builder.Services.AddScoped<IWebSearchClient, SerpApiWebSearchClient>();
@@ -110,6 +119,7 @@ builder.Services.AddSingleton<IIngestJobNotifier, IngestJobNotifier>();
 builder.Services.AddScoped<IIngestSourceStructureBuilder, IngestSourceStructureBuilder>();
 builder.Services.AddScoped<IIngestGraphSync, IngestGraphSync>();
 builder.Services.AddScoped<IIngestGraphCleanup, IngestGraphCleanup>();
+builder.Services.AddScoped<IIngestVectorIndexingService, IngestVectorIndexingService>();
 builder.Services.AddScoped<IngestAgentTools>();
 builder.Services.AddScoped<IngestJobProcessor>();
 builder.Services.AddScoped<IIngestService, IngestService>();
@@ -177,7 +187,9 @@ using (var scope = app.Services.CreateScope())
         db.Database.Migrate();
     }
 
-    VectorStoreInitializer.Initialize(builder.Configuration, startupLogger);
+    var embeddingConfiguration = await db.EmbeddingConfigurations.AsNoTracking().FirstOrDefaultAsync();
+    var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();
+    vectorMaintenance.Initialize(embeddingConfiguration?.Dimensions);
 
     var projectRepository = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
     var outlineGraphSync = scope.ServiceProvider.GetRequiredService<IOutlineGraphSync>();

@@ -437,6 +437,10 @@
                     {
                         <span class="badge text-bg-danger mt-1" title="@ch.VectorIndexError">Index failed — retrying</span>
                     }
+                    else if (ch.VectorIndexState == VectorIndexState.Disabled)
+                    {
+                        <span class="badge text-bg-secondary mt-1" title="No embedding model is configured.">Vectors disabled</span>
+                    }
                 </div>
                 <div class="outline-chapter-actions">
                     <select class="form-select form-select-sm outline-act-picker"

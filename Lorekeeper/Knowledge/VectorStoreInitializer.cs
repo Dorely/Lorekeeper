@@ -5,15 +5,14 @@ namespace Lorekeeper.Knowledge;
 
 /// <summary>
 /// Loads the sqlite-vec extension and ensures the <c>knowledge_chunks</c> metadata table
-/// + <c>vec_knowledge</c> virtual table exist. Run once at startup before any vector
-/// reads or writes.
+/// exists. Creates <c>vec_knowledge</c> only when embedding dimensions are configured.
+/// Run once at startup before any vector reads or writes.
 /// </summary>
 public static class VectorStoreInitializer
 {
-    public static void Initialize(IConfiguration configuration, ILogger logger)
+    public static void Initialize(IConfiguration configuration, ILogger logger, int? dimensions)
     {
         var connectionString = SqliteConnectionSettings.BuildConnectionString(configuration);
-        var dimensions = configuration.GetValue("Embeddings:Dimensions", 768);
 
         using var connection = new SqliteConnection(connectionString);
         connection.Open();
@@ -45,13 +44,16 @@ public static class VectorStoreInitializer
             createIndex.ExecuteNonQuery();
         }
 
-        using (var createVec = connection.CreateCommand())
+        if (dimensions is int vectorDimensions)
         {
+            using var createVec = connection.CreateCommand();
             createVec.CommandText =
-                $"CREATE VIRTUAL TABLE IF NOT EXISTS vec_knowledge USING vec0(embedding float[{dimensions}])";
+                $"CREATE VIRTUAL TABLE IF NOT EXISTS vec_knowledge USING vec0(embedding float[{vectorDimensions}])";
             createVec.ExecuteNonQuery();
+            logger.LogInformation("Vector store ready (dimensions={Dimensions})", vectorDimensions);
+            return;
         }
 
-        logger.LogInformation("Vector store ready (dimensions={Dimensions})", dimensions);
+        logger.LogInformation("Vector metadata store ready; vector table not created because no embedding model is configured.");
     }
 }

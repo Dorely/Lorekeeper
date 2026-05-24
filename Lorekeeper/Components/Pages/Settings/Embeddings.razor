@@ -1,0 +1,331 @@
+@page "/settings/embeddings"
+@using Lorekeeper.Llm
+@using Lorekeeper.Models
+@rendermode InteractiveServer
+@inject IEmbeddingConfigurationService EmbeddingConfig
+
+<PageTitle>Embeddings</PageTitle>
+
+<h3>Embeddings</h3>
+<p class="text-muted">Choose the single active embedding model used for vector search and semantic context recommendations.</p>
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-@_statusKind alert-dismissible fade show" role="alert">
+        @_statusMessage
+        <button type="button" class="btn-close" @onclick="ClearStatus"></button>
+    </div>
+}
+
+@if (_loading)
+{
+    <p class="text-muted"><em>Loading...</em></p>
+}
+else if (_connections.Count == 0)
+{
+    <div class="alert alert-warning">
+        No provider connections are configured. Set up a connection on the
+        <a class="alert-link" href="/settings/providers">Providers</a>
+        tab before configuring embeddings.
+    </div>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Active Embedding Model</h5>
+            @if (_active is null)
+            {
+                <p class="text-muted mb-0">No embedding model is active. Vector search and semantic recommendations are disabled.</p>
+            }
+            else
+            {
+                <dl class="row mb-0">
+                    <dt class="col-sm-3">Connection</dt>
+                    <dd class="col-sm-9">@ConnectionLabel(_active.Provider)</dd>
+                    <dt class="col-sm-3">API</dt>
+                    <dd class="col-sm-9">@_active.ApiKind</dd>
+                    <dt class="col-sm-3">Model</dt>
+                    <dd class="col-sm-9">@_active.ModelId</dd>
+                    <dt class="col-sm-3">Dimensions</dt>
+                    <dd class="col-sm-9">@_active.Dimensions</dd>
+                    <dt class="col-sm-3">Tested</dt>
+                    <dd class="col-sm-9">@_active.LastTestedAt.ToLocalTime().ToString("g")</dd>
+                </dl>
+                <div class="alert alert-warning mt-3 mb-0">
+                    Unsetting the active embedding model disables vector search and semantic recommendations. Manual context search remains available. Existing vectors are left in place and will be rebuilt if a model is configured again.
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="confirmUnsetEmbedding" @bind="_confirmUnset" disabled="@Busy" />
+                        <label class="form-check-label" for="confirmUnsetEmbedding">I understand vector features will be disabled.</label>
+                    </div>
+                    <button type="button" class="btn btn-outline-danger btn-sm mt-2" disabled="@(!CanUnset)" @onclick="UnsetAsync">
+                        @(_unsetting ? "Unsetting..." : "Unset Active Embedding Model")
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">Configure Active Model</h5>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Connection</label>
+                    <select class="form-select" value="@_providerId" @onchange="OnProviderChanged">
+                        @foreach (var connection in _connections)
+                        {
+                            <option value="@connection.Id">@ConnectionLabel(connection)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Embedding API</label>
+                    <select class="form-select" @bind="_apiKind" @bind:after="DraftChanged">
+                        <option value="@EmbeddingApiKind.OllamaNative">Ollama native</option>
+                        <option value="@EmbeddingApiKind.OpenAICompatible">OpenAI compatible</option>
+                    </select>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label">Embedding model id</label>
+                    <input class="form-control" value="@_modelId" @oninput="OnModelChanged" placeholder="nomic-embed-text or text-embedding-3-small" />
+                </div>
+            </div>
+
+            @if (_tested is not null && TestMatchesDraft)
+            {
+                <div class="alert alert-success mt-3 mb-0">
+                    Test succeeded. Dimensions: @_tested.Dimensions.
+                </div>
+            }
+
+            @if (WillSwitchActiveModel)
+            {
+                <div class="alert alert-warning mt-3">
+                    Switching the active embedding model will clear and rebuild all project vectors. This can take time and will run in the background with throttling.
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="confirmReembed" @bind="_confirmReembed" disabled="@Busy" />
+                        <label class="form-check-label" for="confirmReembed">I understand this will trigger a full project re-embed.</label>
+                    </div>
+                </div>
+            }
+
+            <div class="mt-3 d-flex gap-2">
+                <button type="button" class="btn btn-outline-info" disabled="@Busy" @onclick="TestAsync">
+                    @(_testing ? "Testing..." : "Test")
+                </button>
+                <button type="button" class="btn btn-primary" disabled="@(!CanSave)" @onclick="SaveAsync">
+                    @(_saving ? "Saving..." : "Save Active Embedding Model")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<LlmProvider> _connections = [];
+    private EmbeddingConfiguration? _active;
+    private int _providerId;
+    private EmbeddingApiKind _apiKind = EmbeddingApiKind.OllamaNative;
+    private string _modelId = string.Empty;
+    private EmbeddingTestResult? _tested;
+    private bool _confirmReembed;
+    private bool _confirmUnset;
+    private bool _loading = true;
+    private bool _testing;
+    private bool _saving;
+    private bool _unsetting;
+    private string? _statusMessage;
+    private string _statusKind = "success";
+
+    private bool Busy => _testing || _saving || _unsetting;
+
+    private bool TestMatchesDraft =>
+        _tested is not null
+        && _tested.ProviderId == _providerId
+        && _tested.ApiKind == _apiKind
+        && string.Equals(_tested.ModelId, _modelId.Trim(), StringComparison.Ordinal);
+
+    private bool WillSwitchActiveModel =>
+        _active is not null
+        && (_active.ProviderId != _providerId
+            || _active.ApiKind != _apiKind
+            || !string.Equals(_active.ModelId, _modelId.Trim(), StringComparison.Ordinal)
+            || (TestMatchesDraft && _tested!.Dimensions != _active.Dimensions));
+
+    private bool CanSave =>
+        !Busy
+        && _providerId > 0
+        && !string.IsNullOrWhiteSpace(_modelId)
+        && TestMatchesDraft
+        && (!WillSwitchActiveModel || _confirmReembed);
+
+    private bool CanUnset =>
+        !Busy
+        && _active is not null
+        && _confirmUnset;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _connections = (await EmbeddingConfig.ListConnectionProvidersAsync()).ToList();
+        _active = await EmbeddingConfig.GetActiveAsync();
+
+        if (_active is not null)
+        {
+            _providerId = _active.ProviderId;
+            _apiKind = _active.ApiKind;
+            _modelId = _active.ModelId;
+            _tested = new EmbeddingTestResult(
+                _active.LastTestedProviderId,
+                _active.LastTestedApiKind,
+                _active.LastTestedModelId,
+                _active.LastTestedDimensions,
+                _active.LastTestedAt);
+        }
+        else if (_connections.FirstOrDefault() is { } first)
+        {
+            _providerId = first.Id;
+            _apiKind = GuessDefaultApiKind(first);
+            _modelId = string.Empty;
+            _tested = null;
+        }
+        else
+        {
+            _providerId = 0;
+            _modelId = string.Empty;
+            _tested = null;
+        }
+
+        _confirmReembed = false;
+        _confirmUnset = false;
+        _loading = false;
+    }
+
+    private async Task TestAsync()
+    {
+        _testing = true;
+        _tested = null;
+        try
+        {
+            _tested = await EmbeddingConfig.TestAsync(new EmbeddingTestRequest(_providerId, _apiKind, _modelId));
+            SetStatus($"Embedding model tested. Dimensions: {_tested.Dimensions}.", "success");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Embedding test failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!CanSave)
+            return;
+
+        if (_tested is null || !TestMatchesDraft)
+        {
+            SetStatus("Run Test successfully before saving this embedding model.", "danger");
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var result = await EmbeddingConfig.SaveAsync(new EmbeddingConfigurationDraft(
+                _providerId,
+                _apiKind,
+                _modelId.Trim(),
+                _tested.Dimensions,
+                _tested.ProviderId,
+                _tested.ApiKind,
+                _tested.ModelId));
+            SetStatus(result.RebuildQueued
+                ? "Active embedding model saved. Full project re-embed queued."
+                : "Active embedding model saved.",
+                "success");
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Save failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task UnsetAsync()
+    {
+        if (!CanUnset)
+            return;
+
+        _unsetting = true;
+        try
+        {
+            var result = await EmbeddingConfig.UnsetAsync();
+            SetStatus(result.Removed
+                ? "Embedding model unset. Vector features are disabled."
+                : "No active embedding model was set.",
+                result.Removed ? "success" : "info");
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Unset failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _unsetting = false;
+        }
+    }
+
+    private void OnProviderChanged(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var providerId))
+            _providerId = providerId;
+        DraftChanged();
+        if (_connections.FirstOrDefault(connection => connection.Id == _providerId) is { } selected)
+            _apiKind = GuessDefaultApiKind(selected);
+    }
+
+    private void OnModelChanged(ChangeEventArgs args)
+    {
+        _modelId = args.Value?.ToString() ?? string.Empty;
+        DraftChanged();
+    }
+
+    private void DraftChanged()
+    {
+        _tested = null;
+        _confirmReembed = false;
+    }
+
+    private static EmbeddingApiKind GuessDefaultApiKind(LlmProvider provider)
+    {
+        var endpoint = provider.EndpointUrl.TrimEnd('/');
+        return endpoint.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
+            ? EmbeddingApiKind.OpenAICompatible
+            : EmbeddingApiKind.OllamaNative;
+    }
+
+    private static string ConnectionLabel(LlmProvider provider) =>
+        $"{(string.IsNullOrWhiteSpace(provider.DisplayName) ? provider.Name : provider.DisplayName)} - {provider.EndpointUrl}";
+
+    private void ClearStatus() => _statusMessage = null;
+
+    private void SetStatus(string message, string kind)
+    {
+        _statusMessage = message;
+        _statusKind = kind;
+    }
+}

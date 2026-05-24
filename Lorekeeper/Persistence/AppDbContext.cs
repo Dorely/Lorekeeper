@@ -12,6 +12,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     private const int _maxLockedSaveAttempts = 6;
 
     public DbSet<LlmProvider> LlmProviders => Set<LlmProvider>();
+    public DbSet<EmbeddingConfiguration> EmbeddingConfigurations => Set<EmbeddingConfiguration>();
     public DbSet<SearchProvider> SearchProviders => Set<SearchProvider>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
     public DbSet<Project> Projects => Set<Project>();
@@ -343,6 +344,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
                 .WithMany(e => e.ChildModels)
                 .HasForeignKey(e => e.CredentialSourceId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<EmbeddingConfiguration>(entity =>
+        {
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.ApiKind).HasConversion<string>();
+            entity.Property(e => e.LastTestedApiKind).HasConversion<string>();
+
+            entity.HasOne(e => e.Provider)
+                .WithMany()
+                .HasForeignKey(e => e.ProviderId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<SearchProvider>(entity =>

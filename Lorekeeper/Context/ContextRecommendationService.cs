@@ -48,7 +48,8 @@ public sealed class ContextRecommendationService(
         var trimmedQuery = query?.Trim();
 
         await AddSecondDegreeGraphRecommendationsAsync(projectId, includedEntityIds, includedKeys, results, cancellationToken);
-        await AddSemanticRecommendationsAsync(projectId, chapterId, includedEntityIds, includedKeys, results, trimmedQuery, cancellationToken);
+        if (await embeddings.IsAvailableAsync(cancellationToken))
+            await AddSemanticRecommendationsAsync(projectId, chapterId, includedEntityIds, includedKeys, results, trimmedQuery, cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(trimmedQuery))
             await AddManualSearchRecommendationsAsync(projectId, chapterId, includedKeys, results, trimmedQuery, cancellationToken);
@@ -246,6 +247,12 @@ public sealed class ContextRecommendationService(
             foreach (var sourceChunk in await ingest.ListSourceChunksAsync(source.Id, cancellationToken))
             {
                 var chunkSearchRank = SearchRank(source, sourceChunk, query);
+                if (chunkSearchRank is null)
+                {
+                    var excerpt = await ingest.GetSourceChunkExcerptAsync(sourceChunk.Id, 4_000, cancellationToken);
+                    if (Contains(excerpt?.Text, query))
+                        chunkSearchRank = DetailSearchRank;
+                }
                 if (chunkSearchRank is null) continue;
 
                 var chunkRecommendation = ProjectIngestSourceChunk(source, sourceChunk, ["Matched manual search"], isSearchResult: true);

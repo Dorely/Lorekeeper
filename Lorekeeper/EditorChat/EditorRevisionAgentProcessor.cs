@@ -104,7 +104,7 @@ public sealed class EditorRevisionAgentProcessor(
                 new(ChatRole.System, systemPrompt),
                 new(ChatRole.User, userPrompt),
             };
-            var tools = BuildTools(job.ProjectId, session.ChapterId, edit);
+            var tools = await BuildToolsAsync(job.ProjectId, session.ChapterId, edit, cancellationToken);
             var chatOptions = new ChatOptions
             {
                 Tools = tools,
@@ -267,15 +267,18 @@ public sealed class EditorRevisionAgentProcessor(
             kind,
             DateTime.UtcNow));
 
-    private IList<AITool> BuildTools(Guid projectId, Guid assignedChapterId, CapturedChapterEdit edit)
+    private async Task<IList<AITool>> BuildToolsAsync(Guid projectId, Guid assignedChapterId, CapturedChapterEdit edit, CancellationToken cancellationToken)
     {
-        return
-        [
-            AIFunctionFactory.Create(
+        var tools = new List<AITool>();
+        if (await embeddings.IsAvailableAsync(cancellationToken))
+        {
+            tools.Add(AIFunctionFactory.Create(
                 method: (string query, int topK = 8) => VectorSearchAsync(projectId, query, topK),
                 name: "vector_search",
-                description: "Semantic search over indexed chapters and lore for the current project. Use focused queries for continuity evidence not already in the Context Feed."),
+                description: "Semantic search over indexed chapters and lore for the current project. Use focused queries for continuity evidence not already in the Context Feed."));
+        }
 
+        tools.AddRange([
             AIFunctionFactory.Create(
                 method: () => ListChaptersAsync(projectId),
                 name: "list_chapters",
@@ -323,7 +326,9 @@ public sealed class EditorRevisionAgentProcessor(
                     "mutationKind must be replace_whole_body, replace_range, insert_before_line, or insert_after_line. " +
                     "Use line numbers from read_chapter or the Context Feed. replacementText must be prose only with no line numbers. " +
                     "Do not call any more tools after this."),
-        ];
+        ]);
+
+        return tools;
     }
 
     private async Task<string> BuildWorkerUserPromptAsync(EditorRevisionJob job, EditorRevisionSession session, CancellationToken cancellationToken)

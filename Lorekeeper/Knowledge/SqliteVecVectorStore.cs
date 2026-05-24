@@ -12,7 +12,7 @@ namespace Lorekeeper.Knowledge;
 /// </summary>
 public class SqliteVecVectorStore(
     IConfiguration configuration,
-    ILogger<SqliteVecVectorStore> logger) : IVectorStore
+    ILogger<SqliteVecVectorStore> logger) : IVectorStore, IVectorStoreMaintenance
 {
     private string ConnectionString =>
         SqliteConnectionSettings.BuildConnectionString(configuration);
@@ -24,6 +24,9 @@ public class SqliteVecVectorStore(
         await using var connection = new SqliteConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
         connection.LoadVector();
+
+        if (!await VectorTableExistsAsync(connection, cancellationToken))
+            throw new InvalidOperationException("Vector store is not initialized because no embedding model is configured.");
 
         await using var metaCmd = connection.CreateCommand();
         metaCmd.CommandText =
@@ -65,6 +68,9 @@ public class SqliteVecVectorStore(
         await connection.OpenAsync(cancellationToken);
         connection.LoadVector();
 
+        if (!await VectorTableExistsAsync(connection, cancellationToken))
+            return [];
+
         await using var cmd = connection.CreateCommand();
         var typeFilter = sourceTypeFilter is not null ? " AND k.source_type = @sourceType" : "";
         cmd.CommandText =
@@ -101,6 +107,9 @@ public class SqliteVecVectorStore(
         await using var connection = new SqliteConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
         connection.LoadVector();
+
+        if (!await VectorTableExistsAsync(connection, cancellationToken))
+            return [];
 
         await using var cmd = connection.CreateCommand();
         var scopeParams = new List<string>();
@@ -150,7 +159,8 @@ public class SqliteVecVectorStore(
 
         if (ids.Count == 0) return;
 
-        await DeleteVecRowsAsync(connection, ids, cancellationToken);
+        if (await VectorTableExistsAsync(connection, cancellationToken))
+            await DeleteVecRowsAsync(connection, ids, cancellationToken);
 
         await using var metaCmd = connection.CreateCommand();
         metaCmd.CommandText =
@@ -176,7 +186,8 @@ public class SqliteVecVectorStore(
 
         if (ids.Count == 0) return;
 
-        await DeleteVecRowsAsync(connection, ids, cancellationToken);
+        if (await VectorTableExistsAsync(connection, cancellationToken))
+            await DeleteVecRowsAsync(connection, ids, cancellationToken);
 
         await using var metaCmd = connection.CreateCommand();
         metaCmd.CommandText = "DELETE FROM knowledge_chunks WHERE scope_key = @scopeKey";
@@ -184,6 +195,40 @@ public class SqliteVecVectorStore(
         await metaCmd.ExecuteNonQueryAsync(cancellationToken);
 
         logger.LogDebug("Deleted {Count} chunks for scope {ScopeKey}", ids.Count, scopeKey);
+    }
+
+    public void Initialize(int? dimensions) =>
+        VectorStoreInitializer.Initialize(configuration, logger, dimensions);
+
+    public async Task RecreateAsync(int dimensions, CancellationToken cancellationToken = default)
+    {
+        if (dimensions <= 0)
+            throw new ArgumentOutOfRangeException(nameof(dimensions), "Embedding dimensions must be greater than zero.");
+
+        await using var connection = new SqliteConnection(ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        SqliteConnectionSettings.ConfigureDatabase(connection);
+        connection.LoadVector();
+
+        await using (var dropVec = connection.CreateCommand())
+        {
+            dropVec.CommandText = "DROP TABLE IF EXISTS vec_knowledge;";
+            await dropVec.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var deleteMeta = connection.CreateCommand())
+        {
+            deleteMeta.CommandText = "DELETE FROM knowledge_chunks;";
+            await deleteMeta.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var createVec = connection.CreateCommand())
+        {
+            createVec.CommandText = $"CREATE VIRTUAL TABLE vec_knowledge USING vec0(embedding float[{dimensions}])";
+            await createVec.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        logger.LogInformation("Recreated vector store (dimensions={Dimensions})", dimensions);
     }
 
     private static async Task<List<KnowledgeResult>> ReadResultsAsync(SqliteCommand cmd, CancellationToken cancellationToken)
@@ -219,6 +264,14 @@ public class SqliteVecVectorStore(
         while (await reader.ReadAsync(cancellationToken))
             ids.Add(reader.GetInt64(0));
         return ids;
+    }
+
+    private static async Task<bool> VectorTableExistsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'virtual table') AND name = 'vec_knowledge' LIMIT 1";
+        var result = await cmd.ExecuteScalarAsync(cancellationToken);
+        return result is not null;
     }
 
     private static async Task DeleteVecRowsAsync(SqliteConnection connection, List<long> ids, CancellationToken cancellationToken)

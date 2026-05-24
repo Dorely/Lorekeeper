@@ -35,7 +35,7 @@ public sealed class ResearchTools(
         WriteIndented = false,
     };
 
-    public IList<AITool> Build(ResearchToolContext context)
+    public async Task<IList<AITool>> BuildAsync(ResearchToolContext context, CancellationToken cancellationToken = default)
     {
         var tools = new List<AITool>
         {
@@ -86,7 +86,7 @@ public sealed class ResearchTools(
         };
 
         var outlineContext = new OutlineCollaborationContext(context.ProjectId, context.OnMutated, context.Staging);
-        foreach (var tool in outlineTools.Build(outlineContext).OfType<AIFunction>())
+        foreach (var tool in (await outlineTools.BuildAsync(outlineContext, cancellationToken)).OfType<AIFunction>())
         {
             if (allowedGraphToolNames.Contains(tool.Name))
                 tools.Add(tool);

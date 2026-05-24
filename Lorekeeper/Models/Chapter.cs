@@ -51,4 +51,5 @@ public enum VectorIndexState
     UpToDate,
     Stale,
     Failed,
+    Disabled,
 }

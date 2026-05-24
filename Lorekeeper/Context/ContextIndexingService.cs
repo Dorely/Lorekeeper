@@ -228,6 +228,9 @@ public sealed class ContextIndexingService(
         var sourceKey = sourceId.ToString("N");
         await vectors.DeleteBySourceAsync(sourceType, sourceKey, scopeKey, cancellationToken);
 
+        if (!await embeddings.IsAvailableAsync(cancellationToken))
+            return;
+
         if (string.IsNullOrWhiteSpace(content)) return;
 
         var chunks = chunker.Chunk(content);
