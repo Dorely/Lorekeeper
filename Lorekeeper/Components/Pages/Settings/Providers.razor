@@ -23,6 +23,13 @@
     </div>
 }
 
+@if (!_hasWorkingChatProvider)
+{
+    <div class="alert alert-warning mt-2">
+        No working chat provider is configured. Run a successful provider test to enable LLM features.
+    </div>
+}
+
 <div class="card mb-4 border-dark">
     <div class="card-body">
         <div class="d-flex align-items-center justify-content-between">
@@ -89,6 +96,7 @@ else
                 <th>Endpoint</th>
                 <th>Model</th>
                 <th>Auth</th>
+                <th>Chat</th>
                 <th>Default</th>
                 <th>Actions</th>
             </tr>
@@ -137,6 +145,7 @@ else
                             <span class="badge bg-secondary">None</span>
                         }
                     </td>
+                    <td>@RenderChatStatus(p)</td>
                     <td>
                         @if (p.IsDefault)
                         {
@@ -145,6 +154,8 @@ else
                         else
                         {
                             <button type="button" class="btn btn-sm btn-outline-primary"
+                                    disabled="@(!IsChatReady(p))"
+                                    title="@DefaultButtonTitle(p)"
                                     @onclick="() => SetDefaultAsync(p.Id)">Set Default</button>
                         }
                     </td>
@@ -188,6 +199,7 @@ else
                                 </div>
                             </td>
                             <td><span class="badge bg-light text-dark">inherited</span></td>
+                            <td>@RenderChatStatus(child)</td>
                             <td>
                                 @if (child.IsDefault)
                                 {
@@ -196,6 +208,8 @@ else
                                 else
                                 {
                                     <button type="button" class="btn btn-sm btn-outline-primary"
+                                            disabled="@(!IsChatReady(child))"
+                                            title="@DefaultButtonTitle(child)"
                                             @onclick="() => SetDefaultAsync(child.Id)">Set Default</button>
                                 }
                             </td>
@@ -209,7 +223,7 @@ else
                 @if (_childForms.TryGetValue(p.Id, out var draft))
                 {
                     <tr class="bg-body-secondary">
-                        <td colspan="6">
+                        <td colspan="7">
                             <div class="d-flex align-items-end gap-2 p-2">
                                 <div>
                                     <label class="form-label form-label-sm mb-0">Display Name</label>
@@ -294,8 +308,10 @@ else
     private List<LlmProvider> _parents = [];
     private Dictionary<int, List<LlmProvider>> _children = [];
     private Dictionary<int, bool> _oauthStatus = [];
+    private Dictionary<int, bool> _chatReadyStatus = [];
     private LlmProvider? _codexProvider;
     private bool _codexConnected;
+    private bool _hasWorkingChatProvider;
 
     private readonly Dictionary<int, ChildDraft> _childForms = [];
     private NewProviderDraft _newProvider = new();
@@ -358,6 +374,11 @@ else
             _oauthStatus[p.Id] = token is not null;
         }
 
+        _chatReadyStatus = new Dictionary<int, bool>();
+        foreach (var provider in all)
+            _chatReadyStatus[provider.Id] = await ProviderService.IsChatProviderWorkingAsync(provider.Id);
+        _hasWorkingChatProvider = _chatReadyStatus.Values.Any(ready => ready);
+
         _codexProvider = _parents.FirstOrDefault(p => p.Name == CodexProvider.Name);
         _codexConnected = _codexProvider is not null
             && _oauthStatus.TryGetValue(_codexProvider.Id, out var c) && c;
@@ -377,6 +398,7 @@ else
 
         try
         {
+            provider.MarkChatTestSucceeded(DateTime.UtcNow);
             await ProviderService.CreateAsync(provider);
             if (provider.IsDefault)
                 await ProviderService.SetDefaultAsync(provider.Id);
@@ -404,6 +426,7 @@ else
         {
             await ChatClientFactory.TestModelAsync(provider);
             _testedNewProviderSnapshot = GetNewProviderConnectionSnapshot();
+            provider.MarkChatTestSucceeded(DateTime.UtcNow);
             SetStatus($"Provider '{provider.DisplayName ?? provider.Name}' endpoint and model verified.", "success");
         }
         catch (Exception ex)
@@ -437,22 +460,39 @@ else
         try
         {
             await ChatClientFactory.TestModelAsync(p);
-            SetStatus($"Provider '{p.DisplayName ?? p.Name}' model '{p.ModelId}' verified.", "success");
+            await ProviderService.MarkChatTestSucceededAsync(p);
+            SetStatus($"Provider '{p.DisplayName ?? p.Name}' model '{p.ModelId}' saved and verified.", "success");
         }
         catch (Exception ex)
         {
+            try
+            {
+                await ProviderService.MarkChatTestFailedAsync(p, ex.Message);
+            }
+            catch
+            {
+                // Keep the original test failure visible to the user.
+            }
             SetStatus($"Provider '{p.DisplayName ?? p.Name}' test failed: {ex.Message}", "danger");
         }
         finally
         {
             _testingProviderId = null;
+            await ReloadAsync();
         }
     }
 
     private async Task SetDefaultAsync(int id)
     {
-        await ProviderService.SetDefaultAsync(id);
-        SetStatus("Default provider updated.", "success");
+        try
+        {
+            await ProviderService.SetDefaultAsync(id);
+            SetStatus("Default provider updated.", "success");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Default provider update failed: {ex.Message}", "danger");
+        }
         await ReloadAsync();
     }
 
@@ -499,6 +539,7 @@ else
         try
         {
             await ChatClientFactory.TestModelAsync(child);
+            child.MarkChatTestSucceeded(DateTime.UtcNow);
             await ProviderService.CreateAsync(child);
             SetStatus($"Model '{displayName}' ({modelId}) added under {parent.DisplayName ?? parent.Name}.", "success");
             _childForms.Remove(parent.Id);
@@ -522,7 +563,7 @@ else
                 EndpointUrl = CodexProvider.ResponsesEndpoint,
                 ModelId = "gpt-5.4-mini",
                 AuthType = AuthType.OAuth,
-                IsDefault = !_parents.Any(p => p.IsDefault)
+                IsDefault = false
             };
             await ProviderService.CreateAsync(codex);
         }
@@ -549,6 +590,37 @@ else
         if (_codexProvider is null) return;
         await TestProviderAsync(_codexProvider);
     }
+
+    private bool IsChatReady(LlmProvider provider) =>
+        _chatReadyStatus.TryGetValue(provider.Id, out var ready) && ready;
+
+    private string DefaultButtonTitle(LlmProvider provider) =>
+        IsChatReady(provider)
+            ? "Set as the default chat provider"
+            : "Run Test successfully before setting this provider as default.";
+
+    private RenderFragment RenderChatStatus(LlmProvider provider) => __builder =>
+    {
+        if (IsChatReady(provider))
+        {
+            <span class="badge bg-success" title="This provider is ready for LLM chat features.">Ready</span>
+            return;
+        }
+
+        if (provider.LastChatTestedAt is null)
+        {
+            <span class="badge bg-secondary" title="Run Test successfully before using this provider for chat.">Untested</span>
+            return;
+        }
+
+        if (provider.LastChatTestSucceeded && !provider.HasCurrentChatTestSnapshot)
+        {
+            <span class="badge bg-warning text-dark" title="Provider settings changed after the last successful test.">Retest</span>
+            return;
+        }
+
+        <span class="badge bg-danger" title="@provider.LastChatTestError">Failed</span>
+    };
 
     private LlmProvider? BuildNewProviderOrSetStatus()
     {

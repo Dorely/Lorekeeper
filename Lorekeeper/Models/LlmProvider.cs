@@ -10,6 +10,13 @@ public class LlmProvider
     public AuthType AuthType { get; set; }
     public string? ApiKey { get; set; }
     public bool IsDefault { get; set; }
+    public bool LastChatTestSucceeded { get; set; }
+    public DateTime? LastChatTestedAt { get; set; }
+    public string? LastChatTestError { get; set; }
+    public string? LastChatTestEndpointUrl { get; set; }
+    public string? LastChatTestModelId { get; set; }
+    public AuthType? LastChatTestAuthType { get; set; }
+    public int? LastChatTestCredentialSourceId { get; set; }
 
     /// <summary>
     /// When set, credentials (API key / OAuth tokens) are resolved from the referenced
@@ -29,4 +36,39 @@ public class LlmProvider
     /// Returns the provider ID whose credentials should be used (follows CredentialSourceId if set).
     /// </summary>
     public int EffectiveCredentialProviderId => CredentialSourceId ?? Id;
+
+    public bool HasCurrentChatTestSnapshot =>
+        LastChatTestSucceeded
+        && string.Equals(LastChatTestEndpointUrl, EndpointUrl, StringComparison.Ordinal)
+        && string.Equals(LastChatTestModelId, ModelId, StringComparison.Ordinal)
+        && LastChatTestAuthType == AuthType
+        && LastChatTestCredentialSourceId == CredentialSourceId;
+
+    public void MarkChatTestSucceeded(DateTime testedAt)
+    {
+        LastChatTestSucceeded = true;
+        LastChatTestedAt = testedAt;
+        LastChatTestError = null;
+        LastChatTestEndpointUrl = EndpointUrl;
+        LastChatTestModelId = ModelId;
+        LastChatTestAuthType = AuthType;
+        LastChatTestCredentialSourceId = CredentialSourceId;
+    }
+
+    public void MarkChatTestFailed(string error, DateTime testedAt)
+    {
+        LastChatTestSucceeded = false;
+        LastChatTestedAt = testedAt;
+        LastChatTestError = error;
+        LastChatTestEndpointUrl = EndpointUrl;
+        LastChatTestModelId = ModelId;
+        LastChatTestAuthType = AuthType;
+        LastChatTestCredentialSourceId = CredentialSourceId;
+    }
+
+    public void ClearChatReadiness(string? reason = null)
+    {
+        LastChatTestSucceeded = false;
+        LastChatTestError = reason;
+    }
 }

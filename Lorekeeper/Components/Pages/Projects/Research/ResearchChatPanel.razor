@@ -1,10 +1,12 @@
 @using Lorekeeper.Components.Chat
 @using Lorekeeper.Components.Pages.Projects.Outline
+@using Lorekeeper.Llm
 @using Lorekeeper.Models
 @using Lorekeeper.Research
 @using Lorekeeper.Tokens
 @implements IAsyncDisposable
 @inject IResearchService Research
+@inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
 
 <ChatSurface Title="Research"
@@ -19,8 +21,8 @@
              InputChanged="SetInput"
              Placeholder="Ask me to research a topic..."
              Running="@_running"
-             ComposerDisabled="@(_running || PendingChangeCount > 0)"
-             SendDisabled="@(string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)"
+             ComposerDisabled="@(ChatDisabled || _running || PendingChangeCount > 0)"
+             SendDisabled="@(ChatDisabled || string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)"
              OnSend="SendAsync"
              OnStop="CancelAsync"
              ForceScrollKey="@_forceScrollKey"
@@ -28,14 +30,20 @@
              AutoFollowKey="@_autoFollowKey"
              ResetComposerKey="@_resetComposerKey">
     <HeaderActions>
-        <button type="button" class="btn btn-link btn-sm research-reset" title="Start over" disabled="@(_running || PendingChangeCount > 0)" @onclick="ResetAsync">Reset</button>
+        <button type="button" class="btn btn-link btn-sm research-reset" title="Start over" disabled="@(ChatDisabled || _running || PendingChangeCount > 0)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
     <ExtraControls>
+        @if (ChatDisabled)
+        {
+            <div class="alert alert-warning py-2 small mb-2">
+                LLM chat is disabled. <a class="alert-link" href="/settings/providers">Configure and test a chat provider</a>.
+            </div>
+        }
         <div class="research-chat-controls">
             <div class="research-chat-controls-row">
                 <label class="research-chat-approval" title="Queue AI changes to existing graph data for review before applying them">
                     <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
-                           disabled="@_running" @onchange="OnApprovalChangedAsync" />
+                           disabled="@(ChatDisabled || _running)" @onchange="OnApprovalChangedAsync" />
                     <span>Review edits</span>
                 </label>
                 @if (PendingChangeCount > 0)
@@ -82,8 +90,12 @@
     private List<AiChangeBatch> _pendingBatches = [];
     private string _systemPrompt = string.Empty;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
+    private ChatProviderAvailability? _chatAvailability;
 
     private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
+    private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
+    private string ChatDisabledMessage => _chatAvailability?.Message
+        ?? "Configure and test a chat provider in Settings > Providers to enable LLM features.";
 
     protected override async Task OnParametersSetAsync()
     {
@@ -98,6 +110,7 @@
         try
         {
             _conversation = await Research.GetOrCreateAsync(ProjectId);
+            _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
             _messages = (await Research.LoadMessagesAsync(_conversation.Id)).ToList();
             _approvalEnabled = await Research.GetAiChangeApprovalEnabledAsync(ProjectId);
             _systemPrompt = await Research.GetSystemPromptAsync(ProjectId);
@@ -118,6 +131,11 @@
     {
         var text = _input.Trim();
         if (_running || string.IsNullOrWhiteSpace(text)) return;
+        if (ChatDisabled)
+        {
+            _error = ChatDisabledMessage;
+            return;
+        }
         if (PendingChangeCount > 0)
         {
             await OpenPendingChangesAsync();

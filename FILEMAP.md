@@ -68,7 +68,7 @@
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared shell for project workspace pages: loads project by slug, renders title + horizontal tab strip including Editor, Outline, Writing Sample, Publish, Research, Ingest, Graph, and Import / Export; exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Three-column context-aware chapter editor: project-wide editor chat left, full-height JS-debounced line-numbered editor center, and right-column Recommended Context/Context Feed. Persists/reindexes body edits, remembers the selected chapter per browser/project, locks while AI runs, and refreshes editor/context/recommendations after AI turns or approved changes. |
-| `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat domain adapter over shared `ChatSurface`: loads the project's `EditorConversation`, streams text/tool/contest updates, exposes Review edits plus Contest Mode controls, and opens review modals for queued AI changes or candidates. |
+| `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: loads the transcript, disables LLM controls when no working chat provider exists, streams text/tool/contest updates, and opens review modals. |
 | `ContestReviewModal.razor` (+ `.razor.css`) | Editor Contest Mode comparison modal: shows mutually-exclusive model candidates with chapter-body diffs, streams status/raw Candidate JSON from contest batches, and applies or stages the selected candidate. |
 | `ContextItemDetailModal.razor` (+ `.razor.css`) | Shared editor context detail modal for recommendation and Context Feed items; loads entities, chapters, acts, ingest sources/chunks, and supports Context Feed project-guidance/entity edits. |
 | `RecommendedContextPanel.razor` (+ `.razor.css`) | Editor right-column context recommender: shows semantic/manual/graph-proximity recommendations for entities plus structural references, and adds them to the active chapter's persisted context working set. |
@@ -88,14 +88,14 @@
 
 | File | Description |
 |------|-------------|
-| `IngestContent.razor` (+ `.razor.css`) | Functional Ingest tab workspace: creates text/file/manual-webpage ingest jobs with configured-model selection and optional instructions, batches same-domain webpage crawls into one job, shows crawl diagnostics, subscribes to live job updates, and supports stop/resume-with-model-change/restart/delete. |
+| `IngestContent.razor` (+ `.razor.css`) | Functional Ingest tab workspace: creates text/file/manual-webpage ingest jobs with working-model selection, disables LLM job controls without a tested provider, shows crawl diagnostics, and manages jobs. |
 
 ### Components/Pages/Projects/Research/
 
 | File | Description |
 |------|-------------|
 | `ResearchContent.razor` (+ `.razor.css`) | Research workspace: hides behind active search-provider readiness, hosts entity-first research chat plus a Research Activity sidebar for touched entities and accessed URLs with detail modals. |
-| `ResearchChatPanel.razor` (+ `.razor.css`) | Research chat domain adapter over shared `ChatSurface`; streams cache-first web/search and graph tool calls, persists the project research transcript, and exposes Review edits + pending-change modal integration. |
+| `ResearchChatPanel.razor` (+ `.razor.css`) | Research chat adapter over `ChatSurface`; keeps transcripts visible, disables LLM controls without a working provider, streams web/search and graph tool calls, and supports review. |
 
 ### Components/Pages/Projects/ImportExport/
 
@@ -107,7 +107,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Full Publish tab workspace for saved book metadata, outline selection, cover text layout editing, image assets/placements, generated images, exports, and Print/PDF preview. |
+| `PublishContent.razor` (+ `.razor.css`) | Full Publish tab workspace for metadata, outline selection, cover layout, assets/placements, exports, Print/PDF preview, and Codex-connected image generation. |
 | `CoverTextEditor.razor` (+ `.razor.css`, `.razor.js`) | Interactive cover text overlay editor: previews the selected cover asset, drags fixed title/subtitle/author layers, and exposes typography/placement controls. |
 
 ### Components/Pages/Projects/Outline/
@@ -120,7 +120,7 @@
 | `OutlineTree.razor` (+ `.razor.css`) | Hierarchical Acts → Chapters tree. Acts are collapsible, drag-reorderable groups with inline-editable title/synopsis and `+ Chapter` / Delete (chapters fall back to Unassigned via `OnDelete.SetNull`). Act/chapter synopsis textareas autosize to their content via `wwwroot/js/autosizeTextareas.js`. Chapters are inline-editable rows with a beats-toggle caret + count badge (renders `ChapterBeats` inline when expanded), stale/failed vector-index badge, drag-reorder within their act bucket, an act-picker `<select>` for cross-act moves, Open link, and delete-with-confirm. Re-fetches per-chapter beat counts via `IEntityService.CountChildrenAsync` whenever `RefreshSignal` bumps. |
 | `EntitiesPanel.razor` (+ `.razor.css`) | Registry-driven project-scoped entities side panel. Lists non-structural graph types from `IEntityTypeService`, supports `+ Type`, per-type `+ Add`, clickable entity rows, and a Bootstrap-style modal with editable name/properties plus read-only adjacent graph links via `IEntityService.ListLinksAsync`. Save computes property diffs and calls `UpdateAsync(propertiesToSet, propertiesToRemove)`; modal also exposes Delete-with-confirm. Re-reads on `RefreshSignal` bumps. |
 | `ChapterBeats.razor` (+ `.razor.css`) | Inline beats expander rendered inside each chapter row. Loads beats via `IEntityService.ListAsync(projectId, "Event", chapterId)` ordered by `Order`, supports inline-edit (name + autosizing summary textarea), drag-reorder (calls `ReorderAsync`), `+ Add beat` and delete-with-confirm. Re-reads on `RefreshSignal` bumps. |
-| `OutlineChatPanel.razor` (+ `.razor.css`) | Outline chat domain adapter over shared `ChatSurface`. Loads/creates the project's `OutlineConversation`, streams text/tool updates, exposes a persisted Review edits toggle, and opens `PendingAiChangesModal` for queued AI changes. |
+| `OutlineChatPanel.razor` (+ `.razor.css`) | Outline chat adapter over `ChatSurface`; keeps transcripts visible, disables LLM controls without a working provider, streams text/tool updates, and opens pending-change review. |
 | `PendingAiChangesModal.razor` (+ `.razor.css`) | Durable AI change review modal reused by Outline Chat and Editor Chat: groups queued tool changes by resource, shows dependency/cascade warnings, renders inline or side-by-side PR-style diffs with JSON fallback, and supports Keep/Reject per group or batch with a rejection note. |
 
 ### Components/Pages/Projects/WritingSample/
@@ -128,14 +128,14 @@
 | File | Description |
 |------|-------------|
 | `WritingSampleContent.razor` (+ `.razor.css`) | Top-level Writing Sample tab orchestrator. Three-pane CSS-grid layout (coach chat | sample editor | sample list), loads project-scoped samples, autosaves the active sample body through the shared editor JS bridge, supports title edits, and flushes pending edits before sample switches or coach sends. |
-| `WritingCoachPanel.razor` (+ `.razor.css`) | Writing Coach domain adapter over shared `ChatSurface`. Streams resettable project-level coaching text and read-only tool cards while exposing no mutation/review controls. |
+| `WritingCoachPanel.razor` (+ `.razor.css`) | Writing Coach adapter over `ChatSurface`; keeps transcripts visible, disables LLM controls without a working provider, and streams project-level coaching/read-only tool cards. |
 | `WritingSampleListPanel.razor` (+ `.razor.css`) | Right-side sample manager with clickable active rows, excerpts, updated timestamps, `New`, and delete-with-confirm. |
 
 ### Components/Pages/Settings/
 
 | File | Description |
 |------|-------------|
-| `Providers.razor` | LLM provider configuration UI: Codex OAuth connect, parent providers + child models, set default, inline edit, model test. |
+| `Providers.razor` | LLM provider configuration UI: Codex OAuth connect, parent providers + child models, chat readiness test status, working-only default selection, inline edit, and model test. |
 | `Embeddings.razor` | Embedding settings UI at `/settings/embeddings`: selects or unsets one active embedding model from existing provider connections, requires test-before-save, captures dimensions, and warns before re-embedding on model changes. |
 | `SearchProviders.razor` | Search provider configuration UI for Research Mode: add/edit/delete SerpApi or Brave providers, save API keys, test connectivity, and choose the single active provider. |
 
@@ -144,7 +144,7 @@
 | File | Description |
 |------|-------------|
 | `AuthType.cs` | Enum: None, ApiKey, OAuth. |
-| `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing via `CredentialSourceId`. |
+| `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing plus persisted chat-readiness test snapshots. |
 | `EmbeddingConfiguration.cs` | Singleton EF entity for the active embedding setup: top-level provider connection, embedding API kind, model id, dimensions, last-tested snapshot, and timestamps. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
 | `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; owns project settings and child navigation collections including conversations, contests, revision jobs, writing samples, import jobs, publish profiles/assets/selections/placements, and graph rows. |
@@ -193,7 +193,7 @@
 | `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, and publish profiles/assets/layouts. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish/cover-layout/revision-agent/embedding-config migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, Contest Mode cleanup, and web research cache metadata). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish/cover-layout/revision-agent/embedding-config/chat-readiness migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, Contest Mode cleanup, and web research cache metadata). |
 
 ### Persistence/Repositories/
 
@@ -245,7 +245,7 @@
 | `EmbeddingRebuildQueue.cs` | Singleton rebuild coordinator: queues full re-embed requests, versions pending work, and cancels/awaits active rebuilds before embedding config changes. |
 | `EmbeddingRebuildWorker.cs` | Hosted worker that drains rebuild requests one at a time, runs scoped rebuilds with coordinator cancellation, and avoids parallel project floods. |
 | `EmbeddingRebuildService.cs` | Bulk rebuild service: recreates sqlite-vec dimensions, marks indexes stale, reindexes chapter bodies, ingest source fragments, and context vectors with batch delay and retry backoff. |
-| `ILlmProviderService.cs` / `LlmProviderService.cs` | CRUD over providers + `GetEffectiveApiKeyAsync` that walks `CredentialSourceId` and resolves OAuth tokens. |
+| `ILlmProviderService.cs` / `LlmProviderService.cs` | CRUD over providers, credential resolution, persisted chat-test readiness, working-default selection, and Codex connection checks. |
 | `CodexProvider.cs` | Shared Codex provider name/endpoints/defaults plus OAuth JWT account-id parsing for Codex chat, images, and embeddings. |
 | `ICodexAuthService.cs` / `CodexAuthService.cs` | OpenAI Codex PKCE OAuth flow (start, handle callback, refresh, revoke). Uses in-process pending state map. |
 | `ReasoningContent.cs` | `AIContent` subclass for Codex reasoning summary streaming. |

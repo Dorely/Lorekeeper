@@ -62,8 +62,11 @@ public sealed class EditorRevisionAgentProcessor(
             if (chapter.ProjectId != job.ProjectId)
                 throw new InvalidOperationException($"Chapter {session.ChapterId} does not belong to project {job.ProjectId}.");
 
-            var provider = await providerService.GetDefaultAsync(cancellationToken)
-                ?? throw new InvalidOperationException("No default LLM provider configured.");
+            var providerAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
+            var provider = providerAvailability.Provider;
+            if (!providerAvailability.IsAvailable || provider is null)
+                throw new InvalidOperationException(providerAvailability.Message);
+
             var chat = await chatClientFactory.CreateChatClientAsync(provider.Id, cancellationToken);
 
             session.Status = EditorRevisionSessionStatus.Running;

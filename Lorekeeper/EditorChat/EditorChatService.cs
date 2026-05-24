@@ -133,6 +133,13 @@ public sealed class EditorChatService(
         }
         await contestService.DiscardInactiveContestBatchesAsync(projectId, cancellationToken);
 
+        var providerAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
+        if (!providerAvailability.IsAvailable || providerAvailability.Provider is null)
+        {
+            yield return new EditorChatTurnError(providerAvailability.Message, Cancelled: false);
+            yield break;
+        }
+
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
         var userMessage = new EditorMessage
         {
@@ -172,9 +179,7 @@ public sealed class EditorChatService(
                 ? AssistantWorkflowInstructions.EditorContestPreparation
                 : AssistantWorkflowInstructions.EditorChatFor(vectorSearchAvailable));
 
-            var defaultProvider = await providerService.GetDefaultAsync(cancellationToken)
-                ?? throw new InvalidOperationException("No default LLM provider configured.");
-            chat = await chatClientFactory.CreateChatClientAsync(defaultProvider.Id, cancellationToken);
+            chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
 
             OutlineToolStagingContext? outlineStaging = null;
             EditorChatChangeStagingContext? editorStaging = null;

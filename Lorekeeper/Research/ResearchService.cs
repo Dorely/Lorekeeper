@@ -200,6 +200,34 @@ public sealed class ResearchService(
             throw new ArgumentException("Message cannot be empty.", nameof(userText));
 
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
+        Project project;
+        ChatProviderAvailability providerAvailability;
+        string? preflightError = null;
+        try
+        {
+            project = await projects.GetByIdAsync(projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} not found.");
+            if (!await searchProviders.HasActiveProviderAsync(cancellationToken))
+                throw new InvalidOperationException("No active search provider is configured.");
+            providerAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
+            if (!providerAvailability.IsAvailable || providerAvailability.Provider is null)
+                throw new InvalidOperationException(providerAvailability.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Research turn setup failed for project {ProjectId}", projectId);
+            preflightError = ex.Message;
+            project = null!;
+            providerAvailability = null!;
+        }
+
+        if (preflightError is not null)
+        {
+            yield return new ResearchTurnError(preflightError, Cancelled: false);
+            yield break;
+        }
+        var chatProvider = providerAvailability.Provider!;
+
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
         await conversations.AddMessageAsync(new ResearchMessage
         {
@@ -219,13 +247,7 @@ public sealed class ResearchService(
         string? setupError = null;
         try
         {
-            var project = await projects.GetByIdAsync(projectId, cancellationToken)
-                ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            if (!await searchProviders.HasActiveProviderAsync(cancellationToken))
-                throw new InvalidOperationException("No active search provider is configured.");
-            var defaultProvider = await providerService.GetDefaultAsync(cancellationToken)
-                ?? throw new InvalidOperationException("No default LLM provider configured.");
-            chat = await chatClientFactory.CreateChatClientAsync(defaultProvider.Id, cancellationToken);
+            chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
             systemPrompt = await BuildSystemPromptAsync(project, cancellationToken);
             if (project.AiChangeApprovalEnabled)
                 staging = outlineTools.CreateStagingContext(

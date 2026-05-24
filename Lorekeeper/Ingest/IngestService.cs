@@ -176,6 +176,10 @@ public sealed class IngestService(
             job.ProviderId = provider?.Id;
             job.ModelName = provider?.ModelId;
         }
+        else
+        {
+            await EnsureProviderAvailableForQueuedJobAsync(job.ProviderId, cancellationToken);
+        }
 
         foreach (var jobChunk in job.Chunks.Where(chunk => chunk.Status is IngestJobChunkStatus.Running or IngestJobChunkStatus.Stopped or IngestJobChunkStatus.Failed))
         {
@@ -200,6 +204,8 @@ public sealed class IngestService(
     {
         var job = await ingest.GetJobDetailAsync(jobId, cancellationToken)
             ?? throw new InvalidOperationException($"Ingest job {jobId} not found.");
+
+        await EnsureProviderAvailableForQueuedJobAsync(job.ProviderId, cancellationToken);
 
         queue.RequestCancellation(job.Id);
 
@@ -714,14 +720,33 @@ public sealed class IngestService(
     {
         if (providerId is int id)
         {
-            return await providers.GetByIdAsync(id, cancellationToken)
+            var provider = await providers.GetByIdAsync(id, cancellationToken)
                 ?? throw new InvalidOperationException($"LLM provider {id} was not found.");
+            if (!await providers.IsChatProviderWorkingAsync(id, cancellationToken))
+                throw new InvalidOperationException("Run Test successfully before using this provider for ingest.");
+
+            return provider;
         }
 
-        var provider = await providers.GetDefaultAsync(cancellationToken);
-        return provider is null && requireProvider
-            ? throw new InvalidOperationException("No LLM providers are configured.")
-            : provider;
+        var availability = await providers.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
+        if (availability.IsAvailable && availability.Provider is not null)
+            return availability.Provider;
+
+        return requireProvider
+            ? throw new InvalidOperationException(availability.Message)
+            : null;
+    }
+
+    private async Task EnsureProviderAvailableForQueuedJobAsync(int? providerId, CancellationToken cancellationToken)
+    {
+        if (providerId is int id && await providers.IsChatProviderWorkingAsync(id, cancellationToken))
+            return;
+
+        var availability = await providers.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
+        if (availability.IsAvailable && availability.Provider is not null)
+            return;
+
+        throw new InvalidOperationException(availability.Message);
     }
 
     private void Notify(Guid projectId, Guid jobId, IngestJobUpdateKind kind) =>

@@ -44,13 +44,10 @@ public sealed class CodexImageGenerationService(
     private async Task<LlmProvider> ResolveCodexProviderAsync(CancellationToken cancellationToken)
     {
         var provider = await providers.GetByNameAsync(CodexProvider.Name, cancellationToken);
-        if (provider is not null)
+        if (provider is not null && CodexProvider.IsCodex(provider))
             return provider;
 
-        provider = (await providers.GetAllAsync(cancellationToken))
-            .FirstOrDefault(candidate => candidate.AuthType == AuthType.OAuth);
-        return provider
-            ?? throw new InvalidOperationException("No OpenAI Codex OAuth provider is configured. Connect OpenAI Codex in Settings first.");
+        throw new InvalidOperationException("No OpenAI Codex OAuth provider is configured. Connect OpenAI Codex in Settings first.");
     }
 
     private async Task<CodexGeneratedImage> GenerateWithModelAsync(

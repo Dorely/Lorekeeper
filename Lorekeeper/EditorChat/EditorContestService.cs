@@ -59,8 +59,13 @@ public sealed class EditorContestService(
         if (slot is < 1 or > 3)
             throw new ArgumentOutOfRangeException(nameof(slot), "Contest provider slot must be 1, 2, or 3.");
 
-        if (providerId is { } id && await providerService.GetByIdAsync(id, cancellationToken) is null)
-            throw new InvalidOperationException($"Provider {id} not found.");
+        if (providerId is { } id)
+        {
+            if (await providerService.GetByIdAsync(id, cancellationToken) is null)
+                throw new InvalidOperationException($"Provider {id} not found.");
+            if (!await providerService.IsChatProviderWorkingAsync(id, cancellationToken))
+                throw new InvalidOperationException("Run Test successfully before using this provider for Contest Mode.");
+        }
 
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
@@ -362,6 +367,9 @@ public sealed class EditorContestService(
         {
             var provider = await providerService.GetByIdAsync(id, cancellationToken);
             if (provider is null) continue;
+            if (!await providerService.IsChatProviderWorkingAsync(id, cancellationToken))
+                throw new InvalidOperationException($"Run Test successfully before using {provider.DisplayName ?? provider.Name} for Contest Mode.");
+
             result.Add(new ContestCandidateProvider(id, provider.DisplayName ?? provider.Name, provider.ModelId));
         }
 

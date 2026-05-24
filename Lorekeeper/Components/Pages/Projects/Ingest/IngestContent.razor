@@ -17,6 +17,12 @@ else
     <div class="ingest-pane">
         <section class="ingest-column ingest-create">
             <div class="ingest-section-title">New Source</div>
+            @if (ChatDisabled)
+            {
+                <div class="alert alert-warning py-2 small">
+                    LLM ingest is disabled. <a class="alert-link" href="/settings/providers">Configure and test a chat provider</a>.
+                </div>
+            }
             <div class="mb-2">
                 <label class="form-label small text-muted">Title</label>
                 <input class="form-control form-control-sm" @bind="_title" @bind:event="oninput" />
@@ -114,7 +120,7 @@ else
             }
             @if (_providers.Count == 0)
             {
-                <div class="alert alert-warning py-2 small">No configured models.</div>
+                <div class="alert alert-warning py-2 small">No working chat models.</div>
             }
             <button type="button" class="btn btn-primary btn-sm" disabled="@(!CanCreate || _creating)" @onclick="CreateAsync">
                 @StartIngestButtonText
@@ -176,8 +182,8 @@ else
                             </select>
                         }
                         <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(!CanStop(_selectedJob))" @onclick="StopAsync">Stop</button>
-                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!CanResume(_selectedJob) || _resumeProviderId is null)" @onclick="ResumeAsync">Resume</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@IsBusy(_selectedJob)" @onclick="RestartAsync">Restart</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(ChatDisabled || !CanResume(_selectedJob) || _resumeProviderId is null)" @onclick="ResumeAsync">Resume</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(ChatDisabled || IsBusy(_selectedJob))" @onclick="RestartAsync">Restart</button>
                         <button type="button" class="btn btn-sm btn-outline-danger" disabled="@IsBusy(_selectedJob)" @onclick="DeleteAsync">Delete</button>
                     </div>
                 </div>
@@ -363,6 +369,7 @@ else
     private List<IngestReportItemView> _reportItems = [];
     private IngestSourceChunkExcerpt? _sourceExcerpt;
     private List<LlmProvider> _providers = [];
+    private ChatProviderAvailability? _chatAvailability;
     private Guid? _selectedChunkId;
     private Guid? _loadedProjectId;
     private bool _loadingJobs;
@@ -405,6 +412,9 @@ else
     private string _editEvidence = string.Empty;
 
     private bool CanCreate => CreateBlockedReason is null;
+    private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
+    private string ChatDisabledMessage => _chatAvailability?.Message
+        ?? "Configure and test a chat provider in Settings > Providers to enable LLM features.";
 
     private string StartIngestButtonText =>
         _readingFile ? "Reading file..." : _creating ? "Starting..." : "Start ingest";
@@ -417,7 +427,8 @@ else
         get
         {
             if (_readingFile) return "Reading the selected source file.";
-            if (_providerId is null) return _providers.Count == 0 ? "Configure a model before starting ingest." : "Select a model.";
+            if (ChatDisabled) return ChatDisabledMessage;
+            if (_providerId is null) return _providers.Count == 0 ? "Configure and test a model before starting ingest." : "Select a model.";
             if (string.IsNullOrWhiteSpace(_title)) return "Add a source title.";
             if (string.IsNullOrWhiteSpace(_sourceText)) return "Add source text or choose a source file.";
             return null;
@@ -431,7 +442,8 @@ else
         get
         {
             if (_webReading) return "Reading webpage.";
-            if (_providerId is null) return _providers.Count == 0 ? "Configure a model before starting ingest." : "Select a model.";
+            if (ChatDisabled) return ChatDisabledMessage;
+            if (_providerId is null) return _providers.Count == 0 ? "Configure and test a model before starting ingest." : "Select a model.";
             if (string.IsNullOrWhiteSpace(_webUrl)) return "Add a webpage URL.";
             if (!TryNormalizeWebUrl(_webUrl, out _, out _)) return "Enter a valid http or https URL.";
             return null;
@@ -454,7 +466,8 @@ else
 
     private async Task LoadProvidersAsync()
     {
-        _providers = (await Providers.GetAllAsync()).ToList();
+        _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
+        _providers = (await Providers.ListWorkingChatProvidersAsync()).ToList();
         var defaultProvider = _providers.FirstOrDefault(provider => provider.IsDefault) ?? _providers.FirstOrDefault();
         _providerId = defaultProvider?.Id;
         _resumeProviderId = defaultProvider?.Id;

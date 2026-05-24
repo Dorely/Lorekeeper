@@ -339,6 +339,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
         {
             entity.HasIndex(e => e.Name).IsUnique();
             entity.Property(e => e.AuthType).HasConversion<string>();
+            entity.Property(e => e.LastChatTestAuthType).HasConversion<string>();
 
             entity.HasOne(e => e.CredentialSource)
                 .WithMany(e => e.ChildModels)

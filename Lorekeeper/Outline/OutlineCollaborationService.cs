@@ -196,6 +196,13 @@ they commit to a direction, act on it without a second confirmation.
             yield break;
         }
 
+        var providerAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
+        if (!providerAvailability.IsAvailable || providerAvailability.Provider is null)
+        {
+            yield return new TurnError(providerAvailability.Message, Cancelled: false);
+            yield break;
+        }
+
         // Persist the user message immediately so it appears in history even if the LLM call fails.
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
         var userMsg = new OutlineMessage
@@ -219,9 +226,7 @@ they commit to a direction, act on it without a second confirmation.
         {
             var project = await projects.GetByIdAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            var defaultProvider = await providerService.GetDefaultAsync(cancellationToken)
-                ?? throw new InvalidOperationException("No default LLM provider configured.");
-            chat = await chatClientFactory.CreateChatClientAsync(defaultProvider.Id, cancellationToken);
+            chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
 
             if (project.AiChangeApprovalEnabled)
                 staging = tools.CreateStagingContext(projectId, conversation.Id, onDirectMutationApplied: OnToolMutated);

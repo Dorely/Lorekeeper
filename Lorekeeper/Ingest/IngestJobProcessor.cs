@@ -305,17 +305,28 @@ public sealed class IngestJobProcessor(
         if (job.ProviderId is int providerId)
         {
             var provider = await providerService.GetByIdAsync(providerId, cancellationToken);
-            if (provider is not null) return provider;
+            if (provider is not null && await providerService.IsChatProviderWorkingAsync(provider.Id, cancellationToken))
+                return provider;
 
-            var fallback = await providerService.GetDefaultAsync(cancellationToken)
-                ?? throw new InvalidOperationException($"LLM provider {providerId} was not found, and no default LLM provider is configured.");
+            var availability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
+            var fallback = availability.Provider;
+            if (!availability.IsAvailable || fallback is null)
+            {
+                var reason = provider is null
+                    ? $"LLM provider {providerId} was not found"
+                    : $"LLM provider {providerId} is not ready";
+                throw new InvalidOperationException($"{reason}, and no working default LLM provider is configured. {availability.Message}");
+            }
+
             await ingest.AddEventAsync(new IngestJobEvent
             {
                 JobId = job.Id,
                 Level = IngestJobEventLevel.Warning,
                 EventType = "provider.fallback",
-                Message = $"Configured provider {providerId} was not found; using {fallback.Name}.",
-                PayloadJson = JsonSerializer.Serialize(new { missingProviderId = providerId, fallbackProviderId = fallback.Id, fallback.ModelId }),
+                Message = provider is null
+                    ? $"Configured provider {providerId} was not found; using {fallback.Name}."
+                    : $"Configured provider {provider.Name} is not ready; using {fallback.Name}.",
+                PayloadJson = JsonSerializer.Serialize(new { providerId, fallbackProviderId = fallback.Id, fallback.ModelId }),
             }, cancellationToken);
             job.ProviderId = fallback.Id;
             job.ModelName = fallback.ModelId;
@@ -326,8 +337,11 @@ public sealed class IngestJobProcessor(
             return fallback;
         }
 
-        var defaultProvider = await providerService.GetDefaultAsync(cancellationToken)
-            ?? throw new InvalidOperationException("No default LLM provider configured.");
+        var defaultAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
+        var defaultProvider = defaultAvailability.Provider;
+        if (!defaultAvailability.IsAvailable || defaultProvider is null)
+            throw new InvalidOperationException(defaultAvailability.Message);
+
         job.ProviderId = defaultProvider.Id;
         job.ModelName = defaultProvider.ModelId;
         job.UpdatedAt = DateTime.UtcNow;

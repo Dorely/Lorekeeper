@@ -93,6 +93,13 @@ public sealed class WritingCoachService(
             throw new ArgumentException("Message cannot be empty.", nameof(userText));
 
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
+        var providerAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
+        if (!providerAvailability.IsAvailable || providerAvailability.Provider is null)
+        {
+            yield return new WritingCoachTurnError(providerAvailability.Message, Cancelled: false);
+            yield break;
+        }
+
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
 
         var userMessage = new WritingCoachMessage
@@ -114,9 +121,7 @@ public sealed class WritingCoachService(
         {
             var project = await projects.GetByIdAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            var defaultProvider = await providerService.GetDefaultAsync(cancellationToken)
-                ?? throw new InvalidOperationException("No default LLM provider configured.");
-            chat = await chatClientFactory.CreateChatClientAsync(defaultProvider.Id, cancellationToken);
+            chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
             aiTools = tools.Build(new WritingCoachContext(project.Id, currentSampleTitle, currentSampleBody));
         }
         catch (Exception ex)

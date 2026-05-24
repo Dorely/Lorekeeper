@@ -5,7 +5,7 @@ namespace Lorekeeper.Llm;
 
 public class LlmProviderService(
     ILlmProviderRepository providers,
-    IOAuthTokenRepository tokens) : ILlmProviderService
+    ICodexAuthService codexAuth) : ILlmProviderService
 {
     public Task<List<LlmProvider>> GetAllAsync(CancellationToken cancellationToken = default) =>
         providers.GetAllAsync(cancellationToken);
@@ -19,6 +19,64 @@ public class LlmProviderService(
     public Task<LlmProvider?> GetDefaultAsync(CancellationToken cancellationToken = default) =>
         providers.GetDefaultAsync(cancellationToken);
 
+    public async Task<ChatProviderAvailability> GetDefaultChatProviderAvailabilityAsync(CancellationToken cancellationToken = default)
+    {
+        var all = await providers.GetAllAsync(cancellationToken);
+        if (all.Count == 0)
+            return ChatProviderAvailability.Unavailable("Configure and test a chat provider in Settings > Providers to enable LLM features.");
+
+        var explicitDefault = all.FirstOrDefault(provider => provider.IsDefault);
+        if (explicitDefault is not null && await IsChatProviderWorkingAsync(explicitDefault, cancellationToken))
+            return ChatProviderAvailability.Available(explicitDefault);
+
+        foreach (var provider in all.Where(provider => !provider.IsDefault))
+        {
+            if (await IsChatProviderWorkingAsync(provider, cancellationToken))
+                return ChatProviderAvailability.Available(provider);
+        }
+
+        var candidate = explicitDefault ?? all.FirstOrDefault();
+        var reason = candidate is null
+            ? "Configure and test a chat provider in Settings > Providers to enable LLM features."
+            : await GetUnavailableReasonAsync(candidate, cancellationToken);
+        return ChatProviderAvailability.Unavailable(reason, candidate);
+    }
+
+    public async Task<List<LlmProvider>> ListWorkingChatProvidersAsync(CancellationToken cancellationToken = default)
+    {
+        var all = await providers.GetAllAsync(cancellationToken);
+        var working = new List<LlmProvider>();
+        foreach (var provider in all)
+        {
+            if (await IsChatProviderWorkingAsync(provider, cancellationToken))
+                working.Add(provider);
+        }
+
+        return working;
+    }
+
+    public async Task<bool> IsChatProviderWorkingAsync(int providerId, CancellationToken cancellationToken = default)
+    {
+        var provider = await providers.GetByIdAsync(providerId, cancellationToken);
+        return provider is not null && await IsChatProviderWorkingAsync(provider, cancellationToken);
+    }
+
+    public async Task<bool> IsCodexConnectedAsync(CancellationToken cancellationToken = default)
+    {
+        var provider = await providers.GetByNameAsync(CodexProvider.Name, cancellationToken);
+        if (provider is null || !CodexProvider.IsCodex(provider))
+            return false;
+
+        try
+        {
+            return !string.IsNullOrWhiteSpace(await codexAuth.GetValidTokenAsync(provider.Id, cancellationToken));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public async Task<LlmProvider> CreateAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
         provider.CreatedAt = DateTime.UtcNow;
@@ -30,6 +88,9 @@ public class LlmProviderService(
 
     public async Task<LlmProvider> UpdateAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
+        if (provider.LastChatTestSucceeded && !provider.HasCurrentChatTestSnapshot)
+            provider.ClearChatReadiness("Provider settings changed. Run Test successfully before using this provider for chat.");
+
         provider.UpdatedAt = DateTime.UtcNow;
         providers.Update(provider);
         await providers.SaveChangesAsync(cancellationToken);
@@ -46,8 +107,37 @@ public class LlmProviderService(
 
     public async Task SetDefaultAsync(int id, CancellationToken cancellationToken = default)
     {
+        if (!await IsChatProviderWorkingAsync(id, cancellationToken))
+            throw new InvalidOperationException("Run Test successfully before setting this provider as the default chat provider.");
+
         await providers.SetDefaultAsync(id, cancellationToken);
         await providers.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<LlmProvider> MarkChatTestSucceededAsync(LlmProvider provider, CancellationToken cancellationToken = default)
+    {
+        var target = await ResolvePersistedProviderForTestAsync(provider, cancellationToken);
+        target.MarkChatTestSucceeded(DateTime.UtcNow);
+        if (target.Id == 0)
+            return target;
+
+        target.UpdatedAt = DateTime.UtcNow;
+        providers.Update(target);
+        await providers.SaveChangesAsync(cancellationToken);
+        return target;
+    }
+
+    public async Task<LlmProvider> MarkChatTestFailedAsync(LlmProvider provider, string error, CancellationToken cancellationToken = default)
+    {
+        var target = await ResolvePersistedProviderForTestAsync(provider, cancellationToken);
+        target.MarkChatTestFailed(error, DateTime.UtcNow);
+        if (target.Id == 0)
+            return target;
+
+        target.UpdatedAt = DateTime.UtcNow;
+        providers.Update(target);
+        await providers.SaveChangesAsync(cancellationToken);
+        return target;
     }
 
     public async Task<string?> GetEffectiveApiKeyAsync(int providerId, CancellationToken cancellationToken = default)
@@ -66,11 +156,98 @@ public class LlmProviderService(
             return credentialProvider.ApiKey;
 
         if (credentialProvider.AuthType == AuthType.OAuth)
-        {
-            var token = await tokens.GetLatestValidForProviderAsync(credentialProviderId, cancellationToken);
-            return token?.AccessToken;
-        }
+            return await codexAuth.GetValidTokenAsync(credentialProviderId, cancellationToken);
 
         return null;
     }
+
+    private async Task<bool> IsChatProviderWorkingAsync(LlmProvider provider, CancellationToken cancellationToken)
+    {
+        if (!provider.HasCurrentChatTestSnapshot)
+            return false;
+
+        var credentials = await GetCredentialStatusAsync(provider, cancellationToken);
+        return credentials.Available;
+    }
+
+    private async Task<string> GetUnavailableReasonAsync(LlmProvider provider, CancellationToken cancellationToken)
+    {
+        if (!provider.LastChatTestSucceeded)
+        {
+            return string.IsNullOrWhiteSpace(provider.LastChatTestError)
+                ? "Run Test successfully in Settings > Providers to enable LLM features."
+                : $"The last provider test failed: {provider.LastChatTestError}";
+        }
+
+        if (!provider.HasCurrentChatTestSnapshot)
+            return "Provider settings changed. Run Test successfully in Settings > Providers to enable LLM features.";
+
+        var credentials = await GetCredentialStatusAsync(provider, cancellationToken);
+        return credentials.Available
+            ? string.Empty
+            : credentials.Message;
+    }
+
+    private async Task<CredentialStatus> GetCredentialStatusAsync(LlmProvider provider, CancellationToken cancellationToken)
+    {
+        var credentialProviderId = provider.EffectiveCredentialProviderId;
+        var credentialProvider = credentialProviderId == provider.Id
+            ? provider
+            : await providers.GetByIdAsync(credentialProviderId, cancellationToken);
+
+        if (credentialProvider is null)
+            return new CredentialStatus(false, "The credential source for this provider no longer exists.");
+
+        if (credentialProvider.AuthType == AuthType.None)
+            return new CredentialStatus(true, string.Empty);
+
+        if (credentialProvider.AuthType == AuthType.ApiKey)
+        {
+            return !string.IsNullOrWhiteSpace(credentialProvider.ApiKey)
+                ? new CredentialStatus(true, string.Empty)
+                : new CredentialStatus(false, "Add an API key and run Test successfully in Settings > Providers.");
+        }
+
+        if (credentialProvider.AuthType == AuthType.OAuth)
+        {
+            try
+            {
+                return !string.IsNullOrWhiteSpace(await codexAuth.GetValidTokenAsync(credentialProvider.Id, cancellationToken))
+                    ? new CredentialStatus(true, string.Empty)
+                    : new CredentialStatus(false, "Connect OpenAI Codex and run Test successfully in Settings > Providers.");
+            }
+            catch (Exception ex)
+            {
+                return new CredentialStatus(false, $"Reconnect OpenAI Codex and run Test successfully in Settings > Providers. {ex.Message}");
+            }
+        }
+
+        return new CredentialStatus(false, "Provider credentials are not configured.");
+    }
+
+    private async Task<LlmProvider> ResolvePersistedProviderForTestAsync(LlmProvider provider, CancellationToken cancellationToken)
+    {
+        if (provider.Id == 0)
+            return provider;
+
+        var target = await providers.GetByIdAsync(provider.Id, cancellationToken)
+            ?? throw new InvalidOperationException($"Provider {provider.Id} not found.");
+
+        CopyEditableValues(provider, target);
+        return target;
+    }
+
+    private static void CopyEditableValues(LlmProvider source, LlmProvider target)
+    {
+        target.Name = source.Name;
+        target.DisplayName = source.DisplayName;
+        target.EndpointUrl = source.EndpointUrl;
+        target.ModelId = source.ModelId;
+        target.AuthType = source.AuthType;
+        target.ApiKey = source.ApiKey;
+        target.IsDefault = source.IsDefault;
+        target.CredentialSourceId = source.CredentialSourceId;
+    }
+
+    private sealed record CredentialStatus(bool Available, string Message);
 }
