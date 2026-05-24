@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
+using System.Runtime.ExceptionServices;
 using Lorekeeper.Chapters;
+using Lorekeeper.Context;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 
@@ -14,6 +16,7 @@ public sealed class AiChangeApprovalService(
     IActService acts,
     IChapterService chapters,
     IEntityService entities,
+    IVectorIndexWorkCoordinator indexWork,
     ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
 {
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
@@ -61,16 +64,25 @@ public sealed class AiChangeApprovalService(
         var batch = await changes.GetBatchAsync(batchId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change batch {batchId} not found.");
 
+        await using var indexDeferral = indexWork.BeginDeferral();
+        ExceptionDispatchInfo? capturedException = null;
         try
         {
             foreach (var pendingChange in batch.Changes.OrderBy(changeItem => changeItem.Order).Where(changeItem => changeItem.Status == AiChangeStatus.Pending))
                 await ApplyChangeCoreAsync(batch, pendingChange, cancellationToken);
         }
+        catch (Exception ex)
+        {
+            capturedException = ExceptionDispatchInfo.Capture(ex);
+        }
         finally
         {
             UpdateBatchStatus(batch);
             await changes.SaveChangesAsync(CancellationToken.None);
+            await indexDeferral.FlushAsync(CancellationToken.None);
         }
+
+        capturedException?.Throw();
     }
 
     public async Task ApplyChangeAsync(Guid changeId, CancellationToken cancellationToken = default)
@@ -78,15 +90,70 @@ public sealed class AiChangeApprovalService(
         var change = await changes.GetChangeAsync(changeId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change {changeId} not found.");
 
+        await using var indexDeferral = indexWork.BeginDeferral();
+        ExceptionDispatchInfo? capturedException = null;
         try
         {
             await ApplyChangeCoreAsync(change.Batch, change, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            capturedException = ExceptionDispatchInfo.Capture(ex);
         }
         finally
         {
             UpdateBatchStatus(change.Batch);
             await changes.SaveChangesAsync(CancellationToken.None);
+            await indexDeferral.FlushAsync(CancellationToken.None);
         }
+
+        capturedException?.Throw();
+    }
+
+    public async Task ApplyChangesAsync(IReadOnlyCollection<Guid> changeIds, CancellationToken cancellationToken = default)
+    {
+        if (changeIds.Count == 0) return;
+
+        var selectedChanges = new List<AiChange>();
+        foreach (var changeId in changeIds.Distinct())
+        {
+            var change = await changes.GetChangeAsync(changeId, cancellationToken)
+                ?? throw new InvalidOperationException($"AI change {changeId} not found.");
+            selectedChanges.Add(change);
+        }
+
+        if (selectedChanges.Count == 0) return;
+
+        var touchedBatches = selectedChanges
+            .Select(change => change.Batch)
+            .GroupBy(batch => batch.Id)
+            .Select(group => group.First())
+            .ToList();
+
+        await using var indexDeferral = indexWork.BeginDeferral();
+        ExceptionDispatchInfo? capturedException = null;
+        try
+        {
+            foreach (var change in selectedChanges
+                .OrderBy(change => change.Batch.CreatedAt)
+                .ThenBy(change => change.Order))
+            {
+                await ApplyChangeCoreAsync(change.Batch, change, cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            capturedException = ExceptionDispatchInfo.Capture(ex);
+        }
+        finally
+        {
+            foreach (var batch in touchedBatches)
+                UpdateBatchStatus(batch);
+            await changes.SaveChangesAsync(CancellationToken.None);
+            await indexDeferral.FlushAsync(CancellationToken.None);
+        }
+
+        capturedException?.Throw();
     }
 
     public async Task RejectBatchAsync(Guid batchId, string? message, CancellationToken cancellationToken = default)

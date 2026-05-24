@@ -17,64 +17,80 @@ public sealed class ContextIndexingService(
     IActRepository acts,
     IChapterRepository chapters,
     IIngestRepository ingest,
+    IVectorIndexWorkCoordinator indexWork,
     ILogger<ContextIndexingService> logger) : IContextIndexingService
 {
     private const int MaxEntityObservations = 12;
     private const int MaxEntityLinks = 30;
     private const int MaxSourceChunkExcerptChars = 6_000;
 
-    public async Task ReindexEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var node = await nodes.FindByKeyAsync(projectId, entityId.ToString("N"), cancellationToken);
-            if (node is null || !IsContextEntityNode(node))
+    public Task ReindexEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default) =>
+        indexWork.QueueOrRunAsync(
+            VectorIndexWorkKind.ContextEntity,
+            $"{projectId:N}:{entityId:N}",
+            async ct =>
             {
-                await DeleteEntityAsync(projectId, entityId, cancellationToken);
-                return;
-            }
+                try
+                {
+                    var node = await nodes.FindByKeyAsync(projectId, entityId.ToString("N"), ct);
+                    if (node is null || !IsContextEntityNode(node))
+                    {
+                        await DeleteEntityAsync(projectId, entityId, ct);
+                        return;
+                    }
 
-            await ReindexEntityNodeAsync(node, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Failed to reindex context entity {EntityId}", entityId);
-        }
-    }
+                    await ReindexEntityNodeAsync(node, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "Failed to reindex context entity {EntityId}", entityId);
+                }
+            },
+            cancellationToken);
 
     public Task DeleteEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default) =>
         DeleteBySourceAsync(projectId, ContextVectorSourceTypes.Entity, entityId, cancellationToken);
 
-    public async Task ReindexChapterAsync(Guid chapterId, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var chapter = await chapters.GetByIdAsync(chapterId, cancellationToken);
-            if (chapter is not null)
-                await ReindexChapterCoreAsync(chapter, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Failed to reindex context chapter {ChapterId}", chapterId);
-        }
-    }
+    public Task ReindexChapterAsync(Guid chapterId, CancellationToken cancellationToken = default) =>
+        indexWork.QueueOrRunAsync(
+            VectorIndexWorkKind.ContextChapter,
+            chapterId.ToString("N"),
+            async ct =>
+            {
+                try
+                {
+                    var chapter = await chapters.GetByIdAsync(chapterId, ct);
+                    if (chapter is not null)
+                        await ReindexChapterCoreAsync(chapter, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "Failed to reindex context chapter {ChapterId}", chapterId);
+                }
+            },
+            cancellationToken);
 
     public Task DeleteChapterAsync(Guid projectId, Guid chapterId, CancellationToken cancellationToken = default) =>
         DeleteBySourceAsync(projectId, ContextVectorSourceTypes.Chapter, chapterId, cancellationToken);
 
-    public async Task ReindexActAsync(Guid actId, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var act = await acts.GetByIdAsync(actId, cancellationToken);
-            if (act is not null)
-                await ReindexActCoreAsync(act, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Failed to reindex context act {ActId}", actId);
-        }
-    }
+    public Task ReindexActAsync(Guid actId, CancellationToken cancellationToken = default) =>
+        indexWork.QueueOrRunAsync(
+            VectorIndexWorkKind.ContextAct,
+            actId.ToString("N"),
+            async ct =>
+            {
+                try
+                {
+                    var act = await acts.GetByIdAsync(actId, ct);
+                    if (act is not null)
+                        await ReindexActCoreAsync(act, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "Failed to reindex context act {ActId}", actId);
+                }
+            },
+            cancellationToken);
 
     public Task DeleteActAsync(Guid projectId, Guid actId, CancellationToken cancellationToken = default) =>
         DeleteBySourceAsync(projectId, ContextVectorSourceTypes.Act, actId, cancellationToken);

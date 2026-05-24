@@ -373,6 +373,16 @@
                 </main>
             </div>
         }
+
+        @if (_applying)
+        {
+            <div class="pending-ai-applying-overlay" role="status" aria-live="polite" aria-label="Applying changes">
+                <div class="pending-ai-applying-card">
+                    <div class="spinner-border spinner-border-sm" aria-hidden="true"></div>
+                    <span>Applying changes...</span>
+                </div>
+            </div>
+        }
     </section>
 }
 
@@ -387,6 +397,7 @@
     private string _rejectionMessage = string.Empty;
     private string? _error;
     private bool _busy;
+    private bool _applying;
     private DiffViewMode _diffViewMode = DiffViewMode.Inline;
     private ElementReference _modalEl;
     private IJSObjectReference? _autoSizer;
@@ -535,7 +546,7 @@
     {
         var batchId = SelectedGroup?.PrimaryBatch.Id;
         if (batchId is null) return;
-        await RunAsync(() => ChangeApproval.ApplyBatchAsync(batchId.Value));
+        await RunAsync(() => ChangeApproval.ApplyBatchAsync(batchId.Value), applying: true);
     }
 
     private async Task RejectSelectedBatchAsync()
@@ -551,9 +562,12 @@
             var group = Grouped.FirstOrDefault(candidate => candidate.Key == groupKey);
             if (group is null) return;
 
-            foreach (var change in group.Changes.Where(change => change.Status == AiChangeStatus.Pending))
-                await ChangeApproval.ApplyChangeAsync(change.Id);
-        });
+            var changeIds = group.Changes
+                .Where(change => change.Status == AiChangeStatus.Pending)
+                .Select(change => change.Id)
+                .ToArray();
+            await ChangeApproval.ApplyChangesAsync(changeIds);
+        }, applying: true);
 
     private async Task RejectGroupAsync(string groupKey) =>
         await RunAsync(async () =>
@@ -565,12 +579,19 @@
                 await ChangeApproval.RejectChangeAsync(change.Id, _rejectionMessage);
         });
 
-    private async Task RunAsync(Func<Task> action)
+    private async Task RunAsync(Func<Task> action, bool applying = false)
     {
         _busy = true;
+        _applying = applying;
         _error = null;
         try
         {
+            if (applying)
+            {
+                StateHasChanged();
+                await Task.Yield();
+            }
+
             await action();
             _rejectionMessage = string.Empty;
             if (OnChanged.HasDelegate)
@@ -583,6 +604,7 @@
         finally
         {
             _busy = false;
+            _applying = false;
             if (IsOpen)
                 QueueAutosizeRefresh();
         }

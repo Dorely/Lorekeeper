@@ -140,6 +140,7 @@ builder.Services.AddScoped<IPublishService, PublishService>();
 builder.Services.AddScoped<ContextBuilder>();
 builder.Services.AddScoped<IContextBuilder>(sp => sp.GetRequiredService<ContextBuilder>());
 builder.Services.AddScoped<IEditorContextService>(sp => sp.GetRequiredService<ContextBuilder>());
+builder.Services.AddScoped<IVectorIndexWorkCoordinator, VectorIndexWorkCoordinator>();
 builder.Services.AddScoped<IContextIndexingService, ContextIndexingService>();
 builder.Services.AddScoped<IContextRecommendationService, ContextRecommendationService>();
 builder.Services.AddScoped<IEntityRelationContextService, EntityRelationContextService>();

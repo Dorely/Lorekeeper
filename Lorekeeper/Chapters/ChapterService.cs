@@ -15,6 +15,7 @@ public class ChapterService(
     ITextChunker chunker,
     IOutlineGraphSync outlineGraphSync,
     IContextIndexingService contextIndexing,
+    IVectorIndexWorkCoordinator indexWork,
     ILogger<ChapterService> logger) : IChapterService
 {
     public async Task<IReadOnlyList<Chapter>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
@@ -134,7 +135,11 @@ public class ChapterService(
     {
         try
         {
-            await ReindexAsync(chapterId, cancellationToken);
+            await indexWork.QueueOrRunAsync(
+                VectorIndexWorkKind.ChapterBody,
+                chapterId.ToString("N"),
+                ct => ReindexAsync(chapterId, ct),
+                cancellationToken);
         }
         catch (OperationCanceledException)
         {

@@ -9,6 +9,7 @@ public interface IAiChangeApprovalService
     Task SaveReviewDraftAsync(Guid changeId, string? draftAfterJson, string? reviewStateJson, CancellationToken cancellationToken = default);
     Task ClearReviewDraftAsync(Guid changeId, CancellationToken cancellationToken = default);
     Task ApplyChangeAsync(Guid changeId, CancellationToken cancellationToken = default);
+    Task ApplyChangesAsync(IReadOnlyCollection<Guid> changeIds, CancellationToken cancellationToken = default);
     Task RejectChangeAsync(Guid changeId, string? message, CancellationToken cancellationToken = default);
     Task ApplyBatchAsync(Guid batchId, CancellationToken cancellationToken = default);
     Task RejectBatchAsync(Guid batchId, string? message, CancellationToken cancellationToken = default);
