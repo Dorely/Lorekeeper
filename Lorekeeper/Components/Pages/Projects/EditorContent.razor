@@ -407,6 +407,12 @@ else
                                                 @onclick="KeepAllActiveChapterChangesAsync">
                                             Keep all chapter changes
                                         </button>
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-danger"
+                                                disabled="@_reviewBusy"
+                                                @onclick="RejectAllActiveChapterChangesAsync">
+                                            Reject all chapter changes
+                                        </button>
                                     </div>
                                 </div>
 
@@ -1415,6 +1421,18 @@ else
 
         var changeIds = _reviewProjection.PendingChangeIds.ToArray();
         await RunReviewActionAsync(() => ChangeApproval.ApplyChangesAsync(changeIds), clearExpandedBlocks: true);
+    }
+
+    private async Task RejectAllActiveChapterChangesAsync()
+    {
+        if (_reviewProjection is null || _reviewProjection.PendingChangeIds.Count == 0) return;
+
+        var changeIds = _reviewProjection.PendingChangeIds.ToArray();
+        await RunReviewActionAsync(async () =>
+        {
+            foreach (var changeId in changeIds)
+                await ChangeApproval.RejectChangeAsync(changeId, message: null);
+        }, clearExpandedBlocks: true);
     }
 
     private async Task KeepContestCandidateAsync(Guid candidateId) =>
