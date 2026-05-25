@@ -47,6 +47,13 @@ dotnet run --project Lorekeeper
 dotnet watch --project Lorekeeper
 ```
 
+## UI Verification
+- For UI, layout, or interaction changes, verify with the Codex Playwright MCP server when browser inspection is relevant.
+- Start Lorekeeper with `dotnet run --project Lorekeeper --no-launch-profile --urls http://127.0.0.1:1455`.
+- Use a disposable SQLite database copy by overriding `ConnectionStrings__DefaultConnection`; do not point UI verification at the live dev database unless explicitly requested.
+- Use Playwright MCP to navigate the running app, inspect accessibility snapshots, capture screenshots, and check desktop and mobile viewports.
+- Always terminate the app after verification; do not leave local server processes running.
+
 ## Conventions
 - Use dependency injection for all services
 - Configuration via `appsettings.json` and environment variables
