@@ -452,8 +452,6 @@ else
     private EditorMode _mode = EditorMode.Edit;
     private bool _chatPaneCollapsed;
     private bool _rightPaneCollapsed;
-    private bool _editModeChatPaneCollapsed;
-    private bool _editModeRightPaneCollapsed;
 
     private ElementReference _bodyTextarea;
     private ElementReference _gutterRef;
@@ -795,6 +793,11 @@ else
     private string EditorGridClass()
     {
         var classes = "editor-grid";
+        if (_mode is EditorMode.Read or EditorMode.Review)
+        {
+            classes += " editor-grid--focus";
+        }
+
         if (_chatPaneCollapsed)
         {
             classes += " editor-grid--chat-collapsed";
@@ -848,25 +851,8 @@ else
             _saveGate.Release();
         }
 
-        if (_mode == EditorMode.Edit)
-        {
-            _editModeChatPaneCollapsed = _chatPaneCollapsed;
-            _editModeRightPaneCollapsed = _rightPaneCollapsed;
-        }
-
         _mode = mode;
-        if (_mode == EditorMode.Edit)
-        {
-            _chatPaneCollapsed = _editModeChatPaneCollapsed;
-            _rightPaneCollapsed = _editModeRightPaneCollapsed;
-            await InvokeEditorVoidAsync("setReadOnly", _chapterLocked);
-        }
-        else
-        {
-            _chatPaneCollapsed = true;
-            _rightPaneCollapsed = true;
-            await InvokeEditorVoidAsync("setReadOnly", _mode == EditorMode.Review || _chapterLocked);
-        }
+        await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
 
         if (_mode == EditorMode.Review)
         {
@@ -879,19 +865,11 @@ else
     private void ToggleChatPane()
     {
         _chatPaneCollapsed = !_chatPaneCollapsed;
-        if (_mode == EditorMode.Edit)
-        {
-            _editModeChatPaneCollapsed = _chatPaneCollapsed;
-        }
     }
 
     private void ToggleRightPane()
     {
         _rightPaneCollapsed = !_rightPaneCollapsed;
-        if (_mode == EditorMode.Edit)
-        {
-            _editModeRightPaneCollapsed = _rightPaneCollapsed;
-        }
     }
 
     private string EditorSidePaneClass()
