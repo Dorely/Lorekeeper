@@ -29,6 +29,25 @@ export function clearLastEditorChapterId(projectId) {
     }
 }
 
+export function scrollReviewBlock(container, blockId, anchorLine) {
+    if (!container || !blockId) return;
+
+    const escapeCss = (value) => {
+        if (window.CSS && typeof window.CSS.escape === "function") {
+            return window.CSS.escape(value);
+        }
+
+        return String(value).replace(/["\\]/g, "\\$&");
+    };
+
+    const target =
+        container.querySelector(`[data-review-block="${escapeCss(blockId)}"]`) ??
+        container.querySelector(`[data-review-line="${anchorLine}"]`);
+    if (!target) return;
+
+    target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+}
+
 export function attach(elements, dotNetRef, debounceMs, initialValue) {
     const el = elements.textarea ?? elements; // back-compat
     const gutter = elements.gutter ?? null;

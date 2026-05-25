@@ -1,9 +1,11 @@
+@using System.Text.Json
 @using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.Chapters
 @using Lorekeeper.Context
 @using Lorekeeper.EditorChat
 @using Lorekeeper.Llm
 @using Lorekeeper.Models
+@using Lorekeeper.Outline
 @using Lorekeeper.Persistence.Repositories
 @using Lorekeeper.Tokens
 @implements IAsyncDisposable
@@ -101,9 +103,11 @@
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid? CurrentChapterId { get; set; }
     [Parameter] public int ContextRefreshSignal { get; set; }
+    [Parameter] public int ReviewRefreshSignal { get; set; }
     [Parameter] public EventCallback OnAiTurnStarting { get; set; }
     [Parameter] public EventCallback OnAiTurnCompleted { get; set; }
     [Parameter] public EventCallback OnAiChangesApplied { get; set; }
+    [Parameter] public EventCallback OnActiveChapterBodyChangesReady { get; set; }
 
     private int _forceScrollKey;
     private int _scrollKey;
@@ -125,6 +129,7 @@
     private Guid? _loadedProjectId;
     private Guid? _loadedChapterId;
     private int _loadedContextRefreshSignal;
+    private int _loadedReviewRefreshSignal;
     private List<AiChangeBatch> _pendingBatches = [];
     private List<ContestBatch> _contestBatches = [];
     private List<LlmProvider> _providers = [];
@@ -154,10 +159,14 @@
         if (ProjectId == Guid.Empty) return;
         if (_loadedProjectId == ProjectId)
         {
-            if (_loadedChapterId != CurrentChapterId || _loadedContextRefreshSignal != ContextRefreshSignal)
+            if (_loadedChapterId != CurrentChapterId
+                || _loadedContextRefreshSignal != ContextRefreshSignal
+                || _loadedReviewRefreshSignal != ReviewRefreshSignal)
             {
                 _loadedChapterId = CurrentChapterId;
                 _loadedContextRefreshSignal = ContextRefreshSignal;
+                _loadedReviewRefreshSignal = ReviewRefreshSignal;
+                await LoadPendingChangesAsync(openIfPending: false);
                 await RefreshSystemPromptAsync();
                 UpdateConversationTokenCount();
             }
@@ -167,6 +176,7 @@
         _loadedProjectId = ProjectId;
         _loadedChapterId = CurrentChapterId;
         _loadedContextRefreshSignal = ContextRefreshSignal;
+        _loadedReviewRefreshSignal = ReviewRefreshSignal;
         await LoadAsync();
     }
 
@@ -295,7 +305,7 @@
                         break;
 
                     case EditorChatToolCallCompleted completed:
-                        LiveTurn().CompleteToolCall(completed.CallId, completed.Result, completed.Error);
+                        LiveTurn().CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
                         UpdateConversationTokenCount();
                         RequestScroll();
                         StateHasChanged();
@@ -360,7 +370,7 @@
                         await TryRunPostToolUiRefreshAsync("assistant completion refresh", async () =>
                         {
                             await ReloadFromDbAsync();
-                            await LoadPendingChangesAsync(openIfPending: true);
+                            await LoadPendingChangesAsync(openIfPending: true, routeActiveChapterBodyToParent: true);
                             await LoadContestBatchesAsync(openIfAvailable: false);
                         });
                         RequestScroll();
@@ -485,13 +495,25 @@
         UpdateConversationTokenCount();
     }
 
-    private async Task LoadPendingChangesAsync(bool openIfPending)
+    private async Task LoadPendingChangesAsync(bool openIfPending, bool routeActiveChapterBodyToParent = false)
     {
         _pendingBatches = (await Chat.ListPendingChangesAsync(ProjectId)).ToList();
         if (openIfPending && PendingChangeCount > 0)
         {
-            _showContestReview = false;
-            _showPendingChanges = true;
+            var hasActiveChapterBodyChanges = HasActiveChapterBodyPendingChanges();
+            var hasOtherPendingChanges = HasOtherPendingChanges(hasActiveChapterBodyChanges);
+            if (routeActiveChapterBodyToParent && hasActiveChapterBodyChanges && OnActiveChapterBodyChangesReady.HasDelegate)
+                await OnActiveChapterBodyChangesReady.InvokeAsync();
+
+            if (!routeActiveChapterBodyToParent || hasOtherPendingChanges || !hasActiveChapterBodyChanges)
+            {
+                _showContestReview = false;
+                _showPendingChanges = true;
+            }
+            else
+            {
+                _showPendingChanges = false;
+            }
         }
         if (PendingChangeCount == 0)
             _showPendingChanges = false;
@@ -586,7 +608,7 @@
     private async Task HandleContestChangedAsync()
     {
         await LoadContestBatchesAsync(openIfAvailable: false);
-        await LoadPendingChangesAsync(openIfPending: true);
+        await LoadPendingChangesAsync(openIfPending: true, routeActiveChapterBodyToParent: true);
         _showContestReview = false;
         if (OnAiChangesApplied.HasDelegate)
             await OnAiChangesApplied.InvokeAsync();
@@ -634,6 +656,55 @@
 
     private bool IsWorkingProvider(int providerId) =>
         _providers.Any(provider => provider.Id == providerId);
+
+    private bool HasActiveChapterBodyPendingChanges() =>
+        CurrentChapterId is { } chapterId
+        && _pendingBatches
+            .SelectMany(batch => batch.Changes)
+            .Any(change => change.Status == AiChangeStatus.Pending && IsChapterBodyChangeFor(change, chapterId));
+
+    private bool HasOtherPendingChanges(bool hasActiveChapterBodyChanges)
+    {
+        if (!hasActiveChapterBodyChanges)
+            return PendingChangeCount > 0;
+        if (CurrentChapterId is not { } chapterId)
+            return PendingChangeCount > 0;
+
+        return _pendingBatches
+            .SelectMany(batch => batch.Changes)
+            .Any(change => change.Status == AiChangeStatus.Pending && !IsChapterBodyChangeFor(change, chapterId));
+    }
+
+    private static bool IsChapterBodyChangeFor(AiChange change, Guid chapterId)
+    {
+        if (!string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return ReadChapterBodyChange(change.BeforeJson)?.Id == chapterId
+            || ReadChapterBodyChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
+    }
+
+    private static ChapterBodyChange? ReadChapterBodyChange(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json == "null") return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<ChapterBodyChange>(json, ChangePayloadJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
 
     private void RebuildRenderable()
     {
@@ -750,6 +821,7 @@
         if (calls.All(call => call.TextOffset is not null))
         {
             var cursor = 0;
+            DateTime? previousToolCompletedAt = message.CreatedAt;
             foreach (var item in calls
                 .Select((call, index) => new { Call = call, Index = index })
                 .OrderBy(item => item.Call.TextOffset!.Value)
@@ -761,7 +833,7 @@
                     parts.Add(new ChatTextPart(message.Content[cursor..offset]));
                     cursor = offset;
                 }
-                parts.Add(new ChatToolPart(BuildToolChip(item.Call, byCallId)));
+                parts.Add(new ChatToolPart(BuildToolChip(item.Call, byCallId, previousToolCompletedAt, out previousToolCompletedAt)));
             }
             if (cursor < message.Content.Length)
                 parts.Add(new ChatTextPart(message.Content[cursor..]));
@@ -771,15 +843,21 @@
 
         if (!string.IsNullOrEmpty(message.Content))
             parts.Add(new ChatTextPart(message.Content));
+        DateTime? previousCompletedAt = message.CreatedAt;
         foreach (var call in calls)
-            parts.Add(new ChatToolPart(BuildToolChip(call, byCallId)));
+            parts.Add(new ChatToolPart(BuildToolChip(call, byCallId, previousCompletedAt, out previousCompletedAt)));
         return parts;
     }
 
-    private static ChatToolChip BuildToolChip(ChatPersistedToolCall call, IReadOnlyDictionary<string, EditorMessage> byCallId)
+    private static ChatToolChip BuildToolChip(
+        ChatPersistedToolCall call,
+        IReadOnlyDictionary<string, EditorMessage> byCallId,
+        DateTime? startedAt,
+        out DateTime? completedAt)
     {
         byCallId.TryGetValue(call.CallId, out var resultMessage);
-        return new ChatToolChip(call.CallId, call.Name, call.ArgumentsJson)
+        completedAt = resultMessage?.CreatedAt;
+        var chip = new ChatToolChip(call.CallId, call.Name, call.ArgumentsJson)
         {
             Result = resultMessage is null
                 ? "No persisted result was found for this tool call. The previous turn was interrupted before this tool completed."
@@ -787,6 +865,12 @@
             Error = resultMessage?.Status == EditorMessageStatus.Failed ? (resultMessage.ErrorMessage ?? resultMessage.Content) : null,
             Completed = true,
         };
+        if (startedAt is { } start && completedAt is { } end && end > start)
+        {
+            chip.DurationMs = (end - start).TotalMilliseconds;
+        }
+
+        return chip;
     }
 
     private void RequestScroll(bool force = false)

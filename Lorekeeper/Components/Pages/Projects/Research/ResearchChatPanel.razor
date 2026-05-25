@@ -186,7 +186,7 @@
                         StateHasChanged();
                         break;
                     case ResearchToolCallCompleted completed:
-                        _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error);
+                        _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
                         UpdateConversationTokenCount();
                         await OnActivityChanged.InvokeAsync();
                         RequestScroll();

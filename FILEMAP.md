@@ -39,9 +39,9 @@
 
 | File | Description |
 |------|-------------|
-| `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text parts, tool-call chips, and transcript token-count helpers. |
+| `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text parts, duration-aware tool-call chips, and transcript token-count helpers. |
 | `ChatTranscriptTokenCounter.cs` | Shared transcript token-count adapter for `ChatSurface` panels: projects domain messages into a common token-count shape, includes pending/live turns, and formats exact/estimated count labels. |
-| `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell for transcript rendering, live-turn rendering, composer controls, scrolling, and textarea autosize behavior. |
+| `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell for transcript/live rendering, grouped adjacent tool-call chips, composer controls, scrolling, and textarea autosize behavior. |
 | `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments/results/errors and opens Editor Revision worker transcripts from `start_revision_agents` chips. |
 
 ### Components/Layout/
@@ -67,12 +67,12 @@
 |------|-------------|
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared shell for project workspace pages: loads project by slug, renders title + horizontal tab strip including Editor, Outline, Writing Sample, Publish, Research, Ingest, Graph, and Import / Export; exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
-| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Three-column context-aware chapter editor: project-wide editor chat left, full-height JS-debounced line-numbered editor center, and right-column Recommended Context/Context Feed. Persists/reindexes body edits, remembers the selected chapter per browser/project, locks while AI runs, and refreshes editor/context/recommendations after AI turns or approved changes. |
-| `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: loads the transcript, disables LLM controls when no working chat provider exists, streams text/tool/contest updates, and opens review modals. |
+| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter editor with collapsible chat/right panes, Edit/Read/Review modes, inline active-chapter body review controls/scroll markers, Assistant Memory, and Search panels. Persists/reindexes body edits, remembers the selected chapter per browser/project, and refreshes editor/context surfaces after AI turns or approved changes. |
+| `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: loads the transcript, disables LLM controls without a working provider, streams text/tool/contest updates, routes active-chapter body changes to inline Review mode, and keeps review modals for universal pending-change review. |
 | `ContestReviewModal.razor` (+ `.razor.css`) | Editor Contest Mode comparison modal: shows mutually-exclusive model candidates with chapter-body diffs, streams status/raw Candidate JSON from contest batches, and applies or stages the selected candidate. |
 | `ContextItemDetailModal.razor` (+ `.razor.css`) | Shared editor context detail modal for recommendation and Context Feed items; loads entities, chapters, acts, ingest sources/chunks, and supports Context Feed project-guidance/entity edits. |
 | `RecommendedContextPanel.razor` (+ `.razor.css`) | Editor right-column context recommender: shows semantic/manual/graph-proximity recommendations for entities plus structural references, and adds them to the active chapter's persisted context working set. |
-| `ContextFeedPanel.razor` (+ `.razor.css`) | Editable Context Feed header list for project guidance, current chapter, outline, facts, writing samples, selected entities, and structural references; opens `ContextItemDetailModal` for full details and persists include/exclude choices via `IEditorContextService`. |
+| `ContextFeedPanel.razor` (+ `.razor.css`) | Editable Assistant Memory list for project guidance, current chapter, outline, facts, writing samples, selected entities, and structural references; opens `ContextItemDetailModal` and persists include/exclude choices via `IEditorContextService`. |
 | `GraphPage.razor` | Graph tab at `/projects/{Slug}/graph`; wraps the project shell and hosts the interactive graph workspace. |
 | `GraphContent.razor` (+ `.razor.css`, `.razor.js`) | Obsidian-inspired full-project graph workspace: loads graph snapshots, filters/searches nodes, bridges to the local `vis-network` renderer for pan/zoom/drag/select, and coordinates graph refreshes. |
 | `GraphDetailsPanel.razor` (+ `.razor.css`) | Selected-node graph editor side panel: create/edit/delete nodes, edit safe parent assignments, and create/edit/delete custom relationships while managed links stay protected. |

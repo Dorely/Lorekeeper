@@ -1,4 +1,9 @@
+@using System.Text.Json
+@using System.Globalization
 @using Lorekeeper.Chapters
+@using Lorekeeper.Components.Pages.Projects.Outline
+@using Lorekeeper.Context
+@using Lorekeeper.EditorChat
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
 @using Lorekeeper.Tokens
@@ -7,6 +12,8 @@
 @implements IAsyncDisposable
 @inject IChapterService Chapters
 @inject IActService Acts
+@inject IEditorChatService Chat
+@inject IAiChangeApprovalService ChangeApproval
 @inject ITokenCounter TokenCounter
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -33,17 +40,39 @@ else if (_current is null)
 }
 else
 {
-    <div class="editor-grid">
-        <aside class="editor-chat-pane">
-            <EditorChatPanel ProjectId="Project.Id"
-                             CurrentChapterId="_activeChapterId"
-                             ContextRefreshSignal="_contextRefreshSignal"
-                             OnAiTurnStarting="OnAiTurnStartingAsync"
-                             OnAiTurnCompleted="OnAiTurnCompletedAsync"
-                             OnAiChangesApplied="OnAiChangesAppliedAsync" />
-        </aside>
+    <div class="@EditorGridClass()">
+        @if (_chatPaneCollapsed)
+        {
+            <button type="button"
+                    class="editor-pane-tab editor-pane-tab--left"
+                    title="Open Editor Chat"
+                    aria-label="Open Editor Chat"
+                    @onclick="ToggleChatPane">
+                <span>Chat</span>
+            </button>
+        }
+        else
+        {
+            <aside class="editor-chat-pane">
+                <button type="button"
+                        class="editor-pane-collapse editor-pane-collapse--left"
+                        title="Collapse Editor Chat"
+                        aria-label="Collapse Editor Chat"
+                        @onclick="ToggleChatPane">
+                    &lsaquo;
+                </button>
+                <EditorChatPanel ProjectId="Project.Id"
+                                 CurrentChapterId="_activeChapterId"
+                                 ContextRefreshSignal="_contextRefreshSignal"
+                                 ReviewRefreshSignal="_reviewRefreshSignal"
+                                 OnAiTurnStarting="OnAiTurnStartingAsync"
+                                 OnAiTurnCompleted="OnAiTurnCompletedAsync"
+                                 OnAiChangesApplied="OnAiChangesAppliedAsync"
+                                 OnActiveChapterBodyChangesReady="OpenReviewForActiveChapterChangesAsync" />
+            </aside>
+        }
 
-        <section class="panel panel-editor">
+        <section class="@EditorPanelClass()">
             <div class="chapter-header">
                 @if (_editingTitle)
                 {
@@ -93,61 +122,351 @@ else
                 </div>
             </div>
 
-            <div class="chapter-editor @(_chapterLocked ? "chapter-editor--locked" : "")">
-                <div @ref="_gutterRef" class="line-gutter" aria-hidden="true"></div>
-                <textarea @ref="_bodyTextarea"
-                          class="form-control chapter-body"
-                          readonly="@_chapterLocked"
-                          placeholder="Start writing your chapter…"></textarea>
+            <div class="chapter-mode-bar" role="group" aria-label="Chapter mode">
+                <button type="button"
+                        class="@ModeButtonClass(EditorMode.Edit)"
+                        aria-pressed="@(_mode == EditorMode.Edit)"
+                        @onclick="() => SetModeAsync(EditorMode.Edit)">Edit</button>
+                <button type="button"
+                        class="@ModeButtonClass(EditorMode.Read)"
+                        aria-pressed="@(_mode == EditorMode.Read)"
+                        @onclick="() => SetModeAsync(EditorMode.Read)">Read</button>
+                <button type="button"
+                        class="@ModeButtonClass(EditorMode.Review)"
+                        aria-pressed="@(_mode == EditorMode.Review)"
+                        @onclick="() => SetModeAsync(EditorMode.Review)">Review</button>
+            </div>
+
+            <div class="@ChapterEditorClass()">
+                <div class="@EditSurfaceClass()">
+                    <div @ref="_gutterRef" class="line-gutter" aria-hidden="true"></div>
+                    <textarea @ref="_bodyTextarea"
+                              class="@ChapterBodyClass()"
+                              readonly="@EditorReadOnly"
+                              placeholder="Start writing your chapter..."></textarea>
+                </div>
+
+                @if (_mode == EditorMode.Review)
+                {
+                    <div class="chapter-review-surface" @ref="_reviewSurfaceRef" role="region" aria-label="Review staged chapter changes">
+                        @if (_reviewLoading)
+                        {
+                            <div class="chapter-review-empty"><em>Loading staged changes...</em></div>
+                        }
+                        else if (_reviewProjection is null)
+                        {
+                            <div class="chapter-review-empty"><em>No chapter selected.</em></div>
+                        }
+                        else
+                        {
+                            @if (!_reviewProjection.HasChanges)
+                            {
+                                <div class="chapter-review-notice">No pending staged chapter-body changes for this chapter.</div>
+                            }
+                            else
+                            {
+                                <div class="chapter-review-toolbar">
+                                    <div class="chapter-review-summary">
+                                        <strong>@_reviewProjection.PendingChangeCount</strong>
+                                        pending chapter-body change@(_reviewProjection.PendingChangeCount == 1 ? string.Empty : "s")
+                                    </div>
+                                    <div class="chapter-review-toolbar-actions">
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                disabled="@(_reviewBusy || _reviewProjection.Blocks.Count == 0)"
+                                                @onclick="GoToNextReviewBlockAsync">
+                                            Next change
+                                        </button>
+                                        <button type="button"
+                                                class="btn btn-sm btn-success"
+                                                disabled="@_reviewBusy"
+                                                @onclick="KeepAllActiveChapterChangesAsync">
+                                            Keep all chapter changes
+                                        </button>
+                                    </div>
+                                </div>
+
+                                @if (!string.IsNullOrWhiteSpace(_reviewError))
+                                {
+                                    <div class="chapter-review-error">
+                                        <span>@_reviewError</span>
+                                        <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" @onclick="() => _reviewError = null"></button>
+                                    </div>
+                                }
+
+                                <div class="chapter-review-scroll-rail" aria-label="Chapter body change locations">
+                                    @foreach (var block in _reviewProjection.Blocks)
+                                    {
+                                        <button type="button"
+                                                class="@ReviewRailMarkerClass(block)"
+                                                style="@RailMarkerStyle(block)"
+                                                title="@block.Title"
+                                                aria-label="@block.Title"
+                                                @onclick="() => ExpandAndScrollReviewBlockAsync(block.Id)">
+                                        </button>
+                                    }
+                                </div>
+                            }
+
+                            <div class="chapter-review-lines">
+                                @foreach (var line in _reviewProjection.Lines)
+                                {
+                                    <div class="@ReviewLineClass(line)" @key="line.LineNumber" data-review-line="@line.LineNumber">
+                                        <span class="review-line-number">@line.LineNumber.ToString(_reviewProjection.LineNumberFormat)</span>
+                                        <span class="@ReviewStripClass(line)" title="@line.MarkerTitle" aria-hidden="true">
+                                            @if (line.HasDeletionMarker)
+                                            {
+                                                <span class="review-strip-dot review-strip-dot--removed"></span>
+                                            }
+                                            @if (line.IsAddedOrChanged)
+                                            {
+                                                <span class="review-strip-dot review-strip-dot--added"></span>
+                                            }
+                                        </span>
+                                        <span class="review-line-text">@RenderReviewLine(line)</span>
+                                        <span class="review-line-actions">
+                                            @if (line.PrimaryBlockId is { } blockId)
+                                            {
+                                                <button type="button"
+                                                        class="@ReviewLineActionClass(blockId)"
+                                                        title="Review this staged change inline"
+                                                        @onclick="() => ToggleReviewBlockAsync(blockId)">
+                                                    @(IsReviewBlockExpanded(blockId) ? "Hide" : "Review")
+                                                </button>
+                                            }
+                                        </span>
+                                    </div>
+
+                                    @foreach (var block in ReviewBlocksAfterLine(line.LineNumber))
+                                    {
+                                        if (IsReviewBlockExpanded(block.Id))
+                                        {
+                                            <article class="review-block" data-review-block="@block.Id" @key="block.Id">
+                                                <header class="review-block-header">
+                                                    <div class="review-block-title-wrap">
+                                                        <div class="review-block-title">@block.Title</div>
+                                                        <div class="review-block-summary">@block.Summary</div>
+                                                    </div>
+                                                    <div class="review-block-actions">
+                                                        <button type="button"
+                                                                class="btn btn-sm btn-outline-primary"
+                                                                disabled="@_reviewBusy"
+                                                                @onclick="() => KeepReviewBlockAsync(block)">
+                                                            Keep
+                                                        </button>
+                                                        <button type="button"
+                                                                class="btn btn-sm btn-outline-danger"
+                                                                disabled="@_reviewBusy"
+                                                                @onclick="() => BeginRejectReviewBlock(block.Id)">
+                                                            Reject
+                                                        </button>
+                                                        @if (block.CanEdit)
+                                                        {
+                                                            @if (IsEditingReviewBlock(block))
+                                                            {
+                                                                <button type="button"
+                                                                        class="btn btn-sm btn-outline-primary"
+                                                                        disabled="@_reviewBusy"
+                                                                        @onclick="() => SaveReviewBlockEditAsync(block)">
+                                                                    Save edit
+                                                                </button>
+                                                                <button type="button"
+                                                                        class="btn btn-sm btn-outline-secondary"
+                                                                        disabled="@_reviewBusy"
+                                                                        @onclick="CancelReviewBlockEdit">
+                                                                    Cancel
+                                                                </button>
+                                                            }
+                                                            else
+                                                            {
+                                                                <button type="button"
+                                                                        class="btn btn-sm btn-outline-secondary"
+                                                                        disabled="@_reviewBusy"
+                                                                        @onclick="() => BeginReviewBlockEdit(block)">
+                                                                    Edit
+                                                                </button>
+                                                            }
+                                                        }
+                                                    </div>
+                                                </header>
+
+                                                @if (IsRejectingReviewBlock(block.Id))
+                                                {
+                                                    <div class="review-reject-box">
+                                                        <label for="@($"review-reject-{block.Id}")">Rejection message</label>
+                                                        <textarea id="@($"review-reject-{block.Id}")"
+                                                                  class="form-control"
+                                                                  rows="3"
+                                                                  placeholder="Tell the assistant what to correct next turn..."
+                                                                  @bind="_reviewRejectionMessage"
+                                                                  @bind:event="oninput"></textarea>
+                                                        <div class="review-reject-actions">
+                                                            <button type="button"
+                                                                    class="btn btn-sm btn-danger"
+                                                                    disabled="@_reviewBusy"
+                                                                    @onclick="() => ConfirmRejectReviewBlockAsync(block)">
+                                                                Reject change
+                                                            </button>
+                                                            <button type="button"
+                                                                    class="btn btn-sm btn-outline-secondary"
+                                                                    disabled="@_reviewBusy"
+                                                                    @onclick="CancelRejectReviewBlock">
+                                                                Cancel
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                }
+
+                                                @if (IsEditingReviewBlock(block))
+                                                {
+                                                    <textarea class="form-control review-block-editor"
+                                                              rows="6"
+                                                              value="@(_reviewBlockEdit?.Text ?? string.Empty)"
+                                                              @oninput="args => UpdateReviewBlockEditText(args.Value?.ToString() ?? string.Empty)"></textarea>
+                                                }
+                                                else
+                                                {
+                                                    <div class="review-block-diff">
+                                                        @foreach (var row in block.Hunk.Rows)
+                                                        {
+                                                            <div class="@ReviewDiffRowClass(row)">
+                                                                <span class="review-diff-line-number">@(row.OldLineNumber?.ToString() ?? string.Empty)</span>
+                                                                <span class="review-diff-line-number">@(row.NewLineNumber?.ToString() ?? string.Empty)</span>
+                                                                <span class="review-diff-marker">@row.Marker</span>
+                                                                <span class="review-diff-line-text">
+                                                                    @if (IsEditingReviewLine(block, row))
+                                                                    {
+                                                                        <textarea class="form-control review-line-editor"
+                                                                                  rows="1"
+                                                                                  value="@(_reviewLineEdit?.Text ?? row.Text)"
+                                                                                  @oninput="args => UpdateReviewLineEditText(args.Value?.ToString() ?? string.Empty)"></textarea>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        @RenderDiffSegments(row, block.Hunk.Rows)
+                                                                    }
+                                                                </span>
+                                                                <span class="review-diff-line-actions">
+                                                                    @if (CanRejectDiffRow(row))
+                                                                    {
+                                                                        <button type="button"
+                                                                                class="btn btn-sm btn-outline-danger"
+                                                                                disabled="@_reviewBusy"
+                                                                                @onclick="() => RejectReviewLineAsync(block, row)">
+                                                                            Reject line
+                                                                        </button>
+                                                                    }
+                                                                    @if (CanEditNewLine(row))
+                                                                    {
+                                                                        @if (IsEditingReviewLine(block, row))
+                                                                        {
+                                                                            <button type="button"
+                                                                                    class="btn btn-sm btn-outline-primary"
+                                                                                    disabled="@_reviewBusy"
+                                                                                    @onclick="() => SaveReviewLineEditAsync(block)">
+                                                                                Save
+                                                                            </button>
+                                                                            <button type="button"
+                                                                                    class="btn btn-sm btn-outline-secondary"
+                                                                                    disabled="@_reviewBusy"
+                                                                                    @onclick="CancelReviewLineEdit">
+                                                                                Cancel
+                                                                            </button>
+                                                                        }
+                                                                        else
+                                                                        {
+                                                                            <button type="button"
+                                                                                    class="btn btn-sm btn-outline-secondary"
+                                                                                    disabled="@_reviewBusy"
+                                                                                    @onclick="() => BeginReviewLineEdit(block, row)">
+                                                                                Edit
+                                                                            </button>
+                                                                        }
+                                                                    }
+                                                                </span>
+                                                            </div>
+                                                        }
+                                                    </div>
+                                                }
+                                            </article>
+                                        }
+                                    }
+                                }
+                            </div>
+                        }
+                    </div>
+                }
             </div>
         </section>
 
-        <aside class="@EditorSidePaneClass()">
-            <section class='@(PanelClass("panel-recommendations", _recommendedContextOpen))'>
-                <h6 class="panel-title">
-                    <button type="button"
-                            class="panel-title-toggle"
-                            title='@(PanelToggleTitle("Recommended Context", _recommendedContextOpen))'
-                            aria-expanded="@_recommendedContextOpen"
-                            aria-controls="recommended-context-panel-content"
-                            @onclick="ToggleRecommendedContext">
-                        <span class="caret">@PanelCaret(_recommendedContextOpen)</span>
-                        <span class="panel-title-text">Recommended Context</span>
-                    </button>
-                </h6>
-                <div id="recommended-context-panel-content"
-                     class="@PanelContentClass(_recommendedContextOpen)"
-                     aria-hidden="@AriaHidden(!_recommendedContextOpen)">
-                    <RecommendedContextPanel ProjectId="Project.Id"
-                                             ChapterId="_activeChapterId"
-                                             RefreshSignal="_contextRefreshSignal"
-                                             OnChanged="OnContextChangedAsync" />
-                </div>
-            </section>
+        @if (_rightPaneCollapsed)
+        {
+            <button type="button"
+                    class="editor-pane-tab editor-pane-tab--right"
+                    title="Open Assistant Memory and Search"
+                    aria-label="Open Assistant Memory and Search"
+                    @onclick="ToggleRightPane">
+                <span>Memory</span>
+            </button>
+        }
+        else
+        {
+            <aside class="@EditorSidePaneClass()">
+                <button type="button"
+                        class="editor-pane-collapse editor-pane-collapse--right"
+                        title="Collapse Assistant Memory and Search"
+                        aria-label="Collapse Assistant Memory and Search"
+                        @onclick="ToggleRightPane">
+                    &rsaquo;
+                </button>
 
-            <section class='@(PanelClass("panel-context", _contextFeedOpen))'>
-                <h6 class="panel-title">
-                    <button type="button"
-                            class="panel-title-toggle"
-                            title='@(PanelToggleTitle("Context Feed", _contextFeedOpen))'
-                            aria-expanded="@_contextFeedOpen"
-                            aria-controls="context-feed-panel-content"
-                            @onclick="ToggleContextFeed">
-                        <span class="caret">@PanelCaret(_contextFeedOpen)</span>
-                        <span class="panel-title-text">Context Feed</span>
-                    </button>
-                </h6>
-                <div id="context-feed-panel-content"
-                     class="@PanelContentClass(_contextFeedOpen)"
-                     aria-hidden="@AriaHidden(!_contextFeedOpen)">
-                    <ContextFeedPanel @ref="_contextPanel"
-                                      Project="Project"
-                                      CurrentChapter="_current"
-                                      OnContextChanged="OnContextChangedAsync" />
-                </div>
-            </section>
-        </aside>
+                <section class='@(PanelClass("panel-context", _contextFeedOpen))'>
+                    <h6 class="panel-title">
+                        <button type="button"
+                                class="panel-title-toggle"
+                                title='@(PanelToggleTitle("Assistant Memory", _contextFeedOpen))'
+                                aria-expanded="@_contextFeedOpen"
+                                aria-controls="context-feed-panel-content"
+                                @onclick="ToggleContextFeed">
+                            <span class="caret">@PanelCaret(_contextFeedOpen)</span>
+                            <span class="panel-title-text">Assistant Memory</span>
+                        </button>
+                    </h6>
+                    <div id="context-feed-panel-content"
+                         class="@PanelContentClass(_contextFeedOpen)"
+                         aria-hidden="@AriaHidden(!_contextFeedOpen)">
+                        <ContextFeedPanel @ref="_contextPanel"
+                                          Project="Project"
+                                          CurrentChapter="_current"
+                                          OnContextChanged="OnContextChangedAsync" />
+                    </div>
+                </section>
+
+                <section class='@(PanelClass("panel-recommendations", _recommendedContextOpen))'>
+                    <h6 class="panel-title">
+                        <button type="button"
+                                class="panel-title-toggle"
+                                title='@(PanelToggleTitle("Search", _recommendedContextOpen))'
+                                aria-expanded="@_recommendedContextOpen"
+                                aria-controls="recommended-context-panel-content"
+                                @onclick="ToggleRecommendedContext">
+                            <span class="caret">@PanelCaret(_recommendedContextOpen)</span>
+                            <span class="panel-title-text">Search</span>
+                        </button>
+                    </h6>
+                    <div id="recommended-context-panel-content"
+                         class="@PanelContentClass(_recommendedContextOpen)"
+                         aria-hidden="@AriaHidden(!_recommendedContextOpen)">
+                        <RecommendedContextPanel ProjectId="Project.Id"
+                                                 ChapterId="_activeChapterId"
+                                                 RefreshSignal="_contextRefreshSignal"
+                                                 OnChanged="OnContextChangedAsync" />
+                    </div>
+                </section>
+            </aside>
+        }
     </div>
+
 }
 
 @code {
@@ -174,9 +493,15 @@ else
     private bool _menuOpen;
     private bool _recommendedContextOpen = true;
     private bool _contextFeedOpen = true;
+    private EditorMode _mode = EditorMode.Edit;
+    private bool _chatPaneCollapsed;
+    private bool _rightPaneCollapsed;
+    private bool _editModeChatPaneCollapsed;
+    private bool _editModeRightPaneCollapsed;
 
     private ElementReference _bodyTextarea;
     private ElementReference _gutterRef;
+    private ElementReference _reviewSurfaceRef;
     private IJSObjectReference? _editorModule;
     private IJSObjectReference? _editorHandle;
 
@@ -189,9 +514,28 @@ else
     private bool _chapterLocked;
     private ContextFeedPanel? _contextPanel;
     private int _contextRefreshSignal;
+    private int _reviewRefreshSignal;
     private int _chapterWordCount;
     private int _chapterTokenCount;
     private bool _chapterTokenIsExact = true;
+    private bool _reviewLoading;
+    private ReviewProjection? _reviewProjection;
+    private IReadOnlyList<AiChangeBatch> _reviewPendingBatches = [];
+    private readonly HashSet<string> _expandedReviewBlockIds = new(StringComparer.Ordinal);
+    private string? _activeReviewBlockId;
+    private string? _pendingReviewScrollBlockId;
+    private string? _rejectingReviewBlockId;
+    private string _reviewRejectionMessage = string.Empty;
+    private string? _reviewError;
+    private bool _reviewBusy;
+    private ReviewBlockEdit? _reviewBlockEdit;
+    private ReviewLineEdit? _reviewLineEdit;
+
+    private bool EditorReadOnly => _chapterLocked || _mode == EditorMode.Review;
+    private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
 
     public EditorContent()
     {
@@ -270,6 +614,10 @@ else
         _pendingRememberChapterId = targetId;
 
         await InvokeEditorVoidAsync("setValue", _current.Body);
+        if (_mode == EditorMode.Review)
+        {
+            await RefreshReviewChangesAsync();
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -314,6 +662,22 @@ else
         if (_pendingRememberChapterId is { } chapterId)
         {
             await RememberSelectedChapterAsync(chapterId);
+        }
+
+        if (_pendingReviewScrollBlockId is { } blockId && _editorModule is not null)
+        {
+            try
+            {
+                var anchorLine = _reviewProjection?.Blocks.FirstOrDefault(block => block.Id == blockId)?.AnchorLine ?? 1;
+                await _editorModule.InvokeVoidAsync("scrollReviewBlock", _reviewSurfaceRef, blockId, anchorLine);
+                _pendingReviewScrollBlockId = null;
+            }
+            catch (JSDisconnectedException) { }
+            catch (OperationCanceledException) { }
+            catch (JSException)
+            {
+                _pendingReviewScrollBlockId = null;
+            }
         }
     }
 
@@ -473,6 +837,108 @@ else
     private void ToggleMenu() => _menuOpen = !_menuOpen;
     private void CloseMenu() => _menuOpen = false;
 
+    private string EditorGridClass()
+    {
+        var classes = "editor-grid";
+        if (_chatPaneCollapsed)
+        {
+            classes += " editor-grid--chat-collapsed";
+        }
+
+        if (_rightPaneCollapsed)
+        {
+            classes += " editor-grid--right-collapsed";
+        }
+
+        return classes;
+    }
+
+    private string EditorPanelClass() =>
+        $"panel panel-editor panel-editor--{_mode.ToString().ToLowerInvariant()}";
+
+    private string ChapterEditorClass()
+    {
+        var classes = $"chapter-editor chapter-editor--{_mode.ToString().ToLowerInvariant()}";
+        if (_chapterLocked)
+        {
+            classes += " chapter-editor--locked";
+        }
+
+        return classes;
+    }
+
+    private string EditSurfaceClass() =>
+        _mode == EditorMode.Review
+            ? "chapter-edit-surface chapter-edit-surface--hidden"
+            : "chapter-edit-surface";
+
+    private string ChapterBodyClass() =>
+        _mode == EditorMode.Read
+            ? "form-control chapter-body chapter-body--read"
+            : "form-control chapter-body";
+
+    private string ModeButtonClass(EditorMode mode) =>
+        _mode == mode
+            ? "chapter-mode-button active"
+            : "chapter-mode-button";
+
+    private async Task SetModeAsync(EditorMode mode)
+    {
+        if (_mode == mode) return;
+
+        if (mode == EditorMode.Review)
+        {
+            await FlushAsync();
+            await _saveGate.WaitAsync();
+            _saveGate.Release();
+        }
+
+        if (_mode == EditorMode.Edit)
+        {
+            _editModeChatPaneCollapsed = _chatPaneCollapsed;
+            _editModeRightPaneCollapsed = _rightPaneCollapsed;
+        }
+
+        _mode = mode;
+        if (_mode == EditorMode.Edit)
+        {
+            _chatPaneCollapsed = _editModeChatPaneCollapsed;
+            _rightPaneCollapsed = _editModeRightPaneCollapsed;
+            await InvokeEditorVoidAsync("setReadOnly", _chapterLocked);
+        }
+        else
+        {
+            _chatPaneCollapsed = true;
+            _rightPaneCollapsed = true;
+            await InvokeEditorVoidAsync("setReadOnly", _mode == EditorMode.Review || _chapterLocked);
+        }
+
+        if (_mode == EditorMode.Review)
+        {
+            await RefreshReviewChangesAsync();
+        }
+
+        StateHasChanged();
+    }
+
+    private void ToggleChatPane()
+    {
+        _chatPaneCollapsed = !_chatPaneCollapsed;
+        if (_mode == EditorMode.Edit)
+        {
+            _editModeChatPaneCollapsed = _chatPaneCollapsed;
+        }
+    }
+
+    private void ToggleRightPane()
+    {
+        _rightPaneCollapsed = !_rightPaneCollapsed;
+        if (_mode == EditorMode.Edit)
+        {
+            _editModeRightPaneCollapsed = _rightPaneCollapsed;
+        }
+    }
+
     private string EditorSidePaneClass()
     {
         var classes = "editor-side-pane";
@@ -525,6 +991,938 @@ else
 
         _contextFeedOpen = !_contextFeedOpen;
     }
+
+    private async Task RefreshReviewChangesAsync()
+    {
+        if (Project is null || _current is null)
+        {
+            _reviewPendingBatches = [];
+            _reviewProjection = null;
+            _reviewLoading = false;
+            ResetInlineReviewState();
+            return;
+        }
+
+        _reviewLoading = true;
+        try
+        {
+            _reviewPendingBatches = await Chat.ListPendingChangesAsync(Project.Id);
+            _reviewProjection = BuildReviewProjection(_current, _reviewPendingBatches);
+            PruneInlineReviewState();
+        }
+        finally
+        {
+            _reviewLoading = false;
+        }
+    }
+
+    private async Task OpenReviewForActiveChapterChangesAsync()
+    {
+        if (Project is null || _current is null) return;
+
+        if (_mode == EditorMode.Review)
+        {
+            await RefreshReviewChangesAsync();
+        }
+        else
+        {
+            await SetModeAsync(EditorMode.Review);
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task GoToNextReviewBlockAsync()
+    {
+        if (_reviewProjection?.Blocks.Count > 0)
+        {
+            var blocks = _reviewProjection.Blocks;
+            var currentIndex = _activeReviewBlockId is null
+                ? -1
+                : blocks.ToList().FindIndex(block => block.Id == _activeReviewBlockId);
+            var next = blocks[(currentIndex + 1 + blocks.Count) % blocks.Count];
+            await ExpandAndScrollReviewBlockAsync(next.Id);
+        }
+    }
+
+    private Task ToggleReviewBlockAsync(string blockId)
+    {
+        if (!_expandedReviewBlockIds.Add(blockId))
+        {
+            _expandedReviewBlockIds.Remove(blockId);
+            if (_activeReviewBlockId == blockId)
+                _activeReviewBlockId = null;
+            ClearInlineReviewEditors();
+        }
+        else
+        {
+            _activeReviewBlockId = blockId;
+            _pendingReviewScrollBlockId = blockId;
+        }
+
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task ExpandAndScrollReviewBlockAsync(string blockId)
+    {
+        _expandedReviewBlockIds.Add(blockId);
+        _activeReviewBlockId = blockId;
+        _pendingReviewScrollBlockId = blockId;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private bool IsReviewBlockExpanded(string blockId) => _expandedReviewBlockIds.Contains(blockId);
+
+    private IReadOnlyList<ReviewBlock> ReviewBlocksAfterLine(int lineNumber) =>
+        _reviewProjection?.Blocks.Where(block => block.AnchorLine == lineNumber).ToList() ?? [];
+
+    private static string ReviewLineActionClass(string blockId) =>
+        "btn btn-sm review-line-action " + (string.IsNullOrWhiteSpace(blockId) ? "btn-outline-secondary" : "btn-outline-success");
+
+    private static string ReviewRailMarkerClass(ReviewBlock block)
+    {
+        var classes = "chapter-review-rail-marker";
+        if (block.HasAdditions)
+            classes += " chapter-review-rail-marker--added";
+        if (block.HasDeletions)
+            classes += " chapter-review-rail-marker--removed";
+        return classes;
+    }
+
+    private static string RailMarkerStyle(ReviewBlock block) =>
+        $"top: {block.MarkerTopPercent.ToString("0.###", CultureInfo.InvariantCulture)}%;";
+
+    private async Task KeepAllActiveChapterChangesAsync()
+    {
+        if (_reviewProjection is null || _reviewProjection.PendingChangeIds.Count == 0) return;
+
+        var changeIds = _reviewProjection.PendingChangeIds.ToArray();
+        await RunReviewActionAsync(() => ChangeApproval.ApplyChangesAsync(changeIds), clearExpandedBlocks: true);
+    }
+
+    private async Task KeepReviewBlockAsync(ReviewBlock block) =>
+        await RunReviewActionAsync(() => ChangeApproval.ApplyChangeAsync(block.ChangeId), clearExpandedBlocks: false);
+
+    private void BeginRejectReviewBlock(string blockId)
+    {
+        _rejectingReviewBlockId = blockId;
+        _reviewRejectionMessage = string.Empty;
+        _reviewError = null;
+    }
+
+    private bool IsRejectingReviewBlock(string blockId) =>
+        string.Equals(_rejectingReviewBlockId, blockId, StringComparison.Ordinal);
+
+    private void CancelRejectReviewBlock()
+    {
+        _rejectingReviewBlockId = null;
+        _reviewRejectionMessage = string.Empty;
+    }
+
+    private async Task ConfirmRejectReviewBlockAsync(ReviewBlock block) =>
+        await RunReviewActionAsync(
+            () => ChangeApproval.RejectChangeAsync(block.ChangeId, _reviewRejectionMessage),
+            clearExpandedBlocks: false);
+
+    private void BeginReviewBlockEdit(ReviewBlock block)
+    {
+        if (!block.CanEdit) return;
+
+        var lines = ChapterFormatting.SplitLines(block.Section.NewText);
+        var startIndex = block.EditStartNewLine!.Value - 1;
+        var endIndex = block.EditEndNewLine!.Value - 1;
+        if (startIndex < 0 || startIndex >= lines.Count || endIndex < startIndex)
+            return;
+
+        var length = Math.Min(lines.Count - startIndex, endIndex - startIndex + 1);
+        _reviewBlockEdit = new ReviewBlockEdit(
+            block.Id,
+            block.ChangeId,
+            block.Section.Key,
+            block.EditStartNewLine.Value,
+            block.EditEndNewLine.Value,
+            ChapterFormatting.JoinLines(lines.Skip(startIndex).Take(length).ToList()));
+        _reviewLineEdit = null;
+        _reviewError = null;
+    }
+
+    private bool IsEditingReviewBlock(ReviewBlock block) =>
+        _reviewBlockEdit is { } edit
+        && edit.BlockId == block.Id
+        && edit.ChangeId == block.ChangeId
+        && string.Equals(edit.SectionKey, block.Section.Key, StringComparison.OrdinalIgnoreCase);
+
+    private void UpdateReviewBlockEditText(string text)
+    {
+        if (_reviewBlockEdit is not null)
+            _reviewBlockEdit.Text = text;
+    }
+
+    private async Task SaveReviewBlockEditAsync(ReviewBlock block)
+    {
+        if (_reviewBlockEdit is not { } edit || !IsEditingReviewBlock(block))
+            return;
+
+        var change = FindReviewChange(block.ChangeId);
+        if (change is null)
+        {
+            _reviewError = "The pending AI change could not be found.";
+            return;
+        }
+
+        var lines = ChapterFormatting.SplitLines(block.Section.NewText);
+        var startIndex = edit.StartNewLine - 1;
+        var endIndex = edit.EndNewLine - 1;
+        if (startIndex < 0 || startIndex > lines.Count || endIndex < startIndex)
+            return;
+
+        var removeCount = Math.Min(lines.Count - startIndex, endIndex - startIndex + 1);
+        lines.RemoveRange(startIndex, removeCount);
+        lines.InsertRange(startIndex, ChapterFormatting.SplitLines(NormalizeLineEditText(edit.Text)));
+        await UpdateReviewFieldDraftAsync(change, block.Section.Key, ChapterFormatting.JoinLines(lines));
+        if (_reviewError is null)
+            _reviewBlockEdit = null;
+    }
+
+    private void CancelReviewBlockEdit() => _reviewBlockEdit = null;
+
+    private void BeginReviewLineEdit(ReviewBlock block, DiffRow row)
+    {
+        if (row.NewLineNumber is not int newLineNumber) return;
+
+        _reviewLineEdit = new ReviewLineEdit(block.Id, block.ChangeId, block.Section.Key, newLineNumber, row.Text);
+        _reviewBlockEdit = null;
+        _reviewError = null;
+    }
+
+    private bool IsEditingReviewLine(ReviewBlock block, DiffRow row) =>
+        row.NewLineNumber is int newLineNumber
+        && _reviewLineEdit is { } edit
+        && edit.BlockId == block.Id
+        && edit.ChangeId == block.ChangeId
+        && edit.NewLineNumber == newLineNumber
+        && string.Equals(edit.SectionKey, block.Section.Key, StringComparison.OrdinalIgnoreCase);
+
+    private void UpdateReviewLineEditText(string text)
+    {
+        if (_reviewLineEdit is not null)
+            _reviewLineEdit.Text = text;
+    }
+
+    private async Task SaveReviewLineEditAsync(ReviewBlock block)
+    {
+        if (_reviewLineEdit is not { } edit
+            || edit.ChangeId != block.ChangeId
+            || !string.Equals(edit.SectionKey, block.Section.Key, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var change = FindReviewChange(block.ChangeId);
+        if (change is null)
+        {
+            _reviewError = "The pending AI change could not be found.";
+            return;
+        }
+
+        var lines = ChapterFormatting.SplitLines(block.Section.NewText);
+        var index = edit.NewLineNumber - 1;
+        if (index < 0 || index >= lines.Count) return;
+
+        lines[index] = NormalizeLineEditText(edit.Text);
+        await UpdateReviewFieldDraftAsync(change, block.Section.Key, ChapterFormatting.JoinLines(lines));
+        if (_reviewError is null)
+            _reviewLineEdit = null;
+    }
+
+    private void CancelReviewLineEdit() => _reviewLineEdit = null;
+
+    private async Task RejectReviewLineAsync(ReviewBlock block, DiffRow row)
+    {
+        var change = FindReviewChange(block.ChangeId);
+        if (change is null)
+        {
+            _reviewError = "The pending AI change could not be found.";
+            return;
+        }
+
+        var newText = RejectLine(block.Section, row, block.Hunk.Rows);
+        _reviewLineEdit = null;
+        await UpdateReviewFieldDraftAsync(change, block.Section.Key, newText);
+    }
+
+    private async Task UpdateReviewFieldDraftAsync(AiChange change, string fieldKey, string newText)
+    {
+        if (!AiChangeReviewDrafts.TryUpdateField(change, fieldKey, newText, out var draftAfterJson, out var error))
+        {
+            _reviewError = error;
+            return;
+        }
+
+        await SaveReviewDraftAsync(change, draftAfterJson);
+    }
+
+    private async Task SaveReviewDraftAsync(AiChange change, string draftAfterJson)
+    {
+        await RunReviewDraftAsync(async () =>
+        {
+            if (string.Equals(draftAfterJson, change.AfterJson, StringComparison.Ordinal))
+            {
+                await ChangeApproval.ClearReviewDraftAsync(change.Id);
+                change.DraftAfterJson = null;
+                change.ReviewStateJson = null;
+                return;
+            }
+
+            var reviewStateJson = BuildReviewStateJson();
+            await ChangeApproval.SaveReviewDraftAsync(change.Id, draftAfterJson, reviewStateJson);
+            change.DraftAfterJson = draftAfterJson;
+            change.ReviewStateJson = reviewStateJson;
+        });
+    }
+
+    private async Task RunReviewActionAsync(Func<Task> action, bool clearExpandedBlocks)
+    {
+        _reviewBusy = true;
+        _reviewError = null;
+        try
+        {
+            await action();
+            _reviewRejectionMessage = string.Empty;
+            _rejectingReviewBlockId = null;
+            ClearInlineReviewEditors();
+            if (clearExpandedBlocks)
+                _expandedReviewBlockIds.Clear();
+
+            await ReloadCurrentChapterAfterAiAsync();
+            await RefreshReviewChangesAsync();
+            _reviewRefreshSignal++;
+        }
+        catch (Exception ex)
+        {
+            _reviewError = ex.Message;
+        }
+        finally
+        {
+            _reviewBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunReviewDraftAsync(Func<Task> action)
+    {
+        _reviewBusy = true;
+        _reviewError = null;
+        try
+        {
+            await action();
+            await RefreshReviewChangesAsync();
+            _reviewRefreshSignal++;
+        }
+        catch (Exception ex)
+        {
+            _reviewError = ex.Message;
+        }
+        finally
+        {
+            _reviewBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private AiChange? FindReviewChange(Guid changeId) =>
+        _reviewPendingBatches
+            .SelectMany(batch => batch.Changes)
+            .FirstOrDefault(change => change.Id == changeId && change.Status == AiChangeStatus.Pending);
+
+    private void ResetInlineReviewState()
+    {
+        _expandedReviewBlockIds.Clear();
+        _activeReviewBlockId = null;
+        _pendingReviewScrollBlockId = null;
+        _rejectingReviewBlockId = null;
+        _reviewRejectionMessage = string.Empty;
+        _reviewError = null;
+        ClearInlineReviewEditors();
+    }
+
+    private void ClearInlineReviewEditors()
+    {
+        _reviewBlockEdit = null;
+        _reviewLineEdit = null;
+    }
+
+    private void PruneInlineReviewState()
+    {
+        if (_reviewProjection is null)
+        {
+            ResetInlineReviewState();
+            return;
+        }
+
+        var validBlockIds = _reviewProjection.Blocks.Select(block => block.Id).ToHashSet(StringComparer.Ordinal);
+        _expandedReviewBlockIds.RemoveWhere(blockId => !validBlockIds.Contains(blockId));
+        if (_activeReviewBlockId is not null && !validBlockIds.Contains(_activeReviewBlockId))
+            _activeReviewBlockId = _expandedReviewBlockIds.FirstOrDefault();
+        if (_pendingReviewScrollBlockId is not null && !validBlockIds.Contains(_pendingReviewScrollBlockId))
+            _pendingReviewScrollBlockId = null;
+        if (_rejectingReviewBlockId is not null && !validBlockIds.Contains(_rejectingReviewBlockId))
+            CancelRejectReviewBlock();
+        if (_reviewBlockEdit is not null && !validBlockIds.Contains(_reviewBlockEdit.BlockId))
+            _reviewBlockEdit = null;
+        if (_reviewLineEdit is not null && !validBlockIds.Contains(_reviewLineEdit.BlockId))
+            _reviewLineEdit = null;
+    }
+
+    private static ReviewProjection BuildReviewProjection(Chapter chapter, IReadOnlyList<AiChangeBatch> batches)
+    {
+        var changes = CurrentChapterBodyChanges(batches, chapter.Id);
+        var proposedBody = changes.Count == 0
+            ? chapter.Body
+            : ReadChapterBodyChange(AiChangeReviewDrafts.EffectiveAfterJson(changes[^1]))?.Body ?? chapter.Body;
+        var lines = ChapterFormatting.SplitLines(proposedBody);
+        var width = Math.Max(4, lines.Count.ToString().Length);
+        var drafts = lines
+            .Select((text, index) => new ReviewLineDraft(index + 1, text))
+            .ToList();
+        var blocks = new List<ReviewBlock>();
+
+        if (changes.Count > 0 && AiChangeReviewDiffBuilder.TryBuild(changes, out var diff))
+        {
+            var fallbackChangeId = changes[^1].Id;
+            foreach (var section in diff.Sections.Where(section => string.Equals(section.Key, "Body", StringComparison.OrdinalIgnoreCase)))
+            {
+                var changeId = section.OwnerChangeId ?? fallbackChangeId;
+                for (var hunkIndex = 0; hunkIndex < section.Hunks.Count; hunkIndex++)
+                {
+                    var hunk = section.Hunks[hunkIndex];
+                    if (!hunk.Rows.Any(row => row.Kind != DiffRowKind.Context))
+                        continue;
+
+                    var anchorLine = FindBlockAnchorLine(hunk.Rows, drafts.Count);
+                    var changedNewLines = hunk.Rows
+                        .Where(row => row.Kind == DiffRowKind.Added && row.NewLineNumber.HasValue)
+                        .Select(row => row.NewLineNumber!.Value)
+                        .ToList();
+                    var blockId = $"review-{changeId:N}-{hunk.NewStart}-{hunk.OldStart}-{hunkIndex}";
+                    blocks.Add(new ReviewBlock(
+                        blockId,
+                        changeId,
+                        ReviewBlockTitle(hunk),
+                        ReviewBlockSummary(hunk),
+                        anchorLine,
+                        MarkerTopPercent(anchorLine, drafts.Count),
+                        section,
+                        hunk,
+                        changedNewLines.Count == 0 ? null : changedNewLines.Min(),
+                        changedNewLines.Count == 0 ? null : changedNewLines.Max()));
+
+                    for (var rowIndex = 0; rowIndex < hunk.Rows.Count; rowIndex++)
+                    {
+                        var row = hunk.Rows[rowIndex];
+                        if (row.Kind == DiffRowKind.Added && row.NewLineNumber is int newLineNumber)
+                        {
+                            if (newLineNumber < 1 || newLineNumber > drafts.Count) continue;
+                            var draft = drafts[newLineNumber - 1];
+                            draft.IsAddedOrChanged = true;
+                            draft.BlockIds.Add(blockId);
+                            draft.Segments = ReviewSegmentsForAddedRow(row, hunk.Rows, rowIndex);
+                            continue;
+                        }
+
+                        if (row.Kind == DiffRowKind.Removed)
+                        {
+                            var deletionAnchorLine = FindDeletionAnchorLine(hunk.Rows, rowIndex, drafts.Count);
+                            if (deletionAnchorLine < 1 || deletionAnchorLine > drafts.Count) continue;
+                            var draft = drafts[deletionAnchorLine - 1];
+                            draft.HasDeletionMarker = true;
+                            draft.BlockIds.Add(blockId);
+                        }
+                    }
+                }
+            }
+        }
+
+        return new ReviewProjection(
+            HasChanges: changes.Count > 0,
+            PendingChangeCount: changes.Count,
+            PendingChangeIds: changes.Select(change => change.Id).ToList(),
+            LineNumberFormat: new string('0', width),
+            Blocks: blocks
+                .OrderBy(block => block.AnchorLine)
+                .ThenBy(block => block.Id, StringComparer.Ordinal)
+                .ToList(),
+            Lines: drafts
+                .Select(draft => new ReviewLine(
+                    draft.LineNumber,
+                    draft.Text,
+                    draft.Segments,
+                    draft.IsAddedOrChanged,
+                    draft.HasDeletionMarker,
+                    draft.BlockIds.Distinct(StringComparer.Ordinal).ToList(),
+                    draft.BlockIds.FirstOrDefault(),
+                    MarkerTitle(draft)))
+                .ToList());
+    }
+
+    private static string ReviewLineClass(ReviewLine line)
+    {
+        var classes = "review-line";
+        if (line.IsAddedOrChanged)
+        {
+            classes += " review-line--changed";
+        }
+
+        if (line.HasDeletionMarker)
+        {
+            classes += " review-line--removed-nearby";
+        }
+
+        return classes;
+    }
+
+    private static string ReviewStripClass(ReviewLine line)
+    {
+        var classes = "review-change-strip";
+        if (line.IsAddedOrChanged)
+        {
+            classes += " review-change-strip--added";
+        }
+
+        if (line.HasDeletionMarker)
+        {
+            classes += " review-change-strip--removed";
+        }
+
+        return classes;
+    }
+
+    private static RenderFragment RenderReviewLine(ReviewLine line) => builder =>
+    {
+        var sequence = 0;
+        if (line.Segments.Count == 0)
+        {
+            builder.AddContent(sequence++, line.Text);
+            return;
+        }
+
+        foreach (var segment in line.Segments)
+        {
+            if (segment.IsAddedToken)
+            {
+                builder.OpenElement(sequence++, "span");
+                builder.AddAttribute(sequence++, "class", "review-token-added");
+                builder.AddContent(sequence++, segment.Text);
+                builder.CloseElement();
+            }
+            else
+            {
+                builder.AddContent(sequence++, segment.Text);
+            }
+        }
+    };
+
+    private static IReadOnlyList<AiChange> CurrentChapterBodyChanges(IReadOnlyList<AiChangeBatch> batches, Guid chapterId) => batches
+        .SelectMany(batch => batch.Changes)
+        .Where(change => change.Status == AiChangeStatus.Pending && IsChapterBodyChangeFor(change, chapterId))
+        .OrderBy(change => change.Batch.CreatedAt)
+        .ThenBy(change => change.Order)
+        .ToList();
+
+    private static bool IsChapterBodyChangeFor(AiChange change, Guid chapterId)
+    {
+        if (!string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return ReadChapterBodyChange(change.BeforeJson)?.Id == chapterId
+            || ReadChapterBodyChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
+    }
+
+    private static ChapterBodyChange? ReadChapterBodyChange(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json == "null") return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<ChapterBodyChange>(json, ChangePayloadJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static int FindDeletionAnchorLine(IReadOnlyList<DiffRow> rows, int rowIndex, int lineCount)
+    {
+        if (rows[rowIndex].PairId is int pairId)
+        {
+            var pairedNew = rows.FirstOrDefault(candidate => candidate.PairId == pairId && candidate.Kind == DiffRowKind.Added);
+            if (pairedNew?.NewLineNumber is int pairedLine)
+                return Math.Clamp(pairedLine, 1, Math.Max(1, lineCount));
+        }
+
+        for (var index = rowIndex + 1; index < rows.Count; index++)
+        {
+            if (rows[index].NewLineNumber is int nextLine)
+                return Math.Clamp(nextLine, 1, Math.Max(1, lineCount));
+        }
+
+        for (var index = rowIndex - 1; index >= 0; index--)
+        {
+            if (rows[index].NewLineNumber is int previousLine)
+                return Math.Clamp(previousLine, 1, Math.Max(1, lineCount));
+        }
+
+        return 1;
+    }
+
+    private static int FindBlockAnchorLine(IReadOnlyList<DiffRow> rows, int lineCount)
+    {
+        var firstAdded = rows.FirstOrDefault(row => row.Kind == DiffRowKind.Added && row.NewLineNumber.HasValue);
+        if (firstAdded?.NewLineNumber is int addedLine)
+            return Math.Clamp(addedLine, 1, Math.Max(1, lineCount));
+
+        var firstRemovedIndex = rows.ToList().FindIndex(row => row.Kind == DiffRowKind.Removed);
+        return firstRemovedIndex >= 0
+            ? FindDeletionAnchorLine(rows, firstRemovedIndex, lineCount)
+            : 1;
+    }
+
+    private static double MarkerTopPercent(int anchorLine, int lineCount)
+    {
+        if (lineCount <= 1) return 0;
+        return Math.Clamp(((double)(anchorLine - 1) / (lineCount - 1)) * 100, 0, 100);
+    }
+
+    private static string ReviewBlockTitle(DiffHunk hunk)
+    {
+        if (hunk.Additions > 0 && hunk.Deletions > 0) return "Changed lines";
+        if (hunk.Additions > 0) return "Added lines";
+        if (hunk.Deletions > 0) return "Removed lines";
+        return "Chapter change";
+    }
+
+    private static string ReviewBlockSummary(DiffHunk hunk)
+    {
+        var additions = hunk.Additions == 1 ? "1 line added" : $"{hunk.Additions} lines added";
+        var deletions = hunk.Deletions == 1 ? "1 line removed" : $"{hunk.Deletions} lines removed";
+        return $"{additions}, {deletions}";
+    }
+
+    private static string? MarkerTitle(ReviewLineDraft draft)
+    {
+        if (draft.IsAddedOrChanged && draft.HasDeletionMarker)
+            return "Added or changed line; nearby line removed";
+        if (draft.IsAddedOrChanged)
+            return "Added or changed line";
+        if (draft.HasDeletionMarker)
+            return "Nearby removed line";
+        return null;
+    }
+
+    private static string ReviewDiffRowClass(DiffRow row) => row.Kind switch
+    {
+        DiffRowKind.Added => "review-diff-row review-diff-row--added",
+        DiffRowKind.Removed => "review-diff-row review-diff-row--removed",
+        _ => "review-diff-row review-diff-row--context",
+    };
+
+    private static IReadOnlyList<ReviewSegment> ReviewSegmentsForAddedRow(DiffRow row, IReadOnlyList<DiffRow> hunkRows, int rowIndex) =>
+        SegmentsForReviewRow(row, hunkRows, rowIndex)
+            .Select(segment => new ReviewSegment(segment.Text, segment.Kind == DiffSegmentKind.Added))
+            .ToList();
+
+    private static RenderFragment RenderDiffSegments(DiffRow row, IReadOnlyList<DiffRow> hunkRows) => builder =>
+    {
+        var segments = SegmentsForReviewRow(row, hunkRows, RowIndex(hunkRows, row));
+        var sequence = 0;
+        foreach (var segment in segments)
+        {
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", DiffSegmentClass(segment.Kind));
+            builder.AddContent(sequence++, segment.Text);
+            builder.CloseElement();
+        }
+    };
+
+    private static IReadOnlyList<DiffSegment> SegmentsForReviewRow(DiffRow row, IReadOnlyList<DiffRow> hunkRows, int rowIndex)
+    {
+        if (row.Kind == DiffRowKind.Context)
+            return row.Segments;
+
+        if (row.Segments.Any(segment => segment.Kind != DiffSegmentKind.Unchanged))
+            return row.Segments;
+
+        var counterpart = FindReviewCounterpart(row, hunkRows, rowIndex);
+        if (counterpart is not null && ReviewLineSimilarity(counterpart.Text, row.Text) >= 0.2)
+        {
+            return row.Kind == DiffRowKind.Added
+                ? BuildTokenDiffSegments(counterpart.Text, row.Text, renderNew: true)
+                : BuildTokenDiffSegments(row.Text, counterpart.Text, renderNew: false);
+        }
+
+        return row.Kind switch
+        {
+            DiffRowKind.Added => SegmentWholeText(row.Text, DiffSegmentKind.Added),
+            DiffRowKind.Removed => SegmentWholeText(row.Text, DiffSegmentKind.Removed),
+            _ => row.Segments,
+        };
+    }
+
+    private static DiffRow? FindReviewCounterpart(DiffRow row, IReadOnlyList<DiffRow> hunkRows, int rowIndex)
+    {
+        var counterpartKind = row.Kind == DiffRowKind.Added ? DiffRowKind.Removed : DiffRowKind.Added;
+        if (row.PairId is int pairId)
+        {
+            var paired = hunkRows.FirstOrDefault(candidate => candidate.Kind == counterpartKind && candidate.PairId == pairId);
+            if (paired is not null)
+                return paired;
+        }
+
+        DiffRow? best = null;
+        var bestScore = 0.0;
+        for (var index = 0; index < hunkRows.Count; index++)
+        {
+            var candidate = hunkRows[index];
+            if (candidate.Kind != counterpartKind || candidate.PairId is not null)
+                continue;
+
+            var distancePenalty = Math.Abs(index - rowIndex) * 0.025;
+            var score = ReviewLineSimilarity(candidate.Text, row.Text) - distancePenalty;
+            if (score > bestScore)
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    private static IReadOnlyList<DiffSegment> SegmentWholeText(string text, DiffSegmentKind kind) =>
+        string.IsNullOrEmpty(text) ? [] : [new DiffSegment(text, kind)];
+
+    private static IReadOnlyList<DiffSegment> BuildTokenDiffSegments(string oldText, string newText, bool renderNew)
+    {
+        var oldTokens = TokenizeReviewDisplayText(oldText);
+        var newTokens = TokenizeReviewDisplayText(newText);
+        if (oldTokens.Count == 0 || newTokens.Count == 0 || (long)oldTokens.Count * newTokens.Count > 10_000)
+            return SegmentWholeText(renderNew ? newText : oldText, renderNew ? DiffSegmentKind.Added : DiffSegmentKind.Removed);
+
+        var table = new int[oldTokens.Count + 1, newTokens.Count + 1];
+        for (var oldIndex = oldTokens.Count - 1; oldIndex >= 0; oldIndex--)
+        {
+            for (var newIndex = newTokens.Count - 1; newIndex >= 0; newIndex--)
+            {
+                table[oldIndex, newIndex] = ReviewTokensEquivalent(oldTokens[oldIndex], newTokens[newIndex])
+                    ? table[oldIndex + 1, newIndex + 1] + 1
+                    : Math.Max(table[oldIndex + 1, newIndex], table[oldIndex, newIndex + 1]);
+            }
+        }
+
+        var segments = new List<DiffSegment>();
+        var oldCursor = 0;
+        var newCursor = 0;
+        while (oldCursor < oldTokens.Count && newCursor < newTokens.Count)
+        {
+            if (ReviewTokensEquivalent(oldTokens[oldCursor], newTokens[newCursor]))
+            {
+                AddReviewSegment(segments, renderNew ? newTokens[newCursor].Text : oldTokens[oldCursor].Text, DiffSegmentKind.Unchanged);
+                oldCursor++;
+                newCursor++;
+            }
+            else if (table[oldCursor + 1, newCursor] >= table[oldCursor, newCursor + 1])
+            {
+                if (!renderNew)
+                    AddReviewSegment(segments, oldTokens[oldCursor].Text, DiffSegmentKind.Removed);
+                oldCursor++;
+            }
+            else
+            {
+                if (renderNew)
+                    AddReviewSegment(segments, newTokens[newCursor].Text, DiffSegmentKind.Added);
+                newCursor++;
+            }
+        }
+
+        while (oldCursor < oldTokens.Count)
+        {
+            if (!renderNew)
+                AddReviewSegment(segments, oldTokens[oldCursor].Text, DiffSegmentKind.Removed);
+            oldCursor++;
+        }
+
+        while (newCursor < newTokens.Count)
+        {
+            if (renderNew)
+                AddReviewSegment(segments, newTokens[newCursor].Text, DiffSegmentKind.Added);
+            newCursor++;
+        }
+
+        return segments;
+    }
+
+    private static void AddReviewSegment(List<DiffSegment> segments, string text, DiffSegmentKind kind)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        if (segments.Count > 0 && segments[^1].Kind == kind)
+        {
+            segments[^1] = segments[^1] with { Text = segments[^1].Text + text };
+            return;
+        }
+
+        segments.Add(new DiffSegment(text, kind));
+    }
+
+    private static IReadOnlyList<ReviewDisplayToken> TokenizeReviewDisplayText(string text)
+    {
+        var tokens = new List<ReviewDisplayToken>();
+        var index = 0;
+        while (index < text.Length)
+        {
+            var start = index;
+            var kind = ReviewTokenKind(text[index]);
+            index++;
+            while (index < text.Length && ReviewTokenKind(text[index]) == kind)
+                index++;
+
+            var tokenText = text[start..index];
+            tokens.Add(new ReviewDisplayToken(tokenText, tokenText, kind));
+        }
+
+        return tokens;
+    }
+
+    private static ReviewDisplayTokenKind ReviewTokenKind(char character)
+    {
+        if (char.IsWhiteSpace(character)) return ReviewDisplayTokenKind.Whitespace;
+        return IsReviewWordCharacter(character) ? ReviewDisplayTokenKind.Word : ReviewDisplayTokenKind.Punctuation;
+    }
+
+    private static bool ReviewTokensEquivalent(ReviewDisplayToken oldToken, ReviewDisplayToken newToken) =>
+        oldToken.Kind == newToken.Kind
+        && string.Equals(oldToken.Key, newToken.Key, StringComparison.Ordinal);
+
+    private static bool IsReviewWordCharacter(char character) =>
+        char.IsLetterOrDigit(character) || character == '_' || character == '\'';
+
+    private static double ReviewLineSimilarity(string oldLine, string newLine)
+    {
+        if (string.Equals(oldLine, newLine, StringComparison.Ordinal)) return 1;
+
+        var oldWords = TokenizeReviewWords(oldLine);
+        var newWords = TokenizeReviewWords(newLine);
+        if (oldWords.Count == 0 || newWords.Count == 0) return 0;
+
+        var oldCounts = oldWords.GroupBy(word => word, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        var newCounts = newWords.GroupBy(word => word, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        var overlap = 0;
+        foreach (var (word, oldCount) in oldCounts)
+        {
+            if (newCounts.TryGetValue(word, out var newCount))
+                overlap += Math.Min(oldCount, newCount);
+        }
+
+        return (2.0 * overlap) / (oldWords.Count + newWords.Count);
+    }
+
+    private static IReadOnlyList<string> TokenizeReviewWords(string line)
+    {
+        var words = new List<string>();
+        var index = 0;
+        while (index < line.Length)
+        {
+            if (!IsReviewWordCharacter(line[index]))
+            {
+                index++;
+                continue;
+            }
+
+            var start = index;
+            while (index < line.Length && IsReviewWordCharacter(line[index]))
+                index++;
+            words.Add(line[start..index]);
+        }
+
+        return words;
+    }
+
+    private static int RowIndex(IReadOnlyList<DiffRow> rows, DiffRow row)
+    {
+        for (var index = 0; index < rows.Count; index++)
+        {
+            if (ReferenceEquals(rows[index], row) || rows[index].Equals(row))
+                return index;
+        }
+
+        return -1;
+    }
+
+    private static string DiffSegmentClass(DiffSegmentKind kind) => kind switch
+    {
+        DiffSegmentKind.Added => "review-diff-segment review-diff-segment--added",
+        DiffSegmentKind.Removed => "review-diff-segment review-diff-segment--removed",
+        _ => "review-diff-segment",
+    };
+
+    private static bool CanEditNewLine(DiffRow row) =>
+        row.Kind == DiffRowKind.Added && row.NewLineNumber.HasValue;
+
+    private static bool CanRejectDiffRow(DiffRow row) => row.Kind != DiffRowKind.Context;
+
+    private static string RejectLine(DiffSection section, DiffRow row, IReadOnlyList<DiffRow> hunkRows)
+    {
+        var lines = ChapterFormatting.SplitLines(section.NewText);
+        if (row.Kind == DiffRowKind.Added && row.NewLineNumber is int newLineNumber)
+        {
+            var index = newLineNumber - 1;
+            if (index < 0 || index >= lines.Count) return section.NewText;
+
+            var pairedOld = row.PairId is int pairId
+                ? hunkRows.FirstOrDefault(candidate => candidate.PairId == pairId && candidate.Kind == DiffRowKind.Removed)
+                : null;
+            if (pairedOld is not null)
+                lines[index] = pairedOld.Text;
+            else
+                lines.RemoveAt(index);
+
+            return ChapterFormatting.JoinLines(lines);
+        }
+
+        if (row.Kind == DiffRowKind.Removed && row.OldLineNumber is int oldLineNumber)
+        {
+            var pairedNew = row.PairId is int pairId
+                ? hunkRows.FirstOrDefault(candidate => candidate.PairId == pairId && candidate.Kind == DiffRowKind.Added)
+                : null;
+            if (pairedNew?.NewLineNumber is int pairedNewLineNumber)
+            {
+                var pairedIndex = pairedNewLineNumber - 1;
+                if (pairedIndex >= 0 && pairedIndex < lines.Count)
+                {
+                    lines[pairedIndex] = row.Text;
+                    return ChapterFormatting.JoinLines(lines);
+                }
+            }
+
+            lines.Insert(Math.Clamp(oldLineNumber - 1, 0, lines.Count), row.Text);
+            return ChapterFormatting.JoinLines(lines);
+        }
+
+        return section.NewText;
+    }
+
+    private static string NormalizeLineEditText(string text) =>
+        text.Replace("\r\n", "\n").Replace('\r', '\n');
+
+    private static string BuildReviewStateJson() =>
+        JsonSerializer.Serialize(new ReviewDraftState(DateTime.UtcNow), JsonSerializerOptions.Default);
 
     private void StartEditTitle()
     {
@@ -667,6 +2065,10 @@ else
         try
         {
             await ReloadCurrentChapterAfterAiAsync();
+            if (_mode == EditorMode.Review)
+            {
+                await RefreshReviewChangesAsync();
+            }
         }
         catch (JSDisconnectedException) { }
         catch (OperationCanceledException) { }
@@ -679,7 +2081,7 @@ else
             _chapterLocked = false;
             try
             {
-                await InvokeEditorVoidAsync("setReadOnly", false);
+                await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
             }
             catch (JSDisconnectedException) { }
             catch (OperationCanceledException) { }
@@ -696,6 +2098,10 @@ else
         try
         {
             await ReloadCurrentChapterAfterAiAsync();
+            if (_mode == EditorMode.Review)
+            {
+                await RefreshReviewChangesAsync();
+            }
         }
         catch (JSDisconnectedException) { }
         catch (OperationCanceledException) { }
@@ -739,7 +2145,7 @@ else
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                LogEditorRefreshFailure(ex, "Context Feed refresh");
+                LogEditorRefreshFailure(ex, "Assistant Memory refresh");
             }
         }
         StateHasChanged();
@@ -773,4 +2179,89 @@ else
     }
 
     private enum SaveState { Idle, Saving, Saved, IndexFailed, SaveFailed }
+
+    private enum EditorMode { Edit, Read, Review }
+
+    private sealed record ReviewProjection(
+        bool HasChanges,
+        int PendingChangeCount,
+        IReadOnlyList<Guid> PendingChangeIds,
+        string LineNumberFormat,
+        IReadOnlyList<ReviewBlock> Blocks,
+        IReadOnlyList<ReviewLine> Lines);
+
+    private sealed record ReviewLine(
+        int LineNumber,
+        string Text,
+        IReadOnlyList<ReviewSegment> Segments,
+        bool IsAddedOrChanged,
+        bool HasDeletionMarker,
+        IReadOnlyList<string> BlockIds,
+        string? PrimaryBlockId,
+        string? MarkerTitle);
+
+    private sealed record ReviewSegment(string Text, bool IsAddedToken);
+
+    private sealed record ReviewBlock(
+        string Id,
+        Guid ChangeId,
+        string Title,
+        string Summary,
+        int AnchorLine,
+        double MarkerTopPercent,
+        DiffSection Section,
+        DiffHunk Hunk,
+        int? EditStartNewLine,
+        int? EditEndNewLine)
+    {
+        public bool HasAdditions => Hunk.Additions > 0;
+        public bool HasDeletions => Hunk.Deletions > 0;
+        public bool CanEdit => EditStartNewLine.HasValue && EditEndNewLine.HasValue;
+    }
+
+    private sealed class ReviewLineDraft(int lineNumber, string text)
+    {
+        public int LineNumber { get; } = lineNumber;
+        public string Text { get; } = text;
+        public IReadOnlyList<ReviewSegment> Segments { get; set; } = [];
+        public bool IsAddedOrChanged { get; set; }
+        public bool HasDeletionMarker { get; set; }
+        public List<string> BlockIds { get; } = [];
+    }
+
+    private sealed class ReviewBlockEdit(
+        string blockId,
+        Guid changeId,
+        string sectionKey,
+        int startNewLine,
+        int endNewLine,
+        string text)
+    {
+        public string BlockId { get; } = blockId;
+        public Guid ChangeId { get; } = changeId;
+        public string SectionKey { get; } = sectionKey;
+        public int StartNewLine { get; } = startNewLine;
+        public int EndNewLine { get; } = endNewLine;
+        public string Text { get; set; } = text;
+    }
+
+    private sealed class ReviewLineEdit(string blockId, Guid changeId, string sectionKey, int newLineNumber, string text)
+    {
+        public string BlockId { get; } = blockId;
+        public Guid ChangeId { get; } = changeId;
+        public string SectionKey { get; } = sectionKey;
+        public int NewLineNumber { get; } = newLineNumber;
+        public string Text { get; set; } = text;
+    }
+
+    private sealed record ReviewDraftState(DateTime UpdatedAt);
+
+    private sealed record ReviewDisplayToken(string Text, string Key, ReviewDisplayTokenKind Kind);
+
+    private enum ReviewDisplayTokenKind
+    {
+        Word,
+        Whitespace,
+        Punctuation,
+    }
 }

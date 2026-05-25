@@ -63,6 +63,8 @@ public sealed class ChatToolChip
 
     public ChatToolProgress? Progress { get; set; }
 
+    public double? DurationMs { get; set; }
+
     public bool Completed { get; set; }
 
     public bool ArgumentsComplete { get; private set; }
@@ -152,7 +154,7 @@ public sealed class ChatLiveTurn
         if (chip is null)
         {
             chip = new ChatToolChip(callId, name, argumentsJson, argumentsComplete);
-            CurrentMessage().Parts.Add(new ChatToolPart(chip));
+            ToolMessage().Parts.Add(new ChatToolPart(chip));
             return;
         }
 
@@ -170,19 +172,20 @@ public sealed class ChatLiveTurn
         if (chip is null)
         {
             chip = new ChatToolChip(callId, callId, string.Empty, argumentsComplete: false);
-            CurrentMessage().Parts.Add(new ChatToolPart(chip));
+            ToolMessage().Parts.Add(new ChatToolPart(chip));
         }
 
         chip.AppendArguments(argumentsDelta, argumentsComplete);
     }
 
-    public void CompleteToolCall(string callId, string? result, string? error)
+    public void CompleteToolCall(string callId, string? result, string? error, double? durationMs = null)
     {
         var chip = FindToolChip(callId);
         if (chip is not null)
         {
             chip.Result = result;
             chip.Error = error;
+            chip.DurationMs = durationMs;
             chip.Completed = true;
             chip.MarkArgumentsComplete();
         }
@@ -198,7 +201,7 @@ public sealed class ChatLiveTurn
         if (chip is null)
         {
             chip = new ChatToolChip(callId, toolName, string.Empty);
-            CurrentMessage().Parts.Add(new ChatToolPart(chip));
+            ToolMessage().Parts.Add(new ChatToolPart(chip));
         }
         else
         {
@@ -226,6 +229,20 @@ public sealed class ChatLiveTurn
         }
 
         return Messages[^1];
+    }
+
+    private ChatLiveMessage ToolMessage()
+    {
+        if (_startNewMessageOnNextPart
+            && Messages.LastOrDefault() is { } lastMessage
+            && lastMessage.Parts.Count > 0
+            && lastMessage.Parts.All(part => part is ChatToolPart))
+        {
+            _startNewMessageOnNextPart = false;
+            return lastMessage;
+        }
+
+        return CurrentMessage();
     }
 }
 

@@ -98,6 +98,77 @@
     margin-top: 0.4rem;
 }
 
+.chat-tool-group {
+    margin-top: 0.4rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.45rem;
+    background: rgba(255, 255, 255, 0.62);
+    font-size: 0.82rem;
+}
+
+.chat-tool-group > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.3rem 0.55rem;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    user-select: none;
+}
+
+.chat-tool-group > summary::-webkit-details-marker {
+    display: none;
+}
+
+.chat-tool-group-icon {
+    width: 1.5rem;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+}
+
+.chat-tool-group-ok .chat-tool-group-icon {
+    color: var(--bs-success, #198754);
+}
+
+.chat-tool-group-error .chat-tool-group-icon {
+    color: var(--bs-danger, #dc3545);
+}
+
+.chat-tool-group-running .chat-tool-group-icon {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.chat-tool-group-title {
+    flex: 0 0 auto;
+    font-weight: 700;
+}
+
+.chat-tool-group-names {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--bs-secondary-color, #6c757d);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.76rem;
+}
+
+.chat-tool-group-duration {
+    flex: 0 0 auto;
+    margin-left: auto;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.chat-tool-group-body {
+    padding: 0.15rem 0.5rem 0.5rem;
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+}
+
 .chat-msg-status {
     margin-top: 0.25rem;
     color: var(--bs-secondary-color, #6c757d);

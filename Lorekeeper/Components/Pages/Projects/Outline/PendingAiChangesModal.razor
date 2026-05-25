@@ -390,6 +390,7 @@
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public IReadOnlyList<AiChangeBatch> Batches { get; set; } = [];
     [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public Guid? SelectedChangeId { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
 
@@ -408,6 +409,7 @@
     private IReadOnlyList<PendingChangeGroup> _grouped = [];
     private PendingChangeGroup? _selectedGroup;
     private PendingLineEdit? _lineEdit;
+    private Guid? _lastAppliedSelectedChangeId;
 
     private IReadOnlyList<PendingChangeItem> Flattened => _flattened;
     private IReadOnlyList<PendingChangeGroup> Grouped => _grouped;
@@ -454,8 +456,20 @@
         _flattened = BuildFlattened(Batches);
         _grouped = BuildGrouped(_flattened);
         _changeCacheHash = ComputeChangeCacheHash(_flattened);
-        _selectedGroup = _grouped.FirstOrDefault(group => group.Key == _selectedGroupKey) ?? _grouped.FirstOrDefault();
+        var shouldApplySelectedChange = SelectedChangeId is not null
+            && (IsOpen && !_wasOpen
+                || SelectedChangeId != _lastAppliedSelectedChangeId
+                || previousChangeCacheHash != _changeCacheHash);
+        var selectedChangeGroup = shouldApplySelectedChange
+            ? _grouped.FirstOrDefault(group => group.ChangeIds.Contains(SelectedChangeId!.Value))
+            : null;
+
+        _selectedGroup = selectedChangeGroup
+            ?? _grouped.FirstOrDefault(group => group.Key == _selectedGroupKey)
+            ?? _grouped.FirstOrDefault();
         _selectedGroupKey = _selectedGroup?.Key;
+        if (shouldApplySelectedChange)
+            _lastAppliedSelectedChangeId = SelectedChangeId;
 
         if (_lineEdit is not null
             && (!IsOpen

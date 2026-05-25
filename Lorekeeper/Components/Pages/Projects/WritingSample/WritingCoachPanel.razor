@@ -163,7 +163,7 @@
                         break;
 
                     case WritingCoachToolCallCompleted completed:
-                        _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error);
+                        _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
                         UpdateConversationTokenCount();
                         RequestScroll();
                         StateHasChanged();

@@ -63,10 +63,44 @@
     background: var(--bs-tertiary-bg, #f8f9fa);
 }
 
-.ctx-action {
+.ctx-action-icon {
     flex: 0 0 auto;
-    padding: 0.1rem 0.45rem;
-    font-size: 0.72rem;
-    line-height: 1.2;
-    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    border: 1px solid currentColor;
+    border-radius: 0.35rem;
+    background: transparent;
+    line-height: 1;
+}
+
+.ctx-action-icon svg {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.ctx-action-icon--enabled {
+    color: var(--bs-success, #198754);
+}
+
+.ctx-action-icon--disabled,
+.ctx-action-icon--remove {
+    color: var(--bs-danger, #dc3545);
+}
+
+.ctx-action-icon:hover {
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.ctx-action-icon:focus-visible {
+    outline: 0;
+    box-shadow: 0 0 0 0.15rem rgba(13, 110, 253, 0.25);
 }

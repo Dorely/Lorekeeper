@@ -190,7 +190,7 @@
                         break;
 
                     case ToolCallCompleted tc:
-                        _live!.CompleteToolCall(tc.CallId, tc.Result, tc.Error);
+                        _live!.CompleteToolCall(tc.CallId, tc.Result, tc.Error, tc.DurationMs);
                         UpdateConversationTokenCount();
                         RequestScroll();
                         StateHasChanged();
