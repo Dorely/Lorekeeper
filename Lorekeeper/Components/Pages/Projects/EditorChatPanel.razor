@@ -29,8 +29,8 @@
              InputChanged="SetInput"
              Placeholder="Type a message..."
              Running="@_running"
-             ComposerDisabled="@(ChatDisabled || _running || PendingChangeCount > 0)"
-             SendDisabled="@(ChatDisabled || string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0 || !ContestCanSend)"
+             ComposerDisabled="@(ChatDisabled || _running || PendingReviewCount > 0)"
+             SendDisabled="@(ChatDisabled || string.IsNullOrWhiteSpace(_input) || PendingReviewCount > 0 || !ContestCanSend)"
              OnSend="SendAsync"
              OnStop="CancelAsync"
              ForceScrollKey="@_forceScrollKey"
@@ -39,7 +39,7 @@
              ResetComposerKey="@_resetComposerKey">
     <HeaderActions>
             <button type="button" class="btn btn-link btn-sm editor-chat-reset" title="Start over"
-                    disabled="@(ChatDisabled || _running || PendingChangeCount > 0)" @onclick="ResetAsync">Reset</button>
+                    disabled="@(ChatDisabled || _running || PendingReviewCount > 0)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
     <ExtraControls>
         @if (ChatDisabled)
@@ -56,7 +56,7 @@
                     <span>Review edits</span>
                 </label>
 
-                <label class="editor-chat-contest-toggle" title="Use read-only chat preparation, then compare up to three model candidates before staging one edit">
+                <label class="editor-chat-contest-toggle" title="Use read-only chat preparation, then compare up to three model candidates in Review mode">
                     <input class="form-check-input" type="checkbox" checked="@_contestEnabled"
                            disabled="@(ChatDisabled || _running)" @onchange="OnContestEnabledChangedAsync" />
                     <span>Contest Mode</span>
@@ -64,7 +64,7 @@
 
                 @if (PendingReviewCount > 0)
                 {
-                    <button type="button" class="btn btn-link btn-sm editor-chat-pending" title="@PendingReviewTitle" @onclick="OpenPendingChanges">
+                    <button type="button" class="btn btn-link btn-sm editor-chat-pending" title="@PendingReviewTitle" @onclick="OpenPendingChangesAsync">
                         Pending changes @PendingReviewCount
                     </button>
                 }
@@ -80,15 +80,6 @@
         </div>
     </ExtraControls>
 </ChatSurface>
-
-<ContestReviewModal ProjectId="@ProjectId"
-                    Batches="@_contestBatches"
-                    IsOpen="@_showContestReview"
-                    Title="Contest Review"
-                    Subtitle="Compare candidate chapter edits from the current contest turn, then apply or stage one."
-                    EmptyText="No current contest candidates yet."
-                    OnClose="CloseContestReview"
-                    OnChanged="HandleContestChangedAsync" />
 
 <PendingAiChangesModal ProjectId="@ProjectId"
                        Batches="@_pendingBatches"
@@ -108,6 +99,7 @@
     [Parameter] public EventCallback OnAiTurnCompleted { get; set; }
     [Parameter] public EventCallback OnAiChangesApplied { get; set; }
     [Parameter] public EventCallback OnActiveChapterBodyChangesReady { get; set; }
+    [Parameter] public EventCallback OnContestResultsReady { get; set; }
 
     private int _forceScrollKey;
     private int _scrollKey;
@@ -137,7 +129,6 @@
     private string _systemPrompt = string.Empty;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private bool _contestEnabled;
-    private bool _showContestReview;
     private int? _contestProviderSlot1Id;
     private int? _contestProviderSlot2Id;
     private int? _contestProviderSlot3Id;
@@ -145,9 +136,15 @@
 
     private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
     private int ContestCandidateCount => _contestBatches.Sum(batch => batch.Candidates.Count);
+    private int ContestReviewCandidateCount => _contestBatches
+        .Where(batch => batch.Status == ContestBatchStatus.Completed)
+        .Sum(batch => batch.Candidates.Count);
+    private bool HasRunningContest => _contestBatches.Any(batch => batch.Status == ContestBatchStatus.Running);
     private int PendingReviewCount => PendingChangeCount > 0 ? PendingChangeCount : ContestCandidateCount;
     private string PendingReviewTitle => PendingChangeCount > 0
         ? "Review pending AI edits"
+        : HasRunningContest
+            ? "Contest Mode is still running"
         : "Review pending Contest Mode candidates";
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
     private string ChatDisabledMessage => _chatAvailability?.Message
@@ -226,18 +223,18 @@
         }
         if (PendingChangeCount > 0)
         {
-            OpenPendingChanges();
+            await OpenPendingChangesAsync();
             return;
         }
         if (_contestBatches.Any(batch => batch.Status == ContestBatchStatus.Running))
         {
-            OpenPendingChanges();
+            await OpenPendingChangesAsync();
             return;
         }
         if (ContestCandidateCount > 0)
         {
-            _contestBatches = [];
-            _showContestReview = false;
+            await OpenPendingChangesAsync();
+            return;
         }
 
         _input = string.Empty;
@@ -507,7 +504,6 @@
 
             if (!routeActiveChapterBodyToParent || hasOtherPendingChanges || !hasActiveChapterBodyChanges)
             {
-                _showContestReview = false;
                 _showPendingChanges = true;
             }
             else
@@ -523,17 +519,13 @@
     {
         _contestBatches = (await Chat.ListCurrentContestBatchesAsync(ProjectId)).ToList();
         if (PendingChangeCount > 0)
-        {
-            _showContestReview = false;
             return;
-        }
-        if (openIfAvailable && ContestCandidateCount > 0)
+        if (openIfAvailable && ContestReviewCandidateCount > 0)
         {
             _showPendingChanges = false;
-            _showContestReview = true;
+            if (OnContestResultsReady.HasDelegate)
+                await OnContestResultsReady.InvokeAsync();
         }
-        if (ContestCandidateCount == 0)
-            _showContestReview = false;
     }
 
     private void ApplyContestCandidateRawResponseDelta(Guid candidateId, string rawResponse)
@@ -574,42 +566,34 @@
         await Chat.SetContestProviderAsync(ProjectId, slot, providerId);
     }
 
-    private void OpenPendingChanges()
+    private async Task OpenPendingChangesAsync()
     {
         if (PendingChangeCount > 0)
         {
-            _showContestReview = false;
             _showPendingChanges = true;
             return;
         }
 
-        if (ContestCandidateCount > 0)
+        if (ContestReviewCandidateCount > 0)
         {
             _showPendingChanges = false;
-            _showContestReview = true;
+            if (OnContestResultsReady.HasDelegate)
+                await OnContestResultsReady.InvokeAsync();
+            return;
+        }
+
+        if (HasRunningContest)
+        {
+            _error = "Wait for the running contest to finish before reviewing candidate changes.";
         }
     }
 
     private void ClosePendingChanges() => _showPendingChanges = false;
 
-    private void CloseContestReview() => _showContestReview = false;
-
     private async Task HandlePendingChangesChangedAsync()
     {
         await LoadPendingChangesAsync(openIfPending: false);
         await ReloadFromDbAsync();
-        if (OnAiChangesApplied.HasDelegate)
-            await OnAiChangesApplied.InvokeAsync();
-        await RefreshSystemPromptAsync();
-        UpdateConversationTokenCount();
-        StateHasChanged();
-    }
-
-    private async Task HandleContestChangedAsync()
-    {
-        await LoadContestBatchesAsync(openIfAvailable: false);
-        await LoadPendingChangesAsync(openIfPending: true, routeActiveChapterBodyToParent: true);
-        _showContestReview = false;
         if (OnAiChangesApplied.HasDelegate)
             await OnAiChangesApplied.InvokeAsync();
         await RefreshSystemPromptAsync();

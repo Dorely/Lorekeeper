@@ -9,6 +9,9 @@ public interface IEditorContestService
     Task SetContestProviderAsync(Guid projectId, int slot, int? providerId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task DiscardInactiveContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task ResolveCandidateLineAsync(Guid projectId, Guid chapterId, ContestCandidateReviewLineResolution request, CancellationToken cancellationToken = default);
+    Task KeepCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default);
+    Task FinishContestBatchAsync(Guid batchId, CancellationToken cancellationToken = default);
     IAsyncEnumerable<EditorContestRunUpdate> StartContestAsync(
         Guid projectId,
         Guid conversationId,
@@ -16,5 +19,4 @@ public interface IEditorContestService
         EditorContestStartRequest request,
         ContestTurnSnapshot snapshot,
         CancellationToken cancellationToken = default);
-    Task StageCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default);
 }

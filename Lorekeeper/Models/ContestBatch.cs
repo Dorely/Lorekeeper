@@ -17,6 +17,10 @@ public class ContestBatch
 
     public string OriginalChapterBody { get; set; } = string.Empty;
 
+    public string AcceptedChapterBody { get; set; } = string.Empty;
+
+    public Guid? WinningCandidateId { get; set; }
+
     public string ContextSnapshotJson { get; set; } = "{}";
 
     public ContestBatchStatus Status { get; set; } = ContestBatchStatus.Running;
@@ -34,7 +38,7 @@ public enum ContestBatchStatus
 {
     Running,
     Completed,
-    Staged,
     Failed,
     Cancelled,
+    Finished,
 }

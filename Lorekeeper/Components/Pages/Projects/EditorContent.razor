@@ -1,4 +1,5 @@
 @using System.Text.Json
+@using System.Text.Json.Serialization
 @using System.Globalization
 @using Lorekeeper.Chapters
 @using Lorekeeper.Components.Pages.Projects.Outline
@@ -41,7 +42,7 @@ else if (_current is null)
 else
 {
     <div class="@EditorGridClass()">
-        @if (_chatPaneCollapsed)
+        @if (EffectiveChatPaneCollapsed)
         {
             <button type="button"
                     class="editor-pane-tab editor-pane-tab--left"
@@ -68,7 +69,8 @@ else
                                  OnAiTurnStarting="OnAiTurnStartingAsync"
                                  OnAiTurnCompleted="OnAiTurnCompletedAsync"
                                  OnAiChangesApplied="OnAiChangesAppliedAsync"
-                                 OnActiveChapterBodyChangesReady="OpenReviewForActiveChapterChangesAsync" />
+                                  OnActiveChapterBodyChangesReady="OpenReviewForActiveChapterChangesAsync"
+                                  OnContestResultsReady="OpenReviewForContestResultsAsync" />
             </aside>
         }
 
@@ -125,10 +127,12 @@ else
             <div class="chapter-mode-bar" role="group" aria-label="Chapter mode">
                 <button type="button"
                         class="@ModeButtonClass(EditorMode.Edit)"
+                        disabled="@ContestReviewActive"
                         aria-pressed="@(_mode == EditorMode.Edit)"
                         @onclick="() => SetModeAsync(EditorMode.Edit)">Edit</button>
                 <button type="button"
                         class="@ModeButtonClass(EditorMode.Read)"
+                        disabled="@ContestReviewActive"
                         aria-pressed="@(_mode == EditorMode.Read)"
                         @onclick="() => SetModeAsync(EditorMode.Read)">Read</button>
                 <button type="button"
@@ -152,6 +156,226 @@ else
                         @if (_reviewLoading)
                         {
                             <div class="chapter-review-empty"><em>Loading staged changes...</em></div>
+                        }
+                        else if (_contestReviewProjection is not null)
+                        {
+                            <div class="contest-review-inline" role="region" aria-label="Contest candidate review">
+                                <div class="contest-review-inline-toolbar">
+                                    <div class="contest-review-inline-summary">
+                                        <strong>Contest Review</strong>
+                                        <span>@_contestReviewProjection.Candidates.Count candidate@(_contestReviewProjection.Candidates.Count == 1 ? string.Empty : "s")</span>
+                                    </div>
+                                    <div class="contest-review-inline-actions">
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                disabled="@(_reviewBusy || _contestReviewProjection.Blocks.Count == 0)"
+                                                @onclick="GoToNextReviewBlockAsync">
+                                            Next change
+                                        </button>
+                                        <button type="button"
+                                                class="btn btn-sm btn-primary"
+                                                disabled="@(_reviewBusy || _contestReviewProjection.Batch.Status == ContestBatchStatus.Running)"
+                                                title="@(_contestReviewProjection.Batch.Status == ContestBatchStatus.Running ? "Wait for all contest candidates to finish before ending Contest Review." : "End Contest Review and keep the current accepted chapter text.")"
+                                                @onclick="FinishContestReviewAsync">
+                                            Finish contest
+                                        </button>
+                                    </div>
+                                </div>
+
+                                @if (!string.IsNullOrWhiteSpace(_reviewError))
+                                {
+                                    <div class="chapter-review-error">
+                                        <span>@_reviewError</span>
+                                        <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" @onclick="() => _reviewError = null"></button>
+                                    </div>
+                                }
+
+                                <div class="contest-review-columns">
+                                    @foreach (var candidate in _contestReviewProjection.Candidates)
+                                    {
+                                        <section class="@ContestCandidateColumnClass(candidate)" @key="candidate.CandidateId">
+                                            <header class="contest-candidate-header">
+                                                <div class="contest-candidate-title-row">
+                                                    <div class="contest-candidate-title">@candidate.ProviderName</div>
+                                                    <span class="@ContestCandidateStatusClass(candidate)">@ContestCandidateStatusText(candidate.Status)</span>
+                                                </div>
+                                                <div class="contest-candidate-model">@candidate.ModelName</div>
+                                                @if (!string.IsNullOrWhiteSpace(candidate.Summary))
+                                                {
+                                                    <div class="contest-candidate-summary">@candidate.Summary</div>
+                                                }
+                                            </header>
+
+                                            <div class="contest-candidate-sticky-action">
+                                                <button type="button"
+                                                        class="btn btn-sm btn-success contest-keep-all"
+                                                        disabled="@(_reviewBusy || !candidate.CanKeepEverything)"
+                                                        @onclick="() => KeepContestCandidateAsync(candidate.CandidateId)">
+                                                    Keep everything from this contestant
+                                                </button>
+                                            </div>
+
+                                            @if (!string.IsNullOrWhiteSpace(candidate.ErrorMessage))
+                                            {
+                                                <div class="contest-candidate-message contest-candidate-message--error">@candidate.ErrorMessage</div>
+                                            }
+                                            else if (candidate.Review is null)
+                                            {
+                                                <div class="contest-candidate-message">@ContestCandidatePlaceholder(candidate)</div>
+                                            }
+                                            else
+                                            {
+                                                <div class="contest-candidate-lines">
+                                                    @foreach (var line in candidate.Review.Lines)
+                                                    {
+                                                        @foreach (var block in ReviewBlocksBeforeLine(candidate.Review, line.LineNumber))
+                                                        {
+                                                            <article class="review-block contest-review-block" data-review-block="@block.Id" @key="block.Id">
+                                                                <header class="review-block-header">
+                                                                    <div class="review-block-title-wrap">
+                                                                        <div class="review-block-title">
+                                                                            @block.Title
+                                                                            <span class="@ContestDecisionBadgeClass(block)">@ContestDecisionText(block)</span>
+                                                                        </div>
+                                                                        <div class="review-block-summary">@block.Summary</div>
+                                                                    </div>
+                                                                    <div class="review-block-actions">
+                                                                        <button type="button"
+                                                                                class="btn btn-sm btn-outline-primary"
+                                                                                disabled="@(_reviewBusy || _contestReviewProjection.Batch.Status == ContestBatchStatus.Running || block.HasContestConflict)"
+                                                                                title="@ContestBlockActionTitle(block, "Keep")"
+                                                                                @onclick="() => KeepReviewBlockAsync(block)">
+                                                                            Keep
+                                                                        </button>
+                                                                        <button type="button"
+                                                                                class="btn btn-sm btn-outline-danger"
+                                                                                disabled="@(_reviewBusy || _contestReviewProjection.Batch.Status == ContestBatchStatus.Running)"
+                                                                                @onclick="() => RejectReviewBlockAsync(block)">
+                                                                            Reject
+                                                                        </button>
+                                                                        @if (block.CanEdit)
+                                                                        {
+                                                                            @if (IsEditingReviewBlock(block))
+                                                                            {
+                                                                                <button type="button"
+                                                                                        class="btn btn-sm btn-outline-primary"
+                                                                                        disabled="@(_reviewBusy || _contestReviewProjection.Batch.Status == ContestBatchStatus.Running || block.HasContestConflict)"
+                                                                                        title="@ContestBlockActionTitle(block, "Save edit")"
+                                                                                        @onclick="() => SaveReviewBlockEditAsync(block)">
+                                                                                    Save edit
+                                                                                </button>
+                                                                                <button type="button"
+                                                                                        class="btn btn-sm btn-outline-secondary"
+                                                                                        disabled="@_reviewBusy"
+                                                                                        @onclick="CancelReviewBlockEdit">
+                                                                                    Cancel
+                                                                                </button>
+                                                                            }
+                                                                            else
+                                                                            {
+                                                                                <button type="button"
+                                                                                        class="btn btn-sm btn-outline-secondary"
+                                                                                        disabled="@(_reviewBusy || _contestReviewProjection.Batch.Status == ContestBatchStatus.Running || block.HasContestConflict)"
+                                                                                        title="@ContestBlockActionTitle(block, "Edit")"
+                                                                                        @onclick="() => BeginReviewBlockEdit(block)">
+                                                                                    Edit
+                                                                                </button>
+                                                                            }
+                                                                        }
+                                                                    </div>
+                                                                </header>
+
+                                                                @if (!string.IsNullOrWhiteSpace(block.ContestConflictMessage))
+                                                                {
+                                                                    <div class="contest-conflict-message">@block.ContestConflictMessage</div>
+                                                                }
+
+                                                                @if (IsRejectingReviewBlock(block))
+                                                                {
+                                                                    <div class="review-reject-box">
+                                                                        <label for="@($"review-reject-{block.Id}")">Optional rejection note</label>
+                                                                        <textarea id="@($"review-reject-{block.Id}")"
+                                                                                  class="form-control"
+                                                                                  rows="2"
+                                                                                  placeholder="Tell the assistant what to correct next time..."
+                                                                                  value="@_reviewRejectionMessage"
+                                                                                  @oninput="args => _reviewRejectionMessage = args.Value?.ToString() ?? string.Empty"></textarea>
+                                                                        <div class="review-reject-actions">
+                                                                            <button type="button"
+                                                                                    class="btn btn-sm btn-danger"
+                                                                                    disabled="@_reviewBusy"
+                                                                                    @onclick="() => ConfirmRejectReviewBlockAsync(block)">
+                                                                                Reject line
+                                                                            </button>
+                                                                            <button type="button"
+                                                                                    class="btn btn-sm btn-outline-secondary"
+                                                                                    disabled="@_reviewBusy"
+                                                                                    @onclick="CancelRejectReviewBlock">
+                                                                                Cancel
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                }
+
+                                                                @if (IsEditingReviewBlock(block))
+                                                                {
+                                                                    <textarea class="form-control review-block-editor"
+                                                                              rows="2"
+                                                                              value="@(_reviewBlockEdit?.Text ?? string.Empty)"
+                                                                              @oninput="args => UpdateReviewBlockEditText(args.Value?.ToString() ?? string.Empty)"></textarea>
+                                                                }
+                                                                else
+                                                                {
+                                                                    <div class="review-block-diff">
+                                                                        @foreach (var row in ReviewBlockDisplayRows(block))
+                                                                        {
+                                                                            <div class="@ReviewDiffRowClass(row)">
+                                                                                <span class="review-diff-line-number">@ReviewDiffLineNumber(row)</span>
+                                                                                <span class="review-diff-marker">@row.Marker</span>
+                                                                                <span class="review-diff-line-text">@RenderDiffSegments(row, block.Hunk.Rows)</span>
+                                                                                <span class="review-diff-spacer"></span>
+                                                                            </div>
+                                                                        }
+                                                                    </div>
+                                                                }
+                                                            </article>
+                                                        }
+
+                                                        @if (ShouldRenderReviewLine(candidate.Review, line))
+                                                        {
+                                                            <div class="@ReviewLineClass(line)" @key="line.LineNumber" data-review-line="@line.LineNumber">
+                                                                <span class="review-line-number">@line.LineNumber.ToString(candidate.Review.LineNumberFormat)</span>
+                                                                <span class="@ReviewStripClass(line)" title="@line.MarkerTitle" aria-hidden="true">
+                                                                    @if (line.HasDeletionMarker)
+                                                                    {
+                                                                        <span class="review-strip-dot review-strip-dot--removed"></span>
+                                                                    }
+                                                                    @if (line.IsAddedOrChanged)
+                                                                    {
+                                                                        <span class="review-strip-dot review-strip-dot--added"></span>
+                                                                    }
+                                                                </span>
+                                                                <span class="review-line-text">@RenderReviewLine(line)</span>
+                                                                <span class="review-line-actions">
+                                                                    @if (line.PrimaryBlockId is { } blockId)
+                                                                    {
+                                                                        <button type="button"
+                                                                                class="@ReviewLineActionClass(blockId)"
+                                                                                disabled="@_reviewBusy"
+                                                                                @onclick="() => ToggleReviewBlockAsync(blockId)">
+                                                                            Review
+                                                                        </button>
+                                                                    }
+                                                                </span>
+                                                            </div>
+                                                        }
+                                                    }
+                                                </div>
+                                            }
+                                        </section>
+                                    }
+                                </div>
+                            </div>
                         }
                         else if (_reviewProjection is null)
                         {
@@ -355,7 +579,7 @@ else
             </div>
         </section>
 
-        @if (_rightPaneCollapsed)
+        @if (EffectiveRightPaneCollapsed)
         {
             <button type="button"
                     class="editor-pane-tab editor-pane-tab--right"
@@ -474,6 +698,8 @@ else
     private bool _chapterTokenIsExact = true;
     private bool _reviewLoading;
     private ReviewProjection? _reviewProjection;
+    private ContestReviewProjection? _contestReviewProjection;
+    private IReadOnlyList<ContestBatch> _contestReviewBatches = [];
     private IReadOnlyList<AiChangeBatch> _reviewPendingBatches = [];
     private readonly HashSet<string> _expandedReviewBlockIds = new(StringComparer.Ordinal);
     private string? _activeReviewBlockId;
@@ -485,9 +711,17 @@ else
     private string _reviewRejectionMessage = string.Empty;
 
     private bool EditorReadOnly => _chapterLocked || _mode == EditorMode.Review;
+    private bool ContestReviewActive => _contestReviewProjection is not null;
+    private bool EffectiveChatPaneCollapsed => ContestReviewActive || _chatPaneCollapsed;
+    private bool EffectiveRightPaneCollapsed => ContestReviewActive || _rightPaneCollapsed;
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+    };
+    private static readonly JsonSerializerOptions ContestReviewStateJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() },
     };
 
     public EditorContent()
@@ -507,6 +741,11 @@ else
             _activeChapterId = null;
             _restoreChapterAfterRender = false;
             _pendingRememberChapterId = null;
+            _contestReviewBatches = [];
+            _contestReviewProjection = null;
+            _reviewPendingBatches = [];
+            _reviewProjection = null;
+            ResetInlineReviewState();
             _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
             _acts = (await Acts.ListAsync(Project.Id)).ToList();
             _loading = false;
@@ -518,6 +757,8 @@ else
             _activeChapterId = null;
             _restoreChapterAfterRender = false;
             _pendingRememberChapterId = null;
+            _contestReviewBatches = [];
+            _contestReviewProjection = null;
             UpdateChapterMetrics(string.Empty);
             return;
         }
@@ -621,7 +862,7 @@ else
         {
             try
             {
-                var anchorLine = _reviewProjection?.Blocks.FirstOrDefault(block => block.Id == blockId)?.AnchorLine ?? 1;
+                var anchorLine = CurrentReviewBlocks().FirstOrDefault(block => block.Id == blockId)?.AnchorLine ?? 1;
                 await _editorModule.InvokeVoidAsync("scrollReviewBlock", _reviewSurfaceRef, blockId, anchorLine);
                 _pendingReviewScrollBlockId = null;
             }
@@ -798,12 +1039,17 @@ else
             classes += " editor-grid--focus";
         }
 
-        if (_chatPaneCollapsed)
+        if (ContestReviewActive)
+        {
+            classes += " editor-grid--contest-review";
+        }
+
+        if (EffectiveChatPaneCollapsed)
         {
             classes += " editor-grid--chat-collapsed";
         }
 
-        if (_rightPaneCollapsed)
+        if (EffectiveRightPaneCollapsed)
         {
             classes += " editor-grid--right-collapsed";
         }
@@ -843,6 +1089,7 @@ else
     private async Task SetModeAsync(EditorMode mode)
     {
         if (_mode == mode) return;
+        if (ContestReviewActive && mode != EditorMode.Review) return;
 
         if (mode == EditorMode.Review)
         {
@@ -864,11 +1111,13 @@ else
 
     private void ToggleChatPane()
     {
+        if (ContestReviewActive) return;
         _chatPaneCollapsed = !_chatPaneCollapsed;
     }
 
     private void ToggleRightPane()
     {
+        if (ContestReviewActive) return;
         _rightPaneCollapsed = !_rightPaneCollapsed;
     }
 
@@ -929,6 +1178,8 @@ else
     {
         if (Project is null || _current is null)
         {
+            _contestReviewBatches = [];
+            _contestReviewProjection = null;
             _reviewPendingBatches = [];
             _reviewProjection = null;
             _reviewLoading = false;
@@ -939,6 +1190,21 @@ else
         _reviewLoading = true;
         try
         {
+            _contestReviewBatches = await Chat.ListCurrentContestBatchesAsync(Project.Id);
+            var activeContest = _contestReviewBatches
+                .FirstOrDefault(batch => batch.ChapterId == _current.Id && batch.Candidates.Count > 0);
+            if (activeContest is not null)
+            {
+                _mode = EditorMode.Review;
+                _reviewPendingBatches = [];
+                _reviewProjection = null;
+                _contestReviewProjection = BuildContestReviewProjection(activeContest);
+                _reviewError = null;
+                PruneInlineReviewState();
+                return;
+            }
+
+            _contestReviewProjection = null;
             await ChangeApproval.PrepareChapterBodyLineReviewAsync(Project.Id, _current.Id);
             _reviewPendingBatches = await Chat.ListPendingChangesAsync(Project.Id);
             _reviewProjection = BuildReviewProjection(_current, _reviewPendingBatches);
@@ -947,6 +1213,8 @@ else
         }
         catch (Exception ex)
         {
+            _contestReviewBatches = await Chat.ListCurrentContestBatchesAsync(Project.Id);
+            _contestReviewProjection = null;
             _reviewPendingBatches = await Chat.ListPendingChangesAsync(Project.Id);
             _reviewProjection = BuildReviewProjection(_current, _reviewPendingBatches);
             _reviewError = ex.Message;
@@ -974,11 +1242,27 @@ else
         StateHasChanged();
     }
 
+    private async Task OpenReviewForContestResultsAsync()
+    {
+        if (Project is null || _current is null) return;
+
+        if (_mode == EditorMode.Review)
+        {
+            await RefreshReviewChangesAsync();
+        }
+        else
+        {
+            await SetModeAsync(EditorMode.Review);
+        }
+
+        StateHasChanged();
+    }
+
     private async Task GoToNextReviewBlockAsync()
     {
-        if (_reviewProjection?.Blocks.Count > 0)
+        var blocks = CurrentReviewBlocks();
+        if (blocks.Count > 0)
         {
-            var blocks = _reviewProjection.Blocks;
             var currentIndex = _activeReviewBlockId is null
                 ? -1
                 : blocks.ToList().FindIndex(block => block.Id == _activeReviewBlockId);
@@ -1017,16 +1301,25 @@ else
 
     private bool IsReviewBlockExpanded(string blockId) => _expandedReviewBlockIds.Contains(blockId);
 
-    private IReadOnlyList<ReviewBlock> ReviewBlocksBeforeLine(int lineNumber) =>
-        _reviewProjection?.Blocks
+    private IReadOnlyList<ReviewBlock> CurrentReviewBlocks() =>
+        _contestReviewProjection?.Blocks ?? _reviewProjection?.Blocks ?? [];
+
+    private IReadOnlyList<ReviewBlock> ReviewBlocksBeforeLine(ReviewProjection? projection, int lineNumber) =>
+        projection?.Blocks
             .Where(block => IsReviewBlockExpanded(block.Id) && ReviewBlockRenderLine(block) == lineNumber)
             .ToList()
         ?? [];
 
-    private bool ShouldRenderReviewLine(ReviewLine line) =>
-        _reviewProjection?.Blocks.Any(block =>
+    private IReadOnlyList<ReviewBlock> ReviewBlocksBeforeLine(int lineNumber) =>
+        ReviewBlocksBeforeLine(_reviewProjection, lineNumber);
+
+    private bool ShouldRenderReviewLine(ReviewProjection? projection, ReviewLine line) =>
+        projection?.Blocks.Any(block =>
             IsReviewBlockExpanded(block.Id)
             && ReviewBlockCoversLine(block, line.LineNumber)) != true;
+
+    private bool ShouldRenderReviewLine(ReviewLine line) =>
+        ShouldRenderReviewLine(_reviewProjection, line);
 
     private static int ReviewBlockRenderLine(ReviewBlock block) =>
         block.NewRow?.NewLineNumber ?? block.AnchorLine;
@@ -1050,12 +1343,96 @@ else
     private static string RailMarkerStyle(ReviewBlock block) =>
         $"top: {block.MarkerTopPercent.ToString("0.###", CultureInfo.InvariantCulture)}%;";
 
+    private static string ContestCandidateColumnClass(ContestCandidateProjection candidate)
+    {
+        var classes = "contest-candidate-column";
+        if (candidate.IsWinner)
+            classes += " contest-candidate-column--winner";
+        if (candidate.Status is ContestCandidateStatus.Failed or ContestCandidateStatus.Invalid)
+            classes += " contest-candidate-column--failed";
+        return classes;
+    }
+
+    private static string ContestCandidateStatusClass(ContestCandidateProjection candidate) =>
+        "contest-candidate-status contest-candidate-status--" + candidate.Status.ToString().ToLowerInvariant();
+
+    private static string ContestCandidateStatusText(ContestCandidateStatus status) => status switch
+    {
+        ContestCandidateStatus.Pending => "Pending",
+        ContestCandidateStatus.Running => "Running",
+        ContestCandidateStatus.Completed => "Ready",
+        ContestCandidateStatus.Failed => "Failed",
+        ContestCandidateStatus.Invalid => "Invalid",
+        ContestCandidateStatus.Selected => "Selected",
+        ContestCandidateStatus.Rejected => "Rejected",
+        _ => status.ToString(),
+    };
+
+    private static string ContestCandidatePlaceholder(ContestCandidateProjection candidate) => candidate.Status switch
+    {
+        ContestCandidateStatus.Pending => "Waiting for this contestant to start.",
+        ContestCandidateStatus.Running => "This contestant is still writing.",
+        ContestCandidateStatus.Selected => "This contestant was selected.",
+        ContestCandidateStatus.Rejected => "This contestant was rejected.",
+        _ => "No reviewable candidate output is available.",
+    };
+
+    private static string ContestDecisionText(ReviewBlock block)
+    {
+        return block.ContestDecision switch
+        {
+            ContestCandidateLineDecisionKind.Kept => "Kept",
+            ContestCandidateLineDecisionKind.Rejected => "Rejected",
+            ContestCandidateLineDecisionKind.Edited => "Edited",
+            ContestCandidateLineDecisionKind.Cleared => "Cleared",
+            _ => block.HasContestConflict ? "Conflict" : "Pending",
+        };
+    }
+
+    private static string ContestDecisionBadgeClass(ReviewBlock block)
+    {
+        var classes = "contest-decision-badge";
+        return block.ContestDecision switch
+        {
+            ContestCandidateLineDecisionKind.Kept => classes + " contest-decision-badge--kept",
+            ContestCandidateLineDecisionKind.Rejected => classes + " contest-decision-badge--rejected",
+            ContestCandidateLineDecisionKind.Edited => classes + " contest-decision-badge--edited",
+            ContestCandidateLineDecisionKind.Cleared => classes + " contest-decision-badge--cleared",
+            _ => block.HasContestConflict
+                ? classes + " contest-decision-badge--conflict"
+                : classes + " contest-decision-badge--pending",
+        };
+    }
+
+    private static string ContestBlockActionTitle(ReviewBlock block, string action) =>
+        block.HasContestConflict
+            ? block.ContestConflictMessage ?? "This line conflicts with an already kept line from another contestant."
+            : action;
+
     private async Task KeepAllActiveChapterChangesAsync()
     {
         if (_reviewProjection is null || _reviewProjection.PendingChangeIds.Count == 0) return;
 
         var changeIds = _reviewProjection.PendingChangeIds.ToArray();
         await RunReviewActionAsync(() => ChangeApproval.ApplyChangesAsync(changeIds), clearExpandedBlocks: true);
+    }
+
+    private async Task KeepContestCandidateAsync(Guid candidateId) =>
+        await RunReviewActionAsync(() => Chat.KeepContestCandidateAsync(candidateId), clearExpandedBlocks: true);
+
+    private async Task FinishContestReviewAsync()
+    {
+        if (_contestReviewProjection is null) return;
+
+        await RunReviewActionAsync(
+            () => Chat.FinishContestBatchAsync(_contestReviewProjection.Batch.Id),
+            clearExpandedBlocks: true);
+
+        if (_contestReviewProjection is null && _reviewProjection?.HasChanges != true)
+        {
+            _mode = EditorMode.Edit;
+            await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
+        }
     }
 
     private async Task KeepReviewBlockAsync(ReviewBlock block) =>
@@ -1120,6 +1497,25 @@ else
         string? editedText = null,
         string? rejectionMessage = null)
     {
+        if (block.ContestCandidateId is { } candidateId)
+        {
+            var contestRequest = new ContestCandidateReviewLineResolution(
+                candidateId,
+                block.Id,
+                block.PairId,
+                block.OldRow?.OldLineNumber,
+                block.NewRow?.NewLineNumber,
+                block.OldRow?.Text,
+                block.NewRow?.Text,
+                action,
+                editedText);
+
+            await RunReviewActionAsync(
+                () => Chat.ResolveContestCandidateLineAsync(Project!.Id, _current!.Id, contestRequest),
+                clearExpandedBlocks: false);
+            return;
+        }
+
         var request = new ChapterBodyReviewLineResolution(
             block.ChangeId,
             block.PairId,
@@ -1180,13 +1576,14 @@ else
 
     private void PruneInlineReviewState()
     {
-        if (_reviewProjection is null)
+        var validBlocks = CurrentReviewBlocks();
+        if (validBlocks.Count == 0)
         {
             ResetInlineReviewState();
             return;
         }
 
-        var validBlockIds = _reviewProjection.Blocks.Select(block => block.Id).ToHashSet(StringComparer.Ordinal);
+        var validBlockIds = validBlocks.Select(block => block.Id).ToHashSet(StringComparer.Ordinal);
         _expandedReviewBlockIds.RemoveWhere(blockId => !validBlockIds.Contains(blockId));
         if (_activeReviewBlockId is not null && !validBlockIds.Contains(_activeReviewBlockId))
             _activeReviewBlockId = _expandedReviewBlockIds.FirstOrDefault();
@@ -1273,6 +1670,258 @@ else
                     draft.BlockIds.FirstOrDefault(),
                     MarkerTitle(draft)))
                 .ToList());
+    }
+
+    private static ContestReviewProjection BuildContestReviewProjection(ContestBatch batch)
+    {
+        var reviews = new Dictionary<Guid, ReviewProjection?>();
+        var states = new Dictionary<Guid, ContestCandidateReviewState>();
+        foreach (var candidate in batch.Candidates.OrderBy(candidate => candidate.Order))
+        {
+            states[candidate.Id] = ReadContestReviewState(candidate);
+            reviews[candidate.Id] = candidate.Status == ContestCandidateStatus.Completed
+                ? BuildContestCandidateReviewProjection(batch, candidate)
+                : null;
+        }
+
+        var acceptedOperations = BuildContestAcceptedOperations(batch, reviews, states);
+        var candidates = new List<ContestCandidateProjection>();
+        foreach (var candidate in batch.Candidates.OrderBy(candidate => candidate.Order))
+        {
+            var review = reviews[candidate.Id];
+            if (review is not null)
+            {
+                var decisionsByBlockId = states[candidate.Id].Lines.ToDictionary(line => line.BlockId, StringComparer.Ordinal);
+                var blocks = review.Blocks.Select(block =>
+                {
+                    var decision = ContestDecisionForBlock(batch, candidate, decisionsByBlockId, block);
+                    var conflict = false;
+                    string? conflictMessage = null;
+                    if (batch.WinningCandidateId is { } winnerId && winnerId != candidate.Id)
+                    {
+                        conflict = true;
+                        conflictMessage = "A whole contestant is selected. Use Keep everything on this contestant to replace it.";
+                    }
+                    else if (decision is not (ContestCandidateLineDecisionKind.Kept or ContestCandidateLineDecisionKind.Edited)
+                             && FindConflictingAcceptedOperation(block, candidate.Id, acceptedOperations) is { } conflictOperation)
+                    {
+                        conflict = true;
+                        conflictMessage = $"Conflicts with a kept line from contestant {conflictOperation.CandidateOrder + 1}.";
+                    }
+
+                    return block with
+                    {
+                        ContestCandidateId = candidate.Id,
+                        ContestDecision = decision,
+                        HasContestConflict = conflict,
+                        ContestConflictMessage = conflictMessage,
+                    };
+                }).ToList();
+                review = review with { Blocks = blocks };
+            }
+
+            candidates.Add(new ContestCandidateProjection(
+                candidate.Id,
+                candidate.Order,
+                candidate.ProviderName,
+                candidate.ModelName,
+                candidate.Status,
+                candidate.Summary,
+                candidate.ErrorMessage,
+                review,
+                batch.WinningCandidateId == candidate.Id,
+                candidate.Status == ContestCandidateStatus.Completed
+                    && batch.Status == ContestBatchStatus.Completed));
+        }
+
+        var allBlocks = candidates
+            .SelectMany(candidate => candidate.Review?.Blocks ?? [])
+            .OrderBy(block => block.AnchorLine)
+            .ThenBy(block => block.ContestCandidateId)
+            .ThenBy(block => block.Id, StringComparer.Ordinal)
+            .ToList();
+
+        return new ContestReviewProjection(batch, candidates, allBlocks);
+    }
+
+    private static ReviewProjection? BuildContestCandidateReviewProjection(ContestBatch batch, ContestCandidate candidate)
+    {
+        var fakeBatch = new AiChangeBatch
+        {
+            Id = batch.Id,
+            ProjectId = batch.ProjectId,
+            ConversationId = batch.ConversationId,
+            ConversationKind = AiChangeConversationKind.Editor,
+            CreatedAt = batch.CreatedAt,
+        };
+        var fakeChange = new AiChange
+        {
+            Id = candidate.Id,
+            BatchId = fakeBatch.Id,
+            Batch = fakeBatch,
+            ToolName = "edit_chapter",
+            Summary = candidate.Summary,
+            BeforeJson = JsonSerializer.Serialize(new ChapterBodyChange(batch.ChapterId, batch.ChapterTitle, batch.OriginalChapterBody), ChangePayloadJsonOptions),
+            AfterJson = JsonSerializer.Serialize(new ChapterBodyChange(batch.ChapterId, batch.ChapterTitle, candidate.ProposedBody), ChangePayloadJsonOptions),
+            ResourceKind = "ChapterBody",
+            ResourceId = batch.ChapterId.ToString("N"),
+            Status = AiChangeStatus.Pending,
+        };
+        fakeBatch.Changes.Add(fakeChange);
+
+        var chapter = new Chapter
+        {
+            Id = batch.ChapterId,
+            ProjectId = batch.ProjectId,
+            Title = batch.ChapterTitle,
+            Body = batch.OriginalChapterBody,
+        };
+        return BuildReviewProjection(chapter, [fakeBatch]);
+    }
+
+    private static IReadOnlyList<ContestReviewOperation> BuildContestAcceptedOperations(
+        ContestBatch batch,
+        IReadOnlyDictionary<Guid, ReviewProjection?> reviews,
+        IReadOnlyDictionary<Guid, ContestCandidateReviewState> states)
+    {
+        var operations = new List<ContestReviewOperation>();
+        if (batch.WinningCandidateId is { } winnerId)
+        {
+            if (!reviews.TryGetValue(winnerId, out var winnerReview) || winnerReview is null)
+                return operations;
+            var winner = batch.Candidates.FirstOrDefault(candidate => candidate.Id == winnerId);
+            if (winner is null)
+                return operations;
+
+            var decisions = states.TryGetValue(winnerId, out var state)
+                ? state.Lines.ToDictionary(line => line.BlockId, StringComparer.Ordinal)
+                : new Dictionary<string, ContestCandidateLineDecision>(StringComparer.Ordinal);
+            foreach (var block in winnerReview.Blocks)
+            {
+                if (decisions.TryGetValue(block.Id, out var decision)
+                    && decision.Decision == ContestCandidateLineDecisionKind.Rejected)
+                {
+                    continue;
+                }
+
+                if (BuildContestOperation(block, winner.Id, winner.Order) is { } operation)
+                    operations.Add(operation);
+            }
+
+            return operations;
+        }
+
+        foreach (var candidate in batch.Candidates.OrderBy(candidate => candidate.Order))
+        {
+            if (!reviews.TryGetValue(candidate.Id, out var review) || review is null)
+                continue;
+            if (!states.TryGetValue(candidate.Id, out var state))
+                continue;
+
+            var blocksById = review.Blocks.ToDictionary(block => block.Id, StringComparer.Ordinal);
+            foreach (var decision in state.Lines)
+            {
+                if (decision.Decision is not (ContestCandidateLineDecisionKind.Kept or ContestCandidateLineDecisionKind.Edited))
+                    continue;
+                if (!blocksById.TryGetValue(decision.BlockId, out var block))
+                    continue;
+                if (BuildContestOperation(block, candidate.Id, candidate.Order) is { } operation)
+                    operations.Add(operation);
+            }
+        }
+
+        return operations;
+    }
+
+    private static ContestCandidateLineDecisionKind? ContestDecisionForBlock(
+        ContestBatch batch,
+        ContestCandidate candidate,
+        IReadOnlyDictionary<string, ContestCandidateLineDecision> decisionsByBlockId,
+        ReviewBlock block)
+    {
+        if (decisionsByBlockId.TryGetValue(block.Id, out var decision))
+            return decision.Decision;
+        return batch.WinningCandidateId == candidate.Id
+            ? ContestCandidateLineDecisionKind.Kept
+            : null;
+    }
+
+    private static ContestReviewOperation? FindConflictingAcceptedOperation(
+        ReviewBlock block,
+        Guid candidateId,
+        IReadOnlyList<ContestReviewOperation> acceptedOperations)
+    {
+        var operation = BuildContestOperation(block, candidateId, candidateOrder: -1);
+        return operation is null
+            ? null
+            : acceptedOperations.FirstOrDefault(existing => ContestOperationsConflict(existing, operation));
+    }
+
+    private static ContestReviewOperation? BuildContestOperation(ReviewBlock block, Guid candidateId, int candidateOrder)
+    {
+        if (block.OldRow?.OldLineNumber is int oldLineNumber)
+            return new ContestReviewOperation(candidateId, block.Id, candidateOrder, oldLineNumber - 1, DeleteCount: 1);
+
+        if (block.NewRow is not null)
+        {
+            var rowIndex = RowIndex(block.Hunk.Rows, block.NewRow);
+            return new ContestReviewOperation(
+                candidateId,
+                block.Id,
+                candidateOrder,
+                FindContestInsertionIndex(block.Hunk.Rows, rowIndex),
+                DeleteCount: 0);
+        }
+
+        return null;
+    }
+
+    private static int FindContestInsertionIndex(IReadOnlyList<DiffRow> rows, int rowIndex)
+    {
+        for (var index = rowIndex - 1; index >= 0; index--)
+        {
+            if (rows[index].OldLineNumber is int previousLine)
+                return previousLine;
+        }
+
+        for (var index = rowIndex + 1; index < rows.Count; index++)
+        {
+            if (rows[index].OldLineNumber is int nextLine)
+                return Math.Max(0, nextLine - 1);
+        }
+
+        return 0;
+    }
+
+    private static bool ContestOperationsConflict(ContestReviewOperation left, ContestReviewOperation right)
+    {
+        if (left.CandidateId == right.CandidateId)
+            return false;
+
+        var leftInsertion = left.DeleteCount == 0;
+        var rightInsertion = right.DeleteCount == 0;
+        if (leftInsertion || rightInsertion)
+            return leftInsertion && rightInsertion && left.StartIndex == right.StartIndex;
+
+        var leftEnd = left.StartIndex + left.DeleteCount - 1;
+        var rightEnd = right.StartIndex + right.DeleteCount - 1;
+        return left.StartIndex <= rightEnd && right.StartIndex <= leftEnd;
+    }
+
+    private static ContestCandidateReviewState ReadContestReviewState(ContestCandidate candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate.ReviewStateJson) || candidate.ReviewStateJson == "{}")
+            return new ContestCandidateReviewState([]);
+
+        try
+        {
+            return JsonSerializer.Deserialize<ContestCandidateReviewState>(candidate.ReviewStateJson, ContestReviewStateJsonOptions)
+                ?? new ContestCandidateReviewState([]);
+        }
+        catch (JsonException)
+        {
+            return new ContestCandidateReviewState([]);
+        }
     }
 
     private static string ReviewLineClass(ReviewLine line)
@@ -2047,6 +2696,23 @@ else
         IReadOnlyList<ReviewBlock> Blocks,
         IReadOnlyList<ReviewLine> Lines);
 
+    private sealed record ContestReviewProjection(
+        ContestBatch Batch,
+        IReadOnlyList<ContestCandidateProjection> Candidates,
+        IReadOnlyList<ReviewBlock> Blocks);
+
+    private sealed record ContestCandidateProjection(
+        Guid CandidateId,
+        int Order,
+        string ProviderName,
+        string ModelName,
+        ContestCandidateStatus Status,
+        string Summary,
+        string? ErrorMessage,
+        ReviewProjection? Review,
+        bool IsWinner,
+        bool CanKeepEverything);
+
     private sealed record ReviewLine(
         int LineNumber,
         string Text,
@@ -2070,11 +2736,43 @@ else
         DiffHunk Hunk,
         DiffRow? OldRow,
         DiffRow? NewRow,
-        int? PairId)
+        int? PairId,
+        Guid? ContestCandidateId = null,
+        ContestCandidateLineDecisionKind? ContestDecision = null,
+        bool HasContestConflict = false,
+        string? ContestConflictMessage = null)
     {
         public bool HasAdditions => NewRow is not null;
         public bool HasDeletions => OldRow is not null;
         public bool CanEdit => OldRow is not null || NewRow is not null;
+    }
+
+    private sealed record ContestCandidateReviewState(List<ContestCandidateLineDecision> Lines);
+
+    private sealed record ContestCandidateLineDecision(
+        string BlockId,
+        ContestCandidateLineDecisionKind Decision,
+        int? PairId,
+        int? OldLineNumber,
+        int? NewLineNumber,
+        string? OldText,
+        string? NewText,
+        string? EditedText,
+        DateTime UpdatedAtUtc);
+
+    private sealed record ContestReviewOperation(
+        Guid CandidateId,
+        string BlockId,
+        int CandidateOrder,
+        int StartIndex,
+        int DeleteCount);
+
+    private enum ContestCandidateLineDecisionKind
+    {
+        Kept,
+        Rejected,
+        Edited,
+        Cleared,
     }
 
     private sealed class ReviewLineDraft(int lineNumber, string text)

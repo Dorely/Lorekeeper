@@ -95,8 +95,18 @@ public sealed class EditorChatService(
     public async Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await contestService.ListCurrentContestBatchesAsync(projectId, cancellationToken);
 
-    public Task StageContestCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default) =>
-        contestService.StageCandidateAsync(candidateId, cancellationToken);
+    public Task ResolveContestCandidateLineAsync(
+        Guid projectId,
+        Guid chapterId,
+        ContestCandidateReviewLineResolution request,
+        CancellationToken cancellationToken = default) =>
+        contestService.ResolveCandidateLineAsync(projectId, chapterId, request, cancellationToken);
+
+    public Task KeepContestCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default) =>
+        contestService.KeepCandidateAsync(candidateId, cancellationToken);
+
+    public Task FinishContestBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>
+        contestService.FinishContestBatchAsync(batchId, cancellationToken);
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -129,6 +139,11 @@ public sealed class EditorChatService(
         if (currentContestBatches.Any(batch => batch.Status == ContestBatchStatus.Running))
         {
             yield return new EditorChatTurnError("Wait for the running contest to finish before sending another editor chat message.", Cancelled: false);
+            yield break;
+        }
+        if (currentContestBatches.Any(batch => batch.Status == ContestBatchStatus.Completed))
+        {
+            yield return new EditorChatTurnError("Finish the pending Contest Mode review before sending another editor chat message.", Cancelled: false);
             yield break;
         }
         await contestService.DiscardInactiveContestBatchesAsync(projectId, cancellationToken);

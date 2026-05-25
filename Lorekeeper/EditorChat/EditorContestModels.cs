@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.Outline;
 
 namespace Lorekeeper.EditorChat;
 
@@ -48,3 +49,14 @@ public sealed record ContestCandidateProvider(
     int Id,
     string Name,
     string ModelName);
+
+public sealed record ContestCandidateReviewLineResolution(
+    Guid CandidateId,
+    string BlockId,
+    int? PairId,
+    int? OldLineNumber,
+    int? NewLineNumber,
+    string? OldText,
+    string? NewText,
+    ChapterBodyReviewLineAction Action,
+    string? EditedText = null);

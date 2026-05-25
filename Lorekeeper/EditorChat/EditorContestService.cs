@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
@@ -19,13 +20,18 @@ public sealed class EditorContestService(
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     IContestRepository contests,
-    IAiChangeRepository changes,
     ILogger<EditorContestService> logger) : IEditorContestService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
         WriteIndented = true,
+    };
+    private static readonly JsonSerializerOptions ReviewStateJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = false,
+        Converters = { new JsonStringEnumConverter() },
     };
     private static readonly TimeSpan CandidateRawResponseSaveInterval = TimeSpan.FromMilliseconds(750);
     private const int CandidateRawResponseSaveChars = 512;
@@ -119,6 +125,7 @@ public sealed class EditorContestService(
             ChapterId = chapter.Id,
             ChapterTitle = chapter.Title,
             OriginalChapterBody = chapter.Body,
+            AcceptedChapterBody = chapter.Body,
             ContextSnapshotJson = JsonSerializer.Serialize(snapshot, JsonOptions),
             Status = ContestBatchStatus.Running,
         };
@@ -272,81 +279,478 @@ public sealed class EditorContestService(
         yield return new EditorContestCompleted(batch.Id, batch.Status);
     }
 
-    public async Task StageCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default)
+    public async Task ResolveCandidateLineAsync(
+        Guid projectId,
+        Guid chapterId,
+        ContestCandidateReviewLineResolution request,
+        CancellationToken cancellationToken = default)
+    {
+        var candidate = await contests.GetCandidateAsync(request.CandidateId, cancellationToken)
+            ?? throw new InvalidOperationException($"Contest candidate {request.CandidateId} not found.");
+        if (candidate.Status != ContestCandidateStatus.Completed)
+            throw new InvalidOperationException("Only completed contest candidates can be reviewed.");
+
+        var batch = candidate.Batch;
+        if (batch.ProjectId != projectId || batch.ChapterId != chapterId)
+            throw new InvalidOperationException("The contest candidate does not belong to the active chapter.");
+        if (batch.Status == ContestBatchStatus.Running)
+            throw new InvalidOperationException("Wait for the running contest to finish before reviewing candidate lines.");
+        if (batch.Status != ContestBatchStatus.Completed)
+            throw new InvalidOperationException("This contest is no longer active.");
+
+        var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken)
+            ?? throw new InvalidOperationException($"Chapter {batch.ChapterId} not found.");
+        if (!string.Equals(chapter.Body, EffectiveAcceptedBody(batch), StringComparison.Ordinal))
+            throw new InvalidOperationException("The chapter changed outside Contest Review. Finish or restart the contest before continuing.");
+
+        if (!TryBuildCandidateDiff(batch, candidate, out var diff))
+            throw new InvalidOperationException("This candidate no longer has a renderable chapter-body diff.");
+
+        var target = FindContestLineTarget(candidate.Id, diff, request)
+            ?? throw new InvalidOperationException("This contest review line changed. Refresh Review mode and try again.");
+
+        if (batch.WinningCandidateId is { } winnerId
+            && winnerId != candidate.Id
+            && request.Action is ChapterBodyReviewLineAction.Keep or ChapterBodyReviewLineAction.Edit)
+        {
+            throw new InvalidOperationException("A whole contestant is currently selected. Use Keep everything on another contestant to replace it.");
+        }
+
+        var state = ReadReviewState(candidate);
+        var editedText = request.Action == ChapterBodyReviewLineAction.Edit
+            ? NormalizeSingleLineEditText(request.EditedText)
+            : null;
+        UpsertReviewDecision(state, request, editedText);
+        candidate.ReviewStateJson = WriteReviewState(state);
+        candidate.UpdatedAt = DateTime.UtcNow;
+        contests.UpdateCandidate(candidate);
+
+        var acceptedBody = RebuildAcceptedBody(batch);
+        batch.AcceptedChapterBody = acceptedBody;
+        batch.UpdatedAt = DateTime.UtcNow;
+        contests.UpdateBatch(batch);
+
+        if (!string.Equals(chapter.Body, acceptedBody, StringComparison.Ordinal))
+            await chapters.UpdateAsync(chapter.Id, body: acceptedBody, cancellationToken: cancellationToken);
+
+        await contests.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task KeepCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
         var candidate = await contests.GetCandidateAsync(candidateId, cancellationToken)
             ?? throw new InvalidOperationException($"Contest candidate {candidateId} not found.");
         if (candidate.Status != ContestCandidateStatus.Completed)
-            throw new InvalidOperationException("Only completed contest candidates can be staged.");
+            throw new InvalidOperationException("Only completed contest candidates can be kept.");
 
         var batch = candidate.Batch;
+        if (batch.Status == ContestBatchStatus.Running)
+            throw new InvalidOperationException("Wait for the running contest to finish before keeping a contestant.");
+        if (batch.Status != ContestBatchStatus.Completed)
+            throw new InvalidOperationException("This contest is no longer active.");
+
         var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {batch.ChapterId} not found.");
-        if (!string.Equals(chapter.Body, batch.OriginalChapterBody, StringComparison.Ordinal))
-            throw new InvalidOperationException("The chapter changed after this contest started. Start a new contest before staging a candidate.");
+        if (!string.Equals(chapter.Body, EffectiveAcceptedBody(batch), StringComparison.Ordinal))
+            throw new InvalidOperationException("The chapter changed outside Contest Review. Finish or restart the contest before continuing.");
 
-        if (string.IsNullOrWhiteSpace(batch.OriginalChapterBody))
-        {
-            await chapters.UpdateAsync(chapter.Id, body: candidate.ProposedBody, cancellationToken: cancellationToken);
-            MarkSelectedCandidate(batch, candidate);
-            contests.UpdateBatch(batch);
-            await contests.SaveChangesAsync(cancellationToken);
-            return;
-        }
-
-        var changeBatch = new AiChangeBatch
-        {
-            ProjectId = batch.ProjectId,
-            ConversationKind = AiChangeConversationKind.Editor,
-            ConversationId = batch.ConversationId,
-            AssistantMessageId = batch.AssistantMessageId,
-        };
-        await changes.AddBatchAsync(changeBatch, cancellationToken);
-
-        var before = new ChapterBodyChange(chapter.Id, chapter.Title, chapter.Body);
-        var after = new ChapterBodyChange(chapter.Id, chapter.Title, candidate.ProposedBody);
-        await changes.AddChangeAsync(new AiChange
-        {
-            BatchId = changeBatch.Id,
-            Order = 0,
-            ToolCallId = $"contest:{candidate.Id:N}",
-            ToolName = "edit_chapter",
-            ArgumentsJson = JsonSerializer.Serialize(new
-            {
-                contestBatchId = batch.Id,
-                candidateId = candidate.Id,
-                mutations = ReadCandidateMutations(candidate.MutationsJson),
-            }, JsonOptions),
-            Summary = $"Contest winner from {candidate.ProviderName} ({candidate.ModelName}): {candidate.Summary}",
-            BeforeJson = JsonSerializer.Serialize(before, JsonSerializerOptions.Default),
-            AfterJson = JsonSerializer.Serialize(after, JsonSerializerOptions.Default),
-            ResultJson = candidate.RawResponse,
-            ResourceKind = "ChapterBody",
-            ResourceId = $"Chapter:{chapter.Id:N}",
-            ReferencedResourceIdsJson = JsonSerializer.Serialize(new[] { $"Chapter:{chapter.Id:N}" }, JsonSerializerOptions.Default),
-        }, cancellationToken);
-
-        MarkSelectedCandidate(batch, candidate);
-        contests.UpdateBatch(batch);
-        await changes.SaveChangesAsync(cancellationToken);
-    }
-
-    private void MarkSelectedCandidate(ContestBatch batch, ContestCandidate selected)
-    {
         foreach (var batchCandidate in batch.Candidates)
         {
-            batchCandidate.Status = batchCandidate.Id == selected.Id
-                ? ContestCandidateStatus.Selected
-                : batchCandidate.Status == ContestCandidateStatus.Completed
-                    ? ContestCandidateStatus.Rejected
-                    : batchCandidate.Status;
+            batchCandidate.ReviewStateJson = "{}";
             batchCandidate.UpdatedAt = DateTime.UtcNow;
             contests.UpdateCandidate(batchCandidate);
         }
 
-        batch.Status = ContestBatchStatus.Staged;
+        batch.AcceptedChapterBody = candidate.ProposedBody;
+        batch.WinningCandidateId = candidate.Id;
         batch.UpdatedAt = DateTime.UtcNow;
+        contests.UpdateBatch(batch);
+
+        if (!string.Equals(chapter.Body, candidate.ProposedBody, StringComparison.Ordinal))
+            await chapters.UpdateAsync(chapter.Id, body: candidate.ProposedBody, cancellationToken: cancellationToken);
+
+        await contests.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task FinishContestBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
+    {
+        var batch = await contests.GetBatchAsync(batchId, cancellationToken)
+            ?? throw new InvalidOperationException($"Contest batch {batchId} not found.");
+        if (batch.Status == ContestBatchStatus.Running)
+            throw new InvalidOperationException("Wait for the running contest to finish before ending Contest Review.");
+        if (batch.Status is not ContestBatchStatus.Completed)
+            return;
+
+        var now = DateTime.UtcNow;
+        if (batch.WinningCandidateId is { } winnerId)
+        {
+            foreach (var candidate in batch.Candidates)
+            {
+                candidate.Status = candidate.Id == winnerId
+                    ? ContestCandidateStatus.Selected
+                    : candidate.Status == ContestCandidateStatus.Completed
+                        ? ContestCandidateStatus.Rejected
+                        : candidate.Status;
+                candidate.UpdatedAt = now;
+                contests.UpdateCandidate(candidate);
+            }
+        }
+
+        batch.Status = ContestBatchStatus.Finished;
+        batch.UpdatedAt = now;
+        batch.CompletedAt ??= now;
+        contests.UpdateBatch(batch);
+        await contests.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string EffectiveAcceptedBody(ContestBatch batch) =>
+        string.IsNullOrEmpty(batch.AcceptedChapterBody) && !string.IsNullOrEmpty(batch.OriginalChapterBody)
+            ? batch.OriginalChapterBody
+            : batch.AcceptedChapterBody;
+
+    private static bool TryBuildCandidateDiff(ContestBatch batch, ContestCandidate candidate, out ReviewDiff diff)
+    {
+        var change = new AiChange
+        {
+            ToolName = "edit_chapter",
+            ResourceKind = "ChapterBody",
+            BeforeJson = JsonSerializer.Serialize(new ChapterBodyChange(batch.ChapterId, batch.ChapterTitle, batch.OriginalChapterBody)),
+            AfterJson = JsonSerializer.Serialize(new ChapterBodyChange(batch.ChapterId, batch.ChapterTitle, candidate.ProposedBody)),
+            Status = AiChangeStatus.Pending,
+        };
+        return AiChangeReviewDiffBuilder.TryBuild(change, out diff);
+    }
+
+    private static ContestLineTarget? FindContestLineTarget(
+        Guid candidateId,
+        ReviewDiff diff,
+        ContestCandidateReviewLineResolution request) =>
+        EnumerateContestLineTargets(candidateId, diff)
+            .FirstOrDefault(target =>
+                string.Equals(target.BlockId, request.BlockId, StringComparison.Ordinal)
+                && target.PairId == request.PairId
+                && target.OldLineNumber == request.OldLineNumber
+                && target.NewLineNumber == request.NewLineNumber
+                && string.Equals(target.OldText, request.OldText, StringComparison.Ordinal)
+                && string.Equals(target.NewText, request.NewText, StringComparison.Ordinal));
+
+    private static IEnumerable<ContestLineTarget> EnumerateContestLineTargets(Guid candidateId, ReviewDiff diff)
+    {
+        foreach (var section in diff.Sections.Where(section => string.Equals(section.Key, "Body", StringComparison.OrdinalIgnoreCase)))
+        {
+            for (var hunkIndex = 0; hunkIndex < section.Hunks.Count; hunkIndex++)
+            {
+                var hunk = section.Hunks[hunkIndex];
+                var consumedPairIds = new HashSet<int>();
+                for (var rowIndex = 0; rowIndex < hunk.Rows.Count; rowIndex++)
+                {
+                    var row = hunk.Rows[rowIndex];
+                    if (row.Kind == DiffRowKind.Context)
+                        continue;
+
+                    if (row.PairId is int pairId)
+                    {
+                        if (!consumedPairIds.Add(pairId))
+                            continue;
+
+                        var oldRowIndex = -1;
+                        var newRowIndex = -1;
+                        DiffRow? oldRow = null;
+                        DiffRow? newRow = null;
+                        for (var pairIndex = 0; pairIndex < hunk.Rows.Count; pairIndex++)
+                        {
+                            var candidateRow = hunk.Rows[pairIndex];
+                            if (candidateRow.PairId != pairId) continue;
+                            if (candidateRow.Kind == DiffRowKind.Removed)
+                            {
+                                oldRow = candidateRow;
+                                oldRowIndex = pairIndex;
+                            }
+                            else if (candidateRow.Kind == DiffRowKind.Added)
+                            {
+                                newRow = candidateRow;
+                                newRowIndex = pairIndex;
+                            }
+                        }
+
+                        var targetIndex = newRowIndex >= 0 ? newRowIndex : oldRowIndex;
+                        if (targetIndex >= 0)
+                        {
+                            yield return CreateContestLineTarget(
+                                candidateId,
+                                hunk,
+                                hunkIndex,
+                                targetIndex,
+                                oldRow,
+                                newRow,
+                                pairId);
+                        }
+
+                        continue;
+                    }
+
+                    yield return row.Kind == DiffRowKind.Added
+                        ? CreateContestLineTarget(candidateId, hunk, hunkIndex, rowIndex, oldRow: null, row, pairId: null)
+                        : CreateContestLineTarget(candidateId, hunk, hunkIndex, rowIndex, row, newRow: null, pairId: null);
+                }
+            }
+        }
+    }
+
+    private static ContestLineTarget CreateContestLineTarget(
+        Guid candidateId,
+        DiffHunk hunk,
+        int hunkIndex,
+        int rowIndex,
+        DiffRow? oldRow,
+        DiffRow? newRow,
+        int? pairId)
+    {
+        var blockId = BuildReviewBlockId(candidateId, hunk, hunkIndex, rowIndex, oldRow, newRow, pairId);
+        return new ContestLineTarget(
+            blockId,
+            pairId,
+            oldRow?.OldLineNumber,
+            newRow?.NewLineNumber,
+            oldRow?.Text,
+            newRow?.Text,
+            hunk,
+            rowIndex,
+            oldRow,
+            newRow);
+    }
+
+    private static string BuildReviewBlockId(
+        Guid ownerId,
+        DiffHunk hunk,
+        int hunkIndex,
+        int rowIndex,
+        DiffRow? oldRow,
+        DiffRow? newRow,
+        int? pairId) =>
+        $"review-{ownerId:N}-{hunk.NewStart}-{hunk.OldStart}-{hunkIndex}-{oldRow?.OldLineNumber ?? 0}-{newRow?.NewLineNumber ?? 0}-{pairId ?? 0}-{rowIndex}";
+
+    private static ContestCandidateReviewState ReadReviewState(ContestCandidate candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate.ReviewStateJson) || candidate.ReviewStateJson == "{}")
+            return new ContestCandidateReviewState([]);
+
+        try
+        {
+            return JsonSerializer.Deserialize<ContestCandidateReviewState>(candidate.ReviewStateJson, ReviewStateJsonOptions)
+                ?? new ContestCandidateReviewState([]);
+        }
+        catch (JsonException)
+        {
+            return new ContestCandidateReviewState([]);
+        }
+    }
+
+    private static string WriteReviewState(ContestCandidateReviewState state) =>
+        state.Lines.Count == 0
+            ? "{}"
+            : JsonSerializer.Serialize(state, ReviewStateJsonOptions);
+
+    private static void UpsertReviewDecision(
+        ContestCandidateReviewState state,
+        ContestCandidateReviewLineResolution request,
+        string? editedText)
+    {
+        var decision = request.Action switch
+        {
+            ChapterBodyReviewLineAction.Keep => ContestCandidateLineDecisionKind.Kept,
+            ChapterBodyReviewLineAction.Reject => ContestCandidateLineDecisionKind.Rejected,
+            ChapterBodyReviewLineAction.Edit => ContestCandidateLineDecisionKind.Edited,
+            _ => throw new InvalidOperationException($"Unsupported contest review action '{request.Action}'."),
+        };
+
+        state.Lines.RemoveAll(line => string.Equals(line.BlockId, request.BlockId, StringComparison.Ordinal));
+        state.Lines.Add(new ContestCandidateLineDecision(
+            request.BlockId,
+            decision,
+            request.PairId,
+            request.OldLineNumber,
+            request.NewLineNumber,
+            request.OldText,
+            request.NewText,
+            editedText,
+            DateTime.UtcNow));
+    }
+
+    private static string RebuildAcceptedBody(ContestBatch batch)
+    {
+        var operations = new List<ContestReviewOperation>();
+        if (batch.WinningCandidateId is { } winnerId)
+        {
+            var winner = batch.Candidates.FirstOrDefault(candidate => candidate.Id == winnerId)
+                ?? throw new InvalidOperationException("The selected contest winner no longer exists.");
+            operations.AddRange(BuildWinnerOperations(batch, winner));
+        }
+        else
+        {
+            foreach (var candidate in batch.Candidates.OrderBy(candidate => candidate.Order))
+            {
+                if (!TryBuildCandidateDiff(batch, candidate, out var diff))
+                    continue;
+
+                var targetsByBlockId = EnumerateContestLineTargets(candidate.Id, diff)
+                    .ToDictionary(target => target.BlockId, StringComparer.Ordinal);
+                foreach (var decision in ReadReviewState(candidate).Lines)
+                {
+                    if (decision.Decision is not (ContestCandidateLineDecisionKind.Kept or ContestCandidateLineDecisionKind.Edited))
+                        continue;
+                    if (!targetsByBlockId.TryGetValue(decision.BlockId, out var target))
+                        continue;
+
+                    operations.Add(BuildOperation(candidate, target, decision.Decision, decision.EditedText));
+                }
+            }
+        }
+
+        var acceptedOperations = new List<ContestReviewOperation>();
+        foreach (var operation in operations.OrderBy(operation => operation.CandidateOrder).ThenBy(operation => operation.SortLine))
+        {
+            var conflict = acceptedOperations.FirstOrDefault(existing => OperationsConflict(existing, operation));
+            if (conflict is not null)
+                throw new InvalidOperationException("This contest line conflicts with an already kept line from another contestant.");
+
+            acceptedOperations.Add(operation);
+        }
+
+        var lines = ChapterFormatting.SplitLines(batch.OriginalChapterBody).ToList();
+        foreach (var operation in acceptedOperations
+            .OrderByDescending(operation => operation.StartIndex)
+            .ThenByDescending(operation => operation.SortLine))
+        {
+            lines.RemoveRange(operation.StartIndex, operation.DeleteCount);
+            lines.InsertRange(operation.StartIndex, operation.ReplacementLines);
+        }
+
+        return ChapterFormatting.JoinLines(lines);
+    }
+
+    private static IEnumerable<ContestReviewOperation> BuildWinnerOperations(ContestBatch batch, ContestCandidate winner)
+    {
+        if (!TryBuildCandidateDiff(batch, winner, out var diff))
+            yield break;
+
+        var decisions = ReadReviewState(winner).Lines.ToDictionary(line => line.BlockId, StringComparer.Ordinal);
+        foreach (var target in EnumerateContestLineTargets(winner.Id, diff))
+        {
+            if (decisions.TryGetValue(target.BlockId, out var decision))
+            {
+                if (decision.Decision == ContestCandidateLineDecisionKind.Rejected)
+                    continue;
+                if (decision.Decision == ContestCandidateLineDecisionKind.Edited)
+                {
+                    yield return BuildOperation(winner, target, decision.Decision, decision.EditedText);
+                    continue;
+                }
+            }
+
+            yield return BuildOperation(winner, target, ContestCandidateLineDecisionKind.Kept, editedText: null);
+        }
+    }
+
+    private static ContestReviewOperation BuildOperation(
+        ContestCandidate candidate,
+        ContestLineTarget target,
+        ContestCandidateLineDecisionKind decision,
+        string? editedText)
+    {
+        var replacementText = decision == ContestCandidateLineDecisionKind.Edited
+            ? NormalizeSingleLineEditText(editedText)
+            : target.NewText;
+
+        if (target.OldRow is not null && target.NewRow is not null)
+        {
+            var oldLineNumber = target.OldLineNumber ?? throw new InvalidOperationException("The contest line no longer has an original line number.");
+            return new ContestReviewOperation(
+                candidate.Id,
+                target.BlockId,
+                candidate.Order,
+                target.NewLineNumber ?? oldLineNumber,
+                oldLineNumber - 1,
+                DeleteCount: 1,
+                [replacementText ?? string.Empty]);
+        }
+
+        if (target.NewRow is not null)
+        {
+            return new ContestReviewOperation(
+                candidate.Id,
+                target.BlockId,
+                candidate.Order,
+                target.NewLineNumber ?? int.MaxValue,
+                FindCurrentInsertionIndex(target, int.MaxValue),
+                DeleteCount: 0,
+                [replacementText ?? string.Empty]);
+        }
+
+        if (target.OldRow is not null)
+        {
+            var oldLineNumber = target.OldLineNumber ?? throw new InvalidOperationException("The contest line no longer has an original line number.");
+            var replacement = decision == ContestCandidateLineDecisionKind.Edited
+                ? [replacementText ?? string.Empty]
+                : Array.Empty<string>();
+            return new ContestReviewOperation(
+                candidate.Id,
+                target.BlockId,
+                candidate.Order,
+                oldLineNumber,
+                oldLineNumber - 1,
+                DeleteCount: 1,
+                replacement);
+        }
+
+        throw new InvalidOperationException("The contest line no longer maps to a candidate edit.");
+    }
+
+    private static bool OperationsConflict(ContestReviewOperation left, ContestReviewOperation right)
+    {
+        if (left.CandidateId == right.CandidateId)
+            return false;
+
+        var leftInsertion = left.DeleteCount == 0;
+        var rightInsertion = right.DeleteCount == 0;
+        if (leftInsertion || rightInsertion)
+            return leftInsertion && rightInsertion && left.StartIndex == right.StartIndex;
+
+        var leftEnd = left.StartIndex + left.DeleteCount - 1;
+        var rightEnd = right.StartIndex + right.DeleteCount - 1;
+        return left.StartIndex <= rightEnd && right.StartIndex <= leftEnd;
+    }
+
+    private static int FindCurrentInsertionIndex(ContestLineTarget target, int currentLineCount) =>
+        FindInsertionIndex(target.Hunk.Rows, target.RowIndex, currentLineCount, useOldLineNumbers: true);
+
+    private static int FindInsertionIndex(IReadOnlyList<DiffRow> rows, int rowIndex, int lineCount, bool useOldLineNumbers)
+    {
+        for (var index = rowIndex - 1; index >= 0; index--)
+        {
+            var lineNumber = useOldLineNumbers ? rows[index].OldLineNumber : rows[index].NewLineNumber;
+            if (lineNumber is int previousLine)
+                return Math.Clamp(previousLine, 0, lineCount);
+        }
+
+        for (var index = rowIndex + 1; index < rows.Count; index++)
+        {
+            var lineNumber = useOldLineNumbers ? rows[index].OldLineNumber : rows[index].NewLineNumber;
+            if (lineNumber is int nextLine)
+                return Math.Clamp(nextLine - 1, 0, lineCount);
+        }
+
+        return lineCount == int.MaxValue ? 0 : lineCount;
+    }
+
+    private static string NormalizeSingleLineEditText(string? text)
+    {
+        var normalized = (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+        if (normalized.Contains('\n'))
+            throw new InvalidOperationException("Line edits must stay on one line.");
+        return normalized;
+    }
+
 
     private async Task<IReadOnlyList<ContestCandidateProvider>> ResolveContestProvidersAsync(Project project, CancellationToken cancellationToken)
     {
@@ -627,9 +1031,6 @@ public sealed class EditorContestService(
         return trimmed[(firstNewline + 1)..lastFence].Trim();
     }
 
-    private static IReadOnlyList<ContestChapterMutation> ReadCandidateMutations(string mutationsJson) =>
-        JsonSerializer.Deserialize<List<ContestChapterMutation>>(mutationsJson, JsonOptions) ?? [];
-
     private static bool SetSlot(Project project, int slot, int? providerId)
     {
         switch (slot)
@@ -665,6 +1066,48 @@ public sealed class EditorContestService(
     private sealed record ContestCandidateRawProgress(Guid CandidateId, string Delta);
 
     private sealed record NormalizedMutation(string Kind, int StartLine, int EndLine, string ReplacementText);
+
+    private sealed record ContestLineTarget(
+        string BlockId,
+        int? PairId,
+        int? OldLineNumber,
+        int? NewLineNumber,
+        string? OldText,
+        string? NewText,
+        DiffHunk Hunk,
+        int RowIndex,
+        DiffRow? OldRow,
+        DiffRow? NewRow);
+
+    private sealed record ContestCandidateReviewState(List<ContestCandidateLineDecision> Lines);
+
+    private sealed record ContestCandidateLineDecision(
+        string BlockId,
+        ContestCandidateLineDecisionKind Decision,
+        int? PairId,
+        int? OldLineNumber,
+        int? NewLineNumber,
+        string? OldText,
+        string? NewText,
+        string? EditedText,
+        DateTime UpdatedAtUtc);
+
+    private sealed record ContestReviewOperation(
+        Guid CandidateId,
+        string BlockId,
+        int CandidateOrder,
+        int SortLine,
+        int StartIndex,
+        int DeleteCount,
+        IReadOnlyList<string> ReplacementLines);
+
+    private enum ContestCandidateLineDecisionKind
+    {
+        Kept,
+        Rejected,
+        Edited,
+        Cleared,
+    }
 
     private enum ContestCandidateFailureKind
     {

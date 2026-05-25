@@ -19,7 +19,8 @@ public sealed class ContestRepository(AppDbContext db) : IContestRepository
         var batches = await db.ContestBatches
             .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
             .Where(batch => batch.ProjectId == projectId
-                && batch.Status != ContestBatchStatus.Running)
+                && batch.Status != ContestBatchStatus.Running
+                && batch.Status != ContestBatchStatus.Completed)
             .ToListAsync(cancellationToken);
 
         if (batches.Count == 0) return;

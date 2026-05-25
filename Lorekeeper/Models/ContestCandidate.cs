@@ -25,6 +25,8 @@ public class ContestCandidate
 
     public string RawResponse { get; set; } = string.Empty;
 
+    public string ReviewStateJson { get; set; } = "{}";
+
     public string? Notes { get; set; }
 
     public string? ErrorMessage { get; set; }
