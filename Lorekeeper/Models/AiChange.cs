@@ -45,4 +45,6 @@ public enum AiChangeStatus
     Applied,
     Rejected,
     Conflict,
+    Superseded,
+    Resolved,
 }

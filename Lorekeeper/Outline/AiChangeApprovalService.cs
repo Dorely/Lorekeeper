@@ -59,6 +59,138 @@ public sealed class AiChangeApprovalService(
     public Task ClearReviewDraftAsync(Guid changeId, CancellationToken cancellationToken = default) =>
         SaveReviewDraftAsync(changeId, draftAfterJson: null, reviewStateJson: null, cancellationToken);
 
+    public async Task PrepareChapterBodyLineReviewAsync(Guid projectId, Guid chapterId, CancellationToken cancellationToken = default)
+    {
+        var chapter = await chapters.GetAsync(chapterId, cancellationToken)
+            ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
+        if (chapter.ProjectId != projectId)
+            throw new InvalidOperationException("The selected chapter does not belong to this project.");
+
+        var pendingBatches = await changes.ListPendingBatchesAsync(projectId, cancellationToken);
+        var chapterBodyChanges = CurrentPendingChapterBodyChanges(pendingBatches, chapterId);
+        if (chapterBodyChanges.Count == 0) return;
+
+        EnsureNoExternalPendingDependencies(chapterBodyChanges, pendingBatches);
+
+        var aggregate = chapterBodyChanges[^1];
+        var finalAfter = ReadOptional<ChapterBodyChange>(AiChangeReviewDrafts.EffectiveAfterJson(aggregate))
+            ?? throw new InvalidOperationException("The active chapter body review change no longer has a proposed body.");
+
+        var now = DateTime.UtcNow;
+        foreach (var folded in chapterBodyChanges.Take(chapterBodyChanges.Count - 1))
+        {
+            folded.Status = AiChangeStatus.Superseded;
+            folded.DraftAfterJson = null;
+            folded.ReviewStateJson = null;
+            folded.UpdatedAt = now;
+            folded.ResolvedAt = now;
+            changes.UpdateChange(folded);
+        }
+
+        var rebasedBefore = new ChapterBodyChange(chapter.Id, chapter.Title, chapter.Body);
+        var rebasedAfter = finalAfter with
+        {
+            Id = chapter.Id,
+            Title = chapter.Title,
+        };
+
+        aggregate.BeforeJson = Serialize(rebasedBefore);
+        aggregate.AfterJson = Serialize(rebasedAfter);
+        aggregate.DraftAfterJson = null;
+        aggregate.ReviewStateJson = BuildReviewStateJson();
+        aggregate.DependsOnChangeIdsJson = "[]";
+        aggregate.Status = BodiesEqualByLines(chapter.Body, rebasedAfter.Body)
+            ? AiChangeStatus.Resolved
+            : AiChangeStatus.Pending;
+        aggregate.UpdatedAt = now;
+        aggregate.ResolvedAt = aggregate.Status == AiChangeStatus.Resolved ? now : null;
+        changes.UpdateChange(aggregate);
+
+        foreach (var batch in chapterBodyChanges.Select(change => change.Batch).DistinctBy(batch => batch.Id))
+            UpdateBatchStatus(batch);
+
+        await changes.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ResolveChapterBodyReviewLineAsync(
+        Guid projectId,
+        Guid chapterId,
+        ChapterBodyReviewLineResolution request,
+        CancellationToken cancellationToken = default)
+    {
+        await PrepareChapterBodyLineReviewAsync(projectId, chapterId, cancellationToken);
+
+        var pendingBatches = await changes.ListPendingBatchesAsync(projectId, cancellationToken);
+        var chapterBodyChanges = CurrentPendingChapterBodyChanges(pendingBatches, chapterId);
+        if (chapterBodyChanges.Count == 0)
+            throw new InvalidOperationException("There are no pending chapter-body lines left to review.");
+
+        if (chapterBodyChanges.Count > 1)
+            throw new InvalidOperationException("The active chapter body review could not be normalized. Open the pending changes modal to review these changes.");
+
+        var aggregate = chapterBodyChanges[0];
+        if (aggregate.Id != request.ChangeId)
+            throw new InvalidOperationException("The chapter-body review changed. Refresh Review mode and try again.");
+
+        var chapter = await chapters.GetAsync(chapterId, cancellationToken)
+            ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
+        if (chapter.ProjectId != projectId)
+            throw new InvalidOperationException("The selected chapter does not belong to this project.");
+
+        var proposed = ReadOptional<ChapterBodyChange>(AiChangeReviewDrafts.EffectiveAfterJson(aggregate))
+            ?? throw new InvalidOperationException("The active chapter body review change no longer has a proposed body.");
+
+        if (!AiChangeReviewDiffBuilder.TryBuild(aggregate, out var diff))
+            throw new InvalidOperationException("The active chapter body review no longer contains a text diff.");
+
+        var target = FindChapterBodyReviewLineTarget(aggregate.Id, diff, request)
+            ?? throw new InvalidOperationException("This review line changed. Refresh Review mode and try again.");
+
+        var currentLines = ChapterFormatting.SplitLines(chapter.Body);
+        var proposedLines = ChapterFormatting.SplitLines(proposed.Body);
+        var editedText = request.Action == ChapterBodyReviewLineAction.Edit
+            ? NormalizeSingleLineEditText(request.EditedText)
+            : null;
+
+        ResolveLineTarget(target, request.Action, editedText, currentLines, proposedLines);
+
+        var newCurrentBody = ChapterFormatting.JoinLines(currentLines);
+        var newProposedBody = ChapterFormatting.JoinLines(proposedLines);
+
+        if (!string.Equals(newCurrentBody, chapter.Body, StringComparison.Ordinal))
+            chapter = await chapters.UpdateAsync(chapter.Id, body: newCurrentBody, cancellationToken: cancellationToken);
+
+        aggregate.BeforeJson = Serialize(new ChapterBodyChange(chapter.Id, chapter.Title, chapter.Body));
+        aggregate.AfterJson = Serialize(proposed with
+        {
+            Id = chapter.Id,
+            Title = chapter.Title,
+            Body = newProposedBody,
+        });
+        aggregate.DraftAfterJson = null;
+        aggregate.ReviewStateJson = BuildReviewStateJson();
+        aggregate.UpdatedAt = DateTime.UtcNow;
+        aggregate.ResolvedAt = null;
+
+        if (BodiesEqualByLines(chapter.Body, newProposedBody))
+        {
+            aggregate.Status = AiChangeStatus.Resolved;
+            aggregate.ResolvedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            aggregate.Status = AiChangeStatus.Pending;
+        }
+
+        changes.UpdateChange(aggregate);
+
+        if (request.Action == ChapterBodyReviewLineAction.Reject && !string.IsNullOrWhiteSpace(request.RejectionMessage))
+            await AppendLineRejectionSystemMessageAsync(aggregate, chapter, target, request.RejectionMessage, cancellationToken);
+
+        UpdateBatchStatus(aggregate.Batch);
+        await changes.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task ApplyBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
     {
         var batch = await changes.GetBatchAsync(batchId, cancellationToken)
@@ -193,7 +325,7 @@ public sealed class AiChangeApprovalService(
 
     private async Task ApplyChangeCoreAsync(AiChangeBatch batch, AiChange change, CancellationToken cancellationToken)
     {
-        if (change.Status == AiChangeStatus.Applied) return;
+        if (change.Status is AiChangeStatus.Applied or AiChangeStatus.Superseded or AiChangeStatus.Resolved) return;
         if (change.Status == AiChangeStatus.Rejected)
             throw new InvalidOperationException($"AI change {change.Id} was rejected and cannot be applied.");
         if (change.Status == AiChangeStatus.Conflict)
@@ -323,6 +455,338 @@ public sealed class AiChangeApprovalService(
         }
     }
 
+    private static IReadOnlyList<AiChange> CurrentPendingChapterBodyChanges(IReadOnlyList<AiChangeBatch> batches, Guid chapterId) =>
+        batches
+            .SelectMany(batch => batch.Changes)
+            .Where(change => change.Status == AiChangeStatus.Pending && IsChapterBodyChangeFor(change, chapterId))
+            .OrderBy(change => change.Batch.CreatedAt)
+            .ThenBy(change => change.Order)
+            .ToList();
+
+    private static bool IsChapterBodyChangeFor(AiChange change, Guid chapterId)
+    {
+        if (!string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(change.ToolName, "edit_assigned_chapter", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return TryReadChapterBodyChange(change.BeforeJson)?.Id == chapterId
+            || TryReadChapterBodyChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
+    }
+
+    private static ChapterBodyChange? TryReadChapterBodyChange(string json)
+    {
+        try
+        {
+            return ReadOptional<ChapterBodyChange>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static void EnsureNoExternalPendingDependencies(IReadOnlyList<AiChange> chapterBodyChanges, IReadOnlyList<AiChangeBatch> pendingBatches)
+    {
+        var chapterBodyChangeIds = chapterBodyChanges.Select(change => change.Id).ToHashSet();
+        var pendingChanges = pendingBatches
+            .SelectMany(batch => batch.Changes)
+            .Where(change => change.Status == AiChangeStatus.Pending)
+            .ToList();
+        var pendingById = pendingChanges.ToDictionary(change => change.Id);
+
+        foreach (var change in chapterBodyChanges)
+        {
+            foreach (var dependencyId in ReadGuidList(change.DependsOnChangeIdsJson))
+            {
+                if (chapterBodyChangeIds.Contains(dependencyId)) continue;
+                if (!pendingById.TryGetValue(dependencyId, out var dependency)) continue;
+
+                var dependencyName = string.IsNullOrWhiteSpace(dependency.Summary)
+                    ? dependency.ToolName
+                    : dependency.Summary;
+                throw new InvalidOperationException(
+                    $"This chapter body review depends on pending non-body change '{dependencyName}'. Open the pending changes modal and resolve that dependency first.");
+            }
+        }
+
+        foreach (var dependent in pendingChanges.Where(change => !chapterBodyChangeIds.Contains(change.Id)))
+        {
+            if (!ReadGuidList(dependent.DependsOnChangeIdsJson).Any(chapterBodyChangeIds.Contains))
+                continue;
+
+            var dependentName = string.IsNullOrWhiteSpace(dependent.Summary)
+                ? dependent.ToolName
+                : dependent.Summary;
+            throw new InvalidOperationException(
+                $"Pending non-body change '{dependentName}' depends on this chapter body review. Open the pending changes modal and resolve the dependent changes together.");
+        }
+    }
+
+    private static ChapterBodyReviewLineTarget? FindChapterBodyReviewLineTarget(
+        Guid changeId,
+        ReviewDiff diff,
+        ChapterBodyReviewLineResolution request) =>
+        EnumerateChapterBodyReviewLineTargets(changeId, diff)
+            .FirstOrDefault(target =>
+                target.ChangeId == request.ChangeId
+                && target.PairId == request.PairId
+                && target.OldLineNumber == request.OldLineNumber
+                && target.NewLineNumber == request.NewLineNumber
+                && string.Equals(target.OldText, request.OldText, StringComparison.Ordinal)
+                && string.Equals(target.NewText, request.NewText, StringComparison.Ordinal));
+
+    private static IEnumerable<ChapterBodyReviewLineTarget> EnumerateChapterBodyReviewLineTargets(Guid changeId, ReviewDiff diff)
+    {
+        foreach (var section in diff.Sections.Where(section => string.Equals(section.Key, "Body", StringComparison.OrdinalIgnoreCase)))
+        {
+            foreach (var hunk in section.Hunks)
+            {
+                var consumedPairIds = new HashSet<int>();
+                for (var rowIndex = 0; rowIndex < hunk.Rows.Count; rowIndex++)
+                {
+                    var row = hunk.Rows[rowIndex];
+                    if (row.Kind == DiffRowKind.Context)
+                        continue;
+
+                    if (row.PairId is int pairId)
+                    {
+                        if (!consumedPairIds.Add(pairId))
+                            continue;
+
+                        var oldRowIndex = -1;
+                        var newRowIndex = -1;
+                        DiffRow? oldRow = null;
+                        DiffRow? newRow = null;
+                        for (var pairIndex = 0; pairIndex < hunk.Rows.Count; pairIndex++)
+                        {
+                            var candidate = hunk.Rows[pairIndex];
+                            if (candidate.PairId != pairId) continue;
+                            if (candidate.Kind == DiffRowKind.Removed)
+                            {
+                                oldRow = candidate;
+                                oldRowIndex = pairIndex;
+                            }
+                            else if (candidate.Kind == DiffRowKind.Added)
+                            {
+                                newRow = candidate;
+                                newRowIndex = pairIndex;
+                            }
+                        }
+
+                        var targetIndex = newRowIndex >= 0 ? newRowIndex : oldRowIndex;
+                        if (targetIndex >= 0)
+                        {
+                            yield return new ChapterBodyReviewLineTarget(
+                                changeId,
+                                pairId,
+                                oldRow?.OldLineNumber,
+                                newRow?.NewLineNumber,
+                                oldRow?.Text,
+                                newRow?.Text,
+                                hunk,
+                                targetIndex,
+                                oldRow,
+                                newRow);
+                        }
+
+                        continue;
+                    }
+
+                    yield return row.Kind == DiffRowKind.Added
+                        ? new ChapterBodyReviewLineTarget(
+                            changeId,
+                            PairId: null,
+                            OldLineNumber: null,
+                            row.NewLineNumber,
+                            OldText: null,
+                            row.Text,
+                            hunk,
+                            rowIndex,
+                            OldRow: null,
+                            row)
+                        : new ChapterBodyReviewLineTarget(
+                            changeId,
+                            PairId: null,
+                            row.OldLineNumber,
+                            NewLineNumber: null,
+                            row.Text,
+                            NewText: null,
+                            hunk,
+                            rowIndex,
+                            row,
+                            NewRow: null);
+                }
+            }
+        }
+    }
+
+    private static void ResolveLineTarget(
+        ChapterBodyReviewLineTarget target,
+        ChapterBodyReviewLineAction action,
+        string? editedText,
+        List<string> currentLines,
+        List<string> proposedLines)
+    {
+        switch (action)
+        {
+            case ChapterBodyReviewLineAction.Keep:
+                ResolveKeep(target, currentLines, proposedLines);
+                break;
+            case ChapterBodyReviewLineAction.Reject:
+                ResolveReject(target, currentLines, proposedLines);
+                break;
+            case ChapterBodyReviewLineAction.Edit:
+                if (editedText is null)
+                    throw new InvalidOperationException("Enter the edited line before saving.");
+                ResolveEdit(target, editedText, currentLines, proposedLines);
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported chapter body review action '{action}'.");
+        }
+    }
+
+    private static void ResolveKeep(ChapterBodyReviewLineTarget target, List<string> currentLines, List<string> proposedLines)
+    {
+        if (target.OldRow is not null && target.NewRow is not null)
+        {
+            currentLines[RequiredOldIndex(target, currentLines)] = target.NewText ?? string.Empty;
+            return;
+        }
+
+        if (target.NewRow is not null)
+        {
+            _ = RequiredNewIndex(target, proposedLines);
+            currentLines.Insert(FindCurrentInsertionIndex(target, currentLines.Count), target.NewText ?? string.Empty);
+            return;
+        }
+
+        if (target.OldRow is not null)
+        {
+            currentLines.RemoveAt(RequiredOldIndex(target, currentLines));
+            return;
+        }
+
+        throw new InvalidOperationException("The review line no longer maps to a chapter body edit.");
+    }
+
+    private static void ResolveReject(ChapterBodyReviewLineTarget target, List<string> currentLines, List<string> proposedLines)
+    {
+        if (target.OldRow is not null && target.NewRow is not null)
+        {
+            _ = RequiredOldIndex(target, currentLines);
+            proposedLines[RequiredNewIndex(target, proposedLines)] = target.OldText ?? string.Empty;
+            return;
+        }
+
+        if (target.NewRow is not null)
+        {
+            proposedLines.RemoveAt(RequiredNewIndex(target, proposedLines));
+            return;
+        }
+
+        if (target.OldRow is not null)
+        {
+            _ = RequiredOldIndex(target, currentLines);
+            proposedLines.Insert(FindProposedInsertionIndex(target, proposedLines.Count), target.OldText ?? string.Empty);
+            return;
+        }
+
+        throw new InvalidOperationException("The review line no longer maps to a chapter body edit.");
+    }
+
+    private static void ResolveEdit(
+        ChapterBodyReviewLineTarget target,
+        string editedText,
+        List<string> currentLines,
+        List<string> proposedLines)
+    {
+        if (target.OldRow is not null && target.NewRow is not null)
+        {
+            currentLines[RequiredOldIndex(target, currentLines)] = editedText;
+            proposedLines[RequiredNewIndex(target, proposedLines)] = editedText;
+            return;
+        }
+
+        if (target.NewRow is not null)
+        {
+            proposedLines[RequiredNewIndex(target, proposedLines)] = editedText;
+            currentLines.Insert(FindCurrentInsertionIndex(target, currentLines.Count), editedText);
+            return;
+        }
+
+        if (target.OldRow is not null)
+        {
+            currentLines[RequiredOldIndex(target, currentLines)] = editedText;
+            proposedLines.Insert(FindProposedInsertionIndex(target, proposedLines.Count), editedText);
+            return;
+        }
+
+        throw new InvalidOperationException("The review line no longer maps to a chapter body edit.");
+    }
+
+    private static int RequiredOldIndex(ChapterBodyReviewLineTarget target, IReadOnlyList<string> currentLines)
+    {
+        if (target.OldLineNumber is not int oldLineNumber || target.OldText is null)
+            throw new InvalidOperationException("This review line no longer has an original chapter line.");
+
+        var index = oldLineNumber - 1;
+        if (index < 0 || index >= currentLines.Count || !string.Equals(currentLines[index], target.OldText, StringComparison.Ordinal))
+            throw new InvalidOperationException("This review line is stale because the chapter body changed. Refresh Review mode and try again.");
+
+        return index;
+    }
+
+    private static int RequiredNewIndex(ChapterBodyReviewLineTarget target, IReadOnlyList<string> proposedLines)
+    {
+        if (target.NewLineNumber is not int newLineNumber || target.NewText is null)
+            throw new InvalidOperationException("This review line no longer has a proposed chapter line.");
+
+        var index = newLineNumber - 1;
+        if (index < 0 || index >= proposedLines.Count || !string.Equals(proposedLines[index], target.NewText, StringComparison.Ordinal))
+            throw new InvalidOperationException("This review line is stale because the proposed body changed. Refresh Review mode and try again.");
+
+        return index;
+    }
+
+    private static int FindCurrentInsertionIndex(ChapterBodyReviewLineTarget target, int currentLineCount) =>
+        FindInsertionIndex(target.Hunk.Rows, target.RowIndex, currentLineCount, useOldLineNumbers: true);
+
+    private static int FindProposedInsertionIndex(ChapterBodyReviewLineTarget target, int proposedLineCount) =>
+        FindInsertionIndex(target.Hunk.Rows, target.RowIndex, proposedLineCount, useOldLineNumbers: false);
+
+    private static int FindInsertionIndex(IReadOnlyList<DiffRow> rows, int rowIndex, int lineCount, bool useOldLineNumbers)
+    {
+        for (var index = rowIndex - 1; index >= 0; index--)
+        {
+            var lineNumber = useOldLineNumbers ? rows[index].OldLineNumber : rows[index].NewLineNumber;
+            if (lineNumber is int previousLine)
+                return Math.Clamp(previousLine, 0, lineCount);
+        }
+
+        for (var index = rowIndex + 1; index < rows.Count; index++)
+        {
+            var lineNumber = useOldLineNumbers ? rows[index].OldLineNumber : rows[index].NewLineNumber;
+            if (lineNumber is int nextLine)
+                return Math.Clamp(nextLine - 1, 0, lineCount);
+        }
+
+        return lineCount;
+    }
+
+    private static string NormalizeSingleLineEditText(string? text)
+    {
+        var normalized = (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+        if (normalized.Contains('\n'))
+            throw new InvalidOperationException("Line edits must stay on one line.");
+        return normalized;
+    }
+
+    private static bool BodiesEqualByLines(string left, string right) =>
+        ChapterFormatting.SplitLines(left).SequenceEqual(ChapterFormatting.SplitLines(right), StringComparer.Ordinal);
+
     private static List<AiChange> CollectDependentPendingChanges(AiChangeBatch batch, Guid rejectedRootId)
     {
         var rejectedIds = new HashSet<Guid> { rejectedRootId };
@@ -378,6 +842,36 @@ public sealed class AiChangeApprovalService(
         }
 
         var correction = builder.ToString().TrimEnd();
+        await AppendCorrectionSystemMessageAsync(batch, correction, cancellationToken);
+    }
+
+    private async Task AppendLineRejectionSystemMessageAsync(
+        AiChange change,
+        Chapter chapter,
+        ChapterBodyReviewLineTarget target,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        var trimmed = message.Trim();
+        if (trimmed.Length == 0) return;
+
+        var builder = new StringBuilder();
+        builder.AppendLine("The user rejected one proposed chapter-body line during inline review. Update future chapter edits to respect this correction.");
+        builder.AppendLine($"Chapter: {chapter.Title}");
+        if (!string.IsNullOrEmpty(target.OldText))
+            builder.AppendLine($"Current line kept by the user: {target.OldText}");
+        if (!string.IsNullOrEmpty(target.NewText))
+            builder.AppendLine($"Rejected proposed line: {target.NewText}");
+        builder.AppendLine($"User rejection note: {trimmed}");
+
+        await AppendCorrectionSystemMessageAsync(change.Batch, builder.ToString().TrimEnd(), cancellationToken);
+    }
+
+    private async Task AppendCorrectionSystemMessageAsync(
+        AiChangeBatch batch,
+        string correction,
+        CancellationToken cancellationToken)
+    {
         switch (batch.ConversationKind)
         {
             case AiChangeConversationKind.Outline:
@@ -531,4 +1025,24 @@ public sealed class AiChangeApprovalService(
         string.IsNullOrWhiteSpace(json) || json == "[]"
             ? []
             : JsonSerializer.Deserialize<List<Guid>>(json, JsonSerializerOptions.Default) ?? [];
+
+    private static string BuildReviewStateJson() =>
+        JsonSerializer.Serialize(new ReviewDraftState(DateTime.UtcNow), JsonSerializerOptions.Default);
+
+    private static string Serialize(object value) =>
+        JsonSerializer.Serialize(value, JsonSerializerOptions.Default);
+
+    private sealed record ChapterBodyReviewLineTarget(
+        Guid ChangeId,
+        int? PairId,
+        int? OldLineNumber,
+        int? NewLineNumber,
+        string? OldText,
+        string? NewText,
+        DiffHunk Hunk,
+        int RowIndex,
+        DiffRow? OldRow,
+        DiffRow? NewRow);
+
+    private sealed record ReviewDraftState(DateTime UpdatedAt);
 }

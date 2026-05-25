@@ -1043,7 +1043,7 @@
             get
             {
                 if (Items.Any(item => item.Change.Status == AiChangeStatus.Conflict)) return "conflict";
-                if (Items.All(item => item.Change.Status == AiChangeStatus.Applied)) return "applied";
+                if (Items.All(item => item.Change.Status is AiChangeStatus.Applied or AiChangeStatus.Resolved or AiChangeStatus.Superseded)) return "applied";
                 if (Items.All(item => item.Change.Status == AiChangeStatus.Rejected)) return "rejected";
                 return "pending";
             }

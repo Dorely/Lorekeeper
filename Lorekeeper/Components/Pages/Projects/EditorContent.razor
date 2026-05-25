@@ -168,7 +168,7 @@ else
                                 <div class="chapter-review-toolbar">
                                     <div class="chapter-review-summary">
                                         <strong>@_reviewProjection.PendingChangeCount</strong>
-                                        pending chapter-body change@(_reviewProjection.PendingChangeCount == 1 ? string.Empty : "s")
+                                        pending line change@(_reviewProjection.PendingChangeCount == 1 ? string.Empty : "s")
                                     </div>
                                     <div class="chapter-review-toolbar-actions">
                                         <button type="button"
@@ -211,185 +211,141 @@ else
                             <div class="chapter-review-lines">
                                 @foreach (var line in _reviewProjection.Lines)
                                 {
-                                    <div class="@ReviewLineClass(line)" @key="line.LineNumber" data-review-line="@line.LineNumber">
-                                        <span class="review-line-number">@line.LineNumber.ToString(_reviewProjection.LineNumberFormat)</span>
-                                        <span class="@ReviewStripClass(line)" title="@line.MarkerTitle" aria-hidden="true">
-                                            @if (line.HasDeletionMarker)
-                                            {
-                                                <span class="review-strip-dot review-strip-dot--removed"></span>
-                                            }
-                                            @if (line.IsAddedOrChanged)
-                                            {
-                                                <span class="review-strip-dot review-strip-dot--added"></span>
-                                            }
-                                        </span>
-                                        <span class="review-line-text">@RenderReviewLine(line)</span>
-                                        <span class="review-line-actions">
-                                            @if (line.PrimaryBlockId is { } blockId)
-                                            {
-                                                <button type="button"
-                                                        class="@ReviewLineActionClass(blockId)"
-                                                        title="Review this staged change inline"
-                                                        @onclick="() => ToggleReviewBlockAsync(blockId)">
-                                                    @(IsReviewBlockExpanded(blockId) ? "Hide" : "Review")
-                                                </button>
-                                            }
-                                        </span>
-                                    </div>
-
-                                    @foreach (var block in ReviewBlocksAfterLine(line.LineNumber))
+                                    @foreach (var block in ReviewBlocksBeforeLine(line.LineNumber))
                                     {
-                                        if (IsReviewBlockExpanded(block.Id))
-                                        {
-                                            <article class="review-block" data-review-block="@block.Id" @key="block.Id">
-                                                <header class="review-block-header">
-                                                    <div class="review-block-title-wrap">
-                                                        <div class="review-block-title">@block.Title</div>
-                                                        <div class="review-block-summary">@block.Summary</div>
-                                                    </div>
-                                                    <div class="review-block-actions">
-                                                        <button type="button"
-                                                                class="btn btn-sm btn-outline-primary"
-                                                                disabled="@_reviewBusy"
-                                                                @onclick="() => KeepReviewBlockAsync(block)">
-                                                            Keep
-                                                        </button>
-                                                        <button type="button"
-                                                                class="btn btn-sm btn-outline-danger"
-                                                                disabled="@_reviewBusy"
-                                                                @onclick="() => BeginRejectReviewBlock(block.Id)">
-                                                            Reject
-                                                        </button>
-                                                        @if (block.CanEdit)
+                                        <article class="review-block" data-review-block="@block.Id" @key="block.Id">
+                                            <header class="review-block-header">
+                                                <div class="review-block-title-wrap">
+                                                    <div class="review-block-title">@block.Title</div>
+                                                    <div class="review-block-summary">@block.Summary</div>
+                                                </div>
+                                                <div class="review-block-actions">
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-outline-secondary"
+                                                            disabled="@_reviewBusy"
+                                                            @onclick="() => ToggleReviewBlockAsync(block.Id)">
+                                                        Hide
+                                                    </button>
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-outline-primary"
+                                                            disabled="@_reviewBusy"
+                                                            @onclick="() => KeepReviewBlockAsync(block)">
+                                                        Keep
+                                                    </button>
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-outline-danger"
+                                                            disabled="@_reviewBusy"
+                                                            @onclick="() => RejectReviewBlockAsync(block)">
+                                                        Reject
+                                                    </button>
+                                                    @if (block.CanEdit)
+                                                    {
+                                                        @if (IsEditingReviewBlock(block))
                                                         {
-                                                            @if (IsEditingReviewBlock(block))
-                                                            {
-                                                                <button type="button"
-                                                                        class="btn btn-sm btn-outline-primary"
-                                                                        disabled="@_reviewBusy"
-                                                                        @onclick="() => SaveReviewBlockEditAsync(block)">
-                                                                    Save edit
-                                                                </button>
-                                                                <button type="button"
-                                                                        class="btn btn-sm btn-outline-secondary"
-                                                                        disabled="@_reviewBusy"
-                                                                        @onclick="CancelReviewBlockEdit">
-                                                                    Cancel
-                                                                </button>
-                                                            }
-                                                            else
-                                                            {
-                                                                <button type="button"
-                                                                        class="btn btn-sm btn-outline-secondary"
-                                                                        disabled="@_reviewBusy"
-                                                                        @onclick="() => BeginReviewBlockEdit(block)">
-                                                                    Edit
-                                                                </button>
-                                                            }
-                                                        }
-                                                    </div>
-                                                </header>
-
-                                                @if (IsRejectingReviewBlock(block.Id))
-                                                {
-                                                    <div class="review-reject-box">
-                                                        <label for="@($"review-reject-{block.Id}")">Rejection message</label>
-                                                        <textarea id="@($"review-reject-{block.Id}")"
-                                                                  class="form-control"
-                                                                  rows="3"
-                                                                  placeholder="Tell the assistant what to correct next turn..."
-                                                                  @bind="_reviewRejectionMessage"
-                                                                  @bind:event="oninput"></textarea>
-                                                        <div class="review-reject-actions">
                                                             <button type="button"
-                                                                    class="btn btn-sm btn-danger"
+                                                                    class="btn btn-sm btn-outline-primary"
                                                                     disabled="@_reviewBusy"
-                                                                    @onclick="() => ConfirmRejectReviewBlockAsync(block)">
-                                                                Reject change
+                                                                    @onclick="() => SaveReviewBlockEditAsync(block)">
+                                                                Save edit
                                                             </button>
                                                             <button type="button"
                                                                     class="btn btn-sm btn-outline-secondary"
                                                                     disabled="@_reviewBusy"
-                                                                    @onclick="CancelRejectReviewBlock">
+                                                                    @onclick="CancelReviewBlockEdit">
                                                                 Cancel
                                                             </button>
-                                                        </div>
-                                                    </div>
-                                                }
-
-                                                @if (IsEditingReviewBlock(block))
-                                                {
-                                                    <textarea class="form-control review-block-editor"
-                                                              rows="6"
-                                                              value="@(_reviewBlockEdit?.Text ?? string.Empty)"
-                                                              @oninput="args => UpdateReviewBlockEditText(args.Value?.ToString() ?? string.Empty)"></textarea>
-                                                }
-                                                else
-                                                {
-                                                    <div class="review-block-diff">
-                                                        @foreach (var row in block.Hunk.Rows)
-                                                        {
-                                                            <div class="@ReviewDiffRowClass(row)">
-                                                                <span class="review-diff-line-number">@(row.OldLineNumber?.ToString() ?? string.Empty)</span>
-                                                                <span class="review-diff-line-number">@(row.NewLineNumber?.ToString() ?? string.Empty)</span>
-                                                                <span class="review-diff-marker">@row.Marker</span>
-                                                                <span class="review-diff-line-text">
-                                                                    @if (IsEditingReviewLine(block, row))
-                                                                    {
-                                                                        <textarea class="form-control review-line-editor"
-                                                                                  rows="1"
-                                                                                  value="@(_reviewLineEdit?.Text ?? row.Text)"
-                                                                                  @oninput="args => UpdateReviewLineEditText(args.Value?.ToString() ?? string.Empty)"></textarea>
-                                                                    }
-                                                                    else
-                                                                    {
-                                                                        @RenderDiffSegments(row, block.Hunk.Rows)
-                                                                    }
-                                                                </span>
-                                                                <span class="review-diff-line-actions">
-                                                                    @if (CanRejectDiffRow(row))
-                                                                    {
-                                                                        <button type="button"
-                                                                                class="btn btn-sm btn-outline-danger"
-                                                                                disabled="@_reviewBusy"
-                                                                                @onclick="() => RejectReviewLineAsync(block, row)">
-                                                                            Reject line
-                                                                        </button>
-                                                                    }
-                                                                    @if (CanEditNewLine(row))
-                                                                    {
-                                                                        @if (IsEditingReviewLine(block, row))
-                                                                        {
-                                                                            <button type="button"
-                                                                                    class="btn btn-sm btn-outline-primary"
-                                                                                    disabled="@_reviewBusy"
-                                                                                    @onclick="() => SaveReviewLineEditAsync(block)">
-                                                                                Save
-                                                                            </button>
-                                                                            <button type="button"
-                                                                                    class="btn btn-sm btn-outline-secondary"
-                                                                                    disabled="@_reviewBusy"
-                                                                                    @onclick="CancelReviewLineEdit">
-                                                                                Cancel
-                                                                            </button>
-                                                                        }
-                                                                        else
-                                                                        {
-                                                                            <button type="button"
-                                                                                    class="btn btn-sm btn-outline-secondary"
-                                                                                    disabled="@_reviewBusy"
-                                                                                    @onclick="() => BeginReviewLineEdit(block, row)">
-                                                                                Edit
-                                                                            </button>
-                                                                        }
-                                                                    }
-                                                                </span>
-                                                            </div>
                                                         }
+                                                        else
+                                                        {
+                                                            <button type="button"
+                                                                    class="btn btn-sm btn-outline-secondary"
+                                                                    disabled="@_reviewBusy"
+                                                                    @onclick="() => BeginReviewBlockEdit(block)">
+                                                                Edit
+                                                            </button>
+                                                        }
+                                                    }
+                                                </div>
+                                            </header>
+
+                                            @if (IsRejectingReviewBlock(block))
+                                            {
+                                                <div class="review-reject-box">
+                                                    <label for="@($"review-reject-{block.Id}")">Optional rejection note</label>
+                                                    <textarea id="@($"review-reject-{block.Id}")"
+                                                              class="form-control"
+                                                              rows="2"
+                                                              placeholder="Tell the assistant what to correct next time..."
+                                                              value="@_reviewRejectionMessage"
+                                                              @oninput="args => _reviewRejectionMessage = args.Value?.ToString() ?? string.Empty"></textarea>
+                                                    <div class="review-reject-actions">
+                                                        <button type="button"
+                                                                class="btn btn-sm btn-danger"
+                                                                disabled="@_reviewBusy"
+                                                                @onclick="() => ConfirmRejectReviewBlockAsync(block)">
+                                                            Reject line
+                                                        </button>
+                                                        <button type="button"
+                                                                class="btn btn-sm btn-outline-secondary"
+                                                                disabled="@_reviewBusy"
+                                                                @onclick="CancelRejectReviewBlock">
+                                                            Cancel
+                                                        </button>
                                                     </div>
+                                                </div>
+                                            }
+
+                                            @if (IsEditingReviewBlock(block))
+                                            {
+                                                <textarea class="form-control review-block-editor"
+                                                          rows="2"
+                                                          value="@(_reviewBlockEdit?.Text ?? string.Empty)"
+                                                          @oninput="args => UpdateReviewBlockEditText(args.Value?.ToString() ?? string.Empty)"></textarea>
+                                            }
+                                            else
+                                            {
+                                                <div class="review-block-diff">
+                                                    @foreach (var row in ReviewBlockDisplayRows(block))
+                                                    {
+                                                        <div class="@ReviewDiffRowClass(row)">
+                                                            <span class="review-diff-line-number">@ReviewDiffLineNumber(row)</span>
+                                                            <span class="review-diff-marker">@row.Marker</span>
+                                                            <span class="review-diff-line-text">@RenderDiffSegments(row, block.Hunk.Rows)</span>
+                                                            <span class="review-diff-spacer"></span>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            }
+                                        </article>
+                                    }
+
+                                    @if (ShouldRenderReviewLine(line))
+                                    {
+                                        <div class="@ReviewLineClass(line)" @key="line.LineNumber" data-review-line="@line.LineNumber">
+                                            <span class="review-line-number">@line.LineNumber.ToString(_reviewProjection.LineNumberFormat)</span>
+                                            <span class="@ReviewStripClass(line)" title="@line.MarkerTitle" aria-hidden="true">
+                                                @if (line.HasDeletionMarker)
+                                                {
+                                                    <span class="review-strip-dot review-strip-dot--removed"></span>
                                                 }
-                                            </article>
-                                        }
+                                                @if (line.IsAddedOrChanged)
+                                                {
+                                                    <span class="review-strip-dot review-strip-dot--added"></span>
+                                                }
+                                            </span>
+                                            <span class="review-line-text">@RenderReviewLine(line)</span>
+                                            <span class="review-line-actions">
+                                                @if (line.PrimaryBlockId is { } blockId)
+                                                {
+                                                    <button type="button"
+                                                            class="@ReviewLineActionClass(blockId)"
+                                                            title="Review this staged change inline"
+                                                            @onclick="() => ToggleReviewBlockAsync(blockId)">
+                                                        Review
+                                                    </button>
+                                                }
+                                            </span>
+                                        </div>
                                     }
                                 }
                             </div>
@@ -524,12 +480,11 @@ else
     private readonly HashSet<string> _expandedReviewBlockIds = new(StringComparer.Ordinal);
     private string? _activeReviewBlockId;
     private string? _pendingReviewScrollBlockId;
-    private string? _rejectingReviewBlockId;
-    private string _reviewRejectionMessage = string.Empty;
     private string? _reviewError;
     private bool _reviewBusy;
     private ReviewBlockEdit? _reviewBlockEdit;
-    private ReviewLineEdit? _reviewLineEdit;
+    private string? _rejectingReviewBlockId;
+    private string _reviewRejectionMessage = string.Empty;
 
     private bool EditorReadOnly => _chapterLocked || _mode == EditorMode.Review;
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
@@ -1006,8 +961,17 @@ else
         _reviewLoading = true;
         try
         {
+            await ChangeApproval.PrepareChapterBodyLineReviewAsync(Project.Id, _current.Id);
             _reviewPendingBatches = await Chat.ListPendingChangesAsync(Project.Id);
             _reviewProjection = BuildReviewProjection(_current, _reviewPendingBatches);
+            _reviewError = null;
+            PruneInlineReviewState();
+        }
+        catch (Exception ex)
+        {
+            _reviewPendingBatches = await Chat.ListPendingChangesAsync(Project.Id);
+            _reviewProjection = BuildReviewProjection(_current, _reviewPendingBatches);
+            _reviewError = ex.Message;
             PruneInlineReviewState();
         }
         finally
@@ -1075,8 +1039,22 @@ else
 
     private bool IsReviewBlockExpanded(string blockId) => _expandedReviewBlockIds.Contains(blockId);
 
-    private IReadOnlyList<ReviewBlock> ReviewBlocksAfterLine(int lineNumber) =>
-        _reviewProjection?.Blocks.Where(block => block.AnchorLine == lineNumber).ToList() ?? [];
+    private IReadOnlyList<ReviewBlock> ReviewBlocksBeforeLine(int lineNumber) =>
+        _reviewProjection?.Blocks
+            .Where(block => IsReviewBlockExpanded(block.Id) && ReviewBlockRenderLine(block) == lineNumber)
+            .ToList()
+        ?? [];
+
+    private bool ShouldRenderReviewLine(ReviewLine line) =>
+        _reviewProjection?.Blocks.Any(block =>
+            IsReviewBlockExpanded(block.Id)
+            && ReviewBlockCoversLine(block, line.LineNumber)) != true;
+
+    private static int ReviewBlockRenderLine(ReviewBlock block) =>
+        block.NewRow?.NewLineNumber ?? block.AnchorLine;
+
+    private static bool ReviewBlockCoversLine(ReviewBlock block, int lineNumber) =>
+        block.NewRow?.NewLineNumber == lineNumber;
 
     private static string ReviewLineActionClass(string blockId) =>
         "btn btn-sm review-line-action " + (string.IsNullOrWhiteSpace(blockId) ? "btn-outline-secondary" : "btn-outline-success");
@@ -1103,56 +1081,35 @@ else
     }
 
     private async Task KeepReviewBlockAsync(ReviewBlock block) =>
-        await RunReviewActionAsync(() => ChangeApproval.ApplyChangeAsync(block.ChangeId), clearExpandedBlocks: false);
+        await ResolveReviewBlockAsync(block, ChapterBodyReviewLineAction.Keep);
 
-    private void BeginRejectReviewBlock(string blockId)
+    private void RejectReviewBlockAsync(ReviewBlock block)
     {
-        _rejectingReviewBlockId = blockId;
+        _rejectingReviewBlockId = block.Id;
         _reviewRejectionMessage = string.Empty;
+        _reviewBlockEdit = null;
         _reviewError = null;
     }
-
-    private bool IsRejectingReviewBlock(string blockId) =>
-        string.Equals(_rejectingReviewBlockId, blockId, StringComparison.Ordinal);
-
-    private void CancelRejectReviewBlock()
-    {
-        _rejectingReviewBlockId = null;
-        _reviewRejectionMessage = string.Empty;
-    }
-
-    private async Task ConfirmRejectReviewBlockAsync(ReviewBlock block) =>
-        await RunReviewActionAsync(
-            () => ChangeApproval.RejectChangeAsync(block.ChangeId, _reviewRejectionMessage),
-            clearExpandedBlocks: false);
 
     private void BeginReviewBlockEdit(ReviewBlock block)
     {
         if (!block.CanEdit) return;
 
-        var lines = ChapterFormatting.SplitLines(block.Section.NewText);
-        var startIndex = block.EditStartNewLine!.Value - 1;
-        var endIndex = block.EditEndNewLine!.Value - 1;
-        if (startIndex < 0 || startIndex >= lines.Count || endIndex < startIndex)
-            return;
-
-        var length = Math.Min(lines.Count - startIndex, endIndex - startIndex + 1);
         _reviewBlockEdit = new ReviewBlockEdit(
             block.Id,
             block.ChangeId,
-            block.Section.Key,
-            block.EditStartNewLine.Value,
-            block.EditEndNewLine.Value,
-            ChapterFormatting.JoinLines(lines.Skip(startIndex).Take(length).ToList()));
-        _reviewLineEdit = null;
+            block.NewRow?.Text ?? block.OldRow?.Text ?? string.Empty);
+        _rejectingReviewBlockId = null;
         _reviewError = null;
     }
 
     private bool IsEditingReviewBlock(ReviewBlock block) =>
         _reviewBlockEdit is { } edit
         && edit.BlockId == block.Id
-        && edit.ChangeId == block.ChangeId
-        && string.Equals(edit.SectionKey, block.Section.Key, StringComparison.OrdinalIgnoreCase);
+        && edit.ChangeId == block.ChangeId;
+
+    private bool IsRejectingReviewBlock(ReviewBlock block) =>
+        string.Equals(_rejectingReviewBlockId, block.Id, StringComparison.Ordinal);
 
     private void UpdateReviewBlockEditText(string text)
     {
@@ -1165,122 +1122,40 @@ else
         if (_reviewBlockEdit is not { } edit || !IsEditingReviewBlock(block))
             return;
 
-        var change = FindReviewChange(block.ChangeId);
-        if (change is null)
-        {
-            _reviewError = "The pending AI change could not be found.";
-            return;
-        }
-
-        var lines = ChapterFormatting.SplitLines(block.Section.NewText);
-        var startIndex = edit.StartNewLine - 1;
-        var endIndex = edit.EndNewLine - 1;
-        if (startIndex < 0 || startIndex > lines.Count || endIndex < startIndex)
-            return;
-
-        var removeCount = Math.Min(lines.Count - startIndex, endIndex - startIndex + 1);
-        lines.RemoveRange(startIndex, removeCount);
-        lines.InsertRange(startIndex, ChapterFormatting.SplitLines(NormalizeLineEditText(edit.Text)));
-        await UpdateReviewFieldDraftAsync(change, block.Section.Key, ChapterFormatting.JoinLines(lines));
-        if (_reviewError is null)
-            _reviewBlockEdit = null;
+        await ResolveReviewBlockAsync(block, ChapterBodyReviewLineAction.Edit, editedText: edit.Text);
     }
 
     private void CancelReviewBlockEdit() => _reviewBlockEdit = null;
 
-    private void BeginReviewLineEdit(ReviewBlock block, DiffRow row)
+    private void CancelRejectReviewBlock()
     {
-        if (row.NewLineNumber is not int newLineNumber) return;
-
-        _reviewLineEdit = new ReviewLineEdit(block.Id, block.ChangeId, block.Section.Key, newLineNumber, row.Text);
-        _reviewBlockEdit = null;
-        _reviewError = null;
+        _rejectingReviewBlockId = null;
+        _reviewRejectionMessage = string.Empty;
     }
 
-    private bool IsEditingReviewLine(ReviewBlock block, DiffRow row) =>
-        row.NewLineNumber is int newLineNumber
-        && _reviewLineEdit is { } edit
-        && edit.BlockId == block.Id
-        && edit.ChangeId == block.ChangeId
-        && edit.NewLineNumber == newLineNumber
-        && string.Equals(edit.SectionKey, block.Section.Key, StringComparison.OrdinalIgnoreCase);
+    private async Task ConfirmRejectReviewBlockAsync(ReviewBlock block) =>
+        await ResolveReviewBlockAsync(block, ChapterBodyReviewLineAction.Reject, rejectionMessage: _reviewRejectionMessage);
 
-    private void UpdateReviewLineEditText(string text)
+    private async Task ResolveReviewBlockAsync(
+        ReviewBlock block,
+        ChapterBodyReviewLineAction action,
+        string? editedText = null,
+        string? rejectionMessage = null)
     {
-        if (_reviewLineEdit is not null)
-            _reviewLineEdit.Text = text;
-    }
+        var request = new ChapterBodyReviewLineResolution(
+            block.ChangeId,
+            block.PairId,
+            block.OldRow?.OldLineNumber,
+            block.NewRow?.NewLineNumber,
+            block.OldRow?.Text,
+            block.NewRow?.Text,
+            action,
+            editedText,
+            rejectionMessage);
 
-    private async Task SaveReviewLineEditAsync(ReviewBlock block)
-    {
-        if (_reviewLineEdit is not { } edit
-            || edit.ChangeId != block.ChangeId
-            || !string.Equals(edit.SectionKey, block.Section.Key, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var change = FindReviewChange(block.ChangeId);
-        if (change is null)
-        {
-            _reviewError = "The pending AI change could not be found.";
-            return;
-        }
-
-        var lines = ChapterFormatting.SplitLines(block.Section.NewText);
-        var index = edit.NewLineNumber - 1;
-        if (index < 0 || index >= lines.Count) return;
-
-        lines[index] = NormalizeLineEditText(edit.Text);
-        await UpdateReviewFieldDraftAsync(change, block.Section.Key, ChapterFormatting.JoinLines(lines));
-        if (_reviewError is null)
-            _reviewLineEdit = null;
-    }
-
-    private void CancelReviewLineEdit() => _reviewLineEdit = null;
-
-    private async Task RejectReviewLineAsync(ReviewBlock block, DiffRow row)
-    {
-        var change = FindReviewChange(block.ChangeId);
-        if (change is null)
-        {
-            _reviewError = "The pending AI change could not be found.";
-            return;
-        }
-
-        var newText = RejectLine(block.Section, row, block.Hunk.Rows);
-        _reviewLineEdit = null;
-        await UpdateReviewFieldDraftAsync(change, block.Section.Key, newText);
-    }
-
-    private async Task UpdateReviewFieldDraftAsync(AiChange change, string fieldKey, string newText)
-    {
-        if (!AiChangeReviewDrafts.TryUpdateField(change, fieldKey, newText, out var draftAfterJson, out var error))
-        {
-            _reviewError = error;
-            return;
-        }
-
-        await SaveReviewDraftAsync(change, draftAfterJson);
-    }
-
-    private async Task SaveReviewDraftAsync(AiChange change, string draftAfterJson)
-    {
-        await RunReviewDraftAsync(async () =>
-        {
-            if (string.Equals(draftAfterJson, change.AfterJson, StringComparison.Ordinal))
-            {
-                await ChangeApproval.ClearReviewDraftAsync(change.Id);
-                change.DraftAfterJson = null;
-                change.ReviewStateJson = null;
-                return;
-            }
-
-            var reviewStateJson = BuildReviewStateJson();
-            await ChangeApproval.SaveReviewDraftAsync(change.Id, draftAfterJson, reviewStateJson);
-            change.DraftAfterJson = draftAfterJson;
-            change.ReviewStateJson = reviewStateJson;
-        });
+        await RunReviewActionAsync(
+            () => ChangeApproval.ResolveChapterBodyReviewLineAsync(Project!.Id, _current!.Id, request),
+            clearExpandedBlocks: false);
     }
 
     private async Task RunReviewActionAsync(Func<Task> action, bool clearExpandedBlocks)
@@ -1290,8 +1165,6 @@ else
         try
         {
             await action();
-            _reviewRejectionMessage = string.Empty;
-            _rejectingReviewBlockId = null;
             ClearInlineReviewEditors();
             if (clearExpandedBlocks)
                 _expandedReviewBlockIds.Clear();
@@ -1311,39 +1184,11 @@ else
         }
     }
 
-    private async Task RunReviewDraftAsync(Func<Task> action)
-    {
-        _reviewBusy = true;
-        _reviewError = null;
-        try
-        {
-            await action();
-            await RefreshReviewChangesAsync();
-            _reviewRefreshSignal++;
-        }
-        catch (Exception ex)
-        {
-            _reviewError = ex.Message;
-        }
-        finally
-        {
-            _reviewBusy = false;
-            StateHasChanged();
-        }
-    }
-
-    private AiChange? FindReviewChange(Guid changeId) =>
-        _reviewPendingBatches
-            .SelectMany(batch => batch.Changes)
-            .FirstOrDefault(change => change.Id == changeId && change.Status == AiChangeStatus.Pending);
-
     private void ResetInlineReviewState()
     {
         _expandedReviewBlockIds.Clear();
         _activeReviewBlockId = null;
         _pendingReviewScrollBlockId = null;
-        _rejectingReviewBlockId = null;
-        _reviewRejectionMessage = string.Empty;
         _reviewError = null;
         ClearInlineReviewEditors();
     }
@@ -1351,7 +1196,8 @@ else
     private void ClearInlineReviewEditors()
     {
         _reviewBlockEdit = null;
-        _reviewLineEdit = null;
+        _rejectingReviewBlockId = null;
+        _reviewRejectionMessage = string.Empty;
     }
 
     private void PruneInlineReviewState()
@@ -1368,12 +1214,13 @@ else
             _activeReviewBlockId = _expandedReviewBlockIds.FirstOrDefault();
         if (_pendingReviewScrollBlockId is not null && !validBlockIds.Contains(_pendingReviewScrollBlockId))
             _pendingReviewScrollBlockId = null;
-        if (_rejectingReviewBlockId is not null && !validBlockIds.Contains(_rejectingReviewBlockId))
-            CancelRejectReviewBlock();
         if (_reviewBlockEdit is not null && !validBlockIds.Contains(_reviewBlockEdit.BlockId))
             _reviewBlockEdit = null;
-        if (_reviewLineEdit is not null && !validBlockIds.Contains(_reviewLineEdit.BlockId))
-            _reviewLineEdit = null;
+        if (_rejectingReviewBlockId is not null && !validBlockIds.Contains(_rejectingReviewBlockId))
+        {
+            _rejectingReviewBlockId = null;
+            _reviewRejectionMessage = string.Empty;
+        }
     }
 
     private static ReviewProjection BuildReviewProjection(Chapter chapter, IReadOnlyList<AiChangeBatch> batches)
@@ -1383,8 +1230,9 @@ else
             ? chapter.Body
             : ReadChapterBodyChange(AiChangeReviewDrafts.EffectiveAfterJson(changes[^1]))?.Body ?? chapter.Body;
         var lines = ChapterFormatting.SplitLines(proposedBody);
-        var width = Math.Max(4, lines.Count.ToString().Length);
-        var drafts = lines
+        var displayLines = lines.Count == 0 && changes.Count > 0 ? [string.Empty] : lines;
+        var width = Math.Max(4, displayLines.Count.ToString().Length);
+        var drafts = displayLines
             .Select((text, index) => new ReviewLineDraft(index + 1, text))
             .ToList();
         var blocks = new List<ReviewBlock>();
@@ -1394,66 +1242,48 @@ else
             var fallbackChangeId = changes[^1].Id;
             foreach (var section in diff.Sections.Where(section => string.Equals(section.Key, "Body", StringComparison.OrdinalIgnoreCase)))
             {
-                var changeId = section.OwnerChangeId ?? fallbackChangeId;
                 for (var hunkIndex = 0; hunkIndex < section.Hunks.Count; hunkIndex++)
                 {
                     var hunk = section.Hunks[hunkIndex];
-                    if (!hunk.Rows.Any(row => row.Kind != DiffRowKind.Context))
-                        continue;
-
-                    var anchorLine = FindBlockAnchorLine(hunk.Rows, drafts.Count);
-                    var changedNewLines = hunk.Rows
-                        .Where(row => row.Kind == DiffRowKind.Added && row.NewLineNumber.HasValue)
-                        .Select(row => row.NewLineNumber!.Value)
-                        .ToList();
-                    var blockId = $"review-{changeId:N}-{hunk.NewStart}-{hunk.OldStart}-{hunkIndex}";
-                    blocks.Add(new ReviewBlock(
-                        blockId,
-                        changeId,
-                        ReviewBlockTitle(hunk),
-                        ReviewBlockSummary(hunk),
-                        anchorLine,
-                        MarkerTopPercent(anchorLine, drafts.Count),
-                        section,
-                        hunk,
-                        changedNewLines.Count == 0 ? null : changedNewLines.Min(),
-                        changedNewLines.Count == 0 ? null : changedNewLines.Max()));
-
-                    for (var rowIndex = 0; rowIndex < hunk.Rows.Count; rowIndex++)
+                    var changeId = section.OwnerChangeId ?? fallbackChangeId;
+                    foreach (var block in ReviewBlocksForHunk(changeId, section, hunk, hunkIndex, drafts.Count))
                     {
-                        var row = hunk.Rows[rowIndex];
-                        if (row.Kind == DiffRowKind.Added && row.NewLineNumber is int newLineNumber)
+                        blocks.Add(block);
+
+                        if (block.NewRow is { NewLineNumber: int newLineNumber } newRow)
                         {
                             if (newLineNumber < 1 || newLineNumber > drafts.Count) continue;
                             var draft = drafts[newLineNumber - 1];
                             draft.IsAddedOrChanged = true;
-                            draft.BlockIds.Add(blockId);
-                            draft.Segments = ReviewSegmentsForAddedRow(row, hunk.Rows, rowIndex);
-                            continue;
+                            draft.BlockIds.Add(block.Id);
+                            draft.Segments = ReviewSegmentsForAddedRow(newRow, hunk.Rows, RowIndex(hunk.Rows, newRow));
                         }
 
-                        if (row.Kind == DiffRowKind.Removed)
+                        if (block.OldRow is not null)
                         {
-                            var deletionAnchorLine = FindDeletionAnchorLine(hunk.Rows, rowIndex, drafts.Count);
-                            if (deletionAnchorLine < 1 || deletionAnchorLine > drafts.Count) continue;
-                            var draft = drafts[deletionAnchorLine - 1];
+                            if (block.AnchorLine < 1 || block.AnchorLine > drafts.Count) continue;
+                            var draft = drafts[block.AnchorLine - 1];
                             draft.HasDeletionMarker = true;
-                            draft.BlockIds.Add(blockId);
+                            draft.BlockIds.Add(block.Id);
                         }
                     }
                 }
             }
         }
 
+        var orderedBlocks = blocks
+            .OrderBy(block => block.AnchorLine)
+            .ThenBy(block => block.NewRow?.NewLineNumber ?? int.MaxValue)
+            .ThenBy(block => block.OldRow?.OldLineNumber ?? int.MaxValue)
+            .ThenBy(block => block.Id, StringComparer.Ordinal)
+            .ToList();
+
         return new ReviewProjection(
-            HasChanges: changes.Count > 0,
-            PendingChangeCount: changes.Count,
+            HasChanges: orderedBlocks.Count > 0,
+            PendingChangeCount: orderedBlocks.Count,
             PendingChangeIds: changes.Select(change => change.Id).ToList(),
             LineNumberFormat: new string('0', width),
-            Blocks: blocks
-                .OrderBy(block => block.AnchorLine)
-                .ThenBy(block => block.Id, StringComparer.Ordinal)
-                .ToList(),
+            Blocks: orderedBlocks,
             Lines: drafts
                 .Select(draft => new ReviewLine(
                     draft.LineNumber,
@@ -1534,7 +1364,8 @@ else
     private static bool IsChapterBodyChangeFor(AiChange change, Guid chapterId)
     {
         if (!string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(change.ToolName, "edit_assigned_chapter", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -1599,19 +1430,98 @@ else
         return Math.Clamp(((double)(anchorLine - 1) / (lineCount - 1)) * 100, 0, 100);
     }
 
-    private static string ReviewBlockTitle(DiffHunk hunk)
+    private static IEnumerable<ReviewBlock> ReviewBlocksForHunk(
+        Guid changeId,
+        DiffSection section,
+        DiffHunk hunk,
+        int hunkIndex,
+        int lineCount)
     {
-        if (hunk.Additions > 0 && hunk.Deletions > 0) return "Changed lines";
-        if (hunk.Additions > 0) return "Added lines";
-        if (hunk.Deletions > 0) return "Removed lines";
+        var consumedPairIds = new HashSet<int>();
+        for (var rowIndex = 0; rowIndex < hunk.Rows.Count; rowIndex++)
+        {
+            var row = hunk.Rows[rowIndex];
+            if (row.Kind == DiffRowKind.Context)
+                continue;
+
+            if (row.PairId is int pairId)
+            {
+                if (!consumedPairIds.Add(pairId))
+                    continue;
+
+                DiffRow? oldRow = null;
+                DiffRow? newRow = null;
+                var targetRowIndex = rowIndex;
+                for (var pairIndex = 0; pairIndex < hunk.Rows.Count; pairIndex++)
+                {
+                    var candidate = hunk.Rows[pairIndex];
+                    if (candidate.PairId != pairId) continue;
+                    if (candidate.Kind == DiffRowKind.Removed)
+                        oldRow = candidate;
+                    else if (candidate.Kind == DiffRowKind.Added)
+                    {
+                        newRow = candidate;
+                        targetRowIndex = pairIndex;
+                    }
+                }
+
+                yield return CreateReviewBlock(changeId, section, hunk, hunkIndex, targetRowIndex, lineCount, oldRow, newRow, pairId);
+                continue;
+            }
+
+            yield return row.Kind == DiffRowKind.Added
+                ? CreateReviewBlock(changeId, section, hunk, hunkIndex, rowIndex, lineCount, oldRow: null, row, pairId: null)
+                : CreateReviewBlock(changeId, section, hunk, hunkIndex, rowIndex, lineCount, row, newRow: null, pairId: null);
+        }
+    }
+
+    private static ReviewBlock CreateReviewBlock(
+        Guid changeId,
+        DiffSection section,
+        DiffHunk hunk,
+        int hunkIndex,
+        int rowIndex,
+        int lineCount,
+        DiffRow? oldRow,
+        DiffRow? newRow,
+        int? pairId)
+    {
+        var anchorLine = newRow?.NewLineNumber
+            ?? (oldRow is null ? FindBlockAnchorLine(hunk.Rows, lineCount) : FindDeletionAnchorLine(hunk.Rows, rowIndex, lineCount));
+        anchorLine = Math.Clamp(anchorLine, 1, Math.Max(1, lineCount));
+        var blockId = $"review-{changeId:N}-{hunk.NewStart}-{hunk.OldStart}-{hunkIndex}-{oldRow?.OldLineNumber ?? 0}-{newRow?.NewLineNumber ?? 0}-{pairId ?? 0}-{rowIndex}";
+
+        return new ReviewBlock(
+            blockId,
+            changeId,
+            ReviewBlockTitle(oldRow, newRow),
+            ReviewBlockSummary(oldRow, newRow),
+            anchorLine,
+            MarkerTopPercent(anchorLine, lineCount),
+            section,
+            hunk,
+            oldRow,
+            newRow,
+            pairId);
+    }
+
+    private static string ReviewBlockTitle(DiffRow? oldRow, DiffRow? newRow)
+    {
+        if (oldRow is not null && newRow is not null) return "Changed line";
+        if (newRow is not null) return "Added line";
+        if (oldRow is not null) return "Removed line";
         return "Chapter change";
     }
 
-    private static string ReviewBlockSummary(DiffHunk hunk)
+    private static string ReviewBlockSummary(DiffRow? oldRow, DiffRow? newRow)
     {
-        var additions = hunk.Additions == 1 ? "1 line added" : $"{hunk.Additions} lines added";
-        var deletions = hunk.Deletions == 1 ? "1 line removed" : $"{hunk.Deletions} lines removed";
-        return $"{additions}, {deletions}";
+        if (oldRow is not null && newRow is not null)
+            return $"Line {oldRow.OldLineNumber} -> {newRow.NewLineNumber}";
+        if (newRow is not null)
+            return $"Line {newRow.NewLineNumber}";
+        if (oldRow is not null)
+            return $"Line {oldRow.OldLineNumber}";
+        return "Line change";
     }
 
     private static string? MarkerTitle(ReviewLineDraft draft)
@@ -1656,6 +1566,9 @@ else
             return row.Segments;
 
         if (row.Segments.Any(segment => segment.Kind != DiffSegmentKind.Unchanged))
+            return row.Segments;
+
+        if (row.PairId is not null)
             return row.Segments;
 
         var counterpart = FindReviewCounterpart(row, hunkRows, rowIndex);
@@ -1712,7 +1625,7 @@ else
         var oldTokens = TokenizeReviewDisplayText(oldText);
         var newTokens = TokenizeReviewDisplayText(newText);
         if (oldTokens.Count == 0 || newTokens.Count == 0 || (long)oldTokens.Count * newTokens.Count > 10_000)
-            return SegmentWholeText(renderNew ? newText : oldText, renderNew ? DiffSegmentKind.Added : DiffSegmentKind.Removed);
+            return SegmentWholeText(renderNew ? newText : oldText, DiffSegmentKind.Unchanged);
 
         var table = new int[oldTokens.Count + 1, newTokens.Count + 1];
         for (var oldIndex = oldTokens.Count - 1; oldIndex >= 0; oldIndex--)
@@ -1792,7 +1705,10 @@ else
                 index++;
 
             var tokenText = text[start..index];
-            tokens.Add(new ReviewDisplayToken(tokenText, tokenText, kind));
+            var key = kind == ReviewDisplayTokenKind.Word
+                ? tokenText.ToUpperInvariant()
+                : tokenText;
+            tokens.Add(new ReviewDisplayToken(tokenText, key, kind));
         }
 
         return tokens;
@@ -1804,9 +1720,13 @@ else
         return IsReviewWordCharacter(character) ? ReviewDisplayTokenKind.Word : ReviewDisplayTokenKind.Punctuation;
     }
 
-    private static bool ReviewTokensEquivalent(ReviewDisplayToken oldToken, ReviewDisplayToken newToken) =>
-        oldToken.Kind == newToken.Kind
-        && string.Equals(oldToken.Key, newToken.Key, StringComparison.Ordinal);
+    private static bool ReviewTokensEquivalent(ReviewDisplayToken oldToken, ReviewDisplayToken newToken)
+    {
+        if (oldToken.Kind != newToken.Kind) return false;
+        return oldToken.Kind == ReviewDisplayTokenKind.Word
+            ? string.Equals(oldToken.Key, newToken.Key, StringComparison.Ordinal)
+            : string.Equals(oldToken.Text, newToken.Text, StringComparison.Ordinal);
+    }
 
     private static bool IsReviewWordCharacter(char character) =>
         char.IsLetterOrDigit(character) || character == '_' || character == '\'';
@@ -1865,64 +1785,23 @@ else
         return -1;
     }
 
+    private static IReadOnlyList<DiffRow> ReviewBlockDisplayRows(ReviewBlock block) =>
+        new[] { block.OldRow, block.NewRow }
+            .Where(row => row is not null)
+            .Select(row => row!)
+            .ToList();
+
+    private static string ReviewDiffLineNumber(DiffRow row) =>
+        (row.Kind == DiffRowKind.Removed
+            ? row.OldLineNumber
+            : row.NewLineNumber ?? row.OldLineNumber)?.ToString() ?? string.Empty;
+
     private static string DiffSegmentClass(DiffSegmentKind kind) => kind switch
     {
         DiffSegmentKind.Added => "review-diff-segment review-diff-segment--added",
         DiffSegmentKind.Removed => "review-diff-segment review-diff-segment--removed",
         _ => "review-diff-segment",
     };
-
-    private static bool CanEditNewLine(DiffRow row) =>
-        row.Kind == DiffRowKind.Added && row.NewLineNumber.HasValue;
-
-    private static bool CanRejectDiffRow(DiffRow row) => row.Kind != DiffRowKind.Context;
-
-    private static string RejectLine(DiffSection section, DiffRow row, IReadOnlyList<DiffRow> hunkRows)
-    {
-        var lines = ChapterFormatting.SplitLines(section.NewText);
-        if (row.Kind == DiffRowKind.Added && row.NewLineNumber is int newLineNumber)
-        {
-            var index = newLineNumber - 1;
-            if (index < 0 || index >= lines.Count) return section.NewText;
-
-            var pairedOld = row.PairId is int pairId
-                ? hunkRows.FirstOrDefault(candidate => candidate.PairId == pairId && candidate.Kind == DiffRowKind.Removed)
-                : null;
-            if (pairedOld is not null)
-                lines[index] = pairedOld.Text;
-            else
-                lines.RemoveAt(index);
-
-            return ChapterFormatting.JoinLines(lines);
-        }
-
-        if (row.Kind == DiffRowKind.Removed && row.OldLineNumber is int oldLineNumber)
-        {
-            var pairedNew = row.PairId is int pairId
-                ? hunkRows.FirstOrDefault(candidate => candidate.PairId == pairId && candidate.Kind == DiffRowKind.Added)
-                : null;
-            if (pairedNew?.NewLineNumber is int pairedNewLineNumber)
-            {
-                var pairedIndex = pairedNewLineNumber - 1;
-                if (pairedIndex >= 0 && pairedIndex < lines.Count)
-                {
-                    lines[pairedIndex] = row.Text;
-                    return ChapterFormatting.JoinLines(lines);
-                }
-            }
-
-            lines.Insert(Math.Clamp(oldLineNumber - 1, 0, lines.Count), row.Text);
-            return ChapterFormatting.JoinLines(lines);
-        }
-
-        return section.NewText;
-    }
-
-    private static string NormalizeLineEditText(string text) =>
-        text.Replace("\r\n", "\n").Replace('\r', '\n');
-
-    private static string BuildReviewStateJson() =>
-        JsonSerializer.Serialize(new ReviewDraftState(DateTime.UtcNow), JsonSerializerOptions.Default);
 
     private void StartEditTitle()
     {
@@ -2211,12 +2090,13 @@ else
         double MarkerTopPercent,
         DiffSection Section,
         DiffHunk Hunk,
-        int? EditStartNewLine,
-        int? EditEndNewLine)
+        DiffRow? OldRow,
+        DiffRow? NewRow,
+        int? PairId)
     {
-        public bool HasAdditions => Hunk.Additions > 0;
-        public bool HasDeletions => Hunk.Deletions > 0;
-        public bool CanEdit => EditStartNewLine.HasValue && EditEndNewLine.HasValue;
+        public bool HasAdditions => NewRow is not null;
+        public bool HasDeletions => OldRow is not null;
+        public bool CanEdit => OldRow is not null || NewRow is not null;
     }
 
     private sealed class ReviewLineDraft(int lineNumber, string text)
@@ -2232,29 +2112,12 @@ else
     private sealed class ReviewBlockEdit(
         string blockId,
         Guid changeId,
-        string sectionKey,
-        int startNewLine,
-        int endNewLine,
         string text)
     {
         public string BlockId { get; } = blockId;
         public Guid ChangeId { get; } = changeId;
-        public string SectionKey { get; } = sectionKey;
-        public int StartNewLine { get; } = startNewLine;
-        public int EndNewLine { get; } = endNewLine;
         public string Text { get; set; } = text;
     }
-
-    private sealed class ReviewLineEdit(string blockId, Guid changeId, string sectionKey, int newLineNumber, string text)
-    {
-        public string BlockId { get; } = blockId;
-        public Guid ChangeId { get; } = changeId;
-        public string SectionKey { get; } = sectionKey;
-        public int NewLineNumber { get; } = newLineNumber;
-        public string Text { get; set; } = text;
-    }
-
-    private sealed record ReviewDraftState(DateTime UpdatedAt);
 
     private sealed record ReviewDisplayToken(string Text, string Key, ReviewDisplayTokenKind Kind);
 

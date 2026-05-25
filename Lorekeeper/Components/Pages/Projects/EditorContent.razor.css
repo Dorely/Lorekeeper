@@ -480,22 +480,27 @@
 }
 
 .review-block {
-    margin: 0.45rem 1.65rem 0.7rem 5.05rem;
-    border: 1px solid var(--bs-border-color, #dee2e6);
-    border-radius: 0.35rem;
+    width: 100%;
+    min-width: 0;
+    border-top: 1px solid var(--bs-border-color-translucent, #e9ecef);
+    border-bottom: 1px solid var(--bs-border-color-translucent, #e9ecef);
     background: var(--bs-body-bg, #fff);
-    box-shadow: 0 0.35rem 0.9rem rgba(0, 0, 0, 0.06);
     font-family: var(--bs-body-font-family, system-ui, sans-serif);
 }
 
 .review-block-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 5.05rem minmax(0, 1fr) auto;
+    align-items: center;
     gap: 0.75rem;
-    padding: 0.55rem 0.65rem;
+    padding: 0.38rem 1.4rem 0.38rem 0;
     border-bottom: 1px solid var(--bs-border-color-translucent, #e9ecef);
     background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.review-block-title-wrap {
+    grid-column: 2;
+    min-width: 0;
 }
 
 .review-block-title {
@@ -508,8 +513,7 @@
     font-size: 0.78rem;
 }
 
-.review-block-actions,
-.review-reject-actions {
+.review-block-actions {
     display: flex;
     align-items: center;
     gap: 0.35rem;
@@ -517,22 +521,45 @@
     justify-content: flex-end;
 }
 
-.review-reject-box {
-    display: grid;
-    gap: 0.35rem;
-    padding: 0.65rem;
-    border-bottom: 1px solid var(--bs-border-color-translucent, #e9ecef);
-    background: rgba(220, 53, 69, 0.04);
-    font-size: 0.82rem;
+.review-block-actions {
+    grid-column: 3;
 }
 
 .review-block-editor {
-    margin: 0.65rem;
-    width: calc(100% - 1.3rem);
-    min-height: 8rem;
+    margin: 0.55rem 5.45rem 0.65rem 5.05rem;
+    width: calc(100% - 10.5rem);
+    min-height: 3.25rem;
     resize: vertical;
     font-family: Georgia, "Times New Roman", serif;
     line-height: 1.6;
+}
+
+.review-reject-box {
+    display: grid;
+    grid-template-columns: 5.05rem minmax(0, 1fr) 5rem;
+    gap: 0.35rem 0.75rem;
+    padding: 0.5rem 1.4rem 0.55rem 0;
+    border-bottom: 1px solid var(--bs-border-color-translucent, #e9ecef);
+    background: rgba(220, 53, 69, 0.06);
+    font-family: var(--bs-body-font-family, system-ui, sans-serif);
+}
+
+.review-reject-box label,
+.review-reject-box textarea,
+.review-reject-actions {
+    grid-column: 2;
+}
+
+.review-reject-box label {
+    color: var(--bs-danger-text-emphasis, #842029);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.review-reject-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
 }
 
 .review-block-diff {
@@ -543,7 +570,7 @@
 
 .review-diff-row {
     display: grid;
-    grid-template-columns: 3.2rem 3.2rem 1.25rem minmax(0, 1fr) minmax(6rem, auto);
+    grid-template-columns: 4.25rem 0.8rem minmax(0, 1fr) 5rem;
     min-width: 0;
     border-top: 1px solid rgba(0, 0, 0, 0.04);
     font-family: Georgia, "Times New Roman", serif;
@@ -565,8 +592,9 @@
 
 .review-diff-line-number,
 .review-diff-marker {
-    padding: 0.12rem 0.35rem;
-    background: rgba(248, 249, 250, 0.72);
+    padding: 0.12rem 0.55rem 0.12rem 0.45rem;
+    border-right: 1px solid var(--bs-border-color-translucent, #e9ecef);
+    background: var(--bs-tertiary-bg, #f8f9fa);
     color: var(--bs-secondary-color, #6c757d);
     font-family: var(--bs-font-monospace, monospace);
     font-size: 0.78rem;
@@ -575,7 +603,16 @@
 }
 
 .review-diff-marker {
+    padding: 0.12rem 0;
     text-align: center;
+}
+
+.review-diff-row--added .review-diff-marker {
+    color: var(--bs-success, #198754);
+}
+
+.review-diff-row--removed .review-diff-marker {
+    color: var(--bs-danger, #dc3545);
 }
 
 .review-diff-line-text {
@@ -585,20 +622,8 @@
     overflow-wrap: anywhere;
 }
 
-.review-diff-line-actions {
-    display: flex;
-    align-items: flex-start;
-    justify-content: flex-end;
-    gap: 0.3rem;
-    padding: 0.16rem 0.45rem;
-    font-family: var(--bs-body-font-family, system-ui, sans-serif);
-}
-
-.review-diff-line-actions .btn {
-    --bs-btn-padding-y: 0.05rem;
-    --bs-btn-padding-x: 0.35rem;
-    --bs-btn-font-size: 0.7rem;
-    white-space: nowrap;
+.review-diff-spacer {
+    background: transparent;
 }
 
 .review-diff-line-text ::deep .review-diff-segment--added,
@@ -613,13 +638,6 @@
     border-radius: 0.14rem;
     padding: 0 0.04rem;
     background: rgba(220, 53, 69, 0.25);
-}
-
-.review-line-editor {
-    min-height: 2rem;
-    resize: vertical;
-    font-family: Georgia, "Times New Roman", serif;
-    line-height: 1.45;
 }
 
 .chapter-header {
