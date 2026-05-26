@@ -26,17 +26,29 @@ public sealed class IngestService(
     IContextIndexingService contextIndexing,
     ILogger<IngestService> logger) : IIngestService
 {
-    public async Task<IReadOnlyList<IngestJob>> ListJobsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await ingest.ListJobsByProjectAsync(projectId, cancellationToken);
+    public async Task<IReadOnlyList<IngestJob>> ListJobsAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await RecoverInactiveRunningJobsAsync(projectId, jobId: null, cancellationToken);
+        return await ingest.ListJobsByProjectAsync(projectId, cancellationToken);
+    }
 
-    public async Task<IReadOnlyList<IngestJobListItem>> ListJobSummariesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await ingest.ListJobSummariesByProjectAsync(projectId, cancellationToken);
+    public async Task<IReadOnlyList<IngestJobListItem>> ListJobSummariesAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await RecoverInactiveRunningJobsAsync(projectId, jobId: null, cancellationToken);
+        return await ingest.ListJobSummariesByProjectAsync(projectId, cancellationToken);
+    }
 
-    public Task<IngestJob?> GetJobDetailAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        ingest.GetJobDetailAsync(jobId, cancellationToken);
+    public async Task<IngestJob?> GetJobDetailAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        await RecoverInactiveRunningJobsAsync(projectId: null, jobId, cancellationToken);
+        return await ingest.GetJobDetailAsync(jobId, cancellationToken);
+    }
 
-    public Task<IngestJobDetailView?> GetJobViewAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        ingest.GetJobDetailViewAsync(jobId, cancellationToken: cancellationToken);
+    public async Task<IngestJobDetailView?> GetJobViewAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        await RecoverInactiveRunningJobsAsync(projectId: null, jobId, cancellationToken);
+        return await ingest.GetJobDetailViewAsync(jobId, cancellationToken: cancellationToken);
+    }
 
     public async Task<IReadOnlyList<IngestReportItemView>> ListReportItemViewsAsync(Guid jobId, Guid? sourceChunkId = null, CancellationToken cancellationToken = default) =>
         await ingest.ListReportItemViewsAsync(jobId, sourceChunkId, cancellationToken);
@@ -235,9 +247,14 @@ public sealed class IngestService(
         }
         else if (job.Status == IngestJobStatus.Running)
         {
+            if (!queue.RequestCancellation(job.Id))
+            {
+                await RecoverInactiveRunningJobsAsync(job.ProjectId, job.Id, cancellationToken);
+                return;
+            }
+
             job.Status = IngestJobStatus.StopRequested;
             job.CurrentMessage = "Stop requested.";
-            queue.RequestCancellation(job.Id);
         }
 
         job.UpdatedAt = DateTime.UtcNow;
@@ -396,6 +413,58 @@ public sealed class IngestService(
             await contextIndexing.ReindexEntityAsync(projectId, entityId, cancellationToken);
     }
 
+    private async Task RecoverInactiveRunningJobsAsync(Guid? projectId, Guid? jobId, CancellationToken cancellationToken)
+    {
+        var interrupted = await ingest.ListInterruptedJobsAsync(cancellationToken);
+        var repairedJobs = new List<(Guid ProjectId, Guid JobId)>();
+
+        foreach (var job in interrupted)
+        {
+            if (projectId is Guid requestedProjectId && job.ProjectId != requestedProjectId) continue;
+            if (jobId is Guid requestedJobId && job.Id != requestedJobId) continue;
+            if (queue.IsActive(job.Id)) continue;
+
+            MarkInactiveRunningJobStopped(job);
+            ingest.UpdateJob(job);
+
+            foreach (var chunk in job.Chunks.Where(chunk => chunk.Status == IngestJobChunkStatus.Running))
+            {
+                chunk.Status = IngestJobChunkStatus.Stopped;
+                chunk.ErrorMessage = "Stopped because no active ingest worker was running for this job.";
+                chunk.CompletedAt = DateTime.UtcNow;
+                chunk.UpdatedAt = DateTime.UtcNow;
+                ingest.UpdateJobChunk(chunk);
+            }
+
+            await ingest.AddEventAsync(new IngestJobEvent
+            {
+                JobId = job.Id,
+                Level = IngestJobEventLevel.Warning,
+                EventType = "job.inactive_running_recovered",
+                Message = "The database marked this ingest job as running, but this app instance no longer had an active worker for it, so the job was moved to Stopped and can be resumed.",
+            }, cancellationToken);
+
+            logger.LogWarning("Recovered inactive running ingest job {JobId}; job can now be resumed.", job.Id);
+            repairedJobs.Add((job.ProjectId, job.Id));
+        }
+
+        if (repairedJobs.Count == 0) return;
+
+        await ingest.SaveChangesAsync(cancellationToken);
+        foreach (var repairedJob in repairedJobs)
+            Notify(repairedJob.ProjectId, repairedJob.JobId, IngestJobUpdateKind.Stopped);
+    }
+
+    private static void MarkInactiveRunningJobStopped(IngestJob job)
+    {
+        job.Status = IngestJobStatus.Stopped;
+        job.CurrentMessage = "Stopped because no active ingest worker was running.";
+        job.ErrorMessage = null;
+        job.CompletedSourceChunks = job.Chunks.Count(chunk => chunk.Status == IngestJobChunkStatus.Completed);
+        job.CompletedAt = DateTime.UtcNow;
+        job.UpdatedAt = DateTime.UtcNow;
+    }
+
     public async Task<IngestReportItem> UpdateReportItemAsync(Guid reportItemId, IngestReportItemUpdateRequest request, CancellationToken cancellationToken = default)
     {
         var item = await ingest.GetReportItemAsync(reportItemId, cancellationToken)
@@ -408,7 +477,6 @@ public sealed class IngestService(
 
         var summary = request.Summary?.Trim() ?? string.Empty;
         var notes = request.Notes?.Trim() ?? string.Empty;
-        var evidence = request.Evidence?.Trim() ?? string.Empty;
         var resourceType = item.Kind == IngestReportItemKind.Relationship && !string.IsNullOrWhiteSpace(request.ResourceType)
             ? request.ResourceType.Trim()
             : item.ResourceType;
@@ -416,7 +484,6 @@ public sealed class IngestService(
         item.Title = title;
         item.Summary = summary;
         item.Notes = notes;
-        item.Evidence = evidence;
         item.ResourceType = resourceType;
         item.UpdatedAt = DateTime.UtcNow;
 
@@ -716,7 +783,6 @@ public sealed class IngestService(
         IngestReportItem item,
         Guid sourceId,
         string? summary,
-        string? evidence,
         string? notes,
         bool replaceExistingText)
     {
@@ -732,7 +798,6 @@ public sealed class IngestService(
             summary,
             new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
             [],
-            evidence,
             notes,
             replaceExistingText);
     }

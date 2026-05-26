@@ -23,7 +23,6 @@ public sealed record IngestReportItemUpdateRequest(
     string Title,
     string Summary,
     string Notes,
-    string Evidence,
     string? ResourceType = null);
 
 public sealed record IngestResumeRequest(int? ProviderId = null);

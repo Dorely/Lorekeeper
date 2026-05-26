@@ -1,4 +1,5 @@
 using System.ClientModel;
+using Microsoft.Extensions.Options;
 using Lorekeeper.Models;
 using Microsoft.Extensions.AI;
 using OpenAI;
@@ -8,6 +9,7 @@ namespace Lorekeeper.Llm;
 public class ChatClientFactory(
     ILlmProviderService providerService,
     IHttpClientFactory httpClientFactory,
+    IOptions<AgentOptions> agentOptions,
     ILoggerFactory loggerFactory) : IChatClientFactory
 {
     public async Task<IChatClient> CreateChatClientAsync(int providerId, CancellationToken cancellationToken = default)
@@ -57,7 +59,8 @@ public class ChatClientFactory(
         if (effectiveAuthType == AuthType.OAuth && apiKey is not null && IsJwt(apiKey))
         {
             var httpClient = httpClientFactory.CreateClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(120);
+            var timeoutSeconds = Math.Clamp(agentOptions.Value.CodexRequestTimeoutSeconds, 1, 3600);
+            httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
             return new CodexChatClient(httpClient, apiKey, provider.ModelId, loggerFactory.CreateLogger<CodexChatClient>());
         }
 

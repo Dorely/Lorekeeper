@@ -393,10 +393,6 @@ else
                                             <label class="form-label small text-muted">Notes</label>
                                             <textarea class="form-control form-control-sm" rows="3" @bind="_editNotes" @bind:event="oninput"></textarea>
                                         </div>
-                                        <div>
-                                            <label class="form-label small text-muted">Evidence</label>
-                                            <textarea class="form-control form-control-sm" rows="3" @bind="_editEvidence" @bind:event="oninput"></textarea>
-                                        </div>
                                         <div class="ingest-report-actions">
                                             <button type="button" class="btn btn-sm btn-primary" disabled="@(_savingReportItemId == item.Id)" @onclick="SaveReportItemAsync">Save</button>
                                             <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_savingReportItemId == item.Id)" @onclick="CancelEditReportItem">Cancel</button>
@@ -420,10 +416,6 @@ else
                                     @if (!string.IsNullOrWhiteSpace(item.Notes))
                                     {
                                         <div class="small"><strong>Notes:</strong> @item.Notes</div>
-                                    }
-                                    @if (!string.IsNullOrWhiteSpace(item.Evidence))
-                                    {
-                                        <blockquote>@item.Evidence</blockquote>
                                     }
                                     <div class="ingest-report-foot">
                                         <div class="small text-muted">@item.Status - @item.ResourceType</div>
@@ -508,7 +500,6 @@ else
     private string _editResourceType = string.Empty;
     private string _editSummary = string.Empty;
     private string _editNotes = string.Empty;
-    private string _editEvidence = string.Empty;
 
     private bool CanCreate => CreateBlockedReason is null;
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
@@ -1050,7 +1041,6 @@ else
         _editResourceType = item.ResourceType;
         _editSummary = item.Summary;
         _editNotes = item.Notes;
-        _editEvidence = item.Evidence;
     }
 
     private void CancelEditReportItem()
@@ -1071,7 +1061,6 @@ else
                 _editTitle,
                 _editSummary,
                 _editNotes,
-                _editEvidence,
                 _editResourceType));
             _editingReportItemId = null;
             await RefreshSelectedJobAsync();
@@ -1340,8 +1329,10 @@ else
         {
             IngestSourceAssertions.CreatedEntityAction => "created",
             IngestSourceAssertions.LinkedExistingEntityAction => "linked existing",
+            IngestSourceAssertions.ObservedEntityAction => "observed",
             IngestSourceAssertions.CreatedEdgeAction => "created",
             IngestSourceAssertions.LinkedExistingEdgeAction => "linked existing",
+            IngestSourceAssertions.ObservedRelationshipAction => "observed",
             _ => null,
         };
     }

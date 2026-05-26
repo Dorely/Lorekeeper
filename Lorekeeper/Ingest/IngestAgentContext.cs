@@ -10,3 +10,14 @@ public sealed record IngestAgentContext(
     int SourceChunkIndex,
     string SourceChunkTitle,
     Action OnMutated);
+
+public sealed record IngestFinalReviewContext(
+    Guid ProjectId,
+    Guid JobId,
+    Guid SourceId,
+    string SourceTitle,
+    string SourceKind,
+    Guid EntityId,
+    string EntityName,
+    string EntityType,
+    Action OnMutated);

@@ -226,7 +226,7 @@
 }
 
 .entities-modal-fact-aliases span,
-.entities-modal-fact-evidence span {
+.entities-modal-fact-source span {
     color: var(--bs-secondary-color, #6c757d);
 }
 
@@ -255,17 +255,10 @@
     overflow-wrap: anywhere;
 }
 
-.entities-modal-fact-evidence {
+.entities-modal-fact-source {
     padding-top: 0.35rem;
     border-top: 1px solid rgba(108, 117, 125, 0.18);
     font-size: 0.8rem;
-}
-
-.entities-modal-fact-evidence blockquote {
-    margin-top: 0.25rem;
-    padding-left: 0.6rem;
-    border-left: 3px solid rgba(108, 117, 125, 0.32);
-    color: var(--bs-secondary-color, #6c757d);
 }
 
 .entities-modal-ingest-list {

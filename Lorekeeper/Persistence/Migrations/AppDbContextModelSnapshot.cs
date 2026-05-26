@@ -1057,10 +1057,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Evidence")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<long?>("GraphEdgeId")
                         .HasColumnType("INTEGER");
 

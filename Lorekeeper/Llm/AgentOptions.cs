@@ -11,4 +11,6 @@ public sealed class AgentOptions
     public int IngestRetryBaseDelayMs { get; set; } = 1_000;
 
     public int IngestRetryMaxDelayMs { get; set; } = 8_000;
+
+    public int CodexRequestTimeoutSeconds { get; set; } = 600;
 }

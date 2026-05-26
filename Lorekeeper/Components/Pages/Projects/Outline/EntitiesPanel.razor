@@ -452,12 +452,8 @@
                             <p>@wikiSection.Body</p>
                             @foreach (var citation in wikiSection.Citations.Take(3))
                             {
-                                <div class="entities-modal-fact-evidence" @key="CitationKey(citation)">
+                                <div class="entities-modal-fact-source" @key="CitationKey(citation)">
                                     <div><strong>@citation.SourceTitle</strong> <span>@citation.SourceKind</span> <span>chunk @(citation.SourceChunkIndex + 1)</span></div>
-                                    @if (!string.IsNullOrWhiteSpace(citation.Snippet))
-                                    {
-                                        <blockquote>@citation.Snippet</blockquote>
-                                    }
                                 </div>
                             }
                         </article>
@@ -496,10 +492,6 @@
                                     <strong>@(string.IsNullOrWhiteSpace(prop.Value) ? "-" : prop.Value)</strong>
                                 </div>
                             }
-                            @if (!string.IsNullOrWhiteSpace(observation.Evidence))
-                            {
-                                <blockquote>@observation.Evidence</blockquote>
-                            }
                             @if (!string.IsNullOrWhiteSpace(observation.Notes))
                             {
                                 <div class="entities-modal-ingest-notes"><strong>Notes:</strong> @observation.Notes</div>
@@ -526,7 +518,6 @@
 
     private static string ObservationPreview(IngestSourceObservation observation) =>
         !string.IsNullOrWhiteSpace(observation.Summary) ? observation.Summary
-        : !string.IsNullOrWhiteSpace(observation.Evidence) ? observation.Evidence
         : !string.IsNullOrWhiteSpace(observation.Notes) ? observation.Notes
         : observation.ObservedProperties.Values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
 
@@ -534,7 +525,7 @@
         $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
 
     private static string CitationKey(IngestWikiCitation citation) =>
-        $"{citation.SourceId}:{citation.SourceChunkId}:{citation.SourceBlockId}:{citation.PageNumber}:{citation.Locator}:{citation.Snippet}";
+        $"{citation.SourceId}:{citation.SourceChunkId}:{citation.SourceBlockId}:{citation.PageNumber}:{citation.Locator}";
 
     private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
 

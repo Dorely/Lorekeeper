@@ -75,7 +75,6 @@ public sealed record IngestReportItemView(
     string Title,
     string Summary,
     string Notes,
-    string Evidence,
     string ResourceType,
     Guid? EntityId,
     long? GraphNodeId,

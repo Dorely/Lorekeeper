@@ -14,269 +14,215 @@ public sealed class IngestAgentTools(
     IEntityService entities,
     IGraphStore graph,
     IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges,
     IEntityTypeService entityTypes,
     IContextIndexingService contextIndexing)
 {
     public IList<AITool> Build(IngestAgentContext context) =>
     [
         AIFunctionFactory.Create(
-            method: (string? type = null, string? query = null) => SearchProjectEntitiesAsync(context, type, query),
-            name: "search_project_entities",
-            description: "Search existing non-structural project entities. Returns concise candidates only: id, type, name, summary, and aliases. Use read_entity_sheet for full details before updating."),
+            method: (string? type = null, string? cursor = null, int? limit = null) => ListProjectEntityIndexAsync(context, type, cursor, limit),
+            name: "list_project_entity_index",
+            description: "List a compact identity index of existing non-structural project entities. Returns only id, type, name, and aliases plus pagination metadata; no summaries, wiki bodies, properties, or relationship details."),
 
         AIFunctionFactory.Create(
-            method: (string entityId) => ReadEntitySheetAsync(context, entityId),
-            name: "read_entity_sheet",
-            description: "Read one entity's full wiki sheet and compact relationship list by entity id."),
-
-        AIFunctionFactory.Create(
-            method: (
-                string type,
-                string name,
-                string summary,
-                string[]? aliases = null,
-                IngestWikiSectionInput[]? wikiSections = null,
-                string? notes = null) => CreateEntityAsync(context, type, name, summary, aliases, wikiSections, notes),
-            name: "create_ingest_entity",
-            description: "Create a new graph entity with a durable wiki sheet. Use only after search_project_entities finds no plausible same subject. summary is required. wikiSections must be complete revised sections with compact citations, not raw observations."),
+            method: (IngestEntityMentionInput[] mentions) => ResolveProjectEntityMentionsAsync(context, mentions),
+            name: "resolve_project_entity_mentions",
+            description: "Bulk resolve source mentions against existing non-structural project entities using names and aliases. Returns compact candidates only; use before creating entities."),
 
         AIFunctionFactory.Create(
             method: (
-                string entityId,
                 string summary,
-                string[]? aliases = null,
-                IngestWikiSectionInput[]? wikiSections = null,
-                string? notes = null) => UpdateEntitySheetAsync(context, entityId, summary, aliases, wikiSections, notes),
-            name: "update_ingest_entity_sheet",
-            description: "Replace an entity's wiki sheet with a complete revised sheet that integrates the current chunk. Call read_entity_sheet first for existing entities. summary is required."),
+                string? entityId = null,
+                string? type = null,
+                string? name = null,
+                string[]? aliasesObserved = null,
+                IngestWikiSectionInput[]? sections = null,
+                string? notes = null) => AppendIngestEntityObservationAsync(context, entityId, type, name, summary, aliasesObserved, sections, notes),
+            name: "append_ingest_entity_observation",
+            description: "Append source-linked observations for one entity from the current chunk. Supply entityId for an existing entity, or type plus name to create/reuse an entity. Writes only ingest source observation storage; it never replaces canonical summary or wiki sections."),
 
         AIFunctionFactory.Create(
             method: (
                 string fromEntityId,
                 string toEntityId,
-                string edgeType,
-                string summary,
-                IngestWikiCitationInput[]? citations = null,
-                string? notes = null) => LinkEntitiesAsync(context, fromEntityId, toEntityId, edgeType, summary, citations, notes),
-            name: "link_ingest_entities",
-            description: "Create or update a concise relationship between two entities already touched by this ingest job. Stores summary and compact citations only."),
+                string edgeType) => AppendIngestRelationshipObservationAsync(context, fromEntityId, toEntityId, edgeType),
+            name: "append_ingest_relationship_observation",
+            description: "Append one sparse source-backed relationship marker with only endpoints, type, and automatic source/chunk provenance. Put all narrative relationship detail in entity observations."),
 
         AIFunctionFactory.Create(
             method: (string chunkSummary, string sourceSynopsis, string? notes = null) =>
                 UpdateIngestSourceProgressAsync(context, chunkSummary, sourceSynopsis, notes),
             name: "update_ingest_source_progress",
-            description: "Record the completed chunk summary and rolling source synopsis. Call exactly once after finishing each source chunk. Keep sourceSynopsis around 1500 words."),
+            description: "Record a concise completed chunk summary and rolling source synopsis. Call exactly once after finishing each source chunk. Keep sourceSynopsis around 1500 words and notes short/operational."),
     ];
 
-    private async Task<string> SearchProjectEntitiesAsync(IngestAgentContext context, string? type, string? query)
+    public IList<AITool> BuildFinalReview(IngestFinalReviewContext context) =>
+    [
+        AIFunctionFactory.Create(
+            method: () => ReadIngestEntitySourceObservationsAsync(context),
+            name: "read_ingest_entity_source_observations",
+            description: "Read this entity's source-linked observations and related relationship observations for the current ingest source. Returns only source-backed ingest observations, not canonical project wiki content."),
+
+        AIFunctionFactory.Create(
+            method: (
+                string body,
+                string? notes = null) => WriteIngestSourceWikiSectionAsync(context, body, notes),
+            name: "write_ingest_source_wiki_section",
+            description: "Write exactly one source-specific wiki section for this entity. Replaces only the generated Source: section for this source and preserves all canonical/manual sections."),
+    ];
+
+    private async Task<string> ListProjectEntityIndexAsync(IngestAgentContext context, string? type, string? cursor, int? limit)
     {
-        var allowedTypes = await GetAllowedEntityTypesAsync(context.ProjectId);
-        var requestedType = NormalizeText(type).Trim();
-        var searchTypes = allowedTypes;
-        if (!string.IsNullOrWhiteSpace(requestedType))
-        {
-            if (IsDisallowedEntityType(requestedType))
-                return $"Error: entity type '{requestedType}' is structural and cannot be searched by ingest.";
+        var searchTypes = await ResolveSearchTypesAsync(context.ProjectId, type);
+        var offset = int.TryParse(cursor, out var parsedCursor) ? Math.Max(0, parsedCursor) : 0;
+        var take = Math.Clamp(limit ?? 100, 1, 200);
 
-            var matchedType = await ResolveEntityTypeAsync(context.ProjectId, requestedType, allowNew: false);
-            searchTypes = matchedType is null
-                ? []
-                : (await GetEquivalentEntityTypeNamesAsync(context.ProjectId, matchedType.Type)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        }
-
-        var queryText = NormalizeText(query).Trim();
-        var terms = SplitSearchTerms(queryText).ToList();
-        var results = new List<ProjectEntityCandidate>();
+        var rows = new List<ProjectEntityIdentity>();
         foreach (var searchType in searchTypes.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
         {
             var typedNodes = await nodes.ListByTypeAsync(context.ProjectId, searchType);
-            foreach (var node in typedNodes)
-            {
-                if (!Guid.TryParseExact(node.Key, "N", out var id)) continue;
-                var score = ScoreCandidate(node, terms, queryText);
-                if (terms.Count > 0 && score == 0) continue;
-
-                results.Add(new ProjectEntityCandidate(
-                    id,
+            rows.AddRange(typedNodes
+                .Where(node => Guid.TryParseExact(node.Key, "N", out _))
+                .Select(node => new ProjectEntityIdentity(
+                    Guid.ParseExact(node.Key, "N"),
                     node.NodeType,
                     node.Label ?? node.Key,
-                    Truncate(IngestWikiSheet.ReadSummary(node.Properties), 260),
-                    IngestWikiSheet.ReadAliases(node.Properties),
-                    score));
-            }
+                    IngestWikiSheet.ReadAliases(node.Properties))));
         }
 
-        var payload = results
-            .OrderByDescending(item => item.Score)
-            .ThenBy(item => item.Type, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
-            .Take(25)
-            .Select(candidate => new
-            {
-                id = candidate.Id,
-                type = candidate.Type,
-                name = candidate.Name,
-                summary = candidate.Summary,
-                aliases = candidate.Aliases,
-                score = candidate.Score,
-            });
-
-        return JsonSerializer.Serialize(payload);
-    }
-
-    private async Task<string> ReadEntitySheetAsync(IngestAgentContext context, string entityId)
-    {
-        if (!Guid.TryParse(entityId, out var parsed)) return $"Error: entityId '{entityId}' is not a valid Guid.";
-        var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, parsed);
-        if (node is null) return $"Error: entity {parsed} is not a non-structural project entity.";
-
-        var adjacent = await edges.GetAdjacentAsync(node.Id, EdgeDirection.Both, edgeTypes: null, maxResults: 30);
-        var otherIds = adjacent.Select(edge => edge.FromNodeId == node.Id ? edge.ToNodeId : edge.FromNodeId).Distinct().ToList();
-        var otherNodes = otherIds.Count == 0
-            ? new Dictionary<long, GraphNode>()
-            : (await nodes.GetByIdsAsync(otherIds)).ToDictionary(other => other.Id);
+        var page = rows
+            .OrderBy(row => row.Type, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
+            .Skip(offset)
+            .Take(take)
+            .ToList();
 
         return JsonSerializer.Serialize(new
         {
-            id = parsed,
-            type = node.NodeType,
-            name = node.Label ?? node.Key,
-            summary = IngestWikiSheet.ReadSummary(node.Properties),
-            aliases = IngestWikiSheet.ReadAliases(node.Properties),
-            wikiSections = IngestWikiSheet.ReadSections(node.Properties),
-            properties = IngestWikiSheet.VisibleProperties(node.Properties),
-            relationships = adjacent
-                .Where(edge => !string.Equals(edge.EdgeType, EntityService.HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
-                .Select(edge =>
+            items = page.Select(row => new
+            {
+                id = row.Id,
+                type = row.Type,
+                name = row.Name,
+                aliases = row.Aliases,
+            }),
+            nextCursor = offset + page.Count < rows.Count ? (offset + page.Count).ToString() : null,
+            returned = page.Count,
+            total = rows.Count,
+        });
+    }
+
+    private async Task<string> ResolveProjectEntityMentionsAsync(IngestAgentContext context, IngestEntityMentionInput[]? mentions)
+    {
+        var requestedMentions = (mentions ?? [])
+            .Where(mention => !string.IsNullOrWhiteSpace(mention.Mention)
+                || mention.Variants is { Length: > 0 }
+                || !string.IsNullOrWhiteSpace(mention.Type))
+            .Take(40)
+            .ToList();
+
+        var results = new List<object>();
+        foreach (var mention in requestedMentions)
+        {
+            var queries = new[] { mention.Mention }
+                .Concat(mention.Variants ?? [])
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => NormalizeText(value).Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var searchTypes = await ResolveSearchTypesAsync(context.ProjectId, mention.Type);
+            var candidates = new List<ProjectEntityIdentityCandidate>();
+            foreach (var searchType in searchTypes)
+            {
+                foreach (var node in await nodes.ListByTypeAsync(context.ProjectId, searchType))
                 {
-                    var isOutgoing = edge.FromNodeId == node.Id;
-                    var otherNodeId = isOutgoing ? edge.ToNodeId : edge.FromNodeId;
-                    otherNodes.TryGetValue(otherNodeId, out var other);
-                    return new
-                    {
-                        edgeId = edge.Id,
-                        direction = isOutgoing ? "outgoing" : "incoming",
-                        edgeType = edge.EdgeType,
-                        otherEntityId = other is not null && Guid.TryParseExact(other.Key, "N", out var otherGuid) ? otherGuid : Guid.Empty,
-                        otherName = other?.Label ?? other?.Key ?? otherNodeId.ToString(),
-                        otherType = other?.NodeType ?? string.Empty,
-                        summary = ReadProperty(edge.Properties, IngestWikiSheet.SummaryProperty),
-                        citations = IngestWikiSheet.ReadRelationshipCitations(edge.Properties).Take(6),
-                    };
-                })
-                .Take(20),
-        });
-    }
+                    if (!Guid.TryParseExact(node.Key, "N", out var id)) continue;
+                    var score = queries.Count == 0
+                        ? 1
+                        : queries.Max(query => ScoreIdentityCandidate(node, query));
+                    if (score == 0) continue;
 
-    private async Task<string> CreateEntityAsync(
-        IngestAgentContext context,
-        [Description("Broad reusable entity type. Prefer an existing project type when one reasonably fits.")] string type,
-        [Description("Display name for the entity.")] string name,
-        string summary,
-        string[]? aliases,
-        IngestWikiSectionInput[]? wikiSections,
-        string? notes)
-    {
-        var normalizedType = NormalizeText(type).Trim();
-        if (string.IsNullOrWhiteSpace(normalizedType)) return "Error: type is required.";
-        var resolvedType = await EnsureEntityTypeAsync(context.ProjectId, normalizedType);
-        if (resolvedType is null) return $"Error: type '{normalizedType}' is structural or invalid and cannot be created by ingest.";
+                    candidates.Add(new ProjectEntityIdentityCandidate(
+                        id,
+                        node.NodeType,
+                        node.Label ?? node.Key,
+                        IngestWikiSheet.ReadAliases(node.Properties),
+                        score));
+                }
+            }
 
-        var trimmedName = NormalizeText(name).Trim();
-        if (string.IsNullOrWhiteSpace(trimmedName)) return "Error: name is required.";
-
-        var validationError = ValidateEntitySheet(summary, aliases, wikiSections, notes);
-        if (validationError is not null) return validationError;
-
-        var duplicateNode = await FindDuplicateEntityByNameAsync(context.ProjectId, resolvedType.Type, trimmedName);
-        if (duplicateNode is not null && Guid.TryParseExact(duplicateNode.Key, "N", out var duplicateId))
-        {
-            return JsonSerializer.Serialize(new
+            results.Add(new
             {
-                created = false,
-                id = duplicateId,
-                type = duplicateNode.NodeType,
-                name = duplicateNode.Label ?? duplicateNode.Key,
-                summary = IngestWikiSheet.ReadSummary(duplicateNode.Properties),
-                aliases = IngestWikiSheet.ReadAliases(duplicateNode.Properties),
-                exactNameMatch = true,
-                message = $"An existing {duplicateNode.NodeType} named '{duplicateNode.Label ?? duplicateNode.Key}' already exists. If this is the same subject, call read_entity_sheet and update_ingest_entity_sheet with this id.",
+                mention = mention.Mention,
+                type = mention.Type,
+                candidates = candidates
+                    .OrderByDescending(candidate => candidate.Score)
+                    .ThenBy(candidate => candidate.Type, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+                    .Take(8)
+                    .Select(candidate => new
+                    {
+                        id = candidate.Id,
+                        type = candidate.Type,
+                        name = candidate.Name,
+                        aliases = candidate.Aliases,
+                        score = candidate.Score,
+                    }),
             });
         }
 
-        var entityObjectProperties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-        {
-            [IngestSourceAssertions.GraphOriginProperty] = IngestSourceAssertions.GraphOriginIngestValue,
-        };
-        IngestWikiSheet.ApplyEntitySheet(entityObjectProperties, summary, aliases, wikiSections, context);
-        var entityProperties = entityObjectProperties.ToDictionary(
-            kv => kv.Key,
-            kv => kv.Value?.ToString(),
-            StringComparer.OrdinalIgnoreCase);
-
-        var created = await entities.CreateAsync(context.ProjectId, resolvedType.Type, trimmedName, entityProperties);
-        var node = await nodes.FindByKeyAsync(context.ProjectId, created.Id.ToString("N"));
-        if (node is not null)
-            await AddExtractedFromAsync(context, node);
-
-        await UpsertEntityReportItemAsync(
-            context,
-            existing: null,
-            node,
-            created.Id,
-            IngestSourceAssertions.CreatedEntityAction,
-            summary,
-            aliases,
-            wikiSections,
-            notes);
-        context.OnMutated();
-        await contextIndexing.ReindexEntityAsync(context.ProjectId, created.Id);
-
-        return JsonSerializer.Serialize(new
-        {
-            id = created.Id,
-            type = created.Type,
-            name = created.Name,
-            action = IngestSourceAssertions.CreatedEntityAction,
-            updatedSections = SectionTitles(wikiSections),
-        });
+        return JsonSerializer.Serialize(results);
     }
 
-    private async Task<string> UpdateEntitySheetAsync(
+    private async Task<string> AppendIngestEntityObservationAsync(
         IngestAgentContext context,
-        string entityId,
+        string? entityId,
+        string? type,
+        string? name,
         string summary,
-        string[]? aliases,
-        IngestWikiSectionInput[]? wikiSections,
+        string[]? aliasesObserved,
+        IngestWikiSectionInput[]? sections,
         string? notes)
     {
-        if (!Guid.TryParse(entityId, out var parsed)) return $"Error: entityId '{entityId}' is not a valid Guid.";
-        var validationError = ValidateEntitySheet(summary, aliases, wikiSections, notes);
+        var sectionList = (sections ?? []).ToList();
+        var validationError = ValidateEntityObservation(summary, sectionList);
         if (validationError is not null) return validationError;
 
-        var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, parsed);
-        if (node is null) return $"Error: entity {parsed} is not a non-structural project entity.";
+        var resolution = await ResolveOrCreateObservationEntityAsync(context, entityId, type, name);
+        if (resolution.Error is not null) return resolution.Error;
+        var node = resolution.Node!;
+        var parsed = resolution.EntityId;
 
-        IngestWikiSheet.ApplyEntitySheet(node.Properties, summary, aliases, wikiSections, context);
+        IngestSourceAssertions.UpsertEntityAssertion(node.Properties, new IngestAssertionInput(
+            context.JobId,
+            context.SourceId,
+            context.SourceTitle,
+            context.SourceKind,
+            context.SourceChunkId,
+            context.SourceChunkIndex,
+            summary,
+            ObservedProperties: new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
+            Aliases: aliasesObserved ?? [],
+            Notes: notes,
+            ReplaceExistingText: false,
+            WikiSections: sectionList));
+
         node.UpdatedAt = DateTime.UtcNow;
         nodes.Update(node);
         await nodes.SaveChangesAsync();
         await AddExtractedFromAsync(context, node);
 
         var existingForChunk = await FindActiveEntityReportItemAsync(context.JobId, parsed, context.SourceChunkId);
-        var action = await WasEntityCreatedByJobAsync(context.JobId, parsed)
-            ? IngestSourceAssertions.CreatedEntityAction
-            : IngestSourceAssertions.LinkedExistingEntityAction;
         await UpsertEntityReportItemAsync(
             context,
             existingForChunk,
             node,
             parsed,
-            action,
+            resolution.Action,
             summary,
-            aliases,
-            wikiSections,
+            aliasesObserved,
+            sectionList,
             notes);
         context.OnMutated();
         await contextIndexing.ReindexEntityAsync(context.ProjectId, parsed);
@@ -286,78 +232,105 @@ public sealed class IngestAgentTools(
             id = parsed,
             type = node.NodeType,
             name = node.Label ?? node.Key,
-            action,
-            updatedSections = SectionTitles(wikiSections),
+            action = resolution.Action,
+            created = resolution.Created,
+            exactNameMatch = resolution.ExactNameMatch,
+            sourceObservationCount = IngestSourceAssertions.CountEntityObservations(node.Properties),
+            sourceSectionCount = sectionList.Count,
+            canonicalUpdated = false,
         });
     }
 
-    private async Task<string> LinkEntitiesAsync(
+    private async Task<ObservationEntityResolution> ResolveOrCreateObservationEntityAsync(
+        IngestAgentContext context,
+        string? entityId,
+        string? type,
+        string? name)
+    {
+        if (!string.IsNullOrWhiteSpace(entityId))
+        {
+            if (!Guid.TryParse(entityId, out var parsed))
+                return ObservationEntityResolution.Failed($"Error: entityId '{entityId}' is not a valid Guid.");
+
+            var existingNode = await ResolveAllowedEntityNodeAsync(context.ProjectId, parsed);
+            return existingNode is null
+                ? ObservationEntityResolution.Failed($"Error: entity {parsed} is not a non-structural project entity.")
+                : ObservationEntityResolution.Resolved(parsed, existingNode, IngestSourceAssertions.ObservedEntityAction, created: false, exactNameMatch: false);
+        }
+
+        var normalizedType = NormalizeText(type).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedType))
+            return ObservationEntityResolution.Failed("Error: type is required when entityId is not supplied.");
+
+        var resolvedType = await EnsureEntityTypeAsync(context.ProjectId, normalizedType);
+        if (resolvedType is null)
+            return ObservationEntityResolution.Failed($"Error: type '{normalizedType}' is structural or invalid and cannot be created by ingest.");
+
+        var trimmedName = NormalizeText(name).Trim();
+        if (string.IsNullOrWhiteSpace(trimmedName))
+            return ObservationEntityResolution.Failed("Error: name is required when entityId is not supplied.");
+
+        var duplicateNode = await FindDuplicateEntityByNameAsync(context.ProjectId, resolvedType.Type, trimmedName);
+        if (duplicateNode is not null && Guid.TryParseExact(duplicateNode.Key, "N", out var duplicateId))
+        {
+            return ObservationEntityResolution.Resolved(
+                duplicateId,
+                duplicateNode,
+                IngestSourceAssertions.ObservedEntityAction,
+                created: false,
+                exactNameMatch: true);
+        }
+
+        var entityProperties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            [IngestSourceAssertions.GraphOriginProperty] = IngestSourceAssertions.GraphOriginIngestValue,
+        };
+        var created = await entities.CreateAsync(context.ProjectId, resolvedType.Type, trimmedName, entityProperties);
+        var createdNode = await nodes.FindByKeyAsync(context.ProjectId, created.Id.ToString("N"));
+        return createdNode is null
+            ? ObservationEntityResolution.Failed($"Error: created entity {created.Id} could not be loaded.")
+            : ObservationEntityResolution.Resolved(
+                created.Id,
+                createdNode,
+                IngestSourceAssertions.CreatedEntityAction,
+                created: true,
+                exactNameMatch: false);
+    }
+
+    private async Task<string> AppendIngestRelationshipObservationAsync(
         IngestAgentContext context,
         string fromEntityId,
         string toEntityId,
-        string edgeType,
-        string summary,
-        IngestWikiCitationInput[]? citations,
-        string? notes)
+        string edgeType)
     {
         if (!Guid.TryParse(fromEntityId, out var from)) return $"Error: fromEntityId '{fromEntityId}' is not a valid Guid.";
         if (!Guid.TryParse(toEntityId, out var to)) return $"Error: toEntityId '{toEntityId}' is not a valid Guid.";
-        var trimmedEdgeType = NormalizeText(edgeType).Trim();
-        if (string.IsNullOrWhiteSpace(trimmedEdgeType)) return "Error: edgeType is required.";
-        if (string.Equals(trimmedEdgeType, EntityService.HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
-            return "Error: HasChild is a managed structural relationship and cannot be created by ingest.";
 
-        var validationError = ValidateRelationship(summary, citations, notes);
-        if (validationError is not null) return validationError;
+        var fromNode = await ResolveAllowedEntityNodeAsync(context.ProjectId, from);
+        if (fromNode is null) return $"Error: from entity {from} is not a non-structural project entity.";
+        var toNode = await ResolveAllowedEntityNodeAsync(context.ProjectId, to);
+        if (toNode is null) return $"Error: to entity {to} is not a non-structural project entity.";
 
-        var fromItem = await FindActiveEntityReportItemAsync(context.JobId, from);
-        var toItem = await FindActiveEntityReportItemAsync(context.JobId, to);
-        if (fromItem is null || toItem is null)
-            return "Error: both relationship endpoints must be entities already touched by this ingest job. Update the endpoint wiki sheets first.";
+        if (!await IsEntityTouchedByJobAsync(context.JobId, from))
+            return $"Error: from entity {from} must be observed before recording relationship observations.";
+        if (!await IsEntityTouchedByJobAsync(context.JobId, to))
+            return $"Error: to entity {to} must be observed before recording relationship observations.";
 
-        var fromNode = await nodes.FindByKeyAsync(context.ProjectId, from.ToString("N"));
-        var toNode = await nodes.FindByKeyAsync(context.ProjectId, to.ToString("N"));
-        if (fromNode is null || toNode is null) return "Error: one or both relationship endpoint graph nodes were not found.";
+        var normalizedEdgeType = NormalizeText(edgeType).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedEdgeType))
+            return "Error: edgeType is required for relationship observations.";
+        if (string.Equals(normalizedEdgeType, EntityService.HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
+            return "Error: HasChild is a managed structural relationship and cannot be recorded by ingest.";
 
-        var existingEdge = await edges.FindAsync(fromNode.Id, toNode.Id, trimmedEdgeType);
-        var action = existingEdge is null
-            ? IngestSourceAssertions.CreatedEdgeAction
-            : IngestSourceAssertions.LinkedExistingEdgeAction;
-
-        GraphEdge edge;
-        if (existingEdge is null)
-        {
-            var edgeProperties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-            {
-                [IngestSourceAssertions.GraphOriginProperty] = IngestSourceAssertions.GraphOriginIngestValue,
-                [IngestWikiSheet.SummaryProperty] = NormalizeText(summary),
-            };
-            IngestWikiSheet.ApplyRelationshipCitations(edgeProperties, citations, context, mergeExisting: false);
-            edge = await graph.UpsertEdgeAsync(fromNode.Id, toNode.Id, trimmedEdgeType, edgeProperties);
-        }
-        else
-        {
-            existingEdge.Properties[IngestWikiSheet.SummaryProperty] = NormalizeText(summary);
-            IngestWikiSheet.ApplyRelationshipCitations(existingEdge.Properties, citations, context, mergeExisting: true);
-            existingEdge.UpdatedAt = DateTime.UtcNow;
-            edges.Update(existingEdge);
-            await edges.SaveChangesAsync();
-            edge = existingEdge;
-        }
-
-        var relationshipItem = await FindActiveRelationshipReportItemAsync(context.JobId, edge.Id, context.SourceChunkId);
-        await UpsertRelationshipReportItemAsync(
+        var existing = await FindActiveRelationshipObservationReportItemAsync(context.JobId, context.SourceChunkId, from, to, normalizedEdgeType);
+        await UpsertRelationshipObservationReportItemAsync(
             context,
-            relationshipItem,
-            edge,
-            action,
+            existing,
+            normalizedEdgeType,
             from,
             to,
-            fromNode.Label ?? fromItem.Title,
-            toNode.Label ?? toItem.Title,
-            summary,
-            citations,
-            notes);
+            fromNode.Label ?? fromNode.Key,
+            toNode.Label ?? toNode.Key);
         context.OnMutated();
         await contextIndexing.ReindexEntityAsync(context.ProjectId, from);
         await contextIndexing.ReindexEntityAsync(context.ProjectId, to);
@@ -366,10 +339,127 @@ public sealed class IngestAgentTools(
         {
             fromEntityId = from,
             toEntityId = to,
-            edgeType = trimmedEdgeType,
-            graphEdgeId = edge.Id,
-            action,
+            edgeType = normalizedEdgeType,
+            action = IngestSourceAssertions.ObservedRelationshipAction,
+            canonicalEdgeUpdated = false,
         });
+    }
+
+    private async Task<string> ReadIngestEntitySourceObservationsAsync(IngestFinalReviewContext context)
+    {
+        var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, context.EntityId);
+        if (node is null) return $"Error: entity {context.EntityId} is not a non-structural project entity.";
+
+        var sourceKey = IngestSourceAssertions.SourceKey(context.SourceId);
+        var observations = IngestSourceAssertions.ListEntityObservations(node.Properties, maxObservations: 1000)
+            .Where(observation => string.Equals(observation.SourceId, sourceKey, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(observation => observation.SourceChunkIndex)
+            .ToList();
+
+        var relationshipObservations = new List<object>();
+        foreach (var item in await ingest.ListReportItemsAsync(context.JobId))
+        {
+            if (item.Status != IngestReportItemStatus.Active || item.Kind != IngestReportItemKind.Relationship)
+                continue;
+            if (!PayloadContainsSource(item.PayloadJson, context.SourceId))
+                continue;
+            if (!TryReadRelationshipEndpoints(item.PayloadJson, out var from, out var to)
+                || (from != context.EntityId && to != context.EntityId))
+            {
+                continue;
+            }
+
+            relationshipObservations.Add(new
+            {
+                sourceChunkId = item.SourceChunkId,
+                sourceChunkIndex = ReadIntPayload(item.PayloadJson, "sourceChunkIndex"),
+                edgeType = item.ResourceType,
+                title = item.Title,
+                fromEntityId = from,
+                toEntityId = to,
+            });
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            entity = new
+            {
+                id = context.EntityId,
+                type = node.NodeType,
+                name = node.Label ?? node.Key,
+            },
+            source = new
+            {
+                id = context.SourceId,
+                title = context.SourceTitle,
+                kind = context.SourceKind,
+            },
+            observations = observations.Select(observation => new
+            {
+                observation.SourceChunkId,
+                observation.SourceChunkIndex,
+                observation.Summary,
+                observation.Aliases,
+                WikiSections = observation.WikiSections.Select(section => new
+                {
+                    section.Id,
+                    section.Title,
+                    section.Body,
+                }),
+                observation.Notes,
+            }),
+            relationshipObservations,
+        });
+    }
+
+    private async Task<string> WriteIngestSourceWikiSectionAsync(
+        IngestFinalReviewContext context,
+        string body,
+        string? notes)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return "Error: body is required.";
+
+        var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, context.EntityId);
+        if (node is null) return $"Error: entity {context.EntityId} is not a non-structural project entity.";
+
+        IngestWikiSheet.UpsertSourceWikiSection(
+            node.Properties,
+            context.SourceId,
+            context.SourceTitle,
+            context.SourceKind,
+            body);
+        node.UpdatedAt = DateTime.UtcNow;
+        nodes.Update(node);
+        await nodes.SaveChangesAsync();
+        context.OnMutated();
+        await contextIndexing.ReindexEntityAsync(context.ProjectId, context.EntityId);
+
+        return JsonSerializer.Serialize(new
+        {
+            entityId = context.EntityId,
+            sectionId = IngestWikiSheet.SourceSectionId(context.SourceId),
+            sectionTitle = IngestWikiSheet.SourceSectionTitle(context.SourceTitle),
+            bodyChars = body.Trim().Length,
+            canonicalSummaryUpdated = false,
+            canonicalSectionsUpdated = false,
+        });
+    }
+
+    private async Task<IReadOnlyCollection<string>> ResolveSearchTypesAsync(Guid projectId, string? type)
+    {
+        var allowedTypes = await GetAllowedEntityTypesAsync(projectId);
+        var requestedType = NormalizeText(type).Trim();
+        if (string.IsNullOrWhiteSpace(requestedType))
+            return allowedTypes;
+
+        if (IsDisallowedEntityType(requestedType))
+            return [];
+
+        var matchedType = await ResolveEntityTypeAsync(projectId, requestedType, allowNew: false);
+        return matchedType is null
+            ? []
+            : await GetEquivalentEntityTypeNamesAsync(projectId, matchedType.Type);
     }
 
     private async Task<string> UpdateIngestSourceProgressAsync(
@@ -383,12 +473,12 @@ public sealed class IngestAgentTools(
         var sourceChunk = await ingest.GetSourceChunkAsync(context.SourceChunkId);
         if (sourceChunk is null) return $"Error: source chunk {context.SourceChunkId} not found.";
 
-        source.Synopsis = NormalizeText(sourceSynopsis).Trim();
+        source.Synopsis = TruncateWords(NormalizeText(sourceSynopsis).Trim(), 1500);
         source.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateSource(source);
 
-        sourceChunk.Summary = NormalizeText(chunkSummary).Trim();
-        sourceChunk.AgentNotes = NormalizeText(notes).Trim();
+        sourceChunk.Summary = NormalizeSourceChunkSummary(chunkSummary);
+        sourceChunk.AgentNotes = NormalizeSourceChunkNotes(notes);
         sourceChunk.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateSourceChunk(sourceChunk);
 
@@ -452,8 +542,13 @@ public sealed class IngestAgentTools(
     {
         var title = node?.Label ?? entityId.ToString("N");
         var resourceType = node?.NodeType ?? string.Empty;
-        var payloadJson = BuildEntityReportPayload(existing?.PayloadJson, context, action, aliases, wikiSections);
-        var evidence = BuildEvidencePreview(wikiSections, context);
+        var aliasesForPayload = node is null
+            ? aliases
+            : IngestWikiSheet.ReadAliases(node.Properties)
+                .Concat(aliases ?? [])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        var payloadJson = BuildEntityReportPayload(existing?.PayloadJson, context, action, aliasesForPayload, wikiSections);
         if (existing is null)
         {
             await ingest.AddReportItemAsync(new IngestReportItem
@@ -465,7 +560,6 @@ public sealed class IngestAgentTools(
                 Title = title,
                 Summary = Truncate(summary, 800),
                 Notes = notes?.Trim() ?? string.Empty,
-                Evidence = evidence,
                 ResourceType = resourceType,
                 EntityId = entityId,
                 GraphNodeId = node?.Id,
@@ -479,7 +573,6 @@ public sealed class IngestAgentTools(
             existing.GraphNodeId = node?.Id ?? existing.GraphNodeId;
             existing.Summary = Truncate(summary, 800);
             existing.Notes = notes?.Trim() ?? string.Empty;
-            existing.Evidence = evidence;
             existing.PayloadJson = payloadJson;
             existing.UpdatedAt = DateTime.UtcNow;
             ingest.UpdateReportItem(existing);
@@ -488,21 +581,16 @@ public sealed class IngestAgentTools(
         await ingest.SaveChangesAsync();
     }
 
-    private async Task UpsertRelationshipReportItemAsync(
+    private async Task UpsertRelationshipObservationReportItemAsync(
         IngestAgentContext context,
         IngestReportItem? existing,
-        GraphEdge edge,
-        string action,
+        string edgeType,
         Guid from,
         Guid to,
         string fromTitle,
-        string toTitle,
-        string summary,
-        IReadOnlyList<IngestWikiCitationInput>? citations,
-        string? notes)
+        string toTitle)
     {
-        var payloadJson = BuildRelationshipReportPayload(existing?.PayloadJson, context, action, from, to, citations);
-        var evidence = BuildCitationEvidencePreview(citations, context);
+        var payloadJson = BuildRelationshipReportPayload(existing?.PayloadJson, context, IngestSourceAssertions.ObservedRelationshipAction, from, to);
         if (existing is null)
         {
             await ingest.AddReportItemAsync(new IngestReportItem
@@ -511,23 +599,19 @@ public sealed class IngestAgentTools(
                 SourceChunkId = context.SourceChunkId,
                 Kind = IngestReportItemKind.Relationship,
                 Status = IngestReportItemStatus.Active,
-                Title = $"{fromTitle} -[{edge.EdgeType}]-> {toTitle}",
-                Summary = Truncate(summary, 800),
-                Notes = notes?.Trim() ?? string.Empty,
-                Evidence = evidence,
-                ResourceType = edge.EdgeType,
-                GraphEdgeId = edge.Id,
+                Title = $"{fromTitle} -[{edgeType}]-> {toTitle}",
+                Summary = string.Empty,
+                Notes = string.Empty,
+                ResourceType = edgeType,
                 PayloadJson = payloadJson,
             });
         }
         else
         {
-            existing.Title = $"{fromTitle} -[{edge.EdgeType}]-> {toTitle}";
-            existing.ResourceType = edge.EdgeType;
-            existing.Summary = Truncate(summary, 800);
-            existing.Notes = notes?.Trim() ?? string.Empty;
-            existing.Evidence = evidence;
-            existing.GraphEdgeId = edge.Id;
+            existing.Title = $"{fromTitle} -[{edgeType}]-> {toTitle}";
+            existing.ResourceType = edgeType;
+            existing.Summary = string.Empty;
+            existing.Notes = string.Empty;
             existing.PayloadJson = payloadJson;
             existing.UpdatedAt = DateTime.UtcNow;
             ingest.UpdateReportItem(existing);
@@ -543,19 +627,26 @@ public sealed class IngestAgentTools(
             && item.EntityId == entityId
             && (sourceChunkId is null || item.SourceChunkId == sourceChunkId));
 
-    private async Task<IngestReportItem?> FindActiveRelationshipReportItemAsync(Guid jobId, long graphEdgeId, Guid? sourceChunkId = null) =>
+    private async Task<IngestReportItem?> FindActiveRelationshipObservationReportItemAsync(
+        Guid jobId,
+        Guid sourceChunkId,
+        Guid from,
+        Guid to,
+        string edgeType) =>
         (await ingest.ListReportItemsAsync(jobId)).FirstOrDefault(item =>
             item.Kind == IngestReportItemKind.Relationship
             && item.Status == IngestReportItemStatus.Active
-            && item.GraphEdgeId == graphEdgeId
-            && (sourceChunkId is null || item.SourceChunkId == sourceChunkId));
+            && item.SourceChunkId == sourceChunkId
+            && string.Equals(item.ResourceType, edgeType, StringComparison.OrdinalIgnoreCase)
+            && TryReadRelationshipEndpoints(item.PayloadJson, out var existingFrom, out var existingTo)
+            && existingFrom == from
+            && existingTo == to);
 
-    private async Task<bool> WasEntityCreatedByJobAsync(Guid jobId, Guid entityId) =>
+    private async Task<bool> IsEntityTouchedByJobAsync(Guid jobId, Guid entityId) =>
         (await ingest.ListReportItemsAsync(jobId)).Any(item =>
             item.Kind == IngestReportItemKind.Entity
             && item.Status == IngestReportItemStatus.Active
-            && item.EntityId == entityId
-            && string.Equals(IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson), IngestSourceAssertions.CreatedEntityAction, StringComparison.Ordinal));
+            && item.EntityId == entityId);
 
     private async Task AddExtractedFromAsync(IngestAgentContext context, GraphNode entityNode)
     {
@@ -680,55 +771,19 @@ public sealed class IngestAgentTools(
         return allowedTypes.Contains(node.NodeType) ? node : null;
     }
 
-    private static string? ValidateEntitySheet(
+    private static string? ValidateEntityObservation(
         string? summary,
-        IReadOnlyList<string>? aliases,
-        IReadOnlyList<IngestWikiSectionInput>? sections,
-        string? notes)
+        IReadOnlyList<IngestWikiSectionInput>? sections)
     {
-        if (string.IsNullOrWhiteSpace(summary)) return "Error: summary is required for every entity wiki sheet.";
-        if (IngestSourceAssertions.ContainsDisallowedExtractionRationale(summary))
-            return "Error: summary must be source-grounded entity knowledge, not extraction process rationale.";
-        if ((aliases ?? []).Any(IngestSourceAssertions.ContainsDisallowedExtractionRationale))
-            return "Error: aliases must be source-mentioned names, not extraction process rationale.";
-        if (IngestSourceAssertions.ContainsDisallowedExtractionRationale(notes))
-            return "Error: notes must not record unsupported-update rationale.";
-
-        foreach (var section in sections ?? [])
-        {
-            if (IngestSourceAssertions.ContainsDisallowedExtractionRationale(section.Title)
-                || IngestSourceAssertions.ContainsDisallowedExtractionRationale(section.Body))
-            {
-                return "Error: wiki sections must contain source-grounded knowledge, not extraction process rationale.";
-            }
-
-            foreach (var citation in section.Citations ?? [])
-            {
-                if (IngestSourceAssertions.ContainsDisallowedExtractionRationale(citation.Snippet))
-                    return "Error: citation snippets must quote or closely summarize source support.";
-            }
-        }
+        if (string.IsNullOrWhiteSpace(summary) && CountNonEmptySections(sections) == 0)
+            return "Error: at least a summary or one non-empty source observation section is required.";
 
         return null;
     }
 
-    private static string? ValidateRelationship(
-        string? summary,
-        IReadOnlyList<IngestWikiCitationInput>? citations,
-        string? notes)
-    {
-        if (string.IsNullOrWhiteSpace(summary)) return "Error: summary is required for every relationship.";
-        if (IngestSourceAssertions.ContainsDisallowedExtractionRationale(summary))
-            return "Error: relationship summary must be source-grounded, not extraction process rationale.";
-        if (IngestSourceAssertions.ContainsDisallowedExtractionRationale(notes))
-            return "Error: notes must not record unsupported-update rationale.";
-        foreach (var citation in citations ?? [])
-        {
-            if (IngestSourceAssertions.ContainsDisallowedExtractionRationale(citation.Snippet))
-                return "Error: citation snippets must quote or closely summarize source support.";
-        }
-        return null;
-    }
+    private static int CountNonEmptySections(IEnumerable<IngestWikiSectionInput>? sections) =>
+        (sections ?? Enumerable.Empty<IngestWikiSectionInput>())
+            .Count(section => section is not null && (!string.IsNullOrWhiteSpace(section.Title) || !string.IsNullOrWhiteSpace(section.Body)));
 
     private static string BuildEntityReportPayload(
         string? json,
@@ -753,8 +808,7 @@ public sealed class IngestAgentTools(
         IngestAgentContext context,
         string action,
         Guid from,
-        Guid to,
-        IReadOnlyList<IngestWikiCitationInput>? citations)
+        Guid to)
     {
         var payload = ReadPayload(json);
         var existingAction = ReadString(payload.GetValueOrDefault(IngestSourceAssertions.RelationshipGraphActionProperty));
@@ -764,7 +818,7 @@ public sealed class IngestAgentTools(
         ApplyCommonPayload(payload, context);
         payload["fromEntityId"] = from;
         payload["toEntityId"] = to;
-        payload["citationCount"] = (citations ?? []).Count;
+        payload.Remove("citationCount");
         return JsonSerializer.Serialize(payload);
     }
 
@@ -794,50 +848,75 @@ public sealed class IngestAgentTools(
         return payload;
     }
 
+    private static bool TryReadRelationshipEndpoints(string payloadJson, out Guid from, out Guid to)
+    {
+        from = Guid.Empty;
+        to = Guid.Empty;
+        if (string.IsNullOrWhiteSpace(payloadJson) || !LooksLikeJsonRoot(payloadJson, '{')) return false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            return document.RootElement.TryGetProperty("fromEntityId", out var fromProperty)
+                && document.RootElement.TryGetProperty("toEntityId", out var toProperty)
+                && Guid.TryParse(fromProperty.ValueKind == JsonValueKind.String ? fromProperty.GetString() : fromProperty.GetRawText(), out from)
+                && Guid.TryParse(toProperty.ValueKind == JsonValueKind.String ? toProperty.GetString() : toProperty.GetRawText(), out to);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool PayloadContainsSource(string payloadJson, Guid sourceId)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson) || !LooksLikeJsonRoot(payloadJson, '{')) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            return document.RootElement.TryGetProperty("sourceId", out var sourceProperty)
+                && Guid.TryParse(sourceProperty.ValueKind == JsonValueKind.String ? sourceProperty.GetString() : sourceProperty.GetRawText(), out var parsed)
+                && parsed == sourceId;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static int ReadIntPayload(string payloadJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson) || !LooksLikeJsonRoot(payloadJson, '{')) return -1;
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            return document.RootElement.TryGetProperty(propertyName, out var property) && property.TryGetInt32(out var value)
+                ? value
+                : -1;
+        }
+        catch (JsonException)
+        {
+            return -1;
+        }
+    }
+
     private static string[] SectionTitles(IReadOnlyList<IngestWikiSectionInput>? sections) =>
         (sections ?? [])
+            .Where(section => section is not null)
             .Select(section => NormalizeText(section.Title).Trim())
             .Where(title => !string.IsNullOrWhiteSpace(title))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-    private static string BuildEvidencePreview(IReadOnlyList<IngestWikiSectionInput>? sections, IngestAgentContext context)
-    {
-        var snippets = (sections ?? [])
-            .SelectMany(section => IngestWikiSheet.BuildCitations(section.Citations, context))
-            .Select(IngestWikiSheet.CitationPreview)
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(6);
-        return Truncate(string.Join("\n", snippets), 1200);
-    }
-
-    private static string BuildCitationEvidencePreview(IReadOnlyList<IngestWikiCitationInput>? citations, IngestAgentContext context) =>
-        Truncate(string.Join("\n", IngestWikiSheet.BuildCitations(citations, context)
-            .Select(IngestWikiSheet.CitationPreview)
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(6)), 1200);
-
-    private static int ScoreCandidate(
-        GraphNode node,
-        IReadOnlyList<string> terms,
-        string queryText)
+    private static int ScoreIdentityCandidate(GraphNode node, string queryText)
     {
         var queryVariants = BuildEntityNameVariants(queryText, ShouldStripEntityTitles(node.NodeType));
-        if (terms.Count == 0 && queryVariants.Count == 0) return 1;
+        if (queryVariants.Count == 0) return 0;
 
-        var candidateVariants = CandidateNameInputs(node)
+        var candidateInputs = CandidateNameInputs(node).ToList();
+        var candidateVariants = candidateInputs
             .SelectMany(name => BuildEntityNameVariants(name, ShouldStripEntityTitles(node.NodeType)))
             .ToHashSet(StringComparer.Ordinal);
-
-        var haystack = string.Join("\n", new[]
-        {
-            node.Label ?? string.Empty,
-            node.NodeType,
-            IngestWikiSheet.BuildEntitySearchText(node.Properties),
-        });
-        var normalizedHaystack = NormalizeComparable(haystack);
 
         var score = 0;
         foreach (var queryVariant in queryVariants)
@@ -846,12 +925,13 @@ public sealed class IngestAgentTools(
             else if (candidateVariants.Any(candidate => candidate.Contains(queryVariant, StringComparison.Ordinal) || queryVariant.Contains(candidate, StringComparison.Ordinal))) score += 8;
         }
 
-        foreach (var term in terms)
+        var identityHaystack = NormalizeComparable(string.Join("\n", candidateInputs));
+        foreach (var term in SplitSearchTerms(queryText))
         {
-            if (string.Equals(node.Label, term, StringComparison.OrdinalIgnoreCase)) score += 10;
-            else if (haystack.Contains(term, StringComparison.OrdinalIgnoreCase)) score += 2;
-            else if (normalizedHaystack.Contains(NormalizeComparable(term), StringComparison.Ordinal)) score += 1;
+            if (identityHaystack.Contains(NormalizeComparable(term), StringComparison.Ordinal))
+                score += 2;
         }
+
         return score;
     }
 
@@ -1013,6 +1093,32 @@ public sealed class IngestAgentTools(
         return trimmed.Length <= max ? trimmed : trimmed[..max] + "...";
     }
 
+    private static string TruncateWords(string value, int maxWords)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var words = value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (words.Length <= maxWords) return value.Trim();
+        return string.Join(' ', words.Take(maxWords)) + "...";
+    }
+
+    private static string NormalizeSourceChunkSummary(string? value) =>
+        Truncate(TruncateWords(NormalizeText(value).Trim(), 120), 900);
+
+    private static string NormalizeSourceChunkNotes(string? value)
+    {
+        var normalized = NormalizeText(value).Trim();
+        if (normalized.Length == 0) return string.Empty;
+
+        var firstLine = normalized
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() ?? string.Empty;
+        if (firstLine.Length == 0) return string.Empty;
+
+        var sentenceEnd = firstLine.IndexOfAny(['.', '!', '?']);
+        var sentence = sentenceEnd >= 0 ? firstLine[..(sentenceEnd + 1)] : firstLine;
+        return Truncate(TruncateWords(sentence, 40), 280);
+    }
+
     private static string NormalizeText(string? value)
     {
         if (string.IsNullOrEmpty(value)) return string.Empty;
@@ -1075,13 +1181,45 @@ public sealed class IngestAgentTools(
         "with",
     ];
 
-    private sealed record ProjectEntityCandidate(
+    private sealed record ProjectEntityIdentity(
         Guid Id,
         string Type,
         string Name,
-        string Summary,
+        IReadOnlyList<string> Aliases);
+
+    private sealed record ProjectEntityIdentityCandidate(
+        Guid Id,
+        string Type,
+        string Name,
         IReadOnlyList<string> Aliases,
         int Score);
 
+    private sealed record ObservationEntityResolution(
+        Guid EntityId,
+        GraphNode? Node,
+        string Action,
+        bool Created,
+        bool ExactNameMatch,
+        string? Error)
+    {
+        public static ObservationEntityResolution Resolved(Guid entityId, GraphNode node, string action, bool created, bool exactNameMatch) =>
+            new(entityId, node, action, created, exactNameMatch, Error: null);
+
+        public static ObservationEntityResolution Failed(string error) =>
+            new(Guid.Empty, Node: null, string.Empty, Created: false, ExactNameMatch: false, error);
+    }
+
     private sealed record EntityTypeResolution(string Type, bool ExistingType);
+}
+
+public sealed class IngestEntityMentionInput
+{
+    [Description("Likely broad entity type such as Character, Location, Faction, Concept, Artifact, Lore, Person, Event, Claim, Term, or Method.")]
+    public string? Type { get; set; }
+
+    [Description("Exact entity mention from the source chunk.")]
+    public string? Mention { get; set; }
+
+    [Description("Optional search variants such as base name without titles, surnames, epithets, aliases, or alternate spellings.")]
+    public string[]? Variants { get; set; }
 }

@@ -750,10 +750,6 @@
                                     <span>@citation.SourceKind</span>
                                     <span>chunk @(citation.SourceChunkIndex + 1)</span>
                                 </div>
-                                @if (!string.IsNullOrWhiteSpace(citation.Snippet))
-                                {
-                                    <blockquote>@citation.Snippet</blockquote>
-                                }
                             }
                         </div>
                     }
@@ -909,7 +905,6 @@
 
     private static string ObservationPreview(IngestSourceObservation observation) =>
         !string.IsNullOrWhiteSpace(observation.Summary) ? observation.Summary
-        : !string.IsNullOrWhiteSpace(observation.Evidence) ? observation.Evidence
         : !string.IsNullOrWhiteSpace(observation.Notes) ? observation.Notes
         : observation.ObservedProperties.Values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
 

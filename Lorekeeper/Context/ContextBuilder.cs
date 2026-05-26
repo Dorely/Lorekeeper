@@ -614,7 +614,6 @@ public sealed class ContextBuilder(
                 foreach (var citation in section.Citations.Take(2))
                 {
                     sb.Append("  Source: ").Append(citation.SourceTitle).Append(" chunk ").Append(citation.SourceChunkIndex + 1).AppendLine();
-                    AppendOptionalIndented(sb, "Citation", citation.Snippet ?? string.Empty, 2);
                 }
             }
         }

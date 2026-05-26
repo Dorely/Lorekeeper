@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Context;
@@ -31,34 +32,38 @@ public sealed class IngestJobProcessor(
     private const string _systemPrompt = """
         You are an ingestion extraction agent for Lorekeeper.
 
-        Your job is to read the current source chunk, which may or may not be part of a larger document, and build durable wiki-style entity sheets on the project graph.
+        Your job is to read the current source chunk, which may or may not be part of a larger document, and append source-linked observations for durable wiki-style entity sheets on the project graph.
         You may link to existing non-structural project entities when the source clearly refers to the same thing.
         Prefer fewer, stronger entities over duplicate nodes for titles, aliases, partial names, or alternate spellings. Entity data should be useful for later retrieval and writing; it should read like an organized wiki sheet, not extraction notes.
 
-        Adapt what counts as an entity to the source and the project. Fiction, science fiction, and fantasy sources should preserve story and setting continuity: characters, places, cultures, factions, artifacts, magic/technology, histories, rules, recurring terms, and relationships. Nonfiction and research sources should preserve concepts, people, events, examples, methods, terms, claims, evidence, and arguments. Use the project type palette first, then create broad useful non-structural types only when the source needs them.
+        Adapt what counts as an entity to the source and the project. Fiction, science fiction, and fantasy sources should preserve story and setting continuity: characters, places, cultures, factions, artifacts, magic/technology, histories, rules, recurring terms, and relationships. Nonfiction and research sources should preserve concepts, people, events, examples, methods, terms, claims, source support, and arguments. Use the project type palette first, then create broad useful non-structural types only when the source needs them.
 
-        A useful wiki sheet captures the source-grounded information the current project would need later: identity, role, status, affiliation, history, motivation, significance, setting/world-building details, factual claims, examples, relationships, and evidence. Store this as summary, aliases, and ordered wiki sections with compact citations.
+        A useful wiki sheet captures the source-grounded information the current project would need later: identity, role, status, affiliation, history, motivation, significance, setting/world-building details, factual claims, examples, and relationships. During chunk ingestion, store this only as source-linked observations. A later final review pass will synthesize those observations into a single Source: wiki section. The graph is only a sparse support structure.
 
         Process rules:
-        - Start from the compact touched-entity index in the prompt. It is only an identity hint; read a full sheet before updating it.
-        - Before every create_ingest_entity call, call search_project_entities for the source mention and its likely variants.
-        - Treat search_project_entities results as candidate matches for your judgment, not automatic identity decisions. A shared title, honorific, role, epithet, or semantic similarity is not enough by itself to reuse or update an entity.
-        - Search broadly, not just exactly: use the canonical singular type plus the exact mention, base name with titles/honorifics removed, known aliases, surnames, epithets, alternate spellings, and descriptive terms from the local context. For example, "Prince Kael'thas" should search both "Prince Kael'thas" and "Kael'thas".
+        - Start from the compact touched-entity index in the prompt. It is only an identity hint.
+        - Use resolve_project_entity_mentions in batches for source mentions and likely variants before creating anything. Use list_project_entity_index when you need a broader name/alias roster.
+        - Treat resolver results as candidate matches for your judgment, not automatic identity decisions. A shared title, honorific, role, epithet, or semantic similarity is not enough by itself to reuse or update an entity.
+        - Resolve broadly, not just exactly: use the canonical singular type plus the exact mention, base name with titles/honorifics removed, known aliases, surnames, epithets, alternate spellings, and nearby descriptive terms from the local context. For example, "Prince Kael'thas" should resolve both "Prince Kael'thas" and "Kael'thas".
         - Treat title/honorific differences, punctuation/case differences, shortened names, aliases, and obvious same-subject references as the same entity when the source context supports it.
-        - Do not create an entity when the touched-entity index or search_project_entities returns a clear same subject with matching names, aliases, or source-grounded identity details. Use read_entity_sheet and update_ingest_entity_sheet instead.
+        - Do not create an entity when the touched-entity index or resolver returns a clear same subject with matching names or aliases. Call append_ingest_entity_observation with entityId for an existing match.
         - Do not update an existing entity just because it is semantically similar to the current source chunk. Update it only when the chunk explicitly supports a fact about that same entity.
-        - Use read_entity_sheet before updating any existing or already-touched entity.
-        - Use update_ingest_entity_sheet when a source mention matches an existing project entity or a same-job entity.
-        - Create a new entity only when no existing project entity or same-job entity matches after variant searches. The tool will reject duplicate names; treat that as instruction to reuse the returned/existing entity.
+        - Use append_ingest_entity_observation as the single entity write path. Supply entityId for an existing entity, or type and name only when creating/reusing a new entity in the same call.
+        - append_ingest_entity_observation never edits canonical summaries or normal wiki sections. Do not try to rewrite the entity wiki during chunk ingestion.
+        - Create a new entity only when no existing project entity or same-job entity matches after variant resolution. The tool will reject duplicate names; treat that as instruction to reuse the returned existing entity.
         - Use canonical singular entity type keys from the known project entity types. Do not invent plural, lowercase, or near-duplicate categories such as "characters", "Characters", "locations", or "organisations" when an existing project type reasonably fits.
         - If a new type is needed, choose a broad stable type name. Prefer reusable categories such as Culture, Faction, Artifact, Magic, Technology, Lore, Concept, Person, Event, Example, Claim, Term, or Method over one-off labels.
-        - Keep recurring sheets current. If a character, place, concept, faction, or other entity appears again with new information, rewrite the relevant sheet sections so the page remains organized and current.
-        - The summary field is required and should remain concise. Wiki sections can be larger, but they should be structured for later reading and retrieval.
-        - Pass tool objects and arrays directly. Do not serialize aliases, wiki sections, or citations into JSON strings; use [] for no aliases or no sections.
-        - Use compact citations from the current source chunk for non-trivial facts. Citations may include sourceBlockId, pageNumber, locator, and a short quote or close summary snippet. Do not invent facts.
-        - Never record statements such as "the page did not mention this", "not enough information", "semantically similar", or any other rationale for why an unsupported update was attempted. If the source does not support a fact, skip that fact.
-        - Link only entities already touched by this ingest job using link_ingest_entities. If an endpoint is an existing project entity, update its sheet first.
-        - Finish each source chunk by calling update_ingest_source_progress exactly once with the completed chunk summary and the rolling source synopsis. Keep the rolling source synopsis around 1500 words.
+        - Keep recurring entities current by appending new source observations when the source supports new facts. Do not overwrite or supersede earlier observations.
+        - Observation summaries should remain concise. Each meaningful touched entity should have source-backed observation sections rather than leaving detail only in relationships.
+        - For story/worldbuilding sources, prefer this section palette when supported by the text: Overview, Role in This Text, Canon / World Role, Appearances & Timeline, Traits & Motivations, Relationships, Important Events, Memorable Quotes.
+        - Only create sections with source-backed content. Memorable Quotes must use exact source text; do not paraphrase invented quotes.
+        - Pass tool objects and arrays directly. Do not serialize aliases or wiki sections into JSON strings; use [] for no aliases or no sections.
+        - Do not provide source ids, chunk ids, page labels, locator labels, or reference metadata; the tools record provenance automatically.
+        - If the source does not support a fact, skip that fact.
+        - Use append_ingest_relationship_observation sparingly, and only for durable high-signal source-backed relationship facts such as membership, family, command, location, direct conflict, ownership, or major causality. It accepts only endpoints and relationship type; all prose detail belongs in entity observation sections.
+        - Relationship observations do not create canonical graph edges. Link only entities already touched by this ingest job through entity observations.
+        - Data-writing tools must be called one at a time. Before each append_ingest_entity_observation, append_ingest_relationship_observation, or update_ingest_source_progress call, first stream a short plain-text note explaining what you are about to record.
+        - Finish each source chunk by calling update_ingest_source_progress exactly once with a concise completed chunk summary and the rolling source synopsis. Keep optional notes to one short operational sentence and keep the rolling source synopsis around 1500 words. After this tool returns, make no more tool calls and respond with a short plain-text completion note.
         """;
 
     public async Task RunAsync(Guid jobId, CancellationToken cancellationToken = default)
@@ -121,6 +126,9 @@ public sealed class IngestJobProcessor(
                 Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
             }
 
+            if (!await ProcessFinalReviewAsync(job, chat, maxIterations, cancellationToken))
+                return;
+
             job.Status = IngestJobStatus.Completed;
             job.CompletedSourceChunks = job.TotalSourceChunks;
             job.CurrentMessage = "Completed.";
@@ -130,7 +138,7 @@ public sealed class IngestJobProcessor(
             await ingest.SaveChangesAsync(CancellationToken.None);
             Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Completed);
         }
-        catch (OperationCanceledException ex)
+        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
         {
             logger.LogInformation(ex, "Ingest job {JobId} was stopped or canceled.", jobId);
             await MarkStoppedAsync(jobId, activeChunk);
@@ -188,7 +196,7 @@ public sealed class IngestJobProcessor(
                 NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnCompleted(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title));
                 break;
             }
-            catch (Exception ex) when (IsRetryableLlmFailure(ex) && attempt < maxAttempts)
+            catch (Exception ex) when (IsRetryableLlmFailure(ex, cancellationToken) && attempt < maxAttempts)
             {
                 var delayMs = RetryDelayMs(attempt);
                 logger.LogWarning(ex, "Transient ingest LLM failure for job {JobId}, source chunk {SourceChunkIndex}, attempt {Attempt}/{MaxAttempts}. Retrying in {DelayMs} ms.", job.Id, jobChunk.SourceChunkIndex, attempt, maxAttempts, delayMs);
@@ -205,6 +213,8 @@ public sealed class IngestJobProcessor(
                         attempt,
                         maxAttempts,
                         delayMs,
+                        errorType = ex.GetType().FullName,
+                        cancellationRequested = cancellationToken.IsCancellationRequested,
                         error = ex.Message,
                     }),
                 }, cancellationToken);
@@ -213,7 +223,7 @@ public sealed class IngestJobProcessor(
                 NotifyLive(job.ProjectId, job.Id, new IngestLiveRetryScheduled(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, attempt, maxAttempts, delayMs, ex.Message));
                 await Task.Delay(delayMs, cancellationToken);
             }
-            catch (Exception ex) when (!IsCancellation(ex))
+            catch (Exception ex) when (!IsCancellation(ex, cancellationToken))
             {
                 NotifyLiveTokenCount(job.ProjectId, job.Id, jobChunk);
                 NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnFailed(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, ex.Message));
@@ -251,6 +261,134 @@ public sealed class IngestJobProcessor(
         }
     }
 
+    private async Task<bool> ProcessFinalReviewAsync(
+        IngestJob job,
+        IChatClient chat,
+        int maxIterations,
+        CancellationToken cancellationToken)
+    {
+        var reportItems = await ingest.ListReportItemsAsync(job.Id, cancellationToken);
+        var touchedEntities = reportItems
+            .Where(item => item.Status == IngestReportItemStatus.Active
+                && item.Kind == IngestReportItemKind.Entity
+                && item.EntityId is not null)
+            .GroupBy(item => item.EntityId!.Value)
+            .Select(group => group.OrderByDescending(item => item.UpdatedAt).First())
+            .OrderBy(item => item.ResourceType, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (touchedEntities.Count == 0)
+            return true;
+
+        await ingest.AddEventAsync(new IngestJobEvent
+        {
+            JobId = job.Id,
+            Level = IngestJobEventLevel.Info,
+            EventType = "llm.final_review_started",
+            Message = $"Starting final source review for {touchedEntities.Count} touched entities.",
+            PayloadJson = JsonSerializer.Serialize(new { entityCount = touchedEntities.Count }),
+        }, cancellationToken);
+        await ingest.SaveChangesAsync(cancellationToken);
+        Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
+
+        var maxAttempts = Math.Max(1, options.Value.IngestMaxTransientRetries);
+        for (var index = 0; index < touchedEntities.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var latestJob = await ingest.GetJobAsync(job.Id, cancellationToken)
+                ?? throw new InvalidOperationException($"Ingest job {job.Id} not found.");
+            if (latestJob.Status == IngestJobStatus.StopRequested)
+            {
+                await MarkStoppedAsync(job.Id, activeChunk: null);
+                return false;
+            }
+
+            var item = touchedEntities[index];
+            var entityId = item.EntityId!.Value;
+            var entityTitle = string.IsNullOrWhiteSpace(item.Title) ? entityId.ToString("N") : item.Title;
+            var liveTitle = $"Final review: {entityTitle}";
+
+            job.CurrentMessage = $"Final source review {index + 1} of {touchedEntities.Count}: {entityTitle}";
+            job.UpdatedAt = DateTime.UtcNow;
+            ingest.UpdateJob(job);
+            await ingest.SaveChangesAsync(cancellationToken);
+            Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
+
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var mutated = false;
+                var context = new IngestFinalReviewContext(
+                    job.ProjectId,
+                    job.Id,
+                    job.SourceId,
+                    job.Source.Title,
+                    job.Source.SourceKind,
+                    entityId,
+                    entityTitle,
+                    item.ResourceType,
+                    OnMutated: () => mutated = true);
+
+                NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnStarted(entityId, -1, liveTitle, attempt, maxAttempts));
+                try
+                {
+                    _ = await RunFinalReviewConversationAsync(job, context, chat, maxIterations, attempt, maxAttempts, cancellationToken);
+                    if (!mutated)
+                        throw new InvalidOperationException($"Final source review for {entityTitle} completed without calling write_ingest_source_wiki_section.");
+                    NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnCompleted(entityId, -1, liveTitle));
+                    if (mutated)
+                        Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
+                    break;
+                }
+                catch (Exception ex) when (IsRetryableLlmFailure(ex, cancellationToken) && attempt < maxAttempts)
+                {
+                    var delayMs = RetryDelayMs(attempt);
+                    logger.LogWarning(ex, "Transient final ingest review failure for job {JobId}, entity {EntityId}, attempt {Attempt}/{MaxAttempts}. Retrying in {DelayMs} ms.", job.Id, entityId, attempt, maxAttempts, delayMs);
+                    await ingest.AddEventAsync(new IngestJobEvent
+                    {
+                        JobId = job.Id,
+                        Level = IngestJobEventLevel.Warning,
+                        EventType = "llm.final_review_retry",
+                        Message = $"Retrying final source review for {entityTitle} after transient LLM error.",
+                        PayloadJson = JsonSerializer.Serialize(new
+                        {
+                            entityId,
+                            entityTitle,
+                            attempt,
+                            maxAttempts,
+                            delayMs,
+                            errorType = ex.GetType().FullName,
+                            cancellationRequested = cancellationToken.IsCancellationRequested,
+                            error = ex.Message,
+                        }),
+                    }, cancellationToken);
+                    await ingest.SaveChangesAsync(cancellationToken);
+                    Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
+                    NotifyLive(job.ProjectId, job.Id, new IngestLiveRetryScheduled(entityId, -1, liveTitle, attempt, maxAttempts, delayMs, ex.Message));
+                    await Task.Delay(delayMs, cancellationToken);
+                }
+                catch (Exception ex) when (!IsCancellation(ex, cancellationToken))
+                {
+                    NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnFailed(entityId, -1, liveTitle, ex.Message));
+                    throw;
+                }
+            }
+        }
+
+        await ingest.AddEventAsync(new IngestJobEvent
+        {
+            JobId = job.Id,
+            Level = IngestJobEventLevel.Info,
+            EventType = "llm.final_review_completed",
+            Message = $"Completed final source review for {touchedEntities.Count} touched entities.",
+            PayloadJson = JsonSerializer.Serialize(new { entityCount = touchedEntities.Count }),
+        }, cancellationToken);
+        await ingest.SaveChangesAsync(cancellationToken);
+        Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
+        return true;
+    }
+
     private async Task<string?> RunChunkConversationAsync(
         IngestJob job,
         IngestJobChunk jobChunk,
@@ -276,7 +414,226 @@ public sealed class IngestJobProcessor(
             new(ChatRole.User, chunkPrompt),
         };
         var tokenTracker = new IngestChunkTokenTracker(messages);
-        NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
+        var toolCallCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var peakTokenCount = 0;
+        var iterationsRun = 0;
+        string? streamExceptionType = null;
+        string? streamExceptionMessage = null;
+        bool? streamCancellationRequested = null;
+
+        void ObserveTokenCount()
+        {
+            NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
+            if (jobChunk.LlmTokenCount is int tokenCount)
+                peakTokenCount = Math.Max(peakTokenCount, tokenCount);
+        }
+
+        ObserveTokenCount();
+
+        string? finalText = null;
+        try
+        {
+            for (var iteration = 0; iteration < maxIterations; iteration++)
+            {
+                iterationsRun = iteration + 1;
+                cancellationToken.ThrowIfCancellationRequested();
+                var assistantText = new StringBuilder();
+                var pendingCalls = new List<PendingChunkToolCall>();
+                var toolTracker = new StreamingToolCallTracker();
+                tokenTracker.BeginAssistantTurn();
+                Exception? streamFailure = null;
+
+                var enumerator = chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken)
+                                     .GetAsyncEnumerator(cancellationToken);
+                try
+                {
+                    while (true)
+                    {
+                        bool hasNext;
+                        try
+                        {
+                            hasNext = await enumerator.MoveNextAsync();
+                        }
+                        catch (Exception ex)
+                        {
+                            streamFailure = BuildStreamFailure(ex);
+                            break;
+                        }
+
+                        if (!hasNext) break;
+
+                        try
+                        {
+                            var contents = enumerator.Current?.Contents;
+                            if (contents is null) continue;
+
+                            foreach (var content in contents)
+                            {
+                                if (content is TextContent textContent && textContent.Text is { Length: > 0 } text)
+                                {
+                                    assistantText.Append(text);
+                                    tokenTracker.AppendAssistantText(text);
+                                    NotifyLive(job.ProjectId, job.Id, new IngestLiveTextDelta(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, text));
+                                    ObserveTokenCount();
+                                    continue;
+                                }
+
+                                foreach (var toolUpdate in toolTracker.Process(content, assistantText.Length))
+                                {
+                                    switch (toolUpdate)
+                                    {
+                                        case StreamingToolCallStartedUpdate started:
+                                            tokenTracker.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson);
+                                            NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallStarted(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete));
+                                            ObserveTokenCount();
+                                            break;
+
+                                        case StreamingToolCallArgumentsDeltaUpdate delta:
+                                            tokenTracker.AppendToolArguments(delta.CallId, delta.ArgumentsDelta);
+                                            NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallArgumentsDelta(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete));
+                                            ObserveTokenCount();
+                                            break;
+
+                                        case StreamingToolCallReadyUpdate ready:
+                                            tokenTracker.SetToolCallArguments(ready.CallId, ready.ToolName, ready.ArgumentsJson);
+                                            pendingCalls.Add(new PendingChunkToolCall(ready.Content, ready.CallId, ready.ToolName, ready.ArgumentsJson, ready.TextOffset));
+                                            ObserveTokenCount();
+                                            break;
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            streamFailure = BuildStreamFailure(ex);
+                            break;
+                        }
+                    }
+                }
+                finally
+                {
+                    try
+                    {
+                        await enumerator.DisposeAsync();
+                    }
+                    catch (Exception ex) when (streamFailure is null)
+                    {
+                        streamFailure = BuildStreamFailure(ex);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogDebug(ex, "Ingest LLM streaming enumerator disposal failed after an earlier stream failure for job {JobId}, source chunk {SourceChunkIndex}.", job.Id, sourceChunk.Index);
+                    }
+                }
+
+                if (streamFailure is not null)
+                    ExceptionDispatchInfo.Capture(streamFailure).Throw();
+
+                var assistantMessage = new ChatMessage(ChatRole.Assistant, BuildAssistantContents(assistantText.ToString(), pendingCalls));
+                messages.Add(assistantMessage);
+                tokenTracker.CommitAssistantMessage();
+                ObserveTokenCount();
+
+                if (pendingCalls.Count == 0)
+                {
+                    finalText = assistantText.ToString();
+                    break;
+                }
+
+                var resultContents = new List<AIContent>();
+                var writeToolCallCount = pendingCalls.Count(call => IsChunkWriteTool(call.Name));
+                foreach (var pendingCall in pendingCalls)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    toolCallCounts[pendingCall.Name] = toolCallCounts.GetValueOrDefault(pendingCall.Name) + 1;
+                    var stopwatch = Stopwatch.StartNew();
+                    var toolResult = writeToolCallCount > 1 && IsChunkWriteTool(pendingCall.Name)
+                        ? $"Error: Data-writing tools must be called one at a time. Stream a short note, then call only {pendingCall.Name}; wait for the result before calling another write tool."
+                        : await InvokeToolAsync(aiTools, pendingCall.Content, job.ProjectId, job.Id, cancellationToken);
+                    stopwatch.Stop();
+
+                    var toolError = toolResult.StartsWith("Error:", StringComparison.OrdinalIgnoreCase)
+                        ? toolResult
+                        : null;
+                    NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallCompleted(
+                        sourceChunk.Id,
+                        sourceChunk.Index,
+                        sourceChunk.Title,
+                        pendingCall.CallId,
+                        pendingCall.Name,
+                        toolError is null ? toolResult : null,
+                        toolError,
+                        stopwatch.Elapsed.TotalMilliseconds));
+
+                    tokenTracker.AddToolResult(pendingCall.CallId, toolResult);
+                    ObserveTokenCount();
+                    resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult));
+                }
+
+                messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+                tokenTracker.CommitToolMessage();
+                ObserveTokenCount();
+                if (iteration == maxIterations - 1)
+                    throw new InvalidOperationException($"Ingest tool-call loop hit configured cap of {maxIterations} iterations without completing source chunk {sourceChunk.Index}.");
+            }
+
+            return finalText;
+        }
+        finally
+        {
+            await RecordChunkDiagnosticsAsync(
+                job,
+                sourceChunk,
+                attempt,
+                maxAttempts,
+                iterationsRun,
+                toolCallCounts,
+                peakTokenCount,
+                streamExceptionType,
+                streamExceptionMessage,
+                streamCancellationRequested);
+        }
+
+        Exception BuildStreamFailure(Exception exception)
+        {
+            streamExceptionType = exception.GetType().FullName;
+            streamExceptionMessage = exception.Message;
+            streamCancellationRequested = cancellationToken.IsCancellationRequested;
+
+            if (exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                return new TimeoutException(
+                    "Ingest LLM streaming was cancelled by the provider or timed out before the turn completed.",
+                    exception);
+            }
+
+            return exception;
+        }
+    }
+
+    private async Task<string?> RunFinalReviewConversationAsync(
+        IngestJob job,
+        IngestFinalReviewContext context,
+        IChatClient chat,
+        int maxIterations,
+        int attempt,
+        int maxAttempts,
+        CancellationToken cancellationToken)
+    {
+        var liveSourceChunkId = context.EntityId;
+        const int liveSourceChunkIndex = -1;
+        var liveTitle = $"Final review: {context.EntityName}";
+        var aiTools = tools.BuildFinalReview(context);
+        var chatOptions = new ChatOptions
+        {
+            Tools = aiTools,
+            ToolMode = ChatToolMode.Auto,
+        };
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, BuildFinalReviewSystemPrompt()),
+            new(ChatRole.User, BuildFinalReviewPrompt(job, context, attempt, maxAttempts)),
+        };
 
         string? finalText = null;
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -285,56 +642,87 @@ public sealed class IngestJobProcessor(
             var assistantText = new StringBuilder();
             var pendingCalls = new List<PendingChunkToolCall>();
             var toolTracker = new StreamingToolCallTracker();
-            tokenTracker.BeginAssistantTurn();
+            Exception? streamFailure = null;
 
-            await foreach (var update in chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken))
+            var enumerator = chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken)
+                                 .GetAsyncEnumerator(cancellationToken);
+            try
             {
-                foreach (var content in update.Contents)
+                while (true)
                 {
-                    if (content is TextContent textContent && textContent.Text is { Length: > 0 } text)
+                    bool hasNext;
+                    try
                     {
-                        assistantText.Append(text);
-                        tokenTracker.AppendAssistantText(text);
-                        NotifyLive(job.ProjectId, job.Id, new IngestLiveTextDelta(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, text));
-                        NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
-                        continue;
+                        hasNext = await enumerator.MoveNextAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        streamFailure = BuildStreamFailure(ex);
+                        break;
                     }
 
-                    foreach (var toolUpdate in toolTracker.Process(content, assistantText.Length))
+                    if (!hasNext) break;
+
+                    try
                     {
-                        switch (toolUpdate)
+                        var contents = enumerator.Current?.Contents;
+                        if (contents is null) continue;
+
+                        foreach (var content in contents)
                         {
-                            case StreamingToolCallStartedUpdate started:
-                                tokenTracker.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson);
-                                NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallStarted(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete));
-                                NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
-                                break;
+                            if (content is TextContent textContent && textContent.Text is { Length: > 0 } text)
+                            {
+                                assistantText.Append(text);
+                                NotifyLive(job.ProjectId, job.Id, new IngestLiveTextDelta(liveSourceChunkId, liveSourceChunkIndex, liveTitle, text));
+                                continue;
+                            }
 
-                            case StreamingToolCallArgumentsDeltaUpdate delta:
-                                tokenTracker.AppendToolArguments(delta.CallId, delta.ArgumentsDelta);
-                                NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallArgumentsDelta(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete));
-                                NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
-                                break;
+                            foreach (var toolUpdate in toolTracker.Process(content, assistantText.Length))
+                            {
+                                switch (toolUpdate)
+                                {
+                                    case StreamingToolCallStartedUpdate started:
+                                        NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallStarted(liveSourceChunkId, liveSourceChunkIndex, liveTitle, started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete));
+                                        break;
 
-                            case StreamingToolCallReadyUpdate ready:
-                                tokenTracker.SetToolCallArguments(ready.CallId, ready.ToolName, ready.ArgumentsJson);
-                                pendingCalls.Add(new PendingChunkToolCall(ready.Content, ready.CallId, ready.ToolName, ready.ArgumentsJson));
-                                NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
-                                break;
+                                    case StreamingToolCallArgumentsDeltaUpdate delta:
+                                        NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallArgumentsDelta(liveSourceChunkId, liveSourceChunkIndex, liveTitle, delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete));
+                                        break;
+
+                                    case StreamingToolCallReadyUpdate ready:
+                                        pendingCalls.Add(new PendingChunkToolCall(ready.Content, ready.CallId, ready.ToolName, ready.ArgumentsJson, ready.TextOffset));
+                                        break;
+                                }
+                            }
                         }
+                    }
+                    catch (Exception ex)
+                    {
+                        streamFailure = BuildStreamFailure(ex);
+                        break;
                     }
                 }
             }
+            finally
+            {
+                try
+                {
+                    await enumerator.DisposeAsync();
+                }
+                catch (Exception ex) when (streamFailure is null)
+                {
+                    streamFailure = BuildStreamFailure(ex);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(ex, "Final ingest review streaming enumerator disposal failed after an earlier stream failure for job {JobId}, entity {EntityId}.", job.Id, context.EntityId);
+                }
+            }
 
-            var assistantContents = new List<AIContent>();
-            if (assistantText.Length > 0)
-                assistantContents.Add(new TextContent(assistantText.ToString()));
-            assistantContents.AddRange(pendingCalls.Select(call => (AIContent)call.Content));
-            var assistantMessage = new ChatMessage(ChatRole.Assistant, assistantContents);
-            messages.Add(assistantMessage);
-            tokenTracker.CommitAssistantMessage();
-            NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
+            if (streamFailure is not null)
+                ExceptionDispatchInfo.Capture(streamFailure).Throw();
 
+            messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantContents(assistantText.ToString(), pendingCalls)));
             if (pendingCalls.Count == 0)
             {
                 finalText = assistantText.ToString();
@@ -342,39 +730,125 @@ public sealed class IngestJobProcessor(
             }
 
             var resultContents = new List<AIContent>();
+            var writeToolCallCount = pendingCalls.Count(call => IsFinalReviewWriteTool(call.Name));
             foreach (var pendingCall in pendingCalls)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var stopwatch = Stopwatch.StartNew();
-                var toolResult = await InvokeToolAsync(aiTools, pendingCall.Content, job.ProjectId, job.Id, cancellationToken);
+                var toolResult = writeToolCallCount > 1 && IsFinalReviewWriteTool(pendingCall.Name)
+                    ? "Error: write_ingest_source_wiki_section must be called at most once in this entity review. Read observations first, stream a short note, then call the writer once."
+                    : await InvokeToolAsync(aiTools, pendingCall.Content, job.ProjectId, job.Id, cancellationToken);
                 stopwatch.Stop();
 
                 var toolError = toolResult.StartsWith("Error:", StringComparison.OrdinalIgnoreCase)
                     ? toolResult
                     : null;
                 NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallCompleted(
-                    sourceChunk.Id,
-                    sourceChunk.Index,
-                    sourceChunk.Title,
+                    liveSourceChunkId,
+                    liveSourceChunkIndex,
+                    liveTitle,
                     pendingCall.CallId,
                     pendingCall.Name,
                     toolError is null ? toolResult : null,
                     toolError,
                     stopwatch.Elapsed.TotalMilliseconds));
 
-                tokenTracker.AddToolResult(pendingCall.CallId, toolResult);
-                NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult));
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
-            tokenTracker.CommitToolMessage();
-            NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
             if (iteration == maxIterations - 1)
-                throw new InvalidOperationException($"Ingest tool-call loop hit configured cap of {maxIterations} iterations without completing source chunk {sourceChunk.Index}.");
+                throw new InvalidOperationException($"Final ingest review for entity {context.EntityName} hit configured cap of {maxIterations} iterations without producing a final response.");
         }
 
         return finalText;
+
+        Exception BuildStreamFailure(Exception exception)
+        {
+            if (exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                return new TimeoutException(
+                    "Final ingest review LLM streaming was cancelled by the provider or timed out before the turn completed.",
+                    exception);
+            }
+
+            return exception;
+        }
+    }
+
+    private static string BuildFinalReviewSystemPrompt() => """
+        You are the final source review agent for Lorekeeper ingestion.
+
+        You work on exactly one touched entity from exactly one ingested source. Your task is to synthesize the appended source observations into one readable wiki-style section for that source only.
+
+        Rules:
+        - First call read_ingest_entity_source_observations.
+        - Then write exactly one section with write_ingest_source_wiki_section.
+        - Before calling the writer, stream a short plain-text note explaining that you are writing the source section.
+        - The section title is controlled by the tool and will be Source: {source title}.
+        - The body should read like a compact wiki page for this entity in this text: who they are in this source, where they appear, why they matter in this text, important events, relationships, traits or motivations, and memorable exact quotes when present.
+        - Use only information from the source observations. Do not alter or summarize canonical project knowledge outside this source.
+        - Write only useful source-backed content for this entity.
+        - After the writer returns, make no more tool calls and return a short plain-text completion note.
+        """;
+
+    private static string BuildFinalReviewPrompt(
+        IngestJob job,
+        IngestFinalReviewContext context,
+        int attempt,
+        int maxAttempts) => $$"""
+        Source title: {{context.SourceTitle}}
+        Source kind: {{context.SourceKind}}
+        Entity: {{context.EntityType}} '{{context.EntityName}}' ({{context.EntityId}})
+        Review attempt: {{attempt}} of {{maxAttempts}}
+
+        Build one source-specific wiki section for this entity from this ingest source.
+        Call read_ingest_entity_source_observations first. Then call write_ingest_source_wiki_section exactly once.
+        Preserve all existing canonical/manual entity information by only using the writer tool.
+        """;
+
+    private async Task RecordChunkDiagnosticsAsync(
+        IngestJob job,
+        IngestSourceChunk sourceChunk,
+        int attempt,
+        int maxAttempts,
+        int iterationsRun,
+        IReadOnlyDictionary<string, int> toolCallCounts,
+        int peakTokenCount,
+        string? streamExceptionType,
+        string? streamExceptionMessage,
+        bool? streamCancellationRequested)
+    {
+        try
+        {
+            await ingest.AddEventAsync(new IngestJobEvent
+            {
+                JobId = job.Id,
+                Level = IngestJobEventLevel.Debug,
+                EventType = "llm.chunk_diagnostics",
+                Message = $"Source chunk {sourceChunk.Index + 1} diagnostics",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    sourceChunkId = sourceChunk.Id,
+                    sourceChunkIndex = sourceChunk.Index,
+                    attempt,
+                    maxAttempts,
+                    iterationsRun,
+                    totalToolCalls = toolCallCounts.Values.Sum(),
+                    toolCallCounts,
+                    peakModelFacingTokenCount = peakTokenCount,
+                    streamExceptionType,
+                    streamExceptionMessage,
+                    streamCancellationRequested,
+                }),
+            }, CancellationToken.None);
+            await ingest.SaveChangesAsync(CancellationToken.None);
+            Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to record ingest chunk diagnostics for job {JobId}, source chunk {SourceChunkIndex}.", job.Id, sourceChunk.Index);
+        }
     }
 
     private void NotifyTokenCountIfChanged(IngestJob job, IngestJobChunk jobChunk, IngestChunkTokenTracker tokenTracker)
@@ -547,11 +1021,11 @@ public sealed class IngestJobProcessor(
         var start = Math.Clamp(sourceChunk.StartChar, 0, sourceText.Length);
         var end = Math.Clamp(sourceChunk.EndChar, start, sourceText.Length);
         var currentText = sourceText[start..end];
-        var entityRoster = await BuildTouchedEntityIndexAsync(job.Id, cancellationToken);
-        var chunkProgress = BuildChunkProgressMap(job);
+        var entityRoster = await BuildTouchedEntityIndexAsync(job.Id, sourceChunkId: null, cancellationToken);
+        var currentChunkEntityRoster = await BuildTouchedEntityIndexAsync(job.Id, sourceChunk.Id, cancellationToken);
+        var chunkProgress = BuildChunkProgressMap(job, sourceChunk.Index);
         var knownEntityTypes = await BuildKnownEntityTypesAsync(job.ProjectId, cancellationToken);
         var extractionProfile = BuildExtractionProfilePrompt(job);
-        var sourceLocators = await BuildSourceLocatorsAsync(job.SourceId, sourceChunk, cancellationToken);
 
         return $$"""
             Source title: {{job.Source.Title}}
@@ -564,7 +1038,7 @@ public sealed class IngestJobProcessor(
             {{job.Instructions}}
 
             Rolling source synopsis:
-            {{(string.IsNullOrWhiteSpace(job.Source.Synopsis) ? "None yet." : job.Source.Synopsis.Trim())}}
+            {{(string.IsNullOrWhiteSpace(job.Source.Synopsis) ? "None yet." : TruncateWords(job.Source.Synopsis.Trim(), 1500))}}
 
             Current ingest step:
             - Processing chunk {{sourceChunk.Index + 1}} of {{job.TotalSourceChunks}}
@@ -583,22 +1057,30 @@ public sealed class IngestJobProcessor(
             Compact touched-entity index:
             {{entityRoster}}
 
+            Current-chunk entities already touched by earlier attempts or partial work:
+            {{currentChunkEntityRoster}}
+
             Known project entity types:
             {{knownEntityTypes}}
 
-            Source locators overlapping this chunk:
-            {{sourceLocators}}
-
             Entity matching workflow for this chunk:
             1. Start from the compact touched-entity index above.
-            2. For each source mention that may be an entity, search existing project entities before creating anything.
+            2. Batch likely source mentions through resolve_project_entity_mentions before creating anything.
             3. Use the canonical singular type and multiple query variants: exact mention, base name without titles/honorifics, aliases, surnames, epithets, alternate spellings, and nearby descriptive terms.
             4. Reuse a plausible same-job or project entity instead of creating duplicate names or duplicate categories. For example, link "Prince Kael'thas" observations to an existing "Kael'thas" Character when the context points to the same person.
-            5. Create only when the touched-entity index and project searches do not return a plausible same subject.
+            5. Create only when the touched-entity index and resolver do not return a plausible same subject.
 
-            Write useful, source-grounded wiki sheets. For each touched entity, provide a required concise summary, source-mentioned aliases, and complete revised wiki sections with citations. If an entity already exists, call read_entity_sheet, integrate the new information into the existing sections, and call update_ingest_entity_sheet with the complete revised sheet. When evidence comes from a listed source locator, include sourceBlockId/pageNumber/locator and a short snippet in the citation.
+            Write useful, source-grounded observations. For each meaningful touched entity, call append_ingest_entity_observation once with a concise source-backed summary, source-mentioned aliases, and non-empty observation sections. Use entityId for an existing entity, or type and name only when no existing entity matches. Do not include source ids, chunk ids, page labels, locator labels, or reference metadata. These observations are append-only for this source and chunk; do not read or rewrite existing wiki sections during chunk ingestion.
 
-            Good example: if a Blood Elves page says Liadrin leads the blood elf paladins and is one of the race's primary leaders, record that as role/significance/history fields on the Liadrin Character with evidence from the page. Bad example: do not write that Liadrin was updated because the page was semantically similar or because the page did not mention her.
+            Default story/worldbuilding wiki section palette, when supported: Overview; Role in This Text; Canon / World Role; Appearances & Timeline; Traits & Motivations; Relationships; Important Events; Memorable Quotes.
+
+            Keep relationship observations minimal. Use append_ingest_relationship_observation only for durable facts such as membership, family, command, location, direct conflict, ownership, or major causality. It accepts only fromEntityId, toEntityId, and edgeType. Put ordinary relationship nuance and narrative detail into entity observation sections.
+
+            Good example: if a Blood Elves page says Liadrin leads the blood elf paladins and is one of the race's primary leaders, record that as role/significance/history sections on the Liadrin Character. Bad example: do not write that Liadrin was updated because the page was semantically similar or because the page did not mention her.
+
+            Tool cadence requirement: data-writing tools must be called one at a time. Before each append_ingest_entity_observation, append_ingest_relationship_observation, or update_ingest_source_progress call, stream a short plain-text note that will be visible in the UI.
+
+            Completion requirement: when this chunk is fully processed, call update_ingest_source_progress exactly once with a concise chunk summary, updated rolling source synopsis, and only a short operational note if needed. After that tool returns, do not call any more tools; return a short plain-text completion note.
 
             Current source chunk text:
             ```text
@@ -607,42 +1089,115 @@ public sealed class IngestJobProcessor(
             """;
     }
 
-    private async Task<string> BuildTouchedEntityIndexAsync(Guid jobId, CancellationToken cancellationToken)
+    private async Task<string> BuildTouchedEntityIndexAsync(Guid jobId, Guid? sourceChunkId, CancellationToken cancellationToken)
     {
         var reportItems = await ingest.ListReportItemsAsync(jobId, cancellationToken);
         var entities = reportItems
             .Where(item => item.Kind == IngestReportItemKind.Entity && item.Status == IngestReportItemStatus.Active)
             .Where(item => item.EntityId is not null)
+            .Where(item => sourceChunkId is null || item.SourceChunkId == sourceChunkId)
             .GroupBy(item => item.EntityId!.Value)
             .Select(group => group.OrderByDescending(item => item.UpdatedAt).First())
             .OrderBy(item => item.ResourceType)
             .ThenBy(item => item.Title)
             .Take(300)
-            .Select(item => $"- {item.EntityId}: {item.ResourceType} '{item.Title}' | {Truncate(item.Summary, 220)}")
+            .Select(item =>
+            {
+                var aliases = ReadReportAliases(item.PayloadJson);
+                var aliasText = aliases.Count == 0 ? string.Empty : $" | aliases: {string.Join(", ", aliases.Take(8))}";
+                return $"- {item.EntityId}: {item.ResourceType} '{item.Title}'{aliasText}";
+            })
             .ToList();
 
         return entities.Count == 0 ? "None yet." : string.Join("\n", entities);
     }
 
-    private static string BuildChunkProgressMap(IngestJob job)
+    private static string BuildChunkProgressMap(IngestJob job, int currentChunkIndex)
     {
-        var lines = job.Chunks
+        var chunks = job.Chunks
             .OrderBy(chunk => chunk.SourceChunkIndex)
+            .ToList();
+
+        var statusLines = chunks
+            .Where(chunk =>
+                chunk.SourceChunkIndex == 0
+                || chunk.SourceChunkIndex == chunks[^1].SourceChunkIndex
+                || Math.Abs(chunk.SourceChunkIndex - currentChunkIndex) <= 4
+                || chunk.Status is IngestJobChunkStatus.Running or IngestJobChunkStatus.Failed or IngestJobChunkStatus.Stopped)
             .Select(chunk =>
             {
                 var sourceChunk = chunk.SourceChunk;
                 var title = string.IsNullOrWhiteSpace(sourceChunk.Title) ? $"Part {sourceChunk.Index + 1}" : sourceChunk.Title;
-                var summary = !string.IsNullOrWhiteSpace(sourceChunk.Summary)
-                    ? Truncate(sourceChunk.Summary, 220)
-                    : !string.IsNullOrWhiteSpace(chunk.Summary)
-                        ? Truncate(chunk.Summary, 220)
-                        : string.Empty;
-                var suffix = string.IsNullOrWhiteSpace(summary) ? string.Empty : $" | {summary}";
-                return $"- {sourceChunk.Index + 1}. {title} | {chunk.Status}{suffix}";
+                return $"- {sourceChunk.Index + 1}. {title} | {chunk.Status}";
             })
             .ToList();
 
-        return lines.Count == 0 ? "No source chunks were generated." : string.Join("\n", lines);
+        var recentSummaries = chunks
+            .Where(chunk => chunk.SourceChunkIndex < currentChunkIndex && chunk.Status == IngestJobChunkStatus.Completed)
+            .OrderByDescending(chunk => chunk.SourceChunkIndex)
+            .Take(5)
+            .OrderBy(chunk => chunk.SourceChunkIndex)
+            .Select(chunk =>
+            {
+                var sourceChunk = chunk.SourceChunk;
+                var summary = !string.IsNullOrWhiteSpace(sourceChunk.Summary)
+                    ? sourceChunk.Summary
+                    : chunk.Summary;
+                return string.IsNullOrWhiteSpace(summary)
+                    ? string.Empty
+                    : $"- {sourceChunk.Index + 1}. {Truncate(summary, 180)}";
+            })
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToList();
+
+        if (statusLines.Count == 0)
+            return "No source chunks were generated.";
+
+        var completed = chunks.Count(chunk => chunk.Status == IngestJobChunkStatus.Completed);
+        var sb = new StringBuilder();
+        sb.Append("Progress: ").Append(completed).Append(" completed of ").Append(chunks.Count).AppendLine(".");
+        sb.AppendLine("Visible chunk statuses:");
+        sb.AppendLine(string.Join("\n", statusLines));
+        if (recentSummaries.Count > 0)
+        {
+            sb.AppendLine("Recent completed summaries:");
+            sb.AppendLine(string.Join("\n", recentSummaries));
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static IReadOnlyList<string> ReadReportAliases(string? payloadJson)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson) || !payloadJson.TrimStart().StartsWith('{'))
+            return [];
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payloadJson);
+            if (!doc.RootElement.TryGetProperty("aliases", out var aliases) || aliases.ValueKind != JsonValueKind.Array)
+                return [];
+
+            return aliases
+                .EnumerateArray()
+                .Select(alias => alias.ValueKind == JsonValueKind.String ? alias.GetString() : alias.GetRawText())
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Select(alias => alias!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static string TruncateWords(string value, int maxWords)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var words = value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (words.Length <= maxWords) return value.Trim();
+        return string.Join(' ', words.Take(maxWords)) + "...";
     }
 
     private async Task<string> BuildKnownEntityTypesAsync(Guid projectId, CancellationToken cancellationToken)
@@ -658,31 +1213,13 @@ public sealed class IngestJobProcessor(
         return lines.Count == 0 ? "None registered yet." : string.Join("\n", lines);
     }
 
-    private async Task<string> BuildSourceLocatorsAsync(Guid sourceId, IngestSourceChunk sourceChunk, CancellationToken cancellationToken)
-    {
-        var blocks = await ingest.ListSourceBlocksAsync(sourceId, cancellationToken);
-        var overlapping = blocks
-            .Where(block => block.EndChar > sourceChunk.StartChar && block.StartChar < sourceChunk.EndChar)
-            .OrderBy(block => block.Index)
-            .Take(24)
-            .Select(block =>
-            {
-                var label = string.IsNullOrWhiteSpace(block.Locator) ? block.Title : block.Locator;
-                var page = block.PageNumber is int pageNumber ? $" page {pageNumber};" : string.Empty;
-                return $"- {block.Id:N}: {block.Kind} '{label}' ({page} chars {block.StartChar}-{block.EndChar})";
-            })
-            .ToList();
-
-        return overlapping.Count == 0 ? "No page or section locators were recorded for this chunk." : string.Join("\n", overlapping);
-    }
-
     private static string BuildExtractionProfilePrompt(IngestJob job)
     {
         var profile = ReadExtractionProfile(job.Source.SourceMetadataJson);
         var profileDescription = profile switch
         {
             IngestExtractionProfile.StoryWorldbuilding => "Story / Worldbuilding. Prioritize continuity knowledge for fiction: characters, places, cultures, factions, lore, history, objects, rules, and relationships.",
-            IngestExtractionProfile.ResearchNonfiction => "Research / Nonfiction. Prioritize concepts, people, historical events, examples, claims, arguments, terms, methods, and source-backed evidence.",
+            IngestExtractionProfile.ResearchNonfiction => "Research / Nonfiction. Prioritize concepts, people, historical events, examples, claims, arguments, terms, methods, and source-backed support.",
             _ => "Auto. Infer the source domain from the title, kind, metadata, user instructions, and chunk text. Reuse project-specific entity types first.",
         };
 
@@ -783,9 +1320,12 @@ public sealed class IngestJobProcessor(
         return Math.Min(maxDelay, (int)Math.Round(baseDelay * multiplier));
     }
 
-    private static bool IsRetryableLlmFailure(Exception exception)
+    private static bool IsRetryableLlmFailure(Exception exception, CancellationToken cancellationToken)
     {
-        if (IsCancellation(exception)) return false;
+        if (IsCancellation(exception, cancellationToken)) return false;
+
+        if (exception is OperationCanceledException or TimeoutException)
+            return true;
 
         if (exception is HttpIOException { HttpRequestError: HttpRequestError.ResponseEnded })
             return true;
@@ -797,7 +1337,7 @@ public sealed class IngestJobProcessor(
             return LooksLikeTransientProviderError(httpRequestException.Message);
         }
 
-        return exception.InnerException is not null && IsRetryableLlmFailure(exception.InnerException)
+        return exception.InnerException is not null && IsRetryableLlmFailure(exception.InnerException, cancellationToken)
             || LooksLikeTransientProviderError(exception.Message);
     }
 
@@ -842,8 +1382,58 @@ public sealed class IngestJobProcessor(
             || normalized.Contains(" 504", StringComparison.Ordinal);
     }
 
-    private static bool IsCancellation(Exception exception) =>
-        exception is OperationCanceledException;
+    private static bool IsCancellation(Exception exception, CancellationToken cancellationToken) =>
+        cancellationToken.IsCancellationRequested && ContainsOperationCanceledException(exception);
+
+    private static bool ContainsOperationCanceledException(Exception exception) =>
+        exception is OperationCanceledException
+        || exception.InnerException is not null && ContainsOperationCanceledException(exception.InnerException);
+
+    private static bool IsChunkWriteTool(string toolName) =>
+        string.Equals(toolName, "append_ingest_entity_observation", StringComparison.Ordinal)
+        || string.Equals(toolName, "append_ingest_relationship_observation", StringComparison.Ordinal)
+        || string.Equals(toolName, "update_ingest_source_progress", StringComparison.Ordinal);
+
+    private static bool IsFinalReviewWriteTool(string toolName) =>
+        string.Equals(toolName, "write_ingest_source_wiki_section", StringComparison.Ordinal);
+
+    private static List<AIContent> BuildAssistantContents(string text, IReadOnlyList<PendingChunkToolCall> calls)
+    {
+        if (calls.Count == 0) return BuildTextOnlyAssistantContents(text);
+
+        var contents = new List<AIContent>();
+        var cursor = 0;
+        foreach (var item in calls
+            .Select((call, index) => new { Call = call, Index = index })
+            .OrderBy(item => item.Call.TextOffset)
+            .ThenBy(item => item.Index))
+        {
+            var offset = Math.Clamp(item.Call.TextOffset, 0, text.Length);
+            if (offset > cursor)
+            {
+                contents.Add(new TextContent(text[cursor..offset]));
+                cursor = offset;
+            }
+
+            contents.Add(item.Call.Content);
+        }
+
+        if (cursor < text.Length)
+            contents.Add(new TextContent(text[cursor..]));
+        if (contents.Count == 0)
+            contents.Add(new TextContent(string.Empty));
+        return contents;
+    }
+
+    private static List<AIContent> BuildTextOnlyAssistantContents(string text)
+    {
+        var contents = new List<AIContent>();
+        if (!string.IsNullOrEmpty(text))
+            contents.Add(new TextContent(text));
+        if (contents.Count == 0)
+            contents.Add(new TextContent(string.Empty));
+        return contents;
+    }
 
     private static int CountDistinctEntities(IEnumerable<IngestReportItem> reportItems) =>
         reportItems
@@ -1021,5 +1611,6 @@ public sealed class IngestJobProcessor(
         FunctionCallContent Content,
         string CallId,
         string Name,
-        string ArgumentsJson);
+        string ArgumentsJson,
+        int TextOffset);
 }

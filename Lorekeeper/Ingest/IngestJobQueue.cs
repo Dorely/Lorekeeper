@@ -21,6 +21,8 @@ public sealed class IngestJobQueue : IIngestJobQueue
     public void RegisterCancellation(Guid jobId, CancellationTokenSource cancellationTokenSource) =>
         _activeCancellations[jobId] = cancellationTokenSource;
 
+    public bool IsActive(Guid jobId) => _activeCancellations.ContainsKey(jobId);
+
     public bool RequestCancellation(Guid jobId)
     {
         if (!_activeCancellations.TryGetValue(jobId, out var cancellationTokenSource)) return false;

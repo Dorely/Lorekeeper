@@ -256,7 +256,6 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
                 item.Title,
                 item.Summary,
                 item.Notes,
-                item.Evidence,
                 item.ResourceType,
                 item.EntityId,
                 item.GraphNodeId,
@@ -275,8 +274,10 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
 
     public Task<List<IngestJob>> ListInterruptedJobsAsync(CancellationToken cancellationToken = default) =>
         db.IngestJobs
+            .Include(job => job.Chunks)
             .Where(job => job.Status == IngestJobStatus.Running || job.Status == IngestJobStatus.StopRequested)
             .OrderBy(job => job.UpdatedAt)
+            .AsSplitQuery()
             .ToListAsync(cancellationToken);
 
     public async Task AddSourceAsync(IngestSource source, CancellationToken cancellationToken = default) =>

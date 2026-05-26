@@ -15,7 +15,6 @@ public class IngestReportItem
     public string Title { get; set; } = string.Empty;
     public string Summary { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
-    public string Evidence { get; set; } = string.Empty;
     public string ResourceType { get; set; } = string.Empty;
     public Guid? EntityId { get; set; }
     public long? GraphNodeId { get; set; }

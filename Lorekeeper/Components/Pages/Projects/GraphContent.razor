@@ -286,8 +286,7 @@ else
             || node.WikiSections.Any(section =>
                 section.Title.Contains(search, StringComparison.OrdinalIgnoreCase)
                 || section.Body.Contains(search, StringComparison.OrdinalIgnoreCase)
-                || section.Citations.Any(citation => (citation.Snippet?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
-                    || citation.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)));
+                || section.Citations.Any(citation => citation.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static bool IngestSummaryMatches(IngestSourceAssertionSummary source, string search) =>
@@ -300,7 +299,6 @@ else
         observation.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)
         || observation.SourceKind.Contains(search, StringComparison.OrdinalIgnoreCase)
         || observation.Summary.Contains(search, StringComparison.OrdinalIgnoreCase)
-        || observation.Evidence.Contains(search, StringComparison.OrdinalIgnoreCase)
         || observation.Notes.Contains(search, StringComparison.OrdinalIgnoreCase)
         || observation.Aliases.Any(alias => alias.Contains(search, StringComparison.OrdinalIgnoreCase))
         || observation.ObservedProperties.Any(kv =>

@@ -358,12 +358,8 @@
                         <p>@wikiSection.Body</p>
                         @foreach (var citation in wikiSection.Citations.Take(3))
                         {
-                            <div class="graph-fact-evidence" @key="CitationKey(citation)">
+                            <div class="graph-fact-source" @key="CitationKey(citation)">
                                 <div><strong>@citation.SourceTitle</strong> <span>@citation.SourceKind</span> <span>chunk @(citation.SourceChunkIndex + 1)</span></div>
-                                @if (!string.IsNullOrWhiteSpace(citation.Snippet))
-                                {
-                                    <blockquote>@citation.Snippet</blockquote>
-                                }
                             </div>
                         }
                     </article>
@@ -388,10 +384,6 @@
                             <span>@citation.SourceKind</span>
                             <span>chunk @(citation.SourceChunkIndex + 1)</span>
                         </div>
-                        @if (!string.IsNullOrWhiteSpace(citation.Snippet))
-                        {
-                            <blockquote>@citation.Snippet</blockquote>
-                        }
                     </div>
                 }
             </div>
@@ -430,10 +422,6 @@
                                     </div>
                                 }
                             </div>
-                        }
-                        @if (!string.IsNullOrWhiteSpace(observation.Evidence))
-                        {
-                            <blockquote>@observation.Evidence</blockquote>
                         }
                         @if (!string.IsNullOrWhiteSpace(observation.Notes))
                         {
@@ -768,7 +756,7 @@
         $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
 
     private static string CitationKey(IngestWikiCitation citation) =>
-        $"{citation.SourceId}:{citation.SourceChunkId}:{citation.SourceBlockId}:{citation.PageNumber}:{citation.Locator}:{citation.Snippet}";
+        $"{citation.SourceId}:{citation.SourceChunkId}:{citation.SourceBlockId}:{citation.PageNumber}:{citation.Locator}";
 
     private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
 

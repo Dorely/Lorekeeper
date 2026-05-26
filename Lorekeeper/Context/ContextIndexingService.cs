@@ -289,7 +289,6 @@ public sealed class ContextIndexingService(
                 foreach (var citation in section.Citations.Take(3))
                 {
                     sb.Append("  Source: ").Append(citation.SourceTitle).Append(" chunk ").Append(citation.SourceChunkIndex + 1).AppendLine();
-                    AppendOptional(sb, "  Citation", citation.Snippet);
                 }
             }
         }

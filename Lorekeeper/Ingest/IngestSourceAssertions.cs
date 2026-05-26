@@ -12,8 +12,10 @@ public static class IngestSourceAssertions
     public const string GraphOriginIngestValue = "ingest";
     public const string CreatedEntityAction = "CreatedEntity";
     public const string LinkedExistingEntityAction = "LinkedExistingEntity";
+    public const string ObservedEntityAction = "ObservedEntity";
     public const string CreatedEdgeAction = "CreatedEdge";
     public const string LinkedExistingEdgeAction = "LinkedExistingEdge";
+    public const string ObservedRelationshipAction = "ObservedRelationship";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly IReadOnlyDictionary<string, string?> EmptyObservedProperties =
@@ -53,24 +55,6 @@ public static class IngestSourceAssertions
         "significance",
         "relationship",
         "details",
-    ];
-
-    private static readonly string[] DisallowedExtractionRationalePhrases =
-    [
-        "not mentioned",
-        "not explicitly mentioned",
-        "does not mention",
-        "doesn't mention",
-        "did not mention",
-        "didn't mention",
-        "no mention of",
-        "no information",
-        "not enough information",
-        "semantically similar",
-        "semantic similarity",
-        "came back as semantically",
-        "because it was similar",
-        "because it matched semantically",
     ];
 
     public static bool IsProtectedProperty(string key) =>
@@ -180,17 +164,17 @@ public static class IngestSourceAssertions
                 builder.Key,
                 builder.Label,
                 string.Join("\n", builder.Values),
-                builder.Evidence
-                    .OrderBy(evidence => evidence.SourceTitle, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(evidence => evidence.SourceChunkIndex)
-                    .ThenByDescending(evidence => evidence.UpdatedAt)
+                builder.References
+                    .OrderBy(reference => reference.SourceTitle, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(reference => reference.SourceChunkIndex)
+                    .ThenByDescending(reference => reference.UpdatedAt)
                     .ToArray()))
             .ToArray();
 
         var aliases = safeObservations
             .SelectMany(observation => observation.Aliases ?? EmptyAliases)
             .Select(NormalizeFactText)
-            .Where(alias => alias.Length > 0 && !ContainsDisallowedExtractionRationale(alias))
+            .Where(alias => alias.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -207,13 +191,6 @@ public static class IngestSourceAssertions
             .ToArray();
 
         return new IngestEntityFactSheet(fields, aliases, sources);
-    }
-
-    public static bool ContainsDisallowedExtractionRationale(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return false;
-        var normalized = NormalizeFactText(value).ToLowerInvariant();
-        return DisallowedExtractionRationalePhrases.Any(phrase => normalized.Contains(phrase, StringComparison.Ordinal));
     }
 
     public static bool TryReadPayloadString(string payloadJson, string propertyName, out string? value)
@@ -313,7 +290,7 @@ public static class IngestSourceAssertions
             chunk.Summary = input.Summary.Trim();
         MergeProperties(chunk.ObservedProperties, input.ObservedProperties);
         MergeAliases(chunk.Aliases, input.Aliases);
-        chunk.Evidence = MergeText(chunk.Evidence, input.Evidence, input.ReplaceExistingText);
+        MergeWikiSections(chunk.WikiSections, input.WikiSections ?? [], input, input.ReplaceExistingText);
         chunk.Notes = MergeText(chunk.Notes, input.Notes, input.ReplaceExistingText);
 
         return new IngestAssertionWriteResult(sourceKey, chunkKey, document.Sources.Count, source.Chunks.Count);
@@ -402,7 +379,10 @@ public static class IngestSourceAssertions
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
                         .ToArray(),
-                    chunk.Evidence ?? string.Empty,
+                    (chunk.WikiSections ?? [])
+                        .Select(NormalizeObservationSection)
+                        .Where(section => !string.IsNullOrWhiteSpace(section.Title) || !string.IsNullOrWhiteSpace(section.Body))
+                        .ToArray(),
                     chunk.Notes ?? string.Empty,
                     chunk.RecordedAt,
                     chunk.UpdatedAt)))
@@ -458,7 +438,10 @@ public static class IngestSourceAssertions
                         chunk.Aliases = (chunk.Aliases ?? [])
                             .Where(alias => !string.IsNullOrWhiteSpace(alias))
                             .ToList();
-                        chunk.Evidence ??= string.Empty;
+                        chunk.WikiSections = (chunk.WikiSections ?? [])
+                            .Select(NormalizeObservationSection)
+                            .Where(section => !string.IsNullOrWhiteSpace(section.Title) || !string.IsNullOrWhiteSpace(section.Body))
+                            .ToList();
                         chunk.Notes ??= string.Empty;
 
                         var safeChunkKey = string.IsNullOrWhiteSpace(chunkKey) ? chunk.SourceChunkId : chunkKey;
@@ -510,6 +493,113 @@ public static class IngestSourceAssertions
         }
     }
 
+    private static void MergeWikiSections(
+        ICollection<IngestSourceObservationSection> target,
+        IReadOnlyList<IngestWikiSectionInput> sections,
+        IngestAssertionInput input,
+        bool replaceExisting)
+    {
+        foreach (var section in sections)
+        {
+            if (section is null) continue;
+
+            var normalized = BuildObservationSection(section, input);
+            if (string.IsNullOrWhiteSpace(normalized.Title) && string.IsNullOrWhiteSpace(normalized.Body))
+                continue;
+
+            var existing = target.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, normalized.Id, StringComparison.OrdinalIgnoreCase));
+            if (existing is null)
+            {
+                target.Add(normalized);
+                continue;
+            }
+
+            target.Remove(existing);
+            target.Add(existing with
+            {
+                Title = string.IsNullOrWhiteSpace(normalized.Title) ? existing.Title : normalized.Title,
+                Body = MergeText(existing.Body, normalized.Body, replaceExisting),
+                Citations = existing.Citations
+                    .Concat(normalized.Citations)
+                    .DistinctBy(CitationKey, StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
+            });
+        }
+    }
+
+    private static IngestSourceObservationSection BuildObservationSection(
+        IngestWikiSectionInput input,
+        IngestAssertionInput assertion)
+    {
+        var title = NormalizeFactText(input.Title);
+        var id = NormalizeObservationSectionId(input.Id, title);
+        var body = NormalizeFactText(input.Body);
+        var citations = new[] { BuildCitation(assertion) };
+        return new IngestSourceObservationSection(id, title, body, citations);
+    }
+
+    private static IngestWikiCitation BuildCitation(IngestAssertionInput assertion) =>
+        new(
+            assertion.SourceId.ToString("N"),
+            assertion.SourceTitle.Trim(),
+            assertion.SourceKind.Trim(),
+            assertion.SourceChunkId.ToString("N"),
+            assertion.SourceChunkIndex,
+            SourceBlockId: null,
+            PageNumber: null,
+            Locator: null);
+
+    private static IngestSourceObservationSection NormalizeObservationSection(IngestSourceObservationSection section) =>
+        section with
+        {
+            Id = NormalizeObservationSectionId(section.Id, section.Title),
+            Title = NormalizeFactText(section.Title),
+            Body = NormalizeFactText(section.Body),
+            Citations = (section.Citations ?? [])
+                .Select(citation => citation with
+                {
+                    SourceId = NormalizeFactText(citation.SourceId),
+                    SourceTitle = NormalizeFactText(citation.SourceTitle),
+                    SourceKind = NormalizeFactText(citation.SourceKind),
+                    SourceChunkId = NormalizeFactText(citation.SourceChunkId),
+                    SourceBlockId = NormalizeNullable(citation.SourceBlockId),
+                    Locator = NormalizeNullable(citation.Locator),
+                })
+                .DistinctBy(CitationKey, StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+        };
+
+    private static string NormalizeObservationSectionId(string? id, string? title)
+    {
+        var source = string.IsNullOrWhiteSpace(id) ? title : id;
+        var normalized = new string((source ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        return normalized.Length == 0 ? "observation" : normalized.Length <= 48 ? normalized : normalized[..48];
+    }
+
+    private static string CitationKey(IngestWikiCitation citation) =>
+        $"{citation.SourceId}|{citation.SourceChunkId}|{citation.SourceBlockId}|{citation.PageNumber}|{citation.Locator}";
+
+    private static string NormalizeSourceId(string? value, Guid fallback)
+    {
+        if (Guid.TryParse(value, out var guid))
+            return guid.ToString("N");
+        return fallback.ToString("N");
+    }
+
+    private static string? NormalizeNullable(string? value)
+    {
+        var normalized = NormalizeFactText(value);
+        return normalized.Length == 0 ? null : normalized;
+    }
+
+    private static string? Truncate(string? value, int max)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        return trimmed.Length <= max ? trimmed : trimmed[..max] + "...";
+    }
+
     private static string MergeText(string target, string? next, bool replaceExisting)
     {
         if (string.IsNullOrWhiteSpace(next)) return target;
@@ -537,7 +627,7 @@ public static class IngestSourceAssertions
         var normalizedKey = NormalizeFactKey(key);
         var normalizedValue = NormalizeFactText(value);
         if (normalizedKey.Length == 0 || normalizedValue.Length == 0) return;
-        if (IsProtectedProperty(normalizedKey) || ContainsDisallowedExtractionRationale(normalizedValue)) return;
+        if (IsProtectedProperty(normalizedKey)) return;
 
         if (!builders.TryGetValue(normalizedKey, out var builder))
         {
@@ -548,22 +638,16 @@ public static class IngestSourceAssertions
         if (!builder.Values.Contains(normalizedValue, StringComparer.OrdinalIgnoreCase))
             builder.Values.Add(normalizedValue);
 
-        var evidenceText = ContainsDisallowedExtractionRationale(observation.Evidence)
-            ? string.Empty
-            : NormalizeFactText(observation.Evidence);
-        var summaryText = ContainsDisallowedExtractionRationale(observation.Summary)
-            ? string.Empty
-            : NormalizeFactText(observation.Summary);
-        var evidenceKey = $"{observation.SourceId}:{observation.SourceChunkId}:{normalizedKey}:{evidenceText}:{summaryText}";
-        if (builder.EvidenceKeys.Add(evidenceKey))
+        var summaryText = NormalizeFactText(observation.Summary);
+        var referenceKey = $"{observation.SourceId}:{observation.SourceChunkId}:{normalizedKey}:{summaryText}";
+        if (builder.ReferenceKeys.Add(referenceKey))
         {
-            builder.Evidence.Add(new IngestFactSheetEvidence(
+            builder.References.Add(new IngestFactSheetReference(
                 observation.SourceId,
                 observation.SourceTitle,
                 observation.SourceKind,
                 observation.SourceChunkId,
                 observation.SourceChunkIndex,
-                evidenceText,
                 summaryText,
                 observation.UpdatedAt));
         }
@@ -639,7 +723,7 @@ public static class IngestSourceAssertions
         public string Summary { get; set; } = string.Empty;
         public Dictionary<string, string?> ObservedProperties { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public List<string> Aliases { get; set; } = [];
-        public string Evidence { get; set; } = string.Empty;
+        public List<IngestSourceObservationSection> WikiSections { get; set; } = [];
         public string Notes { get; set; } = string.Empty;
         public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
@@ -650,8 +734,8 @@ public static class IngestSourceAssertions
         public string Key { get; } = key;
         public string Label { get; } = label;
         public List<string> Values { get; } = [];
-        public List<IngestFactSheetEvidence> Evidence { get; } = [];
-        public HashSet<string> EvidenceKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public List<IngestFactSheetReference> References { get; } = [];
+        public HashSet<string> ReferenceKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 }
 
@@ -665,9 +749,9 @@ public sealed record IngestAssertionInput(
     string? Summary,
     IReadOnlyDictionary<string, string?> ObservedProperties,
     IReadOnlyList<string> Aliases,
-    string? Evidence,
     string? Notes,
-    bool ReplaceExistingText = false);
+    bool ReplaceExistingText = false,
+    IReadOnlyList<IngestWikiSectionInput>? WikiSections = null);
 
 public sealed record IngestAssertionWriteResult(
     string SourceKey,
@@ -698,10 +782,16 @@ public sealed record IngestSourceObservation(
     string Summary,
     IReadOnlyDictionary<string, string?> ObservedProperties,
     IReadOnlyList<string> Aliases,
-    string Evidence,
+    IReadOnlyList<IngestSourceObservationSection> WikiSections,
     string Notes,
     DateTime RecordedAt,
     DateTime UpdatedAt);
+
+public sealed record IngestSourceObservationSection(
+    string Id,
+    string Title,
+    string Body,
+    IReadOnlyList<IngestWikiCitation> Citations);
 
 public sealed record IngestEntityFactSheet(
     IReadOnlyList<IngestFactSheetField> Fields,
@@ -712,15 +802,14 @@ public sealed record IngestFactSheetField(
     string Key,
     string Label,
     string Value,
-    IReadOnlyList<IngestFactSheetEvidence> Evidence);
+    IReadOnlyList<IngestFactSheetReference> References);
 
-public sealed record IngestFactSheetEvidence(
+public sealed record IngestFactSheetReference(
     string SourceId,
     string SourceTitle,
     string SourceKind,
     string SourceChunkId,
     int SourceChunkIndex,
-    string Evidence,
     string Summary,
     DateTime UpdatedAt);
 

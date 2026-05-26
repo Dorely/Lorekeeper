@@ -48,7 +48,7 @@ public static class IngestWikiSheet
         if (!properties.TryGetValue(RelationshipCitationsProperty, out var value)) return [];
         return ReadJsonArray<IngestWikiCitation>(value)
             .Select(NormalizeCitation)
-            .Where(citation => !string.IsNullOrWhiteSpace(citation.SourceId) || !string.IsNullOrWhiteSpace(citation.Snippet))
+            .Where(citation => !string.IsNullOrWhiteSpace(citation.SourceId))
             .ToList();
     }
 
@@ -64,39 +64,83 @@ public static class IngestWikiSheet
         properties[WikiSectionsProperty] = SerializeSections(sections, context);
     }
 
-    public static IReadOnlyList<IngestWikiCitation> BuildCitations(
-        IEnumerable<IngestWikiCitationInput>? citations,
+    public static void ApplyEntitySheetPatch(
+        IDictionary<string, object?> properties,
+        string summary,
+        IEnumerable<string>? aliasesToAdd,
+        IEnumerable<IngestWikiSectionInput>? sectionPatches,
         IngestAgentContext context)
     {
-        var result = (citations ?? [])
-            .Select(input => BuildCitation(input, context))
-            .Where(citation => !string.IsNullOrWhiteSpace(citation.SourceId) || !string.IsNullOrWhiteSpace(citation.Snippet))
-            .DistinctBy(CitationKey, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        properties[SummaryProperty] = NormalizeText(summary);
 
-        if (result.Count == 0)
-            result.Add(BuildCitation(new IngestWikiCitationInput(), context));
-        return result;
+        var aliases = ReadAliases(AsReadOnly(properties))
+            .Concat(aliasesToAdd ?? Enumerable.Empty<string>());
+        properties[AliasesProperty] = SerializeAliases(aliases);
+
+        var sections = ReadSections(AsReadOnly(properties)).ToList();
+        var patchIndex = sections.Count;
+        foreach (var patch in sectionPatches ?? Enumerable.Empty<IngestWikiSectionInput>())
+        {
+            if (patch is null) continue;
+
+            var normalized = NormalizeSection(patch, patchIndex++, context);
+            if (string.IsNullOrWhiteSpace(normalized.Title) && string.IsNullOrWhiteSpace(normalized.Body))
+                continue;
+
+            var existingIndex = sections.FindIndex(section =>
+                string.Equals(section.Id, normalized.Id, StringComparison.OrdinalIgnoreCase));
+            if (existingIndex >= 0)
+                sections[existingIndex] = normalized;
+            else
+                sections.Add(normalized);
+        }
+
+        properties[WikiSectionsProperty] = SerializeSections(sections);
     }
 
-    public static void ApplyRelationshipCitations(
+    public static void UpsertSourceWikiSection(
         IDictionary<string, object?> properties,
-        IEnumerable<IngestWikiCitationInput>? citations,
-        IngestAgentContext context,
-        bool mergeExisting)
+        Guid sourceId,
+        string sourceTitle,
+        string sourceKind,
+        string body)
     {
-        var merged = mergeExisting
-            ? ReadRelationshipCitations(AsReadOnly(properties)).ToList()
-            : [];
-        merged.AddRange(BuildCitations(citations, context));
-        properties[RelationshipCitationsProperty] = JsonSerializer.Serialize(
-            merged.DistinctBy(CitationKey, StringComparer.OrdinalIgnoreCase).ToList(),
-            JsonOptions);
+        var sectionId = SourceSectionId(sourceId);
+        var title = SourceSectionTitle(sourceTitle);
+        var sections = ReadSections(AsReadOnly(properties))
+            .Where(section => !string.Equals(section.Id, sectionId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        sections.Add(new IngestWikiSection(
+            sectionId,
+            title,
+            NormalizeText(body),
+            BuildSourceSectionCitations(sourceId, sourceTitle, sourceKind)));
+
+        properties[WikiSectionsProperty] = SerializeSections(sections);
+    }
+
+    public static bool RemoveSourceWikiSection(IDictionary<string, object?> properties, Guid sourceId)
+    {
+        var sections = ReadSections(AsReadOnly(properties));
+        if (sections.Count == 0) return false;
+
+        var sectionId = SourceSectionId(sourceId);
+        var next = sections
+            .Where(section => !string.Equals(section.Id, sectionId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (next.Count == sections.Count) return false;
+
+        if (next.Count == 0)
+            properties.Remove(WikiSectionsProperty);
+        else
+            properties[WikiSectionsProperty] = JsonSerializer.Serialize(next, JsonOptions);
+        return true;
     }
 
     public static bool RemoveSourceCitations(IDictionary<string, object?> properties, Guid sourceId)
     {
-        var changed = false;
+        var changed = RemoveSourceWikiSection(properties, sourceId);
         var sourceKey = sourceId.ToString("N");
 
         var sections = ReadSections(AsReadOnly(properties));
@@ -131,6 +175,11 @@ public static class IngestWikiSheet
         return changed;
     }
 
+    public static string SourceSectionId(Guid sourceId) => $"source{sourceId:N}";
+
+    public static string SourceSectionTitle(string sourceTitle) =>
+        $"Source: {NormalizeText(sourceTitle, "Untitled source")}";
+
     public static bool HasCitations(IReadOnlyDictionary<string, object?> properties) =>
         ReadSections(properties).Any(section => section.Citations.Count > 0)
         || ReadRelationshipCitations(properties).Count > 0;
@@ -155,7 +204,7 @@ public static class IngestWikiSheet
         {
             parts.Add(section.Title);
             parts.Add(section.Body);
-            parts.AddRange(section.Citations.Select(citation => citation.Snippet ?? string.Empty));
+            parts.AddRange(section.Citations.Select(CitationPreview));
         }
 
         foreach (var property in VisibleProperties(properties))
@@ -175,8 +224,6 @@ public static class IngestWikiSheet
             chunks.Add(citation.Locator);
         if (citation.PageNumber is int page)
             chunks.Add($"page {page}");
-        if (!string.IsNullOrWhiteSpace(citation.Snippet))
-            chunks.Add(citation.Snippet);
         return string.Join(" - ", chunks);
     }
 
@@ -211,11 +258,20 @@ public static class IngestWikiSheet
     private static string SerializeSections(IEnumerable<IngestWikiSectionInput>? sections, IngestAgentContext context)
     {
         var normalized = (sections ?? Enumerable.Empty<IngestWikiSectionInput>())
+            .Where(section => section is not null)
             .Select((section, index) => NormalizeSection(section, index, context))
             .Where(section => !string.IsNullOrWhiteSpace(section.Title) || !string.IsNullOrWhiteSpace(section.Body))
             .ToList();
-        return JsonSerializer.Serialize(normalized, JsonOptions);
+        return SerializeSections(normalized);
     }
+
+    private static string SerializeSections(IEnumerable<IngestWikiSection> sections) =>
+        JsonSerializer.Serialize(
+            sections
+                .Select(NormalizeSection)
+                .Where(section => !string.IsNullOrWhiteSpace(section.Title) || !string.IsNullOrWhiteSpace(section.Body))
+                .ToList(),
+            JsonOptions);
 
     private static IngestWikiSection NormalizeSection(IngestWikiSectionInput input, int index, IngestAgentContext context)
     {
@@ -226,7 +282,7 @@ public static class IngestWikiSheet
             id,
             title,
             body,
-            BuildCitations(input.Citations, context));
+            BuildSectionCitations(context));
     }
 
     private static IngestWikiSection NormalizeSection(IngestWikiSection section) =>
@@ -238,17 +294,18 @@ public static class IngestWikiSheet
             Citations = section.Citations.Select(NormalizeCitation).ToList(),
         };
 
-    private static IngestWikiCitation BuildCitation(IngestWikiCitationInput input, IngestAgentContext context) =>
+    private static IReadOnlyList<IngestWikiCitation> BuildSectionCitations(IngestAgentContext context) =>
+    [
         new(
-            NormalizeSourceId(input.SourceId, context.SourceId),
-            NormalizeText(input.SourceTitle, context.SourceTitle),
-            NormalizeText(input.SourceKind, context.SourceKind),
-            NormalizeSourceId(input.SourceChunkId, context.SourceChunkId),
-            input.SourceChunkIndex ?? context.SourceChunkIndex,
-            NormalizeNullableText(input.SourceBlockId),
-            input.PageNumber,
-            NormalizeNullableText(input.Locator),
-            Truncate(NormalizeNullableText(input.Snippet), 360));
+            context.SourceId.ToString("N"),
+            NormalizeText(context.SourceTitle),
+            NormalizeText(context.SourceKind),
+            context.SourceChunkId.ToString("N"),
+            context.SourceChunkIndex,
+            SourceBlockId: null,
+            PageNumber: null,
+            Locator: null),
+    ];
 
     private static IngestWikiCitation NormalizeCitation(IngestWikiCitation citation) =>
         citation with
@@ -259,11 +316,30 @@ public static class IngestWikiSheet
             SourceChunkId = NormalizeText(citation.SourceChunkId),
             SourceBlockId = NormalizeNullableText(citation.SourceBlockId),
             Locator = NormalizeNullableText(citation.Locator),
-            Snippet = Truncate(NormalizeNullableText(citation.Snippet), 360),
         };
 
+    private static IReadOnlyList<IngestWikiCitation> BuildSourceSectionCitations(
+        Guid sourceId,
+        string sourceTitle,
+        string sourceKind)
+    {
+        var sourceKey = sourceId.ToString("N");
+        return
+        [
+            new(
+                sourceKey,
+                NormalizeText(sourceTitle),
+                NormalizeText(sourceKind),
+                string.Empty,
+                -1,
+                SourceBlockId: null,
+                PageNumber: null,
+                Locator: null),
+        ];
+    }
+
     private static string CitationKey(IngestWikiCitation citation) =>
-        $"{citation.SourceId}|{citation.SourceChunkId}|{citation.SourceBlockId}|{citation.PageNumber}|{citation.Locator}|{NormalizeComparable(citation.Snippet ?? string.Empty)}";
+        $"{citation.SourceId}|{citation.SourceChunkId}|{citation.SourceBlockId}|{citation.PageNumber}|{citation.Locator}";
 
     private static string NormalizeSectionId(string? id, string title, int index)
     {
@@ -391,13 +467,12 @@ public sealed record IngestWikiCitation(
     int SourceChunkIndex,
     string? SourceBlockId,
     int? PageNumber,
-    string? Locator,
-    string? Snippet);
+    string? Locator);
 
 public sealed class IngestWikiSectionInput
 {
     [JsonPropertyName("id")]
-    [Description("Stable section id such as overview, appearance, history, relationships, rules, claims, or examples. Reuse existing ids when revising a sheet.")]
+    [Description("Stable section id such as overview, role, timeline, relationships, traits, events, quotes, rules, claims, or examples.")]
     public string? Id { get; set; }
 
     [JsonPropertyName("title")]
@@ -405,44 +480,6 @@ public sealed class IngestWikiSectionInput
     public string? Title { get; set; }
 
     [JsonPropertyName("body")]
-    [Description("Complete revised section body. Integrate new information with existing sheet content instead of appending raw notes.")]
+    [Description("Source-grounded observation body for this section. Keep narrative detail here instead of relationship records.")]
     public string? Body { get; set; }
-
-    [JsonPropertyName("citations")]
-    [Description("Compact citations for the facts in this section.")]
-    public IngestWikiCitationInput[]? Citations { get; set; }
-}
-
-public sealed class IngestWikiCitationInput
-{
-    [JsonPropertyName("sourceId")]
-    public string? SourceId { get; set; }
-
-    [JsonPropertyName("sourceTitle")]
-    public string? SourceTitle { get; set; }
-
-    [JsonPropertyName("sourceKind")]
-    public string? SourceKind { get; set; }
-
-    [JsonPropertyName("sourceChunkId")]
-    public string? SourceChunkId { get; set; }
-
-    [JsonPropertyName("sourceChunkIndex")]
-    public int? SourceChunkIndex { get; set; }
-
-    [JsonPropertyName("sourceBlockId")]
-    [Description("Optional source block id when the fact came from a specific block listed in the prompt.")]
-    public string? SourceBlockId { get; set; }
-
-    [JsonPropertyName("pageNumber")]
-    [Description("Optional page number from the source locator.")]
-    public int? PageNumber { get; set; }
-
-    [JsonPropertyName("locator")]
-    [Description("Optional page, section, heading, or block locator label.")]
-    public string? Locator { get; set; }
-
-    [JsonPropertyName("snippet")]
-    [Description("Short quote or close supporting snippet from the current source chunk.")]
-    public string? Snippet { get; set; }
 }

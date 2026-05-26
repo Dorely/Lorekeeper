@@ -254,7 +254,7 @@
 }
 
 .graph-fact-aliases span,
-.graph-fact-evidence span {
+.graph-fact-source span {
     color: var(--bs-secondary-color, #6c757d);
 }
 
@@ -284,16 +284,9 @@
     overflow-wrap: anywhere;
 }
 
-.graph-fact-evidence {
+.graph-fact-source {
     padding-top: 0.35rem;
     border-top: 1px solid rgba(108, 117, 125, 0.18);
-}
-
-.graph-fact-evidence blockquote {
-    margin-top: 0.25rem;
-    padding-left: 0.6rem;
-    border-left: 3px solid rgba(108, 117, 125, 0.32);
-    color: var(--bs-secondary-color, #6c757d);
 }
 
 .graph-ingest-section {
