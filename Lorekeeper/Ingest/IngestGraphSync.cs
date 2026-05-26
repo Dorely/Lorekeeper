@@ -12,11 +12,17 @@ public sealed class IngestGraphSync(
 {
     public const string SourceNodeType = EntityTypeService.SourceNodeType;
     public const string SourceChunkNodeType = EntityTypeService.SourceChunkNodeType;
+    public const string SourceBlockNodeType = EntityTypeService.SourceBlockNodeType;
     public const string ExtractedFromEdgeType = "ExtractedFrom";
 
-    public async Task EnsureSourceAsync(IngestSource source, IReadOnlyList<IngestSourceChunk> sourceChunks, CancellationToken cancellationToken = default)
+    public async Task EnsureSourceAsync(
+        IngestSource source,
+        IReadOnlyList<IngestSourceChunk> sourceChunks,
+        IReadOnlyList<IngestSourceBlock>? sourceBlocks = null,
+        CancellationToken cancellationToken = default)
     {
         var orderedChunks = sourceChunks.OrderBy(chunk => chunk.Index).ToList();
+        var orderedBlocks = (sourceBlocks ?? []).OrderBy(block => block.Index).ToList();
         var isSingleChunkSource = orderedChunks.Count == 1;
         var sourceNode = await graph.UpsertNodeAsync(
             source.ProjectId,
@@ -53,11 +59,41 @@ public sealed class IngestGraphSync(
                 sortOrder: sourceChunk.Index,
                 cancellationToken: cancellationToken);
         }
+
+        foreach (var sourceBlock in orderedBlocks)
+        {
+            var parentNode = FindParentChunkNode(orderedChunks, sourceBlock) is IngestSourceChunk parentChunk
+                ? await nodes.FindAsync(source.ProjectId, SourceChunkNodeType, parentChunk.Id.ToString("N"), cancellationToken)
+                : sourceNode;
+            parentNode ??= sourceNode;
+
+            var blockNode = await graph.UpsertNodeAsync(
+                source.ProjectId,
+                SourceBlockNodeType,
+                sourceBlock.Id.ToString("N"),
+                BuildBlockGraphLabel(source, sourceBlock),
+                BuildBlockProperties(source, sourceBlock),
+                cancellationToken);
+
+            await graph.UpsertEdgeAsync(
+                parentNode.Id,
+                blockNode.Id,
+                EntityService.HasChildEdgeType,
+                properties: null,
+                sortOrder: sourceBlock.Index,
+                cancellationToken: cancellationToken);
+        }
     }
 
     public async Task RemoveSourceAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default)
     {
         var sourceKey = sourceId.ToString("N");
+        var blockNodes = await nodes.ListByTypeAsync(projectId, SourceBlockNodeType, cancellationToken);
+        foreach (var blockNode in blockNodes.Where(node => HasSourceId(node, sourceKey)).ToList())
+        {
+            await graph.RemoveNodeAsync(blockNode.Id, cancellationToken);
+        }
+
         var chunkNodes = await nodes.ListByTypeAsync(projectId, SourceChunkNodeType, cancellationToken);
         foreach (var chunkNode in chunkNodes.Where(node => HasSourceId(node, sourceKey)).ToList())
         {
@@ -123,6 +159,25 @@ public sealed class IngestGraphSync(
         return properties;
     }
 
+    private static Dictionary<string, object?> BuildBlockProperties(IngestSource source, IngestSourceBlock sourceBlock) =>
+        new()
+        {
+            [IngestSourceAssertions.GraphOriginProperty] = IngestSourceAssertions.GraphOriginIngestValue,
+            ["sourceType"] = "ingest_source_block",
+            ["sourceId"] = source.Id.ToString("N"),
+            ["sourceBlockId"] = sourceBlock.Id.ToString("N"),
+            ["sourcePageId"] = sourceBlock.SourcePageId?.ToString("N"),
+            ["index"] = sourceBlock.Index,
+            ["kind"] = sourceBlock.Kind,
+            ["title"] = sourceBlock.Title,
+            ["locator"] = sourceBlock.Locator,
+            ["pageNumber"] = sourceBlock.PageNumber,
+            ["startChar"] = sourceBlock.StartChar,
+            ["endChar"] = sourceBlock.EndChar,
+            ["metadataJson"] = sourceBlock.MetadataJson,
+            ["structural"] = true,
+        };
+
     private static void AddChunkProperties(
         Dictionary<string, object?> properties,
         IngestSource source,
@@ -152,6 +207,26 @@ public sealed class IngestGraphSync(
         return string.IsNullOrWhiteSpace(title) || IsGeneratedPartTitle(title)
             ? prefix
             : $"{prefix} / {title}";
+    }
+
+    private static IngestSourceChunk? FindParentChunkNode(
+        IReadOnlyList<IngestSourceChunk> sourceChunks,
+        IngestSourceBlock sourceBlock) =>
+        sourceChunks.FirstOrDefault(chunk =>
+            sourceBlock.StartChar >= chunk.StartChar
+            && sourceBlock.StartChar < chunk.EndChar)
+        ?? sourceChunks.FirstOrDefault(chunk =>
+            sourceBlock.EndChar > chunk.StartChar
+            && sourceBlock.StartChar < chunk.EndChar);
+
+    private static string BuildBlockGraphLabel(IngestSource source, IngestSourceBlock sourceBlock)
+    {
+        var title = string.IsNullOrWhiteSpace(sourceBlock.Title)
+            ? sourceBlock.Locator
+            : sourceBlock.Title;
+        if (string.IsNullOrWhiteSpace(title))
+            title = $"Block {sourceBlock.Index + 1}";
+        return $"{source.Title.Trim()} / {title}".Trim();
     }
 
     private static bool IsGeneratedPartTitle(string title)

@@ -1,0 +1,359 @@
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Docnet.Core;
+using Docnet.Core.Models;
+using Lorekeeper.Llm;
+using Microsoft.Extensions.Options;
+using SkiaSharp;
+using UglyToad.PdfPig;
+using VersOne.Epub;
+
+namespace Lorekeeper.Ingest;
+
+public sealed partial class BookArtifactPreprocessor(
+    IVisionModelClientFactory visionModels,
+    ILlmProviderService providers,
+    IOptions<BookArtifactIngestOptions> options) : IBookArtifactPreprocessor
+{
+    public async Task<BookArtifactPreprocessResult> PreprocessAsync(
+        BookArtifactPreprocessRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.Bytes.Length == 0)
+            throw new ArgumentException("Uploaded source file is empty.", nameof(request));
+        if (request.Bytes.Length > options.Value.MaxFileBytes)
+            throw new InvalidOperationException($"Uploaded source file is larger than the configured limit of {options.Value.MaxFileBytes / 1024 / 1024:N0} MB.");
+
+        var extension = Path.GetExtension(request.FileName).ToLowerInvariant();
+        return extension switch
+        {
+            ".epub" => await PreprocessEpubAsync(request, cancellationToken),
+            ".pdf" => await PreprocessPdfAsync(request, cancellationToken),
+            ".txt" or ".md" or ".markdown" => PreprocessPlainText(request),
+            _ => throw new InvalidOperationException("Unsupported source file type. Use .txt, .md, .epub, or .pdf."),
+        };
+    }
+
+    private static BookArtifactPreprocessResult PreprocessPlainText(BookArtifactPreprocessRequest request)
+    {
+        var text = DecodeText(request.Bytes).Trim();
+        if (string.IsNullOrWhiteSpace(text))
+            throw new InvalidOperationException("The selected text file did not contain readable text.");
+
+        var sourceText = text + Environment.NewLine;
+        var block = new IngestSourceBlockDraft(
+            Guid.NewGuid(),
+            SourcePageId: null,
+            Index: 0,
+            Kind: "Text",
+            Title: Path.GetFileNameWithoutExtension(request.FileName),
+            Locator: "text",
+            PageNumber: null,
+            StartChar: 0,
+            EndChar: sourceText.Length,
+            MetadataJson: JsonSerializer.Serialize(new { request.FileName, request.ExtractionProfile }));
+
+        return new BookArtifactPreprocessResult(
+            sourceText,
+            SourceKindFromExtension(request.FileName),
+            request.ContentType ?? "text/plain",
+            JsonSerializer.Serialize(new
+            {
+                artifact = "plain_text",
+                request.FileName,
+                request.ExtractionProfile,
+                sourceHash = ComputeHash(request.Bytes),
+            }),
+            Pages: [],
+            Blocks: [block],
+            UsedVision: false,
+            Diagnostics: "Read text file.");
+    }
+
+    private static async Task<BookArtifactPreprocessResult> PreprocessEpubAsync(
+        BookArtifactPreprocessRequest request,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = new MemoryStream(request.Bytes);
+        var book = await EpubReader.ReadBookAsync(stream);
+        var sb = new StringBuilder();
+        var blocks = new List<IngestSourceBlockDraft>();
+        var index = 0;
+
+        foreach (var file in book.ReadingOrder)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var sectionText = NormalizeText(HtmlToText(file.Content));
+            if (string.IsNullOrWhiteSpace(sectionText))
+                continue;
+
+            if (sb.Length > 0) sb.AppendLine().AppendLine();
+            var filePath = file.FilePath;
+            var title = string.IsNullOrWhiteSpace(filePath)
+                ? $"Section {index + 1}"
+                : Path.GetFileNameWithoutExtension(filePath);
+            var start = sb.Length;
+            sb.AppendLine($"# {title}");
+            sb.AppendLine();
+            sb.AppendLine(sectionText);
+            var end = sb.Length;
+
+            blocks.Add(new IngestSourceBlockDraft(
+                Guid.NewGuid(),
+                SourcePageId: null,
+                Index: index,
+                Kind: "EpubSection",
+                Title: title,
+                Locator: filePath,
+                PageNumber: null,
+                StartChar: start,
+                EndChar: end,
+                MetadataJson: JsonSerializer.Serialize(new { filePath, request.ExtractionProfile })));
+            index++;
+        }
+
+        if (sb.Length == 0)
+            throw new InvalidOperationException("The EPUB did not contain readable text.");
+
+        return new BookArtifactPreprocessResult(
+            sb.ToString(),
+            "EPUB book",
+            request.ContentType ?? "application/epub+zip",
+            JsonSerializer.Serialize(new
+            {
+                artifact = "epub",
+                request.FileName,
+                book.Title,
+                request.ExtractionProfile,
+                sourceHash = ComputeHash(request.Bytes),
+                sectionCount = blocks.Count,
+            }),
+            Pages: [],
+            Blocks: blocks,
+            UsedVision: false,
+            Diagnostics: $"Read {blocks.Count:N0} EPUB section(s).");
+    }
+
+    private async Task<BookArtifactPreprocessResult> PreprocessPdfAsync(
+        BookArtifactPreprocessRequest request,
+        CancellationToken cancellationToken)
+    {
+        var maxPages = Math.Clamp(request.PdfOptions.MaxPages ?? options.Value.MaxPdfPages, 1, options.Value.MaxPdfPages);
+        var dpi = Math.Clamp(request.PdfOptions.VisionDpi ?? options.Value.PdfVisionDpi, 72, 300);
+        var maxImagePixels = Math.Clamp(request.PdfOptions.MaxImagePixels ?? options.Value.MaxImagePixels, 250_000, 20_000_000);
+        var embeddedMinChars = Math.Max(0, options.Value.EmbeddedTextMinCharsPerPage);
+        var pages = new List<IngestSourcePageDraft>();
+        var blocks = new List<IngestSourceBlockDraft>();
+        var sb = new StringBuilder();
+        var usedVision = false;
+        var visionProvider = request.ProviderId is int providerId
+            ? await providers.GetByIdAsync(providerId, cancellationToken)
+            : null;
+
+        await using var stream = new MemoryStream(request.Bytes);
+        using var document = PdfDocument.Open(stream);
+        var documentPages = document.GetPages().Take(maxPages).ToList();
+        var totalPages = document.NumberOfPages;
+        if (documentPages.Count == 0)
+            throw new InvalidOperationException("The PDF did not contain any readable pages.");
+
+        foreach (var page in documentPages)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var pageText = NormalizeText(page.Text);
+            var extractionMethod = "EmbeddedText";
+            var diagnostics = string.Empty;
+            var imageHash = string.Empty;
+            var renderSettingsJson = "{}";
+            var pageWidth = (int)Math.Ceiling(page.Width);
+            var pageHeight = (int)Math.Ceiling(page.Height);
+
+            var useVision = request.PdfOptions.ForceVision || pageText.Length < embeddedMinChars;
+            if (useVision)
+            {
+                if (request.ProviderId is not int visionProviderId)
+                    throw new InvalidOperationException("Select a vision-ready model before ingesting a PDF page that requires image reading.");
+                if (!await providers.IsVisionProviderWorkingAsync(visionProviderId, cancellationToken))
+                    throw new InvalidOperationException("The selected model is not vision-ready. Run Test Vision in Settings > Providers before ingesting this PDF.");
+
+                var render = RenderPdfPage(request.Bytes, page.Number, page.Width, page.Height, dpi, maxImagePixels);
+                imageHash = ComputeHash(render.ImageBytes);
+                renderSettingsJson = JsonSerializer.Serialize(new
+                {
+                    dpi = render.Dpi,
+                    render.Width,
+                    render.Height,
+                    imageFormat = "png",
+                });
+
+                pageWidth = render.Width;
+                pageHeight = render.Height;
+                pageText = NormalizeText(await visionModels.ReadImageAsync(
+                    visionProviderId,
+                    render.ImageBytes,
+                    "image/png",
+                    BuildPdfVisionPrompt(page.Number),
+                    options.Value.VisionPageMaxOutputTokens,
+                    cancellationToken));
+                extractionMethod = "Vision";
+                diagnostics = pageText.Length == 0 ? "Vision model returned no text." : "Read from rendered page image.";
+                usedVision = true;
+            }
+            else
+            {
+                diagnostics = pageText.Length == 0 ? "No embedded page text." : "Read embedded PDF text.";
+            }
+
+            if (sb.Length > 0) sb.AppendLine().AppendLine();
+            var start = sb.Length;
+            sb.AppendLine($"[Page {page.Number}]");
+            sb.AppendLine();
+            sb.AppendLine(pageText);
+            var end = sb.Length;
+            var pageId = Guid.NewGuid();
+
+            pages.Add(new IngestSourcePageDraft(
+                pageId,
+                page.Number,
+                pageText,
+                start,
+                end,
+                extractionMethod,
+                pageWidth,
+                pageHeight,
+                imageHash,
+                renderSettingsJson,
+                extractionMethod == "Vision" ? request.ProviderId : null,
+                extractionMethod == "Vision" ? visionProvider?.ModelId ?? string.Empty : string.Empty,
+                diagnostics));
+
+            blocks.Add(new IngestSourceBlockDraft(
+                Guid.NewGuid(),
+                pageId,
+                blocks.Count,
+                "PdfPage",
+                $"Page {page.Number}",
+                $"p. {page.Number}",
+                page.Number,
+                start,
+                end,
+                JsonSerializer.Serialize(new { page.Number, extractionMethod, request.ExtractionProfile })));
+        }
+
+        if (sb.Length == 0)
+            throw new InvalidOperationException("The PDF did not contain readable text.");
+
+        var diagnosticsSummary = totalPages > documentPages.Count
+            ? $"Read {documentPages.Count:N0} of {totalPages:N0} PDF page(s)."
+            : $"Read {documentPages.Count:N0} PDF page(s).";
+
+        return new BookArtifactPreprocessResult(
+            sb.ToString(),
+            "PDF book",
+            request.ContentType ?? "application/pdf",
+            JsonSerializer.Serialize(new
+            {
+                artifact = "pdf",
+                request.FileName,
+                request.ExtractionProfile,
+                sourceHash = ComputeHash(request.Bytes),
+                totalPages,
+                processedPages = documentPages.Count,
+                usedVision,
+                request.PdfOptions.ForceVision,
+                dpi,
+                maxImagePixels,
+            }),
+            pages,
+            blocks,
+            usedVision,
+            diagnosticsSummary);
+    }
+
+    private static PdfPageRenderResult RenderPdfPage(byte[] pdfBytes, int pageNumber, double pageWidthPoints, double pageHeightPoints, int dpi, int maxImagePixels)
+    {
+        var scale = dpi / 72.0;
+        var width = Math.Max(1, (int)Math.Ceiling(pageWidthPoints * scale));
+        var height = Math.Max(1, (int)Math.Ceiling(pageHeightPoints * scale));
+        var pixels = width * height;
+        if (pixels > maxImagePixels)
+        {
+            var downscale = Math.Sqrt(maxImagePixels / (double)pixels);
+            width = Math.Max(1, (int)Math.Floor(width * downscale));
+            height = Math.Max(1, (int)Math.Floor(height * downscale));
+        }
+
+        using var docReader = DocLib.Instance.GetDocReader(pdfBytes, new PageDimensions(width, height));
+        using var pageReader = docReader.GetPageReader(pageNumber - 1);
+        var rawBytes = pageReader.GetImage();
+        var renderedWidth = pageReader.GetPageWidth();
+        var renderedHeight = pageReader.GetPageHeight();
+
+        using var bitmap = new SKBitmap(renderedWidth, renderedHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+        System.Runtime.InteropServices.Marshal.Copy(rawBytes, 0, bitmap.GetPixels(), rawBytes.Length);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SKEncodedImageFormat.Png, 95);
+        return new PdfPageRenderResult(encoded.ToArray(), renderedWidth, renderedHeight, dpi);
+    }
+
+    private static string BuildPdfVisionPrompt(int pageNumber) =>
+        $"""
+        Transcribe the readable text on PDF page {pageNumber}.
+        Preserve reading order, headings, paragraph breaks, captions, footnotes, and page-visible labels when legible.
+        Do not summarize. Do not explain. Return only the transcribed page text.
+        """;
+
+    private static string DecodeText(byte[] bytes)
+    {
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+            return Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    private static string HtmlToText(string html)
+    {
+        var withBreaks = BlockBreakRegex().Replace(html, "\n");
+        var withoutTags = TagRegex().Replace(withBreaks, " ");
+        return WebUtility.HtmlDecode(withoutTags);
+    }
+
+    private static string NormalizeText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        normalized = HorizontalWhitespaceRegex().Replace(normalized, " ");
+        normalized = ExcessiveBlankLinesRegex().Replace(normalized, "\n\n");
+        return normalized.Trim();
+    }
+
+    private static string SourceKindFromExtension(string fileName) =>
+        Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".md" or ".markdown" => "Markdown source",
+            _ => "Text source",
+        };
+
+    private static string ComputeHash(byte[] bytes) =>
+        Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+    [GeneratedRegex("<\\s*(br|p|div|section|article|h[1-6]|li|tr|table)\\b[^>]*>", RegexOptions.IgnoreCase)]
+    private static partial Regex BlockBreakRegex();
+
+    [GeneratedRegex("<[^>]+>", RegexOptions.IgnoreCase)]
+    private static partial Regex TagRegex();
+
+    [GeneratedRegex("[\\t \\u00A0]+")]
+    private static partial Regex HorizontalWhitespaceRegex();
+
+    [GeneratedRegex("\\n{3,}")]
+    private static partial Regex ExcessiveBlankLinesRegex();
+
+    private sealed record PdfPageRenderResult(byte[] ImageBytes, int Width, int Height, int Dpi);
+}

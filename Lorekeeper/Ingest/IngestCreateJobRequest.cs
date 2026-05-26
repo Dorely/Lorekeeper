@@ -14,4 +14,9 @@ public sealed record IngestCreateJobRequest(
     string? CanonicalUrl = null,
     DateTime? FetchedAt = null,
     string? ContentType = null,
-    string? SourceMetadataJson = null);
+    string? SourceMetadataJson = null,
+    byte[]? ArtifactBytes = null,
+    string? ArtifactFileName = null,
+    string? ArtifactContentType = null,
+    IngestExtractionProfile ExtractionProfile = IngestExtractionProfile.Auto,
+    PdfArtifactIngestOptions? PdfOptions = null);

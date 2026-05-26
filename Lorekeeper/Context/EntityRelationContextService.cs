@@ -128,7 +128,8 @@ public sealed class EntityRelationContextService(IEntityService entities) : IEnt
 
     private static bool CanTraverse(EntityLink link) =>
         !string.Equals(link.OtherEntityType, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(link.OtherEntityType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+        && !string.Equals(link.OtherEntityType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(link.OtherEntityType, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
     private sealed record TraversalCursor(Guid EntityId, int Depth, string Path);
 }

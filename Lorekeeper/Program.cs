@@ -93,6 +93,7 @@ builder.Services.AddSingleton<ITokenBudgetPlanner, TokenBudgetPlanner>();
 // Projects
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
+builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>();
 
 // Chapters
 builder.Services.AddScoped<IChapterService, ChapterService>();
@@ -114,9 +115,11 @@ builder.Services.AddScoped<IWritingCoachService, WritingCoachService>();
 
 // Ingest
 builder.Services.Configure<IngestSourceStructureOptions>(builder.Configuration.GetSection(IngestSourceStructureOptions.SectionName));
+builder.Services.Configure<BookArtifactIngestOptions>(builder.Configuration.GetSection(BookArtifactIngestOptions.SectionName));
 builder.Services.AddSingleton<IIngestJobQueue, IngestJobQueue>();
 builder.Services.AddSingleton<IIngestJobNotifier, IngestJobNotifier>();
 builder.Services.AddScoped<IIngestSourceStructureBuilder, IngestSourceStructureBuilder>();
+builder.Services.AddScoped<IBookArtifactPreprocessor, BookArtifactPreprocessor>();
 builder.Services.AddScoped<IIngestGraphSync, IngestGraphSync>();
 builder.Services.AddScoped<IIngestGraphCleanup, IngestGraphCleanup>();
 builder.Services.AddScoped<IIngestVectorIndexingService, IngestVectorIndexingService>();

@@ -51,6 +51,14 @@ else
                 <label class="form-label small text-muted">Extraction instructions (optional)</label>
                 <textarea class="form-control form-control-sm" rows="4" @bind="_instructions" @bind:event="oninput"></textarea>
             </div>
+            <div class="mb-2">
+                <label class="form-label small text-muted">Extraction profile</label>
+                <select class="form-select form-select-sm" @bind="_extractionProfile">
+                    <option value="@IngestExtractionProfile.Auto">Auto</option>
+                    <option value="@IngestExtractionProfile.StoryWorldbuilding">Story / Worldbuilding</option>
+                    <option value="@IngestExtractionProfile.ResearchNonfiction">Research / Nonfiction</option>
+                </select>
+            </div>
             <div class="ingest-section-title mt-3">Webpage</div>
             <div class="mb-2">
                 <label class="form-label small text-muted">URL</label>
@@ -112,6 +120,35 @@ else
             <div class="mb-2">
                 <label class="form-label small text-muted">Source text</label>
                 <InputFile OnChange="OnFileSelectedAsync" class="form-control form-control-sm mb-2" />
+                @if (!string.IsNullOrWhiteSpace(_artifactFileName))
+                {
+                    <div class="ingest-artifact-status">
+                        <span>@_artifactFileName</span>
+                        <span class="text-muted">@ArtifactModeLabel</span>
+                        <button type="button" class="btn btn-link btn-sm" @onclick="ClearSelectedArtifact">Clear</button>
+                    </div>
+                }
+                @if (IsSelectedPdfArtifact)
+                {
+                    <div class="ingest-pdf-options">
+                        <label class="form-check small">
+                            <input class="form-check-input" type="checkbox" @bind="_pdfForceVision" />
+                            <span class="form-check-label">Read every PDF page with vision</span>
+                        </label>
+                        <div>
+                            <label class="form-label small text-muted">Max pages</label>
+                            <input type="number" class="form-control form-control-sm" min="1" max="500" @bind="_pdfMaxPages" />
+                        </div>
+                        <div>
+                            <label class="form-label small text-muted">DPI</label>
+                            <input type="number" class="form-control form-control-sm" min="72" max="300" @bind="_pdfVisionDpi" />
+                        </div>
+                    </div>
+                    @if (_pdfForceVision && _providerId is int providerId && !_visionProviderIds.Contains(providerId))
+                    {
+                        <div class="form-text small text-warning">The selected provider must pass Test Vision before force-vision PDF ingest can start.</div>
+                    }
+                }
                 <textarea class="form-control form-control-sm ingest-source-input" rows="12" @bind="_sourceText" @bind:event="oninput"></textarea>
             </div>
             @if (!string.IsNullOrWhiteSpace(_formError))
@@ -369,6 +406,7 @@ else
     private List<IngestReportItemView> _reportItems = [];
     private IngestSourceChunkExcerpt? _sourceExcerpt;
     private List<LlmProvider> _providers = [];
+    private HashSet<int> _visionProviderIds = [];
     private ChatProviderAvailability? _chatAvailability;
     private Guid? _selectedChunkId;
     private Guid? _loadedProjectId;
@@ -398,6 +436,13 @@ else
     private string _description = string.Empty;
     private string _instructions = string.Empty;
     private string _sourceText = string.Empty;
+    private byte[]? _artifactBytes;
+    private string? _artifactFileName;
+    private string? _artifactContentType;
+    private IngestExtractionProfile _extractionProfile = IngestExtractionProfile.Auto;
+    private bool _pdfForceVision;
+    private int _pdfMaxPages = 500;
+    private int _pdfVisionDpi = 144;
     private string _webUrl = string.Empty;
     private bool _webFollowLinks;
     private int _webFollowDepth = 1;
@@ -417,7 +462,7 @@ else
         ?? "Configure and test a chat provider in Settings > Providers to enable LLM features.";
 
     private string StartIngestButtonText =>
-        _readingFile ? "Reading file..." : _creating ? "Starting..." : "Start ingest";
+        _readingFile ? "Reading file..." : _creating && _artifactBytes is not null ? "Preprocessing..." : _creating ? "Starting..." : "Start ingest";
 
     private string StartWebIngestButtonText =>
         _webReading ? "Reading webpage..." : "Ingest webpage";
@@ -429,8 +474,9 @@ else
             if (_readingFile) return "Reading the selected source file.";
             if (ChatDisabled) return ChatDisabledMessage;
             if (_providerId is null) return _providers.Count == 0 ? "Configure and test a model before starting ingest." : "Select a model.";
+            if (_pdfForceVision && IsSelectedPdfArtifact && !_visionProviderIds.Contains(_providerId.Value)) return "Run Test Vision for the selected model before force-vision PDF ingest.";
             if (string.IsNullOrWhiteSpace(_title)) return "Add a source title.";
-            if (string.IsNullOrWhiteSpace(_sourceText)) return "Add source text or choose a source file.";
+            if (_artifactBytes is null && string.IsNullOrWhiteSpace(_sourceText)) return "Add source text or choose a source file.";
             return null;
         }
     }
@@ -454,6 +500,16 @@ else
         .FirstOrDefault(chunk => chunk.SourceChunkId == _selectedChunkId)
         ?? _selectedJob?.Chunks.OrderBy(chunk => chunk.SourceChunkIndex).FirstOrDefault();
 
+    private bool IsSelectedPdfArtifact =>
+        string.Equals(Path.GetExtension(_artifactFileName), ".pdf", StringComparison.OrdinalIgnoreCase);
+
+    private string ArtifactModeLabel =>
+        IsSelectedPdfArtifact
+            ? "PDF artifact"
+            : string.Equals(Path.GetExtension(_artifactFileName), ".epub", StringComparison.OrdinalIgnoreCase)
+                ? "EPUB artifact"
+                : "Text artifact";
+
     protected override async Task OnParametersSetAsync()
     {
         if (Project is null || _loadedProjectId == Project.Id) return;
@@ -468,6 +524,9 @@ else
     {
         _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
         _providers = (await Providers.ListWorkingChatProvidersAsync()).ToList();
+        _visionProviderIds = (await Providers.ListWorkingVisionProvidersAsync())
+            .Select(provider => provider.Id)
+            .ToHashSet();
         var defaultProvider = _providers.FirstOrDefault(provider => provider.IsDefault) ?? _providers.FirstOrDefault();
         _providerId = defaultProvider?.Id;
         _resumeProviderId = defaultProvider?.Id;
@@ -586,12 +645,22 @@ else
                 _instructions,
                 _sourceKind,
                 _description,
-                _providerId));
+                _providerId,
+                ArtifactBytes: _artifactBytes,
+                ArtifactFileName: _artifactFileName,
+                ArtifactContentType: _artifactContentType,
+                ExtractionProfile: _extractionProfile,
+                PdfOptions: new PdfArtifactIngestOptions(
+                    _pdfForceVision,
+                    _pdfMaxPages > 0 ? _pdfMaxPages : null,
+                    _pdfVisionDpi > 0 ? _pdfVisionDpi : null,
+                    null)));
             _title = string.Empty;
             _sourceKind = string.Empty;
             _description = string.Empty;
             _instructions = string.Empty;
             _sourceText = string.Empty;
+            ClearSelectedArtifact();
             await ReloadJobsAsync();
             await SelectJobAsync(job.Id);
         }
@@ -916,10 +985,26 @@ else
         try
         {
             var file = e.File;
-            await using var stream = file.OpenReadStream(maxAllowedSize: 25 * 1024 * 1024);
-            using var reader = new StreamReader(stream);
-            _sourceText = await reader.ReadToEndAsync();
+            await using var stream = file.OpenReadStream(maxAllowedSize: 100 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            _artifactBytes = ms.ToArray();
+            _artifactFileName = file.Name;
+            _artifactContentType = file.ContentType;
+
+            if (IsTextArtifact(file.Name))
+            {
+                using var reader = new StreamReader(new MemoryStream(_artifactBytes));
+                _sourceText = await reader.ReadToEndAsync();
+            }
+            else
+            {
+                _sourceText = string.Empty;
+            }
+
             if (string.IsNullOrWhiteSpace(_title)) _title = Path.GetFileNameWithoutExtension(file.Name);
+            if (string.IsNullOrWhiteSpace(_sourceKind))
+                _sourceKind = SourceKindFromFileName(file.Name);
         }
         catch (Exception ex)
         {
@@ -929,6 +1014,14 @@ else
         {
             _readingFile = false;
         }
+    }
+
+    private void ClearSelectedArtifact()
+    {
+        _artifactBytes = null;
+        _artifactFileName = null;
+        _artifactContentType = null;
+        _pdfForceVision = false;
     }
 
     private void OnProviderChanged(ChangeEventArgs args) =>
@@ -942,6 +1035,18 @@ else
 
     private static int? ParseProviderId(object? value) =>
         int.TryParse(value?.ToString(), out var providerId) ? providerId : null;
+
+    private static bool IsTextArtifact(string fileName) =>
+        Path.GetExtension(fileName).ToLowerInvariant() is ".txt" or ".md" or ".markdown";
+
+    private static string SourceKindFromFileName(string fileName) =>
+        Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".pdf" => "PDF book",
+            ".epub" => "EPUB book",
+            ".md" or ".markdown" => "Markdown source",
+            _ => "Text source",
+        };
 
     private static bool TryNormalizeWebUrl(string value, out string normalizedUrl, out string hostKey)
     {

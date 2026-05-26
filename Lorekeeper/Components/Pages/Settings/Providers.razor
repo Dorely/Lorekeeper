@@ -7,6 +7,7 @@
 @inject ILlmProviderService ProviderService
 @inject ICodexAuthService CodexAuth
 @inject IChatClientFactory ChatClientFactory
+@inject IVisionModelClientFactory VisionModelClientFactory
 @inject NavigationManager Nav
 @implements IDisposable
 
@@ -67,9 +68,16 @@
                 </div>
                 <div class="col-auto">
                     <button type="button" class="btn btn-sm btn-outline-info"
-                            disabled="@(_testingProviderId is not null)"
+                            disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
                             @onclick="TestCodexModelAsync">
                         @(_testingProviderId == _codexProvider.Id ? "Testing..." : "Test")
+                    </button>
+                </div>
+                <div class="col-auto">
+                    <button type="button" class="btn btn-sm btn-outline-info"
+                            disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
+                            @onclick="TestCodexVisionModelAsync">
+                        @(_testingVisionProviderId == _codexProvider.Id ? "Testing vision..." : "Test Vision")
                     </button>
                 </div>
             </div>
@@ -97,6 +105,7 @@ else
                 <th>Model</th>
                 <th>Auth</th>
                 <th>Chat</th>
+                <th>Vision</th>
                 <th>Default</th>
                 <th>Actions</th>
             </tr>
@@ -112,10 +121,15 @@ else
                             <input type="text" class="form-control form-control-sm" style="width:140px" @bind="p.ModelId" />
                             <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2"
                                     @onclick="() => SaveProviderAsync(p)" title="Save model changes">Save</button>
-                            <button type="button" class="btn btn-sm btn-outline-info py-0 px-2"
-                                    disabled="@(_testingProviderId is not null)"
+                                    <button type="button" class="btn btn-sm btn-outline-info py-0 px-2"
+                                    disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
                                     @onclick="() => TestProviderAsync(p)" title="Test this model">
                                 @(_testingProviderId == p.Id ? "Testing..." : "Test")
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-info py-0 px-2"
+                                    disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
+                                    @onclick="() => TestVisionProviderAsync(p)" title="Test image input for this model">
+                                @(_testingVisionProviderId == p.Id ? "Testing..." : "Vision")
                             </button>
                         </div>
                     </td>
@@ -146,6 +160,7 @@ else
                         }
                     </td>
                     <td>@RenderChatStatus(p)</td>
+                    <td>@RenderVisionStatus(p)</td>
                     <td>
                         @if (p.IsDefault)
                         {
@@ -192,14 +207,20 @@ else
                                     <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2"
                                             @onclick="() => SaveProviderAsync(child)" title="Save model changes">Save</button>
                                     <button type="button" class="btn btn-sm btn-outline-info py-0 px-2"
-                                            disabled="@(_testingProviderId is not null)"
+                                            disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
                                             @onclick="() => TestProviderAsync(child)" title="Test this model">
                                         @(_testingProviderId == child.Id ? "Testing..." : "Test")
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-info py-0 px-2"
+                                            disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
+                                            @onclick="() => TestVisionProviderAsync(child)" title="Test image input for this model">
+                                        @(_testingVisionProviderId == child.Id ? "Testing..." : "Vision")
                                     </button>
                                 </div>
                             </td>
                             <td><span class="badge bg-light text-dark">inherited</span></td>
                             <td>@RenderChatStatus(child)</td>
+                            <td>@RenderVisionStatus(child)</td>
                             <td>
                                 @if (child.IsDefault)
                                 {
@@ -223,7 +244,7 @@ else
                 @if (_childForms.TryGetValue(p.Id, out var draft))
                 {
                     <tr class="bg-body-secondary">
-                        <td colspan="7">
+                        <td colspan="8">
                             <div class="d-flex align-items-end gap-2 p-2">
                                 <div>
                                     <label class="form-label form-label-sm mb-0">Display Name</label>
@@ -292,7 +313,7 @@ else
             </div>
             <div class="col-12">
                 <button type="button" class="btn btn-outline-info btn-sm me-2"
-                        disabled="@_isTestingNewProvider"
+                        disabled="@(_isTestingNewProvider || _testingVisionProviderId is not null)"
                         @onclick="TestNewProviderAsync">
                     @(_isTestingNewProvider ? "Testing..." : "Test")
                 </button>
@@ -309,6 +330,7 @@ else
     private Dictionary<int, List<LlmProvider>> _children = [];
     private Dictionary<int, bool> _oauthStatus = [];
     private Dictionary<int, bool> _chatReadyStatus = [];
+    private Dictionary<int, bool> _visionReadyStatus = [];
     private LlmProvider? _codexProvider;
     private bool _codexConnected;
     private bool _hasWorkingChatProvider;
@@ -318,6 +340,7 @@ else
     private NewProviderConnectionSnapshot? _testedNewProviderSnapshot;
     private bool _isTestingNewProvider;
     private int? _testingProviderId;
+    private int? _testingVisionProviderId;
 
     private string? _statusMessage;
     private string _statusKind = "success";
@@ -384,6 +407,10 @@ else
         foreach (var provider in all)
             _chatReadyStatus[provider.Id] = await ProviderService.IsChatProviderWorkingAsync(provider.Id);
         _hasWorkingChatProvider = _chatReadyStatus.Values.Any(ready => ready);
+
+        _visionReadyStatus = new Dictionary<int, bool>();
+        foreach (var provider in all)
+            _visionReadyStatus[provider.Id] = await ProviderService.IsVisionProviderWorkingAsync(provider.Id);
 
         _codexProvider = _parents.FirstOrDefault(p => p.Name == CodexProvider.Name);
         _codexConnected = _codexProvider is not null
@@ -484,6 +511,35 @@ else
         finally
         {
             _testingProviderId = null;
+            await ReloadAsync();
+        }
+    }
+
+    private async Task TestVisionProviderAsync(LlmProvider p)
+    {
+        _testingVisionProviderId = p.Id;
+
+        try
+        {
+            await VisionModelClientFactory.TestVisionModelAsync(p);
+            await ProviderService.MarkVisionTestSucceededAsync(p);
+            SetStatus($"Provider '{p.DisplayName ?? p.Name}' model '{p.ModelId}' saved and vision-verified.", "success");
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                await ProviderService.MarkVisionTestFailedAsync(p, ex.Message);
+            }
+            catch
+            {
+                // Keep the original test failure visible to the user.
+            }
+            SetStatus($"Provider '{p.DisplayName ?? p.Name}' vision test failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _testingVisionProviderId = null;
             await ReloadAsync();
         }
     }
@@ -597,8 +653,17 @@ else
         await TestProviderAsync(_codexProvider);
     }
 
+    private async Task TestCodexVisionModelAsync()
+    {
+        if (_codexProvider is null) return;
+        await TestVisionProviderAsync(_codexProvider);
+    }
+
     private bool IsChatReady(LlmProvider provider) =>
         _chatReadyStatus.TryGetValue(provider.Id, out var ready) && ready;
+
+    private bool IsVisionReady(LlmProvider provider) =>
+        _visionReadyStatus.TryGetValue(provider.Id, out var ready) && ready;
 
     private string DefaultButtonTitle(LlmProvider provider) =>
         IsChatReady(provider)
@@ -626,6 +691,29 @@ else
         }
 
         <span class="badge bg-danger" title="@provider.LastChatTestError">Failed</span>
+    };
+
+    private RenderFragment RenderVisionStatus(LlmProvider provider) => __builder =>
+    {
+        if (IsVisionReady(provider))
+        {
+            <span class="badge bg-success" title="This provider is ready for image-reading PDF ingestion.">Ready</span>
+            return;
+        }
+
+        if (provider.LastVisionTestedAt is null)
+        {
+            <span class="badge bg-secondary" title="Run Test Vision before using this provider for PDF image reading.">Untested</span>
+            return;
+        }
+
+        if (provider.LastVisionTestSucceeded && !provider.HasCurrentVisionTestSnapshot)
+        {
+            <span class="badge bg-warning text-dark" title="Provider settings changed after the last successful vision test.">Retest</span>
+            return;
+        }
+
+        <span class="badge bg-danger" title="@provider.LastVisionTestError">Failed</span>
     };
 
     private LlmProvider? BuildNewProviderOrSetStatus()

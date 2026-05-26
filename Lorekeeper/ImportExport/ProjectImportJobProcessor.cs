@@ -44,6 +44,7 @@ public sealed class ProjectImportJobProcessor(
         EntityTypeService.EventNodeType,
         EntityTypeService.SourceNodeType,
         EntityTypeService.SourceChunkNodeType,
+        EntityTypeService.SourceBlockNodeType,
     ];
 
     private sealed class ImportState
@@ -737,7 +738,8 @@ public sealed class ProjectImportJobProcessor(
             || string.Equals(node.NodeType, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
             || string.Equals(node.NodeType, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
             || string.Equals(node.NodeType, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(node.NodeType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase))
+            || string.Equals(node.NodeType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(node.NodeType, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }

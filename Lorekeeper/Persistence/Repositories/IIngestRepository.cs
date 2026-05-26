@@ -14,6 +14,8 @@ public interface IIngestRepository
     Task<IngestSourceChunk?> GetSourceChunkAsync(Guid sourceChunkId, CancellationToken cancellationToken = default);
     Task<IngestSourceChunkExcerpt?> GetSourceChunkExcerptAsync(Guid sourceChunkId, int maxChars = 8_000, CancellationToken cancellationToken = default);
     Task<List<IngestSource>> ListSourcesByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<List<IngestSourcePage>> ListSourcePagesAsync(Guid sourceId, CancellationToken cancellationToken = default);
+    Task<List<IngestSourceBlock>> ListSourceBlocksAsync(Guid sourceId, CancellationToken cancellationToken = default);
     Task<IngestReportItem?> GetReportItemAsync(Guid reportItemId, CancellationToken cancellationToken = default);
     Task<List<IngestSourceChunk>> ListSourceChunksAsync(Guid sourceId, CancellationToken cancellationToken = default);
     Task<List<IngestVectorFragment>> ListVectorFragmentsAsync(Guid sourceId, CancellationToken cancellationToken = default);
@@ -22,6 +24,8 @@ public interface IIngestRepository
     Task<List<IngestJob>> ListQueuedJobsAsync(CancellationToken cancellationToken = default);
     Task<List<IngestJob>> ListInterruptedJobsAsync(CancellationToken cancellationToken = default);
     Task AddSourceAsync(IngestSource source, CancellationToken cancellationToken = default);
+    Task AddSourcePageAsync(IngestSourcePage sourcePage, CancellationToken cancellationToken = default);
+    Task AddSourceBlockAsync(IngestSourceBlock sourceBlock, CancellationToken cancellationToken = default);
     Task AddJobAsync(IngestJob job, CancellationToken cancellationToken = default);
     Task AddSourceChunkAsync(IngestSourceChunk sourceChunk, CancellationToken cancellationToken = default);
     Task AddVectorFragmentAsync(IngestVectorFragment vectorFragment, CancellationToken cancellationToken = default);

@@ -17,6 +17,13 @@ public class LlmProvider
     public string? LastChatTestModelId { get; set; }
     public AuthType? LastChatTestAuthType { get; set; }
     public int? LastChatTestCredentialSourceId { get; set; }
+    public bool LastVisionTestSucceeded { get; set; }
+    public DateTime? LastVisionTestedAt { get; set; }
+    public string? LastVisionTestError { get; set; }
+    public string? LastVisionTestEndpointUrl { get; set; }
+    public string? LastVisionTestModelId { get; set; }
+    public AuthType? LastVisionTestAuthType { get; set; }
+    public int? LastVisionTestCredentialSourceId { get; set; }
 
     /// <summary>
     /// When set, credentials (API key / OAuth tokens) are resolved from the referenced
@@ -44,6 +51,13 @@ public class LlmProvider
         && LastChatTestAuthType == AuthType
         && LastChatTestCredentialSourceId == CredentialSourceId;
 
+    public bool HasCurrentVisionTestSnapshot =>
+        LastVisionTestSucceeded
+        && string.Equals(LastVisionTestEndpointUrl, EndpointUrl, StringComparison.Ordinal)
+        && string.Equals(LastVisionTestModelId, ModelId, StringComparison.Ordinal)
+        && LastVisionTestAuthType == AuthType
+        && LastVisionTestCredentialSourceId == CredentialSourceId;
+
     public void MarkChatTestSucceeded(DateTime testedAt)
     {
         LastChatTestSucceeded = true;
@@ -70,5 +84,33 @@ public class LlmProvider
     {
         LastChatTestSucceeded = false;
         LastChatTestError = reason;
+    }
+
+    public void MarkVisionTestSucceeded(DateTime testedAt)
+    {
+        LastVisionTestSucceeded = true;
+        LastVisionTestedAt = testedAt;
+        LastVisionTestError = null;
+        LastVisionTestEndpointUrl = EndpointUrl;
+        LastVisionTestModelId = ModelId;
+        LastVisionTestAuthType = AuthType;
+        LastVisionTestCredentialSourceId = CredentialSourceId;
+    }
+
+    public void MarkVisionTestFailed(string error, DateTime testedAt)
+    {
+        LastVisionTestSucceeded = false;
+        LastVisionTestedAt = testedAt;
+        LastVisionTestError = error;
+        LastVisionTestEndpointUrl = EndpointUrl;
+        LastVisionTestModelId = ModelId;
+        LastVisionTestAuthType = AuthType;
+        LastVisionTestCredentialSourceId = CredentialSourceId;
+    }
+
+    public void ClearVisionReadiness(string? reason = null)
+    {
+        LastVisionTestSucceeded = false;
+        LastVisionTestError = reason;
     }
 }

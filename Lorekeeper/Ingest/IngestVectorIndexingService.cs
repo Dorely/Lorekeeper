@@ -34,6 +34,7 @@ public sealed class IngestVectorIndexingService(
             await DeleteExistingVectorRowsAsync(source, existingFragments, cancellationToken);
 
             var chunks = chunker.Chunk(source.SourceText);
+            var sourceBlocks = await ingest.ListSourceBlocksAsync(source.Id, cancellationToken);
             if (chunks.Count > 0)
             {
                 var contents = chunks.Select(item => item.Content).ToList();
@@ -45,7 +46,7 @@ public sealed class IngestVectorIndexingService(
                     var start = FindFragmentStart(source.SourceText, text, cursor);
                     var end = Math.Min(source.SourceText.Length, start + text.Length);
                     cursor = Math.Min(source.SourceText.Length, Math.Max(start + 1, end - 200));
-                    var metadata = $"Source {source.Title} - Vector fragment {index + 1}/{chunks.Count}";
+                    var metadata = BuildFragmentMetadata(source, sourceBlocks, index, chunks.Count, start, end);
                     var rowId = await vectors.StoreAsync(
                         content: text,
                         embedding: embeddingVectors[index],
@@ -107,5 +108,39 @@ public sealed class IngestVectorIndexingService(
         var found = sourceText.IndexOf(fragmentText, searchStart, StringComparison.Ordinal);
         return found < 0 ? Math.Clamp(cursor, 0, sourceText.Length) : found;
     }
-}
 
+    private static string BuildFragmentMetadata(
+        IngestSource source,
+        IReadOnlyList<IngestSourceBlock> sourceBlocks,
+        int index,
+        int count,
+        int startChar,
+        int endChar)
+    {
+        var blocks = sourceBlocks
+            .Where(block => block.EndChar > startChar && block.StartChar < endChar)
+            .OrderBy(block => block.Index)
+            .Take(8)
+            .Select(block => new
+            {
+                id = block.Id.ToString("N"),
+                block.Kind,
+                block.Title,
+                block.Locator,
+                block.PageNumber,
+                block.StartChar,
+                block.EndChar,
+            })
+            .ToList();
+
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            label = $"Source {source.Title} - Vector fragment {index + 1}/{count}",
+            sourceId = source.Id.ToString("N"),
+            startChar,
+            endChar,
+            blocks,
+            linkedEntityIds = Array.Empty<string>(),
+        });
+    }
+}

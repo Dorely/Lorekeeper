@@ -306,7 +306,8 @@ else
         node.IsIngestCreated
         || node.IngestSourceCount > 0
         || string.Equals(node.Type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(node.Type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+        || string.Equals(node.Type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(node.Type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsIngestEdge(ProjectGraphEdge edge) =>
         edge.IsIngestCreated

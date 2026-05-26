@@ -84,24 +84,34 @@
     background: var(--bs-body-bg);
 }
 
-.ingest-source-extracted {
+.ingest-source-extracted,
+.ingest-source-blocks {
     display: flex;
     flex-wrap: wrap;
     gap: 0.3rem;
     padding: 0 0.55rem 0.55rem;
 }
 
-.ingest-source-extracted span {
+.ingest-source-extracted span,
+.ingest-source-blocks span {
     max-width: 100%;
     padding: 0.1rem 0.4rem;
     border-radius: 999px;
-    color: var(--bs-info-text-emphasis, #087990);
-    background: rgba(13, 202, 240, 0.12);
     font-size: 0.75rem;
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.ingest-source-extracted span {
+    color: var(--bs-info-text-emphasis, #087990);
+    background: rgba(13, 202, 240, 0.12);
+}
+
+.ingest-source-blocks span {
+    color: var(--bs-secondary-color);
+    background: var(--bs-tertiary-bg);
 }
 
 .ingest-sources-error {

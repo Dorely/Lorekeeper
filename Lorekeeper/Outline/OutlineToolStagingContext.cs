@@ -1130,7 +1130,8 @@ public sealed class OutlineToolStagingContext(
 
     private static bool CanTraverse(StagedEntityLink link) =>
         !string.Equals(link.OtherEntityType, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(link.OtherEntityType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+        && !string.Equals(link.OtherEntityType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(link.OtherEntityType, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
     private static EntityRelationContextOptions NormalizeRelationOptions(EntityRelationContextOptions options) => new()
     {
@@ -1273,7 +1274,8 @@ public sealed class OutlineToolStagingContext(
         && !string.Equals(type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+        && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
     private static string Serialize(object? value) => JsonSerializer.Serialize(value, JsonSerializerOptions.Default);
 

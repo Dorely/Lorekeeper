@@ -13,6 +13,7 @@ public sealed class IngestService(
     IIngestRepository ingest,
     IProjectRepository projects,
     IIngestSourceStructureBuilder structureBuilder,
+    IBookArtifactPreprocessor artifactPreprocessor,
     IIngestGraphSync graphSync,
     IIngestJobQueue queue,
     ILlmProviderService providers,
@@ -52,6 +53,36 @@ public sealed class IngestService(
         if (title.Length == 0) throw new ArgumentException("Source title is required.", nameof(request));
 
         var sourceText = request.SourceText ?? string.Empty;
+        var sourceKind = request.SourceKind?.Trim() ?? string.Empty;
+        var contentType = request.ContentType?.Trim() ?? string.Empty;
+        var sourceMetadataJson = string.IsNullOrWhiteSpace(request.SourceMetadataJson) ? "{}" : request.SourceMetadataJson.Trim();
+        IReadOnlyList<IngestSourcePageDraft> pageDrafts = [];
+        IReadOnlyList<IngestSourceBlockDraft> blockDrafts = [];
+
+        if (request.ArtifactBytes is { Length: > 0 } artifactBytes)
+        {
+            var preprocessed = await artifactPreprocessor.PreprocessAsync(new BookArtifactPreprocessRequest(
+                request.ArtifactFileName ?? title,
+                request.ArtifactContentType,
+                artifactBytes,
+                request.ProviderId,
+                request.ExtractionProfile,
+                request.PdfOptions ?? new PdfArtifactIngestOptions()), cancellationToken);
+
+            sourceText = preprocessed.SourceText;
+            pageDrafts = preprocessed.Pages;
+            blockDrafts = preprocessed.Blocks;
+            if (string.IsNullOrWhiteSpace(sourceKind))
+                sourceKind = preprocessed.SourceKind;
+            if (string.IsNullOrWhiteSpace(contentType))
+                contentType = preprocessed.ContentType;
+            sourceMetadataJson = MergeSourceMetadataJson(sourceMetadataJson, preprocessed);
+        }
+        else
+        {
+            sourceMetadataJson = EnsureExtractionProfileMetadata(sourceMetadataJson, request.ExtractionProfile);
+        }
+
         if (string.IsNullOrWhiteSpace(sourceText)) throw new ArgumentException("Source text is required.", nameof(request));
 
         var instructions = (request.UserInstructions ?? string.Empty).Trim();
@@ -62,7 +93,7 @@ public sealed class IngestService(
         {
             ProjectId = projectId,
             Title = title,
-            SourceKind = request.SourceKind?.Trim() ?? string.Empty,
+            SourceKind = sourceKind,
             Description = request.Description?.Trim() ?? string.Empty,
             UserInstructions = instructions,
             SourceText = sourceText,
@@ -71,12 +102,51 @@ public sealed class IngestService(
             FinalUrl = request.FinalUrl?.Trim() ?? string.Empty,
             CanonicalUrl = request.CanonicalUrl?.Trim() ?? string.Empty,
             FetchedAt = request.FetchedAt,
-            ContentType = request.ContentType?.Trim() ?? string.Empty,
-            SourceMetadataJson = string.IsNullOrWhiteSpace(request.SourceMetadataJson) ? "{}" : request.SourceMetadataJson.Trim(),
+            ContentType = contentType,
+            SourceMetadataJson = sourceMetadataJson,
             VectorIndexState = VectorIndexState.Stale,
         };
 
         await ingest.AddSourceAsync(source, cancellationToken);
+
+        foreach (var pageDraft in pageDrafts)
+        {
+            await ingest.AddSourcePageAsync(new IngestSourcePage
+            {
+                Id = pageDraft.Id,
+                SourceId = source.Id,
+                PageNumber = pageDraft.PageNumber,
+                Text = pageDraft.Text,
+                StartChar = pageDraft.StartChar,
+                EndChar = pageDraft.EndChar,
+                ExtractionMethod = pageDraft.ExtractionMethod,
+                Width = pageDraft.Width,
+                Height = pageDraft.Height,
+                ImageHash = pageDraft.ImageHash,
+                RenderSettingsJson = pageDraft.RenderSettingsJson,
+                VisionProviderId = pageDraft.VisionProviderId,
+                VisionModelName = pageDraft.VisionModelName,
+                Diagnostics = pageDraft.Diagnostics,
+            }, cancellationToken);
+        }
+
+        foreach (var blockDraft in blockDrafts)
+        {
+            await ingest.AddSourceBlockAsync(new IngestSourceBlock
+            {
+                Id = blockDraft.Id,
+                SourceId = source.Id,
+                SourcePageId = blockDraft.SourcePageId,
+                Index = blockDraft.Index,
+                Kind = blockDraft.Kind,
+                Title = blockDraft.Title,
+                Locator = blockDraft.Locator,
+                PageNumber = blockDraft.PageNumber,
+                StartChar = blockDraft.StartChar,
+                EndChar = blockDraft.EndChar,
+                MetadataJson = blockDraft.MetadataJson,
+            }, cancellationToken);
+        }
 
         var drafts = structureBuilder.Build(new IngestSourceStructureRequest(
             sourceText,
@@ -132,7 +202,20 @@ public sealed class IngestService(
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
         await ingest.SaveChangesAsync(cancellationToken);
-        await graphSync.EnsureSourceAsync(source, sourceChunks, cancellationToken);
+        await graphSync.EnsureSourceAsync(source, sourceChunks, blockDrafts.Select(draft => new IngestSourceBlock
+        {
+            Id = draft.Id,
+            SourceId = source.Id,
+            SourcePageId = draft.SourcePageId,
+            Index = draft.Index,
+            Kind = draft.Kind,
+            Title = draft.Title,
+            Locator = draft.Locator,
+            PageNumber = draft.PageNumber,
+            StartChar = draft.StartChar,
+            EndChar = draft.EndChar,
+            MetadataJson = draft.MetadataJson,
+        }).ToList(), cancellationToken);
         await contextIndexing.ReindexIngestSourceAsync(source.Id, cancellationToken);
         queue.Enqueue(job.Id);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Created);
@@ -709,6 +792,64 @@ public sealed class IngestService(
             ids.Add(parsed);
         }
     }
+
+    private static string MergeSourceMetadataJson(string baseMetadataJson, BookArtifactPreprocessResult preprocessed)
+    {
+        var metadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(baseMetadataJson) && baseMetadataJson.TrimStart().StartsWith('{'))
+        {
+            try
+            {
+                using var baseDoc = JsonDocument.Parse(baseMetadataJson);
+                foreach (var property in baseDoc.RootElement.EnumerateObject())
+                    metadata[property.Name] = JsonElementToObject(property.Value);
+            }
+            catch (JsonException)
+            {
+                metadata["rawMetadata"] = baseMetadataJson;
+            }
+        }
+
+        metadata["artifactPreprocess"] = JsonSerializer.Deserialize<object>(preprocessed.SourceMetadataJson);
+        metadata["artifactDiagnostics"] = preprocessed.Diagnostics;
+        metadata["artifactUsedVision"] = preprocessed.UsedVision;
+        metadata["sourceBlockCount"] = preprocessed.Blocks.Count;
+        metadata["sourcePageCount"] = preprocessed.Pages.Count;
+        return JsonSerializer.Serialize(metadata);
+    }
+
+    private static string EnsureExtractionProfileMetadata(string baseMetadataJson, IngestExtractionProfile extractionProfile)
+    {
+        var metadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(baseMetadataJson) && baseMetadataJson.TrimStart().StartsWith('{'))
+        {
+            try
+            {
+                using var baseDoc = JsonDocument.Parse(baseMetadataJson);
+                foreach (var property in baseDoc.RootElement.EnumerateObject())
+                    metadata[property.Name] = JsonElementToObject(property.Value);
+            }
+            catch (JsonException)
+            {
+                metadata["rawMetadata"] = baseMetadataJson;
+            }
+        }
+
+        metadata["extractionProfile"] = extractionProfile.ToString();
+        return JsonSerializer.Serialize(metadata);
+    }
+
+    private static object? JsonElementToObject(JsonElement element) =>
+        element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number when element.TryGetInt64(out var longValue) => longValue,
+            JsonValueKind.Number when element.TryGetDouble(out var doubleValue) => doubleValue,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            _ => JsonSerializer.Deserialize<object>(element.GetRawText()),
+        };
 
     private static string ComputeHash(string text)
     {

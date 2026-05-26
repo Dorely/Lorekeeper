@@ -28,6 +28,8 @@ public class IngestSource
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<IngestSourceChunk> SourceChunks { get; set; } = [];
+    public ICollection<IngestSourcePage> SourcePages { get; set; } = [];
+    public ICollection<IngestSourceBlock> SourceBlocks { get; set; } = [];
     public ICollection<IngestVectorFragment> VectorFragments { get; set; } = [];
     public ICollection<IngestJob> Jobs { get; set; } = [];
 

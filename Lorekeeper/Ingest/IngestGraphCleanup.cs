@@ -216,6 +216,8 @@ public sealed class IngestGraphCleanup(
         || string.Equals(key, "sourceId", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "sourceChunkId", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "sourceChunkIndex", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "sourceBlockId", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "sourcePageId", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "sourceGraphTargetType", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "structural", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "order", StringComparison.OrdinalIgnoreCase)
@@ -225,6 +227,8 @@ public sealed class IngestGraphCleanup(
         (string.Equals(node.NodeType, IngestGraphSync.SourceNodeType, StringComparison.OrdinalIgnoreCase)
             && string.Equals(node.Key, sourceKey, StringComparison.OrdinalIgnoreCase))
         || (string.Equals(node.NodeType, IngestGraphSync.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
+            && HasSourceId(node.Properties, sourceKey))
+        || (string.Equals(node.NodeType, IngestGraphSync.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase)
             && HasSourceId(node.Properties, sourceKey));
 
     private static bool IsSourceOwnedExtractedFromEdge(GraphEdge edge, string sourceKey, HashSet<long> sourceGraphNodeIds) =>
@@ -264,5 +268,6 @@ public sealed class IngestGraphCleanup(
         && !string.Equals(type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+        && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 }

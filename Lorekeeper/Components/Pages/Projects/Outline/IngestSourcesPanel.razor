@@ -39,7 +39,7 @@
                             <details class="ingest-source-chunk" @key="chunk.Chunk.Id">
                                 <summary>
                                     <span>@(ChunkIndex(chunk.Chunk) + 1). @chunk.Chunk.Name</span>
-                                    <span>@chunk.ExtractedLinks.Count extracted</span>
+                                    <span>@chunk.Blocks.Count block@(PluralSuffix(chunk.Blocks.Count)) - @chunk.ExtractedLinks.Count extracted</span>
                                 </summary>
 
                                 @if (chunk.Chunk.Properties.TryGetValue("summary", out var summary) && !string.IsNullOrWhiteSpace(summary))
@@ -57,6 +57,15 @@
                                         @foreach (var link in chunk.ExtractedLinks)
                                         {
                                             <span title="@link.OtherEntityType">@link.OtherEntityName</span>
+                                        }
+                                    </div>
+                                }
+                                @if (chunk.Blocks.Count > 0)
+                                {
+                                    <div class="ingest-source-blocks">
+                                        @foreach (var block in chunk.Blocks)
+                                        {
+                                            <span title="@BlockTitle(block)">@BlockLocator(block)</span>
                                         }
                                     </div>
                                 }
@@ -90,6 +99,7 @@
     private sealed class ChunkSection
     {
         public required StoryEntity Chunk { get; init; }
+        public List<StoryEntity> Blocks { get; set; } = [];
         public List<EntityLink> ExtractedLinks { get; set; } = [];
     }
 
@@ -126,6 +136,9 @@
                     section.Chunks.Add(new ChunkSection
                     {
                         Chunk = chunk,
+                        Blocks = (await Entities.ListAsync(ProjectId, EntityTypeService.SourceBlockNodeType, chunk.Id))
+                            .OrderBy(BlockIndex)
+                            .ToList(),
                         ExtractedLinks = await ListExtractedLinksAsync(chunk.Id),
                     });
                 }
@@ -135,6 +148,9 @@
                     section.Chunks.Add(new ChunkSection
                     {
                         Chunk = source,
+                        Blocks = (await Entities.ListAsync(ProjectId, EntityTypeService.SourceBlockNodeType, source.Id))
+                            .OrderBy(BlockIndex)
+                            .ToList(),
                         ExtractedLinks = await ListExtractedLinksAsync(source.Id),
                     });
                 }
@@ -181,6 +197,22 @@
         if (TryReadInt(chunk.Properties, "sourceChunkIndex", out var sourceChunkIndex)) return sourceChunkIndex;
         return chunk.Order ?? 0;
     }
+
+    private static int BlockIndex(StoryEntity block)
+    {
+        if (TryReadInt(block.Properties, "index", out var index)) return index;
+        return block.Order ?? 0;
+    }
+
+    private static string BlockLocator(StoryEntity block) =>
+        block.Properties.TryGetValue("locator", out var locator) && !string.IsNullOrWhiteSpace(locator)
+            ? locator
+            : block.Name;
+
+    private static string BlockTitle(StoryEntity block) =>
+        block.Properties.TryGetValue("title", out var title) && !string.IsNullOrWhiteSpace(title)
+            ? title
+            : block.Name;
 
     private static bool TryReadInt(IReadOnlyDictionary<string, string?> properties, string key, out int value)
     {

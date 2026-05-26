@@ -31,7 +31,9 @@ public sealed class IngestJobProcessor(
         Do not rewrite canonical project entity properties. Extracted facts, aliases, evidence, and source notes belong in source-scoped assertions recorded by the ingest tools.
         Prefer fewer, stronger story entities over duplicate nodes for titles, aliases, partial names, or alternate spellings. Entity data should be useful for later retrieval and writing; it should read like a concise fact sheet, not like extraction process notes.
 
-        A useful fact sheet captures the source-grounded information a writer would need later: identity, role, status, affiliation, history, motivation, significance, setting/world-building details, relationships, and notable lore or factual claims. Record complete natural-language facts, not empty schema fields.
+        Adapt what counts as an entity to the source and the project. Fiction, science fiction, and fantasy sources should preserve story and setting continuity: characters, places, cultures, factions, artifacts, magic/technology, histories, rules, recurring terms, and relationships. Nonfiction and research sources should preserve concepts, people, events, examples, methods, terms, claims, evidence, and arguments. Use the project type palette first, then create broad useful non-structural types only when the source needs them.
+
+        A useful fact sheet captures the source-grounded information the current project would need later: identity, role, status, affiliation, history, motivation, significance, setting/world-building details, factual claims, examples, relationships, and evidence. Record complete natural-language facts, not empty schema fields.
 
         Process rules:
         - Call list_job_entities before creating or linking entities, and compare each source mention against the same-job roster first.
@@ -44,7 +46,8 @@ public sealed class IngestJobProcessor(
         - Use record_existing_entity_observation when a source mention matches an existing project entity.
         - Use update_ingest_entity when a source mention matches an entity already touched by this ingest job.
         - Create a new entity only when no existing project entity or same-job entity matches after variant searches. The tool will reject duplicate names; treat that as instruction to reuse the returned/existing entity.
-        - Use canonical singular entity type keys from the known project entity types. Do not invent plural, lowercase, or near-duplicate categories such as "characters", "Characters", "locations", or "organisations" when Character, Location, or Organization/Faction-style categories are available.
+        - Use canonical singular entity type keys from the known project entity types. Do not invent plural, lowercase, or near-duplicate categories such as "characters", "Characters", "locations", or "organisations" when an existing project type reasonably fits.
+        - If a new type is needed, choose a broad stable type name. Prefer reusable categories such as Culture, Faction, Artifact, Magic, Technology, Lore, Concept, Person, Event, Example, Claim, Term, or Method over one-off labels.
         - Keep recurring source observations current. If a character appears again later with new history, status, aliases, relationships, or role details, update the source assertion for the existing entity.
         - Use the properties object for practical, readable fact-sheet fields such as summary, description, role, status, affiliation, history, motivation, significance, relationship, or details. Avoid empty schema-filling; prefer concise natural-language values that will help a writer understand and retrieve the entity later.
         - Pass tool objects and arrays directly. Do not serialize properties or aliases into JSON strings; use {} for no properties and [] for no aliases.
@@ -80,7 +83,8 @@ public sealed class IngestJobProcessor(
 
             await ingestVectorIndexing.EnsureVectorFragmentsAsync(job.Source, cancellationToken: cancellationToken);
             var sourceChunks = job.Chunks.Select(chunk => chunk.SourceChunk).OrderBy(chunk => chunk.Index).ToList();
-            await graphSync.EnsureSourceAsync(job.Source, sourceChunks, cancellationToken);
+            var sourceBlocks = await ingest.ListSourceBlocksAsync(job.SourceId, cancellationToken);
+            await graphSync.EnsureSourceAsync(job.Source, sourceChunks, sourceBlocks, cancellationToken);
 
             var chat = await chatClientFactory.CreateChatClientAsync(provider.Id, cancellationToken);
             var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
@@ -231,7 +235,8 @@ public sealed class IngestJobProcessor(
         if (mutated || sourceGraphChanged)
         {
             var sourceChunks = await ingest.ListSourceChunksAsync(job.SourceId, cancellationToken);
-            await graphSync.EnsureSourceAsync(job.Source, sourceChunks, cancellationToken);
+            var sourceBlocks = await ingest.ListSourceBlocksAsync(job.SourceId, cancellationToken);
+            await graphSync.EnsureSourceAsync(job.Source, sourceChunks, sourceBlocks, cancellationToken);
             if (sourceGraphChanged)
                 await contextIndexing.ReindexIngestSourceChunkAsync(sourceChunk.Id, cancellationToken);
         }
@@ -360,11 +365,15 @@ public sealed class IngestJobProcessor(
         var entityRoster = await BuildEntityRosterAsync(job.Id, cancellationToken);
         var previousSummaries = await BuildPreviousSummariesAsync(job, sourceChunk.Index, cancellationToken);
         var knownEntityTypes = await BuildKnownEntityTypesAsync(job.ProjectId, cancellationToken);
+        var extractionProfile = BuildExtractionProfilePrompt(job);
+        var sourceLocators = await BuildSourceLocatorsAsync(job.SourceId, sourceChunk, cancellationToken);
 
         return $$"""
             Source title: {{job.Source.Title}}
             Source kind: {{job.Source.SourceKind}}
             Source description: {{job.Source.Description}}
+            Extraction profile:
+            {{extractionProfile}}
 
             User extraction instructions:
             {{job.Instructions}}
@@ -384,6 +393,9 @@ public sealed class IngestJobProcessor(
             Known project entity types:
             {{knownEntityTypes}}
 
+            Source locators overlapping this chunk:
+            {{sourceLocators}}
+
             Entity matching workflow for this chunk:
             1. Start from the same-job roster above.
             2. For each source mention that may be an entity, search existing project entities before creating anything.
@@ -391,7 +403,7 @@ public sealed class IngestJobProcessor(
             4. Reuse a plausible same-job or project entity instead of creating duplicate names or duplicate categories. For example, link "Prince Kael'thas" observations to an existing "Kael'thas" Character when the context points to the same person.
             5. Create only when the roster and project searches do not return a plausible same subject.
 
-            Write useful, source-grounded fact sheets. The properties object may use broad natural-language fields such as summary, description, role, status, affiliation, history, motivation, significance, relationship, or details; it does not need to be highly structured when a readable fact is more useful. Include evidence for each fact field.
+            Write useful, source-grounded fact sheets. The properties object may use broad natural-language fields such as summary, description, role, status, affiliation, history, motivation, significance, relationship, claim, example, method, or details; it does not need to be highly structured when a readable fact is more useful. Include evidence for each fact field. When evidence comes from a listed source locator, include the page/section/block label in the evidence text.
 
             Good example: if a Blood Elves page says Liadrin leads the blood elf paladins and is one of the race's primary leaders, record that as role/significance/history fields on the Liadrin Character with evidence from the page. Bad example: do not write that Liadrin was updated because the page was semantically similar or because the page did not mention her.
 
@@ -409,7 +421,7 @@ public sealed class IngestJobProcessor(
             .Where(item => item.Kind == IngestReportItemKind.Entity && item.Status == IngestReportItemStatus.Active)
             .OrderBy(item => item.ResourceType)
             .ThenBy(item => item.Title)
-            .Take(200)
+            .Take(1000)
             .Select(item => $"- {item.EntityId}: {item.ResourceType} '{item.Title}' | {Truncate(item.Summary, 180)} | notes: {Truncate(item.Notes, 180)}")
             .ToList();
 
@@ -427,6 +439,69 @@ public sealed class IngestJobProcessor(
             .ToList();
 
         return lines.Count == 0 ? "None registered yet." : string.Join("\n", lines);
+    }
+
+    private async Task<string> BuildSourceLocatorsAsync(Guid sourceId, IngestSourceChunk sourceChunk, CancellationToken cancellationToken)
+    {
+        var blocks = await ingest.ListSourceBlocksAsync(sourceId, cancellationToken);
+        var overlapping = blocks
+            .Where(block => block.EndChar > sourceChunk.StartChar && block.StartChar < sourceChunk.EndChar)
+            .OrderBy(block => block.Index)
+            .Take(24)
+            .Select(block =>
+            {
+                var label = string.IsNullOrWhiteSpace(block.Locator) ? block.Title : block.Locator;
+                var page = block.PageNumber is int pageNumber ? $" page {pageNumber};" : string.Empty;
+                return $"- {block.Id:N}: {block.Kind} '{label}' ({page} chars {block.StartChar}-{block.EndChar})";
+            })
+            .ToList();
+
+        return overlapping.Count == 0 ? "No page or section locators were recorded for this chunk." : string.Join("\n", overlapping);
+    }
+
+    private static string BuildExtractionProfilePrompt(IngestJob job)
+    {
+        var profile = ReadExtractionProfile(job.Source.SourceMetadataJson);
+        var profileDescription = profile switch
+        {
+            IngestExtractionProfile.StoryWorldbuilding => "Story / Worldbuilding. Prioritize continuity knowledge for fiction: characters, places, cultures, factions, lore, history, objects, rules, and relationships.",
+            IngestExtractionProfile.ResearchNonfiction => "Research / Nonfiction. Prioritize concepts, people, historical events, examples, claims, arguments, terms, methods, and source-backed evidence.",
+            _ => "Auto. Infer the source domain from the title, kind, metadata, user instructions, and chunk text. Reuse project-specific entity types first.",
+        };
+
+        return $"{profile}: {profileDescription}";
+    }
+
+    private static IngestExtractionProfile ReadExtractionProfile(string metadataJson)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson) || !metadataJson.TrimStart().StartsWith('{'))
+            return IngestExtractionProfile.Auto;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(metadataJson);
+            if (doc.RootElement.TryGetProperty("extractionProfile", out var direct)
+                && direct.ValueKind == JsonValueKind.String
+                && Enum.TryParse<IngestExtractionProfile>(direct.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+
+            if (doc.RootElement.TryGetProperty("artifactPreprocess", out var artifact)
+                && artifact.ValueKind == JsonValueKind.Object
+                && artifact.TryGetProperty("extractionProfile", out var nested)
+                && nested.ValueKind == JsonValueKind.String
+                && Enum.TryParse<IngestExtractionProfile>(nested.GetString(), out parsed))
+            {
+                return parsed;
+            }
+        }
+        catch (JsonException)
+        {
+            return IngestExtractionProfile.Auto;
+        }
+
+        return IngestExtractionProfile.Auto;
     }
 
     private async Task<string> BuildPreviousSummariesAsync(IngestJob job, int currentIndex, CancellationToken cancellationToken)

@@ -43,7 +43,7 @@ public sealed class IngestAgentTools(
         AIFunctionFactory.Create(
             method: (string? type = null, string? query = null) => SearchProjectEntitiesAsync(context, type, query),
             name: "search_project_entities",
-            description: "Search existing non-structural story entities in the project graph before creating a new entity. Use type when known; search exact names plus variants such as titles removed, aliases, alternate spellings, surnames, epithets, and descriptive terms."),
+            description: "Search existing non-structural project entities before creating a new entity. Use type when known; search exact names plus variants such as titles removed, aliases, alternate spellings, surnames, epithets, and descriptive terms."),
 
         AIFunctionFactory.Create(
             method: (string existingEntityId, IngestObservationProperties? properties = null, string[]? aliases = null, string? evidence = null, string? notes = null) =>
@@ -55,7 +55,7 @@ public sealed class IngestAgentTools(
             method: (string type, string name, IngestObservationProperties? properties = null, string[]? aliases = null, string? evidence = null, string? notes = null) =>
                 CreateEntityAsync(context, type, name, properties, aliases, evidence, notes),
             name: "create_ingest_entity",
-            description: "Create a new graph entity with source-scoped, evidence-backed fact-sheet fields. Only use after list_job_entities and variant search_project_entities calls find no plausible same subject. properties is an object with concise natural-language fields such as summary/status/history/significance; evidence is required for fact fields. Use {} for no properties and [] for no aliases."),
+            description: "Create a new graph entity with source-scoped, evidence-backed fact-sheet fields. Only use after list_job_entities and variant search_project_entities calls find no plausible same subject. Prefer existing project entity types; if a new type is needed, use a broad reusable non-structural type. properties is an object with concise natural-language fields such as summary/status/history/significance/claim/example; evidence is required for fact fields. Use {} for no properties and [] for no aliases."),
 
         AIFunctionFactory.Create(
             method: (string entityId, string? name = null, IngestObservationProperties? propertiesToSet = null, string[]? aliases = null, string? evidence = null, string? notes = null) =>
@@ -998,7 +998,8 @@ public sealed class IngestAgentTools(
         || string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
         || string.Equals(type, EntityTypeService.EventNodeType, StringComparison.OrdinalIgnoreCase)
         || string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase);
+        || string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeTypeKey(string input)
     {

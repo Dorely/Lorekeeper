@@ -155,6 +155,18 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
             .ThenBy(source => source.Id)
             .ToListAsync(cancellationToken);
 
+    public Task<List<IngestSourcePage>> ListSourcePagesAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
+        db.IngestSourcePages
+            .Where(page => page.SourceId == sourceId)
+            .OrderBy(page => page.PageNumber)
+            .ToListAsync(cancellationToken);
+
+    public Task<List<IngestSourceBlock>> ListSourceBlocksAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
+        db.IngestSourceBlocks
+            .Where(block => block.SourceId == sourceId)
+            .OrderBy(block => block.Index)
+            .ToListAsync(cancellationToken);
+
     public async Task<IngestSourceChunkExcerpt?> GetSourceChunkExcerptAsync(Guid sourceChunkId, int maxChars = 8_000, CancellationToken cancellationToken = default)
     {
         maxChars = Math.Clamp(maxChars, 1, 100_000);
@@ -237,6 +249,12 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
 
     public async Task AddSourceAsync(IngestSource source, CancellationToken cancellationToken = default) =>
         await db.IngestSources.AddAsync(source, cancellationToken);
+
+    public async Task AddSourcePageAsync(IngestSourcePage sourcePage, CancellationToken cancellationToken = default) =>
+        await db.IngestSourcePages.AddAsync(sourcePage, cancellationToken);
+
+    public async Task AddSourceBlockAsync(IngestSourceBlock sourceBlock, CancellationToken cancellationToken = default) =>
+        await db.IngestSourceBlocks.AddAsync(sourceBlock, cancellationToken);
 
     public async Task AddJobAsync(IngestJob job, CancellationToken cancellationToken = default) =>
         await db.IngestJobs.AddAsync(job, cancellationToken);

@@ -14,6 +14,7 @@ public sealed class EntityTypeService(
     public const string ProjectFactNodeType = "ProjectFact";
     public const string SourceNodeType = "Source";
     public const string SourceChunkNodeType = "SourceChunk";
+    public const string SourceBlockNodeType = "SourceBlock";
 
     private static readonly EntityTypeSeed[] Defaults =
     [
@@ -28,6 +29,8 @@ public sealed class EntityTypeService(
             DefaultProperties: new Dictionary<string, object?> { ["kind"] = string.Empty, ["description"] = string.Empty }),
         new(SourceChunkNodeType, "Source chunk", "Source chunks", true, false, -130,
             DefaultProperties: new Dictionary<string, object?> { ["summary"] = string.Empty, ["notes"] = string.Empty }),
+        new(SourceBlockNodeType, "Source block", "Source blocks", true, false, -120,
+            DefaultProperties: new Dictionary<string, object?> { ["locator"] = string.Empty, ["kind"] = string.Empty }),
         new(EventNodeType, "Beat", "Beats", true, true, -100,
             DefaultProperties: new Dictionary<string, object?> { ["summary"] = string.Empty }),
         new("Character", "Character", "Characters", false, false, 100,

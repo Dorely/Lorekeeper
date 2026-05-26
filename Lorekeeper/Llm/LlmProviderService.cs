@@ -42,6 +42,29 @@ public class LlmProviderService(
         return ChatProviderAvailability.Unavailable(reason, candidate);
     }
 
+    public async Task<VisionProviderAvailability> GetDefaultVisionProviderAvailabilityAsync(CancellationToken cancellationToken = default)
+    {
+        var all = await providers.GetAllAsync(cancellationToken);
+        if (all.Count == 0)
+            return VisionProviderAvailability.Unavailable("Configure and test a vision-capable provider in Settings > Providers to enable PDF image reading.");
+
+        var explicitDefault = all.FirstOrDefault(provider => provider.IsDefault);
+        if (explicitDefault is not null && await IsVisionProviderWorkingAsync(explicitDefault, cancellationToken))
+            return VisionProviderAvailability.Available(explicitDefault);
+
+        foreach (var provider in all.Where(provider => !provider.IsDefault))
+        {
+            if (await IsVisionProviderWorkingAsync(provider, cancellationToken))
+                return VisionProviderAvailability.Available(provider);
+        }
+
+        var candidate = explicitDefault ?? all.FirstOrDefault();
+        var reason = candidate is null
+            ? "Configure and test a vision-capable provider in Settings > Providers to enable PDF image reading."
+            : await GetVisionUnavailableReasonAsync(candidate, cancellationToken);
+        return VisionProviderAvailability.Unavailable(reason, candidate);
+    }
+
     public async Task<List<LlmProvider>> ListWorkingChatProvidersAsync(CancellationToken cancellationToken = default)
     {
         var all = await providers.GetAllAsync(cancellationToken);
@@ -55,10 +78,29 @@ public class LlmProviderService(
         return working;
     }
 
+    public async Task<List<LlmProvider>> ListWorkingVisionProvidersAsync(CancellationToken cancellationToken = default)
+    {
+        var all = await providers.GetAllAsync(cancellationToken);
+        var working = new List<LlmProvider>();
+        foreach (var provider in all)
+        {
+            if (await IsVisionProviderWorkingAsync(provider, cancellationToken))
+                working.Add(provider);
+        }
+
+        return working;
+    }
+
     public async Task<bool> IsChatProviderWorkingAsync(int providerId, CancellationToken cancellationToken = default)
     {
         var provider = await providers.GetByIdAsync(providerId, cancellationToken);
         return provider is not null && await IsChatProviderWorkingAsync(provider, cancellationToken);
+    }
+
+    public async Task<bool> IsVisionProviderWorkingAsync(int providerId, CancellationToken cancellationToken = default)
+    {
+        var provider = await providers.GetByIdAsync(providerId, cancellationToken);
+        return provider is not null && await IsVisionProviderWorkingAsync(provider, cancellationToken);
     }
 
     public async Task<bool> IsCodexConnectedAsync(CancellationToken cancellationToken = default)
@@ -90,6 +132,8 @@ public class LlmProviderService(
     {
         if (provider.LastChatTestSucceeded && !provider.HasCurrentChatTestSnapshot)
             provider.ClearChatReadiness("Provider settings changed. Run Test successfully before using this provider for chat.");
+        if (provider.LastVisionTestSucceeded && !provider.HasCurrentVisionTestSnapshot)
+            provider.ClearVisionReadiness("Provider settings changed. Run Test Vision successfully before using this provider for PDF image reading.");
 
         provider.UpdatedAt = DateTime.UtcNow;
         providers.Update(provider);
@@ -140,6 +184,32 @@ public class LlmProviderService(
         return target;
     }
 
+    public async Task<LlmProvider> MarkVisionTestSucceededAsync(LlmProvider provider, CancellationToken cancellationToken = default)
+    {
+        var target = await ResolvePersistedProviderForTestAsync(provider, cancellationToken);
+        target.MarkVisionTestSucceeded(DateTime.UtcNow);
+        if (target.Id == 0)
+            return target;
+
+        target.UpdatedAt = DateTime.UtcNow;
+        providers.Update(target);
+        await providers.SaveChangesAsync(cancellationToken);
+        return target;
+    }
+
+    public async Task<LlmProvider> MarkVisionTestFailedAsync(LlmProvider provider, string error, CancellationToken cancellationToken = default)
+    {
+        var target = await ResolvePersistedProviderForTestAsync(provider, cancellationToken);
+        target.MarkVisionTestFailed(error, DateTime.UtcNow);
+        if (target.Id == 0)
+            return target;
+
+        target.UpdatedAt = DateTime.UtcNow;
+        providers.Update(target);
+        await providers.SaveChangesAsync(cancellationToken);
+        return target;
+    }
+
     public async Task<string?> GetEffectiveApiKeyAsync(int providerId, CancellationToken cancellationToken = default)
     {
         var provider = await providers.GetByIdAsync(providerId, cancellationToken);
@@ -170,6 +240,15 @@ public class LlmProviderService(
         return credentials.Available;
     }
 
+    private async Task<bool> IsVisionProviderWorkingAsync(LlmProvider provider, CancellationToken cancellationToken)
+    {
+        if (!provider.HasCurrentVisionTestSnapshot)
+            return false;
+
+        var credentials = await GetCredentialStatusAsync(provider, cancellationToken);
+        return credentials.Available;
+    }
+
     private async Task<string> GetUnavailableReasonAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
         if (!provider.LastChatTestSucceeded)
@@ -181,6 +260,24 @@ public class LlmProviderService(
 
         if (!provider.HasCurrentChatTestSnapshot)
             return "Provider settings changed. Run Test successfully in Settings > Providers to enable LLM features.";
+
+        var credentials = await GetCredentialStatusAsync(provider, cancellationToken);
+        return credentials.Available
+            ? string.Empty
+            : credentials.Message;
+    }
+
+    private async Task<string> GetVisionUnavailableReasonAsync(LlmProvider provider, CancellationToken cancellationToken)
+    {
+        if (!provider.LastVisionTestSucceeded)
+        {
+            return string.IsNullOrWhiteSpace(provider.LastVisionTestError)
+                ? "Run Test Vision successfully in Settings > Providers to enable PDF image reading."
+                : $"The last provider vision test failed: {provider.LastVisionTestError}";
+        }
+
+        if (!provider.HasCurrentVisionTestSnapshot)
+            return "Provider settings changed. Run Test Vision successfully in Settings > Providers to enable PDF image reading.";
 
         var credentials = await GetCredentialStatusAsync(provider, cancellationToken);
         return credentials.Available

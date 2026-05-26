@@ -40,6 +40,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<EditorContextPreference> EditorContextPreferences => Set<EditorContextPreference>();
     public DbSet<IngestSource> IngestSources => Set<IngestSource>();
     public DbSet<IngestSourceChunk> IngestSourceChunks => Set<IngestSourceChunk>();
+    public DbSet<IngestSourcePage> IngestSourcePages => Set<IngestSourcePage>();
+    public DbSet<IngestSourceBlock> IngestSourceBlocks => Set<IngestSourceBlock>();
     public DbSet<IngestVectorFragment> IngestVectorFragments => Set<IngestVectorFragment>();
     public DbSet<IngestJob> IngestJobs => Set<IngestJob>();
     public DbSet<IngestJobChunk> IngestJobChunks => Set<IngestJobChunk>();
@@ -340,6 +342,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasIndex(e => e.Name).IsUnique();
             entity.Property(e => e.AuthType).HasConversion<string>();
             entity.Property(e => e.LastChatTestAuthType).HasConversion<string>();
+            entity.Property(e => e.LastVisionTestAuthType).HasConversion<string>();
 
             entity.HasOne(e => e.CredentialSource)
                 .WithMany(e => e.ChildModels)
@@ -446,6 +449,34 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
                 .WithMany(s => s.SourceChunks)
                 .HasForeignKey(e => e.SourceId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<IngestSourcePage>(entity =>
+        {
+            entity.HasIndex(e => new { e.SourceId, e.PageNumber }).IsUnique();
+            entity.HasIndex(e => new { e.SourceId, e.StartChar });
+
+            entity.HasOne(e => e.Source)
+                .WithMany(s => s.SourcePages)
+                .HasForeignKey(e => e.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<IngestSourceBlock>(entity =>
+        {
+            entity.HasIndex(e => new { e.SourceId, e.Index }).IsUnique();
+            entity.HasIndex(e => new { e.SourceId, e.StartChar });
+            entity.HasIndex(e => e.SourcePageId);
+
+            entity.HasOne(e => e.Source)
+                .WithMany(s => s.SourceBlocks)
+                .HasForeignKey(e => e.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SourcePage)
+                .WithMany(p => p.Blocks)
+                .HasForeignKey(e => e.SourcePageId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<IngestVectorFragment>(entity =>
