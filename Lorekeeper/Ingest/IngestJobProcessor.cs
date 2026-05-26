@@ -277,9 +277,16 @@ public sealed class IngestJobProcessor(
             .OrderBy(item => item.ResourceType, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var touchedEntityIds = touchedEntities
+            .Select(item => item.EntityId!.Value)
+            .ToHashSet();
+        var finalizedEntityIds = new HashSet<Guid>();
 
         if (touchedEntities.Count == 0)
+        {
+            await MarkRemainingFinalizedReportItemsDeletedAsync(job.Id, cancellationToken);
             return true;
+        }
 
         await ingest.AddEventAsync(new IngestJobEvent
         {
@@ -336,9 +343,14 @@ public sealed class IngestJobProcessor(
                     _ = await RunFinalReviewConversationAsync(job, context, chat, maxIterations, attempt, maxAttempts, cancellationToken);
                     if (!mutated)
                         throw new InvalidOperationException($"Final source review for {entityTitle} completed without calling write_ingest_source_wiki_section.");
+                    await MarkFinalizedEntityReportItemsDeletedAsync(
+                        job.Id,
+                        entityId,
+                        touchedEntityIds,
+                        finalizedEntityIds,
+                        cancellationToken);
                     NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnCompleted(entityId, -1, liveTitle));
-                    if (mutated)
-                        Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
+                    Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
                     break;
                 }
                 catch (Exception ex) when (IsRetryableLlmFailure(ex, cancellationToken) && attempt < maxAttempts)
@@ -376,6 +388,7 @@ public sealed class IngestJobProcessor(
             }
         }
 
+        await MarkRemainingFinalizedReportItemsDeletedAsync(job.Id, cancellationToken);
         await ingest.AddEventAsync(new IngestJobEvent
         {
             JobId = job.Id,
@@ -387,6 +400,54 @@ public sealed class IngestJobProcessor(
         await ingest.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
         return true;
+    }
+
+    private async Task MarkFinalizedEntityReportItemsDeletedAsync(
+        Guid jobId,
+        Guid entityId,
+        IReadOnlySet<Guid> touchedEntityIds,
+        ISet<Guid> finalizedEntityIds,
+        CancellationToken cancellationToken)
+    {
+        finalizedEntityIds.Add(entityId);
+        var reportItems = await ingest.ListReportItemsAsync(jobId, cancellationToken);
+        var changed = false;
+
+        foreach (var item in reportItems.Where(item => item.Status == IngestReportItemStatus.Active))
+        {
+            if (item.Kind == IngestReportItemKind.Entity && item.EntityId == entityId)
+            {
+                MarkReportItemDeleted(item);
+                changed = true;
+                continue;
+            }
+
+            if (item.Kind != IngestReportItemKind.Relationship) continue;
+            if (!TryReadRelationshipEndpointIds(item.PayloadJson, out var endpointIds)) continue;
+            if (!endpointIds.Contains(entityId)) continue;
+            if (endpointIds.All(endpointId => !touchedEntityIds.Contains(endpointId) || finalizedEntityIds.Contains(endpointId)))
+            {
+                MarkReportItemDeleted(item);
+                changed = true;
+            }
+        }
+
+        if (changed)
+            await ingest.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task MarkRemainingFinalizedReportItemsDeletedAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        var reportItems = await ingest.ListReportItemsAsync(jobId, cancellationToken);
+        var changed = false;
+        foreach (var item in reportItems.Where(item => item.Status == IngestReportItemStatus.Active))
+        {
+            MarkReportItemDeleted(item);
+            changed = true;
+        }
+
+        if (changed)
+            await ingest.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<string?> RunChunkConversationAsync(
@@ -1396,6 +1457,43 @@ public sealed class IngestJobProcessor(
 
     private static bool IsFinalReviewWriteTool(string toolName) =>
         string.Equals(toolName, "write_ingest_source_wiki_section", StringComparison.Ordinal);
+
+    private static void MarkReportItemDeleted(IngestReportItem item)
+    {
+        item.Status = IngestReportItemStatus.Deleted;
+        item.DeletedAt = DateTime.UtcNow;
+        item.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private static bool TryReadRelationshipEndpointIds(string payloadJson, out IReadOnlyList<Guid> endpointIds)
+    {
+        endpointIds = [];
+        if (string.IsNullOrWhiteSpace(payloadJson) || !payloadJson.TrimStart().StartsWith('{')) return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payloadJson);
+            var ids = new List<Guid>(2);
+            AddEndpointId(doc.RootElement, "fromEntityId", ids);
+            AddEndpointId(doc.RootElement, "toEntityId", ids);
+            endpointIds = ids.Distinct().ToArray();
+            return endpointIds.Count > 0;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static void AddEndpointId(JsonElement element, string propertyName, ICollection<Guid> ids)
+    {
+        if (element.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.String
+            && Guid.TryParse(property.GetString(), out var parsed))
+        {
+            ids.Add(parsed);
+        }
+    }
 
     private static List<AIContent> BuildAssistantContents(string text, IReadOnlyList<PendingChunkToolCall> calls)
     {

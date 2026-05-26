@@ -101,11 +101,29 @@ public static class IngestSourceAssertions
         Guid sourceId) =>
         RemoveSource(properties, RelationshipAssertionsProperty, sourceId);
 
+    public static IngestAssertionRemovalResult RemoveEntityChunk(
+        IDictionary<string, object?> properties,
+        Guid sourceId,
+        Guid sourceChunkId) =>
+        RemoveChunk(properties, EntityAssertionsProperty, sourceId, sourceChunkId);
+
+    public static IngestAssertionRemovalResult RemoveRelationshipChunk(
+        IDictionary<string, object?> properties,
+        Guid sourceId,
+        Guid sourceChunkId) =>
+        RemoveChunk(properties, RelationshipAssertionsProperty, sourceId, sourceChunkId);
+
     public static int CountEntitySources(IReadOnlyDictionary<string, object?> properties) =>
         CountSources(properties, EntityAssertionsProperty);
 
     public static int CountRelationshipSources(IReadOnlyDictionary<string, object?> properties) =>
         CountSources(properties, RelationshipAssertionsProperty);
+
+    public static int CountEntitySourceChunks(IReadOnlyDictionary<string, object?> properties, Guid sourceId) =>
+        CountSourceChunks(properties, EntityAssertionsProperty, sourceId);
+
+    public static int CountRelationshipSourceChunks(IReadOnlyDictionary<string, object?> properties, Guid sourceId) =>
+        CountSourceChunks(properties, RelationshipAssertionsProperty, sourceId);
 
     public static bool ContainsEntitySource(IReadOnlyDictionary<string, object?> properties, Guid sourceId) =>
         ContainsSource(properties, EntityAssertionsProperty, sourceId);
@@ -219,6 +237,44 @@ public static class IngestSourceAssertions
         return Guid.TryParse(sourceId, out var parsed) ? parsed : null;
     }
 
+    public static Guid? ReadPayloadSourceChunkId(string payloadJson)
+    {
+        if (!LooksLikeJsonRoot(payloadJson, '{')) return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payloadJson);
+            if (doc.RootElement.TryGetProperty("sourceChunkId", out var sourceChunkId)
+                && sourceChunkId.ValueKind == JsonValueKind.String
+                && Guid.TryParse(sourceChunkId.GetString(), out var parsed)
+                && parsed != Guid.Empty)
+            {
+                return parsed;
+            }
+
+            if (doc.RootElement.TryGetProperty("sourceChunkIds", out var sourceChunkIds)
+                && sourceChunkIds.ValueKind == JsonValueKind.Array)
+            {
+                var parsedIds = sourceChunkIds
+                    .EnumerateArray()
+                    .Where(element => element.ValueKind == JsonValueKind.String)
+                    .Select(element => Guid.TryParse(element.GetString(), out var id) ? id : (Guid?)null)
+                    .Where(id => id is not null && id != Guid.Empty)
+                    .Select(id => id!.Value)
+                    .Distinct()
+                    .Take(2)
+                    .ToList();
+                return parsedIds.Count == 1 ? parsedIds[0] : null;
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
     public static string? ReadEntityGraphAction(string payloadJson) =>
         TryReadPayloadString(payloadJson, EntityGraphActionProperty, out var action) ? action : null;
 
@@ -311,10 +367,46 @@ public static class IngestSourceAssertions
         return new IngestAssertionRemovalResult(removed, document.Sources.Count);
     }
 
+    private static IngestAssertionRemovalResult RemoveChunk(
+        IDictionary<string, object?> properties,
+        string propertyKey,
+        Guid sourceId,
+        Guid sourceChunkId)
+    {
+        var document = ReadDocument(ReadRaw(properties, propertyKey));
+        var sourceKey = SourceKey(sourceId);
+        if (!document.Sources.TryGetValue(sourceKey, out var source))
+            return new IngestAssertionRemovalResult(false, document.Sources.Count);
+
+        var removed = source.Chunks.Remove(ChunkKey(sourceChunkId));
+        if (!removed)
+            return new IngestAssertionRemovalResult(false, document.Sources.Count);
+
+        if (source.Chunks.Count == 0)
+            document.Sources.Remove(sourceKey);
+        else
+            source.UpdatedAt = DateTime.UtcNow;
+
+        if (document.Sources.Count == 0)
+            properties.Remove(propertyKey);
+        else
+            properties[propertyKey] = Serialize(document);
+
+        return new IngestAssertionRemovalResult(true, document.Sources.Count);
+    }
+
     private static int CountSources(IReadOnlyDictionary<string, object?> properties, string propertyKey)
     {
         var document = ReadDocument(ReadRaw(properties, propertyKey));
         return document.Sources.Count;
+    }
+
+    private static int CountSourceChunks(IReadOnlyDictionary<string, object?> properties, string propertyKey, Guid sourceId)
+    {
+        var document = ReadDocument(ReadRaw(properties, propertyKey));
+        return document.Sources.TryGetValue(SourceKey(sourceId), out var source)
+            ? source.Chunks.Count
+            : 0;
     }
 
     private static bool ContainsSource(IReadOnlyDictionary<string, object?> properties, string propertyKey, Guid sourceId)

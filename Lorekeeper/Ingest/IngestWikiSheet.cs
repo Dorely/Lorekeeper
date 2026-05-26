@@ -154,8 +154,9 @@ public static class IngestWikiSheet
                         .ToList(),
                 })
                 .ToList();
-            changed = nextSections.Where((section, index) => section.Citations.Count != sections[index].Citations.Count).Any();
-            if (changed)
+            var citationsChanged = nextSections.Where((section, index) => section.Citations.Count != sections[index].Citations.Count).Any();
+            changed = changed || citationsChanged;
+            if (citationsChanged)
                 properties[WikiSectionsProperty] = JsonSerializer.Serialize(nextSections, JsonOptions);
         }
 
@@ -164,6 +165,49 @@ public static class IngestWikiSheet
         {
             var next = relationshipCitations
                 .Where(citation => !string.Equals(citation.SourceId, sourceKey, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (next.Count != relationshipCitations.Count)
+            {
+                properties[RelationshipCitationsProperty] = JsonSerializer.Serialize(next, JsonOptions);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    public static bool RemoveSourceChunkCitations(
+        IDictionary<string, object?> properties,
+        Guid sourceId,
+        Guid sourceChunkId,
+        bool removeSourceWikiSection)
+    {
+        var changed = removeSourceWikiSection && RemoveSourceWikiSection(properties, sourceId);
+        var sourceKey = sourceId.ToString("N");
+        var sourceChunkKey = sourceChunkId.ToString("N");
+
+        var sections = ReadSections(AsReadOnly(properties));
+        if (sections.Count > 0)
+        {
+            var nextSections = sections
+                .Select(section => section with
+                {
+                    Citations = section.Citations
+                        .Where(citation => !CitationMatchesChunk(citation, sourceKey, sourceChunkKey))
+                        .ToList(),
+                })
+                .ToList();
+            var citationsChanged = nextSections.Where((section, index) => section.Citations.Count != sections[index].Citations.Count).Any();
+            changed = changed || citationsChanged;
+            if (citationsChanged)
+                properties[WikiSectionsProperty] = JsonSerializer.Serialize(nextSections, JsonOptions);
+        }
+
+        var relationshipCitations = ReadRelationshipCitations(AsReadOnly(properties));
+        if (relationshipCitations.Count > 0)
+        {
+            var next = relationshipCitations
+                .Where(citation => !CitationMatchesChunk(citation, sourceKey, sourceChunkKey))
                 .ToList();
             if (next.Count != relationshipCitations.Count)
             {
@@ -340,6 +384,10 @@ public static class IngestWikiSheet
 
     private static string CitationKey(IngestWikiCitation citation) =>
         $"{citation.SourceId}|{citation.SourceChunkId}|{citation.SourceBlockId}|{citation.PageNumber}|{citation.Locator}";
+
+    private static bool CitationMatchesChunk(IngestWikiCitation citation, string sourceKey, string sourceChunkKey) =>
+        string.Equals(citation.SourceId, sourceKey, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(citation.SourceChunkId, sourceChunkKey, StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeSectionId(string? id, string title, int index)
     {
