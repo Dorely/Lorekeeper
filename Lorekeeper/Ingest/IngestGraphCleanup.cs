@@ -50,6 +50,7 @@ public sealed class IngestGraphCleanup(
             .Where(edge => edgeActions.ContainsKey(edge.Id) || IngestSourceAssertions.ContainsRelationshipSource(edge.Properties, sourceId))
             .ToList())
         {
+            var wikiChanged = IngestWikiSheet.RemoveSourceCitations(edge.Properties, sourceId);
             var removal = IngestSourceAssertions.ContainsRelationshipSource(edge.Properties, sourceId)
                 ? IngestSourceAssertions.RemoveRelationshipSource(edge.Properties, sourceId)
                 : new IngestAssertionRemovalResult(false, IngestSourceAssertions.CountRelationshipSources(edge.Properties));
@@ -62,7 +63,7 @@ public sealed class IngestGraphCleanup(
                 deletedEdgeIds.Add(edge.Id);
                 edgesDeleted++;
             }
-            else if (removal.Removed)
+            else if (removal.Removed || wikiChanged)
             {
                 AddEdgeEndpointContextEntityIds(edge, nodeById, entityIdsToReindex);
                 edge.UpdatedAt = DateTime.UtcNow;
@@ -76,6 +77,7 @@ public sealed class IngestGraphCleanup(
             .Where(node => nodeActions.ContainsKey(node.Id) || IngestSourceAssertions.ContainsEntitySource(node.Properties, sourceId))
             .ToList())
         {
+            var wikiChanged = IngestWikiSheet.RemoveSourceCitations(node.Properties, sourceId);
             var removal = IngestSourceAssertions.ContainsEntitySource(node.Properties, sourceId)
                 ? IngestSourceAssertions.RemoveEntitySource(node.Properties, sourceId)
                 : new IngestAssertionRemovalResult(false, IngestSourceAssertions.CountEntitySources(node.Properties));
@@ -87,7 +89,7 @@ public sealed class IngestGraphCleanup(
                 await graphStore.RemoveNodeAsync(node.Id, cancellationToken);
                 nodesDeleted++;
             }
-            else if (removal.Removed)
+            else if (removal.Removed || wikiChanged)
             {
                 AddContextEntityId(node, entityIdsToReindex);
                 node.UpdatedAt = DateTime.UtcNow;
@@ -183,6 +185,8 @@ public sealed class IngestGraphCleanup(
             return false;
         if (IngestSourceAssertions.CountEntitySources(node.Properties) > 0)
             return false;
+        if (IngestWikiSheet.HasCitations(node.Properties))
+            return false;
         if (HasCanonicalProperties(node.Properties))
             return false;
 
@@ -195,6 +199,8 @@ public sealed class IngestGraphCleanup(
         if (!CanRemovePotentiallyIngestCreatedObject(edge.Properties, graphAction, IngestSourceAssertions.CreatedEdgeAction))
             return false;
         if (IngestSourceAssertions.CountRelationshipSources(edge.Properties) > 0)
+            return false;
+        if (IngestWikiSheet.HasCitations(edge.Properties))
             return false;
         return !HasCanonicalProperties(edge.Properties);
     }
@@ -209,7 +215,8 @@ public sealed class IngestGraphCleanup(
     private static bool HasCanonicalProperties(IReadOnlyDictionary<string, object?> properties) =>
         properties.Keys.Any(key => !IsInternalProperty(key)
             && !IngestSourceAssertions.IsProtectedProperty(key)
-            && !IngestSourceAssertions.IsLegacyIngestProperty(key));
+            && !IngestSourceAssertions.IsLegacyIngestProperty(key)
+            && !IngestWikiSheet.IsWikiStorageProperty(key));
 
     private static bool IsInternalProperty(string key) =>
         string.Equals(key, "sourceType", StringComparison.OrdinalIgnoreCase)

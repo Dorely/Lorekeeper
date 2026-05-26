@@ -73,7 +73,7 @@
                                     @onclick="() => OpenModalAsync(e)">@e.Name</button>
                             @if (e.IngestSourceCount > 0)
                             {
-                                <div class="entities-item-meta small">@e.IngestSourceCount source@(PluralSuffix(e.IngestSourceCount)) - @e.IngestObservationCount observation@(PluralSuffix(e.IngestObservationCount))</div>
+                                <div class="entities-item-meta small">@e.IngestSourceCount source@(PluralSuffix(e.IngestSourceCount))</div>
                             }
                             @if (EntitySubtitle(e) is { Length: > 0 } subtitle)
                             {
@@ -139,8 +139,7 @@
                         </div>
                     </div>
 
-                    @RenderEntityFactSheet(_modalEntity.IngestObservations)
-                    @RenderIngestObservations(_modalEntity.IngestObservations, "Raw ingest observations")
+                    @RenderWikiSheet(_modalEntity.Summary, _modalEntity.Aliases, _modalEntity.WikiSections)
 
                     <div class="mb-0">
                         <label class="form-label small text-muted">Links</label>
@@ -168,12 +167,16 @@
                                         {
                                             <span class="entities-modal-link-badge">ingest</span>
                                         }
-                                        @if (link.IngestObservations.Count > 0)
+                                        @if (!string.IsNullOrWhiteSpace(link.Summary) || link.RelationshipCitations.Count > 0)
                                         {
                                             <div class="entities-modal-link-observations">
-                                                @foreach (var observation in link.IngestObservations.Take(3))
+                                                @if (!string.IsNullOrWhiteSpace(link.Summary))
                                                 {
-                                                    <div><strong>@observation.SourceTitle:</strong> @ObservationPreview(observation)</div>
+                                                    <div>@link.Summary</div>
+                                                }
+                                                @foreach (var citation in link.RelationshipCitations.Take(3))
+                                                {
+                                                    <div><strong>@citation.SourceTitle:</strong> @IngestWikiSheet.CitationPreview(citation)</div>
                                                 }
                                             </div>
                                         }
@@ -425,35 +428,35 @@
     private static int RowsFor(string value) =>
         Math.Clamp(1 + value.Count(c => c == '\n'), 2, 10);
 
-    private RenderFragment RenderEntityFactSheet(IReadOnlyList<IngestSourceObservation> observations) => @<div>
-        @{
-            var factSheet = IngestSourceAssertions.BuildFactSheet(observations);
-        }
-        @if (factSheet.Fields.Count > 0 || factSheet.Aliases.Count > 0)
+    private RenderFragment RenderWikiSheet(string summary, IReadOnlyList<string> aliases, IReadOnlyList<IngestWikiSection> sections) => @<div>
+        @if (!string.IsNullOrWhiteSpace(summary) || aliases.Count > 0 || sections.Count > 0)
         {
             <div class="entities-modal-facts mb-3">
-                <label class="form-label small text-muted">Source-grounded fact sheet</label>
-                @if (factSheet.Aliases.Count > 0)
+                <label class="form-label small text-muted">Wiki sheet</label>
+                @if (!string.IsNullOrWhiteSpace(summary))
                 {
-                    <div class="entities-modal-fact-aliases"><span>Aliases</span><strong>@string.Join(", ", factSheet.Aliases)</strong></div>
+                    <article class="entities-modal-fact">
+                        <div class="entities-modal-fact-head">Summary</div>
+                        <p>@summary</p>
+                    </article>
+                }
+                @if (aliases.Count > 0)
+                {
+                    <div class="entities-modal-fact-aliases"><span>Aliases</span><strong>@string.Join(", ", aliases)</strong></div>
                 }
                 <div class="entities-modal-fact-list">
-                    @foreach (var field in factSheet.Fields)
+                    @foreach (var wikiSection in sections)
                     {
-                        <article class="entities-modal-fact" @key="field.Key">
-                            <div class="entities-modal-fact-head">@field.Label</div>
-                            <p>@field.Value</p>
-                            @foreach (var evidence in field.Evidence.Take(3))
+                        <article class="entities-modal-fact" @key="wikiSection.Id">
+                            <div class="entities-modal-fact-head">@wikiSection.Title</div>
+                            <p>@wikiSection.Body</p>
+                            @foreach (var citation in wikiSection.Citations.Take(3))
                             {
-                                <div class="entities-modal-fact-evidence" @key="FactEvidenceKey(field, evidence)">
-                                    <div><strong>@evidence.SourceTitle</strong> <span>@evidence.SourceKind</span> <span>chunk @(evidence.SourceChunkIndex + 1)</span></div>
-                                    @if (!string.IsNullOrWhiteSpace(evidence.Evidence))
+                                <div class="entities-modal-fact-evidence" @key="CitationKey(citation)">
+                                    <div><strong>@citation.SourceTitle</strong> <span>@citation.SourceKind</span> <span>chunk @(citation.SourceChunkIndex + 1)</span></div>
+                                    @if (!string.IsNullOrWhiteSpace(citation.Snippet))
                                     {
-                                        <blockquote>@evidence.Evidence</blockquote>
-                                    }
-                                    else if (!string.IsNullOrWhiteSpace(evidence.Summary))
-                                    {
-                                        <blockquote>@evidence.Summary</blockquote>
+                                        <blockquote>@citation.Snippet</blockquote>
                                     }
                                 </div>
                             }
@@ -510,21 +513,14 @@
 
     private static string EntitySubtitle(StoryEntity entity)
     {
+        if (!string.IsNullOrWhiteSpace(entity.Summary))
+            return entity.Summary;
         if (entity.Properties.TryGetValue("description", out var description) && !string.IsNullOrWhiteSpace(description))
             return description;
         if (entity.Properties.TryGetValue("role", out var role) && !string.IsNullOrWhiteSpace(role))
             return role;
 
-        var factSheet = IngestSourceAssertions.BuildFactSheet(entity.IngestObservations);
-        foreach (var key in new[] { "summary", "role", "description", "significance", "details" })
-        {
-            var field = factSheet.Fields.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.OrdinalIgnoreCase));
-            if (field is not null && !string.IsNullOrWhiteSpace(field.Value))
-                return field.Value;
-        }
-
-        return entity.IngestObservations.Select(ObservationPreview).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
-            ?? entity.IngestSources.Select(source => source.Summary).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+        return entity.WikiSections.Select(section => section.Body).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
             ?? string.Empty;
     }
 
@@ -537,8 +533,8 @@
     private static string ObservationKey(IngestSourceObservation observation) =>
         $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
 
-    private static string FactEvidenceKey(IngestFactSheetField field, IngestFactSheetEvidence evidence) =>
-        $"{field.Key}:{evidence.SourceId}:{evidence.SourceChunkId}:{evidence.UpdatedAt:o}";
+    private static string CitationKey(IngestWikiCitation citation) =>
+        $"{citation.SourceId}:{citation.SourceChunkId}:{citation.SourceBlockId}:{citation.PageNumber}:{citation.Locator}:{citation.Snippet}";
 
     private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
 

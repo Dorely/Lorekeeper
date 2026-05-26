@@ -29,35 +29,34 @@ public sealed class IngestJobProcessor(
     private const string _systemPrompt = """
         You are an ingestion extraction agent for Lorekeeper.
 
-        Your job is to read the current source chunk, which may or may not be part of a larger document, and record source-scoped, evidence-backed fact sheets on the project graph.
+        Your job is to read the current source chunk, which may or may not be part of a larger document, and build durable wiki-style entity sheets on the project graph.
         You may link to existing non-structural project entities when the source clearly refers to the same thing.
-        Do not rewrite canonical project entity properties. Extracted facts, aliases, evidence, and source notes belong in source-scoped assertions recorded by the ingest tools.
-        Prefer fewer, stronger story entities over duplicate nodes for titles, aliases, partial names, or alternate spellings. Entity data should be useful for later retrieval and writing; it should read like a concise fact sheet, not like extraction process notes.
+        Prefer fewer, stronger entities over duplicate nodes for titles, aliases, partial names, or alternate spellings. Entity data should be useful for later retrieval and writing; it should read like an organized wiki sheet, not extraction notes.
 
         Adapt what counts as an entity to the source and the project. Fiction, science fiction, and fantasy sources should preserve story and setting continuity: characters, places, cultures, factions, artifacts, magic/technology, histories, rules, recurring terms, and relationships. Nonfiction and research sources should preserve concepts, people, events, examples, methods, terms, claims, evidence, and arguments. Use the project type palette first, then create broad useful non-structural types only when the source needs them.
 
-        A useful fact sheet captures the source-grounded information the current project would need later: identity, role, status, affiliation, history, motivation, significance, setting/world-building details, factual claims, examples, relationships, and evidence. Record complete natural-language facts, not empty schema fields.
+        A useful wiki sheet captures the source-grounded information the current project would need later: identity, role, status, affiliation, history, motivation, significance, setting/world-building details, factual claims, examples, relationships, and evidence. Store this as summary, aliases, and ordered wiki sections with compact citations.
 
         Process rules:
-        - Call list_job_entities before creating or linking entities, and compare each source mention against the same-job roster first.
+        - Start from the compact touched-entity index in the prompt. It is only an identity hint; read a full sheet before updating it.
         - Before every create_ingest_entity call, call search_project_entities for the source mention and its likely variants.
         - Treat search_project_entities results as candidate matches for your judgment, not automatic identity decisions. A shared title, honorific, role, epithet, or semantic similarity is not enough by itself to reuse or update an entity.
         - Search broadly, not just exactly: use the canonical singular type plus the exact mention, base name with titles/honorifics removed, known aliases, surnames, epithets, alternate spellings, and descriptive terms from the local context. For example, "Prince Kael'thas" should search both "Prince Kael'thas" and "Kael'thas".
         - Treat title/honorific differences, punctuation/case differences, shortened names, aliases, and obvious same-subject references as the same entity when the source context supports it.
-        - Do not create an entity when list_job_entities or search_project_entities returns a clear same subject with matching names, aliases, or source-grounded identity details. Use update_ingest_entity or record_existing_entity_observation instead.
+        - Do not create an entity when the touched-entity index or search_project_entities returns a clear same subject with matching names, aliases, or source-grounded identity details. Use read_entity_sheet and update_ingest_entity_sheet instead.
         - Do not update an existing entity just because it is semantically similar to the current source chunk. Update it only when the chunk explicitly supports a fact about that same entity.
-        - Use record_existing_entity_observation when a source mention matches an existing project entity.
-        - Use update_ingest_entity when a source mention matches an entity already touched by this ingest job.
+        - Use read_entity_sheet before updating any existing or already-touched entity.
+        - Use update_ingest_entity_sheet when a source mention matches an existing project entity or a same-job entity.
         - Create a new entity only when no existing project entity or same-job entity matches after variant searches. The tool will reject duplicate names; treat that as instruction to reuse the returned/existing entity.
         - Use canonical singular entity type keys from the known project entity types. Do not invent plural, lowercase, or near-duplicate categories such as "characters", "Characters", "locations", or "organisations" when an existing project type reasonably fits.
         - If a new type is needed, choose a broad stable type name. Prefer reusable categories such as Culture, Faction, Artifact, Magic, Technology, Lore, Concept, Person, Event, Example, Claim, Term, or Method over one-off labels.
-        - Keep recurring source observations current. If a character appears again later with new history, status, aliases, relationships, or role details, update the source assertion for the existing entity.
-        - Use the properties object for practical, readable fact-sheet fields such as summary, description, role, status, affiliation, history, motivation, significance, relationship, or details. Avoid empty schema-filling; prefer concise natural-language values that will help a writer understand and retrieve the entity later.
-        - Pass tool objects and arrays directly. Do not serialize properties or aliases into JSON strings; use {} for no properties and [] for no aliases.
-        - Use evidence from the current source chunk for every non-trivial fact. Evidence may be a short quote or a close summary of the supporting sentence or paragraph. Do not invent facts.
+        - Keep recurring sheets current. If a character, place, concept, faction, or other entity appears again with new information, rewrite the relevant sheet sections so the page remains organized and current.
+        - The summary field is required and should remain concise. Wiki sections can be larger, but they should be structured for later reading and retrieval.
+        - Pass tool objects and arrays directly. Do not serialize aliases, wiki sections, or citations into JSON strings; use [] for no aliases or no sections.
+        - Use compact citations from the current source chunk for non-trivial facts. Citations may include sourceBlockId, pageNumber, locator, and a short quote or close summary snippet. Do not invent facts.
         - Never record statements such as "the page did not mention this", "not enough information", "semantically similar", or any other rationale for why an unsupported update was attempted. If the source does not support a fact, skip that fact.
-        - Link only entities already touched by this ingest job using link_ingest_entities. If an endpoint is an existing project entity, record an observation on it first.
-        - Finish each source chunk by calling record_source_chunk_notes with a concise summary.
+        - Link only entities already touched by this ingest job using link_ingest_entities. If an endpoint is an existing project entity, update its sheet first.
+        - Finish each source chunk by calling update_ingest_source_progress exactly once with the completed chunk summary and the rolling source synopsis. Keep the rolling source synopsis around 1500 words.
         """;
 
     public async Task RunAsync(Guid jobId, CancellationToken cancellationToken = default)
@@ -182,7 +181,7 @@ public sealed class IngestJobProcessor(
                     OnMutated: () => mutated = true);
 
                 NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnStarted(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, attempt, maxAttempts));
-                finalText = await RunChunkConversationAsync(job, sourceChunk, context, chat, maxIterations, cancellationToken);
+                finalText = await RunChunkConversationAsync(job, sourceChunk, context, chat, maxIterations, attempt, maxAttempts, cancellationToken);
                 NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnCompleted(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title));
                 break;
             }
@@ -254,6 +253,8 @@ public sealed class IngestJobProcessor(
         IngestAgentContext context,
         IChatClient chat,
         int maxIterations,
+        int attempt,
+        int maxAttempts,
         CancellationToken cancellationToken)
     {
         var aiTools = tools.Build(context);
@@ -266,7 +267,7 @@ public sealed class IngestJobProcessor(
         var messages = new List<ChatMessage>
         {
             new(ChatRole.System, _systemPrompt),
-            new(ChatRole.User, await BuildChunkPromptAsync(job, sourceChunk, cancellationToken)),
+            new(ChatRole.User, await BuildChunkPromptAsync(job, sourceChunk, attempt, maxAttempts, cancellationToken)),
         };
 
         string? finalText = null;
@@ -466,14 +467,19 @@ public sealed class IngestJobProcessor(
         return defaultProvider;
     }
 
-    private async Task<string> BuildChunkPromptAsync(IngestJob job, IngestSourceChunk sourceChunk, CancellationToken cancellationToken)
+    private async Task<string> BuildChunkPromptAsync(
+        IngestJob job,
+        IngestSourceChunk sourceChunk,
+        int attempt,
+        int maxAttempts,
+        CancellationToken cancellationToken)
     {
         var sourceText = job.Source.SourceText;
         var start = Math.Clamp(sourceChunk.StartChar, 0, sourceText.Length);
         var end = Math.Clamp(sourceChunk.EndChar, start, sourceText.Length);
         var currentText = sourceText[start..end];
-        var entityRoster = await BuildEntityRosterAsync(job.Id, cancellationToken);
-        var previousSummaries = await BuildPreviousSummariesAsync(job, sourceChunk.Index, cancellationToken);
+        var entityRoster = await BuildTouchedEntityIndexAsync(job.Id, cancellationToken);
+        var chunkProgress = BuildChunkProgressMap(job);
         var knownEntityTypes = await BuildKnownEntityTypesAsync(job.ProjectId, cancellationToken);
         var extractionProfile = BuildExtractionProfilePrompt(job);
         var sourceLocators = await BuildSourceLocatorsAsync(job.SourceId, sourceChunk, cancellationToken);
@@ -488,16 +494,24 @@ public sealed class IngestJobProcessor(
             User extraction instructions:
             {{job.Instructions}}
 
+            Rolling source synopsis:
+            {{(string.IsNullOrWhiteSpace(job.Source.Synopsis) ? "None yet." : job.Source.Synopsis.Trim())}}
+
+            Current ingest step:
+            - Processing chunk {{sourceChunk.Index + 1}} of {{job.TotalSourceChunks}}
+            - Current phase: source-grounded wiki-sheet extraction
+            - Retry attempt: {{attempt}} of {{maxAttempts}}
+
             Current source chunk:
             - Index: {{sourceChunk.Index + 1}} of {{job.TotalSourceChunks}}
             - Title: {{sourceChunk.Title}}
             - Heading path: {{sourceChunk.HeadingPath}}
             - Estimated tokens: {{sourceChunk.EstimatedTokenCount}} ({{sourceChunk.TokenCountMethod}}{{(sourceChunk.TokenCountIsExact ? ", exact" : ", estimated")}})
 
-            Previous source chunk summaries:
-            {{previousSummaries}}
+            Chunk progress map:
+            {{chunkProgress}}
 
-            Entities already touched by this ingest job:
+            Compact touched-entity index:
             {{entityRoster}}
 
             Known project entity types:
@@ -507,13 +521,13 @@ public sealed class IngestJobProcessor(
             {{sourceLocators}}
 
             Entity matching workflow for this chunk:
-            1. Start from the same-job roster above.
+            1. Start from the compact touched-entity index above.
             2. For each source mention that may be an entity, search existing project entities before creating anything.
             3. Use the canonical singular type and multiple query variants: exact mention, base name without titles/honorifics, aliases, surnames, epithets, alternate spellings, and nearby descriptive terms.
             4. Reuse a plausible same-job or project entity instead of creating duplicate names or duplicate categories. For example, link "Prince Kael'thas" observations to an existing "Kael'thas" Character when the context points to the same person.
-            5. Create only when the roster and project searches do not return a plausible same subject.
+            5. Create only when the touched-entity index and project searches do not return a plausible same subject.
 
-            Write useful, source-grounded fact sheets. The properties object may use broad natural-language fields such as summary, description, role, status, affiliation, history, motivation, significance, relationship, claim, example, method, or details; it does not need to be highly structured when a readable fact is more useful. Include evidence for each fact field. When evidence comes from a listed source locator, include the page/section/block label in the evidence text.
+            Write useful, source-grounded wiki sheets. For each touched entity, provide a required concise summary, source-mentioned aliases, and complete revised wiki sections with citations. If an entity already exists, call read_entity_sheet, integrate the new information into the existing sections, and call update_ingest_entity_sheet with the complete revised sheet. When evidence comes from a listed source locator, include sourceBlockId/pageNumber/locator and a short snippet in the citation.
 
             Good example: if a Blood Elves page says Liadrin leads the blood elf paladins and is one of the race's primary leaders, record that as role/significance/history fields on the Liadrin Character with evidence from the page. Bad example: do not write that Liadrin was updated because the page was semantically similar or because the page did not mention her.
 
@@ -524,18 +538,42 @@ public sealed class IngestJobProcessor(
             """;
     }
 
-    private async Task<string> BuildEntityRosterAsync(Guid jobId, CancellationToken cancellationToken)
+    private async Task<string> BuildTouchedEntityIndexAsync(Guid jobId, CancellationToken cancellationToken)
     {
         var reportItems = await ingest.ListReportItemsAsync(jobId, cancellationToken);
         var entities = reportItems
             .Where(item => item.Kind == IngestReportItemKind.Entity && item.Status == IngestReportItemStatus.Active)
+            .Where(item => item.EntityId is not null)
+            .GroupBy(item => item.EntityId!.Value)
+            .Select(group => group.OrderByDescending(item => item.UpdatedAt).First())
             .OrderBy(item => item.ResourceType)
             .ThenBy(item => item.Title)
-            .Take(1000)
-            .Select(item => $"- {item.EntityId}: {item.ResourceType} '{item.Title}' | {Truncate(item.Summary, 180)} | notes: {Truncate(item.Notes, 180)}")
+            .Take(300)
+            .Select(item => $"- {item.EntityId}: {item.ResourceType} '{item.Title}' | {Truncate(item.Summary, 220)}")
             .ToList();
 
         return entities.Count == 0 ? "None yet." : string.Join("\n", entities);
+    }
+
+    private static string BuildChunkProgressMap(IngestJob job)
+    {
+        var lines = job.Chunks
+            .OrderBy(chunk => chunk.SourceChunkIndex)
+            .Select(chunk =>
+            {
+                var sourceChunk = chunk.SourceChunk;
+                var title = string.IsNullOrWhiteSpace(sourceChunk.Title) ? $"Part {sourceChunk.Index + 1}" : sourceChunk.Title;
+                var summary = !string.IsNullOrWhiteSpace(sourceChunk.Summary)
+                    ? Truncate(sourceChunk.Summary, 220)
+                    : !string.IsNullOrWhiteSpace(chunk.Summary)
+                        ? Truncate(chunk.Summary, 220)
+                        : string.Empty;
+                var suffix = string.IsNullOrWhiteSpace(summary) ? string.Empty : $" | {summary}";
+                return $"- {sourceChunk.Index + 1}. {title} | {chunk.Status}{suffix}";
+            })
+            .ToList();
+
+        return lines.Count == 0 ? "No source chunks were generated." : string.Join("\n", lines);
     }
 
     private async Task<string> BuildKnownEntityTypesAsync(Guid projectId, CancellationToken cancellationToken)
@@ -612,20 +650,6 @@ public sealed class IngestJobProcessor(
         }
 
         return IngestExtractionProfile.Auto;
-    }
-
-    private async Task<string> BuildPreviousSummariesAsync(IngestJob job, int currentIndex, CancellationToken cancellationToken)
-    {
-        var sourceChunks = await ingest.ListSourceChunksAsync(job.SourceId, cancellationToken);
-        var summaries = sourceChunks
-            .Where(chunk => chunk.Index < currentIndex && !string.IsNullOrWhiteSpace(chunk.Summary))
-            .OrderByDescending(chunk => chunk.Index)
-            .Take(8)
-            .OrderBy(chunk => chunk.Index)
-            .Select(chunk => $"- {chunk.Index + 1}. {chunk.Title}: {Truncate(chunk.Summary, 300)}")
-            .ToList();
-
-        return summaries.Count == 0 ? "None yet." : string.Join("\n", summaries);
     }
 
     private async Task MarkStoppedAsync(Guid jobId, IngestJobChunk? activeChunk)

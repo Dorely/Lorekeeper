@@ -123,11 +123,15 @@ public sealed record EntityLink(
     string OtherEntityType,
     int? SortOrder,
     IReadOnlyDictionary<string, string?> Properties,
+    string Summary,
+    IReadOnlyList<string> Aliases,
+    IReadOnlyList<IngestWikiSection> WikiSections,
     bool IsIngestCreated,
     int IngestSourceCount,
     int IngestObservationCount,
     IReadOnlyList<IngestSourceAssertionSummary> IngestSources,
-    IReadOnlyList<IngestSourceObservation> IngestObservations);
+    IReadOnlyList<IngestSourceObservation> IngestObservations,
+    IReadOnlyList<IngestWikiCitation> RelationshipCitations);
 
 /// <summary>
 /// Project-scoped projection of a <see cref="GraphNode"/> exposed to UI + chat tools.
@@ -145,6 +149,9 @@ public sealed record StoryEntity(
     int? Order,
     Guid? ParentId,
     IReadOnlyDictionary<string, string?> Properties,
+    string Summary,
+    IReadOnlyList<string> Aliases,
+    IReadOnlyList<IngestWikiSection> WikiSections,
     bool IsIngestCreated,
     int IngestSourceCount,
     int IngestObservationCount,

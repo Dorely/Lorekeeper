@@ -20,7 +20,6 @@ public sealed class ContextIndexingService(
     IVectorIndexWorkCoordinator indexWork,
     ILogger<ContextIndexingService> logger) : IContextIndexingService
 {
-    private const int MaxEntityObservations = 12;
     private const int MaxEntityLinks = 30;
     private const int MaxSourceChunkExcerptChars = 6_000;
 
@@ -269,28 +268,28 @@ public sealed class ContextIndexingService(
         var sb = new StringBuilder();
         sb.Append("Type: ").AppendLine(node.NodeType);
         sb.Append("Name: ").AppendLine(node.Label ?? node.Key);
+        AppendOptional(sb, "Summary", IngestWikiSheet.ReadSummary(node.Properties));
 
         AppendProperties(sb, node.Properties);
 
-        var factSheet = IngestSourceAssertions.BuildEntityFactSheet(node.Properties, MaxEntityObservations);
-        if (factSheet.Aliases.Count > 0)
+        var aliases = IngestWikiSheet.ReadAliases(node.Properties);
+        if (aliases.Count > 0)
         {
             sb.AppendLine("Aliases:");
-            sb.Append("- ").AppendLine(string.Join(", ", factSheet.Aliases));
+            sb.Append("- ").AppendLine(string.Join(", ", aliases));
         }
 
-        if (factSheet.Fields.Count > 0)
+        var sections = IngestWikiSheet.ReadSections(node.Properties);
+        if (sections.Count > 0)
         {
-            sb.AppendLine("Source-grounded fact sheet:");
-            foreach (var field in factSheet.Fields)
+            sb.AppendLine("Wiki sheet:");
+            foreach (var section in sections)
             {
-                sb.Append("- ").Append(field.Label).Append(": ").AppendLine(field.Value);
-                foreach (var evidence in field.Evidence.Take(3))
+                sb.Append("- ").Append(section.Title).Append(": ").AppendLine(section.Body);
+                foreach (var citation in section.Citations.Take(3))
                 {
-                    sb.Append("  Source: ").Append(evidence.SourceTitle).Append(" chunk ").Append(evidence.SourceChunkIndex + 1).AppendLine();
-                    AppendOptional(sb, "  Evidence", evidence.Evidence);
-                    if (string.IsNullOrWhiteSpace(evidence.Evidence))
-                        AppendOptional(sb, "  Source summary", evidence.Summary);
+                    sb.Append("  Source: ").Append(citation.SourceTitle).Append(" chunk ").Append(citation.SourceChunkIndex + 1).AppendLine();
+                    AppendOptional(sb, "  Citation", citation.Snippet);
                 }
             }
         }
@@ -309,6 +308,7 @@ public sealed class ContextIndexingService(
                 sb.Append("- ").Append(direction).Append(' ').Append(edge.EdgeType).Append(' ')
                     .Append(other.Label ?? other.Key).Append(" (").Append(other.NodeType).AppendLine(")");
                 AppendProperties(sb, edge.Properties, "  ");
+                AppendOptional(sb, "  Summary", ReadProperty(edge.Properties, IngestWikiSheet.SummaryProperty));
             }
         }
 
@@ -356,6 +356,7 @@ public sealed class ContextIndexingService(
         sb.Append("Title: ").AppendLine(source.Title);
         AppendOptional(sb, "Kind", source.SourceKind);
         AppendOptional(sb, "Description", source.Description);
+        AppendOptional(sb, "Synopsis", source.Synopsis);
         AppendOptional(sb, "Instructions", source.UserInstructions);
 
         var sourceChunks = await ingest.ListSourceChunksAsync(source.Id, cancellationToken);
@@ -398,6 +399,7 @@ public sealed class ContextIndexingService(
         var visible = properties
             .Where(property => !IngestSourceAssertions.IsProtectedProperty(property.Key)
                 && !IngestSourceAssertions.IsLegacyIngestProperty(property.Key)
+                && !IngestWikiSheet.IsWikiStorageProperty(property.Key)
                 && !string.IsNullOrWhiteSpace(property.Value?.ToString()))
             .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -423,6 +425,9 @@ public sealed class ContextIndexingService(
         if (string.IsNullOrWhiteSpace(value)) return;
         sb.Append(label).Append(": ").AppendLine(value.Trim());
     }
+
+    private static string ReadProperty(IReadOnlyDictionary<string, object?> properties, string key) =>
+        properties.TryGetValue(key, out var value) ? value?.ToString() ?? string.Empty : string.Empty;
 
     private static bool IsContextEntityNode(GraphNode node) =>
         Guid.TryParseExact(node.Key, "N", out _)

@@ -387,11 +387,15 @@ public sealed class EntityService(
                 OtherEntityType: other.NodeType,
                 SortOrder: edge.SortOrder,
                 Properties: ProjectProperties(edge.Properties),
+                Summary: ReadProperty(edge.Properties, IngestWikiSheet.SummaryProperty),
+                Aliases: [],
+                WikiSections: [],
                 IsIngestCreated: IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties),
                 IngestSourceCount: IngestSourceAssertions.CountRelationshipSources(edge.Properties),
                 IngestObservationCount: IngestSourceAssertions.CountRelationshipObservations(edge.Properties),
                 IngestSources: IngestSourceAssertions.SummarizeRelationshipAssertions(edge.Properties),
-                IngestObservations: IngestSourceAssertions.ListRelationshipObservations(edge.Properties)));
+                IngestObservations: IngestSourceAssertions.ListRelationshipObservations(edge.Properties),
+                RelationshipCitations: IngestWikiSheet.ReadRelationshipCitations(edge.Properties)));
         }
         return result;
     }
@@ -529,7 +533,7 @@ public sealed class EntityService(
         var props = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in node.Properties)
         {
-            if (IngestSourceAssertions.IsProtectedProperty(kv.Key)) continue;
+            if (IngestSourceAssertions.IsProtectedProperty(kv.Key) || IngestWikiSheet.IsWikiStorageProperty(kv.Key)) continue;
             props[kv.Key] = kv.Value?.ToString();
         }
 
@@ -543,6 +547,9 @@ public sealed class EntityService(
             Order: orderOverride,
             ParentId: parentId,
                 Properties: props,
+                Summary: IngestWikiSheet.ReadSummary(node.Properties),
+                Aliases: IngestWikiSheet.ReadAliases(node.Properties),
+                WikiSections: IngestWikiSheet.ReadSections(node.Properties),
                 IsIngestCreated: IngestSourceAssertions.IsIngestCreatedGraphObject(node.Properties),
                 IngestSourceCount: IngestSourceAssertions.CountEntitySources(node.Properties),
                 IngestObservationCount: IngestSourceAssertions.CountEntityObservations(node.Properties),
@@ -567,9 +574,12 @@ public sealed class EntityService(
         var props = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in source)
         {
-            if (IngestSourceAssertions.IsProtectedProperty(kv.Key)) continue;
+            if (IngestSourceAssertions.IsProtectedProperty(kv.Key) || IngestWikiSheet.IsWikiStorageProperty(kv.Key)) continue;
             props[kv.Key] = kv.Value?.ToString();
         }
         return props;
     }
+
+    private static string ReadProperty(IReadOnlyDictionary<string, object?> properties, string key) =>
+        properties.TryGetValue(key, out var value) ? value?.ToString() ?? string.Empty : string.Empty;
 }

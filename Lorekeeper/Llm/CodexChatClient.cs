@@ -147,6 +147,7 @@ public sealed class CodexChatClient : IChatClient
         var outputTextChars = 0;
         var functionCallCount = 0;
         string? lastEventType = null;
+        var lastEventData = string.Empty;
 
         while (true)
         {
@@ -176,6 +177,7 @@ public sealed class CodexChatClient : IChatClient
             var data = line["data: ".Length..];
             if (data == "[DONE]")
                 break;
+            lastEventData = data;
 
             JsonElement evt;
             try
@@ -315,18 +317,30 @@ public sealed class CodexChatClient : IChatClient
                     break;
 
                 case "response.failed":
-                    var errorMsg = "Codex API error";
-                    if (evt.TryGetProperty("response", out var resp) &&
-                        resp.TryGetProperty("error", out var err) &&
-                        err.TryGetProperty("message", out var msg))
-                    {
-                        errorMsg = msg.GetString() ?? errorMsg;
-                    }
-                    throw new InvalidOperationException(errorMsg);
+                    var responseFailedMessage = ExtractCodexErrorMessage(evt, "Codex API response failed");
+                    _logger.LogError(
+                        "Codex streaming response failed after {EventCount} SSE events; lastEvent={LastEventType}; textChars={TextChars}; functionCalls={FunctionCallCount}; model={Model}; bodyChars={BodyChars}; event={EventData}",
+                        eventCount,
+                        lastEventType ?? "(none)",
+                        outputTextChars,
+                        functionCallCount,
+                        _model,
+                        json.Length,
+                        Truncate(lastEventData, 2000));
+                    throw new InvalidOperationException(responseFailedMessage);
 
                 case "error":
-                    var errMsg = evt.TryGetProperty("message", out var m) ? m.GetString() : "Unknown error";
-                    throw new InvalidOperationException($"Codex error: {errMsg}");
+                    var errorMessage = ExtractCodexErrorMessage(evt, "Unknown error");
+                    _logger.LogError(
+                        "Codex streaming error after {EventCount} SSE events; lastEvent={LastEventType}; textChars={TextChars}; functionCalls={FunctionCallCount}; model={Model}; bodyChars={BodyChars}; event={EventData}",
+                        eventCount,
+                        lastEventType ?? "(none)",
+                        outputTextChars,
+                        functionCallCount,
+                        _model,
+                        json.Length,
+                        Truncate(lastEventData, 2000));
+                    throw new InvalidOperationException($"Codex error: {errorMessage}");
 
                 default:
                     _logger.LogWarning("Unhandled Codex SSE event type: {EventType}", type);
@@ -347,6 +361,45 @@ public sealed class CodexChatClient : IChatClient
 
     private static bool IsResponseEnded(HttpIOException exception) =>
         exception.HttpRequestError == HttpRequestError.ResponseEnded;
+
+    private static string ExtractCodexErrorMessage(JsonElement evt, string fallback)
+    {
+        foreach (var path in new[]
+        {
+            new[] { "message" },
+            new[] { "error", "message" },
+            new[] { "response", "error", "message" },
+            new[] { "error", "code" },
+            new[] { "response", "error", "code" },
+        })
+        {
+            if (TryGetStringByPath(evt, path, out var value))
+                return value;
+        }
+
+        return fallback;
+    }
+
+    private static bool TryGetStringByPath(JsonElement element, IReadOnlyList<string> path, out string value)
+    {
+        value = string.Empty;
+        var current = element;
+        foreach (var segment in path)
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current))
+                return false;
+        }
+
+        value = current.ValueKind == JsonValueKind.String ? current.GetString() ?? string.Empty : current.GetRawText();
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static string Truncate(string? value, int max)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var trimmed = value.Trim();
+        return trimmed.Length <= max ? trimmed : trimmed[..max] + "...";
+    }
 
     private Dictionary<string, object> BuildRequestBody(IEnumerable<ChatMessage> chatMessages, ChatOptions? options)
     {

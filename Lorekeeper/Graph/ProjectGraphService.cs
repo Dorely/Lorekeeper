@@ -358,6 +358,9 @@ public sealed class ProjectGraphService(
             !isProject,
             degree,
             color,
+            IngestWikiSheet.ReadSummary(node.Properties),
+            IngestWikiSheet.ReadAliases(node.Properties),
+            IngestWikiSheet.ReadSections(node.Properties),
             IngestSourceAssertions.IsIngestCreatedGraphObject(node.Properties),
             IngestSourceAssertions.CountEntitySources(node.Properties),
             IngestSourceAssertions.CountEntityObservations(node.Properties),
@@ -379,6 +382,8 @@ public sealed class ProjectGraphService(
             isManaged,
             !isManaged && !isExtractedFrom,
             !isManaged && !isExtractedFrom,
+            Read(edge.Properties, IngestWikiSheet.SummaryProperty) ?? string.Empty,
+            IngestWikiSheet.ReadRelationshipCitations(edge.Properties),
             IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties),
             IngestSourceAssertions.CountRelationshipSources(edge.Properties),
             IngestSourceAssertions.CountRelationshipObservations(edge.Properties),
@@ -426,6 +431,7 @@ public sealed class ProjectGraphService(
         || string.Equals(key, "sourceId", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "structural", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "order", StringComparison.OrdinalIgnoreCase)
+        || IngestWikiSheet.IsWikiStorageProperty(key)
         || IngestSourceAssertions.IsProtectedProperty(key)
         || key.StartsWith("vectorIndex", StringComparison.OrdinalIgnoreCase);
 
@@ -522,7 +528,7 @@ public sealed class ProjectGraphService(
         var result = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in properties)
         {
-            if (IngestSourceAssertions.IsProtectedProperty(kv.Key)) continue;
+            if (IngestSourceAssertions.IsProtectedProperty(kv.Key) || IngestWikiSheet.IsWikiStorageProperty(kv.Key)) continue;
             result[kv.Key] = kv.Value?.ToString();
         }
         return result;

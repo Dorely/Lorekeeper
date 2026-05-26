@@ -462,28 +462,9 @@ public sealed class IngestService(
         switch (item.Kind)
         {
             case IngestReportItemKind.Entity:
-                var node = await FindReportNodeAsync(item, item.Job.ProjectId, cancellationToken);
-                if (node is null) return;
-
-                if (ResolveReportSourceId(item, item.Job.SourceId) is not Guid entitySourceId) return;
-                IngestSourceAssertions.UpsertEntityAssertion(
-                    node.Properties,
-                    BuildReportAssertionInput(item, entitySourceId, item.Summary, item.Evidence, item.Notes, replaceExistingText: true));
-                node.UpdatedAt = DateTime.UtcNow;
-                nodes.Update(node);
                 break;
 
             case IngestReportItemKind.Relationship:
-                if (item.GraphEdgeId is null) return;
-                var edge = await edges.GetByIdAsync(item.GraphEdgeId.Value, cancellationToken);
-                if (edge is null) return;
-
-                if (ResolveReportSourceId(item, item.Job.SourceId) is not Guid relationshipSourceId) return;
-                IngestSourceAssertions.UpsertRelationshipAssertion(
-                    edge.Properties,
-                    BuildReportAssertionInput(item, relationshipSourceId, item.Summary, item.Evidence, item.Notes, replaceExistingText: true));
-                edge.UpdatedAt = DateTime.UtcNow;
-                edges.Update(edge);
                 break;
 
             case IngestReportItemKind.SourceChunkNote:
@@ -585,7 +566,10 @@ public sealed class IngestService(
 
             var sourceId = ResolveReportSourceId(item, fallbackSourceId);
             if (sourceId is not null)
+            {
                 IngestSourceAssertions.RemoveRelationshipSource(edge.Properties, sourceId.Value);
+                IngestWikiSheet.RemoveSourceCitations(edge.Properties, sourceId.Value);
+            }
 
             var graphAction = IngestSourceAssertions.ReadRelationshipGraphAction(item.PayloadJson);
             if (CanRemoveGraphEdgeAfterSourceSubtraction(edge, graphAction))
@@ -617,6 +601,7 @@ public sealed class IngestService(
             if (sourceId is not null)
             {
                 IngestSourceAssertions.RemoveEntitySource(node.Properties, sourceId.Value);
+                IngestWikiSheet.RemoveSourceCitations(node.Properties, sourceId.Value);
                 await RemoveExtractedFromEdgesForSourceAsync(node, sourceId.Value, cancellationToken);
             }
 
@@ -676,6 +661,8 @@ public sealed class IngestService(
             return false;
         if (IngestSourceAssertions.CountEntitySources(node.Properties) > 0)
             return false;
+        if (IngestWikiSheet.HasCitations(node.Properties))
+            return false;
         if (HasCanonicalProperties(node.Properties))
             return false;
 
@@ -688,6 +675,8 @@ public sealed class IngestService(
         if (!CanRemovePotentiallyIngestCreatedObject(edge.Properties, graphAction, IngestSourceAssertions.CreatedEdgeAction))
             return false;
         if (IngestSourceAssertions.CountRelationshipSources(edge.Properties) > 0)
+            return false;
+        if (IngestWikiSheet.HasCitations(edge.Properties))
             return false;
         return !HasCanonicalProperties(edge.Properties);
     }
@@ -702,7 +691,8 @@ public sealed class IngestService(
     private static bool HasCanonicalProperties(IReadOnlyDictionary<string, object?> properties) =>
         properties.Keys.Any(key => !IsInternalProperty(key)
             && !IngestSourceAssertions.IsProtectedProperty(key)
-            && !IngestSourceAssertions.IsLegacyIngestProperty(key));
+            && !IngestSourceAssertions.IsLegacyIngestProperty(key)
+            && !IngestWikiSheet.IsWikiStorageProperty(key));
 
     private static bool IsInternalProperty(string key) =>
         string.Equals(key, "sourceType", StringComparison.OrdinalIgnoreCase)

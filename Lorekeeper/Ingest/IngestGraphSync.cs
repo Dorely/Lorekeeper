@@ -127,6 +127,7 @@ public sealed class IngestGraphSync(
             ["sourceId"] = source.Id.ToString("N"),
             ["kind"] = source.SourceKind,
             ["description"] = source.Description,
+            ["synopsis"] = source.Synopsis,
             ["sourceUrl"] = source.SourceUrl,
             ["finalUrl"] = source.FinalUrl,
             ["canonicalUrl"] = source.CanonicalUrl,

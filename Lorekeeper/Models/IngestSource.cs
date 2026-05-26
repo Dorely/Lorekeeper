@@ -10,6 +10,7 @@ public class IngestSource
     public required string Title { get; set; }
     public string SourceKind { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
+    public string Synopsis { get; set; } = string.Empty;
     public required string UserInstructions { get; set; }
     public required string SourceText { get; set; }
     public string SourceHash { get; set; } = string.Empty;

@@ -167,7 +167,7 @@
 | `AiChange.cs` | EF entity for one queued AI tool mutation: tool metadata, before/after/result JSON, dependency metadata, status, rejection/error notes, timestamps. |
 | `ContestBatch.cs` | EF entity for one Editor Contest Mode run: captured turn/context snapshot, target chapter/body snapshot, operation metadata, status, and model candidates. |
 | `ContestCandidate.cs` | EF entity for one model's contest proposal: provider/model labels, validated mutation JSON, proposed chapter body, raw response, status, timing, and errors. |
-| `IngestSource.cs` | EF entity for one ingested source: full source text, source metadata/instructions, content hash, source page/block locators, optional webpage URL/fetch provenance, and independent vector-index state/source id. |
+| `IngestSource.cs` | EF entity for one ingested source: full source text, rolling synopsis, source metadata/instructions, content hash, source page/block locators, optional webpage URL/fetch provenance, and independent vector-index state/source id. |
 | `IngestSourcePage.cs` | EF entity for PDF page-level provenance: page text, char bounds, extraction method, render/image hash metadata, vision provider/model, and diagnostics. |
 | `IngestSourceBlock.cs` | EF entity for source section/page/block locators with kind/title/locator, optional page link, char bounds, and metadata JSON. |
 | `IngestSourceChunk.cs` | EF entity for a large logical source chunk used as extraction checkpoint; tracks character bounds, token count metadata, summaries, and structure status. |
@@ -339,16 +339,17 @@
 | `IBookArtifactPreprocessor.cs` / `BookArtifactPreprocessor.cs` | EPUB/PDF/text artifact preprocessor: extracts EPUB sections, PDF embedded text, vision-read rendered PDF pages, and source page/block locator drafts before job creation. |
 | `IIngestSourceStructureBuilder.cs` / `IngestSourceStructureBuilder.cs` | Splits raw source text into logical source chunks using headings/scene breaks, then merges adjacent sections with configurable target/soft token limits; source chunks are independent from vector fragments. |
 | `IngestSourceStructureOptions.cs` | Configurable source sectioning defaults for ingest chunk target tokens, soft max ratio, and small-section merge threshold. |
-| `IIngestGraphSync.cs` / `IngestGraphSync.cs` | Projects ingest sources, source chunks, and source blocks into structural graph nodes and ordered `HasChild` edges, including webpage/artifact provenance on source nodes when present. |
-| `IIngestGraphCleanup.cs` / `IngestGraphCleanup.cs` | Source-scoped graph cleanup for ingest restart/delete: subtracts one source's node/edge assertions and provenance, deleting only ingest-owned orphan output and returning affected entities for targeted context-vector cleanup. |
+| `IIngestGraphSync.cs` / `IngestGraphSync.cs` | Projects ingest sources, source synopsis, source chunks, and source blocks into structural graph nodes and ordered `HasChild` edges, including webpage/artifact provenance on source nodes when present. |
+| `IIngestGraphCleanup.cs` / `IngestGraphCleanup.cs` | Source-scoped graph cleanup for ingest restart/delete: subtracts one source's legacy assertions/wiki citations/provenance, deleting only ingest-owned orphan graph output and returning affected entities for targeted context-vector cleanup. |
 | `IIngestVectorIndexingService.cs` / `IngestVectorIndexingService.cs` | Extracted ingest source vector-fragment indexer used by ingest jobs and bulk embedding rebuilds; stores source block/page locator metadata and marks sources Disabled when embeddings are intentionally unavailable. |
 | `IIngestJobQueue.cs` / `IngestJobQueue.cs` | In-process queue plus cancellation registry for durable ingest jobs. |
 | `IIngestJobNotifier.cs` / `IngestJobNotifier.cs` | In-process pub/sub for ingest job updates, including ephemeral live LLM/text/tool-call progress consumed by Blazor Server components. |
 | `IngestUiModels.cs` | Lightweight read-model records for the Ingest tab: job summaries, selected job detail, chunk progress, report items, events, and bounded source excerpts. |
 | `IngestSourceAssertions.cs` | Shared helper/model for protected source-scoped node/edge assertion JSON, ingest-created graph origin markers, report graph-action payloads, and source-subtraction operations. |
+| `IngestWikiSheet.cs` | Shared wiki-sheet helper/models for ingest-managed entity summaries, aliases, ordered wiki sections, compact source citations, relationship citations, and cleanup/search projection helpers. |
 | `IngestJobWorker.cs` | Hosted background worker that marks interrupted jobs stopped at startup and drains queued ingest jobs in scoped processors. |
-| `IngestJobProcessor.cs` | Runs ingest jobs with streaming chunk extraction, transient LLM retries, live text/tool-call notifications, adaptive profile/type prompts, source locators, report events, and indexing updates. |
-| `IngestAgentTools.cs` | Ingest LLM tools for advisory project entity candidate search, adaptive source-scoped observations on new/existing entities, source-scoped relationship assertions, and source-chunk notes/provenance. Exact duplicate creation returns an existing candidate instead of auto-merging. |
+| `IngestJobProcessor.cs` | Runs ingest jobs with streaming chunk extraction, transient LLM retries, live text/tool-call notifications, adaptive profile/type prompts, compact source progress memory, source locators, report events, and indexing updates. |
+| `IngestAgentTools.cs` | Ingest LLM tools for concise entity search, full wiki-sheet reads, create/update wiki sheets, concise cited relationships, and rolling source progress updates. Exact duplicate creation returns an existing candidate instead of auto-merging. |
 
 ### ImportExport/
 

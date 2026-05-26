@@ -281,8 +281,13 @@ else
             return true;
         }
 
-        return node.IngestSources.Any(source => IngestSummaryMatches(source, search))
-            || node.IngestObservations.Any(observation => IngestObservationMatches(observation, search));
+        return node.Summary.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || node.Aliases.Any(alias => alias.Contains(search, StringComparison.OrdinalIgnoreCase))
+            || node.WikiSections.Any(section =>
+                section.Title.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || section.Body.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || section.Citations.Any(citation => (citation.Snippet?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || citation.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static bool IngestSummaryMatches(IngestSourceAssertionSummary source, string search) =>
@@ -317,8 +322,10 @@ else
     private static string NodeTitle(ProjectGraphNode node)
     {
         var title = $"{node.Type}: {node.Label}";
+        if (!string.IsNullOrWhiteSpace(node.Summary))
+            title += $"\n{node.Summary}";
         if (node.IngestSourceCount > 0)
-            title += $"\nIngest observations: {node.IngestObservationCount} from {node.IngestSourceCount} source{PluralSuffix(node.IngestSourceCount)}";
+            title += $"\nSources: {node.IngestSourceCount}";
         else if (node.IsIngestCreated)
             title += "\nCreated by ingest";
         return title;
@@ -327,8 +334,10 @@ else
     private static string EdgeTitle(ProjectGraphEdge edge)
     {
         var title = edge.EdgeType;
+        if (!string.IsNullOrWhiteSpace(edge.Summary))
+            title += $"\n{edge.Summary}";
         if (edge.IngestSourceCount > 0)
-            title += $"\nIngest observations: {edge.IngestObservationCount} from {edge.IngestSourceCount} source{PluralSuffix(edge.IngestSourceCount)}";
+            title += $"\nSources: {edge.IngestSourceCount}";
         else if (edge.IsIngestCreated || string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase))
             title += "\nIngest provenance link";
         return title;

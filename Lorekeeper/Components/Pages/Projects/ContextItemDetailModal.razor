@@ -403,7 +403,7 @@
                 @RenderProperties(_entity.Properties)
             }
 
-            @RenderIngestObservations(_entity.IngestObservations, "Ingest observations")
+            @RenderWikiSheet(_entity.Summary, _entity.Aliases, _entity.WikiSections)
             @RenderEntityLinks()
         }
     </div>;
@@ -508,6 +508,14 @@
                 <section class="context-detail-section">
                     <h6>Description</h6>
                     <p>@_source.Description</p>
+                </section>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_source.Synopsis))
+            {
+                <section class="context-detail-section">
+                    <h6>Synopsis</h6>
+                    <p>@_source.Synopsis</p>
                 </section>
             }
 
@@ -692,12 +700,16 @@
                         {
                             <span class="context-detail-link-badge">ingest</span>
                         }
-                        @if (link.IngestObservations.Count > 0)
+                        @if (!string.IsNullOrWhiteSpace(link.Summary) || link.RelationshipCitations.Count > 0)
                         {
                             <div class="context-detail-link-observations">
-                                @foreach (var observation in link.IngestObservations.Take(3))
+                                @if (!string.IsNullOrWhiteSpace(link.Summary))
                                 {
-                                    <div><strong>@observation.SourceTitle:</strong> @ObservationPreview(observation)</div>
+                                    <div>@link.Summary</div>
+                                }
+                                @foreach (var citation in link.RelationshipCitations.Take(3))
+                                {
+                                    <div><strong>@citation.SourceTitle:</strong> @IngestWikiSheet.CitationPreview(citation)</div>
                                 }
                             </div>
                         }
@@ -707,42 +719,41 @@
         }
     </section>;
 
-    private RenderFragment RenderIngestObservations(IReadOnlyList<IngestSourceObservation> observations, string title) => @<section>
-        @if (observations.Count > 0)
+    private RenderFragment RenderWikiSheet(string summary, IReadOnlyList<string> aliases, IReadOnlyList<IngestWikiSection> sections) => @<section>
+        @if (!string.IsNullOrWhiteSpace(summary) || aliases.Count > 0 || sections.Count > 0)
         {
             <div class="context-detail-ingest">
-                <h6>@title</h6>
+                <h6>Wiki Sheet</h6>
                 <div class="context-detail-ingest-list">
-                    @foreach (var observation in observations)
+                    @if (!string.IsNullOrWhiteSpace(summary))
                     {
-                        <div class="context-detail-ingest-item" @key="ObservationKey(observation)">
-                            <div class="context-detail-ingest-head">
-                                <strong>@observation.SourceTitle</strong>
-                                <span>@observation.SourceKind</span>
-                                <span>chunk @(observation.SourceChunkIndex + 1)</span>
-                            </div>
-                            @if (!string.IsNullOrWhiteSpace(observation.Summary))
+                        <div class="context-detail-ingest-item">
+                            <div class="context-detail-ingest-head"><strong>Summary</strong></div>
+                            <p>@summary</p>
+                        </div>
+                    }
+                    @if (aliases.Count > 0)
+                    {
+                        <div class="context-detail-ingest-item">
+                            <div class="context-detail-ingest-line"><span>Aliases</span><strong>@string.Join(", ", aliases)</strong></div>
+                        </div>
+                    }
+                    @foreach (var wikiSection in sections)
+                    {
+                        <div class="context-detail-ingest-item" @key="wikiSection.Id">
+                            <div class="context-detail-ingest-head"><strong>@wikiSection.Title</strong></div>
+                            <p>@wikiSection.Body</p>
+                            @foreach (var citation in wikiSection.Citations.Take(3))
                             {
-                                <p>@observation.Summary</p>
-                            }
-                            @if (observation.Aliases.Count > 0)
-                            {
-                                <div class="context-detail-ingest-line"><span>Aliases</span><strong>@string.Join(", ", observation.Aliases)</strong></div>
-                            }
-                            @foreach (var prop in observation.ObservedProperties.OrderBy(prop => prop.Key, StringComparer.OrdinalIgnoreCase))
-                            {
-                                <div class="context-detail-ingest-line">
-                                    <span>@prop.Key</span>
-                                    <strong>@BlankFallback(prop.Value)</strong>
+                                <div class="context-detail-ingest-head">
+                                    <strong>@citation.SourceTitle</strong>
+                                    <span>@citation.SourceKind</span>
+                                    <span>chunk @(citation.SourceChunkIndex + 1)</span>
                                 </div>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(observation.Evidence))
-                            {
-                                <blockquote>@observation.Evidence</blockquote>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(observation.Notes))
-                            {
-                                <div class="context-detail-ingest-notes"><strong>Notes:</strong> @observation.Notes</div>
+                                @if (!string.IsNullOrWhiteSpace(citation.Snippet))
+                                {
+                                    <blockquote>@citation.Snippet</blockquote>
+                                }
                             }
                         </div>
                     }

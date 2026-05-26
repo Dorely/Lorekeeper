@@ -474,6 +474,7 @@ public sealed class ContextBuilder(
         body.Append("Title: ").AppendLine(source.Title);
         AppendOptionalIndented(body, "Kind", source.SourceKind, 0);
         AppendOptionalIndented(body, "Description", source.Description, 0);
+        AppendOptionalIndented(body, "Synopsis", source.Synopsis, 0);
         if (sourceChunks.Count > 0)
         {
             body.AppendLine("Source chunks:");
@@ -589,6 +590,7 @@ public sealed class ContextBuilder(
         var sb = new StringBuilder();
         sb.Append("Type: ").AppendLine(entity.Type);
         sb.Append("Name: ").AppendLine(entity.Name);
+        AppendOptionalIndented(sb, "Summary", entity.Summary, 0);
 
         if (entity.Properties.Count > 0)
         {
@@ -597,25 +599,22 @@ public sealed class ContextBuilder(
                 sb.Append("- ").Append(property.Key).Append(": ").AppendLine(property.Value ?? string.Empty);
         }
 
-        var factSheet = IngestSourceAssertions.BuildFactSheet(entity.IngestObservations);
-        if (factSheet.Aliases.Count > 0)
+        if (entity.Aliases.Count > 0)
         {
             sb.AppendLine("Aliases:");
-            sb.Append("- ").AppendLine(string.Join(", ", factSheet.Aliases));
+            sb.Append("- ").AppendLine(string.Join(", ", entity.Aliases));
         }
 
-        if (factSheet.Fields.Count > 0)
+        if (entity.WikiSections.Count > 0)
         {
-            sb.AppendLine("Source-grounded fact sheet:");
-            foreach (var field in factSheet.Fields.Take(8))
+            sb.AppendLine("Wiki sheet:");
+            foreach (var section in entity.WikiSections.Take(8))
             {
-                sb.Append("- ").Append(field.Label).Append(": ").AppendLine(field.Value);
-                foreach (var evidence in field.Evidence.Take(2))
+                sb.Append("- ").Append(section.Title).Append(": ").AppendLine(section.Body);
+                foreach (var citation in section.Citations.Take(2))
                 {
-                    sb.Append("  Source: ").Append(evidence.SourceTitle).Append(" chunk ").Append(evidence.SourceChunkIndex + 1).AppendLine();
-                    AppendOptionalIndented(sb, "Evidence", evidence.Evidence, 2);
-                    if (string.IsNullOrWhiteSpace(evidence.Evidence))
-                        AppendOptionalIndented(sb, "Source summary", evidence.Summary, 2);
+                    sb.Append("  Source: ").Append(citation.SourceTitle).Append(" chunk ").Append(citation.SourceChunkIndex + 1).AppendLine();
+                    AppendOptionalIndented(sb, "Citation", citation.Snippet ?? string.Empty, 2);
                 }
             }
         }
