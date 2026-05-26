@@ -16,6 +16,10 @@ public class IngestJobChunk
     public string? ErrorMessage { get; set; }
     public int CreatedEntityCount { get; set; }
     public int CreatedRelationshipCount { get; set; }
+    public int? LlmTokenCount { get; set; }
+    public bool? LlmTokenCountIsExact { get; set; }
+    public string? LlmTokenCountMethod { get; set; }
+    public string? LlmTokenEncodingName { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

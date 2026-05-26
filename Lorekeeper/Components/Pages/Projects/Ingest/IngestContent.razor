@@ -250,10 +250,16 @@ else
                                 <div class="ingest-section-title mb-1">Current LLM Call</div>
                                 <div class="small text-muted">@_liveSourceChunkTitle</div>
                             </div>
-                            @if (!string.IsNullOrWhiteSpace(_liveStatus))
-                            {
-                                <span class="badge bg-secondary">@_liveStatus</span>
-                            }
+                            <div class="ingest-live-badges">
+                                @if (_liveLlmTokenCount is not null)
+                                {
+                                    <span class="ingest-live-token-count" title="@LiveLlmTokenTitle">@LiveLlmTokenLabel</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(_liveStatus))
+                                {
+                                    <span class="badge bg-secondary">@_liveStatus</span>
+                                }
+                            </div>
                         </div>
                         <div class="ingest-live-body">
                             @foreach (var message in _liveIngest.Messages)
@@ -289,7 +295,7 @@ else
                                 <span>@(chunk.SourceChunkIndex + 1). @chunk.SourceChunkTitle</span>
                                 <span class="badge bg-@StatusColor(chunk.Status)">@chunk.Status</span>
                             </span>
-                            <span class="ingest-job-meta">@chunk.EstimatedTokenCount tokens - @chunk.CreatedEntityCount entities - @chunk.CreatedRelationshipCount links</span>
+                            <span class="ingest-job-meta">@ChunkMeta(chunk)</span>
                             @if (!string.IsNullOrWhiteSpace(chunk.ErrorMessage))
                             {
                                 <span class="text-danger small">@chunk.ErrorMessage</span>
@@ -473,6 +479,10 @@ else
     private Guid? _liveSourceChunkId;
     private string _liveSourceChunkTitle = string.Empty;
     private string? _liveStatus;
+    private int? _liveLlmTokenCount;
+    private bool _liveLlmTokenCountIsExact = true;
+    private string? _liveLlmTokenCountMethod;
+    private string? _liveLlmTokenEncodingName;
     private ChatLiveTurn? _liveIngest;
 
     private string _title = string.Empty;
@@ -543,6 +553,28 @@ else
     private IngestJobChunkProgress? SelectedSourceChunk => _selectedJob?.Chunks
         .FirstOrDefault(chunk => chunk.SourceChunkId == _selectedChunkId)
         ?? _selectedJob?.Chunks.OrderBy(chunk => chunk.SourceChunkIndex).FirstOrDefault();
+
+    private string LiveLlmTokenLabel => _liveLlmTokenCount is int tokenCount
+        ? $"{TokenPrefix(_liveLlmTokenCountIsExact)}{tokenCount:N0} LLM tokens"
+        : string.Empty;
+
+    private string LiveLlmTokenTitle
+    {
+        get
+        {
+            if (_liveLlmTokenCount is null)
+                return string.Empty;
+
+            var title = _liveLlmTokenCountIsExact
+                ? "Current LLM call token count"
+                : "Current LLM call token count is estimated";
+            if (!string.IsNullOrWhiteSpace(_liveLlmTokenCountMethod))
+                title += $" via {_liveLlmTokenCountMethod}";
+            if (!string.IsNullOrWhiteSpace(_liveLlmTokenEncodingName))
+                title += $" ({_liveLlmTokenEncodingName})";
+            return title;
+        }
+    }
 
     private bool IsSelectedPdfArtifact =>
         string.Equals(Path.GetExtension(_artifactFileName), ".pdf", StringComparison.OrdinalIgnoreCase);
@@ -681,6 +713,14 @@ else
                 _liveIngest?.CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
                 break;
 
+            case IngestLiveTokenCountUpdated tokenCount:
+                EnsureLiveTurn(update.JobId, tokenCount.SourceChunkId, tokenCount.SourceChunkTitle);
+                _liveLlmTokenCount = tokenCount.TokenCount;
+                _liveLlmTokenCountIsExact = tokenCount.IsExact;
+                _liveLlmTokenCountMethod = tokenCount.Method;
+                _liveLlmTokenEncodingName = tokenCount.EncodingName;
+                break;
+
             case IngestLiveRetryScheduled retry:
                 EnsureLiveTurn(update.JobId, retry.SourceChunkId, retry.SourceChunkTitle);
                 _liveStatus = $"Retrying in {retry.DelayMs / 1000.0:0.#}s";
@@ -709,6 +749,10 @@ else
             _liveSourceChunkId = sourceChunkId;
             _liveSourceChunkTitle = sourceChunkTitle;
             _liveStatus = null;
+            _liveLlmTokenCount = null;
+            _liveLlmTokenCountIsExact = true;
+            _liveLlmTokenCountMethod = null;
+            _liveLlmTokenEncodingName = null;
         }
     }
 
@@ -718,6 +762,10 @@ else
         _liveSourceChunkId = null;
         _liveSourceChunkTitle = string.Empty;
         _liveStatus = null;
+        _liveLlmTokenCount = null;
+        _liveLlmTokenCountIsExact = true;
+        _liveLlmTokenCountMethod = null;
+        _liveLlmTokenEncodingName = null;
         _liveIngest = null;
     }
 
@@ -1250,6 +1298,21 @@ else
             ? _sourceExcerpt.Text + "\n..."
             : _sourceExcerpt.Text;
     }
+
+    private static string ChunkMeta(IngestJobChunkProgress chunk)
+    {
+        var parts = new List<string>
+        {
+            $"{TokenPrefix(chunk.TokenCountIsExact)}{chunk.EstimatedTokenCount:N0} source tokens",
+        };
+        if (chunk.LlmTokenCount is int llmTokenCount)
+            parts.Add($"{TokenPrefix(chunk.LlmTokenCountIsExact == true)}{llmTokenCount:N0} LLM tokens");
+        parts.Add($"{chunk.CreatedEntityCount:N0} entities");
+        parts.Add($"{chunk.CreatedRelationshipCount:N0} links");
+        return string.Join(" - ", parts);
+    }
+
+    private static string TokenPrefix(bool isExact) => isExact ? string.Empty : "~";
 
     private static string ProviderLabel(LlmProvider provider)
     {

@@ -77,6 +77,15 @@ public sealed record IngestLiveToolCallCompleted(
     string? Error,
     double DurationMs) : IngestLiveUpdate(SourceChunkId, SourceChunkIndex, SourceChunkTitle);
 
+public sealed record IngestLiveTokenCountUpdated(
+    Guid SourceChunkId,
+    int SourceChunkIndex,
+    string SourceChunkTitle,
+    int TokenCount,
+    bool IsExact,
+    string Method,
+    string? EncodingName) : IngestLiveUpdate(SourceChunkId, SourceChunkIndex, SourceChunkTitle);
+
 public sealed record IngestLiveRetryScheduled(
     Guid SourceChunkId,
     int SourceChunkIndex,

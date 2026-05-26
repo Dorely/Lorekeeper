@@ -288,6 +288,10 @@ public sealed class IngestService(
             jobChunk.ErrorMessage = null;
             jobChunk.CreatedEntityCount = 0;
             jobChunk.CreatedRelationshipCount = 0;
+            jobChunk.LlmTokenCount = null;
+            jobChunk.LlmTokenCountIsExact = null;
+            jobChunk.LlmTokenCountMethod = null;
+            jobChunk.LlmTokenEncodingName = null;
             jobChunk.StartedAt = null;
             jobChunk.CompletedAt = null;
             jobChunk.UpdatedAt = DateTime.UtcNow;
@@ -338,6 +342,10 @@ public sealed class IngestService(
             jobChunk.ErrorMessage = null;
             jobChunk.CreatedEntityCount = 0;
             jobChunk.CreatedRelationshipCount = 0;
+            jobChunk.LlmTokenCount = null;
+            jobChunk.LlmTokenCountIsExact = null;
+            jobChunk.LlmTokenCountMethod = null;
+            jobChunk.LlmTokenEncodingName = null;
             jobChunk.StartedAt = null;
             jobChunk.CompletedAt = null;
             jobChunk.UpdatedAt = DateTime.UtcNow;

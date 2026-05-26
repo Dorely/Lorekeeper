@@ -8,6 +8,7 @@ using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Tokens;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
@@ -17,6 +18,7 @@ public sealed class IngestJobProcessor(
     IIngestRepository ingest,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
+    ITokenCounter tokenCounter,
     IngestAgentTools tools,
     IEntityTypeService entityTypes,
     IIngestVectorIndexingService ingestVectorIndexing,
@@ -152,6 +154,7 @@ public sealed class IngestJobProcessor(
         jobChunk.StartedAt = DateTime.UtcNow;
         jobChunk.CompletedAt = null;
         jobChunk.ErrorMessage = null;
+        ResetLlmTokenCount(jobChunk);
         jobChunk.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJobChunk(jobChunk);
 
@@ -181,7 +184,7 @@ public sealed class IngestJobProcessor(
                     OnMutated: () => mutated = true);
 
                 NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnStarted(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, attempt, maxAttempts));
-                finalText = await RunChunkConversationAsync(job, sourceChunk, context, chat, maxIterations, attempt, maxAttempts, cancellationToken);
+                finalText = await RunChunkConversationAsync(job, jobChunk, context, chat, maxIterations, attempt, maxAttempts, cancellationToken);
                 NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnCompleted(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title));
                 break;
             }
@@ -212,6 +215,7 @@ public sealed class IngestJobProcessor(
             }
             catch (Exception ex) when (!IsCancellation(ex))
             {
+                NotifyLiveTokenCount(job.ProjectId, job.Id, jobChunk);
                 NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnFailed(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, ex.Message));
                 throw;
             }
@@ -249,7 +253,7 @@ public sealed class IngestJobProcessor(
 
     private async Task<string?> RunChunkConversationAsync(
         IngestJob job,
-        IngestSourceChunk sourceChunk,
+        IngestJobChunk jobChunk,
         IngestAgentContext context,
         IChatClient chat,
         int maxIterations,
@@ -257,6 +261,7 @@ public sealed class IngestJobProcessor(
         int maxAttempts,
         CancellationToken cancellationToken)
     {
+        var sourceChunk = jobChunk.SourceChunk;
         var aiTools = tools.Build(context);
         var chatOptions = new ChatOptions
         {
@@ -264,11 +269,14 @@ public sealed class IngestJobProcessor(
             ToolMode = ChatToolMode.Auto,
         };
 
+        var chunkPrompt = await BuildChunkPromptAsync(job, sourceChunk, attempt, maxAttempts, cancellationToken);
         var messages = new List<ChatMessage>
         {
             new(ChatRole.System, _systemPrompt),
-            new(ChatRole.User, await BuildChunkPromptAsync(job, sourceChunk, attempt, maxAttempts, cancellationToken)),
+            new(ChatRole.User, chunkPrompt),
         };
+        var tokenTracker = new IngestChunkTokenTracker(messages);
+        NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
 
         string? finalText = null;
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -277,6 +285,7 @@ public sealed class IngestJobProcessor(
             var assistantText = new StringBuilder();
             var pendingCalls = new List<PendingChunkToolCall>();
             var toolTracker = new StreamingToolCallTracker();
+            tokenTracker.BeginAssistantTurn();
 
             await foreach (var update in chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken))
             {
@@ -285,7 +294,9 @@ public sealed class IngestJobProcessor(
                     if (content is TextContent textContent && textContent.Text is { Length: > 0 } text)
                     {
                         assistantText.Append(text);
+                        tokenTracker.AppendAssistantText(text);
                         NotifyLive(job.ProjectId, job.Id, new IngestLiveTextDelta(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, text));
+                        NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
                         continue;
                     }
 
@@ -294,15 +305,21 @@ public sealed class IngestJobProcessor(
                         switch (toolUpdate)
                         {
                             case StreamingToolCallStartedUpdate started:
+                                tokenTracker.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson);
                                 NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallStarted(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete));
+                                NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
                                 break;
 
                             case StreamingToolCallArgumentsDeltaUpdate delta:
+                                tokenTracker.AppendToolArguments(delta.CallId, delta.ArgumentsDelta);
                                 NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallArgumentsDelta(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete));
+                                NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
                                 break;
 
                             case StreamingToolCallReadyUpdate ready:
+                                tokenTracker.SetToolCallArguments(ready.CallId, ready.ToolName, ready.ArgumentsJson);
                                 pendingCalls.Add(new PendingChunkToolCall(ready.Content, ready.CallId, ready.ToolName, ready.ArgumentsJson));
+                                NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
                                 break;
                         }
                     }
@@ -313,7 +330,10 @@ public sealed class IngestJobProcessor(
             if (assistantText.Length > 0)
                 assistantContents.Add(new TextContent(assistantText.ToString()));
             assistantContents.AddRange(pendingCalls.Select(call => (AIContent)call.Content));
-            messages.Add(new ChatMessage(ChatRole.Assistant, assistantContents));
+            var assistantMessage = new ChatMessage(ChatRole.Assistant, assistantContents);
+            messages.Add(assistantMessage);
+            tokenTracker.CommitAssistantMessage();
+            NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
 
             if (pendingCalls.Count == 0)
             {
@@ -342,15 +362,64 @@ public sealed class IngestJobProcessor(
                     toolError,
                     stopwatch.Elapsed.TotalMilliseconds));
 
+                tokenTracker.AddToolResult(pendingCall.CallId, toolResult);
+                NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult));
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+            tokenTracker.CommitToolMessage();
+            NotifyTokenCountIfChanged(job, jobChunk, tokenTracker);
             if (iteration == maxIterations - 1)
                 throw new InvalidOperationException($"Ingest tool-call loop hit configured cap of {maxIterations} iterations without completing source chunk {sourceChunk.Index}.");
         }
 
         return finalText;
+    }
+
+    private void NotifyTokenCountIfChanged(IngestJob job, IngestJobChunk jobChunk, IngestChunkTokenTracker tokenTracker)
+    {
+        var result = tokenTracker.Count(tokenCounter, job.ModelName, job.EncodingName);
+        var changed = jobChunk.LlmTokenCount != result.TokenCount
+            || jobChunk.LlmTokenCountIsExact != result.IsExact
+            || !string.Equals(jobChunk.LlmTokenCountMethod, result.Method, StringComparison.Ordinal)
+            || !string.Equals(jobChunk.LlmTokenEncodingName, result.EncodingName, StringComparison.Ordinal);
+
+        ApplyLlmTokenCount(jobChunk, result);
+        if (changed)
+            NotifyLiveTokenCount(job.ProjectId, job.Id, jobChunk);
+    }
+
+    private void NotifyLiveTokenCount(Guid projectId, Guid jobId, IngestJobChunk jobChunk)
+    {
+        if (jobChunk.LlmTokenCount is not int tokenCount)
+            return;
+
+        var sourceChunk = jobChunk.SourceChunk;
+        NotifyLive(projectId, jobId, new IngestLiveTokenCountUpdated(
+            sourceChunk.Id,
+            sourceChunk.Index,
+            sourceChunk.Title,
+            tokenCount,
+            jobChunk.LlmTokenCountIsExact ?? false,
+            jobChunk.LlmTokenCountMethod ?? string.Empty,
+            jobChunk.LlmTokenEncodingName));
+    }
+
+    private static void ApplyLlmTokenCount(IngestJobChunk jobChunk, TokenCountResult result)
+    {
+        jobChunk.LlmTokenCount = result.TokenCount;
+        jobChunk.LlmTokenCountIsExact = result.IsExact;
+        jobChunk.LlmTokenCountMethod = result.Method;
+        jobChunk.LlmTokenEncodingName = result.EncodingName;
+    }
+
+    private static void ResetLlmTokenCount(IngestJobChunk jobChunk)
+    {
+        jobChunk.LlmTokenCount = null;
+        jobChunk.LlmTokenCountIsExact = null;
+        jobChunk.LlmTokenCountMethod = null;
+        jobChunk.LlmTokenEncodingName = null;
     }
 
     private async Task<string> InvokeToolAsync(IList<AITool> aiTools, FunctionCallContent functionCall, Guid projectId, Guid jobId, CancellationToken cancellationToken)
@@ -670,6 +739,8 @@ public sealed class IngestJobProcessor(
         job.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJob(job);
         await ingest.SaveChangesAsync(CancellationToken.None);
+        if (activeChunk is not null)
+            NotifyLiveTokenCount(job.ProjectId, job.Id, activeChunk);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Stopped);
     }
 
@@ -693,6 +764,8 @@ public sealed class IngestJobProcessor(
         job.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJob(job);
         await ingest.SaveChangesAsync(CancellationToken.None);
+        if (activeChunk is not null)
+            NotifyLiveTokenCount(job.ProjectId, job.Id, activeChunk);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Failed);
     }
 
@@ -792,6 +865,157 @@ public sealed class IngestJobProcessor(
         var trimmed = value.Trim();
         return trimmed.Length <= max ? trimmed : trimmed[..max] + "...";
     }
+
+    private sealed class IngestChunkTokenTracker(IReadOnlyList<ChatMessage> messages)
+    {
+        private readonly StringBuilder _currentAssistantText = new();
+        private readonly List<LiveToolCallTokenState> _currentToolCalls = [];
+        private readonly List<PendingToolResultTokenState> _pendingToolResults = [];
+
+        public void BeginAssistantTurn()
+        {
+            _currentAssistantText.Clear();
+            _currentToolCalls.Clear();
+            _pendingToolResults.Clear();
+        }
+
+        public void AppendAssistantText(string text) => _currentAssistantText.Append(text);
+
+        public void StartToolCall(string callId, string name, string argumentsJson)
+        {
+            var call = FindOrAddToolCall(callId);
+            call.Name = name;
+            if (!string.IsNullOrEmpty(argumentsJson))
+                call.SetArguments(argumentsJson);
+        }
+
+        public void AppendToolArguments(string callId, string argumentsDelta)
+        {
+            var call = FindOrAddToolCall(callId);
+            if (!string.IsNullOrEmpty(argumentsDelta))
+                call.Arguments.Append(argumentsDelta);
+        }
+
+        public void SetToolCallArguments(string callId, string name, string argumentsJson)
+        {
+            var call = FindOrAddToolCall(callId);
+            call.Name = name;
+            call.SetArguments(argumentsJson);
+        }
+
+        public void CommitAssistantMessage()
+        {
+            _currentAssistantText.Clear();
+            _currentToolCalls.Clear();
+        }
+
+        public void AddToolResult(string callId, string result) =>
+            _pendingToolResults.Add(new PendingToolResultTokenState(callId, result));
+
+        public void CommitToolMessage() => _pendingToolResults.Clear();
+
+        public TokenCountResult Count(ITokenCounter counter, string? modelName, string? encodingName)
+        {
+            var sb = new StringBuilder();
+            foreach (var message in messages)
+                AppendMessage(sb, message);
+
+            AppendCurrentAssistant(sb);
+            AppendPendingToolResults(sb);
+
+            return counter.Count(sb.ToString(), new TokenCountRequest(modelName, encodingName));
+        }
+
+        private LiveToolCallTokenState FindOrAddToolCall(string callId)
+        {
+            var call = _currentToolCalls.FirstOrDefault(candidate => string.Equals(candidate.CallId, callId, StringComparison.Ordinal));
+            if (call is not null)
+                return call;
+
+            call = new LiveToolCallTokenState(callId);
+            _currentToolCalls.Add(call);
+            return call;
+        }
+
+        private void AppendCurrentAssistant(StringBuilder sb)
+        {
+            if (_currentAssistantText.Length == 0 && _currentToolCalls.Count == 0)
+                return;
+
+            sb.AppendLine("Assistant:");
+            if (_currentAssistantText.Length > 0)
+                sb.AppendLine(_currentAssistantText.ToString());
+            foreach (var call in _currentToolCalls)
+                AppendToolCall(sb, call.CallId, call.Name, call.Arguments.ToString());
+        }
+
+        private void AppendPendingToolResults(StringBuilder sb)
+        {
+            if (_pendingToolResults.Count == 0)
+                return;
+
+            sb.AppendLine("Tool:");
+            foreach (var result in _pendingToolResults)
+                AppendToolResult(sb, result.CallId, result.Result);
+        }
+
+        private static void AppendMessage(StringBuilder sb, ChatMessage message)
+        {
+            sb.Append(message.Role).AppendLine(":");
+            foreach (var content in message.Contents)
+                AppendContent(sb, content);
+        }
+
+        private static void AppendContent(StringBuilder sb, AIContent content)
+        {
+            switch (content)
+            {
+                case TextContent textContent when !string.IsNullOrEmpty(textContent.Text):
+                    sb.AppendLine(textContent.Text);
+                    break;
+                case FunctionCallContent functionCall:
+                    AppendToolCall(
+                        sb,
+                        functionCall.CallId ?? string.Empty,
+                        functionCall.Name,
+                        functionCall.Arguments is null ? "{}" : ToolCallArguments.Serialize(functionCall.Arguments));
+                    break;
+                case FunctionResultContent functionResult:
+                    AppendToolResult(sb, functionResult.CallId ?? string.Empty, functionResult.Result?.ToString() ?? string.Empty);
+                    break;
+            }
+        }
+
+        private static void AppendToolCall(StringBuilder sb, string callId, string name, string argumentsJson)
+        {
+            sb.Append("Tool: ").Append(name).Append(' ').AppendLine(callId);
+            if (!string.IsNullOrWhiteSpace(argumentsJson) && argumentsJson != "{}")
+                sb.Append("Args: ").AppendLine(argumentsJson);
+        }
+
+        private static void AppendToolResult(StringBuilder sb, string callId, string result)
+        {
+            sb.Append("Tool result: ").AppendLine(callId);
+            if (!string.IsNullOrWhiteSpace(result))
+                sb.Append("Result: ").AppendLine(result);
+        }
+    }
+
+    private sealed class LiveToolCallTokenState(string callId)
+    {
+        public string CallId { get; } = callId;
+        public string Name { get; set; } = callId;
+        public StringBuilder Arguments { get; } = new();
+
+        public void SetArguments(string argumentsJson)
+        {
+            Arguments.Clear();
+            if (!string.IsNullOrEmpty(argumentsJson))
+                Arguments.Append(argumentsJson);
+        }
+    }
+
+    private sealed record PendingToolResultTokenState(string CallId, string Result);
 
     private sealed record PendingChunkToolCall(
         FunctionCallContent Content,

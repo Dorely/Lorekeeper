@@ -220,6 +220,25 @@
     margin-bottom: 0.55rem;
 }
 
+.ingest-live-badges {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.ingest-live-token-count {
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 999px;
+    padding: 0.15rem 0.45rem;
+    background: var(--bs-body-bg, #fff);
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.76rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
 .ingest-live-body {
     display: flex;
     flex-direction: column;
