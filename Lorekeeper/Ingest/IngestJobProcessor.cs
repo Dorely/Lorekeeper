@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Context;
@@ -63,7 +66,7 @@ public sealed class IngestJobProcessor(
 
         try
         {
-            var job = await ingest.GetJobDetailAsync(jobId, cancellationToken)
+            var job = await ingest.GetJobProcessorDetailAsync(jobId, cancellationToken)
                 ?? throw new InvalidOperationException($"Ingest job {jobId} not found.");
 
             if (job.Status is not (IngestJobStatus.Queued or IngestJobStatus.Running or IngestJobStatus.StopRequested))
@@ -108,8 +111,8 @@ public sealed class IngestJobProcessor(
 
                 job.CompletedSourceChunks = job.Chunks.Count(chunk => chunk.Status == IngestJobChunkStatus.Completed);
                 var reportItems = await ingest.ListReportItemsAsync(job.Id, cancellationToken);
-                job.CreatedEntityCount = reportItems.Count(item => item.Kind == IngestReportItemKind.Entity && item.Status == IngestReportItemStatus.Active);
-                job.CreatedRelationshipCount = reportItems.Count(item => item.Kind == IngestReportItemKind.Relationship && item.Status == IngestReportItemStatus.Active);
+                job.CreatedEntityCount = CountDistinctEntities(reportItems);
+                job.CreatedRelationshipCount = CountDistinctRelationships(reportItems);
                 job.CurrentMessage = $"Completed source chunk {jobChunk.SourceChunkIndex + 1} of {job.TotalSourceChunks}.";
                 job.UpdatedAt = DateTime.UtcNow;
                 ingest.UpdateJob(job);
@@ -159,60 +162,63 @@ public sealed class IngestJobProcessor(
         await ingest.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
 
-        var mutated = false;
-        var sourceGraphChanged = false;
-        var context = new IngestAgentContext(
-            job.ProjectId,
-            job.Id,
-            job.SourceId,
-            job.Source.Title,
-            job.Source.SourceKind,
-            sourceChunk.Id,
-            sourceChunk.Index,
-            sourceChunk.Title,
-            OnMutated: () => mutated = true);
-        var aiTools = tools.Build(context);
-        var chatOptions = new ChatOptions
-        {
-            Tools = aiTools,
-            ToolMode = ChatToolMode.Auto,
-        };
-
-        var messages = new List<ChatMessage>
-        {
-            new(ChatRole.System, _systemPrompt),
-            new(ChatRole.User, await BuildChunkPromptAsync(job, sourceChunk, cancellationToken)),
-        };
-
         string? finalText = null;
-        for (var iteration = 0; iteration < maxIterations; iteration++)
+        var mutated = false;
+        var maxAttempts = Math.Max(1, options.Value.IngestMaxTransientRetries);
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var response = await chat.GetResponseAsync(messages, chatOptions, cancellationToken);
-            var assistantMessage = response.Messages.LastOrDefault()
-                ?? new ChatMessage(ChatRole.Assistant, response.Text ?? string.Empty);
-            messages.Add(assistantMessage);
-
-            var functionCalls = assistantMessage.Contents.OfType<FunctionCallContent>().ToList();
-            if (functionCalls.Count == 0)
+            try
             {
-                finalText = assistantMessage.Text;
+                var context = new IngestAgentContext(
+                    job.ProjectId,
+                    job.Id,
+                    job.SourceId,
+                    job.Source.Title,
+                    job.Source.SourceKind,
+                    sourceChunk.Id,
+                    sourceChunk.Index,
+                    sourceChunk.Title,
+                    OnMutated: () => mutated = true);
+
+                NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnStarted(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, attempt, maxAttempts));
+                finalText = await RunChunkConversationAsync(job, sourceChunk, context, chat, maxIterations, cancellationToken);
+                NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnCompleted(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title));
                 break;
             }
-
-            var resultContents = new List<AIContent>();
-            foreach (var functionCall in functionCalls)
+            catch (Exception ex) when (IsRetryableLlmFailure(ex) && attempt < maxAttempts)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var toolResult = await InvokeToolAsync(aiTools, functionCall, job.ProjectId, job.Id, cancellationToken);
-                resultContents.Add(new FunctionResultContent(functionCall.CallId ?? functionCall.Name, toolResult));
+                var delayMs = RetryDelayMs(attempt);
+                logger.LogWarning(ex, "Transient ingest LLM failure for job {JobId}, source chunk {SourceChunkIndex}, attempt {Attempt}/{MaxAttempts}. Retrying in {DelayMs} ms.", job.Id, jobChunk.SourceChunkIndex, attempt, maxAttempts, delayMs);
+                await ingest.AddEventAsync(new IngestJobEvent
+                {
+                    JobId = job.Id,
+                    Level = IngestJobEventLevel.Warning,
+                    EventType = "llm.retry",
+                    Message = $"Retrying source chunk {jobChunk.SourceChunkIndex + 1} after transient LLM error.",
+                    PayloadJson = JsonSerializer.Serialize(new
+                    {
+                        sourceChunkId = sourceChunk.Id,
+                        sourceChunkIndex = sourceChunk.Index,
+                        attempt,
+                        maxAttempts,
+                        delayMs,
+                        error = ex.Message,
+                    }),
+                }, cancellationToken);
+                await ingest.SaveChangesAsync(cancellationToken);
+                Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
+                NotifyLive(job.ProjectId, job.Id, new IngestLiveRetryScheduled(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, attempt, maxAttempts, delayMs, ex.Message));
+                await Task.Delay(delayMs, cancellationToken);
             }
-
-            messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
-            if (iteration == maxIterations - 1)
-                throw new InvalidOperationException($"Ingest tool-call loop hit configured cap of {maxIterations} iterations without completing source chunk {sourceChunk.Index}.");
+            catch (Exception ex) when (!IsCancellation(ex))
+            {
+                NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnFailed(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, ex.Message));
+                throw;
+            }
         }
 
+        var sourceGraphChanged = false;
         if (string.IsNullOrWhiteSpace(sourceChunk.Summary) && !string.IsNullOrWhiteSpace(finalText))
         {
             sourceChunk.Summary = Truncate(finalText, 800);
@@ -240,6 +246,110 @@ public sealed class IngestJobProcessor(
             if (sourceGraphChanged)
                 await contextIndexing.ReindexIngestSourceChunkAsync(sourceChunk.Id, cancellationToken);
         }
+    }
+
+    private async Task<string?> RunChunkConversationAsync(
+        IngestJob job,
+        IngestSourceChunk sourceChunk,
+        IngestAgentContext context,
+        IChatClient chat,
+        int maxIterations,
+        CancellationToken cancellationToken)
+    {
+        var aiTools = tools.Build(context);
+        var chatOptions = new ChatOptions
+        {
+            Tools = aiTools,
+            ToolMode = ChatToolMode.Auto,
+        };
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, _systemPrompt),
+            new(ChatRole.User, await BuildChunkPromptAsync(job, sourceChunk, cancellationToken)),
+        };
+
+        string? finalText = null;
+        for (var iteration = 0; iteration < maxIterations; iteration++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var assistantText = new StringBuilder();
+            var pendingCalls = new List<PendingChunkToolCall>();
+            var toolTracker = new StreamingToolCallTracker();
+
+            await foreach (var update in chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken))
+            {
+                foreach (var content in update.Contents)
+                {
+                    if (content is TextContent textContent && textContent.Text is { Length: > 0 } text)
+                    {
+                        assistantText.Append(text);
+                        NotifyLive(job.ProjectId, job.Id, new IngestLiveTextDelta(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, text));
+                        continue;
+                    }
+
+                    foreach (var toolUpdate in toolTracker.Process(content, assistantText.Length))
+                    {
+                        switch (toolUpdate)
+                        {
+                            case StreamingToolCallStartedUpdate started:
+                                NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallStarted(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete));
+                                break;
+
+                            case StreamingToolCallArgumentsDeltaUpdate delta:
+                                NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallArgumentsDelta(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete));
+                                break;
+
+                            case StreamingToolCallReadyUpdate ready:
+                                pendingCalls.Add(new PendingChunkToolCall(ready.Content, ready.CallId, ready.ToolName, ready.ArgumentsJson));
+                                break;
+                        }
+                    }
+                }
+            }
+
+            var assistantContents = new List<AIContent>();
+            if (assistantText.Length > 0)
+                assistantContents.Add(new TextContent(assistantText.ToString()));
+            assistantContents.AddRange(pendingCalls.Select(call => (AIContent)call.Content));
+            messages.Add(new ChatMessage(ChatRole.Assistant, assistantContents));
+
+            if (pendingCalls.Count == 0)
+            {
+                finalText = assistantText.ToString();
+                break;
+            }
+
+            var resultContents = new List<AIContent>();
+            foreach (var pendingCall in pendingCalls)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var stopwatch = Stopwatch.StartNew();
+                var toolResult = await InvokeToolAsync(aiTools, pendingCall.Content, job.ProjectId, job.Id, cancellationToken);
+                stopwatch.Stop();
+
+                var toolError = toolResult.StartsWith("Error:", StringComparison.OrdinalIgnoreCase)
+                    ? toolResult
+                    : null;
+                NotifyLive(job.ProjectId, job.Id, new IngestLiveToolCallCompleted(
+                    sourceChunk.Id,
+                    sourceChunk.Index,
+                    sourceChunk.Title,
+                    pendingCall.CallId,
+                    pendingCall.Name,
+                    toolError is null ? toolResult : null,
+                    toolError,
+                    stopwatch.Elapsed.TotalMilliseconds));
+
+                resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult));
+            }
+
+            messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+            if (iteration == maxIterations - 1)
+                throw new InvalidOperationException($"Ingest tool-call loop hit configured cap of {maxIterations} iterations without completing source chunk {sourceChunk.Index}.");
+        }
+
+        return finalText;
     }
 
     private async Task<string> InvokeToolAsync(IList<AITool> aiTools, FunctionCallContent functionCall, Guid projectId, Guid jobId, CancellationToken cancellationToken)
@@ -565,10 +675,103 @@ public sealed class IngestJobProcessor(
     private void Notify(Guid projectId, Guid jobId, IngestJobUpdateKind kind) =>
         notifier.Notify(new IngestJobUpdate(projectId, jobId, kind, DateTime.UtcNow));
 
+    private void NotifyLive(Guid projectId, Guid jobId, IngestLiveUpdate live) =>
+        notifier.Notify(new IngestJobUpdate(projectId, jobId, IngestJobUpdateKind.Live, DateTime.UtcNow, live));
+
+    private int RetryDelayMs(int failedAttempt)
+    {
+        var baseDelay = Math.Clamp(options.Value.IngestRetryBaseDelayMs, 100, 60_000);
+        var maxDelay = Math.Clamp(options.Value.IngestRetryMaxDelayMs, baseDelay, 120_000);
+        var multiplier = Math.Pow(2, Math.Max(0, failedAttempt - 1));
+        return Math.Min(maxDelay, (int)Math.Round(baseDelay * multiplier));
+    }
+
+    private static bool IsRetryableLlmFailure(Exception exception)
+    {
+        if (IsCancellation(exception)) return false;
+
+        if (exception is HttpIOException { HttpRequestError: HttpRequestError.ResponseEnded })
+            return true;
+
+        if (exception is HttpRequestException httpRequestException)
+        {
+            if (httpRequestException.StatusCode is { } statusCode)
+                return IsTransientStatusCode(statusCode);
+            return LooksLikeTransientProviderError(httpRequestException.Message);
+        }
+
+        return exception.InnerException is not null && IsRetryableLlmFailure(exception.InnerException)
+            || LooksLikeTransientProviderError(exception.Message);
+    }
+
+    private static bool IsTransientStatusCode(HttpStatusCode statusCode) =>
+        statusCode is HttpStatusCode.RequestTimeout
+            or HttpStatusCode.Conflict
+            or HttpStatusCode.TooManyRequests
+            or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable
+            or HttpStatusCode.GatewayTimeout
+        || (int)statusCode == 425;
+
+    private static bool LooksLikeTransientProviderError(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return false;
+        var normalized = message.ToLowerInvariant();
+        return normalized.Contains("response ended", StringComparison.Ordinal)
+            || normalized.Contains("status code 408", StringComparison.Ordinal)
+            || normalized.Contains("returned 408", StringComparison.Ordinal)
+            || normalized.Contains(" 408", StringComparison.Ordinal)
+            || normalized.Contains("status code 409", StringComparison.Ordinal)
+            || normalized.Contains("returned 409", StringComparison.Ordinal)
+            || normalized.Contains(" 409", StringComparison.Ordinal)
+            || normalized.Contains("status code 425", StringComparison.Ordinal)
+            || normalized.Contains("returned 425", StringComparison.Ordinal)
+            || normalized.Contains(" 425", StringComparison.Ordinal)
+            || normalized.Contains("status code 429", StringComparison.Ordinal)
+            || normalized.Contains("returned 429", StringComparison.Ordinal)
+            || normalized.Contains(" 429", StringComparison.Ordinal)
+            || normalized.Contains("status code 500", StringComparison.Ordinal)
+            || normalized.Contains("returned 500", StringComparison.Ordinal)
+            || normalized.Contains(" 500", StringComparison.Ordinal)
+            || normalized.Contains("status code 502", StringComparison.Ordinal)
+            || normalized.Contains("returned 502", StringComparison.Ordinal)
+            || normalized.Contains(" 502", StringComparison.Ordinal)
+            || normalized.Contains("status code 503", StringComparison.Ordinal)
+            || normalized.Contains("returned 503", StringComparison.Ordinal)
+            || normalized.Contains(" 503", StringComparison.Ordinal)
+            || normalized.Contains("status code 504", StringComparison.Ordinal)
+            || normalized.Contains("returned 504", StringComparison.Ordinal)
+            || normalized.Contains(" 504", StringComparison.Ordinal);
+    }
+
+    private static bool IsCancellation(Exception exception) =>
+        exception is OperationCanceledException;
+
+    private static int CountDistinctEntities(IEnumerable<IngestReportItem> reportItems) =>
+        reportItems
+            .Where(item => item.Kind == IngestReportItemKind.Entity && item.Status == IngestReportItemStatus.Active)
+            .Select(item => item.EntityId?.ToString("N") ?? item.GraphNodeId?.ToString() ?? item.Id.ToString("N"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+
+    private static int CountDistinctRelationships(IEnumerable<IngestReportItem> reportItems) =>
+        reportItems
+            .Where(item => item.Kind == IngestReportItemKind.Relationship && item.Status == IngestReportItemStatus.Active)
+            .Select(item => item.GraphEdgeId?.ToString() ?? item.Id.ToString("N"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+
     private static string Truncate(string? value, int max)
     {
         if (string.IsNullOrWhiteSpace(value)) return string.Empty;
         var trimmed = value.Trim();
         return trimmed.Length <= max ? trimmed : trimmed[..max] + "...";
     }
+
+    private sealed record PendingChunkToolCall(
+        FunctionCallContent Content,
+        string CallId,
+        string Name,
+        string ArgumentsJson);
 }

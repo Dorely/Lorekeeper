@@ -9,6 +9,8 @@ public interface IIngestRepository
     Task<List<IngestJobListItem>> ListJobSummariesByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<IngestJob?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<IngestJob?> GetJobDetailAsync(Guid jobId, CancellationToken cancellationToken = default);
+    Task<IngestJob?> GetJobProcessorDetailAsync(Guid jobId, CancellationToken cancellationToken = default);
+    Task<IngestJob?> GetJobResumeDetailAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<IngestJobDetailView?> GetJobDetailViewAsync(Guid jobId, int eventLimit = 20, CancellationToken cancellationToken = default);
     Task<IngestSource?> GetSourceAsync(Guid sourceId, CancellationToken cancellationToken = default);
     Task<IngestSourceChunk?> GetSourceChunkAsync(Guid sourceChunkId, CancellationToken cancellationToken = default);

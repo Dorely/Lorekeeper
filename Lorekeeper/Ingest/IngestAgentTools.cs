@@ -79,25 +79,39 @@ public sealed class IngestAgentTools(
     {
         var items = (await ingest.ListReportItemsAsync(context.JobId))
             .Where(item => item.Kind == IngestReportItemKind.Entity && item.Status == IngestReportItemStatus.Active)
-            .OrderBy(item => item.ResourceType)
-            .ThenBy(item => item.Title)
+            .Where(item => item.EntityId is not null)
+            .GroupBy(item => item.EntityId!.Value)
+            .Select(group => new
+            {
+                EntityId = group.Key,
+                Latest = group.OrderByDescending(item => item.UpdatedAt).First(),
+                All = group.OrderBy(item => item.CreatedAt).ToList(),
+            })
+            .OrderBy(group => group.Latest.ResourceType)
+            .ThenBy(group => group.Latest.Title)
             .ToList();
 
         var payload = new List<object>();
-        foreach (var item in items)
+        foreach (var group in items)
         {
-            var relationContext = item.EntityId is Guid entityId
-                ? await BuildRelationContextAsync(context.ProjectId, entityId)
-                : EntityRelationContext.Empty;
+            var item = group.Latest;
+            var relationContext = await BuildRelationContextAsync(context.ProjectId, group.EntityId);
             payload.Add(new
             {
-                id = item.EntityId,
+                id = group.EntityId,
                 type = item.ResourceType,
                 name = item.Title,
                 summary = item.Summary,
                 notes = item.Notes,
-                evidence = Truncate(item.Evidence, 600),
-                graphAction = IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson),
+                evidence = Truncate(string.Join("\n", group.All.Select(row => row.Evidence).Where(value => !string.IsNullOrWhiteSpace(value))), 600),
+                graphAction = group.All.Any(row => string.Equals(IngestSourceAssertions.ReadEntityGraphAction(row.PayloadJson), IngestSourceAssertions.CreatedEntityAction, StringComparison.Ordinal))
+                    ? IngestSourceAssertions.CreatedEntityAction
+                    : IngestSourceAssertions.LinkedExistingEntityAction,
+                touchedSourceChunkIndexes = group.All
+                    .SelectMany(row => ReadIntArray(row.PayloadJson, "sourceChunkIndexes"))
+                    .Distinct()
+                    .Order()
+                    .ToArray(),
                 payload = SafeDeserialize(item.PayloadJson),
                 relationContext,
             });
@@ -109,20 +123,37 @@ public sealed class IngestAgentTools(
     private async Task<string> GetJobEntityAsync(IngestAgentContext context, string entityId)
     {
         if (!Guid.TryParse(entityId, out var parsed)) return $"Error: entityId '{entityId}' is not a valid Guid.";
-        var item = await FindActiveEntityReportItemAsync(context.JobId, parsed);
-        if (item is null) return $"Error: entity {parsed} has not been touched by this ingest job.";
+        var itemRows = (await ingest.ListReportItemsAsync(context.JobId))
+            .Where(item => item.Kind == IngestReportItemKind.Entity
+                && item.Status == IngestReportItemStatus.Active
+                && item.EntityId == parsed)
+            .OrderBy(item => item.CreatedAt)
+            .ToList();
+        if (itemRows.Count == 0) return $"Error: entity {parsed} has not been touched by this ingest job.";
 
         var node = await nodes.FindByKeyAsync(context.ProjectId, parsed.ToString("N"));
         var relationContext = await BuildRelationContextAsync(context.ProjectId, parsed);
+        var item = itemRows.OrderByDescending(row => row.UpdatedAt).First();
         return JsonSerializer.Serialize(new
         {
             id = parsed,
             type = item.ResourceType,
             name = node?.Label ?? item.Title,
             summary = item.Summary,
-            notes = item.Notes,
-            evidence = item.Evidence,
-            graphAction = IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson),
+            notes = string.Join("\n", itemRows.Select(row => row.Notes).Where(value => !string.IsNullOrWhiteSpace(value))),
+            evidence = string.Join("\n", itemRows.Select(row => row.Evidence).Where(value => !string.IsNullOrWhiteSpace(value))),
+            graphAction = itemRows.Any(row => string.Equals(IngestSourceAssertions.ReadEntityGraphAction(row.PayloadJson), IngestSourceAssertions.CreatedEntityAction, StringComparison.Ordinal))
+                ? IngestSourceAssertions.CreatedEntityAction
+                : IngestSourceAssertions.LinkedExistingEntityAction,
+            reportRows = itemRows.Select(row => new
+            {
+                row.Id,
+                row.SourceChunkId,
+                sourceChunkIndexes = ReadIntArray(row.PayloadJson, "sourceChunkIndexes"),
+                row.Summary,
+                row.Evidence,
+                row.UpdatedAt,
+            }),
             canonicalProperties = node is null ? new Dictionary<string, string?>() : VisibleProperties(node.Properties),
             sourceAssertions = node is null ? Array.Empty<IngestSourceAssertionSummary>() : IngestSourceAssertions.SummarizeEntityAssertions(node.Properties),
             payload = SafeDeserialize(item.PayloadJson),
@@ -216,7 +247,7 @@ public sealed class IngestAgentTools(
         var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, parsed);
         if (node is null) return $"Error: entity {parsed} is not a non-structural project story entity.";
 
-        var item = await FindActiveEntityReportItemAsync(context.JobId, parsed);
+        var item = await FindActiveEntityReportItemAsync(context.JobId, parsed, context.SourceChunkId);
         await RecordEntityObservationAsync(
             context,
             node,
@@ -343,7 +374,7 @@ public sealed class IngestAgentTools(
         var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, parsed);
         if (node is null) return $"Error: entity {parsed} is not a non-structural project story entity.";
 
-        var item = await FindActiveEntityReportItemAsync(context.JobId, parsed);
+        var item = await FindActiveEntityReportItemAsync(context.JobId, parsed, context.SourceChunkId);
         var action = item is null
             ? IngestSourceAssertions.LinkedExistingEntityAction
             : IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson) ?? IngestSourceAssertions.LinkedExistingEntityAction;
@@ -436,7 +467,7 @@ public sealed class IngestAgentTools(
             edge = existingEdge;
         }
 
-        var relationshipItem = await FindActiveRelationshipReportItemAsync(context.JobId, edge.Id);
+        var relationshipItem = await FindActiveRelationshipReportItemAsync(context.JobId, edge.Id, context.SourceChunkId);
         await UpsertRelationshipReportItemAsync(
             context,
             relationshipItem,
@@ -475,23 +506,40 @@ public sealed class IngestAgentTools(
         sourceChunk.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateSourceChunk(sourceChunk);
 
-        await ingest.AddReportItemAsync(new IngestReportItem
+        var payloadJson = JsonSerializer.Serialize(new
         {
-            JobId = context.JobId,
-            SourceChunkId = context.SourceChunkId,
-            Kind = IngestReportItemKind.SourceChunkNote,
-            Status = IngestReportItemStatus.Active,
-            Title = context.SourceChunkTitle,
-            Summary = sourceChunk.Summary,
-            Notes = sourceChunk.AgentNotes,
-            ResourceType = "SourceChunk",
-            PayloadJson = JsonSerializer.Serialize(new
-            {
-                sourceId = context.SourceId.ToString("N"),
-                sourceChunkId = context.SourceChunkId,
-                sourceChunkIndex = context.SourceChunkIndex,
-            }),
+            sourceId = context.SourceId.ToString("N"),
+            sourceChunkId = context.SourceChunkId,
+            sourceChunkIndex = context.SourceChunkIndex,
         });
+        var existingNote = (await ingest.ListReportItemsAsync(context.JobId)).FirstOrDefault(item =>
+            item.Kind == IngestReportItemKind.SourceChunkNote
+            && item.Status == IngestReportItemStatus.Active
+            && item.SourceChunkId == context.SourceChunkId);
+        if (existingNote is null)
+        {
+            await ingest.AddReportItemAsync(new IngestReportItem
+            {
+                JobId = context.JobId,
+                SourceChunkId = context.SourceChunkId,
+                Kind = IngestReportItemKind.SourceChunkNote,
+                Status = IngestReportItemStatus.Active,
+                Title = context.SourceChunkTitle,
+                Summary = sourceChunk.Summary,
+                Notes = sourceChunk.AgentNotes,
+                ResourceType = "SourceChunk",
+                PayloadJson = payloadJson,
+            });
+        }
+        else
+        {
+            existingNote.Title = context.SourceChunkTitle;
+            existingNote.Summary = sourceChunk.Summary;
+            existingNote.Notes = sourceChunk.AgentNotes;
+            existingNote.PayloadJson = payloadJson;
+            existingNote.UpdatedAt = DateTime.UtcNow;
+            ingest.UpdateReportItem(existingNote);
+        }
 
         await ingest.SaveChangesAsync();
         context.OnMutated();
@@ -633,17 +681,19 @@ public sealed class IngestAgentTools(
         await ingest.SaveChangesAsync();
     }
 
-    private async Task<IngestReportItem?> FindActiveEntityReportItemAsync(Guid jobId, Guid entityId) =>
+    private async Task<IngestReportItem?> FindActiveEntityReportItemAsync(Guid jobId, Guid entityId, Guid? sourceChunkId = null) =>
         (await ingest.ListReportItemsAsync(jobId)).FirstOrDefault(item =>
             item.Kind == IngestReportItemKind.Entity
             && item.Status == IngestReportItemStatus.Active
-            && item.EntityId == entityId);
+            && item.EntityId == entityId
+            && (sourceChunkId is null || item.SourceChunkId == sourceChunkId));
 
-    private async Task<IngestReportItem?> FindActiveRelationshipReportItemAsync(Guid jobId, long graphEdgeId) =>
+    private async Task<IngestReportItem?> FindActiveRelationshipReportItemAsync(Guid jobId, long graphEdgeId, Guid? sourceChunkId = null) =>
         (await ingest.ListReportItemsAsync(jobId)).FirstOrDefault(item =>
             item.Kind == IngestReportItemKind.Relationship
             && item.Status == IngestReportItemStatus.Active
-            && item.GraphEdgeId == graphEdgeId);
+            && item.GraphEdgeId == graphEdgeId
+            && (sourceChunkId is null || item.SourceChunkId == sourceChunkId));
 
     private async Task AddExtractedFromAsync(IngestAgentContext context, GraphNode entityNode)
     {
@@ -1174,6 +1224,8 @@ public sealed class IngestAgentTools(
     {
         if (string.IsNullOrWhiteSpace(next)) return existing ?? string.Empty;
         var block = $"[Source chunk {sourceChunkIndex}] {next.Trim()}";
+        if (!string.IsNullOrWhiteSpace(existing) && existing.Contains(block, StringComparison.OrdinalIgnoreCase))
+            return existing;
         return string.IsNullOrWhiteSpace(existing) ? block : existing.TrimEnd() + "\n" + block;
     }
 
@@ -1264,6 +1316,30 @@ public sealed class IngestAgentTools(
         if (!LooksLikeJsonRoot(json, '{') && !LooksLikeJsonRoot(json, '[')) return json;
         try { return JsonSerializer.Deserialize<object>(json); }
         catch (JsonException) { return json; }
+    }
+
+    private static IReadOnlyList<int> ReadIntArray(string json, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(json) || !LooksLikeJsonRoot(json, '{')) return [];
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty(propertyName, out var property)
+                || property.ValueKind != JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            return property.EnumerateArray()
+                .Where(value => value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out _))
+                .Select(value => value.GetInt32())
+                .ToArray();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     private static string Truncate(string? value, int max)

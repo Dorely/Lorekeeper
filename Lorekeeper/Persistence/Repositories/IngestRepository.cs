@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
 using Microsoft.EntityFrameworkCore;
@@ -47,6 +48,22 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
                 .ThenInclude(chunk => chunk.SourceChunk)
             .Include(job => job.ReportItems.OrderBy(item => item.CreatedAt))
             .Include(job => job.Events.OrderByDescending(item => item.CreatedAt))
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(job => job.Id == jobId, cancellationToken);
+
+    public Task<IngestJob?> GetJobProcessorDetailAsync(Guid jobId, CancellationToken cancellationToken = default) =>
+        db.IngestJobs
+            .Include(job => job.Source)
+            .Include(job => job.Chunks.OrderBy(chunk => chunk.SourceChunkIndex))
+                .ThenInclude(chunk => chunk.SourceChunk)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(job => job.Id == jobId, cancellationToken);
+
+    public Task<IngestJob?> GetJobResumeDetailAsync(Guid jobId, CancellationToken cancellationToken = default) =>
+        db.IngestJobs
+            .Include(job => job.Chunks.OrderBy(chunk => chunk.SourceChunkIndex))
+                .ThenInclude(chunk => chunk.SourceChunk)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(job => job.Id == jobId, cancellationToken);
 
     public async Task<IngestJobDetailView?> GetJobDetailViewAsync(Guid jobId, int eventLimit = 20, CancellationToken cancellationToken = default)
@@ -212,11 +229,21 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
             .OrderBy(item => item.CreatedAt)
             .ToListAsync(cancellationToken);
 
-    public Task<List<IngestReportItemView>> ListReportItemViewsAsync(Guid jobId, Guid? sourceChunkId = null, CancellationToken cancellationToken = default) =>
-        db.IngestReportItems
+    public async Task<List<IngestReportItemView>> ListReportItemViewsAsync(Guid jobId, Guid? sourceChunkId = null, CancellationToken cancellationToken = default)
+    {
+        var query = db.IngestReportItems
             .AsNoTracking()
-            .Where(item => item.JobId == jobId && item.Status != IngestReportItemStatus.Deleted && (sourceChunkId == null || item.SourceChunkId == sourceChunkId))
+            .Where(item => item.JobId == jobId && item.Status != IngestReportItemStatus.Deleted);
+
+        if (sourceChunkId is Guid selectedSourceChunkId)
+            query = query.Where(item => item.SourceChunkId == selectedSourceChunkId || item.SourceChunkId == null);
+
+        var items = await query
             .OrderBy(item => item.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        return items
+            .Where(item => sourceChunkId is null || ReportItemBelongsToChunk(item, sourceChunkId.Value))
             .Select(item => new IngestReportItemView(
                 item.Id,
                 item.SourceChunkId,
@@ -233,7 +260,8 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
                 item.PayloadJson,
                 item.CreatedAt,
                 item.UpdatedAt))
-            .ToListAsync(cancellationToken);
+            .ToList();
+    }
 
     public Task<List<IngestJob>> ListQueuedJobsAsync(CancellationToken cancellationToken = default) =>
         db.IngestJobs
@@ -274,17 +302,17 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
     public async Task AddEventAsync(IngestJobEvent jobEvent, CancellationToken cancellationToken = default) =>
         await db.IngestJobEvents.AddAsync(jobEvent, cancellationToken);
 
-    public void UpdateSource(IngestSource source) => db.IngestSources.Update(source);
+    public void UpdateSource(IngestSource source) => MarkModified(source);
 
-    public void UpdateSourceChunk(IngestSourceChunk sourceChunk) => db.IngestSourceChunks.Update(sourceChunk);
+    public void UpdateSourceChunk(IngestSourceChunk sourceChunk) => MarkModified(sourceChunk);
 
     public void RemoveVectorFragment(IngestVectorFragment vectorFragment) => db.IngestVectorFragments.Remove(vectorFragment);
 
-    public void UpdateJob(IngestJob job) => db.IngestJobs.Update(job);
+    public void UpdateJob(IngestJob job) => MarkModified(job);
 
-    public void UpdateJobChunk(IngestJobChunk jobChunk) => db.IngestJobChunks.Update(jobChunk);
+    public void UpdateJobChunk(IngestJobChunk jobChunk) => MarkModified(jobChunk);
 
-    public void UpdateReportItem(IngestReportItem item) => db.IngestReportItems.Update(item);
+    public void UpdateReportItem(IngestReportItem item) => MarkModified(item);
 
     public void RemoveSource(IngestSource source) => db.IngestSources.Remove(source);
 
@@ -292,4 +320,44 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         db.SaveChangesAsync(cancellationToken);
+
+    private void MarkModified<TEntity>(TEntity entity)
+        where TEntity : class
+    {
+        var entry = db.Entry(entity);
+        if (entry.State == EntityState.Detached)
+            entry.State = EntityState.Modified;
+    }
+
+    private static bool ReportItemBelongsToChunk(IngestReportItem item, Guid sourceChunkId)
+    {
+        if (item.SourceChunkId == sourceChunkId) return true;
+        if (item.SourceChunkId is not null) return false;
+
+        var chunkKey = sourceChunkId.ToString("N");
+        if (string.IsNullOrWhiteSpace(item.PayloadJson) || item.PayloadJson == "{}") return false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(item.PayloadJson);
+            var root = document.RootElement;
+            if (root.TryGetProperty("sourceChunkIds", out var sourceChunkIds)
+                && sourceChunkIds.ValueKind == JsonValueKind.Array
+                && sourceChunkIds.EnumerateArray().Any(value =>
+                    string.Equals(value.GetString(), chunkKey, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            if (root.TryGetProperty("sourceChunkId", out var sourceChunkIdProperty)
+                && sourceChunkIdProperty.ValueKind == JsonValueKind.String
+                && string.Equals(sourceChunkIdProperty.GetString(), chunkKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        catch (JsonException) { }
+
+        return false;
+    }
 }

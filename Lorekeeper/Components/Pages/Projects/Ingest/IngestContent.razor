@@ -1,6 +1,7 @@
 @using Lorekeeper.Ingest
 @using Lorekeeper.Llm
 @using Lorekeeper.Models
+@using Lorekeeper.Components.Chat
 @using Lorekeeper.Research
 @implements IAsyncDisposable
 @inject IIngestService Ingest
@@ -218,10 +219,10 @@ else
                                 }
                             </select>
                         }
-                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(!CanStop(_selectedJob))" @onclick="StopAsync">Stop</button>
-                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(ChatDisabled || !CanResume(_selectedJob) || _resumeProviderId is null)" @onclick="ResumeAsync">Resume</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(ChatDisabled || IsBusy(_selectedJob))" @onclick="RestartAsync">Restart</button>
-                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@IsBusy(_selectedJob)" @onclick="DeleteAsync">Delete</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_jobActionBusy || !CanStop(_selectedJob))" @onclick="StopAsync">Stop</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_jobActionBusy || ChatDisabled || !CanResume(_selectedJob) || _resumeProviderId is null)" @onclick="ResumeAsync">Resume</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_jobActionBusy || ChatDisabled || IsBusy(_selectedJob))" @onclick="RestartAsync">Restart</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_jobActionBusy || IsBusy(_selectedJob))" @onclick="DeleteAsync">Delete</button>
                     </div>
                 </div>
 
@@ -240,6 +241,43 @@ else
                 @if (!string.IsNullOrWhiteSpace(_jobActionError))
                 {
                     <div class="alert alert-danger py-2 small">@_jobActionError</div>
+                }
+                @if (_liveIngest is not null && _liveJobId == _selectedJob.Id)
+                {
+                    <div class="ingest-live-panel">
+                        <div class="ingest-live-head">
+                            <div>
+                                <div class="ingest-section-title mb-1">Current LLM Call</div>
+                                <div class="small text-muted">@_liveSourceChunkTitle</div>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(_liveStatus))
+                            {
+                                <span class="badge bg-secondary">@_liveStatus</span>
+                            }
+                        </div>
+                        <div class="ingest-live-body">
+                            @foreach (var message in _liveIngest.Messages)
+                            {
+                                <div class="ingest-live-message">
+                                    @foreach (var part in message.Parts)
+                                    {
+                                        @if (part is ChatTextPart textPart)
+                                        {
+                                            <div class="ingest-live-text">@(textPart.Text.ToString())</div>
+                                        }
+                                        else if (part is ChatToolPart toolPart)
+                                        {
+                                            <ChatToolChipView Chip="@toolPart.Chip" />
+                                        }
+                                    }
+                                </div>
+                            }
+                            @if (_liveIngest.IsThinking)
+                            {
+                                <div class="small text-muted"><em>Waiting for the model...</em></div>
+                            }
+                        </div>
+                    </div>
                 }
 
                 <div class="ingest-section-title mt-3">Source Chunks</div>
@@ -415,6 +453,7 @@ else
     private bool _creating;
     private bool _readingFile;
     private bool _webReading;
+    private bool _jobActionBusy;
     private bool _followCurrentChunk = true;
     private string? _formError;
     private string? _jobActionError;
@@ -430,6 +469,11 @@ else
     private Guid? _editingReportItemId;
     private Guid? _savingReportItemId;
     private Guid? _deletingReportItemId;
+    private Guid? _liveJobId;
+    private Guid? _liveSourceChunkId;
+    private string _liveSourceChunkTitle = string.Empty;
+    private string? _liveStatus;
+    private ChatLiveTurn? _liveIngest;
 
     private string _title = string.Empty;
     private string _sourceKind = string.Empty;
@@ -554,6 +598,13 @@ else
     private async Task RefreshForUpdateAsync(IngestJobUpdate update)
     {
         if (Project is null || update.ProjectId != Project.Id) return;
+        if (update.Kind == IngestJobUpdateKind.Live)
+        {
+            ApplyLiveUpdate(update);
+            StateHasChanged();
+            return;
+        }
+
         if (!await _refreshLock.WaitAsync(0))
         {
             _refreshAgain = true;
@@ -575,6 +626,7 @@ else
                         _selectedChunkId = null;
                         _reportItems = [];
                         _sourceExcerpt = null;
+                        ClearLiveIngest();
                         if (_jobs.Count > 0)
                             await SelectJobAsync(_jobs[0].Id);
                     }
@@ -591,6 +643,82 @@ else
         {
             _refreshLock.Release();
         }
+    }
+
+    private void ApplyLiveUpdate(IngestJobUpdate update)
+    {
+        if (_selectedJob?.Id != update.JobId || update.Live is null) return;
+
+        var live = update.Live;
+        switch (live)
+        {
+            case IngestLiveTurnStarted started:
+                EnsureLiveTurn(update.JobId, started.SourceChunkId, started.SourceChunkTitle, reset: _liveSourceChunkId != started.SourceChunkId);
+                _liveStatus = started.Attempt == 1
+                    ? $"Attempt {started.Attempt}/{started.MaxAttempts}"
+                    : $"Retry {started.Attempt}/{started.MaxAttempts}";
+                if (started.Attempt > 1)
+                    _liveIngest?.AppendText($"\nAttempt {started.Attempt} of {started.MaxAttempts}.\n");
+                break;
+
+            case IngestLiveTextDelta delta:
+                EnsureLiveTurn(update.JobId, delta.SourceChunkId, delta.SourceChunkTitle);
+                _liveIngest?.AppendText(delta.Text);
+                break;
+
+            case IngestLiveToolCallStarted started:
+                EnsureLiveTurn(update.JobId, started.SourceChunkId, started.SourceChunkTitle);
+                _liveIngest?.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
+                break;
+
+            case IngestLiveToolCallArgumentsDelta delta:
+                EnsureLiveTurn(update.JobId, delta.SourceChunkId, delta.SourceChunkTitle);
+                _liveIngest?.AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
+                break;
+
+            case IngestLiveToolCallCompleted completed:
+                EnsureLiveTurn(update.JobId, completed.SourceChunkId, completed.SourceChunkTitle);
+                _liveIngest?.CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
+                break;
+
+            case IngestLiveRetryScheduled retry:
+                EnsureLiveTurn(update.JobId, retry.SourceChunkId, retry.SourceChunkTitle);
+                _liveStatus = $"Retrying in {retry.DelayMs / 1000.0:0.#}s";
+                _liveIngest?.AppendText($"\nTransient error: {retry.Error}\nRetrying...\n");
+                break;
+
+            case IngestLiveTurnCompleted completed:
+                EnsureLiveTurn(update.JobId, completed.SourceChunkId, completed.SourceChunkTitle);
+                _liveStatus = "Completed";
+                break;
+
+            case IngestLiveTurnFailed failed:
+                EnsureLiveTurn(update.JobId, failed.SourceChunkId, failed.SourceChunkTitle);
+                _liveStatus = "Failed";
+                _liveIngest?.AppendText($"\nFailed: {failed.Error}");
+                break;
+        }
+    }
+
+    private void EnsureLiveTurn(Guid jobId, Guid sourceChunkId, string sourceChunkTitle, bool reset = false)
+    {
+        if (reset || _liveIngest is null || _liveJobId != jobId || _liveSourceChunkId != sourceChunkId)
+        {
+            _liveIngest = new ChatLiveTurn();
+            _liveJobId = jobId;
+            _liveSourceChunkId = sourceChunkId;
+            _liveSourceChunkTitle = sourceChunkTitle;
+            _liveStatus = null;
+        }
+    }
+
+    private void ClearLiveIngest()
+    {
+        _liveJobId = null;
+        _liveSourceChunkId = null;
+        _liveSourceChunkTitle = string.Empty;
+        _liveStatus = null;
+        _liveIngest = null;
     }
 
     private async Task ReloadJobsAsync()
@@ -791,6 +919,7 @@ else
         _followCurrentChunk = true;
         _jobActionError = null;
         _reportActionError = null;
+        ClearLiveIngest();
         try
         {
             _selectedJob = await Ingest.GetJobViewAsync(jobId, cancellationToken);
@@ -932,23 +1061,52 @@ else
     private async Task StopAsync()
     {
         if (_selectedJob is null) return;
-        await Ingest.RequestStopAsync(_selectedJob.Id);
-        await RefreshSelectedJobAsync();
+        _jobActionBusy = true;
+        _jobActionError = null;
+        try
+        {
+            await Ingest.RequestStopAsync(_selectedJob.Id);
+            await RefreshSelectedJobAsync();
+        }
+        catch (Exception ex)
+        {
+            _jobActionError = ex.Message;
+        }
+        finally
+        {
+            _jobActionBusy = false;
+        }
     }
 
     private async Task ResumeAsync()
     {
         if (_selectedJob is null) return;
-        await Ingest.ResumeAsync(_selectedJob.Id, new IngestResumeRequest(_resumeProviderId));
-        await RefreshSelectedJobAsync();
+        _jobActionBusy = true;
+        _jobActionError = null;
+        try
+        {
+            ClearLiveIngest();
+            await Ingest.ResumeAsync(_selectedJob.Id, new IngestResumeRequest(_resumeProviderId));
+            await RefreshSelectedJobAsync();
+        }
+        catch (Exception ex)
+        {
+            _jobActionError = ex.Message;
+        }
+        finally
+        {
+            _jobActionBusy = false;
+        }
     }
 
     private async Task RestartAsync()
     {
         if (_selectedJob is null) return;
+        _jobActionBusy = true;
         _jobActionError = null;
         try
         {
+            ClearLiveIngest();
             await Ingest.RestartAsync(_selectedJob.Id);
             await RefreshSelectedJobAsync();
         }
@@ -956,11 +1114,16 @@ else
         {
             _jobActionError = ex.Message;
         }
+        finally
+        {
+            _jobActionBusy = false;
+        }
     }
 
     private async Task DeleteAsync()
     {
         if (_selectedJob is null) return;
+        _jobActionBusy = true;
         _jobActionError = null;
         try
         {
@@ -969,12 +1132,17 @@ else
             _selectedChunkId = null;
             _reportItems = [];
             _sourceExcerpt = null;
+            ClearLiveIngest();
             await ReloadJobsAsync();
         }
         catch (Exception ex)
         {
             _jobActionError = ex.Message;
             await RefreshSelectedJobAsync();
+        }
+        finally
+        {
+            _jobActionBusy = false;
         }
     }
 

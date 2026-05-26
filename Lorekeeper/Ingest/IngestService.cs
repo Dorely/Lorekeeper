@@ -248,7 +248,7 @@ public sealed class IngestService(
 
     public async Task ResumeAsync(Guid jobId, IngestResumeRequest? request = null, CancellationToken cancellationToken = default)
     {
-        var job = await ingest.GetJobDetailAsync(jobId, cancellationToken)
+        var job = await ingest.GetJobResumeDetailAsync(jobId, cancellationToken)
             ?? throw new InvalidOperationException($"Ingest job {jobId} not found.");
 
         if (job.Status is not (IngestJobStatus.Stopped or IngestJobStatus.Failed)) return;
@@ -264,16 +264,39 @@ public sealed class IngestService(
             await EnsureProviderAvailableForQueuedJobAsync(job.ProviderId, cancellationToken);
         }
 
-        foreach (var jobChunk in job.Chunks.Where(chunk => chunk.Status is IngestJobChunkStatus.Running or IngestJobChunkStatus.Stopped or IngestJobChunkStatus.Failed))
+        var chunksToReset = job.Chunks
+            .Where(chunk => chunk.Status is IngestJobChunkStatus.Running or IngestJobChunkStatus.Stopped or IngestJobChunkStatus.Failed)
+            .ToList();
+        if (chunksToReset.Count == 0)
         {
+            chunksToReset = job.Chunks
+                .Where(chunk => chunk.Status != IngestJobChunkStatus.Completed)
+                .OrderBy(chunk => chunk.SourceChunkIndex)
+                .Take(1)
+                .ToList();
+        }
+
+        foreach (var jobChunk in chunksToReset)
+        {
+            jobChunk.SourceChunk.Summary = string.Empty;
+            jobChunk.SourceChunk.AgentNotes = string.Empty;
+            jobChunk.SourceChunk.UpdatedAt = DateTime.UtcNow;
+            ingest.UpdateSourceChunk(jobChunk.SourceChunk);
+
             jobChunk.Status = IngestJobChunkStatus.Pending;
+            jobChunk.Summary = string.Empty;
             jobChunk.ErrorMessage = null;
+            jobChunk.CreatedEntityCount = 0;
+            jobChunk.CreatedRelationshipCount = 0;
+            jobChunk.StartedAt = null;
+            jobChunk.CompletedAt = null;
             jobChunk.UpdatedAt = DateTime.UtcNow;
             ingest.UpdateJobChunk(jobChunk);
         }
 
         job.Status = IngestJobStatus.Queued;
         job.ErrorMessage = null;
+        job.CompletedSourceChunks = job.Chunks.Count(chunk => chunk.Status == IngestJobChunkStatus.Completed);
         job.CurrentMessage = "Queued for resume.";
         job.CompletedAt = null;
         job.UpdatedAt = DateTime.UtcNow;
@@ -528,10 +551,28 @@ public sealed class IngestService(
         if (job is null) return;
 
         var reportItems = await ingest.ListReportItemsAsync(jobId, cancellationToken);
-        job.CreatedEntityCount = reportItems.Count(item => item.Kind == IngestReportItemKind.Entity && item.Status == IngestReportItemStatus.Active);
-        job.CreatedRelationshipCount = reportItems.Count(item => item.Kind == IngestReportItemKind.Relationship && item.Status == IngestReportItemStatus.Active);
+        RefreshJobCounts(job, reportItems);
         job.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJob(job);
+    }
+
+    private static void RefreshJobCounts(IngestJob job, IEnumerable<IngestReportItem> reportItems)
+    {
+        var activeItems = reportItems
+            .Where(item => item.Status == IngestReportItemStatus.Active)
+            .ToList();
+
+        job.CreatedEntityCount = activeItems
+            .Where(item => item.Kind == IngestReportItemKind.Entity)
+            .Select(item => item.EntityId?.ToString("N") ?? item.GraphNodeId?.ToString() ?? item.Id.ToString("N"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+
+        job.CreatedRelationshipCount = activeItems
+            .Where(item => item.Kind == IngestReportItemKind.Relationship)
+            .Select(item => item.GraphEdgeId?.ToString() ?? item.Id.ToString("N"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
     }
 
     private async Task RemoveRelationshipGraphEdgeAsync(IngestReportItem item, Guid fallbackSourceId, CancellationToken cancellationToken)
