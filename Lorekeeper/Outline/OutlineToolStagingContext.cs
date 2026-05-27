@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Lorekeeper.Context;
 using Lorekeeper.Chapters;
+using Lorekeeper.Ingest;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 
@@ -189,6 +190,9 @@ public sealed class OutlineToolStagingContext(
             parentId = entity.ParentId,
             addedToContextFeed,
             properties = entity.Properties,
+            summary = entity.Summary,
+            aliases = entity.Aliases,
+            wikiSections = entity.WikiSections,
             links = links.Select(link => new
             {
                 link.EdgeId,
@@ -488,6 +492,9 @@ public sealed class OutlineToolStagingContext(
             resolvedOrder,
             created.ParentId,
             new Dictionary<string, string?>(created.Properties, StringComparer.OrdinalIgnoreCase),
+            created.Summary,
+            created.Aliases,
+            created.WikiSections,
             Deleted: false);
         _entities[entity.Id] = entity;
         MarkDirectlyCreated(Resource("Entity", entity.Id));
@@ -512,6 +519,9 @@ public sealed class OutlineToolStagingContext(
                 entity.Order,
                 entity.ParentId,
                 new Dictionary<string, string?>(updated.Properties, StringComparer.OrdinalIgnoreCase),
+                updated.Summary,
+                updated.Aliases,
+                updated.WikiSections,
                 Deleted: false);
             onDirectMutationApplied?.Invoke();
             return Serialize(await EntityPayloadAsync(_entities[updated.Id], cancellationToken));
@@ -722,6 +732,9 @@ public sealed class OutlineToolStagingContext(
                 entity.Order,
                 entity.ParentId,
                 new Dictionary<string, string?>(entity.Properties, StringComparer.OrdinalIgnoreCase),
+                entity.Summary,
+                entity.Aliases,
+                entity.WikiSections,
                 Deleted: false);
         }
     }
@@ -878,6 +891,9 @@ public sealed class OutlineToolStagingContext(
             order = entity.Order,
             parentId = entity.ParentId,
             properties = entity.Properties,
+            summary = entity.Summary,
+            aliases = entity.Aliases,
+            wikiSections = entity.WikiSections,
             relationContext,
         };
     }
@@ -1212,6 +1228,14 @@ public sealed class OutlineToolStagingContext(
     {
         var score = TextMatchScore(entity.Name, query, titleWeight: 80, detailWeight: 30);
         score += TextMatchScore(entity.Type, query, titleWeight: 12, detailWeight: 8);
+        score += TextMatchScore(entity.Summary, query, titleWeight: 20, detailWeight: 12);
+        foreach (var alias in entity.Aliases)
+            score += TextMatchScore(alias, query, titleWeight: 30, detailWeight: 16);
+        foreach (var section in entity.WikiSections)
+        {
+            score += TextMatchScore(section.Title, query, titleWeight: 12, detailWeight: 6);
+            score += TextMatchScore(section.Body, query, titleWeight: 12, detailWeight: 8);
+        }
         foreach (var property in entity.Properties)
         {
             score += TextMatchScore(property.Key, query, titleWeight: 8, detailWeight: 4);
@@ -1222,6 +1246,14 @@ public sealed class OutlineToolStagingContext(
         {
             score += TextMatchScore(entity.Name, term, titleWeight: 180, detailWeight: 60);
             score += TextMatchScore(entity.Type, term, titleWeight: 16, detailWeight: 8);
+            score += TextMatchScore(entity.Summary, term, titleWeight: 28, detailWeight: 14);
+            foreach (var alias in entity.Aliases)
+                score += TextMatchScore(alias, term, titleWeight: 70, detailWeight: 24);
+            foreach (var section in entity.WikiSections)
+            {
+                score += TextMatchScore(section.Title, term, titleWeight: 18, detailWeight: 8);
+                score += TextMatchScore(section.Body, term, titleWeight: 18, detailWeight: 10);
+            }
             foreach (var property in entity.Properties)
             {
                 score += TextMatchScore(property.Key, term, titleWeight: 10, detailWeight: 5);
@@ -1248,8 +1280,22 @@ public sealed class OutlineToolStagingContext(
         order = entity.Order,
         parentId = entity.ParentId,
         matchScore = score,
+        summary = TruncatePropertyValue(entity.Summary),
+        aliases = entity.Aliases.Take(8).ToArray(),
+        wikiSections = CompactWikiSections(entity.WikiSections),
         properties = CompactProperties(entity.Properties),
     };
+
+    private static object[] CompactWikiSections(IReadOnlyList<IngestWikiSection> sections) =>
+        sections
+            .Take(4)
+            .Select(section => new
+            {
+                section.Id,
+                section.Title,
+                body = TruncatePropertyValue(section.Body),
+            })
+            .ToArray();
 
     private static Dictionary<string, string?> CompactProperties(IReadOnlyDictionary<string, string?> properties)
     {
@@ -1307,6 +1353,9 @@ public sealed class OutlineToolStagingContext(
         int? Order,
         Guid? ParentId,
         Dictionary<string, string?> Properties,
+        string Summary,
+        IReadOnlyList<string> Aliases,
+        IReadOnlyList<IngestWikiSection> WikiSections,
         bool Deleted)
     {
         public string Name { get; set; } = Name;

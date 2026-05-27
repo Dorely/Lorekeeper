@@ -403,7 +403,11 @@
                 @RenderProperties(_entity.Properties)
             }
 
-            @RenderWikiSheet(_entity.Summary, _entity.Aliases, _entity.WikiSections)
+            <EntityKnowledgeView Summary="@_entity.Summary"
+                                 Aliases="@_entity.Aliases"
+                                 WikiSections="@_entity.WikiSections"
+                                 IngestSources="@_entity.IngestSources"
+                                 IngestObservations="@_entity.IngestObservations" />
             @RenderEntityLinks()
         }
     </div>;
@@ -719,45 +723,6 @@
         }
     </section>;
 
-    private RenderFragment RenderWikiSheet(string summary, IReadOnlyList<string> aliases, IReadOnlyList<IngestWikiSection> sections) => @<section>
-        @if (!string.IsNullOrWhiteSpace(summary) || aliases.Count > 0 || sections.Count > 0)
-        {
-            <div class="context-detail-ingest">
-                <h6>Wiki Sheet</h6>
-                <div class="context-detail-ingest-list">
-                    @if (!string.IsNullOrWhiteSpace(summary))
-                    {
-                        <div class="context-detail-ingest-item">
-                            <div class="context-detail-ingest-head"><strong>Summary</strong></div>
-                            <p>@summary</p>
-                        </div>
-                    }
-                    @if (aliases.Count > 0)
-                    {
-                        <div class="context-detail-ingest-item">
-                            <div class="context-detail-ingest-line"><span>Aliases</span><strong>@string.Join(", ", aliases)</strong></div>
-                        </div>
-                    }
-                    @foreach (var wikiSection in sections)
-                    {
-                        <div class="context-detail-ingest-item" @key="wikiSection.Id">
-                            <div class="context-detail-ingest-head"><strong>@wikiSection.Title</strong></div>
-                            <p>@wikiSection.Body</p>
-                            @foreach (var citation in wikiSection.Citations.Take(3))
-                            {
-                                <div class="context-detail-ingest-head">
-                                    <strong>@citation.SourceTitle</strong>
-                                    <span>@citation.SourceKind</span>
-                                    <span>chunk @(citation.SourceChunkIndex + 1)</span>
-                                </div>
-                            }
-                        </div>
-                    }
-                </div>
-            </div>
-        }
-    </section>;
-
     private void OnPromptInput(ChangeEventArgs e)
     {
         _promptDraft = e.Value?.ToString() ?? string.Empty;
@@ -907,9 +872,6 @@
         !string.IsNullOrWhiteSpace(observation.Summary) ? observation.Summary
         : !string.IsNullOrWhiteSpace(observation.Notes) ? observation.Notes
         : observation.ObservedProperties.Values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
-
-    private static string ObservationKey(IngestSourceObservation observation) =>
-        $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
 
     private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
 

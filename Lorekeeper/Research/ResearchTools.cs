@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Lorekeeper.Context;
+using Lorekeeper.Ingest;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Search;
@@ -68,7 +69,7 @@ public sealed class ResearchTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ReadEntityAsync(context, entityId),
                 name: "read_entity",
-                description: "Read one graph entity by id, including properties, adjacent links, and relation context. When Review edits is enabled, returns the latest staged entity and link state from this turn."),
+                description: "Read one graph entity by id, including properties, structured wiki data, adjacent links, and relation context. When Review edits is enabled, returns the latest staged entity and link state from this turn."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
@@ -197,17 +198,12 @@ public sealed class ResearchTools(
             order = entity.Order,
             parentId = entity.ParentId,
             properties = entity.Properties,
-            links = links.Select(link => new
-            {
-                link.EdgeId,
-                link.EdgeType,
-                direction = link.Direction.ToString(),
-                link.OtherEntityId,
-                link.OtherEntityName,
-                link.OtherEntityType,
-                link.SortOrder,
-                link.Properties,
-            }),
+            summary = entity.Summary,
+            aliases = entity.Aliases,
+            wikiSections = entity.WikiSections,
+            ingestSources = entity.IngestSources,
+            ingestObservations = entity.IngestObservations,
+            links = links.Select(LinkPayload),
             relationContext,
         }, JsonOptions);
     }
@@ -222,18 +218,24 @@ public sealed class ResearchTools(
             return $"Error: entity {entityId} not found in this project.";
 
         var links = await entities.ListLinksAsync(context.ProjectId, entityId);
-        return JsonSerializer.Serialize(links.Select(link => new
-        {
-            link.EdgeId,
-            link.EdgeType,
-            direction = link.Direction.ToString(),
-            link.OtherEntityId,
-            link.OtherEntityName,
-            link.OtherEntityType,
-            link.SortOrder,
-            link.Properties,
-        }), JsonOptions);
+        return JsonSerializer.Serialize(links.Select(LinkPayload), JsonOptions);
     }
+
+    private static object LinkPayload(EntityLink link) => new
+    {
+        edgeId = link.EdgeId,
+        edgeType = link.EdgeType,
+        direction = link.Direction.ToString(),
+        otherEntityId = link.OtherEntityId,
+        otherEntityName = link.OtherEntityName,
+        otherEntityType = link.OtherEntityType,
+        sortOrder = link.SortOrder,
+        properties = link.Properties,
+        summary = link.Summary,
+        ingestSources = link.IngestSources,
+        ingestObservations = link.IngestObservations,
+        relationshipCitations = link.RelationshipCitations,
+    };
 
     private string SerializeReadPayload(WebIngestCandidateReadResult read, int? pageNumber, WebReadToolKind toolKind)
     {

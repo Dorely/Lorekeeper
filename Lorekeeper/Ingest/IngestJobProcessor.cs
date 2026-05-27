@@ -26,6 +26,8 @@ public sealed class IngestJobProcessor(
     IIngestGraphSync graphSync,
     IIngestJobNotifier notifier,
     IContextIndexingService contextIndexing,
+    IGraphNodeRepository nodes,
+    IGraphEdgeRepository edges,
     IOptions<AgentOptions> options,
     ILogger<IngestJobProcessor> logger)
 {
@@ -61,7 +63,7 @@ public sealed class IngestJobProcessor(
         - Do not provide source ids, chunk ids, page labels, locator labels, or reference metadata; the tools record provenance automatically.
         - If the source does not support a fact, skip that fact.
         - Use append_ingest_relationship_observation sparingly, and only for durable high-signal source-backed relationship facts such as membership, family, command, location, direct conflict, ownership, or major causality. It accepts only endpoints and relationship type; all prose detail belongs in entity observation sections.
-        - Relationship observations do not create canonical graph edges. Link only entities already touched by this ingest job through entity observations.
+        - Relationship observations are staged during chunk ingestion and promoted to durable graph edges after the final source review succeeds. Link only entities already touched by this ingest job through entity observations.
         - Data-writing tools must be called one at a time. Before each append_ingest_entity_observation, append_ingest_relationship_observation, or update_ingest_source_progress call, first stream a short plain-text note explaining what you are about to record.
         - Finish each source chunk by calling update_ingest_source_progress exactly once with a concise completed chunk summary and the rolling source synopsis. Keep optional notes to one short operational sentence and keep the rolling source synopsis around 1500 words. After this tool returns, make no more tool calls and respond with a short plain-text completion note.
         """;
@@ -277,13 +279,10 @@ public sealed class IngestJobProcessor(
             .OrderBy(item => item.ResourceType, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var touchedEntityIds = touchedEntities
-            .Select(item => item.EntityId!.Value)
-            .ToHashSet();
-        var finalizedEntityIds = new HashSet<Guid>();
 
         if (touchedEntities.Count == 0)
         {
+            await PromoteFinalizedRelationshipReportItemsAsync(job, cancellationToken);
             await MarkRemainingFinalizedReportItemsDeletedAsync(job.Id, cancellationToken);
             return true;
         }
@@ -346,8 +345,6 @@ public sealed class IngestJobProcessor(
                     await MarkFinalizedEntityReportItemsDeletedAsync(
                         job.Id,
                         entityId,
-                        touchedEntityIds,
-                        finalizedEntityIds,
                         cancellationToken);
                     NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnCompleted(entityId, -1, liveTitle));
                     Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
@@ -388,6 +385,7 @@ public sealed class IngestJobProcessor(
             }
         }
 
+        await PromoteFinalizedRelationshipReportItemsAsync(job, cancellationToken);
         await MarkRemainingFinalizedReportItemsDeletedAsync(job.Id, cancellationToken);
         await ingest.AddEventAsync(new IngestJobEvent
         {
@@ -405,11 +403,8 @@ public sealed class IngestJobProcessor(
     private async Task MarkFinalizedEntityReportItemsDeletedAsync(
         Guid jobId,
         Guid entityId,
-        IReadOnlySet<Guid> touchedEntityIds,
-        ISet<Guid> finalizedEntityIds,
         CancellationToken cancellationToken)
     {
-        finalizedEntityIds.Add(entityId);
         var reportItems = await ingest.ListReportItemsAsync(jobId, cancellationToken);
         var changed = false;
 
@@ -419,21 +414,129 @@ public sealed class IngestJobProcessor(
             {
                 MarkReportItemDeleted(item);
                 changed = true;
-                continue;
-            }
-
-            if (item.Kind != IngestReportItemKind.Relationship) continue;
-            if (!TryReadRelationshipEndpointIds(item.PayloadJson, out var endpointIds)) continue;
-            if (!endpointIds.Contains(entityId)) continue;
-            if (endpointIds.All(endpointId => !touchedEntityIds.Contains(endpointId) || finalizedEntityIds.Contains(endpointId)))
-            {
-                MarkReportItemDeleted(item);
-                changed = true;
             }
         }
 
         if (changed)
             await ingest.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task PromoteFinalizedRelationshipReportItemsAsync(IngestJob job, CancellationToken cancellationToken)
+    {
+        var reportItems = await ingest.ListReportItemsAsync(job.Id, cancellationToken);
+        var relationshipItems = reportItems
+            .Where(item => item.Status == IngestReportItemStatus.Active && item.Kind == IngestReportItemKind.Relationship)
+            .ToList();
+        if (relationshipItems.Count == 0) return;
+
+        var affectedEntityIds = new HashSet<Guid>();
+        var promoted = 0;
+        var skipped = 0;
+
+        foreach (var item in relationshipItems)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!TryReadRelationshipPromotionInput(item, job, out var input, out var skipReason))
+            {
+                skipped++;
+                logger.LogWarning("Skipping ingest relationship report item {ReportItemId} during finalization: {Reason}", item.Id, skipReason);
+                continue;
+            }
+
+            var fromNode = await nodes.FindByKeyAsync(job.ProjectId, input.FromEntityId.ToString("N"), cancellationToken);
+            var toNode = await nodes.FindByKeyAsync(job.ProjectId, input.ToEntityId.ToString("N"), cancellationToken);
+            if (fromNode is null || toNode is null)
+            {
+                skipped++;
+                logger.LogWarning("Skipping ingest relationship report item {ReportItemId} during finalization because one or both endpoints could not be resolved.", item.Id);
+                continue;
+            }
+
+            if (!IsPromotableRelationshipNode(fromNode) || !IsPromotableRelationshipNode(toNode))
+            {
+                skipped++;
+                logger.LogWarning("Skipping ingest relationship report item {ReportItemId} during finalization because one or both endpoints are structural graph nodes.", item.Id);
+                continue;
+            }
+
+            var edge = await edges.FindAsync(fromNode.Id, toNode.Id, input.EdgeType, cancellationToken);
+            var created = edge is null;
+            if (edge is null)
+            {
+                edge = new GraphEdge
+                {
+                    FromNodeId = fromNode.Id,
+                    ToNodeId = toNode.Id,
+                    EdgeType = input.EdgeType,
+                    Properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        [IngestSourceAssertions.GraphOriginProperty] = IngestSourceAssertions.GraphOriginIngestValue,
+                    },
+                };
+            }
+
+            IngestSourceAssertions.UpsertRelationshipAssertion(edge.Properties, new IngestAssertionInput(
+                job.Id,
+                input.SourceId,
+                input.SourceTitle,
+                input.SourceKind,
+                input.SourceChunkId,
+                input.SourceChunkIndex,
+                item.Title,
+                ObservedProperties: new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
+                Aliases: [],
+                Notes: item.Notes,
+                ReplaceExistingText: false));
+            IngestWikiSheet.UpsertRelationshipCitation(
+                edge.Properties,
+                input.SourceId,
+                input.SourceTitle,
+                input.SourceKind,
+                input.SourceChunkId,
+                input.SourceChunkIndex);
+            edge.UpdatedAt = DateTime.UtcNow;
+
+            if (created)
+            {
+                await edges.AddAsync(edge, cancellationToken);
+                await edges.SaveChangesAsync(cancellationToken);
+            }
+            else
+            {
+                edges.Update(edge);
+            }
+
+            item.GraphEdgeId = edge.Id;
+            item.PayloadJson = UpdateRelationshipGraphAction(
+                item.PayloadJson,
+                created ? IngestSourceAssertions.CreatedEdgeAction : IngestSourceAssertions.LinkedExistingEdgeAction);
+            item.UpdatedAt = DateTime.UtcNow;
+            ingest.UpdateReportItem(item);
+
+            affectedEntityIds.Add(input.FromEntityId);
+            affectedEntityIds.Add(input.ToEntityId);
+            promoted++;
+        }
+
+        if (promoted > 0 || skipped > 0)
+        {
+            await ingest.AddEventAsync(new IngestJobEvent
+            {
+                JobId = job.Id,
+                Level = skipped == 0 ? IngestJobEventLevel.Info : IngestJobEventLevel.Warning,
+                EventType = "relationships.promoted",
+                Message = skipped == 0
+                    ? $"Promoted {promoted} relationship observations to graph edges."
+                    : $"Promoted {promoted} relationship observations to graph edges; skipped {skipped}.",
+                PayloadJson = JsonSerializer.Serialize(new { promoted, skipped }),
+            }, cancellationToken);
+        }
+
+        await ingest.SaveChangesAsync(cancellationToken);
+
+        foreach (var entityId in affectedEntityIds)
+            await contextIndexing.ReindexEntityAsync(job.ProjectId, entityId, cancellationToken);
     }
 
     private async Task MarkRemainingFinalizedReportItemsDeletedAsync(Guid jobId, CancellationToken cancellationToken)
@@ -1465,19 +1568,106 @@ public sealed class IngestJobProcessor(
         item.UpdatedAt = DateTime.UtcNow;
     }
 
-    private static bool TryReadRelationshipEndpointIds(string payloadJson, out IReadOnlyList<Guid> endpointIds)
+    private static bool TryReadRelationshipPromotionInput(
+        IngestReportItem item,
+        IngestJob job,
+        out RelationshipPromotionInput input,
+        out string reason)
     {
-        endpointIds = [];
+        input = default!;
+        reason = string.Empty;
+
+        if (!TryReadRelationshipEndpoints(item.PayloadJson, out var from, out var to))
+        {
+            reason = "payload is missing relationship endpoints";
+            return false;
+        }
+
+        if (from == to)
+        {
+            reason = "relationship points to the same entity";
+            return false;
+        }
+
+        var edgeType = (item.ResourceType ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(edgeType))
+        {
+            reason = "relationship type is empty";
+            return false;
+        }
+
+        if (string.Equals(edgeType, EntityService.HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
+        {
+            reason = "HasChild is a managed structural relationship";
+            return false;
+        }
+
+        var sourceChunkId = item.SourceChunkId
+            ?? IngestSourceAssertions.ReadPayloadSourceChunkId(item.PayloadJson);
+        if (sourceChunkId is null || sourceChunkId == Guid.Empty)
+        {
+            reason = "relationship is not tied to exactly one source chunk";
+            return false;
+        }
+
+        var sourceChunkIndex = ReadPayloadInt(item.PayloadJson, "sourceChunkIndex");
+        if (sourceChunkIndex is null)
+        {
+            reason = "relationship is missing source chunk index";
+            return false;
+        }
+
+        input = new RelationshipPromotionInput(
+            from,
+            to,
+            edgeType,
+            IngestSourceAssertions.ReadPayloadSourceId(item.PayloadJson) ?? job.SourceId,
+            ReadPayloadString(item.PayloadJson, "sourceTitle") ?? job.Source.Title,
+            ReadPayloadString(item.PayloadJson, "sourceKind") ?? job.Source.SourceKind,
+            sourceChunkId.Value,
+            sourceChunkIndex.Value);
+        return true;
+    }
+
+    private static bool IsPromotableRelationshipNode(GraphNode node) =>
+        Guid.TryParseExact(node.Key, "N", out _)
+        && !string.Equals(node.NodeType, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
+
+    private static string UpdateRelationshipGraphAction(string payloadJson, string graphAction)
+    {
+        var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(payloadJson) && payloadJson.TrimStart().StartsWith('{'))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(payloadJson);
+                foreach (var property in doc.RootElement.EnumerateObject())
+                    payload[property.Name] = property.Value.Clone();
+            }
+            catch (JsonException) { }
+        }
+
+        payload[IngestSourceAssertions.RelationshipGraphActionProperty] = graphAction;
+        return JsonSerializer.Serialize(payload);
+    }
+
+    private static bool TryReadRelationshipEndpoints(string payloadJson, out Guid from, out Guid to)
+    {
+        from = Guid.Empty;
+        to = Guid.Empty;
         if (string.IsNullOrWhiteSpace(payloadJson) || !payloadJson.TrimStart().StartsWith('{')) return false;
 
         try
         {
             using var doc = JsonDocument.Parse(payloadJson);
-            var ids = new List<Guid>(2);
-            AddEndpointId(doc.RootElement, "fromEntityId", ids);
-            AddEndpointId(doc.RootElement, "toEntityId", ids);
-            endpointIds = ids.Distinct().ToArray();
-            return endpointIds.Count > 0;
+            return TryReadGuid(doc.RootElement, "fromEntityId", out from)
+                && TryReadGuid(doc.RootElement, "toEntityId", out to);
         }
         catch (JsonException)
         {
@@ -1485,13 +1675,45 @@ public sealed class IngestJobProcessor(
         }
     }
 
-    private static void AddEndpointId(JsonElement element, string propertyName, ICollection<Guid> ids)
+    private static bool TryReadGuid(JsonElement element, string propertyName, out Guid parsed)
     {
-        if (element.TryGetProperty(propertyName, out var property)
+        parsed = Guid.Empty;
+        return element.TryGetProperty(propertyName, out var property)
             && property.ValueKind == JsonValueKind.String
-            && Guid.TryParse(property.GetString(), out var parsed))
+            && Guid.TryParse(property.GetString(), out parsed);
+    }
+
+    private static string? ReadPayloadString(string payloadJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson) || !payloadJson.TrimStart().StartsWith('{')) return null;
+        try
         {
-            ids.Add(parsed);
+            using var doc = JsonDocument.Parse(payloadJson);
+            return doc.RootElement.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+                ? property.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static int? ReadPayloadInt(string payloadJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson) || !payloadJson.TrimStart().StartsWith('{')) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(payloadJson);
+            if (!doc.RootElement.TryGetProperty(propertyName, out var property)) return null;
+            if (property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var number)) return number;
+            return property.ValueKind == JsonValueKind.String && int.TryParse(property.GetString(), out var parsed)
+                ? parsed
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
@@ -1704,6 +1926,16 @@ public sealed class IngestJobProcessor(
     }
 
     private sealed record PendingToolResultTokenState(string CallId, string Result);
+
+    private sealed record RelationshipPromotionInput(
+        Guid FromEntityId,
+        Guid ToEntityId,
+        string EdgeType,
+        Guid SourceId,
+        string SourceTitle,
+        string SourceKind,
+        Guid SourceChunkId,
+        int SourceChunkIndex);
 
     private sealed record PendingChunkToolCall(
         FunctionCallContent Content,

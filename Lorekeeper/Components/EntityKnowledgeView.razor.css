@@ -1,0 +1,109 @@
+.entity-knowledge {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.entity-knowledge-title,
+.entity-knowledge-subtitle {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.entity-knowledge-subtitle {
+    margin-top: 0.25rem;
+    font-size: 0.72rem;
+}
+
+.entity-knowledge-item,
+.entity-knowledge-aliases,
+.entity-knowledge-empty {
+    padding: 0.6rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.4rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.entity-knowledge-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.entity-knowledge-aliases,
+.entity-knowledge-line {
+    display: grid;
+    grid-template-columns: minmax(5rem, 9rem) minmax(0, 1fr);
+    gap: 0.5rem;
+    font-size: 0.86rem;
+}
+
+.entity-knowledge-head {
+    color: var(--bs-secondary-color, #6c757d);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.entity-knowledge-head span,
+.entity-knowledge-source span,
+.entity-knowledge-line span,
+.entity-knowledge-notes,
+.entity-knowledge-empty {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.entity-knowledge-aliases strong,
+.entity-knowledge-line strong {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.entity-knowledge-item p,
+.entity-knowledge-observation-section p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.entity-knowledge-source {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    padding-top: 0.35rem;
+    border-top: 1px solid rgba(108, 117, 125, 0.18);
+    font-size: 0.78rem;
+}
+
+.entity-knowledge-source strong {
+    font-weight: 600;
+}
+
+.entity-knowledge-observation-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid rgba(108, 117, 125, 0.18);
+}
+
+.entity-knowledge-observation-section span {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.entity-knowledge-notes {
+    font-size: 0.82rem;
+    overflow-wrap: anywhere;
+}

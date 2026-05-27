@@ -256,7 +256,11 @@
             </div>
         </form>
 
-        @RenderWikiSheet(selected.Summary, selected.Aliases, selected.WikiSections)
+        <EntityKnowledgeView Summary="@selected.Summary"
+                             Aliases="@selected.Aliases"
+                             WikiSections="@selected.WikiSections"
+                             IngestSources="@selected.IngestSources"
+                             IngestObservations="@selected.IngestObservations" />
 
         <div class="graph-links-section">
             <div class="graph-links-header">
@@ -335,39 +339,6 @@
         </div>
     </div>;
 
-    private RenderFragment RenderWikiSheet(string summary, IReadOnlyList<string> aliases, IReadOnlyList<IngestWikiSection> sections) => @<div>
-        @if (!string.IsNullOrWhiteSpace(summary) || aliases.Count > 0 || sections.Count > 0)
-        {
-            <div class="graph-fact-section">
-                <div class="graph-section-title">Wiki sheet</div>
-                @if (!string.IsNullOrWhiteSpace(summary))
-                {
-                    <article class="graph-fact">
-                        <div class="graph-fact-head">Summary</div>
-                        <p>@summary</p>
-                    </article>
-                }
-                @if (aliases.Count > 0)
-                {
-                    <div class="graph-fact-aliases"><span>Aliases</span><strong>@string.Join(", ", aliases)</strong></div>
-                }
-                @foreach (var wikiSection in sections)
-                {
-                    <article class="graph-fact" @key="wikiSection.Id">
-                        <div class="graph-fact-head">@wikiSection.Title</div>
-                        <p>@wikiSection.Body</p>
-                        @foreach (var citation in wikiSection.Citations.Take(3))
-                        {
-                            <div class="graph-fact-source" @key="CitationKey(citation)">
-                                <div><strong>@citation.SourceTitle</strong> <span>@citation.SourceKind</span> <span>chunk @(citation.SourceChunkIndex + 1)</span></div>
-                            </div>
-                        }
-                    </article>
-                }
-            </div>
-        }
-    </div>;
-
     private RenderFragment RenderRelationshipCitations(ProjectGraphEdge edge) => @<div>
         @if (!string.IsNullOrWhiteSpace(edge.Summary) || edge.Citations.Count > 0)
         {
@@ -384,49 +355,6 @@
                             <span>@citation.SourceKind</span>
                             <span>chunk @(citation.SourceChunkIndex + 1)</span>
                         </div>
-                    </div>
-                }
-            </div>
-        }
-    </div>;
-
-    private RenderFragment RenderIngestObservations(IReadOnlyList<IngestSourceObservation> observations, string title) => @<div>
-        @if (observations.Count > 0)
-        {
-            <div class="graph-ingest-section">
-                <div class="graph-section-title">@title</div>
-                @foreach (var observation in observations)
-                {
-                    <div class="graph-ingest-observation" @key="ObservationKey(observation)">
-                        <div class="graph-ingest-head">
-                            <strong>@observation.SourceTitle</strong>
-                            <span>@observation.SourceKind</span>
-                            <span>chunk @(observation.SourceChunkIndex + 1)</span>
-                        </div>
-                        @if (!string.IsNullOrWhiteSpace(observation.Summary))
-                        {
-                            <p>@observation.Summary</p>
-                        }
-                        @if (observation.Aliases.Count > 0)
-                        {
-                            <div class="graph-ingest-line"><span>Aliases</span><strong>@string.Join(", ", observation.Aliases)</strong></div>
-                        }
-                        @if (observation.ObservedProperties.Count > 0)
-                        {
-                            <div class="graph-ingest-props">
-                                @foreach (var prop in observation.ObservedProperties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
-                                {
-                                    <div class="graph-ingest-line">
-                                        <span>@prop.Key</span>
-                                        <strong>@(string.IsNullOrWhiteSpace(prop.Value) ? "-" : prop.Value)</strong>
-                                    </div>
-                                }
-                            </div>
-                        }
-                        @if (!string.IsNullOrWhiteSpace(observation.Notes))
-                        {
-                            <div class="graph-ingest-notes"><strong>Notes:</strong> @observation.Notes</div>
-                        }
                     </div>
                 }
             </div>
@@ -751,9 +679,6 @@
 
     private static bool IsExtractedFrom(ProjectGraphEdge edge) =>
         string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
-
-    private static string ObservationKey(IngestSourceObservation observation) =>
-        $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
 
     private static string CitationKey(IngestWikiCitation citation) =>
         $"{citation.SourceId}:{citation.SourceChunkId}:{citation.SourceBlockId}:{citation.PageNumber}:{citation.Locator}";

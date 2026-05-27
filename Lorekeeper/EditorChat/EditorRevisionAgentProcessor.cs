@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -301,7 +302,7 @@ public sealed class EditorRevisionAgentProcessor(
                 method: (string query, int topK = 10, string? type = null, string? parentId = null) =>
                     SearchEntitiesAsync(projectId, query, topK, type, parentId),
                 name: "search_entities",
-                description: "Search story graph entities by name, type, and property text."),
+                description: "Search story graph entities by name, type, property text, aliases, and wiki text."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ReadEntityAsync(projectId, entityId),
@@ -545,6 +546,9 @@ public sealed class EditorRevisionAgentProcessor(
                 order = match.Entity.Order,
                 parentId = match.Entity.ParentId,
                 matchScore = match.Score,
+                summary = TruncatePropertyValue(match.Entity.Summary),
+                aliases = match.Entity.Aliases.Take(8).ToArray(),
+                wikiSections = CompactWikiSections(match.Entity.WikiSections),
                 properties = match.Entity.Properties,
             }));
     }
@@ -565,17 +569,12 @@ public sealed class EditorRevisionAgentProcessor(
             order = entity.Order,
             parentId = entity.ParentId,
             properties = entity.Properties,
-            links = links.Select(link => new
-            {
-                link.EdgeId,
-                link.EdgeType,
-                direction = link.Direction.ToString(),
-                link.OtherEntityId,
-                link.OtherEntityName,
-                link.OtherEntityType,
-                link.SortOrder,
-                link.Properties,
-            }),
+            summary = entity.Summary,
+            aliases = entity.Aliases,
+            wikiSections = entity.WikiSections,
+            ingestSources = entity.IngestSources,
+            ingestObservations = entity.IngestObservations,
+            links = links.Select(LinkPayload),
             relationContext,
         });
     }
@@ -583,17 +582,7 @@ public sealed class EditorRevisionAgentProcessor(
     private async Task<string> ListEntityLinksAsync(Guid projectId, Guid entityId)
     {
         var links = await entities.ListLinksAsync(projectId, entityId);
-        return JsonSerializer.Serialize(links.Select(link => new
-        {
-            edgeId = link.EdgeId,
-            edgeType = link.EdgeType,
-            direction = link.Direction.ToString(),
-            otherEntityId = link.OtherEntityId,
-            otherEntityName = link.OtherEntityName,
-            otherEntityType = link.OtherEntityType,
-            sortOrder = link.SortOrder,
-            properties = link.Properties,
-        }));
+        return JsonSerializer.Serialize(links.Select(LinkPayload));
     }
 
     private Task<string> EditAssignedChapterAsync(
@@ -905,6 +894,14 @@ public sealed class EditorRevisionAgentProcessor(
     {
         var score = TextMatchScore(entity.Name, query, titleWeight: 80, detailWeight: 30);
         score += TextMatchScore(entity.Type, query, titleWeight: 12, detailWeight: 8);
+        score += TextMatchScore(entity.Summary, query, titleWeight: 20, detailWeight: 12);
+        foreach (var alias in entity.Aliases)
+            score += TextMatchScore(alias, query, titleWeight: 30, detailWeight: 16);
+        foreach (var section in entity.WikiSections)
+        {
+            score += TextMatchScore(section.Title, query, titleWeight: 12, detailWeight: 6);
+            score += TextMatchScore(section.Body, query, titleWeight: 12, detailWeight: 8);
+        }
         foreach (var property in entity.Properties)
         {
             score += TextMatchScore(property.Key, query, titleWeight: 8, detailWeight: 4);
@@ -915,6 +912,14 @@ public sealed class EditorRevisionAgentProcessor(
         {
             score += TextMatchScore(entity.Name, term, titleWeight: 180, detailWeight: 60);
             score += TextMatchScore(entity.Type, term, titleWeight: 16, detailWeight: 8);
+            score += TextMatchScore(entity.Summary, term, titleWeight: 28, detailWeight: 14);
+            foreach (var alias in entity.Aliases)
+                score += TextMatchScore(alias, term, titleWeight: 70, detailWeight: 24);
+            foreach (var section in entity.WikiSections)
+            {
+                score += TextMatchScore(section.Title, term, titleWeight: 18, detailWeight: 8);
+                score += TextMatchScore(section.Body, term, titleWeight: 18, detailWeight: 10);
+            }
             foreach (var property in entity.Properties)
             {
                 score += TextMatchScore(property.Key, term, titleWeight: 10, detailWeight: 5);
@@ -932,6 +937,36 @@ public sealed class EditorRevisionAgentProcessor(
         if (value.StartsWith(query, StringComparison.OrdinalIgnoreCase)) return titleWeight * 2;
         return value.Contains(query, StringComparison.OrdinalIgnoreCase) ? detailWeight : 0;
     }
+
+    private static object LinkPayload(EntityLink link) => new
+    {
+        edgeId = link.EdgeId,
+        edgeType = link.EdgeType,
+        direction = link.Direction.ToString(),
+        otherEntityId = link.OtherEntityId,
+        otherEntityName = link.OtherEntityName,
+        otherEntityType = link.OtherEntityType,
+        sortOrder = link.SortOrder,
+        properties = link.Properties,
+        summary = link.Summary,
+        ingestSources = link.IngestSources,
+        ingestObservations = link.IngestObservations,
+        relationshipCitations = link.RelationshipCitations,
+    };
+
+    private static object[] CompactWikiSections(IReadOnlyList<IngestWikiSection> sections) =>
+        sections
+            .Take(4)
+            .Select(section => new
+            {
+                section.Id,
+                section.Title,
+                body = TruncatePropertyValue(section.Body),
+            })
+            .ToArray();
+
+    private static string? TruncatePropertyValue(string? value) =>
+        string.IsNullOrEmpty(value) || value.Length <= 240 ? value : value[..240] + "...";
 
     private static bool IsSearchableEntityType(string type) =>
         !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)

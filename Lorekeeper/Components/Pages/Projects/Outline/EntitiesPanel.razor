@@ -139,7 +139,11 @@
                         </div>
                     </div>
 
-                    @RenderWikiSheet(_modalEntity.Summary, _modalEntity.Aliases, _modalEntity.WikiSections)
+                    <EntityKnowledgeView Summary="@_modalEntity.Summary"
+                                         Aliases="@_modalEntity.Aliases"
+                                         WikiSections="@_modalEntity.WikiSections"
+                                         IngestSources="@_modalEntity.IngestSources"
+                                         IngestObservations="@_modalEntity.IngestObservations" />
 
                     <div class="mb-0">
                         <label class="form-label small text-muted">Links</label>
@@ -428,81 +432,6 @@
     private static int RowsFor(string value) =>
         Math.Clamp(1 + value.Count(c => c == '\n'), 2, 10);
 
-    private RenderFragment RenderWikiSheet(string summary, IReadOnlyList<string> aliases, IReadOnlyList<IngestWikiSection> sections) => @<div>
-        @if (!string.IsNullOrWhiteSpace(summary) || aliases.Count > 0 || sections.Count > 0)
-        {
-            <div class="entities-modal-facts mb-3">
-                <label class="form-label small text-muted">Wiki sheet</label>
-                @if (!string.IsNullOrWhiteSpace(summary))
-                {
-                    <article class="entities-modal-fact">
-                        <div class="entities-modal-fact-head">Summary</div>
-                        <p>@summary</p>
-                    </article>
-                }
-                @if (aliases.Count > 0)
-                {
-                    <div class="entities-modal-fact-aliases"><span>Aliases</span><strong>@string.Join(", ", aliases)</strong></div>
-                }
-                <div class="entities-modal-fact-list">
-                    @foreach (var wikiSection in sections)
-                    {
-                        <article class="entities-modal-fact" @key="wikiSection.Id">
-                            <div class="entities-modal-fact-head">@wikiSection.Title</div>
-                            <p>@wikiSection.Body</p>
-                            @foreach (var citation in wikiSection.Citations.Take(3))
-                            {
-                                <div class="entities-modal-fact-source" @key="CitationKey(citation)">
-                                    <div><strong>@citation.SourceTitle</strong> <span>@citation.SourceKind</span> <span>chunk @(citation.SourceChunkIndex + 1)</span></div>
-                                </div>
-                            }
-                        </article>
-                    }
-                </div>
-            </div>
-        }
-    </div>;
-
-    private RenderFragment RenderIngestObservations(IReadOnlyList<IngestSourceObservation> observations, string title) => @<div>
-        @if (observations.Count > 0)
-        {
-            <div class="entities-modal-ingest mb-3">
-                <label class="form-label small text-muted">@title</label>
-                <div class="entities-modal-ingest-list">
-                    @foreach (var observation in observations)
-                    {
-                        <div class="entities-modal-ingest-item" @key="ObservationKey(observation)">
-                            <div class="entities-modal-ingest-head">
-                                <strong>@observation.SourceTitle</strong>
-                                <span>@observation.SourceKind</span>
-                                <span>chunk @(observation.SourceChunkIndex + 1)</span>
-                            </div>
-                            @if (!string.IsNullOrWhiteSpace(observation.Summary))
-                            {
-                                <p>@observation.Summary</p>
-                            }
-                            @if (observation.Aliases.Count > 0)
-                            {
-                                <div class="entities-modal-ingest-line"><span>Aliases</span><strong>@string.Join(", ", observation.Aliases)</strong></div>
-                            }
-                            @foreach (var prop in observation.ObservedProperties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
-                            {
-                                <div class="entities-modal-ingest-line">
-                                    <span>@prop.Key</span>
-                                    <strong>@(string.IsNullOrWhiteSpace(prop.Value) ? "-" : prop.Value)</strong>
-                                </div>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(observation.Notes))
-                            {
-                                <div class="entities-modal-ingest-notes"><strong>Notes:</strong> @observation.Notes</div>
-                            }
-                        </div>
-                    }
-                </div>
-            </div>
-        }
-    </div>;
-
     private static string EntitySubtitle(StoryEntity entity)
     {
         if (!string.IsNullOrWhiteSpace(entity.Summary))
@@ -520,12 +449,6 @@
         !string.IsNullOrWhiteSpace(observation.Summary) ? observation.Summary
         : !string.IsNullOrWhiteSpace(observation.Notes) ? observation.Notes
         : observation.ObservedProperties.Values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
-
-    private static string ObservationKey(IngestSourceObservation observation) =>
-        $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
-
-    private static string CitationKey(IngestWikiCitation citation) =>
-        $"{citation.SourceId}:{citation.SourceChunkId}:{citation.SourceBlockId}:{citation.PageNumber}:{citation.Locator}";
 
     private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
 

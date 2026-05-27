@@ -34,6 +34,7 @@
 | `App.razor` | Root component: `<html>` shell, head outlet, scripts. |
 | `Routes.razor` | `<Router>` wiring `MainLayout` and `NotFound`. |
 | `_Imports.razor` | Shared `@using` directives for all components. |
+| `EntityKnowledgeView.razor` (+ `.razor.css`) | Shared read-only entity knowledge renderer for structured wiki data, ingest source summaries, and source chunk observations used by graph, outline, and context entity detail surfaces. |
 
 ### Components/Chat/
 

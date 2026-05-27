@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -121,7 +122,7 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: (string query, int topK = 10, string? type = null, string? parentId = null) => SearchEntitiesAsync(context, query, topK, type, parentId),
                 name: "search_entities",
-                description: "Bounded search for graph entities by name, type, and property text. Use type or parentId to narrow results when known. When Review edits is enabled, returns staged state. Returns compact matches; call read_entity or list_entity_links for details."),
+                description: "Bounded search for graph entities by name, type, property text, aliases, and wiki text. Use type or parentId to narrow results when known. When Review edits is enabled, returns staged state. Returns compact matches; call read_entity or list_entity_links for details."),
 
             AIFunctionFactory.Create(
                 method: (string type, string name, string? propertiesJson = null, string? parentId = null, int? order = null) =>
@@ -637,6 +638,11 @@ public sealed class OutlineCollaborationTools(
             order = entity.Order,
             parentId = entity.ParentId,
             properties = entity.Properties,
+            summary = entity.Summary,
+            aliases = entity.Aliases,
+            wikiSections = entity.WikiSections,
+            ingestSources = entity.IngestSources,
+            ingestObservations = entity.IngestObservations,
             relationContext,
         };
     }
@@ -854,6 +860,14 @@ public sealed class OutlineCollaborationTools(
     {
         var score = TextMatchScore(entity.Name, query, titleWeight: 80, detailWeight: 30);
         score += TextMatchScore(entity.Type, query, titleWeight: 12, detailWeight: 8);
+        score += TextMatchScore(entity.Summary, query, titleWeight: 20, detailWeight: 12);
+        foreach (var alias in entity.Aliases)
+            score += TextMatchScore(alias, query, titleWeight: 30, detailWeight: 16);
+        foreach (var section in entity.WikiSections)
+        {
+            score += TextMatchScore(section.Title, query, titleWeight: 12, detailWeight: 6);
+            score += TextMatchScore(section.Body, query, titleWeight: 12, detailWeight: 8);
+        }
         foreach (var property in entity.Properties)
         {
             score += TextMatchScore(property.Key, query, titleWeight: 8, detailWeight: 4);
@@ -864,6 +878,14 @@ public sealed class OutlineCollaborationTools(
         {
             score += TextMatchScore(entity.Name, term, titleWeight: 180, detailWeight: 60);
             score += TextMatchScore(entity.Type, term, titleWeight: 16, detailWeight: 8);
+            score += TextMatchScore(entity.Summary, term, titleWeight: 28, detailWeight: 14);
+            foreach (var alias in entity.Aliases)
+                score += TextMatchScore(alias, term, titleWeight: 70, detailWeight: 24);
+            foreach (var section in entity.WikiSections)
+            {
+                score += TextMatchScore(section.Title, term, titleWeight: 18, detailWeight: 8);
+                score += TextMatchScore(section.Body, term, titleWeight: 18, detailWeight: 10);
+            }
             foreach (var property in entity.Properties)
             {
                 score += TextMatchScore(property.Key, term, titleWeight: 10, detailWeight: 5);
@@ -890,8 +912,22 @@ public sealed class OutlineCollaborationTools(
         order = entity.Order,
         parentId = entity.ParentId,
         matchScore = score,
+        summary = TruncatePropertyValue(entity.Summary),
+        aliases = entity.Aliases.Take(8).ToArray(),
+        wikiSections = CompactWikiSections(entity.WikiSections),
         properties = CompactProperties(entity.Properties),
     };
+
+    private static object[] CompactWikiSections(IReadOnlyList<IngestWikiSection> sections) =>
+        sections
+            .Take(4)
+            .Select(section => new
+            {
+                section.Id,
+                section.Title,
+                body = TruncatePropertyValue(section.Body),
+            })
+            .ToArray();
 
     private static Dictionary<string, string?> CompactProperties(IReadOnlyDictionary<string, string?> properties)
     {

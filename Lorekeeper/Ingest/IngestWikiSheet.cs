@@ -52,6 +52,36 @@ public static class IngestWikiSheet
             .ToList();
     }
 
+    public static bool UpsertRelationshipCitation(
+        IDictionary<string, object?> properties,
+        Guid sourceId,
+        string sourceTitle,
+        string sourceKind,
+        Guid sourceChunkId,
+        int sourceChunkIndex)
+    {
+        var citations = ReadRelationshipCitations(AsReadOnly(properties)).ToList();
+        var citation = NormalizeCitation(new IngestWikiCitation(
+            sourceId.ToString("N"),
+            sourceTitle,
+            sourceKind,
+            sourceChunkId.ToString("N"),
+            sourceChunkIndex,
+            SourceBlockId: null,
+            PageNumber: null,
+            Locator: null));
+
+        if (citations.Any(existing =>
+            string.Equals(CitationKey(existing), CitationKey(citation), StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        citations.Add(citation);
+        properties[RelationshipCitationsProperty] = JsonSerializer.Serialize(citations, JsonOptions);
+        return true;
+    }
+
     public static void ApplyEntitySheet(
         IDictionary<string, object?> properties,
         string summary,

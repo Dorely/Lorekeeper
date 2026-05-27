@@ -1,0 +1,138 @@
+@using Lorekeeper.Ingest
+
+<section class="entity-knowledge">
+    <div class="entity-knowledge-title">@Title</div>
+
+    @if (HasContent)
+    {
+        @if (!string.IsNullOrWhiteSpace(Summary))
+        {
+            <article class="entity-knowledge-item">
+                <div class="entity-knowledge-head">Summary</div>
+                <p>@Summary</p>
+            </article>
+        }
+
+        @if (Aliases.Count > 0)
+        {
+            <div class="entity-knowledge-aliases">
+                <span>Aliases</span>
+                <strong>@string.Join(", ", Aliases)</strong>
+            </div>
+        }
+
+        @foreach (var wikiSection in WikiSections)
+        {
+            <article class="entity-knowledge-item" @key="wikiSection.Id">
+                <div class="entity-knowledge-head">@wikiSection.Title</div>
+                <p>@wikiSection.Body</p>
+                @foreach (var citation in wikiSection.Citations.Take(3))
+                {
+                    <div class="entity-knowledge-source" @key="CitationKey(citation)">
+                        <strong>@citation.SourceTitle</strong>
+                        <span>@IngestWikiSheet.CitationPreview(citation)</span>
+                    </div>
+                }
+            </article>
+        }
+
+        @if (IngestSources.Count > 0)
+        {
+            <div class="entity-knowledge-subtitle">Ingest Sources</div>
+            @foreach (var source in IngestSources)
+            {
+                <article class="entity-knowledge-item" @key="source.SourceId">
+                    <div class="entity-knowledge-head">
+                        @source.SourceTitle
+                        <span>@source.SourceKind</span>
+                        <span>@source.ChunkCount chunk@(PluralSuffix(source.ChunkCount))</span>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(source.Summary))
+                    {
+                        <p>@source.Summary</p>
+                    }
+                    @if (source.Aliases.Count > 0)
+                    {
+                        <div class="entity-knowledge-line">
+                            <span>Aliases</span>
+                            <strong>@string.Join(", ", source.Aliases)</strong>
+                        </div>
+                    }
+                </article>
+            }
+        }
+
+        @if (IngestObservations.Count > 0)
+        {
+            <div class="entity-knowledge-subtitle">Chunk Observations</div>
+            @foreach (var observation in IngestObservations)
+            {
+                <article class="entity-knowledge-item" @key="ObservationKey(observation)">
+                    <div class="entity-knowledge-head">
+                        @observation.SourceTitle
+                        <span>@observation.SourceKind</span>
+                        <span>chunk @(observation.SourceChunkIndex + 1)</span>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(observation.Summary))
+                    {
+                        <p>@observation.Summary</p>
+                    }
+                    @if (observation.Aliases.Count > 0)
+                    {
+                        <div class="entity-knowledge-line">
+                            <span>Aliases</span>
+                            <strong>@string.Join(", ", observation.Aliases)</strong>
+                        </div>
+                    }
+                    @foreach (var property in observation.ObservedProperties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+                    {
+                        <div class="entity-knowledge-line">
+                            <span>@property.Key</span>
+                            <strong>@(string.IsNullOrWhiteSpace(property.Value) ? "-" : property.Value)</strong>
+                        </div>
+                    }
+                    @foreach (var observationSection in observation.WikiSections)
+                    {
+                        <div class="entity-knowledge-observation-section">
+                            <span>@observationSection.Title</span>
+                            <p>@observationSection.Body</p>
+                        </div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(observation.Notes))
+                    {
+                        <div class="entity-knowledge-notes">@observation.Notes</div>
+                    }
+                </article>
+            }
+        }
+    }
+    else if (ShowEmptyState)
+    {
+        <div class="entity-knowledge-empty"><em>No structured entity data yet.</em></div>
+    }
+</section>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Entity Data";
+    [Parameter] public string Summary { get; set; } = string.Empty;
+    [Parameter] public IReadOnlyList<string> Aliases { get; set; } = [];
+    [Parameter] public IReadOnlyList<IngestWikiSection> WikiSections { get; set; } = [];
+    [Parameter] public IReadOnlyList<IngestSourceAssertionSummary> IngestSources { get; set; } = [];
+    [Parameter] public IReadOnlyList<IngestSourceObservation> IngestObservations { get; set; } = [];
+    [Parameter] public bool ShowEmptyState { get; set; } = true;
+
+    private bool HasContent =>
+        !string.IsNullOrWhiteSpace(Summary)
+        || Aliases.Count > 0
+        || WikiSections.Count > 0
+        || IngestSources.Count > 0
+        || IngestObservations.Count > 0;
+
+    private static string CitationKey(IngestWikiCitation citation) =>
+        $"{citation.SourceId}:{citation.SourceChunkId}:{citation.SourceBlockId}:{citation.PageNumber}:{citation.Locator}";
+
+    private static string ObservationKey(IngestSourceObservation observation) =>
+        $"{observation.SourceId}:{observation.SourceChunkId}:{observation.UpdatedAt:o}";
+
+    private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
+}

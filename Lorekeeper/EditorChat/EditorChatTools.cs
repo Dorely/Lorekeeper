@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -90,12 +91,12 @@ public sealed class EditorChatTools(
                 method: (string query, int topK = 10, string? type = null, string? parentId = null) =>
                     SearchEntitiesAsync(context, query, topK, type, parentId),
                 name: "search_entities",
-                description: "Search story graph entities by name, type, and property text. Use optional type or parentId to narrow results. When Review edits is enabled, returns the latest staged entity state from this turn."),
+                description: "Search story graph entities by name, type, property text, aliases, and wiki text. Use optional type or parentId to narrow results. When Review edits is enabled, returns the latest staged entity state from this turn."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ReadEntityAsync(context, entityId),
                 name: "read_entity",
-                description: "Read one graph entity by id, including properties and adjacent links. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
+                description: "Read one graph entity by id, including properties, structured wiki data, adjacent links, and relation context. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
@@ -474,17 +475,12 @@ public sealed class EditorChatTools(
             parentId = entity.ParentId,
             addedToContextFeed,
             properties = entity.Properties,
-            links = links.Select(link => new
-            {
-                link.EdgeId,
-                link.EdgeType,
-                direction = link.Direction.ToString(),
-                link.OtherEntityId,
-                link.OtherEntityName,
-                link.OtherEntityType,
-                link.SortOrder,
-                link.Properties,
-            }),
+            summary = entity.Summary,
+            aliases = entity.Aliases,
+            wikiSections = entity.WikiSections,
+            ingestSources = entity.IngestSources,
+            ingestObservations = entity.IngestObservations,
+            links = links.Select(LinkPayload),
             relationContext,
         });
     }
@@ -503,6 +499,11 @@ public sealed class EditorChatTools(
             order = entity.Order,
             parentId = entity.ParentId,
             properties = entity.Properties,
+            summary = entity.Summary,
+            aliases = entity.Aliases,
+            wikiSections = entity.WikiSections,
+            ingestSources = entity.IngestSources,
+            ingestObservations = entity.IngestObservations,
             relationContext,
         };
     }
@@ -513,17 +514,7 @@ public sealed class EditorChatTools(
             return await ctx.OutlineStaging.ListEntityLinksAsync(entityId);
 
         var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
-        return JsonSerializer.Serialize(links.Select(link => new
-        {
-            edgeId = link.EdgeId,
-            edgeType = link.EdgeType,
-            direction = link.Direction.ToString(),
-            otherEntityId = link.OtherEntityId,
-            otherEntityName = link.OtherEntityName,
-            otherEntityType = link.OtherEntityType,
-            sortOrder = link.SortOrder,
-            properties = link.Properties,
-        }));
+        return JsonSerializer.Serialize(links.Select(LinkPayload));
     }
 
     private async Task<string> ReadChapterAsync(
@@ -1187,6 +1178,14 @@ public sealed class EditorChatTools(
     {
         var score = TextMatchScore(entity.Name, query, titleWeight: 80, detailWeight: 30);
         score += TextMatchScore(entity.Type, query, titleWeight: 12, detailWeight: 8);
+        score += TextMatchScore(entity.Summary, query, titleWeight: 20, detailWeight: 12);
+        foreach (var alias in entity.Aliases)
+            score += TextMatchScore(alias, query, titleWeight: 30, detailWeight: 16);
+        foreach (var section in entity.WikiSections)
+        {
+            score += TextMatchScore(section.Title, query, titleWeight: 12, detailWeight: 6);
+            score += TextMatchScore(section.Body, query, titleWeight: 12, detailWeight: 8);
+        }
         foreach (var property in entity.Properties)
         {
             score += TextMatchScore(property.Key, query, titleWeight: 8, detailWeight: 4);
@@ -1197,6 +1196,14 @@ public sealed class EditorChatTools(
         {
             score += TextMatchScore(entity.Name, term, titleWeight: 180, detailWeight: 60);
             score += TextMatchScore(entity.Type, term, titleWeight: 16, detailWeight: 8);
+            score += TextMatchScore(entity.Summary, term, titleWeight: 28, detailWeight: 14);
+            foreach (var alias in entity.Aliases)
+                score += TextMatchScore(alias, term, titleWeight: 70, detailWeight: 24);
+            foreach (var section in entity.WikiSections)
+            {
+                score += TextMatchScore(section.Title, term, titleWeight: 18, detailWeight: 8);
+                score += TextMatchScore(section.Body, term, titleWeight: 18, detailWeight: 10);
+            }
             foreach (var property in entity.Properties)
             {
                 score += TextMatchScore(property.Key, term, titleWeight: 10, detailWeight: 5);
@@ -1223,8 +1230,38 @@ public sealed class EditorChatTools(
         order = entity.Order,
         parentId = entity.ParentId,
         matchScore = score,
+        summary = TruncatePropertyValue(entity.Summary),
+        aliases = entity.Aliases.Take(8).ToArray(),
+        wikiSections = CompactWikiSections(entity.WikiSections),
         properties = CompactProperties(entity.Properties),
     };
+
+    private static object LinkPayload(EntityLink link) => new
+    {
+        edgeId = link.EdgeId,
+        edgeType = link.EdgeType,
+        direction = link.Direction.ToString(),
+        otherEntityId = link.OtherEntityId,
+        otherEntityName = link.OtherEntityName,
+        otherEntityType = link.OtherEntityType,
+        sortOrder = link.SortOrder,
+        properties = link.Properties,
+        summary = link.Summary,
+        ingestSources = link.IngestSources,
+        ingestObservations = link.IngestObservations,
+        relationshipCitations = link.RelationshipCitations,
+    };
+
+    private static object[] CompactWikiSections(IReadOnlyList<IngestWikiSection> sections) =>
+        sections
+            .Take(4)
+            .Select(section => new
+            {
+                section.Id,
+                section.Title,
+                body = TruncatePropertyValue(section.Body),
+            })
+            .ToArray();
 
     private static Dictionary<string, string?> CompactProperties(IReadOnlyDictionary<string, string?> properties)
     {
