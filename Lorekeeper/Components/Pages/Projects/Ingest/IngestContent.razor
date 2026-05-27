@@ -290,7 +290,7 @@ else
                 <div class="ingest-chunk-list">
                     @foreach (var chunk in _selectedJob.Chunks.OrderBy(chunk => chunk.SourceChunkIndex))
                     {
-                        <button type="button" class="ingest-chunk-row @(_selectedChunkId == chunk.SourceChunkId ? "selected" : null)" @onclick="() => SelectChunkAsync(chunk.SourceChunkId)">
+                        <button type="button" class="ingest-chunk-row @(!_selectedFinalization && _selectedChunkId == chunk.SourceChunkId ? "selected" : null)" @onclick="() => SelectChunkAsync(chunk.SourceChunkId)">
                             <span class="ingest-chunk-main">
                                 <span>@(chunk.SourceChunkIndex + 1). @chunk.SourceChunkTitle</span>
                                 <span class="badge bg-@StatusColor(chunk.Status)">@chunk.Status</span>
@@ -302,6 +302,14 @@ else
                             }
                         </button>
                     }
+                    <button type="button" class="ingest-chunk-row ingest-finalization-row @(_selectedFinalization ? "selected" : null)" @onclick="SelectFinalizationAsync">
+                        <span class="ingest-chunk-main">
+                            <span>Final review &amp; relationship build</span>
+                            <span class="badge bg-@FinalizationStatusColor(_selectedJob.Finalization.Phase)">@FinalizationPhaseLabel(_selectedJob.Finalization.Phase)</span>
+                        </span>
+                        <span class="ingest-job-meta">@FinalizationMeta(_selectedJob.Finalization)</span>
+                        <span class="ingest-finalization-hint">Graph relationship links are built after entity final review.</span>
+                    </button>
                 </div>
 
                 @if (!_followCurrentChunk && IsBusy(_selectedJob))
@@ -356,6 +364,20 @@ else
                         <pre>@SourceExcerpt()</pre>
                     </details>
                 }
+                else if (_selectedFinalization)
+                {
+                    <div class="ingest-source-preview ingest-finalization-preview">
+                        <div class="ingest-chunk-main">
+                            <span>Final review &amp; relationship build</span>
+                            <span class="badge bg-@FinalizationStatusColor(_selectedJob.Finalization.Phase)">@FinalizationPhaseLabel(_selectedJob.Finalization.Phase)</span>
+                        </div>
+                        <div class="small text-muted">@FinalizationMeta(_selectedJob.Finalization)</div>
+                        @if (!string.IsNullOrWhiteSpace(_selectedJob.Finalization.CurrentMessage))
+                        {
+                            <div class="small mt-1">@_selectedJob.Finalization.CurrentMessage</div>
+                        }
+                    </div>
+                }
 
                 @if (_loadingReport)
                 {
@@ -363,7 +385,7 @@ else
                 }
                 else if (_reportItems.Count == 0)
                 {
-                    <p class="text-muted small">No report items for this source chunk yet.</p>
+                    <p class="text-muted small">@ReportEmptyText()</p>
                 }
                 else
                 {
@@ -418,7 +440,13 @@ else
                                         <div class="small"><strong>Notes:</strong> @item.Notes</div>
                                     }
                                     <div class="ingest-report-foot">
-                                        <div class="small text-muted">@item.Status - @item.ResourceType</div>
+                                        <div class="small text-muted">
+                                            @if (_selectedFinalization && ReportChunkContext(item) is { Length: > 0 } chunkContext)
+                                            {
+                                                <span class="ingest-report-chunk-context">@chunkContext</span>
+                                            }
+                                            <span>@item.Status - @item.ResourceType</span>
+                                        </div>
                                         <div class="ingest-report-actions">
                                             <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(item.Status != IngestStagingRecordStatus.Active)" @onclick="() => StartEditReportItem(item)">Edit</button>
                                             <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_deletingReportItemId == item.Id || item.Status != IngestStagingRecordStatus.Active)" @onclick="() => DeleteReportItemAsync(item.Id)">Delete</button>
@@ -446,6 +474,7 @@ else
     private ChatProviderAvailability? _chatAvailability;
     private Guid? _selectedChunkId;
     private Guid? _loadedProjectId;
+    private bool _selectedFinalization;
     private bool _loadingJobs;
     private bool _loadingReport;
     private bool _creating;
@@ -541,9 +570,10 @@ else
         }
     }
 
-    private IngestJobChunkProgress? SelectedSourceChunk => _selectedJob?.Chunks
-        .FirstOrDefault(chunk => chunk.SourceChunkId == _selectedChunkId)
-        ?? _selectedJob?.Chunks.OrderBy(chunk => chunk.SourceChunkIndex).FirstOrDefault();
+    private IngestJobChunkProgress? SelectedSourceChunk => _selectedFinalization
+        ? null
+        : (_selectedJob?.Chunks.FirstOrDefault(chunk => chunk.SourceChunkId == _selectedChunkId)
+            ?? _selectedJob?.Chunks.OrderBy(chunk => chunk.SourceChunkIndex).FirstOrDefault());
 
     private string LiveLlmTokenLabel => _liveLlmTokenCount is int tokenCount
         ? $"{TokenPrefix(_liveLlmTokenCountIsExact)}{tokenCount:N0} LLM tokens"
@@ -647,6 +677,7 @@ else
                     {
                         _selectedJob = null;
                         _selectedChunkId = null;
+                        _selectedFinalization = false;
                         _reportItems = [];
                         _sourceExcerpt = null;
                         ClearLiveIngest();
@@ -776,6 +807,7 @@ else
             {
                 _selectedJob = null;
                 _selectedChunkId = null;
+                _selectedFinalization = false;
                 _reportItems = [];
                 _sourceExcerpt = null;
             }
@@ -964,7 +996,7 @@ else
             _selectedJob = await Ingest.GetJobViewAsync(jobId, cancellationToken);
             if (_selectedJob is null) return;
             _resumeProviderId = _selectedJob.ProviderId ?? DefaultProviderId;
-            _selectedChunkId = FollowChunkId(_selectedJob);
+            SetFollowTarget(_selectedJob);
             await LoadSelectedChunkDataAsync(cancellationToken);
         }
         catch (OperationCanceledException) { }
@@ -976,11 +1008,13 @@ else
         var selectedJobId = _selectedJob.Id;
         var previousChunkId = _selectedChunkId;
         var previousFollow = _followCurrentChunk;
+        var previousFinalization = _selectedFinalization;
         var refreshed = await Ingest.GetJobViewAsync(selectedJobId);
         if (refreshed is null)
         {
             _selectedJob = null;
             _selectedChunkId = null;
+            _selectedFinalization = false;
             _reportItems = [];
             _sourceExcerpt = null;
             if (_jobs.Count > 0)
@@ -989,18 +1023,40 @@ else
         }
 
         _selectedJob = refreshed;
-        _selectedChunkId = previousFollow
-            ? FollowChunkId(refreshed)
-            : refreshed.Chunks.Any(chunk => chunk.SourceChunkId == previousChunkId)
-                ? previousChunkId
-                : FollowChunkId(refreshed);
+        if (previousFollow)
+        {
+            SetFollowTarget(refreshed);
+        }
+        else if (previousFinalization)
+        {
+            _selectedFinalization = true;
+            _selectedChunkId = null;
+        }
+        else if (refreshed.Chunks.Any(chunk => chunk.SourceChunkId == previousChunkId))
+        {
+            _selectedFinalization = false;
+            _selectedChunkId = previousChunkId;
+        }
+        else
+        {
+            SetFollowTarget(refreshed);
+        }
         await LoadSelectedChunkDataAsync(CancellationToken.None);
     }
 
     private async Task SelectChunkAsync(Guid sourceChunkId)
     {
         _followCurrentChunk = false;
+        _selectedFinalization = false;
         _selectedChunkId = sourceChunkId;
+        await LoadSelectedChunkDataAsync(CancellationToken.None);
+    }
+
+    private async Task SelectFinalizationAsync()
+    {
+        _followCurrentChunk = false;
+        _selectedFinalization = true;
+        _selectedChunkId = null;
         await LoadSelectedChunkDataAsync(CancellationToken.None);
     }
 
@@ -1008,13 +1064,13 @@ else
     {
         if (_selectedJob is null) return;
         _followCurrentChunk = true;
-        _selectedChunkId = FollowChunkId(_selectedJob);
+        SetFollowTarget(_selectedJob);
         await LoadSelectedChunkDataAsync(CancellationToken.None);
     }
 
     private async Task LoadSelectedChunkDataAsync(CancellationToken cancellationToken)
     {
-        if (_selectedJob is null || _selectedChunkId is null)
+        if (_selectedJob is null)
         {
             _reportItems = [];
             _sourceExcerpt = null;
@@ -1024,8 +1080,21 @@ else
         _loadingReport = true;
         try
         {
-            _reportItems = (await Ingest.ListReportItemViewsAsync(_selectedJob.Id, _selectedChunkId, cancellationToken)).ToList();
-            _sourceExcerpt = await Ingest.GetSourceChunkExcerptAsync(_selectedChunkId.Value, cancellationToken: cancellationToken);
+            if (_selectedFinalization)
+            {
+                _reportItems = (await Ingest.ListReportItemViewsAsync(_selectedJob.Id, null, cancellationToken)).ToList();
+                _sourceExcerpt = null;
+            }
+            else if (_selectedChunkId is Guid selectedChunkId)
+            {
+                _reportItems = (await Ingest.ListReportItemViewsAsync(_selectedJob.Id, selectedChunkId, cancellationToken)).ToList();
+                _sourceExcerpt = await Ingest.GetSourceChunkExcerptAsync(selectedChunkId, cancellationToken: cancellationToken);
+            }
+            else
+            {
+                _reportItems = [];
+                _sourceExcerpt = null;
+            }
         }
         finally
         {
@@ -1167,6 +1236,7 @@ else
             await Ingest.DeleteJobAsync(_selectedJob.Id);
             _selectedJob = null;
             _selectedChunkId = null;
+            _selectedFinalization = false;
             _reportItems = [];
             _sourceExcerpt = null;
             ClearLiveIngest();
@@ -1274,11 +1344,85 @@ else
         return true;
     }
 
+    private void SetFollowTarget(IngestJobDetailView job)
+    {
+        if (ShouldFollowFinalization(job))
+        {
+            _selectedFinalization = true;
+            _selectedChunkId = null;
+            return;
+        }
+
+        _selectedFinalization = false;
+        _selectedChunkId = FollowChunkId(job);
+    }
+
+    private static bool ShouldFollowFinalization(IngestJobDetailView job) =>
+        job.TotalSourceChunks > 0
+        && job.CompletedSourceChunks >= job.TotalSourceChunks
+        && (job.Finalization.EntityTotal > 0
+            || job.Finalization.RelationshipTotal > 0
+            || job.Finalization.SourceChunkNoteTotal > 0);
+
     private static Guid? FollowChunkId(IngestJobDetailView job) =>
         job.Chunks.FirstOrDefault(chunk => chunk.Status == IngestJobChunkStatus.Running)?.SourceChunkId
         ?? job.Chunks.FirstOrDefault(chunk => chunk.Status is IngestJobChunkStatus.Pending or IngestJobChunkStatus.Stopped or IngestJobChunkStatus.Failed)?.SourceChunkId
         ?? job.Chunks.OrderByDescending(chunk => chunk.SourceChunkIndex).FirstOrDefault(chunk => chunk.Status == IngestJobChunkStatus.Completed)?.SourceChunkId
         ?? job.Chunks.OrderBy(chunk => chunk.SourceChunkIndex).FirstOrDefault()?.SourceChunkId;
+
+    private string ReportEmptyText() =>
+        _selectedFinalization
+            ? "No queued finalization records for this job yet."
+            : "No report items for this source chunk yet.";
+
+    private static string ReportChunkContext(IngestReportItemView item)
+    {
+        if (item.SourceChunkIndex is not int sourceChunkIndex)
+            return string.Empty;
+
+        var chunkLabel = $"chunk {sourceChunkIndex + 1}";
+        return string.IsNullOrWhiteSpace(item.SourceChunkTitle)
+            ? chunkLabel
+            : $"{chunkLabel}: {item.SourceChunkTitle}";
+    }
+
+    private static string FinalizationMeta(IngestFinalizationProgressView progress)
+    {
+        var parts = new List<string>
+        {
+            $"{progress.EntityFinalized:N0}/{progress.EntityTotal:N0} entities reviewed",
+            $"{progress.RelationshipFinalized:N0}/{progress.RelationshipTotal:N0} links built",
+        };
+
+        if (progress.EntityActive > 0)
+            parts.Add($"{progress.EntityActive:N0} entities remaining");
+        if (progress.RelationshipActive > 0)
+            parts.Add($"{progress.RelationshipActive:N0} links queued");
+        if (progress.SourceChunkNoteTotal > 0)
+            parts.Add($"{progress.SourceChunkNoteFinalized:N0}/{progress.SourceChunkNoteTotal:N0} source notes finalized");
+
+        var failed = progress.EntityFailed + progress.RelationshipFailed + progress.SourceChunkNoteFailed;
+        if (failed > 0)
+            parts.Add($"{failed:N0} failed");
+
+        return string.Join(" - ", parts);
+    }
+
+    private static string FinalizationPhaseLabel(IngestFinalizationPhase phase) => phase switch
+    {
+        IngestFinalizationPhase.ReviewingEntities => "Reviewing entities",
+        IngestFinalizationPhase.BuildingRelationships => "Building links",
+        _ => phase.ToString(),
+    };
+
+    private static string FinalizationStatusColor(IngestFinalizationPhase phase) => phase switch
+    {
+        IngestFinalizationPhase.Completed => "success",
+        IngestFinalizationPhase.ReviewingEntities => "primary",
+        IngestFinalizationPhase.BuildingRelationships => "info text-dark",
+        IngestFinalizationPhase.Failed => "danger",
+        _ => "light text-dark",
+    };
 
     private string SourceExcerpt()
     {

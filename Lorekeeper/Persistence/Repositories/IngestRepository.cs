@@ -140,6 +140,17 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
                 jobEvent.CreatedAt))
             .ToListAsync(cancellationToken);
 
+        var finalizationRecords = await db.IngestStagingRecords
+            .AsNoTracking()
+            .Where(item => item.JobId == jobId && item.Status != IngestStagingRecordStatus.Deleted)
+            .Select(item => new FinalizationStagingRecord(
+                item.Id,
+                item.Kind,
+                item.Status,
+                item.EntityId,
+                item.GraphNodeId))
+            .ToListAsync(cancellationToken);
+
         return new IngestJobDetailView(
             job.Id,
             job.ProjectId,
@@ -161,6 +172,12 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
             job.CreatedAt,
             job.UpdatedAt,
             chunks,
+            BuildFinalizationProgress(
+                job.Status,
+                job.TotalSourceChunks,
+                job.CompletedSourceChunks,
+                job.CurrentMessage,
+                finalizationRecords),
             events);
     }
 
@@ -263,6 +280,7 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
             query = query.Where(item => item.SourceChunkId == selectedSourceChunkId || item.SourceChunkId == null);
 
         var items = await query
+            .Include(item => item.SourceChunk)
             .OrderBy(item => item.CreatedAt)
             .ToListAsync(cancellationToken);
 
@@ -272,6 +290,7 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
                 item.Id,
                 item.SourceChunkId,
                 item.SourceChunkIndex,
+                item.SourceChunk?.Title,
                 item.Kind,
                 item.Status,
                 item.Title,
@@ -393,4 +412,73 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
 
         return false;
     }
+
+    private static IngestFinalizationProgressView BuildFinalizationProgress(
+        IngestJobStatus jobStatus,
+        int totalSourceChunks,
+        int completedSourceChunks,
+        string? currentMessage,
+        IReadOnlyList<FinalizationStagingRecord> records)
+    {
+        var entityGroups = records
+            .Where(item => item.Kind == IngestStagingRecordKind.Entity)
+            .GroupBy(EntityFinalizationKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => EntityFinalizationStatus(group.Select(item => item.Status)))
+            .ToList();
+
+        var entityActive = entityGroups.Count(status => status == IngestStagingRecordStatus.Active);
+        var entityFailed = entityGroups.Count(status => status == IngestStagingRecordStatus.Failed);
+        var entityFinalized = entityGroups.Count(status => status == IngestStagingRecordStatus.Finalized);
+
+        var relationshipRecords = records.Where(item => item.Kind == IngestStagingRecordKind.Relationship).ToList();
+        var sourceChunkNoteRecords = records.Where(item => item.Kind == IngestStagingRecordKind.SourceChunkNote).ToList();
+
+        var allChunksCompleted = totalSourceChunks > 0 && completedSourceChunks >= totalSourceChunks;
+        var phase = jobStatus switch
+        {
+            IngestJobStatus.Failed => IngestFinalizationPhase.Failed,
+            _ when !allChunksCompleted => IngestFinalizationPhase.Pending,
+            _ when entityActive > 0 => IngestFinalizationPhase.ReviewingEntities,
+            _ when relationshipRecords.Any(item => item.Status == IngestStagingRecordStatus.Active)
+                || sourceChunkNoteRecords.Any(item => item.Status == IngestStagingRecordStatus.Active) => IngestFinalizationPhase.BuildingRelationships,
+            _ when records.Count > 0 || jobStatus == IngestJobStatus.Completed => IngestFinalizationPhase.Completed,
+            _ => IngestFinalizationPhase.Pending,
+        };
+
+        return new IngestFinalizationProgressView(
+            phase,
+            entityGroups.Count,
+            entityFinalized,
+            entityActive,
+            entityFailed,
+            relationshipRecords.Count,
+            relationshipRecords.Count(item => item.Status == IngestStagingRecordStatus.Active),
+            relationshipRecords.Count(item => item.Status == IngestStagingRecordStatus.Finalized),
+            relationshipRecords.Count(item => item.Status == IngestStagingRecordStatus.Failed),
+            sourceChunkNoteRecords.Count,
+            sourceChunkNoteRecords.Count(item => item.Status == IngestStagingRecordStatus.Active),
+            sourceChunkNoteRecords.Count(item => item.Status == IngestStagingRecordStatus.Finalized),
+            sourceChunkNoteRecords.Count(item => item.Status == IngestStagingRecordStatus.Failed),
+            currentMessage ?? string.Empty);
+    }
+
+    private static string EntityFinalizationKey(FinalizationStagingRecord item) =>
+        item.EntityId?.ToString("N") ?? item.GraphNodeId?.ToString() ?? item.Id.ToString("N");
+
+    private static IngestStagingRecordStatus EntityFinalizationStatus(IEnumerable<IngestStagingRecordStatus> statuses)
+    {
+        var statusList = statuses.ToList();
+        if (statusList.Any(status => status == IngestStagingRecordStatus.Active))
+            return IngestStagingRecordStatus.Active;
+        if (statusList.Any(status => status == IngestStagingRecordStatus.Failed))
+            return IngestStagingRecordStatus.Failed;
+        return IngestStagingRecordStatus.Finalized;
+    }
+
+    private sealed record FinalizationStagingRecord(
+        Guid Id,
+        IngestStagingRecordKind Kind,
+        IngestStagingRecordStatus Status,
+        Guid? EntityId,
+        long? GraphNodeId);
 }

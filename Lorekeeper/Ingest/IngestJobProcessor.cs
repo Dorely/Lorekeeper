@@ -284,6 +284,7 @@ public sealed class IngestJobProcessor(
         {
             await PromoteFinalizedRelationshipStagingRecordsAsync(job, cancellationToken);
             await MarkRemainingStagingRecordsFinalizedAsync(job.Id, cancellationToken);
+            Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
             return true;
         }
 
@@ -387,6 +388,7 @@ public sealed class IngestJobProcessor(
 
         await PromoteFinalizedRelationshipStagingRecordsAsync(job, cancellationToken);
         await MarkRemainingStagingRecordsFinalizedAsync(job.Id, cancellationToken);
+        Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
         await ingest.AddEventAsync(new IngestJobEvent
         {
             JobId = job.Id,
@@ -433,15 +435,25 @@ public sealed class IngestJobProcessor(
         var promoted = 0;
         var skipped = 0;
 
-        foreach (var item in relationshipItems)
+        for (var index = 0; index < relationshipItems.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var item = relationshipItems[index];
+
+            job.CurrentMessage = $"Building relationship links {index + 1} of {relationshipItems.Count}: {RelationshipPromotionLabel(item)}";
+            job.UpdatedAt = DateTime.UtcNow;
+            ingest.UpdateJob(job);
+            await ingest.SaveChangesAsync(cancellationToken);
+            Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
 
             if (!TryReadRelationshipPromotionInput(item, job, out var input, out var skipReason))
             {
                 skipped++;
                 logger.LogWarning("Skipping ingest relationship staging record {StagingRecordId} during finalization: {Reason}", item.Id, skipReason);
                 MarkStagingRecordFailed(item, skipReason);
+                ingest.UpdateStagingRecord(item);
+                await ingest.SaveChangesAsync(cancellationToken);
+                Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
                 continue;
             }
 
@@ -452,6 +464,9 @@ public sealed class IngestJobProcessor(
                 skipped++;
                 logger.LogWarning("Skipping ingest relationship staging record {StagingRecordId} during finalization because one or both endpoints could not be resolved.", item.Id);
                 MarkStagingRecordFailed(item, "one or both endpoints could not be resolved");
+                ingest.UpdateStagingRecord(item);
+                await ingest.SaveChangesAsync(cancellationToken);
+                Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
                 continue;
             }
 
@@ -460,6 +475,9 @@ public sealed class IngestJobProcessor(
                 skipped++;
                 logger.LogWarning("Skipping ingest relationship staging record {StagingRecordId} during finalization because one or both endpoints are structural graph nodes.", item.Id);
                 MarkStagingRecordFailed(item, "one or both endpoints are structural graph nodes");
+                ingest.UpdateStagingRecord(item);
+                await ingest.SaveChangesAsync(cancellationToken);
+                Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
                 continue;
             }
 
@@ -501,12 +519,14 @@ public sealed class IngestJobProcessor(
             item.PayloadJson = UpdateRelationshipGraphAction(
                 item.PayloadJson,
                 created ? IngestSourceAssertions.CreatedEdgeAction : IngestSourceAssertions.LinkedExistingEdgeAction);
-            item.UpdatedAt = DateTime.UtcNow;
+            MarkStagingRecordFinalized(item);
             ingest.UpdateStagingRecord(item);
 
             affectedEntityIds.Add(input.FromEntityId);
             affectedEntityIds.Add(input.ToEntityId);
             promoted++;
+            await ingest.SaveChangesAsync(cancellationToken);
+            Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
         }
 
         if (promoted > 0 || skipped > 0)
@@ -524,6 +544,7 @@ public sealed class IngestJobProcessor(
         }
 
         await ingest.SaveChangesAsync(cancellationToken);
+        Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
 
         foreach (var entityId in affectedEntityIds)
             await contextIndexing.ReindexEntityAsync(job.ProjectId, entityId, cancellationToken);
@@ -1629,6 +1650,14 @@ public sealed class IngestJobProcessor(
         item.Status = IngestStagingRecordStatus.Failed;
         item.ErrorMessage = reason;
         item.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private static string RelationshipPromotionLabel(IngestStagingRecord item)
+    {
+        var title = string.IsNullOrWhiteSpace(item.Title)
+            ? $"{item.FromEntityId?.ToString("N") ?? "unknown"} -[{item.EdgeType}]-> {item.ToEntityId?.ToString("N") ?? "unknown"}"
+            : item.Title;
+        return Truncate(title, 120);
     }
 
     private static bool TryReadRelationshipPromotionInput(

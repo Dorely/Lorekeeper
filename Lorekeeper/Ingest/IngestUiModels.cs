@@ -41,7 +41,33 @@ public sealed record IngestJobDetailView(
     DateTime CreatedAt,
     DateTime UpdatedAt,
     IReadOnlyList<IngestJobChunkProgress> Chunks,
+    IngestFinalizationProgressView Finalization,
     IReadOnlyList<IngestJobEventView> Events);
+
+public enum IngestFinalizationPhase
+{
+    Pending,
+    ReviewingEntities,
+    BuildingRelationships,
+    Completed,
+    Failed,
+}
+
+public sealed record IngestFinalizationProgressView(
+    IngestFinalizationPhase Phase,
+    int EntityTotal,
+    int EntityFinalized,
+    int EntityActive,
+    int EntityFailed,
+    int RelationshipTotal,
+    int RelationshipActive,
+    int RelationshipFinalized,
+    int RelationshipFailed,
+    int SourceChunkNoteTotal,
+    int SourceChunkNoteActive,
+    int SourceChunkNoteFinalized,
+    int SourceChunkNoteFailed,
+    string CurrentMessage);
 
 public sealed record IngestJobChunkProgress(
     Guid Id,
@@ -71,6 +97,7 @@ public sealed record IngestReportItemView(
     Guid Id,
     Guid? SourceChunkId,
     int? SourceChunkIndex,
+    string? SourceChunkTitle,
     IngestStagingRecordKind Kind,
     IngestStagingRecordStatus Status,
     string Title,

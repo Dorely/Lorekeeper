@@ -154,6 +154,17 @@
     background: rgba(27, 110, 194, 0.08);
 }
 
+.ingest-finalization-row {
+    border-style: dashed;
+}
+
+.ingest-finalization-hint {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.78rem;
+}
+
 .ingest-job-title,
 .ingest-chunk-main {
     display: flex;
@@ -265,6 +276,12 @@
     padding-bottom: 0.75rem;
 }
 
+.ingest-finalization-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
 .ingest-source-preview summary {
     cursor: pointer;
     font-weight: 600;
@@ -319,6 +336,16 @@
     padding: 0.65rem;
 }
 
+.ingest-report-item.finalized {
+    border-color: rgba(25, 135, 84, 0.45);
+    background: rgba(25, 135, 84, 0.04);
+}
+
+.ingest-report-item.failed {
+    border-color: rgba(220, 53, 69, 0.5);
+    background: rgba(220, 53, 69, 0.05);
+}
+
 .ingest-report-head {
     display: flex;
     align-items: center;
@@ -335,6 +362,11 @@
     justify-content: space-between;
     gap: 0.5rem;
     flex-wrap: wrap;
+}
+
+.ingest-report-chunk-context {
+    display: inline-block;
+    margin-right: 0.35rem;
 }
 
 .ingest-report-actions {
