@@ -34,7 +34,7 @@
 | `App.razor` | Root component: `<html>` shell, head outlet, scripts. |
 | `Routes.razor` | `<Router>` wiring `MainLayout` and `NotFound`. |
 | `_Imports.razor` | Shared `@using` directives for all components. |
-| `EntityKnowledgeView.razor` (+ `.razor.css`) | Shared read-only entity knowledge renderer for structured wiki data, ingest source summaries, and source chunk observations used by graph, outline, and context entity detail surfaces. |
+| `EntityKnowledgeView.razor` (+ `.razor.css`) | Shared read-only entity knowledge renderer for structured wiki data and source-backed canon markdown used by graph, outline, and context entity detail surfaces. |
 
 ### Components/Chat/
 
@@ -175,7 +175,8 @@
 | `IngestVectorFragment.cs` | EF entity mapping small retrieval vector fragments back to an ingest source with vector row id, char bounds, and metadata. |
 | `IngestJob.cs` | EF entity for durable async ingest job state, progress counters, selected provider/model snapshot, encoding metadata, and source/job relationships. |
 | `IngestJobChunk.cs` | EF entity for per-source-chunk ingest processing status, timestamps, errors, created item counters, and persisted LLM token-count metadata. |
-| `IngestReportItem.cs` | EF entity for the live/final ingest report: created/updated entities, relationships, source-chunk notes, graph ids, status, and payload JSON. |
+| `IngestReportItem.cs` | Legacy EF entity for pre-staging ingest report rows retained for existing database compatibility. |
+| `IngestStagingRecord.cs` | EF entity for temporary chunk-pass ingest records that back the Ingest report/history UI and are finalized into canon source properties plus simple graph edges. |
 | `IngestJobEvent.cs` | EF entity for ingest progress/debug events such as tool calls and failures. |
 | `ProjectImportJob.cs` | EF entity for durable project import job state: uploaded JSON payload, source format metadata, status/progress counters, import counts, warnings, errors, and timestamps. |
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
@@ -195,7 +196,7 @@
 | `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, and publish profiles/assets/layouts. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish/cover-layout/revision-agent/embedding-config/chat-readiness/adaptive artifact ingest, ingest LLM token metadata, and ingest report payload cleanup migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, Contest Mode cleanup, inline contest review, and web research cache metadata). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish/cover-layout/revision-agent/embedding-config/chat-readiness/adaptive artifact ingest, ingest staging records/canon cleanup, ingest LLM token metadata, and ingest report payload cleanup migrations, `ReplaceAiConsoleWithEditorChat`, `AddContestMode`, Contest Mode cleanup, inline contest review, and web research cache metadata). |
 
 ### Persistence/Repositories/
 
@@ -220,7 +221,7 @@
 | `IAiChangeRepository.cs` / `AiChangeRepository.cs` | Persistence for pending AI change batches and changes, including eager-loaded pending batch listing and change lookup for approval actions. |
 | `IContestRepository.cs` / `ContestRepository.cs` | Persistence for Editor Contest Mode batches and candidates, including current/history project batch listing, detail loading, candidate lookup, and status updates. |
 | `IEditorContextPreferenceRepository.cs` / `EditorContextPreferenceRepository.cs` | Persistence for active-chapter Context Feed include/exclude preferences, scoped by project, chapter, item kind, and item key. |
-| `IIngestRepository.cs` / `IngestRepository.cs` | Persistence for ingest sources, pages/blocks, chunks, vector fragments, jobs, report items, and events, including chunk-aware report projections, lightweight resume/processor reads, and scalar-only update helpers. |
+| `IIngestRepository.cs` / `IngestRepository.cs` | Persistence for ingest sources, pages/blocks, chunks, vector fragments, jobs, staging records, legacy report items, and events, including chunk-aware report projections, lightweight resume/processor reads, and scalar-only update helpers. |
 | `IWebIngestCandidateRepository.cs` / `WebIngestCandidateRepository.cs` | Persistence for project-scoped cached webpage sources discovered by Research Mode or manual URL reading, including staged-page listing for Ingest and URL de-duplication. |
 | `IProjectImportRepository.cs` / `ProjectImportRepository.cs` | Persistence for project import jobs and report items, including list/detail UI projections, queued/interrupted job lookup, and delete/save operations. |
 
@@ -341,16 +342,16 @@
 | `IIngestSourceStructureBuilder.cs` / `IngestSourceStructureBuilder.cs` | Splits raw source text into logical source chunks using headings/scene breaks, then merges adjacent sections with configurable target/soft token limits; source chunks are independent from vector fragments. |
 | `IngestSourceStructureOptions.cs` | Configurable source sectioning defaults for ingest chunk target tokens, soft max ratio, and small-section merge threshold. |
 | `IIngestGraphSync.cs` / `IngestGraphSync.cs` | Projects ingest sources, source synopsis, source chunks, and source blocks into structural graph nodes and ordered `HasChild` edges, including webpage/artifact provenance on source nodes when present. |
-| `IIngestGraphCleanup.cs` / `IngestGraphCleanup.cs` | Source-scoped graph cleanup for ingest restart/delete: subtracts one source's legacy assertions/wiki citations/provenance, deleting only ingest-owned orphan graph output and returning affected entities for targeted context-vector cleanup. |
+| `IIngestGraphCleanup.cs` / `IngestGraphCleanup.cs` | Source-scoped graph cleanup for ingest restart/delete: removes one source's canon metadata/markdown plus legacy assertions/citations, deleting only ingest-owned orphan graph output and returning affected entities for targeted context-vector cleanup. |
 | `IIngestVectorIndexingService.cs` / `IngestVectorIndexingService.cs` | Extracted ingest source vector-fragment indexer used by ingest jobs and bulk embedding rebuilds; stores source block/page locator metadata and marks sources Disabled when embeddings are intentionally unavailable. |
 | `IIngestJobQueue.cs` / `IngestJobQueue.cs` | In-process queue plus active-job cancellation registry used to stop jobs and detect stale running records. |
 | `IIngestJobNotifier.cs` / `IngestJobNotifier.cs` | In-process pub/sub for ingest job updates, including ephemeral live LLM/text/tool-call progress consumed by Blazor Server components. |
-| `IngestUiModels.cs` | Lightweight read-model records for the Ingest tab: job summaries, selected job detail, chunk progress, report items, events, and bounded source excerpts. |
-| `IngestSourceAssertions.cs` | Shared helper/model for protected source-scoped node/edge assertion JSON, append-only wiki observation storage, ingest-created graph origin markers, report graph-action payloads, and source-subtraction operations. |
-| `IngestWikiSheet.cs` | Shared wiki-sheet helper/models for ingest-managed summaries, alias merges, source-specific wiki section writes/removal, compact source citations, relationship citations, and cleanup/search projection helpers. |
+| `IngestUiModels.cs` | Lightweight read-model records for the Ingest tab: job summaries, selected job detail, chunk progress, staging/report items, events, and bounded source excerpts. |
+| `IngestSourceAssertions.cs` | Legacy helper/model for protected source-scoped node/edge assertion JSON, ingest-created graph origin markers, report graph-action payloads, and source-subtraction operations. |
+| `IngestWikiSheet.cs` | Shared wiki/canon helper/models for ingest-managed summaries, aliases, wiki sections, source-backed `canonSource.*` markdown, canon metadata cleanup, citations, and search projection helpers. |
 | `IngestJobWorker.cs` | Hosted background worker that marks interrupted jobs/chunks stopped at startup, notifies the UI, and drains queued ingest jobs in scoped processors. |
-| `IngestJobProcessor.cs` | Runs ingest jobs with streaming append-only chunk extraction, per-entity final source-section review, sparse relationship observation guidance, compact source/entity memory, retry-aware partial-work context, diagnostics, and indexing updates. |
-| `IngestAgentTools.cs` | Ingest LLM tools for compact entity identity indexes, bulk mention resolution, combined create/append entity observations, sparse relationship markers, per-entity final source-section writes, and rolling source progress updates. |
+| `IngestJobProcessor.cs` | Runs ingest jobs with streaming chunk staging, per-entity final canon-source markdown synthesis, simple relationship promotion, compact source/entity memory, retry-aware partial-work context, diagnostics, and indexing updates. |
+| `IngestAgentTools.cs` | Ingest LLM tools for compact entity identity indexes, bulk mention resolution, staged entity observations, staged relationship markers, per-entity canon-source markdown writes, and rolling source progress updates. |
 
 ### ImportExport/
 

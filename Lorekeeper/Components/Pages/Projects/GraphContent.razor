@@ -286,35 +286,23 @@ else
             || node.WikiSections.Any(section =>
                 section.Title.Contains(search, StringComparison.OrdinalIgnoreCase)
                 || section.Body.Contains(search, StringComparison.OrdinalIgnoreCase)
-                || section.Citations.Any(citation => citation.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)));
+                || section.Citations.Any(citation => citation.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)))
+            || node.CanonSources.Any(source =>
+                source.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || source.SourceKind.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || source.Markdown.Contains(search, StringComparison.OrdinalIgnoreCase));
     }
-
-    private static bool IngestSummaryMatches(IngestSourceAssertionSummary source, string search) =>
-        source.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)
-        || source.SourceKind.Contains(search, StringComparison.OrdinalIgnoreCase)
-        || source.Summary.Contains(search, StringComparison.OrdinalIgnoreCase)
-        || source.Aliases.Any(alias => alias.Contains(search, StringComparison.OrdinalIgnoreCase));
-
-    private static bool IngestObservationMatches(IngestSourceObservation observation, string search) =>
-        observation.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)
-        || observation.SourceKind.Contains(search, StringComparison.OrdinalIgnoreCase)
-        || observation.Summary.Contains(search, StringComparison.OrdinalIgnoreCase)
-        || observation.Notes.Contains(search, StringComparison.OrdinalIgnoreCase)
-        || observation.Aliases.Any(alias => alias.Contains(search, StringComparison.OrdinalIgnoreCase))
-        || observation.ObservedProperties.Any(kv =>
-            kv.Key.Contains(search, StringComparison.OrdinalIgnoreCase)
-            || (kv.Value?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
 
     private static bool IsIngestNode(ProjectGraphNode node) =>
         node.IsIngestCreated
-        || node.IngestSourceCount > 0
+        || node.CanonSourceCount > 0
         || string.Equals(node.Type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
         || string.Equals(node.Type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
         || string.Equals(node.Type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsIngestEdge(ProjectGraphEdge edge) =>
         edge.IsIngestCreated
-        || edge.IngestSourceCount > 0
+        || edge.CanonSourceCount > 0
         || string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
 
     private static string NodeTitle(ProjectGraphNode node)
@@ -322,8 +310,8 @@ else
         var title = $"{node.Type}: {node.Label}";
         if (!string.IsNullOrWhiteSpace(node.Summary))
             title += $"\n{node.Summary}";
-        if (node.IngestSourceCount > 0)
-            title += $"\nSources: {node.IngestSourceCount}";
+        if (node.CanonSourceCount > 0)
+            title += $"\nCanon sources: {node.CanonSourceCount}";
         else if (node.IsIngestCreated)
             title += "\nCreated by ingest";
         return title;
@@ -334,8 +322,8 @@ else
         var title = edge.EdgeType;
         if (!string.IsNullOrWhiteSpace(edge.Summary))
             title += $"\n{edge.Summary}";
-        if (edge.IngestSourceCount > 0)
-            title += $"\nSources: {edge.IngestSourceCount}";
+        if (edge.CanonSourceCount > 0)
+            title += $"\nCanon sources: {edge.CanonSourceCount}";
         else if (edge.IsIngestCreated || string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase))
             title += "\nIngest provenance link";
         return title;

@@ -32,6 +32,7 @@ public class IngestJob
 
     public ICollection<IngestJobChunk> Chunks { get; set; } = [];
     public ICollection<IngestReportItem> ReportItems { get; set; } = [];
+    public ICollection<IngestStagingRecord> StagingRecords { get; set; } = [];
     public ICollection<IngestJobEvent> Events { get; set; } = [];
 }
 

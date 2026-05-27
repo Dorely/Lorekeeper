@@ -193,6 +193,7 @@ public sealed class OutlineToolStagingContext(
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
+            canonSources = entity.CanonSources,
             links = links.Select(link => new
             {
                 link.EdgeId,
@@ -495,6 +496,7 @@ public sealed class OutlineToolStagingContext(
             created.Summary,
             created.Aliases,
             created.WikiSections,
+            created.CanonSources,
             Deleted: false);
         _entities[entity.Id] = entity;
         MarkDirectlyCreated(Resource("Entity", entity.Id));
@@ -522,6 +524,7 @@ public sealed class OutlineToolStagingContext(
                 updated.Summary,
                 updated.Aliases,
                 updated.WikiSections,
+                updated.CanonSources,
                 Deleted: false);
             onDirectMutationApplied?.Invoke();
             return Serialize(await EntityPayloadAsync(_entities[updated.Id], cancellationToken));
@@ -735,6 +738,7 @@ public sealed class OutlineToolStagingContext(
                 entity.Summary,
                 entity.Aliases,
                 entity.WikiSections,
+                entity.CanonSources,
                 Deleted: false);
         }
     }
@@ -894,6 +898,7 @@ public sealed class OutlineToolStagingContext(
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
+            canonSources = entity.CanonSources,
             relationContext,
         };
     }
@@ -1236,6 +1241,11 @@ public sealed class OutlineToolStagingContext(
             score += TextMatchScore(section.Title, query, titleWeight: 12, detailWeight: 6);
             score += TextMatchScore(section.Body, query, titleWeight: 12, detailWeight: 8);
         }
+        foreach (var canonSource in entity.CanonSources)
+        {
+            score += TextMatchScore(canonSource.SourceTitle, query, titleWeight: 12, detailWeight: 6);
+            score += TextMatchScore(canonSource.Markdown, query, titleWeight: 12, detailWeight: 8);
+        }
         foreach (var property in entity.Properties)
         {
             score += TextMatchScore(property.Key, query, titleWeight: 8, detailWeight: 4);
@@ -1253,6 +1263,11 @@ public sealed class OutlineToolStagingContext(
             {
                 score += TextMatchScore(section.Title, term, titleWeight: 18, detailWeight: 8);
                 score += TextMatchScore(section.Body, term, titleWeight: 18, detailWeight: 10);
+            }
+            foreach (var canonSource in entity.CanonSources)
+            {
+                score += TextMatchScore(canonSource.SourceTitle, term, titleWeight: 18, detailWeight: 8);
+                score += TextMatchScore(canonSource.Markdown, term, titleWeight: 18, detailWeight: 10);
             }
             foreach (var property in entity.Properties)
             {
@@ -1283,8 +1298,20 @@ public sealed class OutlineToolStagingContext(
         summary = TruncatePropertyValue(entity.Summary),
         aliases = entity.Aliases.Take(8).ToArray(),
         wikiSections = CompactWikiSections(entity.WikiSections),
+        canonSources = CompactCanonSources(entity.CanonSources),
         properties = CompactProperties(entity.Properties),
     };
+
+    private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>
+        sources
+            .Take(4)
+            .Select(source => new
+            {
+                source.SourceTitle,
+                source.SourceKind,
+                markdown = TruncatePropertyValue(source.Markdown),
+            })
+            .ToArray();
 
     private static object[] CompactWikiSections(IReadOnlyList<IngestWikiSection> sections) =>
         sections
@@ -1356,6 +1383,7 @@ public sealed class OutlineToolStagingContext(
         string Summary,
         IReadOnlyList<string> Aliases,
         IReadOnlyList<IngestWikiSection> WikiSections,
+        IReadOnlyList<IngestCanonSource> CanonSources,
         bool Deleted)
     {
         public string Name { get; set; } = Name;

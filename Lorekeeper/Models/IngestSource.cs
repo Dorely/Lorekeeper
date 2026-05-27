@@ -33,6 +33,7 @@ public class IngestSource
     public ICollection<IngestSourceBlock> SourceBlocks { get; set; } = [];
     public ICollection<IngestVectorFragment> VectorFragments { get; set; } = [];
     public ICollection<IngestJob> Jobs { get; set; } = [];
+    public ICollection<IngestStagingRecord> StagingRecords { get; set; } = [];
 
     public string VectorSourceId => Id.ToString("N");
 }

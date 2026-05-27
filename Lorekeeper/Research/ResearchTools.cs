@@ -201,8 +201,7 @@ public sealed class ResearchTools(
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
-            ingestSources = entity.IngestSources,
-            ingestObservations = entity.IngestObservations,
+            canonSources = entity.CanonSources,
             links = links.Select(LinkPayload),
             relationContext,
         }, JsonOptions);
@@ -232,8 +231,6 @@ public sealed class ResearchTools(
         sortOrder = link.SortOrder,
         properties = link.Properties,
         summary = link.Summary,
-        ingestSources = link.IngestSources,
-        ingestObservations = link.IngestObservations,
         relationshipCitations = link.RelationshipCitations,
     };
 

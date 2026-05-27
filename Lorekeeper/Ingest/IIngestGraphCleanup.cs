@@ -7,7 +7,7 @@ public interface IIngestGraphCleanup
     Task<IngestGraphCleanupResult> RemoveSourceGraphContributionsAsync(
         Guid projectId,
         Guid sourceId,
-        IEnumerable<IngestReportItem> reportItems,
+        IEnumerable<IngestStagingRecord> stagingRecords,
         CancellationToken cancellationToken = default);
 }
 

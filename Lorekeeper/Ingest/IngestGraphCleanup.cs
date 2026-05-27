@@ -13,15 +13,15 @@ public sealed class IngestGraphCleanup(
     public async Task<IngestGraphCleanupResult> RemoveSourceGraphContributionsAsync(
         Guid projectId,
         Guid sourceId,
-        IEnumerable<IngestReportItem> reportItems,
+        IEnumerable<IngestStagingRecord> stagingRecords,
         CancellationToken cancellationToken = default)
     {
-        var reportItemList = reportItems.ToList();
+        var stagingRecordList = stagingRecords.ToList();
         var sourceKey = IngestSourceAssertions.SourceKey(sourceId);
         var projectNodes = await nodes.ListByProjectAsync(projectId, cancellationToken);
         var projectEdges = await edges.ListByProjectAsync(projectId, cancellationToken);
-        var nodeActions = BuildNodeActions(reportItemList, projectNodes);
-        var edgeActions = BuildEdgeActions(reportItemList);
+        var nodeActions = BuildNodeActions(stagingRecordList, projectNodes);
+        var edgeActions = BuildEdgeActions(stagingRecordList);
         var nodeById = projectNodes.ToDictionary(node => node.Id);
         var sourceGraphNodeIds = projectNodes
             .Where(node => IsSourceGraphNodeForSource(node, sourceKey))
@@ -47,9 +47,12 @@ public sealed class IngestGraphCleanup(
 
         foreach (var edge in projectEdges
             .Where(edge => !deletedEdgeIds.Contains(edge.Id))
-            .Where(edge => edgeActions.ContainsKey(edge.Id) || IngestSourceAssertions.ContainsRelationshipSource(edge.Properties, sourceId))
+            .Where(edge => edgeActions.ContainsKey(edge.Id)
+                || IngestSourceAssertions.ContainsRelationshipSource(edge.Properties, sourceId)
+                || IngestWikiSheet.ContainsCanonSource(edge.Properties, sourceId))
             .ToList())
         {
+            var canonChanged = IngestWikiSheet.RemoveCanonSource(edge.Properties, sourceId);
             var wikiChanged = IngestWikiSheet.RemoveSourceCitations(edge.Properties, sourceId);
             var removal = IngestSourceAssertions.ContainsRelationshipSource(edge.Properties, sourceId)
                 ? IngestSourceAssertions.RemoveRelationshipSource(edge.Properties, sourceId)
@@ -63,7 +66,7 @@ public sealed class IngestGraphCleanup(
                 deletedEdgeIds.Add(edge.Id);
                 edgesDeleted++;
             }
-            else if (removal.Removed || wikiChanged)
+            else if (removal.Removed || wikiChanged || canonChanged)
             {
                 AddEdgeEndpointContextEntityIds(edge, nodeById, entityIdsToReindex);
                 edge.UpdatedAt = DateTime.UtcNow;
@@ -74,9 +77,12 @@ public sealed class IngestGraphCleanup(
         }
 
         foreach (var node in projectNodes
-            .Where(node => nodeActions.ContainsKey(node.Id) || IngestSourceAssertions.ContainsEntitySource(node.Properties, sourceId))
+            .Where(node => nodeActions.ContainsKey(node.Id)
+                || IngestSourceAssertions.ContainsEntitySource(node.Properties, sourceId)
+                || IngestWikiSheet.ContainsCanonSource(node.Properties, sourceId))
             .ToList())
         {
+            var canonChanged = IngestWikiSheet.RemoveCanonSource(node.Properties, sourceId);
             var wikiChanged = IngestWikiSheet.RemoveSourceCitations(node.Properties, sourceId);
             var removal = IngestSourceAssertions.ContainsEntitySource(node.Properties, sourceId)
                 ? IngestSourceAssertions.RemoveEntitySource(node.Properties, sourceId)
@@ -89,7 +95,7 @@ public sealed class IngestGraphCleanup(
                 await graphStore.RemoveNodeAsync(node.Id, cancellationToken);
                 nodesDeleted++;
             }
-            else if (removal.Removed || wikiChanged)
+            else if (removal.Removed || wikiChanged || canonChanged)
             {
                 AddContextEntityId(node, entityIdsToReindex);
                 node.UpdatedAt = DateTime.UtcNow;
@@ -110,11 +116,11 @@ public sealed class IngestGraphCleanup(
     }
 
     private static Dictionary<long, string?> BuildNodeActions(
-        IReadOnlyCollection<IngestReportItem> reportItems,
+        IReadOnlyCollection<IngestStagingRecord> reportItems,
         IReadOnlyList<GraphNode> projectNodes)
     {
         var actions = new Dictionary<long, string?>();
-        foreach (var item in reportItems.Where(item => item.Status != IngestReportItemStatus.Deleted && item.Kind == IngestReportItemKind.Entity))
+        foreach (var item in reportItems.Where(item => item.Status != IngestStagingRecordStatus.Deleted && item.Kind == IngestStagingRecordKind.Entity))
         {
             var node = FindReportNode(item, projectNodes);
             if (node is null) continue;
@@ -128,10 +134,10 @@ public sealed class IngestGraphCleanup(
         return actions;
     }
 
-    private static Dictionary<long, string?> BuildEdgeActions(IReadOnlyCollection<IngestReportItem> reportItems)
+    private static Dictionary<long, string?> BuildEdgeActions(IReadOnlyCollection<IngestStagingRecord> reportItems)
     {
         var actions = new Dictionary<long, string?>();
-        foreach (var item in reportItems.Where(item => item.Status != IngestReportItemStatus.Deleted && item.Kind == IngestReportItemKind.Relationship))
+        foreach (var item in reportItems.Where(item => item.Status != IngestStagingRecordStatus.Deleted && item.Kind == IngestStagingRecordKind.Relationship))
         {
             if (item.GraphEdgeId is not long edgeId) continue;
             actions[edgeId] = MergeCreatedAction(
@@ -143,7 +149,7 @@ public sealed class IngestGraphCleanup(
         return actions;
     }
 
-    private static GraphNode? FindReportNode(IngestReportItem item, IReadOnlyList<GraphNode> projectNodes)
+    private static GraphNode? FindReportNode(IngestStagingRecord item, IReadOnlyList<GraphNode> projectNodes)
     {
         if (item.GraphNodeId is long graphNodeId)
         {
@@ -154,10 +160,10 @@ public sealed class IngestGraphCleanup(
         if (item.EntityId is not Guid entityId) return null;
 
         var key = entityId.ToString("N");
-        if (!string.IsNullOrWhiteSpace(item.ResourceType))
+        if (!string.IsNullOrWhiteSpace(item.EntityType))
         {
             var typedNode = projectNodes.FirstOrDefault(candidate =>
-                string.Equals(candidate.NodeType, item.ResourceType, StringComparison.OrdinalIgnoreCase)
+                string.Equals(candidate.NodeType, item.EntityType, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(candidate.Key, key, StringComparison.OrdinalIgnoreCase));
             if (typedNode is not null) return typedNode;
         }
@@ -185,6 +191,8 @@ public sealed class IngestGraphCleanup(
             return false;
         if (IngestSourceAssertions.CountEntitySources(node.Properties) > 0)
             return false;
+        if (IngestWikiSheet.HasCanonSources(node.Properties))
+            return false;
         if (IngestWikiSheet.HasCitations(node.Properties))
             return false;
         if (HasCanonicalProperties(node.Properties))
@@ -199,6 +207,8 @@ public sealed class IngestGraphCleanup(
         if (!CanRemovePotentiallyIngestCreatedObject(edge.Properties, graphAction, IngestSourceAssertions.CreatedEdgeAction))
             return false;
         if (IngestSourceAssertions.CountRelationshipSources(edge.Properties) > 0)
+            return false;
+        if (IngestWikiSheet.HasCanonSources(edge.Properties))
             return false;
         if (IngestWikiSheet.HasCitations(edge.Properties))
             return false;

@@ -27,11 +27,9 @@ public sealed record ProjectGraphNode(
     string Summary,
     IReadOnlyList<string> Aliases,
     IReadOnlyList<IngestWikiSection> WikiSections,
+    IReadOnlyList<IngestCanonSource> CanonSources,
     bool IsIngestCreated,
-    int IngestSourceCount,
-    int IngestObservationCount,
-    IReadOnlyList<IngestSourceAssertionSummary> IngestSources,
-    IReadOnlyList<IngestSourceObservation> IngestObservations);
+    int CanonSourceCount);
 
 public sealed record ProjectGraphEdge(
     long EdgeId,
@@ -46,10 +44,7 @@ public sealed record ProjectGraphEdge(
     string Summary,
     IReadOnlyList<IngestWikiCitation> Citations,
     bool IsIngestCreated,
-    int IngestSourceCount,
-    int IngestObservationCount,
-    IReadOnlyList<IngestSourceAssertionSummary> IngestSources,
-    IReadOnlyList<IngestSourceObservation> IngestObservations);
+    int CanonSourceCount);
 
 public sealed record ProjectGraphNodeType(
     string Type,

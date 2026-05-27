@@ -18,9 +18,12 @@ public interface IIngestRepository
     Task<List<IngestSource>> ListSourcesByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<List<IngestSourcePage>> ListSourcePagesAsync(Guid sourceId, CancellationToken cancellationToken = default);
     Task<List<IngestSourceBlock>> ListSourceBlocksAsync(Guid sourceId, CancellationToken cancellationToken = default);
+    Task<IngestStagingRecord?> GetStagingRecordAsync(Guid stagingRecordId, CancellationToken cancellationToken = default);
     Task<IngestReportItem?> GetReportItemAsync(Guid reportItemId, CancellationToken cancellationToken = default);
     Task<List<IngestSourceChunk>> ListSourceChunksAsync(Guid sourceId, CancellationToken cancellationToken = default);
     Task<List<IngestVectorFragment>> ListVectorFragmentsAsync(Guid sourceId, CancellationToken cancellationToken = default);
+    Task<List<IngestStagingRecord>> ListStagingRecordsAsync(Guid jobId, CancellationToken cancellationToken = default);
+    Task<List<IngestStagingRecord>> ListStagingRecordsBySourceAsync(Guid sourceId, CancellationToken cancellationToken = default);
     Task<List<IngestReportItem>> ListReportItemsAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<List<IngestReportItemView>> ListReportItemViewsAsync(Guid jobId, Guid? sourceChunkId = null, CancellationToken cancellationToken = default);
     Task<List<IngestJob>> ListQueuedJobsAsync(CancellationToken cancellationToken = default);
@@ -32,6 +35,7 @@ public interface IIngestRepository
     Task AddSourceChunkAsync(IngestSourceChunk sourceChunk, CancellationToken cancellationToken = default);
     Task AddVectorFragmentAsync(IngestVectorFragment vectorFragment, CancellationToken cancellationToken = default);
     Task AddJobChunkAsync(IngestJobChunk jobChunk, CancellationToken cancellationToken = default);
+    Task AddStagingRecordAsync(IngestStagingRecord item, CancellationToken cancellationToken = default);
     Task AddReportItemAsync(IngestReportItem item, CancellationToken cancellationToken = default);
     Task AddEventAsync(IngestJobEvent jobEvent, CancellationToken cancellationToken = default);
     void UpdateSource(IngestSource source);
@@ -39,6 +43,7 @@ public interface IIngestRepository
     void RemoveVectorFragment(IngestVectorFragment vectorFragment);
     void UpdateJob(IngestJob job);
     void UpdateJobChunk(IngestJobChunk jobChunk);
+    void UpdateStagingRecord(IngestStagingRecord item);
     void UpdateReportItem(IngestReportItem item);
     void RemoveSource(IngestSource source);
     void RemoveJob(IngestJob job);

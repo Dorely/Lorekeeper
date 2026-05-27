@@ -549,6 +549,7 @@ public sealed class EditorRevisionAgentProcessor(
                 summary = TruncatePropertyValue(match.Entity.Summary),
                 aliases = match.Entity.Aliases.Take(8).ToArray(),
                 wikiSections = CompactWikiSections(match.Entity.WikiSections),
+                canonSources = CompactCanonSources(match.Entity.CanonSources),
                 properties = match.Entity.Properties,
             }));
     }
@@ -572,8 +573,7 @@ public sealed class EditorRevisionAgentProcessor(
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
-            ingestSources = entity.IngestSources,
-            ingestObservations = entity.IngestObservations,
+            canonSources = entity.CanonSources,
             links = links.Select(LinkPayload),
             relationContext,
         });
@@ -902,6 +902,11 @@ public sealed class EditorRevisionAgentProcessor(
             score += TextMatchScore(section.Title, query, titleWeight: 12, detailWeight: 6);
             score += TextMatchScore(section.Body, query, titleWeight: 12, detailWeight: 8);
         }
+        foreach (var canonSource in entity.CanonSources)
+        {
+            score += TextMatchScore(canonSource.SourceTitle, query, titleWeight: 12, detailWeight: 6);
+            score += TextMatchScore(canonSource.Markdown, query, titleWeight: 12, detailWeight: 8);
+        }
         foreach (var property in entity.Properties)
         {
             score += TextMatchScore(property.Key, query, titleWeight: 8, detailWeight: 4);
@@ -919,6 +924,11 @@ public sealed class EditorRevisionAgentProcessor(
             {
                 score += TextMatchScore(section.Title, term, titleWeight: 18, detailWeight: 8);
                 score += TextMatchScore(section.Body, term, titleWeight: 18, detailWeight: 10);
+            }
+            foreach (var canonSource in entity.CanonSources)
+            {
+                score += TextMatchScore(canonSource.SourceTitle, term, titleWeight: 18, detailWeight: 8);
+                score += TextMatchScore(canonSource.Markdown, term, titleWeight: 18, detailWeight: 10);
             }
             foreach (var property in entity.Properties)
             {
@@ -949,10 +959,19 @@ public sealed class EditorRevisionAgentProcessor(
         sortOrder = link.SortOrder,
         properties = link.Properties,
         summary = link.Summary,
-        ingestSources = link.IngestSources,
-        ingestObservations = link.IngestObservations,
         relationshipCitations = link.RelationshipCitations,
     };
+
+    private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>
+        sources
+            .Take(4)
+            .Select(source => new
+            {
+                source.SourceTitle,
+                source.SourceKind,
+                markdown = TruncatePropertyValue(source.Markdown),
+            })
+            .ToArray();
 
     private static object[] CompactWikiSections(IReadOnlyList<IngestWikiSection> sections) =>
         sections

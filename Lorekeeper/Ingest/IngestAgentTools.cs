@@ -39,7 +39,7 @@ public sealed class IngestAgentTools(
                 IngestWikiSectionInput[]? sections = null,
                 string? notes = null) => AppendIngestEntityObservationAsync(context, entityId, type, name, summary, aliasesObserved, sections, notes),
             name: "append_ingest_entity_observation",
-            description: "Append source-linked observations for one entity from the current chunk. Supply entityId for an existing entity, or type plus name to create/reuse an entity. Writes only ingest source observation storage; it never replaces canonical summary or wiki sections."),
+            description: "Append a temporary staging observation for one entity from the current chunk. Supply entityId for an existing entity, or type plus name to create/reuse a minimal identity shell. Final canon markdown is written later during source finalization."),
 
         AIFunctionFactory.Create(
             method: (
@@ -47,7 +47,7 @@ public sealed class IngestAgentTools(
                 string toEntityId,
                 string edgeType) => AppendIngestRelationshipObservationAsync(context, fromEntityId, toEntityId, edgeType),
             name: "append_ingest_relationship_observation",
-            description: "Append one sparse source-backed relationship marker with only endpoints, type, and automatic source/chunk provenance. Put all narrative relationship detail in entity observations."),
+            description: "Append one temporary relationship marker with only endpoints and edge type. Relationship markers are promoted to simple graph edges during finalization; put all narrative detail in entity observations."),
 
         AIFunctionFactory.Create(
             method: (string chunkSummary, string sourceSynopsis, string? notes = null) =>
@@ -61,14 +61,14 @@ public sealed class IngestAgentTools(
         AIFunctionFactory.Create(
             method: () => ReadIngestEntitySourceObservationsAsync(context),
             name: "read_ingest_entity_source_observations",
-            description: "Read this entity's source-linked observations and related relationship observations for the current ingest source. Returns only source-backed ingest observations, not canonical project wiki content."),
+            description: "Read this entity's temporary staging observations and related relationship markers for the current ingest source. Returns staging data only, not canonical project wiki content."),
 
         AIFunctionFactory.Create(
             method: (
                 string body,
                 string? notes = null) => WriteIngestSourceWikiSectionAsync(context, body, notes),
             name: "write_ingest_source_wiki_section",
-            description: "Write exactly one source-specific wiki section for this entity. Replaces only the generated Source: section for this source and preserves all canonical/manual sections."),
+            description: "Write exactly one source-specific canon markdown page for this entity. Replaces only the canonSource property for this ingest source and preserves other source/manual canon."),
     ];
 
     private async Task<string> ListProjectEntityIndexAsync(IngestAgentContext context, string? type, string? cursor, int? limit)
@@ -194,27 +194,8 @@ public sealed class IngestAgentTools(
         var node = resolution.Node!;
         var parsed = resolution.EntityId;
 
-        IngestSourceAssertions.UpsertEntityAssertion(node.Properties, new IngestAssertionInput(
-            context.JobId,
-            context.SourceId,
-            context.SourceTitle,
-            context.SourceKind,
-            context.SourceChunkId,
-            context.SourceChunkIndex,
-            summary,
-            ObservedProperties: new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
-            Aliases: aliasesObserved ?? [],
-            Notes: notes,
-            ReplaceExistingText: false,
-            WikiSections: sectionList));
-
-        node.UpdatedAt = DateTime.UtcNow;
-        nodes.Update(node);
-        await nodes.SaveChangesAsync();
-        await AddExtractedFromAsync(context, node);
-
-        var existingForChunk = await FindActiveEntityReportItemAsync(context.JobId, parsed, context.SourceChunkId);
-        await UpsertEntityReportItemAsync(
+        var existingForChunk = await FindActiveEntityStagingRecordAsync(context.JobId, parsed, context.SourceChunkId);
+        await UpsertEntityStagingRecordAsync(
             context,
             existingForChunk,
             node,
@@ -235,7 +216,7 @@ public sealed class IngestAgentTools(
             action = resolution.Action,
             created = resolution.Created,
             exactNameMatch = resolution.ExactNameMatch,
-            sourceObservationCount = IngestSourceAssertions.CountEntityObservations(node.Properties),
+            stagedObservationCount = await CountActiveEntityStagingRecordsAsync(context.JobId, parsed),
             sourceSectionCount = sectionList.Count,
             canonicalUpdated = false,
         });
@@ -322,8 +303,8 @@ public sealed class IngestAgentTools(
         if (string.Equals(normalizedEdgeType, EntityService.HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
             return "Error: HasChild is a managed structural relationship and cannot be recorded by ingest.";
 
-        var existing = await FindActiveRelationshipObservationReportItemAsync(context.JobId, context.SourceChunkId, from, to, normalizedEdgeType);
-        await UpsertRelationshipObservationReportItemAsync(
+        var existing = await FindActiveRelationshipObservationStagingRecordAsync(context.JobId, context.SourceChunkId, from, to, normalizedEdgeType);
+        await UpsertRelationshipObservationStagingRecordAsync(
             context,
             existing,
             normalizedEdgeType,
@@ -350,20 +331,23 @@ public sealed class IngestAgentTools(
         var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, context.EntityId);
         if (node is null) return $"Error: entity {context.EntityId} is not a non-structural project entity.";
 
-        var sourceKey = IngestSourceAssertions.SourceKey(context.SourceId);
-        var observations = IngestSourceAssertions.ListEntityObservations(node.Properties, maxObservations: 1000)
-            .Where(observation => string.Equals(observation.SourceId, sourceKey, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(observation => observation.SourceChunkIndex)
+        var stagingRecords = await ingest.ListStagingRecordsAsync(context.JobId);
+        var observations = stagingRecords
+            .Where(item => item.Status == IngestStagingRecordStatus.Active
+                && item.Kind == IngestStagingRecordKind.Entity
+                && item.SourceId == context.SourceId
+                && item.EntityId == context.EntityId)
+            .OrderBy(item => item.SourceChunkIndex ?? int.MaxValue)
             .ToList();
 
         var relationshipObservations = new List<object>();
-        foreach (var item in await ingest.ListReportItemsAsync(context.JobId))
+        foreach (var item in stagingRecords)
         {
-            if (item.Status != IngestReportItemStatus.Active || item.Kind != IngestReportItemKind.Relationship)
+            if (item.Status != IngestStagingRecordStatus.Active || item.Kind != IngestStagingRecordKind.Relationship)
                 continue;
-            if (!PayloadContainsSource(item.PayloadJson, context.SourceId))
+            if (item.SourceId != context.SourceId)
                 continue;
-            if (!TryReadRelationshipEndpoints(item.PayloadJson, out var from, out var to)
+            if (!TryReadRelationshipEndpoints(item, out var from, out var to)
                 || (from != context.EntityId && to != context.EntityId))
             {
                 continue;
@@ -372,8 +356,8 @@ public sealed class IngestAgentTools(
             relationshipObservations.Add(new
             {
                 sourceChunkId = item.SourceChunkId,
-                sourceChunkIndex = ReadIntPayload(item.PayloadJson, "sourceChunkIndex"),
-                edgeType = item.ResourceType,
+                sourceChunkIndex = item.SourceChunkIndex ?? ReadIntPayload(item.PayloadJson, "sourceChunkIndex"),
+                edgeType = item.EdgeType,
                 title = item.Title,
                 fromEntityId = from,
                 toEntityId = to,
@@ -399,12 +383,12 @@ public sealed class IngestAgentTools(
                 observation.SourceChunkId,
                 observation.SourceChunkIndex,
                 observation.Summary,
-                observation.Aliases,
-                WikiSections = observation.WikiSections.Select(section => new
+                Aliases = ReadAliasesJson(observation.AliasesJson),
+                WikiSections = ReadWikiSectionInputsJson(observation.WikiSectionsJson).Select(section => new
                 {
-                    section.Id,
-                    section.Title,
-                    section.Body,
+                    id = section.Id,
+                    title = section.Title,
+                    body = section.Body,
                 }),
                 observation.Notes,
             }),
@@ -423,11 +407,12 @@ public sealed class IngestAgentTools(
         var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, context.EntityId);
         if (node is null) return $"Error: entity {context.EntityId} is not a non-structural project entity.";
 
-        IngestWikiSheet.UpsertSourceWikiSection(
+        IngestWikiSheet.UpsertCanonSourceMarkdown(
             node.Properties,
             context.SourceId,
             context.SourceTitle,
             context.SourceKind,
+            context.JobId,
             body);
         node.UpdatedAt = DateTime.UtcNow;
         nodes.Update(node);
@@ -438,11 +423,11 @@ public sealed class IngestAgentTools(
         return JsonSerializer.Serialize(new
         {
             entityId = context.EntityId,
-            sectionId = IngestWikiSheet.SourceSectionId(context.SourceId),
-            sectionTitle = IngestWikiSheet.SourceSectionTitle(context.SourceTitle),
+            sourceId = context.SourceId,
+            sourceTitle = context.SourceTitle,
             bodyChars = body.Trim().Length,
             canonicalSummaryUpdated = false,
-            canonicalSectionsUpdated = false,
+            canonSourceUpdated = true,
         });
     }
 
@@ -489,22 +474,24 @@ public sealed class IngestAgentTools(
             sourceChunkIndex = context.SourceChunkIndex,
             sourceSynopsisChars = source.Synopsis.Length,
         });
-        var existingNote = (await ingest.ListReportItemsAsync(context.JobId)).FirstOrDefault(item =>
-            item.Kind == IngestReportItemKind.SourceChunkNote
-            && item.Status == IngestReportItemStatus.Active
+        var existingNote = (await ingest.ListStagingRecordsAsync(context.JobId)).FirstOrDefault(item =>
+            item.Kind == IngestStagingRecordKind.SourceChunkNote
+            && item.Status == IngestStagingRecordStatus.Active
             && item.SourceChunkId == context.SourceChunkId);
         if (existingNote is null)
         {
-            await ingest.AddReportItemAsync(new IngestReportItem
+            await ingest.AddStagingRecordAsync(new IngestStagingRecord
             {
                 JobId = context.JobId,
+                SourceId = context.SourceId,
                 SourceChunkId = context.SourceChunkId,
-                Kind = IngestReportItemKind.SourceChunkNote,
-                Status = IngestReportItemStatus.Active,
+                SourceChunkIndex = context.SourceChunkIndex,
+                Kind = IngestStagingRecordKind.SourceChunkNote,
+                Status = IngestStagingRecordStatus.Active,
                 Title = context.SourceChunkTitle,
                 Summary = sourceChunk.Summary,
                 Notes = sourceChunk.AgentNotes,
-                ResourceType = "SourceChunk",
+                EntityType = "SourceChunk",
                 PayloadJson = payloadJson,
             });
         }
@@ -515,7 +502,7 @@ public sealed class IngestAgentTools(
             existingNote.Notes = sourceChunk.AgentNotes;
             existingNote.PayloadJson = payloadJson;
             existingNote.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateReportItem(existingNote);
+            ingest.UpdateStagingRecord(existingNote);
         }
 
         await ingest.SaveChangesAsync();
@@ -529,9 +516,9 @@ public sealed class IngestAgentTools(
         });
     }
 
-    private async Task UpsertEntityReportItemAsync(
+    private async Task UpsertEntityStagingRecordAsync(
         IngestAgentContext context,
-        IngestReportItem? existing,
+        IngestStagingRecord? existing,
         GraphNode? node,
         Guid entityId,
         string action,
@@ -551,39 +538,45 @@ public sealed class IngestAgentTools(
         var payloadJson = BuildEntityReportPayload(existing?.PayloadJson, context, action, aliasesForPayload, wikiSections);
         if (existing is null)
         {
-            await ingest.AddReportItemAsync(new IngestReportItem
+            await ingest.AddStagingRecordAsync(new IngestStagingRecord
             {
                 JobId = context.JobId,
+                SourceId = context.SourceId,
                 SourceChunkId = context.SourceChunkId,
-                Kind = IngestReportItemKind.Entity,
-                Status = IngestReportItemStatus.Active,
+                SourceChunkIndex = context.SourceChunkIndex,
+                Kind = IngestStagingRecordKind.Entity,
+                Status = IngestStagingRecordStatus.Active,
                 Title = title,
                 Summary = Truncate(summary, 800),
                 Notes = notes?.Trim() ?? string.Empty,
-                ResourceType = resourceType,
+                EntityType = resourceType,
                 EntityId = entityId,
                 GraphNodeId = node?.Id,
+                AliasesJson = SerializeAliases(aliases),
+                WikiSectionsJson = SerializeWikiSections(wikiSections),
                 PayloadJson = payloadJson,
             });
         }
         else
         {
             existing.Title = title;
-            existing.ResourceType = resourceType;
+            existing.EntityType = resourceType;
             existing.GraphNodeId = node?.Id ?? existing.GraphNodeId;
             existing.Summary = Truncate(summary, 800);
             existing.Notes = notes?.Trim() ?? string.Empty;
+            existing.AliasesJson = SerializeAliases(aliases);
+            existing.WikiSectionsJson = SerializeWikiSections(wikiSections);
             existing.PayloadJson = payloadJson;
             existing.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateReportItem(existing);
+            ingest.UpdateStagingRecord(existing);
         }
 
         await ingest.SaveChangesAsync();
     }
 
-    private async Task UpsertRelationshipObservationReportItemAsync(
+    private async Task UpsertRelationshipObservationStagingRecordAsync(
         IngestAgentContext context,
-        IngestReportItem? existing,
+        IngestStagingRecord? existing,
         string edgeType,
         Guid from,
         Guid to,
@@ -593,59 +586,65 @@ public sealed class IngestAgentTools(
         var payloadJson = BuildRelationshipReportPayload(existing?.PayloadJson, context, IngestSourceAssertions.ObservedRelationshipAction, from, to);
         if (existing is null)
         {
-            await ingest.AddReportItemAsync(new IngestReportItem
+            await ingest.AddStagingRecordAsync(new IngestStagingRecord
             {
                 JobId = context.JobId,
+                SourceId = context.SourceId,
                 SourceChunkId = context.SourceChunkId,
-                Kind = IngestReportItemKind.Relationship,
-                Status = IngestReportItemStatus.Active,
+                SourceChunkIndex = context.SourceChunkIndex,
+                Kind = IngestStagingRecordKind.Relationship,
+                Status = IngestStagingRecordStatus.Active,
                 Title = $"{fromTitle} -[{edgeType}]-> {toTitle}",
                 Summary = string.Empty,
                 Notes = string.Empty,
-                ResourceType = edgeType,
+                EdgeType = edgeType,
+                FromEntityId = from,
+                ToEntityId = to,
                 PayloadJson = payloadJson,
             });
         }
         else
         {
             existing.Title = $"{fromTitle} -[{edgeType}]-> {toTitle}";
-            existing.ResourceType = edgeType;
+            existing.EdgeType = edgeType;
+            existing.FromEntityId = from;
+            existing.ToEntityId = to;
             existing.Summary = string.Empty;
             existing.Notes = string.Empty;
             existing.PayloadJson = payloadJson;
             existing.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateReportItem(existing);
+            ingest.UpdateStagingRecord(existing);
         }
 
         await ingest.SaveChangesAsync();
     }
 
-    private async Task<IngestReportItem?> FindActiveEntityReportItemAsync(Guid jobId, Guid entityId, Guid? sourceChunkId = null) =>
-        (await ingest.ListReportItemsAsync(jobId)).FirstOrDefault(item =>
-            item.Kind == IngestReportItemKind.Entity
-            && item.Status == IngestReportItemStatus.Active
+    private async Task<IngestStagingRecord?> FindActiveEntityStagingRecordAsync(Guid jobId, Guid entityId, Guid? sourceChunkId = null) =>
+        (await ingest.ListStagingRecordsAsync(jobId)).FirstOrDefault(item =>
+            item.Kind == IngestStagingRecordKind.Entity
+            && item.Status == IngestStagingRecordStatus.Active
             && item.EntityId == entityId
             && (sourceChunkId is null || item.SourceChunkId == sourceChunkId));
 
-    private async Task<IngestReportItem?> FindActiveRelationshipObservationReportItemAsync(
+    private async Task<IngestStagingRecord?> FindActiveRelationshipObservationStagingRecordAsync(
         Guid jobId,
         Guid sourceChunkId,
         Guid from,
         Guid to,
         string edgeType) =>
-        (await ingest.ListReportItemsAsync(jobId)).FirstOrDefault(item =>
-            item.Kind == IngestReportItemKind.Relationship
-            && item.Status == IngestReportItemStatus.Active
+        (await ingest.ListStagingRecordsAsync(jobId)).FirstOrDefault(item =>
+            item.Kind == IngestStagingRecordKind.Relationship
+            && item.Status == IngestStagingRecordStatus.Active
             && item.SourceChunkId == sourceChunkId
-            && string.Equals(item.ResourceType, edgeType, StringComparison.OrdinalIgnoreCase)
-            && TryReadRelationshipEndpoints(item.PayloadJson, out var existingFrom, out var existingTo)
+            && string.Equals(item.EdgeType, edgeType, StringComparison.OrdinalIgnoreCase)
+            && TryReadRelationshipEndpoints(item, out var existingFrom, out var existingTo)
             && existingFrom == from
             && existingTo == to);
 
     private async Task<bool> IsEntityTouchedByJobAsync(Guid jobId, Guid entityId) =>
-        (await ingest.ListReportItemsAsync(jobId)).Any(item =>
-            item.Kind == IngestReportItemKind.Entity
-            && item.Status == IngestReportItemStatus.Active
+        (await ingest.ListStagingRecordsAsync(jobId)).Any(item =>
+            item.Kind == IngestStagingRecordKind.Entity
+            && item.Status == IngestStagingRecordStatus.Active
             && item.EntityId == entityId);
 
     private async Task AddExtractedFromAsync(IngestAgentContext context, GraphNode entityNode)
@@ -846,6 +845,66 @@ public sealed class IngestAgentTools(
         }
         catch (JsonException) { }
         return payload;
+    }
+
+    private static string SerializeAliases(IEnumerable<string>? aliases) =>
+        JsonSerializer.Serialize((aliases ?? [])
+            .Where(alias => !string.IsNullOrWhiteSpace(alias))
+            .Select(alias => alias.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray());
+
+    private static string SerializeWikiSections(IEnumerable<IngestWikiSectionInput>? sections) =>
+        JsonSerializer.Serialize((sections ?? [])
+            .Where(section => section is not null
+                && (!string.IsNullOrWhiteSpace(section.Title) || !string.IsNullOrWhiteSpace(section.Body)))
+            .ToArray());
+
+    private static IReadOnlyList<string> ReadAliasesJson(string? aliasesJson)
+    {
+        if (string.IsNullOrWhiteSpace(aliasesJson) || !LooksLikeJsonRoot(aliasesJson, '[')) return [];
+        try
+        {
+            return (JsonSerializer.Deserialize<string[]>(aliasesJson) ?? [])
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Select(alias => alias.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<IngestWikiSectionInput> ReadWikiSectionInputsJson(string? sectionsJson)
+    {
+        if (string.IsNullOrWhiteSpace(sectionsJson) || !LooksLikeJsonRoot(sectionsJson, '[')) return [];
+        try
+        {
+            return (JsonSerializer.Deserialize<List<IngestWikiSectionInput>>(sectionsJson) ?? [])
+                .Where(section => section is not null
+                    && (!string.IsNullOrWhiteSpace(section.Title) || !string.IsNullOrWhiteSpace(section.Body)))
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private async Task<int> CountActiveEntityStagingRecordsAsync(Guid jobId, Guid entityId) =>
+        (await ingest.ListStagingRecordsAsync(jobId))
+            .Count(item => item.Kind == IngestStagingRecordKind.Entity
+                && item.Status == IngestStagingRecordStatus.Active
+                && item.EntityId == entityId);
+
+    private static bool TryReadRelationshipEndpoints(IngestStagingRecord item, out Guid from, out Guid to)
+    {
+        from = item.FromEntityId ?? Guid.Empty;
+        to = item.ToEntityId ?? Guid.Empty;
+        return (from != Guid.Empty && to != Guid.Empty)
+            || TryReadRelationshipEndpoints(item.PayloadJson, out from, out to);
     }
 
     private static bool TryReadRelationshipEndpoints(string payloadJson, out Guid from, out Guid to)

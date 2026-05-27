@@ -68,9 +68,14 @@
 }
 
 .entity-knowledge-item p,
-.entity-knowledge-observation-section p {
+.entity-knowledge-observation-section p,
+.entity-knowledge-markdown {
     margin: 0;
     overflow-wrap: anywhere;
+}
+
+.entity-knowledge-markdown {
+    white-space: pre-wrap;
 }
 
 .entity-knowledge-source {

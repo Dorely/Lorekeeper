@@ -15,7 +15,7 @@ public interface IIngestService
     Task ResumeAsync(Guid jobId, IngestResumeRequest? request = null, CancellationToken cancellationToken = default);
     Task RestartAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task DeleteJobAsync(Guid jobId, CancellationToken cancellationToken = default);
-    Task<IngestReportItem> UpdateReportItemAsync(Guid reportItemId, IngestReportItemUpdateRequest request, CancellationToken cancellationToken = default);
+    Task<IngestStagingRecord> UpdateReportItemAsync(Guid reportItemId, IngestReportItemUpdateRequest request, CancellationToken cancellationToken = default);
     Task DeleteReportItemAsync(Guid reportItemId, CancellationToken cancellationToken = default);
 }
 

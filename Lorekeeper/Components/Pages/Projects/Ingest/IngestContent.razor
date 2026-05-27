@@ -378,7 +378,7 @@ else
                                             <label class="form-label small text-muted">Title</label>
                                             <input class="form-control form-control-sm" @bind="_editTitle" @bind:event="oninput" />
                                         </div>
-                                        @if (item.Kind == IngestReportItemKind.Relationship)
+                                        @if (item.Kind == IngestStagingRecordKind.Relationship)
                                         {
                                             <div>
                                                 <label class="form-label small text-muted">Relationship type</label>
@@ -420,8 +420,8 @@ else
                                     <div class="ingest-report-foot">
                                         <div class="small text-muted">@item.Status - @item.ResourceType</div>
                                         <div class="ingest-report-actions">
-                                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => StartEditReportItem(item)">Edit</button>
-                                            <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_deletingReportItemId == item.Id)" @onclick="() => DeleteReportItemAsync(item.Id)">Delete</button>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(item.Status != IngestStagingRecordStatus.Active)" @onclick="() => StartEditReportItem(item)">Edit</button>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_deletingReportItemId == item.Id || item.Status != IngestStagingRecordStatus.Active)" @onclick="() => DeleteReportItemAsync(item.Id)">Delete</button>
                                         </div>
                                     </div>
                                 }
@@ -1320,8 +1320,8 @@ else
     {
         var action = item.Kind switch
         {
-            IngestReportItemKind.Entity => IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson),
-            IngestReportItemKind.Relationship => IngestSourceAssertions.ReadRelationshipGraphAction(item.PayloadJson),
+            IngestStagingRecordKind.Entity => IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson),
+            IngestStagingRecordKind.Relationship => IngestSourceAssertions.ReadRelationshipGraphAction(item.PayloadJson),
             _ => null,
         };
 

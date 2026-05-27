@@ -336,15 +336,15 @@ public sealed class IngestService(
 
         queue.RequestCancellation(job.Id);
 
-        var cleanup = await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.ReportItems, cancellationToken);
+        var cleanup = await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.StagingRecords, cancellationToken);
         await ApplyGraphCleanupContextUpdatesAsync(job.ProjectId, cleanup, cancellationToken);
 
-        foreach (var item in job.ReportItems.Where(item => item.Status != IngestReportItemStatus.Deleted))
+        foreach (var item in job.StagingRecords.Where(item => item.Status != IngestStagingRecordStatus.Deleted))
         {
-            item.Status = IngestReportItemStatus.Deleted;
+            item.Status = IngestStagingRecordStatus.Deleted;
             item.DeletedAt = DateTime.UtcNow;
             item.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateReportItem(item);
+            ingest.UpdateStagingRecord(item);
         }
 
         foreach (var jobChunk in job.Chunks)
@@ -392,7 +392,7 @@ public sealed class IngestService(
 
         var projectId = job.ProjectId;
         queue.RequestCancellation(job.Id);
-        var cleanup = await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.ReportItems, cancellationToken);
+        var cleanup = await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.StagingRecords, cancellationToken);
         await ApplyGraphCleanupContextUpdatesAsync(job.ProjectId, cleanup, cancellationToken);
         await vectors.DeleteBySourceAsync("ingest_source", job.Source.VectorSourceId, Project.ScopeKey(job.ProjectId), cancellationToken);
         await contextIndexing.DeleteIngestSourceAsync(job.ProjectId, job.SourceId, cancellationToken);
@@ -465,84 +465,89 @@ public sealed class IngestService(
         job.UpdatedAt = DateTime.UtcNow;
     }
 
-    public async Task<IngestReportItem> UpdateReportItemAsync(Guid reportItemId, IngestReportItemUpdateRequest request, CancellationToken cancellationToken = default)
+    public async Task<IngestStagingRecord> UpdateReportItemAsync(Guid reportItemId, IngestReportItemUpdateRequest request, CancellationToken cancellationToken = default)
     {
-        var item = await ingest.GetReportItemAsync(reportItemId, cancellationToken)
-            ?? throw new InvalidOperationException($"Ingest report item {reportItemId} not found.");
-        if (item.Status == IngestReportItemStatus.Deleted)
-            throw new InvalidOperationException("Deleted report items cannot be edited.");
+        var item = await ingest.GetStagingRecordAsync(reportItemId, cancellationToken)
+            ?? throw new InvalidOperationException($"Ingest staging record {reportItemId} not found.");
+        if (item.Status != IngestStagingRecordStatus.Active)
+            throw new InvalidOperationException("Only active ingest staging records can be edited.");
 
         var title = (request.Title ?? string.Empty).Trim();
-        if (title.Length == 0) throw new ArgumentException("Report item title is required.", nameof(request));
+        if (title.Length == 0) throw new ArgumentException("Staging record title is required.", nameof(request));
 
         var summary = request.Summary?.Trim() ?? string.Empty;
         var notes = request.Notes?.Trim() ?? string.Empty;
-        var resourceType = item.Kind == IngestReportItemKind.Relationship && !string.IsNullOrWhiteSpace(request.ResourceType)
+        var resourceType = item.Kind == IngestStagingRecordKind.Relationship && !string.IsNullOrWhiteSpace(request.ResourceType)
             ? request.ResourceType.Trim()
-            : item.ResourceType;
+            : item.Kind == IngestStagingRecordKind.Relationship ? item.EdgeType : item.EntityType;
 
         item.Title = title;
         item.Summary = summary;
         item.Notes = notes;
-        item.ResourceType = resourceType;
+        if (item.Kind == IngestStagingRecordKind.Relationship)
+            item.EdgeType = resourceType;
+        else
+            item.EntityType = resourceType;
         item.UpdatedAt = DateTime.UtcNow;
 
-        await SyncReportEditToGraphAsync(item, cancellationToken);
-        ingest.UpdateReportItem(item);
+        await SyncStagingEditAsync(item, cancellationToken);
+        ingest.UpdateStagingRecord(item);
         await ingest.SaveChangesAsync(cancellationToken);
-        await ReindexReportItemContextAsync(item, cancellationToken);
+        await ReindexStagingRecordContextAsync(item, cancellationToken);
         Notify(item.Job.ProjectId, item.JobId, IngestJobUpdateKind.Report);
         return item;
     }
 
     public async Task DeleteReportItemAsync(Guid reportItemId, CancellationToken cancellationToken = default)
     {
-        var item = await ingest.GetReportItemAsync(reportItemId, cancellationToken)
-            ?? throw new InvalidOperationException($"Ingest report item {reportItemId} not found.");
-        if (item.Status == IngestReportItemStatus.Deleted) return;
+        var item = await ingest.GetStagingRecordAsync(reportItemId, cancellationToken)
+            ?? throw new InvalidOperationException($"Ingest staging record {reportItemId} not found.");
+        if (item.Status == IngestStagingRecordStatus.Deleted) return;
+        if (item.Status != IngestStagingRecordStatus.Active)
+            throw new InvalidOperationException("Only active ingest staging records can be deleted.");
 
-        var affectedEntityIds = await RemoveSingleReportGraphItemAsync(item, cancellationToken);
-        MarkReportItemDeleted(item);
-        ingest.UpdateReportItem(item);
+        var affectedEntityIds = await RemoveSingleStagingGraphItemAsync(item, cancellationToken);
+        MarkStagingRecordDeleted(item);
+        ingest.UpdateStagingRecord(item);
         await ingest.SaveChangesAsync(cancellationToken);
         await RefreshJobCountsAsync(item.JobId, cancellationToken);
         await ingest.SaveChangesAsync(cancellationToken);
-        await ReindexReportItemContextAsync(item, cancellationToken);
+        await ReindexStagingRecordContextAsync(item, cancellationToken);
         foreach (var entityId in affectedEntityIds)
             await contextIndexing.ReindexEntityAsync(item.Job.ProjectId, entityId, cancellationToken);
         Notify(item.Job.ProjectId, item.JobId, IngestJobUpdateKind.Report);
     }
 
-    private async Task ReindexReportItemContextAsync(IngestReportItem item, CancellationToken cancellationToken)
+    private async Task ReindexStagingRecordContextAsync(IngestStagingRecord item, CancellationToken cancellationToken)
     {
         switch (item.Kind)
         {
-            case IngestReportItemKind.Entity when item.EntityId is Guid entityId:
+            case IngestStagingRecordKind.Entity when item.EntityId is Guid entityId:
                 await contextIndexing.ReindexEntityAsync(item.Job.ProjectId, entityId, cancellationToken);
                 break;
 
-            case IngestReportItemKind.Relationship:
-                foreach (var entityId in ReadRelationshipEndpointIds(item.PayloadJson))
+            case IngestStagingRecordKind.Relationship:
+                foreach (var entityId in ReadRelationshipEndpointIds(item))
                     await contextIndexing.ReindexEntityAsync(item.Job.ProjectId, entityId, cancellationToken);
                 break;
 
-            case IngestReportItemKind.SourceChunkNote when item.SourceChunkId is Guid sourceChunkId:
+            case IngestStagingRecordKind.SourceChunkNote when item.SourceChunkId is Guid sourceChunkId:
                 await contextIndexing.ReindexIngestSourceChunkAsync(sourceChunkId, cancellationToken);
                 break;
         }
     }
 
-    private async Task SyncReportEditToGraphAsync(IngestReportItem item, CancellationToken cancellationToken)
+    private async Task SyncStagingEditAsync(IngestStagingRecord item, CancellationToken cancellationToken)
     {
         switch (item.Kind)
         {
-            case IngestReportItemKind.Entity:
+            case IngestStagingRecordKind.Entity:
                 break;
 
-            case IngestReportItemKind.Relationship:
+            case IngestStagingRecordKind.Relationship:
                 break;
 
-            case IngestReportItemKind.SourceChunkNote:
+            case IngestStagingRecordKind.SourceChunkNote:
                 if (item.SourceChunkId is null) return;
                 var sourceChunk = await ingest.GetSourceChunkAsync(item.SourceChunkId.Value, cancellationToken);
                 if (sourceChunk is null) return;
@@ -555,24 +560,24 @@ public sealed class IngestService(
         }
     }
 
-    private async Task<IReadOnlyCollection<Guid>> RemoveSingleReportGraphItemAsync(IngestReportItem item, CancellationToken cancellationToken)
+    private async Task<IReadOnlyCollection<Guid>> RemoveSingleStagingGraphItemAsync(IngestStagingRecord item, CancellationToken cancellationToken)
     {
         var affectedEntityIds = new HashSet<Guid>();
         switch (item.Kind)
         {
-            case IngestReportItemKind.Entity:
+            case IngestStagingRecordKind.Entity:
                 if (item.EntityId is Guid reportEntityId)
                     affectedEntityIds.Add(reportEntityId);
-                await RemoveEntityGraphContributionAsync(item, item.Job.ProjectId, item.Job.SourceId, cancellationToken);
+                await RemoveEntityShellIfOrphanedAsync(item, item.Job.ProjectId, cancellationToken);
                 break;
 
-            case IngestReportItemKind.Relationship:
-                foreach (var endpointEntityId in ReadRelationshipEndpointIds(item.PayloadJson))
+            case IngestStagingRecordKind.Relationship:
+                foreach (var endpointEntityId in ReadRelationshipEndpointIds(item))
                     affectedEntityIds.Add(endpointEntityId);
-                await RemoveRelationshipGraphEdgeAsync(item, item.Job.SourceId, cancellationToken);
+                await RemoveStagingRelationshipEdgeIfOrphanedAsync(item, cancellationToken);
                 break;
 
-            case IngestReportItemKind.SourceChunkNote:
+            case IngestStagingRecordKind.SourceChunkNote:
                 if (item.SourceChunkId is null) break;
                 var sourceChunk = await ingest.GetSourceChunkAsync(item.SourceChunkId.Value, cancellationToken);
                 if (sourceChunk is null) break;
@@ -592,29 +597,111 @@ public sealed class IngestService(
         var job = await ingest.GetJobAsync(jobId, cancellationToken);
         if (job is null) return;
 
-        var reportItems = await ingest.ListReportItemsAsync(jobId, cancellationToken);
+        var reportItems = await ingest.ListStagingRecordsAsync(jobId, cancellationToken);
         RefreshJobCounts(job, reportItems);
         job.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJob(job);
     }
 
-    private static void RefreshJobCounts(IngestJob job, IEnumerable<IngestReportItem> reportItems)
+    private static void RefreshJobCounts(IngestJob job, IEnumerable<IngestStagingRecord> reportItems)
     {
         var activeItems = reportItems
-            .Where(item => item.Status == IngestReportItemStatus.Active)
+            .Where(item => item.Status == IngestStagingRecordStatus.Active)
             .ToList();
 
         job.CreatedEntityCount = activeItems
-            .Where(item => item.Kind == IngestReportItemKind.Entity)
+            .Where(item => item.Kind == IngestStagingRecordKind.Entity)
             .Select(item => item.EntityId?.ToString("N") ?? item.GraphNodeId?.ToString() ?? item.Id.ToString("N"))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();
 
         job.CreatedRelationshipCount = activeItems
-            .Where(item => item.Kind == IngestReportItemKind.Relationship)
+            .Where(item => item.Kind == IngestStagingRecordKind.Relationship)
             .Select(item => item.GraphEdgeId?.ToString() ?? item.Id.ToString("N"))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();
+    }
+
+    private async Task RemoveEntityShellIfOrphanedAsync(IngestStagingRecord item, Guid projectId, CancellationToken cancellationToken)
+    {
+        var node = await FindStagingNodeAsync(item, projectId, cancellationToken);
+        if (node is null || item.EntityId is not Guid entityId) return;
+
+        var graphAction = IngestSourceAssertions.ReadEntityGraphAction(item.PayloadJson);
+        if (!CanRemovePotentiallyIngestCreatedObject(node.Properties, graphAction, IngestSourceAssertions.CreatedEntityAction))
+            return;
+
+        if (await HasActiveStagingReferencesForEntityAsync(item.JobId, entityId, item.Id, cancellationToken))
+            return;
+
+        if (IngestWikiSheet.HasCanonSources(node.Properties) || HasCanonicalProperties(node.Properties))
+            return;
+
+        var adjacent = await edges.GetAdjacentAsync(node.Id, EdgeDirection.Both, edgeTypes: null, maxResults: null, cancellationToken);
+        if (adjacent.Count == 0)
+            await graphStore.RemoveNodeAsync(node.Id, cancellationToken);
+    }
+
+    private async Task RemoveStagingRelationshipEdgeIfOrphanedAsync(IngestStagingRecord item, CancellationToken cancellationToken)
+    {
+        if (item.GraphEdgeId is null) return;
+
+        var edge = await edges.GetByIdAsync(item.GraphEdgeId.Value, cancellationToken);
+        if (edge is null) return;
+
+        var graphAction = IngestSourceAssertions.ReadRelationshipGraphAction(item.PayloadJson);
+        if (!CanRemovePotentiallyIngestCreatedObject(edge.Properties, graphAction, IngestSourceAssertions.CreatedEdgeAction))
+            return;
+        if (IngestWikiSheet.HasCanonSources(edge.Properties) || HasCanonicalProperties(edge.Properties))
+            return;
+
+        await graphStore.RemoveEdgeAsync(edge.Id, cancellationToken);
+    }
+
+    private async Task<GraphNode?> FindStagingNodeAsync(IngestStagingRecord item, Guid projectId, CancellationToken cancellationToken)
+    {
+        if (item.GraphNodeId is not null)
+        {
+            var node = await nodes.GetByIdAsync(item.GraphNodeId.Value, cancellationToken);
+            if (node is not null) return node;
+        }
+
+        return item.EntityId is null || string.IsNullOrWhiteSpace(item.EntityType)
+            ? null
+            : await nodes.FindAsync(projectId, item.EntityType, item.EntityId.Value.ToString("N"), cancellationToken);
+    }
+
+    private async Task<bool> HasActiveStagingReferencesForEntityAsync(
+        Guid jobId,
+        Guid entityId,
+        Guid excludedStagingRecordId,
+        CancellationToken cancellationToken)
+    {
+        var records = await ingest.ListStagingRecordsAsync(jobId, cancellationToken);
+        return records.Any(item =>
+            item.Id != excludedStagingRecordId
+            && item.Status == IngestStagingRecordStatus.Active
+            && ((item.Kind == IngestStagingRecordKind.Entity && item.EntityId == entityId)
+                || (item.Kind == IngestStagingRecordKind.Relationship && IsRelationshipConnectedTo(item, entityId))));
+    }
+
+    private static IReadOnlyCollection<Guid> ReadRelationshipEndpointIds(IngestStagingRecord item)
+    {
+        var ids = new HashSet<Guid>();
+        if (item.FromEntityId is Guid from && from != Guid.Empty)
+            ids.Add(from);
+        if (item.ToEntityId is Guid to && to != Guid.Empty)
+            ids.Add(to);
+        foreach (var id in ReadRelationshipEndpointIds(item.PayloadJson))
+            ids.Add(id);
+        return ids;
+    }
+
+    private static void MarkStagingRecordDeleted(IngestStagingRecord item)
+    {
+        item.Status = IngestStagingRecordStatus.Deleted;
+        item.DeletedAt = DateTime.UtcNow;
+        item.UpdatedAt = DateTime.UtcNow;
     }
 
     private async Task RemoveRelationshipGraphEdgeAsync(IngestReportItem item, Guid fallbackSourceId, CancellationToken cancellationToken)
@@ -836,6 +923,25 @@ public sealed class IngestService(
         catch (JsonException ex)
         {
             logger.LogWarning(ex, "Invalid relationship payload JSON for ingest report item {ReportItemId}", relationship.Id);
+            return false;
+        }
+    }
+
+    private bool IsRelationshipConnectedTo(IngestStagingRecord relationship, Guid entityId)
+    {
+        if (relationship.FromEntityId == entityId || relationship.ToEntityId == entityId)
+            return true;
+
+        try
+        {
+            if (!relationship.PayloadJson.TrimStart().StartsWith('{')) return false;
+            using var doc = JsonDocument.Parse(relationship.PayloadJson);
+            return MatchesEndpoint(doc.RootElement, "fromEntityId", entityId)
+                || MatchesEndpoint(doc.RootElement, "toEntityId", entityId);
+        }
+        catch (JsonException ex)
+        {
+            logger.LogWarning(ex, "Invalid relationship payload JSON for ingest staging record {StagingRecordId}", relationship.Id);
             return false;
         }
     }

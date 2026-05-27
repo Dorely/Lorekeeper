@@ -446,6 +446,10 @@ public sealed class ContextRecommendationService(
         if (titleRank is not null) return titleRank.Value;
 
         return Contains(entity.Type, query)
+            || Contains(entity.Summary, query)
+            || entity.Aliases.Any(alias => Contains(alias, query))
+            || entity.WikiSections.Any(section => Contains(section.Title, query) || Contains(section.Body, query))
+            || entity.CanonSources.Any(source => Contains(source.SourceTitle, query) || Contains(source.Markdown, query))
             || entity.Properties.Any(property => Contains(property.Key, query) || Contains(property.Value, query))
             ? DetailSearchRank
             : null;

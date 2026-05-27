@@ -27,6 +27,7 @@ public class IngestSourceChunk
 
     public ICollection<IngestJobChunk> JobChunks { get; set; } = [];
     public ICollection<IngestReportItem> ReportItems { get; set; } = [];
+    public ICollection<IngestStagingRecord> StagingRecords { get; set; } = [];
 }
 
 public enum IngestSourceChunkStructureStatus

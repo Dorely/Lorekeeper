@@ -189,9 +189,9 @@
             <div class="graph-node-meta">
                 <span class="graph-node-type" style="border-color: @selected.Color">@selected.Type</span>
                 <span class="text-muted small">@selected.Key</span>
-                @if (selected.IngestSourceCount > 0)
+                @if (selected.CanonSourceCount > 0)
                 {
-                    <span class="badge text-bg-info">@selected.IngestSourceCount source@(PluralSuffix(selected.IngestSourceCount))</span>
+                    <span class="badge text-bg-info">@selected.CanonSourceCount canon source@(PluralSuffix(selected.CanonSourceCount))</span>
                 }
                 else if (selected.IsIngestCreated)
                 {
@@ -259,8 +259,7 @@
         <EntityKnowledgeView Summary="@selected.Summary"
                              Aliases="@selected.Aliases"
                              WikiSections="@selected.WikiSections"
-                             IngestSources="@selected.IngestSources"
-                             IngestObservations="@selected.IngestObservations" />
+                             CanonSources="@selected.CanonSources" />
 
         <div class="graph-links-section">
             <div class="graph-links-header">
@@ -289,9 +288,9 @@
                         {
                             <span class="badge text-bg-secondary">managed</span>
                         }
-                        @if (edge.IngestSourceCount > 0)
+                        @if (edge.CanonSourceCount > 0)
                         {
-                            <span class="badge text-bg-info">@edge.IngestSourceCount source@(PluralSuffix(edge.IngestSourceCount))</span>
+                            <span class="badge text-bg-info">@edge.CanonSourceCount canon source@(PluralSuffix(edge.CanonSourceCount))</span>
                         }
                         else if (IsExtractedFrom(edge) || edge.IsIngestCreated)
                         {

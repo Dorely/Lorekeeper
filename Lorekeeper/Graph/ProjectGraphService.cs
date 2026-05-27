@@ -361,11 +361,9 @@ public sealed class ProjectGraphService(
             IngestWikiSheet.ReadSummary(node.Properties),
             IngestWikiSheet.ReadAliases(node.Properties),
             IngestWikiSheet.ReadSections(node.Properties),
+            IngestWikiSheet.ReadCanonSources(node.Properties),
             IngestSourceAssertions.IsIngestCreatedGraphObject(node.Properties),
-            IngestSourceAssertions.CountEntitySources(node.Properties),
-            IngestSourceAssertions.CountEntityObservations(node.Properties),
-            IngestSourceAssertions.SummarizeEntityAssertions(node.Properties),
-            IngestSourceAssertions.ListEntityObservations(node.Properties));
+            IngestWikiSheet.ReadCanonSources(node.Properties).Count);
     }
 
     private static ProjectGraphEdge ProjectEdge(GraphEdge edge)
@@ -385,10 +383,7 @@ public sealed class ProjectGraphService(
             Read(edge.Properties, IngestWikiSheet.SummaryProperty) ?? string.Empty,
             IngestWikiSheet.ReadRelationshipCitations(edge.Properties),
             IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties),
-            IngestSourceAssertions.CountRelationshipSources(edge.Properties),
-            IngestSourceAssertions.CountRelationshipObservations(edge.Properties),
-            IngestSourceAssertions.SummarizeRelationshipAssertions(edge.Properties),
-            IngestSourceAssertions.ListRelationshipObservations(edge.Properties));
+            IngestWikiSheet.ReadCanonSources(edge.Properties).Count);
     }
 
     private static ProjectGraphNodeType ProjectType(EntityTypeDefinition typeDefinition, string color) =>

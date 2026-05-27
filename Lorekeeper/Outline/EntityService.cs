@@ -390,11 +390,9 @@ public sealed class EntityService(
                 Summary: ReadProperty(edge.Properties, IngestWikiSheet.SummaryProperty),
                 Aliases: [],
                 WikiSections: [],
+                CanonSources: [],
                 IsIngestCreated: IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties),
-                IngestSourceCount: IngestSourceAssertions.CountRelationshipSources(edge.Properties),
-                IngestObservationCount: IngestSourceAssertions.CountRelationshipObservations(edge.Properties),
-                IngestSources: IngestSourceAssertions.SummarizeRelationshipAssertions(edge.Properties),
-                IngestObservations: IngestSourceAssertions.ListRelationshipObservations(edge.Properties),
+                CanonSourceCount: IngestWikiSheet.ReadCanonSources(edge.Properties).Count,
                 RelationshipCitations: IngestWikiSheet.ReadRelationshipCitations(edge.Properties)));
         }
         return result;
@@ -550,11 +548,9 @@ public sealed class EntityService(
                 Summary: IngestWikiSheet.ReadSummary(node.Properties),
                 Aliases: IngestWikiSheet.ReadAliases(node.Properties),
                 WikiSections: IngestWikiSheet.ReadSections(node.Properties),
+                CanonSources: IngestWikiSheet.ReadCanonSources(node.Properties),
                 IsIngestCreated: IngestSourceAssertions.IsIngestCreatedGraphObject(node.Properties),
-                IngestSourceCount: IngestSourceAssertions.CountEntitySources(node.Properties),
-                IngestObservationCount: IngestSourceAssertions.CountEntityObservations(node.Properties),
-                IngestSources: IngestSourceAssertions.SummarizeEntityAssertions(node.Properties),
-                IngestObservations: IngestSourceAssertions.ListEntityObservations(node.Properties));
+                CanonSourceCount: IngestWikiSheet.ReadCanonSources(node.Properties).Count);
     }
 
     private static Dictionary<string, object?> ToObjectDict(IDictionary<string, string?>? src)

@@ -618,6 +618,16 @@ public sealed class ContextBuilder(
             }
         }
 
+        if (entity.CanonSources.Count > 0)
+        {
+            sb.AppendLine("Canon sources:");
+            foreach (var source in entity.CanonSources.Take(6))
+            {
+                sb.Append("# ").Append(source.SourceTitle).AppendLine();
+                sb.AppendLine(source.Markdown);
+            }
+        }
+
         var links = await entities.ListLinksAsync(projectId, entity.Id, cancellationToken);
         var visibleLinks = links
             .Where(link => IsContextEntityType(link.OtherEntityType) || string.Equals(link.OtherEntityType, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase))

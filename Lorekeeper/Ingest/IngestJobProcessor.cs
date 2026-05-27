@@ -34,13 +34,13 @@ public sealed class IngestJobProcessor(
     private const string _systemPrompt = """
         You are an ingestion extraction agent for Lorekeeper.
 
-        Your job is to read the current source chunk, which may or may not be part of a larger document, and append source-linked observations for durable wiki-style entity sheets on the project graph.
+        Your job is to read the current source chunk, which may or may not be part of a larger document, and append temporary staging observations for later wiki-style canon synthesis.
         You may link to existing non-structural project entities when the source clearly refers to the same thing.
         Prefer fewer, stronger entities over duplicate nodes for titles, aliases, partial names, or alternate spellings. Entity data should be useful for later retrieval and writing; it should read like an organized wiki sheet, not extraction notes.
 
         Adapt what counts as an entity to the source and the project. Fiction, science fiction, and fantasy sources should preserve story and setting continuity: characters, places, cultures, factions, artifacts, magic/technology, histories, rules, recurring terms, and relationships. Nonfiction and research sources should preserve concepts, people, events, examples, methods, terms, claims, source support, and arguments. Use the project type palette first, then create broad useful non-structural types only when the source needs them.
 
-        A useful wiki sheet captures the source-grounded information the current project would need later: identity, role, status, affiliation, history, motivation, significance, setting/world-building details, factual claims, examples, and relationships. During chunk ingestion, store this only as source-linked observations. A later final review pass will synthesize those observations into a single Source: wiki section. The graph is only a sparse support structure.
+        A useful final wiki page captures the source-grounded information the current project would need later: identity, role, status, affiliation, history, motivation, significance, setting/world-building details, factual claims, examples, and relationships. During chunk ingestion, store this only as temporary staging records. A later final review pass will synthesize those records into a single canonSource markdown property for the whole source. The graph is only a sparse support structure.
 
         Process rules:
         - Start from the compact touched-entity index in the prompt. It is only an identity hint.
@@ -51,7 +51,7 @@ public sealed class IngestJobProcessor(
         - Do not create an entity when the touched-entity index or resolver returns a clear same subject with matching names or aliases. Call append_ingest_entity_observation with entityId for an existing match.
         - Do not update an existing entity just because it is semantically similar to the current source chunk. Update it only when the chunk explicitly supports a fact about that same entity.
         - Use append_ingest_entity_observation as the single entity write path. Supply entityId for an existing entity, or type and name only when creating/reusing a new entity in the same call.
-        - append_ingest_entity_observation never edits canonical summaries or normal wiki sections. Do not try to rewrite the entity wiki during chunk ingestion.
+        - append_ingest_entity_observation never edits canonical summaries, normal wiki sections, or canonSource properties. Do not try to rewrite the entity wiki during chunk ingestion.
         - Create a new entity only when no existing project entity or same-job entity matches after variant resolution. The tool will reject duplicate names; treat that as instruction to reuse the returned existing entity.
         - Use canonical singular entity type keys from the known project entity types. Do not invent plural, lowercase, or near-duplicate categories such as "characters", "Characters", "locations", or "organisations" when an existing project type reasonably fits.
         - If a new type is needed, choose a broad stable type name. Prefer reusable categories such as Culture, Faction, Artifact, Magic, Technology, Lore, Concept, Person, Event, Example, Claim, Term, or Method over one-off labels.
@@ -118,7 +118,7 @@ public sealed class IngestJobProcessor(
                 activeChunk = null;
 
                 job.CompletedSourceChunks = job.Chunks.Count(chunk => chunk.Status == IngestJobChunkStatus.Completed);
-                var reportItems = await ingest.ListReportItemsAsync(job.Id, cancellationToken);
+                var reportItems = await ingest.ListStagingRecordsAsync(job.Id, cancellationToken);
                 job.CreatedEntityCount = CountDistinctEntities(reportItems);
                 job.CreatedRelationshipCount = CountDistinctRelationships(reportItems);
                 job.CurrentMessage = $"Completed source chunk {jobChunk.SourceChunkIndex + 1} of {job.TotalSourceChunks}.";
@@ -242,11 +242,11 @@ public sealed class IngestJobProcessor(
             sourceGraphChanged = true;
         }
 
-        var reportItems = await ingest.ListReportItemsAsync(job.Id, cancellationToken);
+        var reportItems = await ingest.ListStagingRecordsAsync(job.Id, cancellationToken);
         jobChunk.Status = IngestJobChunkStatus.Completed;
         jobChunk.Summary = sourceChunk.Summary;
-        jobChunk.CreatedEntityCount = reportItems.Count(item => item.SourceChunkId == sourceChunk.Id && item.Kind == IngestReportItemKind.Entity && item.Status == IngestReportItemStatus.Active);
-        jobChunk.CreatedRelationshipCount = reportItems.Count(item => item.SourceChunkId == sourceChunk.Id && item.Kind == IngestReportItemKind.Relationship && item.Status == IngestReportItemStatus.Active);
+        jobChunk.CreatedEntityCount = reportItems.Count(item => item.SourceChunkId == sourceChunk.Id && item.Kind == IngestStagingRecordKind.Entity && item.Status == IngestStagingRecordStatus.Active);
+        jobChunk.CreatedRelationshipCount = reportItems.Count(item => item.SourceChunkId == sourceChunk.Id && item.Kind == IngestStagingRecordKind.Relationship && item.Status == IngestStagingRecordStatus.Active);
         jobChunk.CompletedAt = DateTime.UtcNow;
         jobChunk.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJobChunk(jobChunk);
@@ -269,21 +269,21 @@ public sealed class IngestJobProcessor(
         int maxIterations,
         CancellationToken cancellationToken)
     {
-        var reportItems = await ingest.ListReportItemsAsync(job.Id, cancellationToken);
+        var reportItems = await ingest.ListStagingRecordsAsync(job.Id, cancellationToken);
         var touchedEntities = reportItems
-            .Where(item => item.Status == IngestReportItemStatus.Active
-                && item.Kind == IngestReportItemKind.Entity
+            .Where(item => item.Status == IngestStagingRecordStatus.Active
+                && item.Kind == IngestStagingRecordKind.Entity
                 && item.EntityId is not null)
             .GroupBy(item => item.EntityId!.Value)
             .Select(group => group.OrderByDescending(item => item.UpdatedAt).First())
-            .OrderBy(item => item.ResourceType, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item.EntityType, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         if (touchedEntities.Count == 0)
         {
-            await PromoteFinalizedRelationshipReportItemsAsync(job, cancellationToken);
-            await MarkRemainingFinalizedReportItemsDeletedAsync(job.Id, cancellationToken);
+            await PromoteFinalizedRelationshipStagingRecordsAsync(job, cancellationToken);
+            await MarkRemainingStagingRecordsFinalizedAsync(job.Id, cancellationToken);
             return true;
         }
 
@@ -333,7 +333,7 @@ public sealed class IngestJobProcessor(
                     job.Source.SourceKind,
                     entityId,
                     entityTitle,
-                    item.ResourceType,
+                    item.EntityType,
                     OnMutated: () => mutated = true);
 
                 NotifyLive(job.ProjectId, job.Id, new IngestLiveTurnStarted(entityId, -1, liveTitle, attempt, maxAttempts));
@@ -342,7 +342,7 @@ public sealed class IngestJobProcessor(
                     _ = await RunFinalReviewConversationAsync(job, context, chat, maxIterations, attempt, maxAttempts, cancellationToken);
                     if (!mutated)
                         throw new InvalidOperationException($"Final source review for {entityTitle} completed without calling write_ingest_source_wiki_section.");
-                    await MarkFinalizedEntityReportItemsDeletedAsync(
+                    await MarkFinalizedEntityStagingRecordsAsync(
                         job.Id,
                         entityId,
                         cancellationToken);
@@ -385,8 +385,8 @@ public sealed class IngestJobProcessor(
             }
         }
 
-        await PromoteFinalizedRelationshipReportItemsAsync(job, cancellationToken);
-        await MarkRemainingFinalizedReportItemsDeletedAsync(job.Id, cancellationToken);
+        await PromoteFinalizedRelationshipStagingRecordsAsync(job, cancellationToken);
+        await MarkRemainingStagingRecordsFinalizedAsync(job.Id, cancellationToken);
         await ingest.AddEventAsync(new IngestJobEvent
         {
             JobId = job.Id,
@@ -400,19 +400,19 @@ public sealed class IngestJobProcessor(
         return true;
     }
 
-    private async Task MarkFinalizedEntityReportItemsDeletedAsync(
+    private async Task MarkFinalizedEntityStagingRecordsAsync(
         Guid jobId,
         Guid entityId,
         CancellationToken cancellationToken)
     {
-        var reportItems = await ingest.ListReportItemsAsync(jobId, cancellationToken);
+        var reportItems = await ingest.ListStagingRecordsAsync(jobId, cancellationToken);
         var changed = false;
 
-        foreach (var item in reportItems.Where(item => item.Status == IngestReportItemStatus.Active))
+        foreach (var item in reportItems.Where(item => item.Status == IngestStagingRecordStatus.Active))
         {
-            if (item.Kind == IngestReportItemKind.Entity && item.EntityId == entityId)
+            if (item.Kind == IngestStagingRecordKind.Entity && item.EntityId == entityId)
             {
-                MarkReportItemDeleted(item);
+                MarkStagingRecordFinalized(item);
                 changed = true;
             }
         }
@@ -421,11 +421,11 @@ public sealed class IngestJobProcessor(
             await ingest.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task PromoteFinalizedRelationshipReportItemsAsync(IngestJob job, CancellationToken cancellationToken)
+    private async Task PromoteFinalizedRelationshipStagingRecordsAsync(IngestJob job, CancellationToken cancellationToken)
     {
-        var reportItems = await ingest.ListReportItemsAsync(job.Id, cancellationToken);
+        var reportItems = await ingest.ListStagingRecordsAsync(job.Id, cancellationToken);
         var relationshipItems = reportItems
-            .Where(item => item.Status == IngestReportItemStatus.Active && item.Kind == IngestReportItemKind.Relationship)
+            .Where(item => item.Status == IngestStagingRecordStatus.Active && item.Kind == IngestStagingRecordKind.Relationship)
             .ToList();
         if (relationshipItems.Count == 0) return;
 
@@ -440,7 +440,8 @@ public sealed class IngestJobProcessor(
             if (!TryReadRelationshipPromotionInput(item, job, out var input, out var skipReason))
             {
                 skipped++;
-                logger.LogWarning("Skipping ingest relationship report item {ReportItemId} during finalization: {Reason}", item.Id, skipReason);
+                logger.LogWarning("Skipping ingest relationship staging record {StagingRecordId} during finalization: {Reason}", item.Id, skipReason);
+                MarkStagingRecordFailed(item, skipReason);
                 continue;
             }
 
@@ -449,14 +450,16 @@ public sealed class IngestJobProcessor(
             if (fromNode is null || toNode is null)
             {
                 skipped++;
-                logger.LogWarning("Skipping ingest relationship report item {ReportItemId} during finalization because one or both endpoints could not be resolved.", item.Id);
+                logger.LogWarning("Skipping ingest relationship staging record {StagingRecordId} during finalization because one or both endpoints could not be resolved.", item.Id);
+                MarkStagingRecordFailed(item, "one or both endpoints could not be resolved");
                 continue;
             }
 
             if (!IsPromotableRelationshipNode(fromNode) || !IsPromotableRelationshipNode(toNode))
             {
                 skipped++;
-                logger.LogWarning("Skipping ingest relationship report item {ReportItemId} during finalization because one or both endpoints are structural graph nodes.", item.Id);
+                logger.LogWarning("Skipping ingest relationship staging record {StagingRecordId} during finalization because one or both endpoints are structural graph nodes.", item.Id);
+                MarkStagingRecordFailed(item, "one or both endpoints are structural graph nodes");
                 continue;
             }
 
@@ -476,25 +479,12 @@ public sealed class IngestJobProcessor(
                 };
             }
 
-            IngestSourceAssertions.UpsertRelationshipAssertion(edge.Properties, new IngestAssertionInput(
-                job.Id,
-                input.SourceId,
-                input.SourceTitle,
-                input.SourceKind,
-                input.SourceChunkId,
-                input.SourceChunkIndex,
-                item.Title,
-                ObservedProperties: new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
-                Aliases: [],
-                Notes: item.Notes,
-                ReplaceExistingText: false));
-            IngestWikiSheet.UpsertRelationshipCitation(
+            IngestWikiSheet.AddCanonSourceProvenance(
                 edge.Properties,
                 input.SourceId,
                 input.SourceTitle,
                 input.SourceKind,
-                input.SourceChunkId,
-                input.SourceChunkIndex);
+                job.Id);
             edge.UpdatedAt = DateTime.UtcNow;
 
             if (created)
@@ -512,7 +502,7 @@ public sealed class IngestJobProcessor(
                 item.PayloadJson,
                 created ? IngestSourceAssertions.CreatedEdgeAction : IngestSourceAssertions.LinkedExistingEdgeAction);
             item.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateReportItem(item);
+            ingest.UpdateStagingRecord(item);
 
             affectedEntityIds.Add(input.FromEntityId);
             affectedEntityIds.Add(input.ToEntityId);
@@ -527,8 +517,8 @@ public sealed class IngestJobProcessor(
                 Level = skipped == 0 ? IngestJobEventLevel.Info : IngestJobEventLevel.Warning,
                 EventType = "relationships.promoted",
                 Message = skipped == 0
-                    ? $"Promoted {promoted} relationship observations to graph edges."
-                    : $"Promoted {promoted} relationship observations to graph edges; skipped {skipped}.",
+                    ? $"Promoted {promoted} staged relationships to graph edges."
+                    : $"Promoted {promoted} staged relationships to graph edges; skipped {skipped}.",
                 PayloadJson = JsonSerializer.Serialize(new { promoted, skipped }),
             }, cancellationToken);
         }
@@ -539,13 +529,13 @@ public sealed class IngestJobProcessor(
             await contextIndexing.ReindexEntityAsync(job.ProjectId, entityId, cancellationToken);
     }
 
-    private async Task MarkRemainingFinalizedReportItemsDeletedAsync(Guid jobId, CancellationToken cancellationToken)
+    private async Task MarkRemainingStagingRecordsFinalizedAsync(Guid jobId, CancellationToken cancellationToken)
     {
-        var reportItems = await ingest.ListReportItemsAsync(jobId, cancellationToken);
+        var reportItems = await ingest.ListStagingRecordsAsync(jobId, cancellationToken);
         var changed = false;
-        foreach (var item in reportItems.Where(item => item.Status == IngestReportItemStatus.Active))
+        foreach (var item in reportItems.Where(item => item.Status == IngestStagingRecordStatus.Active))
         {
-            MarkReportItemDeleted(item);
+            MarkStagingRecordFinalized(item);
             changed = true;
         }
 
@@ -943,14 +933,14 @@ public sealed class IngestJobProcessor(
     private static string BuildFinalReviewSystemPrompt() => """
         You are the final source review agent for Lorekeeper ingestion.
 
-        You work on exactly one touched entity from exactly one ingested source. Your task is to synthesize the appended source observations into one readable wiki-style section for that source only.
+        You work on exactly one touched entity from exactly one ingested source. Your task is to synthesize the staging observations into one readable markdown wiki page for that source only.
 
         Rules:
         - First call read_ingest_entity_source_observations.
-        - Then write exactly one section with write_ingest_source_wiki_section.
-        - Before calling the writer, stream a short plain-text note explaining that you are writing the source section.
-        - The section title is controlled by the tool and will be Source: {source title}.
-        - The body should read like a compact wiki page for this entity in this text: who they are in this source, where they appear, why they matter in this text, important events, relationships, traits or motivations, and memorable exact quotes when present.
+        - Then write exactly one markdown page with write_ingest_source_wiki_section.
+        - Before calling the writer, stream a short plain-text note explaining that you are writing the source-backed canon page.
+        - The property key is controlled by the tool and will be canonSource.{source-title-slug}.
+        - The body should read like a compact markdown wiki page for this entity in this text: who they are in this source, where they appear, why they matter in this text, important events, relationships, traits or motivations, and memorable exact quotes when present.
         - Use only information from the source observations. Do not alter or summarize canonical project knowledge outside this source.
         - Write only useful source-backed content for this entity.
         - After the writer returns, make no more tool calls and return a short plain-text completion note.
@@ -966,7 +956,7 @@ public sealed class IngestJobProcessor(
         Entity: {{context.EntityType}} '{{context.EntityName}}' ({{context.EntityId}})
         Review attempt: {{attempt}} of {{maxAttempts}}
 
-        Build one source-specific wiki section for this entity from this ingest source.
+        Build one source-specific markdown wiki page for this entity from this ingest source.
         Call read_ingest_entity_source_observations first. Then call write_ingest_source_wiki_section exactly once.
         Preserve all existing canonical/manual entity information by only using the writer tool.
         """;
@@ -1234,7 +1224,7 @@ public sealed class IngestJobProcessor(
             4. Reuse a plausible same-job or project entity instead of creating duplicate names or duplicate categories. For example, link "Prince Kael'thas" observations to an existing "Kael'thas" Character when the context points to the same person.
             5. Create only when the touched-entity index and resolver do not return a plausible same subject.
 
-            Write useful, source-grounded observations. For each meaningful touched entity, call append_ingest_entity_observation once with a concise source-backed summary, source-mentioned aliases, and non-empty observation sections. Use entityId for an existing entity, or type and name only when no existing entity matches. Do not include source ids, chunk ids, page labels, locator labels, or reference metadata. These observations are append-only for this source and chunk; do not read or rewrite existing wiki sections during chunk ingestion.
+            Write useful, source-grounded staging observations. For each meaningful touched entity, call append_ingest_entity_observation once with a concise source-backed summary, source-mentioned aliases, and non-empty observation sections. Use entityId for an existing entity, or type and name only when no existing entity matches. Do not include source ids, chunk ids, page labels, locator labels, or reference metadata. These observations are temporary for this source and chunk; do not read or rewrite existing wiki sections during chunk ingestion.
 
             Default story/worldbuilding wiki section palette, when supported: Overview; Role in This Text; Canon / World Role; Appearances & Timeline; Traits & Motivations; Relationships; Important Events; Memorable Quotes.
 
@@ -1255,21 +1245,21 @@ public sealed class IngestJobProcessor(
 
     private async Task<string> BuildTouchedEntityIndexAsync(Guid jobId, Guid? sourceChunkId, CancellationToken cancellationToken)
     {
-        var reportItems = await ingest.ListReportItemsAsync(jobId, cancellationToken);
+        var reportItems = await ingest.ListStagingRecordsAsync(jobId, cancellationToken);
         var entities = reportItems
-            .Where(item => item.Kind == IngestReportItemKind.Entity && item.Status == IngestReportItemStatus.Active)
+            .Where(item => item.Kind == IngestStagingRecordKind.Entity && item.Status == IngestStagingRecordStatus.Active)
             .Where(item => item.EntityId is not null)
             .Where(item => sourceChunkId is null || item.SourceChunkId == sourceChunkId)
             .GroupBy(item => item.EntityId!.Value)
             .Select(group => group.OrderByDescending(item => item.UpdatedAt).First())
-            .OrderBy(item => item.ResourceType)
+            .OrderBy(item => item.EntityType)
             .ThenBy(item => item.Title)
             .Take(300)
             .Select(item =>
             {
-                var aliases = ReadReportAliases(item.PayloadJson);
+                var aliases = ReadStagingAliases(item.AliasesJson);
                 var aliasText = aliases.Count == 0 ? string.Empty : $" | aliases: {string.Join(", ", aliases.Take(8))}";
-                return $"- {item.EntityId}: {item.ResourceType} '{item.Title}'{aliasText}";
+                return $"- {item.EntityId}: {item.EntityType} '{item.Title}'{aliasText}";
             })
             .ToList();
 
@@ -1331,7 +1321,30 @@ public sealed class IngestJobProcessor(
         return sb.ToString().TrimEnd();
     }
 
-    private static IReadOnlyList<string> ReadReportAliases(string? payloadJson)
+    private static IReadOnlyList<string> ReadStagingAliases(string? aliasesJson)
+    {
+        if (string.IsNullOrWhiteSpace(aliasesJson) || !aliasesJson.TrimStart().StartsWith('['))
+            return [];
+
+        try
+        {
+            using var doc = JsonDocument.Parse(aliasesJson);
+            return doc.RootElement.ValueKind == JsonValueKind.Array
+                ? doc.RootElement.EnumerateArray()
+                    .Select(alias => alias.ValueKind == JsonValueKind.String ? alias.GetString() : alias.GetRawText())
+                    .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                    .Select(alias => alias!.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList()
+                : [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<string> ReadPayloadAliases(string? payloadJson)
     {
         if (string.IsNullOrWhiteSpace(payloadJson) || !payloadJson.TrimStart().StartsWith('{'))
             return [];
@@ -1354,6 +1367,49 @@ public sealed class IngestJobProcessor(
         {
             return [];
         }
+    }
+
+    private static IReadOnlyList<IngestWikiSectionInput> ReadStagingWikiSections(string? sectionsJson)
+    {
+        if (string.IsNullOrWhiteSpace(sectionsJson) || !sectionsJson.TrimStart().StartsWith('['))
+            return [];
+
+        try
+        {
+            return (JsonSerializer.Deserialize<List<IngestWikiSectionInput>>(sectionsJson) ?? [])
+                .Where(section => section is not null
+                    && (!string.IsNullOrWhiteSpace(section.Title) || !string.IsNullOrWhiteSpace(section.Body)))
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<string> ReadMergedStagingAliases(IngestStagingRecord item)
+    {
+        var aliases = ReadStagingAliases(item.AliasesJson);
+        return aliases.Count > 0
+            ? aliases
+            : ReadPayloadAliases(item.PayloadJson);
+    }
+
+    private static string StagingRecordObservationText(IngestStagingRecord item)
+    {
+        var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(item.Summary))
+            sb.AppendLine(item.Summary.Trim());
+        foreach (var section in ReadStagingWikiSections(item.WikiSectionsJson))
+        {
+            if (!string.IsNullOrWhiteSpace(section.Title))
+                sb.AppendLine(section.Title.Trim());
+            if (!string.IsNullOrWhiteSpace(section.Body))
+                sb.AppendLine(section.Body.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(item.Notes))
+            sb.AppendLine(item.Notes.Trim());
+        return sb.ToString().Trim();
     }
 
     private static string TruncateWords(string value, int maxWords)
@@ -1561,15 +1617,22 @@ public sealed class IngestJobProcessor(
     private static bool IsFinalReviewWriteTool(string toolName) =>
         string.Equals(toolName, "write_ingest_source_wiki_section", StringComparison.Ordinal);
 
-    private static void MarkReportItemDeleted(IngestReportItem item)
+    private static void MarkStagingRecordFinalized(IngestStagingRecord item)
     {
-        item.Status = IngestReportItemStatus.Deleted;
-        item.DeletedAt = DateTime.UtcNow;
+        item.Status = IngestStagingRecordStatus.Finalized;
+        item.FinalizedAt = DateTime.UtcNow;
+        item.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private static void MarkStagingRecordFailed(IngestStagingRecord item, string reason)
+    {
+        item.Status = IngestStagingRecordStatus.Failed;
+        item.ErrorMessage = reason;
         item.UpdatedAt = DateTime.UtcNow;
     }
 
     private static bool TryReadRelationshipPromotionInput(
-        IngestReportItem item,
+        IngestStagingRecord item,
         IngestJob job,
         out RelationshipPromotionInput input,
         out string reason)
@@ -1577,7 +1640,9 @@ public sealed class IngestJobProcessor(
         input = default!;
         reason = string.Empty;
 
-        if (!TryReadRelationshipEndpoints(item.PayloadJson, out var from, out var to))
+        var from = item.FromEntityId ?? Guid.Empty;
+        var to = item.ToEntityId ?? Guid.Empty;
+        if ((from == Guid.Empty || to == Guid.Empty) && !TryReadRelationshipEndpoints(item.PayloadJson, out from, out to))
         {
             reason = "payload is missing relationship endpoints";
             return false;
@@ -1589,7 +1654,7 @@ public sealed class IngestJobProcessor(
             return false;
         }
 
-        var edgeType = (item.ResourceType ?? string.Empty).Trim();
+        var edgeType = (item.EdgeType ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(edgeType))
         {
             reason = "relationship type is empty";
@@ -1610,7 +1675,7 @@ public sealed class IngestJobProcessor(
             return false;
         }
 
-        var sourceChunkIndex = ReadPayloadInt(item.PayloadJson, "sourceChunkIndex");
+        var sourceChunkIndex = item.SourceChunkIndex ?? ReadPayloadInt(item.PayloadJson, "sourceChunkIndex");
         if (sourceChunkIndex is null)
         {
             reason = "relationship is missing source chunk index";
@@ -1755,16 +1820,16 @@ public sealed class IngestJobProcessor(
         return contents;
     }
 
-    private static int CountDistinctEntities(IEnumerable<IngestReportItem> reportItems) =>
+    private static int CountDistinctEntities(IEnumerable<IngestStagingRecord> reportItems) =>
         reportItems
-            .Where(item => item.Kind == IngestReportItemKind.Entity && item.Status == IngestReportItemStatus.Active)
+            .Where(item => item.Kind == IngestStagingRecordKind.Entity && item.Status == IngestStagingRecordStatus.Active)
             .Select(item => item.EntityId?.ToString("N") ?? item.GraphNodeId?.ToString() ?? item.Id.ToString("N"))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();
 
-    private static int CountDistinctRelationships(IEnumerable<IngestReportItem> reportItems) =>
+    private static int CountDistinctRelationships(IEnumerable<IngestStagingRecord> reportItems) =>
         reportItems
-            .Where(item => item.Kind == IngestReportItemKind.Relationship && item.Status == IngestReportItemStatus.Active)
+            .Where(item => item.Kind == IngestStagingRecordKind.Relationship && item.Status == IngestStagingRecordStatus.Active)
             .Select(item => item.GraphEdgeId?.ToString() ?? item.Id.ToString("N"))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();

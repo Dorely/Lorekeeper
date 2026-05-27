@@ -46,6 +46,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<IngestJob> IngestJobs => Set<IngestJob>();
     public DbSet<IngestJobChunk> IngestJobChunks => Set<IngestJobChunk>();
     public DbSet<IngestReportItem> IngestReportItems => Set<IngestReportItem>();
+    public DbSet<IngestStagingRecord> IngestStagingRecords => Set<IngestStagingRecord>();
     public DbSet<IngestJobEvent> IngestJobEvents => Set<IngestJobEvent>();
     public DbSet<WebIngestCandidate> WebIngestCandidates => Set<WebIngestCandidate>();
     public DbSet<ProjectImportJob> ProjectImportJobs => Set<ProjectImportJob>();
@@ -545,6 +546,33 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
 
             entity.HasOne(e => e.SourceChunk)
                 .WithMany(c => c.ReportItems)
+                .HasForeignKey(e => e.SourceChunkId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<IngestStagingRecord>(entity =>
+        {
+            entity.HasIndex(e => new { e.JobId, e.Kind, e.Status, e.CreatedAt });
+            entity.HasIndex(e => new { e.JobId, e.SourceChunkId, e.Kind, e.Status });
+            entity.HasIndex(e => new { e.SourceId, e.Status });
+            entity.HasIndex(e => e.EntityId);
+            entity.HasIndex(e => e.GraphNodeId);
+            entity.HasIndex(e => e.GraphEdgeId);
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Job)
+                .WithMany(j => j.StagingRecords)
+                .HasForeignKey(e => e.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Source)
+                .WithMany(s => s.StagingRecords)
+                .HasForeignKey(e => e.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SourceChunk)
+                .WithMany(c => c.StagingRecords)
                 .HasForeignKey(e => e.SourceChunkId)
                 .OnDelete(DeleteBehavior.SetNull);
         });

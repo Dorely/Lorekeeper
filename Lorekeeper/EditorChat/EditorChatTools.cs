@@ -478,8 +478,7 @@ public sealed class EditorChatTools(
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
-            ingestSources = entity.IngestSources,
-            ingestObservations = entity.IngestObservations,
+            canonSources = entity.CanonSources,
             links = links.Select(LinkPayload),
             relationContext,
         });
@@ -502,8 +501,7 @@ public sealed class EditorChatTools(
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
-            ingestSources = entity.IngestSources,
-            ingestObservations = entity.IngestObservations,
+            canonSources = entity.CanonSources,
             relationContext,
         };
     }
@@ -1186,6 +1184,11 @@ public sealed class EditorChatTools(
             score += TextMatchScore(section.Title, query, titleWeight: 12, detailWeight: 6);
             score += TextMatchScore(section.Body, query, titleWeight: 12, detailWeight: 8);
         }
+        foreach (var canonSource in entity.CanonSources)
+        {
+            score += TextMatchScore(canonSource.SourceTitle, query, titleWeight: 12, detailWeight: 6);
+            score += TextMatchScore(canonSource.Markdown, query, titleWeight: 12, detailWeight: 8);
+        }
         foreach (var property in entity.Properties)
         {
             score += TextMatchScore(property.Key, query, titleWeight: 8, detailWeight: 4);
@@ -1203,6 +1206,11 @@ public sealed class EditorChatTools(
             {
                 score += TextMatchScore(section.Title, term, titleWeight: 18, detailWeight: 8);
                 score += TextMatchScore(section.Body, term, titleWeight: 18, detailWeight: 10);
+            }
+            foreach (var canonSource in entity.CanonSources)
+            {
+                score += TextMatchScore(canonSource.SourceTitle, term, titleWeight: 18, detailWeight: 8);
+                score += TextMatchScore(canonSource.Markdown, term, titleWeight: 18, detailWeight: 10);
             }
             foreach (var property in entity.Properties)
             {
@@ -1233,6 +1241,7 @@ public sealed class EditorChatTools(
         summary = TruncatePropertyValue(entity.Summary),
         aliases = entity.Aliases.Take(8).ToArray(),
         wikiSections = CompactWikiSections(entity.WikiSections),
+        canonSources = CompactCanonSources(entity.CanonSources),
         properties = CompactProperties(entity.Properties),
     };
 
@@ -1247,10 +1256,19 @@ public sealed class EditorChatTools(
         sortOrder = link.SortOrder,
         properties = link.Properties,
         summary = link.Summary,
-        ingestSources = link.IngestSources,
-        ingestObservations = link.IngestObservations,
         relationshipCitations = link.RelationshipCitations,
     };
+
+    private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>
+        sources
+            .Take(4)
+            .Select(source => new
+            {
+                source.SourceTitle,
+                source.SourceKind,
+                markdown = TruncatePropertyValue(source.Markdown),
+            })
+            .ToArray();
 
     private static object[] CompactWikiSections(IReadOnlyList<IngestWikiSection> sections) =>
         sections

@@ -126,11 +126,9 @@ public sealed record EntityLink(
     string Summary,
     IReadOnlyList<string> Aliases,
     IReadOnlyList<IngestWikiSection> WikiSections,
+    IReadOnlyList<IngestCanonSource> CanonSources,
     bool IsIngestCreated,
-    int IngestSourceCount,
-    int IngestObservationCount,
-    IReadOnlyList<IngestSourceAssertionSummary> IngestSources,
-    IReadOnlyList<IngestSourceObservation> IngestObservations,
+    int CanonSourceCount,
     IReadOnlyList<IngestWikiCitation> RelationshipCitations);
 
 /// <summary>
@@ -152,8 +150,6 @@ public sealed record StoryEntity(
     string Summary,
     IReadOnlyList<string> Aliases,
     IReadOnlyList<IngestWikiSection> WikiSections,
+    IReadOnlyList<IngestCanonSource> CanonSources,
     bool IsIngestCreated,
-    int IngestSourceCount,
-    int IngestObservationCount,
-    IReadOnlyList<IngestSourceAssertionSummary> IngestSources,
-    IReadOnlyList<IngestSourceObservation> IngestObservations);
+    int CanonSourceCount);

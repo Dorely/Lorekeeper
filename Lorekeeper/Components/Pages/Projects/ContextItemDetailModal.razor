@@ -406,8 +406,7 @@
             <EntityKnowledgeView Summary="@_entity.Summary"
                                  Aliases="@_entity.Aliases"
                                  WikiSections="@_entity.WikiSections"
-                                 IngestSources="@_entity.IngestSources"
-                                 IngestObservations="@_entity.IngestObservations" />
+                                 CanonSources="@_entity.CanonSources" />
             @RenderEntityLinks()
         }
     </div>;
@@ -696,9 +695,9 @@
                         <span class="context-detail-link-edge">@link.EdgeType</span>
                         <span class="context-detail-link-other">@link.OtherEntityName</span>
                         <span class="context-detail-link-type text-muted small">@link.OtherEntityType</span>
-                        @if (link.IngestSourceCount > 0)
+                        @if (link.CanonSourceCount > 0)
                         {
-                            <span class="context-detail-link-badge">@link.IngestSourceCount source@(PluralSuffix(link.IngestSourceCount))</span>
+                            <span class="context-detail-link-badge">@link.CanonSourceCount canon source@(PluralSuffix(link.CanonSourceCount))</span>
                         }
                         else if (link.IsIngestCreated)
                         {
