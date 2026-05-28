@@ -1,260 +1,69 @@
 @using Lorekeeper.Graph
 @using Lorekeeper.Ingest
-@implements IAsyncDisposable
-@inject IProjectGraphService ProjectGraph
-@inject IJSRuntime JS
 
-<aside class="graph-details" @ref="_rootEl" aria-label="Graph details">
+<aside class="graph-details" aria-label="Graph details">
     <div class="graph-details-header">
         <div>
-            <div class="graph-details-kicker">Graph editor</div>
+            <div class="graph-details-kicker">Graph overview</div>
             <h5>@PanelTitle</h5>
         </div>
-        @if (AddingNode || SelectedNode is not null)
+        @if (SelectedNode is not null)
         {
             <button type="button" class="btn-close" @onclick="ClearPanelAsync" aria-label="Close details"></button>
         }
     </div>
-
-    @if (_error is not null)
-    {
-        <div class="alert alert-danger alert-dismissible graph-details-alert">
-            @_error
-            <button type="button" class="btn-close" @onclick="() => _error = null"></button>
-        </div>
-    }
 
     <div class="graph-details-body">
         @if (Snapshot is null)
         {
             <div class="text-muted small"><em>Loading graph details...</em></div>
         }
-        else if (AddingNode)
-        {
-            @RenderAddNodeForm()
-        }
         else if (SelectedNode is { } selected)
         {
-            @RenderNodeEditor(selected)
+            @RenderNodeOverview(selected)
         }
         else
         {
             <div class="graph-details-empty">
                 <strong>Select a node</strong>
-                <p>Click a node in the graph to inspect and edit it, or create a new graph node.</p>
-                <button type="button" class="btn btn-sm btn-primary" @onclick="BeginAddNodeAsync">Add node</button>
+                <p>Click a node in the graph to inspect it, or create a new graph node.</p>
+                <button type="button" class="btn btn-sm btn-primary" @onclick="AddNodeAsync">Add node</button>
             </div>
         }
     </div>
 </aside>
 
 @code {
-    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public ProjectGraphSnapshot? Snapshot { get; set; }
     [Parameter] public long? SelectedNodeId { get; set; }
-    [Parameter] public bool AddingNode { get; set; }
-    [Parameter] public EventCallback<bool> AddingNodeChanged { get; set; }
-    [Parameter] public EventCallback OnChanged { get; set; }
     [Parameter] public EventCallback<long?> OnSelectNode { get; set; }
-
-    private sealed class PropertyRow
-    {
-        public string Key { get; set; } = string.Empty;
-        public string Value { get; set; } = string.Empty;
-    }
-
-    private ElementReference _rootEl;
-    private IJSObjectReference? _autoSizer;
-    private long? _editingNodeId;
-    private bool _lastAddingNode;
-    private string _editName = string.Empty;
-    private string _editParentNodeId = string.Empty;
-    private readonly List<PropertyRow> _editProperties = [];
-    private bool _confirmDeleteNode;
-
-    private string _newType = string.Empty;
-    private string _newTypeName = string.Empty;
-    private string _newName = string.Empty;
-    private string _newParentNodeId = string.Empty;
-    private readonly List<PropertyRow> _newProperties = [];
-
-    private bool _addingRelationship;
-    private string _relationshipDirection = "outgoing";
-    private string _relationshipTargetNodeId = string.Empty;
-    private string _relationshipType = string.Empty;
-    private readonly List<PropertyRow> _relationshipProperties = [];
-
-    private long? _editingEdgeId;
-    private string _edgeType = string.Empty;
-    private readonly List<PropertyRow> _edgeProperties = [];
-    private long? _confirmDeleteEdgeId;
-    private string? _error;
+    [Parameter] public EventCallback<long> OnEditNode { get; set; }
+    [Parameter] public EventCallback OnAddNode { get; set; }
 
     private ProjectGraphNode? SelectedNode =>
         SelectedNodeId is long nodeId ? Snapshot?.Nodes.FirstOrDefault(n => n.NodeId == nodeId) : null;
 
-    private string PanelTitle => AddingNode
-        ? "Add node"
-        : SelectedNode is { } selected ? selected.Label : "Details";
+    private string PanelTitle => SelectedNode is { } selected ? selected.Label : "Details";
 
-    protected override void OnParametersSet()
-    {
-        if (AddingNode && !_lastAddingNode)
-            InitializeAddNode();
-
-        _lastAddingNode = AddingNode;
-
-        if (!AddingNode && SelectedNode is { } selected && _editingNodeId != selected.NodeId)
-            InitializeNodeEditor(selected);
-
-        if (!AddingNode && SelectedNode is null)
-            _editingNodeId = null;
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender || _autoSizer is null)
-            await ImportAutoSizerAsync();
-
-        if (_autoSizer is not null)
-            await RefreshAutoSizeAsync(_rootEl);
-    }
-
-    private async Task ImportAutoSizerAsync()
-    {
-        try
-        {
-            _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js");
-        }
-        catch (JSDisconnectedException) { }
-        catch (OperationCanceledException) { }
-    }
-
-    private async Task RefreshAutoSizeAsync(ElementReference root)
-    {
-        if (_autoSizer is null) return;
-
-        try { await _autoSizer.InvokeVoidAsync("refresh", root); }
-        catch (JSDisconnectedException) { }
-        catch (OperationCanceledException) { }
-    }
-
-    private RenderFragment RenderAddNodeForm() => @<form class="graph-form" @onsubmit="CreateNodeAsync" @onsubmit:preventDefault="true">
-        <div class="mb-2">
-            <label class="form-label small text-muted">Type</label>
-            <select class="form-select form-select-sm" value="@_newType" @onchange="OnNewTypeChanged">
-                <option value="">Choose type</option>
-                @foreach (var type in Snapshot?.NodeTypes.Where(t => t.CanCreate).OrderBy(t => t.SortOrder).ThenBy(t => t.PluralLabel) ?? Enumerable.Empty<ProjectGraphNodeType>())
-                {
-                    <option value="@type.Type">@type.SingularLabel</option>
-                }
-                <option value="__new">New type...</option>
-            </select>
+    private RenderFragment RenderNodeOverview(ProjectGraphNode selected) => @<div class="graph-node-overview">
+        <div class="graph-node-meta">
+            <span class="graph-node-type" style="border-color: @selected.Color">@selected.Type</span>
+            <span class="text-muted small">@selected.Key</span>
+            @if (selected.CanonSourceCount > 0)
+            {
+                <span class="badge text-bg-info">@selected.CanonSourceCount canon source@(PluralSuffix(selected.CanonSourceCount))</span>
+            }
+            else if (selected.IsIngestCreated)
+            {
+                <span class="badge text-bg-info">ingest</span>
+            }
         </div>
 
-        @if (_newType == "__new")
-        {
-            <div class="mb-2">
-                <label class="form-label small text-muted">New type name</label>
-                <input type="text" class="form-control form-control-sm" @bind="_newTypeName" @bind:event="oninput" />
-            </div>
-        }
-
-        <div class="mb-2">
-            <label class="form-label small text-muted">Name</label>
-            <input type="text" class="form-control form-control-sm" @bind="_newName" @bind:event="oninput" />
+        <div class="graph-overview-actions">
+            <button type="button" class="btn btn-sm btn-primary" @onclick="() => EditNodeAsync(selected.NodeId)">Edit</button>
         </div>
 
-        <div class="mb-2">
-            <label class="form-label small text-muted">Parent</label>
-            <select class="form-select form-select-sm" @bind="_newParentNodeId">
-                <option value="">No parent</option>
-                @foreach (var node in NewNodeParentOptions())
-                {
-                    <option value="@node.NodeId">@node.Label (@node.Type)</option>
-                }
-            </select>
-        </div>
-
-        @RenderPropertyEditor(_newProperties, allowCustomKeys: true, fixedKeys: false)
-
-        <div class="graph-form-actions">
-            <button type="button" class="btn btn-sm btn-link" @onclick="ClearPanelAsync">Cancel</button>
-            <button type="submit" class="btn btn-sm btn-primary" disabled="@(!CanCreateNode)">Create node</button>
-        </div>
-    </form>;
-
-    private RenderFragment RenderNodeEditor(ProjectGraphNode selected) => @<div class="graph-node-editor">
-        <form class="graph-form" @onsubmit="SaveNodeAsync" @onsubmit:preventDefault="true">
-            <div class="graph-node-meta">
-                <span class="graph-node-type" style="border-color: @selected.Color">@selected.Type</span>
-                <span class="text-muted small">@selected.Key</span>
-                @if (selected.CanonSourceCount > 0)
-                {
-                    <span class="badge text-bg-info">@selected.CanonSourceCount canon source@(PluralSuffix(selected.CanonSourceCount))</span>
-                }
-                else if (selected.IsIngestCreated)
-                {
-                    <span class="badge text-bg-info">ingest</span>
-                }
-            </div>
-
-            @if (selected.CanRename)
-            {
-                <div class="mb-2">
-                    <label class="form-label small text-muted">Name</label>
-                    <input type="text" class="form-control form-control-sm" @bind="_editName" @bind:event="oninput" />
-                </div>
-            }
-
-            @if (selected.CanChangeParent)
-            {
-                <div class="mb-2">
-                    <label class="form-label small text-muted">Parent</label>
-                    <select class="form-select form-select-sm" @bind="_editParentNodeId">
-                        <option value="">No parent</option>
-                        @foreach (var node in ParentOptions(selected))
-                        {
-                            <option value="@node.NodeId">@node.Label (@node.Type)</option>
-                        }
-                    </select>
-                </div>
-            }
-
-            @if (selected.CanEditProperties)
-            {
-                @RenderPropertyEditor(_editProperties, selected.AllowsCustomProperties, fixedKeys: !selected.AllowsCustomProperties)
-            }
-            else if (selected.Properties.Count > 0)
-            {
-                <div class="graph-readonly-block">
-                    <div class="graph-section-title">Properties</div>
-                    @foreach (var prop in selected.Properties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
-                    {
-                        <div class="graph-readonly-row">
-                            <span>@prop.Key</span>
-                            <strong>@(string.IsNullOrWhiteSpace(prop.Value) ? "-" : prop.Value)</strong>
-                        </div>
-                    }
-                </div>
-            }
-
-            <div class="graph-form-actions">
-                @if (selected.CanDelete)
-                {
-                    @if (_confirmDeleteNode)
-                    {
-                        <button type="button" class="btn btn-sm btn-danger me-auto" @onclick="DeleteNodeAsync">Confirm delete</button>
-                        <button type="button" class="btn btn-sm btn-link" @onclick="() => _confirmDeleteNode = false">Cancel delete</button>
-                    }
-                    else
-                    {
-                        <button type="button" class="btn btn-sm btn-link text-danger me-auto" @onclick="() => _confirmDeleteNode = true">Delete</button>
-                    }
-                }
-                <button type="submit" class="btn btn-sm btn-primary">Save</button>
-            </div>
-        </form>
+        @RenderProperties(selected)
 
         <EntityKnowledgeView Summary="@selected.Summary"
                              Aliases="@selected.Aliases"
@@ -264,78 +73,69 @@
         <div class="graph-links-section">
             <div class="graph-links-header">
                 <div class="graph-section-title">Relationships</div>
-                <button type="button" class="btn btn-sm btn-link" @onclick="BeginAddRelationship">Add link</button>
             </div>
 
-            @if (_addingRelationship)
+            @if (!AdjacentEdges(selected).Any())
             {
-                @RenderRelationshipForm(selected)
+                <div class="text-muted small"><em>No relationships.</em></div>
             }
-
-            @foreach (var edge in AdjacentEdges(selected))
+            else
             {
-                var other = OtherNode(edge, selected.NodeId);
-                <div class="graph-link-row" @key="edge.EdgeId">
-                    <div class="graph-link-main">
-                        <span class="graph-link-direction">@(edge.FromNodeId == selected.NodeId ? "out" : "in")</span>
-                        <span class="graph-link-type">@edge.EdgeType</span>
-                        @if (other is not null)
+                @foreach (var edge in AdjacentEdges(selected))
+                {
+                    var other = OtherNode(edge, selected.NodeId);
+                    <div class="graph-link-row" @key="edge.EdgeId">
+                        <div class="graph-link-main">
+                            <span class="graph-link-direction">@(edge.FromNodeId == selected.NodeId ? "out" : "in")</span>
+                            <span class="graph-link-type">@edge.EdgeType</span>
+                            @if (other is not null)
+                            {
+                                <button type="button" class="graph-link-target" @onclick="() => SelectNodeAsync(other.NodeId)">@other.Label</button>
+                                <span class="text-muted small">@other.Type</span>
+                            }
+                            @if (edge.IsManaged)
+                            {
+                                <span class="badge text-bg-secondary">managed</span>
+                            }
+                            @if (edge.CanonSourceCount > 0)
+                            {
+                                <span class="badge text-bg-info">@edge.CanonSourceCount canon source@(PluralSuffix(edge.CanonSourceCount))</span>
+                            }
+                            else if (IsExtractedFrom(edge) || edge.IsIngestCreated)
+                            {
+                                <span class="badge text-bg-info">ingest</span>
+                            }
+                        </div>
+                        @RenderRelationshipCitations(edge)
+                        @if (edge.Properties.Count > 0)
                         {
-                            <button type="button" class="graph-link-target" @onclick="() => SelectNodeAsync(other.NodeId)">@other.Label</button>
-                            <span class="text-muted small">@other.Type</span>
-                        }
-                        @if (edge.IsManaged)
-                        {
-                            <span class="badge text-bg-secondary">managed</span>
-                        }
-                        @if (edge.CanonSourceCount > 0)
-                        {
-                            <span class="badge text-bg-info">@edge.CanonSourceCount canon source@(PluralSuffix(edge.CanonSourceCount))</span>
-                        }
-                        else if (IsExtractedFrom(edge) || edge.IsIngestCreated)
-                        {
-                            <span class="badge text-bg-info">ingest</span>
+                            <div class="graph-link-props">
+                                @foreach (var prop in edge.Properties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    <span>@prop.Key: @(string.IsNullOrWhiteSpace(prop.Value) ? "-" : prop.Value)</span>
+                                }
+                            </div>
                         }
                     </div>
-
-                    @if (_editingEdgeId == edge.EdgeId)
-                    {
-                        @RenderEdgeEditor(edge)
-                    }
-                    else if (edge.CanEdit || edge.CanDelete)
-                    {
-                        <div class="graph-link-actions">
-                            @if (edge.CanEdit)
-                            {
-                                <button type="button" class="btn btn-sm btn-link" @onclick="() => BeginEditEdge(edge)">Edit</button>
-                            }
-                            @if (edge.CanDelete)
-                            {
-                                @if (_confirmDeleteEdgeId == edge.EdgeId)
-                                {
-                                    <button type="button" class="btn btn-sm btn-link text-danger" @onclick="() => DeleteEdgeAsync(edge.EdgeId)">Confirm</button>
-                                    <button type="button" class="btn btn-sm btn-link" @onclick="() => _confirmDeleteEdgeId = null">Cancel</button>
-                                }
-                                else
-                                {
-                                    <button type="button" class="btn btn-sm btn-link text-danger" @onclick="() => _confirmDeleteEdgeId = edge.EdgeId">Delete</button>
-                                }
-                            }
-                        </div>
-                    }
-                    @RenderRelationshipCitations(edge)
-                    @if (!edge.CanEdit && edge.Properties.Count > 0)
-                    {
-                        <div class="graph-link-props">
-                            @foreach (var prop in edge.Properties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
-                            {
-                                <span>@prop.Key: @(string.IsNullOrWhiteSpace(prop.Value) ? "-" : prop.Value)</span>
-                            }
-                        </div>
-                    }
-                </div>
+                }
             }
         </div>
+    </div>;
+
+    private RenderFragment RenderProperties(ProjectGraphNode selected) => @<div>
+        @if (selected.Properties.Count > 0)
+        {
+            <div class="graph-readonly-block">
+                <div class="graph-section-title">Properties</div>
+                @foreach (var prop in selected.Properties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    <div class="graph-readonly-row">
+                        <span>@prop.Key</span>
+                        <strong>@(string.IsNullOrWhiteSpace(prop.Value) ? "-" : prop.Value)</strong>
+                    </div>
+                }
+            </div>
+        }
     </div>;
 
     private RenderFragment RenderRelationshipCitations(ProjectGraphEdge edge) => @<div>
@@ -360,78 +160,6 @@
         }
     </div>;
 
-    private RenderFragment RenderPropertyEditor(List<PropertyRow> rows, bool allowCustomKeys, bool fixedKeys) => @<div class="graph-property-editor">
-        <div class="graph-section-title">Properties</div>
-        @if (rows.Count == 0)
-        {
-            <div class="text-muted small"><em>No editable properties.</em></div>
-        }
-        @for (var i = 0; i < rows.Count; i++)
-        {
-            var row = rows[i];
-            var index = i;
-            <div class="graph-property-row" @key="row">
-                @if (fixedKeys)
-                {
-                    <div class="graph-property-fixed-key">@row.Key</div>
-                }
-                else
-                {
-                    <input type="text" class="form-control form-control-sm" placeholder="key" @bind="row.Key" @bind:event="oninput" />
-                }
-                <textarea class="form-control form-control-sm" data-autosize rows="@RowsFor(row.Value)" placeholder="value" @bind="row.Value" @bind:event="oninput"></textarea>
-                @if (allowCustomKeys)
-                {
-                    <button type="button" class="btn btn-sm btn-link text-danger graph-property-remove" @onclick="() => rows.RemoveAt(index)">x</button>
-                }
-            </div>
-        }
-        @if (allowCustomKeys)
-        {
-            <button type="button" class="btn btn-sm btn-link graph-add-property" @onclick="() => rows.Add(new PropertyRow())">Add property</button>
-        }
-    </div>;
-
-    private RenderFragment RenderRelationshipForm(ProjectGraphNode selected) => @<form class="graph-relationship-form" @onsubmit="CreateRelationshipAsync" @onsubmit:preventDefault="true">
-        <div class="graph-relationship-grid">
-            <select class="form-select form-select-sm" @bind="_relationshipDirection">
-                <option value="outgoing">Outgoing</option>
-                <option value="incoming">Incoming</option>
-            </select>
-            <select class="form-select form-select-sm" @bind="_relationshipTargetNodeId">
-                <option value="">Target node</option>
-                @foreach (var node in Snapshot?.Nodes.Where(n => n.NodeId != selected.NodeId).OrderBy(n => n.Label) ?? Enumerable.Empty<ProjectGraphNode>())
-                {
-                    <option value="@node.NodeId">@node.Label (@node.Type)</option>
-                }
-            </select>
-        </div>
-        <input type="text" class="form-control form-control-sm" placeholder="Relationship type" @bind="_relationshipType" @bind:event="oninput" />
-        @RenderPropertyEditor(_relationshipProperties, allowCustomKeys: true, fixedKeys: false)
-        <div class="graph-form-actions">
-            <button type="button" class="btn btn-sm btn-link" @onclick="CancelRelationship">Cancel</button>
-            <button type="submit" class="btn btn-sm btn-primary" disabled="@(!CanCreateRelationship)">Create link</button>
-        </div>
-    </form>;
-
-    private RenderFragment RenderEdgeEditor(ProjectGraphEdge edge) => @<form class="graph-edge-editor" @onsubmit="() => SaveEdgeAsync(edge.EdgeId)" @onsubmit:preventDefault="true">
-        <input type="text" class="form-control form-control-sm" @bind="_edgeType" @bind:event="oninput" />
-        @RenderPropertyEditor(_edgeProperties, allowCustomKeys: true, fixedKeys: false)
-        <div class="graph-form-actions">
-            <button type="button" class="btn btn-sm btn-link" @onclick="CancelEdgeEdit">Cancel</button>
-            <button type="submit" class="btn btn-sm btn-primary" disabled="@(string.IsNullOrWhiteSpace(_edgeType))">Save link</button>
-        </div>
-    </form>;
-
-    private bool CanCreateNode =>
-        !string.IsNullOrWhiteSpace(_newName)
-        && (!string.IsNullOrWhiteSpace(_newType) && (_newType != "__new" || !string.IsNullOrWhiteSpace(_newTypeName)));
-
-    private bool CanCreateRelationship =>
-        SelectedNode is not null
-        && long.TryParse(_relationshipTargetNodeId, out _)
-        && !string.IsNullOrWhiteSpace(_relationshipType);
-
     private IEnumerable<ProjectGraphEdge> AdjacentEdges(ProjectGraphNode node) =>
         Snapshot?.Edges
             .Where(e => e.FromNodeId == node.NodeId || e.ToNodeId == node.NodeId)
@@ -445,236 +173,13 @@
         return Snapshot?.Nodes.FirstOrDefault(n => n.NodeId == otherId);
     }
 
-    private IEnumerable<ProjectGraphNode> ParentOptions(ProjectGraphNode selected)
-    {
-        if (Snapshot is null) return [];
-        var options = Snapshot.Nodes.Where(n => n.NodeId != selected.NodeId);
-        if (selected.Type == "Chapter")
-            options = options.Where(n => n.Type == "Project" || n.Type == "Act");
-        return options.OrderBy(n => n.Type).ThenBy(n => n.Label);
-    }
+    private async Task ClearPanelAsync() => await OnSelectNode.InvokeAsync(null);
 
-    private IEnumerable<ProjectGraphNode> NewNodeParentOptions()
-    {
-        if (Snapshot is null) return [];
-        var options = Snapshot.Nodes.AsEnumerable();
-        if (_newType == "Chapter")
-            options = options.Where(n => n.Type == "Project" || n.Type == "Act");
-        return options.OrderBy(n => n.Type).ThenBy(n => n.Label);
-    }
+    private async Task SelectNodeAsync(long nodeId) => await OnSelectNode.InvokeAsync(nodeId);
 
-    private void InitializeNodeEditor(ProjectGraphNode selected)
-    {
-        _editingNodeId = selected.NodeId;
-        _editName = selected.Label;
-        _editParentNodeId = selected.ParentNodeId?.ToString() ?? string.Empty;
-        _confirmDeleteNode = false;
-        _confirmDeleteEdgeId = null;
-        _editingEdgeId = null;
-        _editProperties.Clear();
+    private async Task EditNodeAsync(long nodeId) => await OnEditNode.InvokeAsync(nodeId);
 
-        if (!selected.CanEditProperties) return;
-        if (selected.AllowsCustomProperties)
-        {
-            foreach (var key in selected.EditablePropertyKeys)
-                _editProperties.Add(new PropertyRow { Key = key, Value = selected.Properties.GetValueOrDefault(key) ?? string.Empty });
-        }
-        else
-        {
-            foreach (var key in selected.EditablePropertyKeys)
-                _editProperties.Add(new PropertyRow { Key = key, Value = selected.Properties.GetValueOrDefault(key) ?? string.Empty });
-        }
-    }
-
-    private void InitializeAddNode()
-    {
-        _newType = Snapshot?.NodeTypes.FirstOrDefault(t => t.CanCreate && !t.IsStructural)?.Type
-            ?? Snapshot?.NodeTypes.FirstOrDefault(t => t.CanCreate)?.Type
-            ?? string.Empty;
-        _newTypeName = string.Empty;
-        _newName = string.Empty;
-        _newParentNodeId = string.Empty;
-        ResetNewProperties();
-    }
-
-    private void OnNewTypeChanged(ChangeEventArgs e)
-    {
-        _newType = e.Value?.ToString() ?? string.Empty;
-        _newTypeName = string.Empty;
-        ResetNewProperties();
-    }
-
-    private void ResetNewProperties()
-    {
-        _newProperties.Clear();
-        var type = Snapshot?.NodeTypes.FirstOrDefault(t => t.Type == _newType);
-        if (type is not null)
-        {
-            foreach (var prop in type.DefaultProperties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
-                _newProperties.Add(new PropertyRow { Key = prop.Key, Value = prop.Value ?? string.Empty });
-        }
-        if (_newType == "ProjectFact" && _newProperties.All(p => p.Key != "key"))
-            _newProperties.Add(new PropertyRow { Key = "key" });
-        if (_newType == "ProjectFact" && _newProperties.All(p => p.Key != "value"))
-            _newProperties.Add(new PropertyRow { Key = "value" });
-        if ((_newType == "Act" || _newType == "Chapter") && _newProperties.All(p => p.Key != "synopsis"))
-            _newProperties.Add(new PropertyRow { Key = "synopsis" });
-    }
-
-    private async Task CreateNodeAsync()
-    {
-        if (!CanCreateNode) return;
-        try
-        {
-            await ProjectGraph.CreateNodeAsync(ProjectId, new ProjectGraphNodeCreateRequest(
-                _newType,
-                _newName,
-                BuildProperties(_newProperties),
-                ParseNullableLong(_newParentNodeId),
-                _newTypeName));
-            await AddingNodeChanged.InvokeAsync(false);
-            await OnChanged.InvokeAsync();
-        }
-        catch (Exception ex) { _error = ex.Message; }
-    }
-
-    private async Task SaveNodeAsync()
-    {
-        if (SelectedNode is not { } selected) return;
-        try
-        {
-            await ProjectGraph.UpdateNodeAsync(ProjectId, new ProjectGraphNodeUpdateRequest(
-                selected.NodeId,
-                selected.CanRename ? _editName : null,
-                selected.CanEditProperties ? BuildProperties(_editProperties) : null));
-
-            if (selected.CanChangeParent && ParseNullableLong(_editParentNodeId) != selected.ParentNodeId)
-                await ProjectGraph.MoveParentAsync(ProjectId, new ProjectGraphMoveParentRequest(selected.NodeId, ParseNullableLong(_editParentNodeId)));
-
-            await OnChanged.InvokeAsync();
-        }
-        catch (Exception ex) { _error = ex.Message; }
-    }
-
-    private async Task DeleteNodeAsync()
-    {
-        if (SelectedNode is not { } selected) return;
-        try
-        {
-            await ProjectGraph.DeleteNodeAsync(ProjectId, selected.NodeId);
-            _confirmDeleteNode = false;
-            await OnSelectNode.InvokeAsync(null);
-            await OnChanged.InvokeAsync();
-        }
-        catch (Exception ex) { _error = ex.Message; }
-    }
-
-    private async Task BeginAddNodeAsync()
-    {
-        await AddingNodeChanged.InvokeAsync(true);
-        InitializeAddNode();
-    }
-
-    private async Task ClearPanelAsync()
-    {
-        _error = null;
-        await AddingNodeChanged.InvokeAsync(false);
-        await OnSelectNode.InvokeAsync(null);
-    }
-
-    private async Task SelectNodeAsync(long nodeId)
-    {
-        await AddingNodeChanged.InvokeAsync(false);
-        await OnSelectNode.InvokeAsync(nodeId);
-    }
-
-    private void BeginAddRelationship()
-    {
-        _addingRelationship = true;
-        _relationshipDirection = "outgoing";
-        _relationshipTargetNodeId = string.Empty;
-        _relationshipType = string.Empty;
-        _relationshipProperties.Clear();
-    }
-
-    private void CancelRelationship()
-    {
-        _addingRelationship = false;
-        _relationshipProperties.Clear();
-    }
-
-    private async Task CreateRelationshipAsync()
-    {
-        if (SelectedNode is not { } selected || !long.TryParse(_relationshipTargetNodeId, out var targetNodeId)) return;
-        try
-        {
-            var fromNodeId = _relationshipDirection == "incoming" ? targetNodeId : selected.NodeId;
-            var toNodeId = _relationshipDirection == "incoming" ? selected.NodeId : targetNodeId;
-            await ProjectGraph.CreateRelationshipAsync(ProjectId, new ProjectGraphRelationshipCreateRequest(
-                fromNodeId,
-                toNodeId,
-                _relationshipType,
-                BuildProperties(_relationshipProperties)));
-            CancelRelationship();
-            await OnChanged.InvokeAsync();
-        }
-        catch (Exception ex) { _error = ex.Message; }
-    }
-
-    private void BeginEditEdge(ProjectGraphEdge edge)
-    {
-        _editingEdgeId = edge.EdgeId;
-        _edgeType = edge.EdgeType;
-        _edgeProperties.Clear();
-        foreach (var prop in edge.Properties.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
-            _edgeProperties.Add(new PropertyRow { Key = prop.Key, Value = prop.Value ?? string.Empty });
-    }
-
-    private void CancelEdgeEdit()
-    {
-        _editingEdgeId = null;
-        _edgeProperties.Clear();
-    }
-
-    private async Task SaveEdgeAsync(long edgeId)
-    {
-        try
-        {
-            await ProjectGraph.UpdateRelationshipAsync(ProjectId, new ProjectGraphRelationshipUpdateRequest(edgeId, _edgeType, BuildProperties(_edgeProperties)));
-            CancelEdgeEdit();
-            await OnChanged.InvokeAsync();
-        }
-        catch (Exception ex) { _error = ex.Message; }
-    }
-
-    private async Task DeleteEdgeAsync(long edgeId)
-    {
-        try
-        {
-            await ProjectGraph.DeleteRelationshipAsync(ProjectId, edgeId);
-            _confirmDeleteEdgeId = null;
-            await OnChanged.InvokeAsync();
-        }
-        catch (Exception ex) { _error = ex.Message; }
-    }
-
-    private static Dictionary<string, string?> BuildProperties(IEnumerable<PropertyRow> rows)
-    {
-        var result = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var row in rows)
-        {
-            var key = row.Key.Trim();
-            if (key.Length == 0) continue;
-            result[key] = row.Value;
-        }
-        return result;
-    }
-
-    private static long? ParseNullableLong(string value) =>
-        long.TryParse(value, out var parsed) ? parsed : null;
-
-    private static int RowsFor(string value) =>
-        Math.Clamp(1 + value.Count(ch => ch == '\n'), 2, 8);
+    private async Task AddNodeAsync() => await OnAddNode.InvokeAsync();
 
     private static bool IsExtractedFrom(ProjectGraphEdge edge) =>
         string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
@@ -683,14 +188,4 @@
         $"{citation.SourceId}:{citation.SourceChunkId}:{citation.SourceBlockId}:{citation.PageNumber}:{citation.Locator}";
 
     private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_autoSizer is not null)
-        {
-            try { await _autoSizer.DisposeAsync(); }
-            catch (JSDisconnectedException) { }
-            catch (OperationCanceledException) { }
-        }
-    }
 }

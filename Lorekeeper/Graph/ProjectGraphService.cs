@@ -310,18 +310,18 @@ public sealed class ProjectGraphService(
     public async Task UpdateRelationshipAsync(Guid projectId, ProjectGraphRelationshipUpdateRequest request, CancellationToken cancellationToken = default)
     {
         var edge = await GetRequiredProjectEdgeAsync(projectId, request.EdgeId, cancellationToken);
-        if (string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Managed parent links cannot be edited directly.");
+        if (IsReadOnlyRelationship(edge))
+            throw new InvalidOperationException("Managed and provenance links cannot be edited directly.");
 
-        await entities.UpdateLinkAsync(projectId, edge.Id, request.EdgeType, CleanProperties(request.Properties), cancellationToken);
+        await entities.UpdateLinkAsync(projectId, edge.Id, NormalizeEditableEdgeType(request.EdgeType), CleanProperties(request.Properties), cancellationToken);
         await TouchProjectAsync(projectId, cancellationToken);
     }
 
     public async Task DeleteRelationshipAsync(Guid projectId, long edgeId, CancellationToken cancellationToken = default)
     {
         var edge = await GetRequiredProjectEdgeAsync(projectId, edgeId, cancellationToken);
-        if (string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Managed parent links cannot be deleted directly.");
+        if (IsReadOnlyRelationship(edge))
+            throw new InvalidOperationException("Managed and provenance links cannot be deleted directly.");
 
         await entities.DeleteLinkAsync(projectId, edge.Id, cancellationToken);
         await TouchProjectAsync(projectId, cancellationToken);
@@ -369,7 +369,7 @@ public sealed class ProjectGraphService(
     private static ProjectGraphEdge ProjectEdge(GraphEdge edge)
     {
         var isManaged = string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase);
-        var isExtractedFrom = string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
+        var isReadOnly = IsReadOnlyRelationship(edge);
         return new ProjectGraphEdge(
             edge.Id,
             edge.FromNodeId,
@@ -378,8 +378,8 @@ public sealed class ProjectGraphService(
             ProjectProperties(edge.Properties),
             edge.SortOrder,
             isManaged,
-            !isManaged && !isExtractedFrom,
-            !isManaged && !isExtractedFrom,
+            !isReadOnly,
+            !isReadOnly,
             Read(edge.Properties, IngestWikiSheet.SummaryProperty) ?? string.Empty,
             IngestWikiSheet.ReadRelationshipCitations(edge.Properties),
             IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties),
@@ -427,6 +427,7 @@ public sealed class ProjectGraphService(
         || string.Equals(key, "structural", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "order", StringComparison.OrdinalIgnoreCase)
         || IngestWikiSheet.IsWikiStorageProperty(key)
+        || IngestWikiSheet.IsCanonSourceProperty(key)
         || IngestSourceAssertions.IsProtectedProperty(key)
         || key.StartsWith("vectorIndex", StringComparison.OrdinalIgnoreCase);
 
@@ -477,10 +478,21 @@ public sealed class ProjectGraphService(
         var type = (edgeType ?? string.Empty).Trim();
         if (type.Length == 0)
             throw new ArgumentException("Relationship type is required.", nameof(edgeType));
-        if (string.Equals(type, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Managed parent links cannot be edited directly.");
+        if (IsReservedEditableEdgeType(type))
+            throw new InvalidOperationException("Managed and provenance links cannot be edited directly.");
         return type;
     }
+
+    private static bool IsReservedEditableEdgeType(string edgeType) =>
+        string.Equals(edgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(edgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsReadOnlyRelationship(GraphEdge edge) =>
+        IsReservedEditableEdgeType(edge.EdgeType)
+        || IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties)
+        || IngestSourceAssertions.CountRelationshipSources(edge.Properties) > 0
+        || IngestWikiSheet.ReadRelationshipCitations(edge.Properties).Count > 0
+        || IngestWikiSheet.ReadCanonSources(edge.Properties).Count > 0;
 
     private async Task TouchProjectAsync(Guid projectId, CancellationToken cancellationToken)
     {
@@ -523,7 +535,13 @@ public sealed class ProjectGraphService(
         var result = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in properties)
         {
-            if (IngestSourceAssertions.IsProtectedProperty(kv.Key) || IngestWikiSheet.IsWikiStorageProperty(kv.Key)) continue;
+            if (IngestSourceAssertions.IsProtectedProperty(kv.Key)
+                || IngestWikiSheet.IsWikiStorageProperty(kv.Key)
+                || IngestWikiSheet.IsCanonSourceProperty(kv.Key))
+            {
+                continue;
+            }
+
             result[kv.Key] = kv.Value?.ToString();
         }
         return result;

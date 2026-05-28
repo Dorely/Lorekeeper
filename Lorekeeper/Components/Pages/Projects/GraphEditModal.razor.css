@@ -1,0 +1,244 @@
+.graph-edit-modal .modal-dialog {
+    max-width: min(76rem, calc(100vw - 2rem));
+}
+
+.graph-edit-title-wrap {
+    min-width: 0;
+}
+
+.graph-edit-kicker {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.7rem;
+}
+
+.graph-edit-alert {
+    font-size: 0.85rem;
+}
+
+.graph-edit-stack,
+.graph-edit-section,
+.graph-edit-props,
+.graph-edit-links,
+.graph-edit-relationship-form,
+.graph-edit-edge-editor,
+.graph-edit-ingest-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    min-width: 0;
+}
+
+.graph-edit-section {
+    padding-top: 0.1rem;
+}
+
+.graph-edit-section h6 {
+    margin: 0;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.graph-edit-section-head,
+.graph-edit-meta,
+.graph-edit-link-main,
+.graph-edit-link-actions,
+.graph-edit-form-actions,
+.graph-edit-ingest-head {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.graph-edit-section-head {
+    justify-content: space-between;
+}
+
+.graph-edit-meta {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.82rem;
+}
+
+.graph-edit-node-type {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.55rem;
+    padding: 0.12rem 0.45rem;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+    color: var(--bs-body-color, #212529);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.graph-edit-field {
+    min-width: 0;
+}
+
+.graph-edit-key-values {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: 0.45rem;
+}
+
+.graph-edit-key-value {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid var(--bs-border-color-translucent, #e9ecef);
+    border-radius: 0.35rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.graph-edit-key-value span {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.graph-edit-key-value strong {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.graph-edit-prop-row {
+    display: grid;
+    grid-template-columns: minmax(7rem, 12rem) minmax(0, 1fr) auto;
+    gap: 0.4rem;
+    align-items: start;
+}
+
+.graph-edit-fixed-key {
+    min-height: 1.9rem;
+    display: flex;
+    align-items: center;
+    padding: 0.25rem 0;
+    color: var(--bs-secondary-color, #6c757d);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+}
+
+.graph-edit-prop-row textarea {
+    min-width: 0;
+}
+
+.graph-edit-prop-remove {
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+}
+
+.graph-edit-add-prop {
+    align-self: flex-start;
+    padding-left: 0;
+}
+
+.graph-edit-relationship-form,
+.graph-edit-edge-editor {
+    padding: 0.6rem;
+    border: 1px solid var(--bs-border-color-translucent, #e9ecef);
+    border-radius: 0.45rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.graph-edit-relationship-grid {
+    display: grid;
+    grid-template-columns: minmax(9rem, 0.7fr) minmax(0, 1.3fr);
+    gap: 0.5rem;
+}
+
+.graph-edit-form-actions,
+.graph-edit-link-actions {
+    justify-content: flex-end;
+}
+
+.graph-edit-link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 0.55rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.45rem;
+    background: var(--bs-body-bg, #fff);
+}
+
+.graph-edit-link-dir,
+.graph-edit-link-edge {
+    color: var(--bs-secondary-color, #6c757d);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+}
+
+.graph-edit-link-edge {
+    color: var(--bs-body-color, #212529);
+    font-weight: 700;
+}
+
+.graph-edit-link-target {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--bs-link-color, #006bb7);
+    font-weight: 600;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+.graph-edit-link-props {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    color: var(--bs-secondary-color, #6c757d);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.72rem;
+}
+
+.graph-edit-ingest-section p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.graph-edit-ingest-observation {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.5rem;
+    border: 1px solid rgba(13, 202, 240, 0.35);
+    border-radius: 0.4rem;
+    background: rgba(13, 202, 240, 0.06);
+    font-size: 0.82rem;
+}
+
+.graph-edit-ingest-head {
+    align-items: baseline;
+}
+
+.graph-edit-ingest-head strong {
+    overflow-wrap: anywhere;
+}
+
+.graph-edit-ingest-head span {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+@media (max-width: 720px) {
+    .graph-edit-modal .modal-dialog {
+        max-width: calc(100vw - 1rem);
+        margin: 0.5rem;
+    }
+
+    .graph-edit-prop-row,
+    .graph-edit-relationship-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

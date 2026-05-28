@@ -25,7 +25,7 @@ else
                            @oninput="OnSearchInputAsync" />
                 </div>
 
-                <div class="graph-toolbar-group">
+                <div class="graph-toolbar-group graph-type-group">
                     <label class="visually-hidden" for="@_typeFilterId">Filter by type</label>
                     <select id="@_typeFilterId" class="form-select form-select-sm graph-type-filter"
                             value="@_typeFilter" @onchange="OnTypeFilterChangedAsync">
@@ -43,13 +43,18 @@ else
                 </label>
 
                 <label class="graph-toggle">
+                    <input type="checkbox" checked="@_showIngestSources" @onchange="OnShowIngestSourcesChangedAsync" />
+                    <span>Ingest sources</span>
+                </label>
+
+                <label class="graph-toggle">
                     <input type="checkbox" checked="@_showManagedEdges" @onchange="OnShowManagedEdgesChangedAsync" />
                     <span>Managed links</span>
                 </label>
 
                 <label class="graph-toggle">
                     <input type="checkbox" checked="@_showOnlyIngest" @onchange="OnShowOnlyIngestChangedAsync" />
-                    <span>Ingested</span>
+                    <span>Only ingested</span>
                 </label>
 
                 <div class="graph-toolbar-spacer"></div>
@@ -100,13 +105,20 @@ else
             </div>
         </section>
 
-        <GraphDetailsPanel ProjectId="@Project.Id"
-                           Snapshot="@_snapshot"
+        <GraphDetailsPanel Snapshot="@_snapshot"
                            SelectedNodeId="@_selectedNodeId"
-                           AddingNode="@_addingNode"
-                           AddingNodeChanged="OnAddingNodeChangedAsync"
-                           OnChanged="OnGraphChangedAsync"
-                           OnSelectNode="SelectNodeFromPanelAsync" />
+                           OnSelectNode="SelectNodeFromPanelAsync"
+                           OnEditNode="OpenEditNode"
+                           OnAddNode="StartAddNode" />
+
+        <GraphEditModal ProjectId="@Project.Id"
+                        Snapshot="@_snapshot"
+                        IsOpen="@_editModalOpen"
+                        AddingNode="@_editModalAddingNode"
+                        NodeId="@_editModalNodeId"
+                        OnClose="CloseEditModal"
+                        OnChanged="OnGraphChangedAsync"
+                        OnSelectNode="SelectNodeFromModalAsync" />
     </div>
 }
 
@@ -126,10 +138,13 @@ else
     private string _search = string.Empty;
     private string _typeFilter = string.Empty;
     private bool _showStructural = true;
+    private bool _showIngestSources;
     private bool _showManagedEdges = true;
     private bool _showOnlyIngest;
     private bool _physicsEnabled = true;
-    private bool _addingNode;
+    private bool _editModalOpen;
+    private bool _editModalAddingNode;
+    private long? _editModalNodeId;
     private bool _loading = true;
     private bool _pendingRender;
     private string? _error;
@@ -252,7 +267,8 @@ else
         if (_snapshot is null) return [];
         var search = _search.Trim();
         return _snapshot.Nodes
-            .Where(n => _showStructural || !n.IsStructural)
+            .Where(n => _showStructural || !n.IsStructural || IsIngestSourceNode(n))
+            .Where(n => _showIngestSources || !IsIngestSourceNode(n))
             .Where(n => string.IsNullOrWhiteSpace(_typeFilter) || string.Equals(n.Type, _typeFilter, StringComparison.Ordinal))
             .Where(n => !_showOnlyIngest || IsIngestNode(n))
             .Where(n => SearchMatches(n, search))
@@ -296,7 +312,10 @@ else
     private static bool IsIngestNode(ProjectGraphNode node) =>
         node.IsIngestCreated
         || node.CanonSourceCount > 0
-        || string.Equals(node.Type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        || IsIngestSourceNode(node);
+
+    private static bool IsIngestSourceNode(ProjectGraphNode node) =>
+        string.Equals(node.Type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
         || string.Equals(node.Type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
         || string.Equals(node.Type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
@@ -347,6 +366,12 @@ else
         await RenderGraphAsync();
     }
 
+    private async Task OnShowIngestSourcesChangedAsync(ChangeEventArgs e)
+    {
+        _showIngestSources = e.Value is bool value && value;
+        await RenderGraphAsync();
+    }
+
     private async Task OnShowManagedEdgesChangedAsync(ChangeEventArgs e)
     {
         _showManagedEdges = e.Value is bool value && value;
@@ -376,26 +401,19 @@ else
 
     private void StartAddNode()
     {
-        _addingNode = true;
-        _selectedNodeId = null;
-    }
-
-    private Task OnAddingNodeChangedAsync(bool adding)
-    {
-        _addingNode = adding;
-        return Task.CompletedTask;
+        _editModalAddingNode = true;
+        _editModalNodeId = null;
+        _editModalOpen = true;
     }
 
     private async Task OnGraphChangedAsync()
     {
-        _addingNode = false;
         await LoadAsync();
         await RenderGraphAsync();
     }
 
     private async Task SelectNodeFromPanelAsync(long? nodeId)
     {
-        _addingNode = false;
         _selectedNodeId = nodeId;
         if (_graphHandle is not null)
         {
@@ -404,10 +422,31 @@ else
         }
     }
 
+    private void OpenEditNode(long nodeId)
+    {
+        _editModalAddingNode = false;
+        _editModalNodeId = nodeId;
+        _editModalOpen = true;
+    }
+
+    private void CloseEditModal()
+    {
+        _editModalOpen = false;
+        _editModalAddingNode = false;
+        _editModalNodeId = null;
+    }
+
+    private async Task SelectNodeFromModalAsync(long? nodeId)
+    {
+        await SelectNodeFromPanelAsync(nodeId);
+        _editModalAddingNode = false;
+        _editModalNodeId = nodeId;
+        _editModalOpen = nodeId is not null;
+    }
+
     [JSInvokable]
     public async Task OnGraphNodeSelected(string? nodeId)
     {
-        _addingNode = false;
         _selectedNodeId = long.TryParse(nodeId, out var parsed) ? parsed : null;
         await InvokeAsync(StateHasChanged);
     }

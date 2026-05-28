@@ -531,7 +531,13 @@ public sealed class EntityService(
         var props = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in node.Properties)
         {
-            if (IngestSourceAssertions.IsProtectedProperty(kv.Key) || IngestWikiSheet.IsWikiStorageProperty(kv.Key)) continue;
+            if (IngestSourceAssertions.IsProtectedProperty(kv.Key)
+                || IngestWikiSheet.IsWikiStorageProperty(kv.Key)
+                || IngestWikiSheet.IsCanonSourceProperty(kv.Key))
+            {
+                continue;
+            }
+
             props[kv.Key] = kv.Value?.ToString();
         }
 
@@ -570,7 +576,13 @@ public sealed class EntityService(
         var props = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in source)
         {
-            if (IngestSourceAssertions.IsProtectedProperty(kv.Key) || IngestWikiSheet.IsWikiStorageProperty(kv.Key)) continue;
+            if (IngestSourceAssertions.IsProtectedProperty(kv.Key)
+                || IngestWikiSheet.IsWikiStorageProperty(kv.Key)
+                || IngestWikiSheet.IsCanonSourceProperty(kv.Key))
+            {
+                continue;
+            }
+
             props[kv.Key] = kv.Value?.ToString();
         }
         return props;

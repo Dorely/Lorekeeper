@@ -21,6 +21,7 @@
     flex: 0 0 auto;
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.5rem;
     min-width: 0;
     padding: 0.55rem 0.65rem;
@@ -36,6 +37,7 @@
 
 .graph-search {
     flex: 1 1 16rem;
+    min-width: 12rem;
 }
 
 .graph-type-filter {
@@ -55,7 +57,11 @@
 }
 
 .graph-toolbar-spacer {
-    flex: 1 1 auto;
+    flex: 1 1 1rem;
+}
+
+.graph-toolbar .btn {
+    white-space: nowrap;
 }
 
 .graph-stage-shell {
@@ -117,11 +123,42 @@
         grid-template-columns: minmax(34rem, 1fr) minmax(18rem, 20rem);
     }
 
-    .graph-toolbar {
-        flex-wrap: wrap;
-    }
-
     .graph-toolbar-spacer {
         display: none;
+    }
+}
+
+@media (max-width: 720px) {
+    .graph-workspace {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        width: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    .graph-main {
+        flex: 0 0 auto;
+    }
+
+    .graph-search,
+    .graph-type-group {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    .graph-search {
+        min-width: 0;
+    }
+
+    .graph-type-filter {
+        width: 100%;
+    }
+
+    .graph-stage-shell {
+        flex: 0 0 auto;
+        height: min(28rem, 58vh);
+        min-height: 22rem;
     }
 }
