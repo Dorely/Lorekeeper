@@ -21,6 +21,7 @@ public sealed class ResearchTools(
     OutlineCollaborationTools outlineTools,
     IEntityService entities,
     IEntityRelationContextService entityRelations,
+    IWebLinkPolicy linkPolicy,
     IOptions<WebResearchOptions> webOptions)
 {
     private static readonly EntityRelationContextOptions EntityRelationOptions = new()
@@ -51,6 +52,7 @@ public sealed class ResearchTools(
                 description:
                     "Read one paginated page of extracted text from a previously discovered search result by page id. " +
                     "Uses cached full-page text and links when available; otherwise fetches and caches the full readable page once. " +
+                    "If a host is cooling down after blocked traffic, the tool returns diagnostics instead of retrying immediately. " +
                     "Omit pageNumber to read page 1; use returned nextPageArguments to continue."),
 
             AIFunctionFactory.Create(
@@ -59,12 +61,16 @@ public sealed class ResearchTools(
                 description:
                     "Read one paginated page of extracted text from a specific webpage URL supplied by the user or discovered from another page's links. " +
                     "Uses cached full-page text and links when available; otherwise fetches and caches the full readable page once. " +
+                    "Prefer specific article/source URLs over account, edit, history, file, category, or special pages. " +
                     "Omit pageNumber to read page 1; use returned nextPageArguments to continue."),
 
             AIFunctionFactory.Create(
                 method: (Guid pageId, int count = 5, bool sameDomainOnly = true) => FollowPageLinksAsync(context, pageId, count, sameDomainOnly),
                 name: "follow_page_links",
-                description: "Read outgoing links from an already-read page, persisting each followed link as a cached research source. Use this when a promising source exposes relevant wiki/article/reference links."),
+                description:
+                    "Read selected outgoing links from an already-read page, persisting each followed link as a cached research source. " +
+                    "Navigation, account, edit/history, special, file, category, and duplicate links are filtered before any fetches. " +
+                    "Use this sparingly when a promising source exposes relevant wiki/article/reference links."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ReadEntityAsync(context, entityId),
@@ -139,19 +145,21 @@ public sealed class ResearchTools(
 
     private async Task<string> FollowPageLinksAsync(ResearchToolContext context, Guid pageId, int count, bool sameDomainOnly)
     {
-        count = Math.Clamp(count, 1, 12);
+        count = Math.Clamp(count, 1, Math.Max(1, webOptions.Value.MaxFollowLinksPerPage));
         var sourceRead = await candidates.ReadCandidateForConversationAsync(pageId, context.ConversationId);
         var sourceUrl = BestUrl(sourceRead.Candidate);
-        var sourceHost = HostKey(sourceUrl);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var followed = new List<object>();
+        var selectedLinks = linkPolicy.FilterAndPrioritizeLinks(
+            sourceRead.Links,
+            sourceUrl,
+            sameDomainOnly,
+            count,
+            out var skippedCount);
 
-        foreach (var link in sourceRead.Links)
+        foreach (var link in selectedLinks)
         {
             if (followed.Count >= count) break;
-            if (!TryNormalizeHttpUrl(link.Url, out var normalizedUrl, out var linkHost)) continue;
-            if (sameDomainOnly && !string.Equals(sourceHost, linkHost, StringComparison.OrdinalIgnoreCase)) continue;
-            if (!seen.Add(normalizedUrl)) continue;
+            if (!linkPolicy.TryNormalizeHttpUrl(link.Url, out var normalizedUrl, out _)) continue;
 
             var read = await candidates.ReadUrlAsync(
                 context.ProjectId,
@@ -175,6 +183,7 @@ public sealed class ResearchTools(
         {
             sourcePage = CandidateSummary(sourceRead.Candidate),
             sameDomainOnly,
+            skippedLinks = skippedCount,
             followed,
         }, JsonOptions);
     }
@@ -276,7 +285,7 @@ public sealed class ResearchTools(
                 ? PageArguments(read.Candidate, toolKind, requestedPageNumber + 1)
                 : null,
             text = pageText,
-            links = read.Links.Take(40).Select(link => new { link.Url, link.Text }),
+            links = read.Links.Take(Math.Max(0, webOptions.Value.MaxLinksReturnedToModel)).Select(link => new { link.Url, link.Text }),
         }, JsonOptions);
     }
 
@@ -313,30 +322,6 @@ public sealed class ResearchTools(
 
     private static string BestUrl(WebIngestCandidateView candidate) =>
         FirstNonEmpty(candidate.CanonicalUrl, candidate.FinalUrl, candidate.Url);
-
-    private static string HostKey(string url) =>
-        TryNormalizeHttpUrl(url, out _, out var hostKey) ? hostKey : string.Empty;
-
-    private static bool TryNormalizeHttpUrl(string url, out string normalizedUrl, out string hostKey)
-    {
-        normalizedUrl = string.Empty;
-        hostKey = string.Empty;
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
-        if (uri.Scheme is not ("http" or "https")) return false;
-
-        var builder = new UriBuilder(uri) { Fragment = string.Empty };
-        if ((builder.Scheme == "http" && builder.Port == 80) ||
-            (builder.Scheme == "https" && builder.Port == 443))
-        {
-            builder.Port = -1;
-        }
-
-        normalizedUrl = builder.Uri.AbsoluteUri;
-        hostKey = uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase)
-            ? uri.Host[4..].ToLowerInvariant()
-            : uri.Host.ToLowerInvariant();
-        return true;
-    }
 
     private static string FirstNonEmpty(params string[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;

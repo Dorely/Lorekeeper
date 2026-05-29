@@ -130,6 +130,11 @@ builder.Services.AddHostedService<IngestJobWorker>();
 
 // Research
 builder.Services.Configure<WebResearchOptions>(builder.Configuration.GetSection(WebResearchOptions.SectionName));
+builder.Services.AddSingleton<IWebFetchCoordinator, WebFetchCoordinator>();
+builder.Services.AddSingleton<IWebHttpFetchClient, WebHttpFetchClient>();
+builder.Services.AddSingleton<IWebLinkPolicy, WebLinkPolicy>();
+builder.Services.AddSingleton<IWebRobotsPolicy, WebRobotsPolicy>();
+builder.Services.AddScoped<IWebPageSourceReader, MediaWikiWebPageSourceReader>();
 builder.Services.AddScoped<IWebPageReader, HttpWebPageReader>();
 builder.Services.AddScoped<IWebIngestCandidateService, WebIngestCandidateService>();
 builder.Services.AddScoped<ResearchTools>();

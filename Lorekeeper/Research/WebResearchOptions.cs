@@ -12,4 +12,14 @@ public sealed class WebResearchOptions
     public int RetryAttempts { get; set; } = 1;
     public int RetryDelayMilliseconds { get; set; } = 1_500;
     public bool BlockPrivateNetworkTargets { get; set; } = true;
+    public int MinDelayBetweenHostRequestsMilliseconds { get; set; } = 4_000;
+    public int HostRequestJitterMilliseconds { get; set; } = 750;
+    public int BlockedHostCooldownSeconds { get; set; } = 300;
+    public int RepeatedFailureCooldownSeconds { get; set; } = 60;
+    public int FailedHostCooldownThreshold { get; set; } = 3;
+    public int FailedCandidateRetryCooldownMinutes { get; set; } = 30;
+    public bool HonorRobotsTxt { get; set; } = true;
+    public int RobotsTxtCacheMinutes { get; set; } = 60;
+    public int MaxFollowLinksPerPage { get; set; } = 12;
+    public int MaxLinksReturnedToModel { get; set; } = 40;
 }

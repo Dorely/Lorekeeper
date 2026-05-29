@@ -5,13 +5,15 @@ using Lorekeeper.Ingest;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
+using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Research;
 
 public sealed class WebIngestCandidateService(
     IWebIngestCandidateRepository candidates,
     IWebPageReader pageReader,
-    IIngestService ingest) : IWebIngestCandidateService
+    IIngestService ingest,
+    IOptions<WebResearchOptions> webOptions) : IWebIngestCandidateService
 {
     private const string WebFactSheetIngestGuidance = """
         Web research extraction guidance:
@@ -308,6 +310,15 @@ public sealed class WebIngestCandidateService(
             return new WebIngestCandidateReadResult(candidate, ReadCachedLinks(candidate.CachedLinksJson), FromCache: true);
         }
 
+        if (ShouldReuseRecentFailure(candidate, out var cooldownDiagnostics))
+        {
+            candidate.Diagnostics = cooldownDiagnostics;
+            candidate.UpdatedAt = DateTime.UtcNow;
+            candidates.Update(candidate);
+            await candidates.SaveChangesAsync(cancellationToken);
+            return new WebIngestCandidateReadResult(candidate, ReadCachedLinks(candidate.CachedLinksJson), FromCache: true);
+        }
+
         var result = await pageReader.ReadAsync(url, cancellationToken);
         candidate.FinalUrl = NormalizeUrl(result.FinalUrl);
         candidate.CanonicalUrl = NormalizeUrl(result.CanonicalUrl);
@@ -334,6 +345,36 @@ public sealed class WebIngestCandidateService(
         candidates.Update(candidate);
         await candidates.SaveChangesAsync(cancellationToken);
         return new WebIngestCandidateReadResult(candidate, result.Links, FromCache: false);
+    }
+
+    private bool ShouldReuseRecentFailure(WebIngestCandidate candidate, out string diagnostics)
+    {
+        diagnostics = string.Empty;
+        var cooldownMinutes = Math.Clamp(webOptions.Value.FailedCandidateRetryCooldownMinutes, 0, 24 * 60);
+        if (cooldownMinutes == 0
+            || candidate.Status != WebIngestCandidateStatus.Failed
+            || candidate.FetchedAt is not { } fetchedAt
+            || !string.IsNullOrWhiteSpace(candidate.ExtractedText))
+        {
+            return false;
+        }
+
+        var retryAt = fetchedAt.AddMinutes(cooldownMinutes);
+        if (retryAt <= DateTime.UtcNow) return false;
+
+        var baseDiagnostics = StripRecentFailureReuse(candidate.Diagnostics);
+        diagnostics = string.IsNullOrWhiteSpace(baseDiagnostics)
+            ? $"Recent failed result reused; next retry after {retryAt:u}."
+            : $"{baseDiagnostics.Trim().TrimEnd('.')}." +
+                $" Recent failed result reused; next retry after {retryAt:u}.";
+        return true;
+    }
+
+    private static string StripRecentFailureReuse(string diagnostics)
+    {
+        const string marker = " Recent failed result reused;";
+        var markerIndex = diagnostics.IndexOf(marker, StringComparison.Ordinal);
+        return markerIndex < 0 ? diagnostics : diagnostics[..markerIndex];
     }
 
     private static IReadOnlyList<WebPageLink> ReadCachedLinks(string linksJson)

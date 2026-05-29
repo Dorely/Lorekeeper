@@ -279,12 +279,18 @@
 | File | Description |
 |------|-------------|
 | `IResearchService.cs` / `ResearchService.cs` | Persistent streaming Research chat: builds project-level guidance/facts/outline context, replays text-only history to the model, streams cache-first web + graph tool calls, stages Review edits, and derives current-conversation activity. |
-| `ResearchTools.cs` | Research LLM tools: cache-first `web_search`, paginated `read_search_result`/`read_webpage`, `follow_page_links`, read-only entity detail/link tools, and selected graph create/update/link tools reused from outline collaboration. |
+| `ResearchTools.cs` | Research LLM tools: cache-first `web_search`, paginated `read_search_result`/`read_webpage`, filtered/throttled `follow_page_links`, read-only entity detail/link tools, and selected graph create/update/link tools reused from outline collaboration. |
 | `ResearchTurnUpdate.cs` | Streaming update records consumed by `ResearchChatPanel`: text/tool updates, pending AI change creation, graph mutation refreshes, assistant completion, and turn errors/cancellation. |
 | `ResearchActivityModels.cs` | Read models for Research Activity sidebar entity/source summaries and cache-only source detail modals. |
-| `WebResearchOptions.cs` | Configurable webpage read limits and HTTP defaults such as user agent, timeout, max bytes, read-page size, retry timing, max links, and private-network target blocking. |
-| `WebPageReader.cs` | HTTP webpage reader/extractor for Research Mode: fetches HTML/text pages with short transient retries, blocks local/private targets by default, extracts title/text/canonical URL/outgoing links, and returns diagnostics. |
-| `IWebIngestCandidateService.cs` / `WebIngestCandidateService.cs` | Application service for cached webpage sources: search-result persistence, conversation-aware cache-first URL/page reading, cache-only source details, and manual Ingest queueing support. |
+| `WebResearchOptions.cs` | Configurable webpage read limits and polite-fetch defaults: user agent, timeout, max bytes, read-page size, retry timing, max links, robots, throttling, cooldowns, and private-network blocking. |
+| `WebPageReader.cs` | Composed webpage reader for Research Mode: validates targets, applies robots/private-network policy, prefers source adapters, falls back to filtered HTML/text extraction, and returns diagnostics. |
+| `WebFetchCoordinator.cs` | Per-host fetch coordinator for polite web reads: serializes requests, enforces host delay/jitter, and applies cooldowns after blocked or repeated failed responses. |
+| `WebHttpFetchClient.cs` | Shared coordinated HTTP GET helper for webpage, robots, and source-adapter reads with byte limits, timeout handling, retryability, and status diagnostics. |
+| `WebLinkPolicy.cs` | URL normalization and link hygiene policy for web research: filters navigation/admin/wiki namespace/static links and prioritizes likely content links. |
+| `WebPageTextExtractor.cs` | Shared HTML/text extraction helpers for titles, canonical URLs, main-content text, outgoing links, decoding, and truncation. |
+| `WebRobotsPolicy.cs` | Lightweight cached `robots.txt` policy reader/parser used before webpage and source-adapter fetches when enabled. |
+| `MediaWikiWebPageSourceReader.cs` | MediaWiki source adapter for `/wiki/{title}` pages: reads allowed `api.php` extract/parse endpoints and returns plain text plus namespace-0 article links. |
+| `IWebIngestCandidateService.cs` / `WebIngestCandidateService.cs` | Application service for cached webpage sources: search-result persistence, conversation-aware cache-first URL/page reading with recent-failure cooldown reuse, cache-only source details, and manual Ingest queueing support. |
 | `WebIngestCandidateModels.cs` | UI/read helper records for webpage candidate lists and read results. |
 
 ### Auth/
