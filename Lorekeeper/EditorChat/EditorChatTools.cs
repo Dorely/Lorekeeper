@@ -1,13 +1,11 @@
-using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.Ingest;
-using Lorekeeper.Knowledge;
-using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
@@ -19,10 +17,9 @@ public sealed class EditorChatTools(
     IEntityService entities,
     IEntityTypeService entityTypes,
     IProjectFactService projectFacts,
-    IVectorStore vectors,
-    IEmbeddingService embeddings,
     IEditorContextService editorContext,
     IEntityRelationContextService entityRelations,
+    IProjectSearchService projectSearch,
     IEditorRevisionAgentService revisionAgents,
     OutlineCollaborationTools outlineTools,
     IOptions<EditorChatOptions> editorOptions)
@@ -51,20 +48,33 @@ public sealed class EditorChatTools(
         CancellationToken cancellationToken = default)
     {
         var tools = new List<AITool>();
-        var vectorSearchAvailable = await embeddings.IsAvailableAsync(cancellationToken);
-        if (vectorSearchAvailable)
-        {
-            tools.Add(AIFunctionFactory.Create(
-                method: (string query, int topK = 8) => VectorSearchAsync(context, query, topK),
-                name: "vector_search",
-                description: "Semantic search over indexed chapters and lore for the current project. Returns the top matching snippets with their source metadata."));
-        }
-
-        var impactDescription = vectorSearchAvailable
-            ? "Read-only book-level impact map for continuity changes. Combines outline order, chapter synopses, server-side keyword/body checks, context vector hits, affected entities/events, adjacency, and downstream chapters from an anchor chapter. Use this before spawning revision agents or before deciding which chapters need body edits."
-            : "Read-only book-level impact map for continuity changes. Combines outline order, chapter synopses, server-side keyword/body checks, affected entities/events, adjacency, and downstream chapters from an anchor chapter. Use this before spawning revision agents or before deciding which chapters need body edits.";
+        var impactDescription = "Read-only book-level impact map for continuity changes. Combines outline order, chapter synopses, server-side keyword/body checks, hybrid project search hits, affected entities/events, adjacency, and downstream chapters from an anchor chapter. Use this before spawning revision agents or before deciding which chapters need body edits.";
 
         tools.AddRange([
+            AIFunctionFactory.Create(
+                method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
+                    ListSearchSourcesAsync(context, query, sourceTypes, topK),
+                name: "list_search_sources",
+                description: "Resolve searchable project source ids by title/name/type. Use this before a source-filtered search when the user names a source but you need its id."),
+
+            AIFunctionFactory.Create(
+                method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
+                    ReadProjectSourceAsync(context, sourceType, sourceId, pageNumber),
+                name: "read_project_source",
+                description: "Read one paginated project source by sourceType and sourceId. Supports chapters, acts, entities, ingest sources, raw ingest source text, and ingest source chunks. Use this before searching only inside a specific source text."),
+
+            AIFunctionFactory.Create(
+                method: (
+                    string query,
+                    int topK = 8,
+                    string[]? sourceTypes = null,
+                    string[]? sourceIds = null,
+                    Guid? containerSourceId = null,
+                    bool lexicalOnly = false) =>
+                    SearchProjectAsync(context, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
+                name: "search_project",
+                description: "Hybrid keyword + semantic search over indexed project text. Use sourceTypes/sourceIds/containerSourceId to manually restrict search to a specific source, chunk, chapter, act, or entity. Set lexicalOnly=true for exact names/phrases or when the user asks to look in a specific source text."),
+
             AIFunctionFactory.Create(
                 method: () => ListChaptersAsync(context),
                 name: "list_chapters",
@@ -158,50 +168,54 @@ public sealed class EditorChatTools(
         return tools;
     }
 
-    private async Task<string> VectorSearchAsync(
+    private async Task<string> ListSearchSourcesAsync(
         EditorChatContext ctx,
-        [Description("Natural-language query to embed and search.")] string query,
-        [Description("Maximum number of results to return (1-20).")] int topK)
+        string? query,
+        string[]? sourceTypes,
+        int topK)
+    {
+        topK = Math.Clamp(topK, 1, 30);
+        var sources = await projectSearch.ListSourcesAsync(ctx.ProjectId, query, sourceTypes, topK);
+        return JsonSerializer.Serialize(sources);
+    }
+
+    private async Task<string> ReadProjectSourceAsync(
+        EditorChatContext ctx,
+        string sourceType,
+        Guid sourceId,
+        int? pageNumber)
+    {
+        var result = await projectSearch.ReadSourceAsync(ctx.ProjectId, sourceType, sourceId, pageNumber);
+        return result is null
+            ? $"Error: source {sourceType}/{sourceId:N} was not found in this project."
+            : JsonSerializer.Serialize(result);
+    }
+
+    private async Task<string> SearchProjectAsync(
+        EditorChatContext ctx,
+        string query,
+        int topK,
+        string[]? sourceTypes,
+        string[]? sourceIds,
+        Guid? containerSourceId,
+        bool lexicalOnly)
     {
         if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
-        topK = Math.Clamp(topK, 1, 20);
+        var parsedSourceIds = ParseSourceIds(sourceIds, out var parseError);
+        if (parseError is not null) return parseError;
 
-        var embedding = await embeddings.GenerateEmbeddingAsync(query);
-        var results = await vectors.SearchAsync(embedding, Project.ScopeKey(ctx.ProjectId), topK);
+        var results = await projectSearch.SearchAsync(new ProjectSearchRequest(
+            ctx.ProjectId,
+            query.Trim(),
+            Math.Clamp(topK, 1, 30),
+            sourceTypes,
+            parsedSourceIds,
+            containerSourceId,
+            lexicalOnly));
 
-        if (results.Count == 0) return "No matches.";
-
-        var sb = new StringBuilder();
-        for (var i = 0; i < results.Count; i++)
-        {
-            var result = results[i];
-            sb.Append('[').Append(i + 1).Append("] ")
-              .Append(result.SourceType).Append('/').Append(result.SourceId ?? "?")
-              .Append(" row=").Append(result.RowId);
-            if (result.ChunkIndex is not null)
-                sb.Append(" fragment=").Append(result.ChunkIndex.Value + 1);
-            if (!string.IsNullOrWhiteSpace(result.Metadata))
-                sb.Append(" - ").Append(result.Metadata);
-            sb.Append(" (distance ").Append(result.Distance.ToString("F4")).Append(")\n");
-            sb.Append(result.Content).Append("\n\n");
-
-            if (string.Equals(result.SourceType, ContextVectorSourceTypes.Entity, StringComparison.Ordinal)
-                && !string.IsNullOrWhiteSpace(result.SourceId)
-                && Guid.TryParseExact(result.SourceId, "N", out var entityId))
-            {
-                var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, _listEntityRelationOptions);
-                if (relationContext.DirectLinks.Count > 0 || relationContext.TraversalMap.Count > 0)
-                {
-                    sb.AppendLine("Relation context:");
-                    foreach (var link in relationContext.DirectLinks)
-                        sb.Append("- ").AppendLine(link.Path);
-                    if (relationContext.TraversalMap.Count > 0)
-                        sb.AppendLine(entityRelations.FormatTraversalMap(relationContext.TraversalMap));
-                    sb.AppendLine();
-                }
-            }
-        }
-        return sb.ToString().TrimEnd();
+        return results.Count == 0
+            ? "No matches."
+            : JsonSerializer.Serialize(results.Select(SearchResultPayload));
     }
 
     private async Task<string> ListChaptersAsync(EditorChatContext ctx)
@@ -270,7 +284,7 @@ public sealed class EditorChatTools(
             ScoreText(candidate, "body-keyword", candidate.Chapter.Body, terms, 18);
         }
 
-        await ScoreVectorHitsAsync(ctx.ProjectId, terms, candidates);
+        await ScoreProjectSearchHitsAsync(ctx.ProjectId, terms, candidates);
         await ScoreEntityAnchorsAsync(ctx.ProjectId, affectedEntityIds, "affected-entity", candidates);
         await ScoreEntityAnchorsAsync(ctx.ProjectId, eventIds, "affected-event", candidates);
 
@@ -302,7 +316,7 @@ public sealed class EditorChatTools(
             return JsonSerializer.Serialize(new
             {
                 query,
-                message = "No impacted chapters found from the available outline, entity, keyword, and optional vector signals.",
+                message = "No impacted chapters found from the available outline, entity, keyword, and project-search signals.",
                 candidates = Array.Empty<object>(),
             });
 
@@ -465,6 +479,8 @@ public sealed class EditorChatTools(
         }
 
         var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
+        var manualLinks = links.Where(link => !link.IsAutoLink).Select(LinkPayload).ToList();
+        var autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload).ToList();
         var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, _detailEntityRelationOptions);
         return JsonSerializer.Serialize(new
         {
@@ -479,7 +495,9 @@ public sealed class EditorChatTools(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
-            links = links.Select(LinkPayload),
+            links = manualLinks.Concat(autoMentionLinks),
+            manualLinks,
+            autoMentionLinks,
             relationContext,
         });
     }
@@ -1039,42 +1057,39 @@ public sealed class EditorChatTools(
         return ordered;
     }
 
-    private async Task ScoreVectorHitsAsync(
+    private async Task ScoreProjectSearchHitsAsync(
         Guid projectId,
         IReadOnlyList<string> terms,
         IReadOnlyDictionary<Guid, ImpactCandidate> candidates)
     {
-        if (!await embeddings.IsAvailableAsync())
-            return;
-
         try
         {
             var queryText = string.Join(' ', terms);
-            var embedding = await embeddings.GenerateEmbeddingAsync(queryText);
-            var results = await vectors.SearchAsync(
-                embedding,
-                Project.ScopeKey(projectId),
-                topK: Math.Min(50, Math.Max(12, candidates.Count)));
+            var results = await projectSearch.SearchAsync(new ProjectSearchRequest(
+                projectId,
+                queryText,
+                Math.Min(50, Math.Max(12, candidates.Count)),
+                [ProjectSearchSourceTypes.Chapter, ProjectSearchSourceTypes.ContextChapter]));
 
             foreach (var result in results)
             {
-                if (!string.Equals(result.SourceType, ContextVectorSourceTypes.Chapter, StringComparison.Ordinal)
-                    || string.IsNullOrWhiteSpace(result.SourceId)
-                    || !Guid.TryParseExact(result.SourceId, "N", out var chapterId)
+                if (result.SourceId is not Guid chapterId
                     || !candidates.TryGetValue(chapterId, out var candidate))
                 {
                     continue;
                 }
 
-                var score = Math.Clamp((int)Math.Round(42 - result.Distance * 12), 8, 42);
-                candidate.Add(score, "vector", $"Semantic chapter/context hit: {result.Metadata ?? result.RowId.ToString()}.");
-                candidate.AddEvidence("vector", Truncate(result.Content, 420));
+                var score = result.Reasons.Contains("semantic")
+                    ? 42
+                    : 30;
+                candidate.Add(score, "project-search", $"Chapter/context search hit: {result.Metadata ?? result.Title}.");
+                candidate.AddEvidence("project-search", Truncate(result.Content, 420));
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             foreach (var candidate in candidates.Values.Take(1))
-                candidate.AddEvidence("vector-warning", $"Vector search was unavailable: {ex.Message}");
+                candidate.AddEvidence("project-search-warning", $"Project search was unavailable: {ex.Message}");
         }
     }
 
@@ -1245,6 +1260,43 @@ public sealed class EditorChatTools(
         properties = CompactProperties(entity.Properties),
     };
 
+    private static IReadOnlyList<Guid>? ParseSourceIds(string[]? sourceIds, out string? error)
+    {
+        error = null;
+        if (sourceIds is not { Length: > 0 }) return null;
+
+        var parsed = new List<Guid>();
+        foreach (var value in sourceIds.Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            if (!Guid.TryParse(value, out var id))
+            {
+                error = $"Error: sourceId '{value}' is not a valid Guid.";
+                return null;
+            }
+            parsed.Add(id);
+        }
+
+        return parsed.Count == 0 ? null : parsed;
+    }
+
+    private static object SearchResultPayload(ProjectSearchResult result) => new
+    {
+        result.SourceType,
+        result.SourceId,
+        result.ContainerSourceId,
+        result.Title,
+        result.Snippet,
+        result.Metadata,
+        result.ChunkIndex,
+        result.LexicalRank,
+        result.LexicalPosition,
+        result.VectorDistance,
+        result.VectorPosition,
+        result.Score,
+        result.Reasons,
+        content = Truncate(result.Content, 1_800),
+    };
+
     private static object LinkPayload(EntityLink link) => new
     {
         edgeId = link.EdgeId,
@@ -1257,6 +1309,7 @@ public sealed class EditorChatTools(
         properties = link.Properties,
         summary = link.Summary,
         relationshipCitations = link.RelationshipCitations,
+        isAutoLink = link.IsAutoLink,
     };
 
     private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>

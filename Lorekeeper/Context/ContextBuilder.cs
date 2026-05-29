@@ -296,6 +296,7 @@ public sealed class ContextBuilder(
         var links = await entities.ListLinksAsync(projectId, entityId, cancellationToken);
         foreach (var link in links)
         {
+            if (link.IsAutoLink) continue;
             if (!IsContextEntityType(link.OtherEntityType)) continue;
             var entity = await entities.GetAsync(projectId, link.OtherEntityId, cancellationToken);
             if (entity is not null)
@@ -634,16 +635,30 @@ public sealed class ContextBuilder(
             .ToList();
         if (visibleLinks.Count > 0)
         {
-            sb.AppendLine("Links:");
-            foreach (var link in visibleLinks)
+            var manualLinks = visibleLinks.Where(link => !link.IsAutoLink).ToList();
+            var autoLinks = visibleLinks.Where(link => link.IsAutoLink).ToList();
+            if (manualLinks.Count > 0)
             {
-                var direction = link.Direction == EntityLinkDirection.Outgoing ? "->" : "<-";
-                sb.Append("- ").Append(direction).Append(' ').Append(link.EdgeType).Append(' ')
-                  .Append(link.OtherEntityName).Append(" (").Append(link.OtherEntityType).AppendLine(")");
+                sb.AppendLine("Links:");
+                foreach (var link in manualLinks)
+                    AppendLinkLine(sb, link);
+            }
+            if (autoLinks.Count > 0)
+            {
+                sb.AppendLine("Auto mention links (weak discovery hints):");
+                foreach (var link in autoLinks.Take(12))
+                    AppendLinkLine(sb, link);
             }
         }
 
         return sb.ToString().TrimEnd();
+    }
+
+    private static void AppendLinkLine(StringBuilder sb, EntityLink link)
+    {
+        var direction = link.Direction == EntityLinkDirection.Outgoing ? "->" : "<-";
+        sb.Append("- ").Append(direction).Append(' ').Append(link.EdgeType).Append(' ')
+          .Append(link.OtherEntityName).Append(" (").Append(link.OtherEntityType).AppendLine(")");
     }
 
     private async Task AppendChaptersAsync(

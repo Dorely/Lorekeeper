@@ -53,6 +53,11 @@ else
                 </label>
 
                 <label class="graph-toggle">
+                    <input type="checkbox" checked="@_showAutoLinks" @onchange="OnShowAutoLinksChangedAsync" />
+                    <span>Auto links</span>
+                </label>
+
+                <label class="graph-toggle">
                     <input type="checkbox" checked="@_showOnlyIngest" @onchange="OnShowOnlyIngestChangedAsync" />
                     <span>Only ingested</span>
                 </label>
@@ -107,6 +112,7 @@ else
 
         <GraphDetailsPanel Snapshot="@_snapshot"
                            SelectedNodeId="@_selectedNodeId"
+                           ShowAutoLinks="@_showAutoLinks"
                            OnSelectNode="SelectNodeFromPanelAsync"
                            OnEditNode="OpenEditNode"
                            OnAddNode="StartAddNode" />
@@ -116,6 +122,7 @@ else
                         IsOpen="@_editModalOpen"
                         AddingNode="@_editModalAddingNode"
                         NodeId="@_editModalNodeId"
+                        ShowAutoLinks="@_showAutoLinks"
                         OnClose="CloseEditModal"
                         OnChanged="OnGraphChangedAsync"
                         OnSelectNode="SelectNodeFromModalAsync" />
@@ -140,6 +147,7 @@ else
     private bool _showStructural = true;
     private bool _showIngestSources;
     private bool _showManagedEdges = true;
+    private bool _showAutoLinks;
     private bool _showOnlyIngest;
     private bool _physicsEnabled = true;
     private bool _editModalOpen;
@@ -242,10 +250,11 @@ else
             to = e.ToNodeId.ToString(),
             label = e.EdgeType,
             title = EdgeTitle(e),
-            dashes = e.IsManaged,
-            color = new { color = IsIngestEdge(e) ? "rgba(253, 214, 99, 0.82)" : e.IsManaged ? "rgba(190, 198, 214, 0.38)" : "rgba(137, 218, 240, 0.68)", highlight = "#ffffff" },
-            arrows = new { to = new { enabled = true, scaleFactor = e.IsManaged ? 0.45 : 0.65 } },
-            font = new { color = "rgba(238, 242, 247, 0.72)", size = 10, strokeWidth = 0 },
+            dashes = e.IsManaged || e.IsAutoLink,
+            width = e.IsAutoLink ? 0.65 : 1,
+            color = new { color = e.IsAutoLink ? "rgba(190, 198, 214, 0.24)" : IsIngestEdge(e) ? "rgba(253, 214, 99, 0.82)" : e.IsManaged ? "rgba(190, 198, 214, 0.38)" : "rgba(137, 218, 240, 0.68)", highlight = "#ffffff" },
+            arrows = new { to = new { enabled = true, scaleFactor = e.IsAutoLink ? 0.35 : e.IsManaged ? 0.45 : 0.65 } },
+            font = new { color = e.IsAutoLink ? "rgba(238, 242, 247, 0.42)" : "rgba(238, 242, 247, 0.72)", size = 10, strokeWidth = 0 },
         }).ToList();
 
         try
@@ -281,6 +290,7 @@ else
         return _snapshot.Edges
             .Where(e => visibleNodeIds.Contains(e.FromNodeId) && visibleNodeIds.Contains(e.ToNodeId))
             .Where(e => _showManagedEdges || !e.IsManaged)
+            .Where(e => _showAutoLinks || !e.IsAutoLink)
             .Where(e => !_showOnlyIngest || IsIngestEdge(e))
             .ToList();
     }
@@ -343,6 +353,8 @@ else
             title += $"\n{edge.Summary}";
         if (edge.CanonSourceCount > 0)
             title += $"\nCanon sources: {edge.CanonSourceCount}";
+        else if (edge.IsAutoLink)
+            title += "\nAuto mention link";
         else if (edge.IsIngestCreated || string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase))
             title += "\nIngest provenance link";
         return title;
@@ -375,6 +387,12 @@ else
     private async Task OnShowManagedEdgesChangedAsync(ChangeEventArgs e)
     {
         _showManagedEdges = e.Value is bool value && value;
+        await RenderGraphAsync();
+    }
+
+    private async Task OnShowAutoLinksChangedAsync(ChangeEventArgs e)
+    {
+        _showAutoLinks = e.Value is bool value && value;
         await RenderGraphAsync();
     }
 

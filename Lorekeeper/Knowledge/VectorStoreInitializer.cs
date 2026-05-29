@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Lorekeeper.Persistence;
+using Lorekeeper.Search;
 
 namespace Lorekeeper.Knowledge;
 
@@ -43,6 +44,8 @@ public static class VectorStoreInitializer
                 "CREATE INDEX IF NOT EXISTS ix_knowledge_chunks_scope_key ON knowledge_chunks(scope_key);";
             createIndex.ExecuteNonQuery();
         }
+
+        SqliteFtsProjectSearchIndex.Initialize(connection);
 
         if (dimensions is int vectorDimensions)
         {

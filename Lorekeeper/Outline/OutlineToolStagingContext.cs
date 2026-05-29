@@ -887,6 +887,7 @@ public sealed class OutlineToolStagingContext(
     private async Task<object> EntityPayloadAsync(EntityState entity, CancellationToken cancellationToken)
     {
         var relationContext = await BuildRelationContextAsync(entity.Id, EntityRelationOptions, cancellationToken);
+        var links = await ListEntityLinksCoreAsync(entity.Id, cancellationToken);
         return new
         {
             id = entity.Id,
@@ -899,6 +900,7 @@ public sealed class OutlineToolStagingContext(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
+            autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload),
             relationContext,
         };
     }
@@ -938,13 +940,18 @@ public sealed class OutlineToolStagingContext(
 
         var links = await ListEntityLinksCoreAsync(entityId, cancellationToken);
         var directLinks = links
-            .Where(CanTraverse)
+            .Where(link => !link.IsAutoLink && CanTraverse(link))
+            .Take(resolvedOptions.MaxDirectLinks)
+            .Select(link => ProjectDirectLink(root, link))
+            .ToList();
+        var autoLinks = links
+            .Where(link => link.IsAutoLink)
             .Take(resolvedOptions.MaxDirectLinks)
             .Select(link => ProjectDirectLink(root, link))
             .ToList();
         var traversalMap = await BuildTraversalMapAsync(entityId, resolvedOptions, cancellationToken);
 
-        return new EntityRelationContext(directLinks, traversalMap);
+        return new EntityRelationContext(directLinks, traversalMap, autoLinks);
     }
 
     private async Task<IReadOnlyList<EntityTraversalPathContext>> BuildTraversalMapAsync(
@@ -1014,7 +1021,8 @@ public sealed class OutlineToolStagingContext(
                     other.Name,
                     other.Type,
                     link.SortOrder,
-                    link.Properties));
+                    link.Properties,
+                    link.IsAutoLink));
             }
         }
 
@@ -1066,7 +1074,8 @@ public sealed class OutlineToolStagingContext(
             other.Name,
             other.Type,
             link.SortOrder,
-            link.Properties);
+            link.Properties,
+            false);
     }
 
     private static object LinkPayload(StagedEntityLink link) => new
@@ -1079,6 +1088,7 @@ public sealed class OutlineToolStagingContext(
         otherEntityType = link.OtherEntityType,
         sortOrder = link.SortOrder,
         properties = link.Properties,
+        isAutoLink = link.IsAutoLink,
     };
 
     private static EntityDirectLinkContext ProjectDirectLink(EntityEndpoint root, StagedEntityLink link) => new(
@@ -1090,7 +1100,8 @@ public sealed class OutlineToolStagingContext(
         link.OtherEntityType,
         link.SortOrder,
         link.Properties,
-        AppendHop(FormatEndpoint(root), link));
+        AppendHop(FormatEndpoint(root), link),
+        link.IsAutoLink);
 
     private static string AppendHop(string path, StagedEntityLink link, EntityEndpoint other) =>
         AppendHop(path, link, FormatEndpoint(other));
@@ -1150,7 +1161,8 @@ public sealed class OutlineToolStagingContext(
         || (_chapters.TryGetValue(id, out var chapter) && chapter.Deleted);
 
     private static bool CanTraverse(StagedEntityLink link) =>
-        !string.Equals(link.OtherEntityType, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        !link.IsAutoLink
+        && !string.Equals(link.OtherEntityType, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(link.OtherEntityType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(link.OtherEntityType, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
@@ -1410,7 +1422,8 @@ public sealed class OutlineToolStagingContext(
         string OtherEntityName,
         string OtherEntityType,
         int? SortOrder,
-        IReadOnlyDictionary<string, string?> Properties);
+        IReadOnlyDictionary<string, string?> Properties,
+        bool IsAutoLink);
 
     private sealed record EntityEndpoint(Guid Id, string Type, string Name);
 

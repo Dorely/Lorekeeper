@@ -94,6 +94,7 @@
     [Parameter] public bool IsOpen { get; set; }
     [Parameter] public bool AddingNode { get; set; }
     [Parameter] public long? NodeId { get; set; }
+    [Parameter] public bool ShowAutoLinks { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
     [Parameter] public EventCallback<long?> OnSelectNode { get; set; }
@@ -336,6 +337,10 @@
                                 {
                                     <span class="badge text-bg-secondary">managed</span>
                                 }
+                                @if (edge.IsAutoLink)
+                                {
+                                    <span class="badge text-bg-secondary">auto</span>
+                                }
                                 @if (edge.CanonSourceCount > 0)
                                 {
                                     <span class="badge text-bg-info">@edge.CanonSourceCount canon source@(PluralSuffix(edge.CanonSourceCount))</span>
@@ -530,7 +535,9 @@
     private IEnumerable<ProjectGraphEdge> AdjacentEdges(ProjectGraphNode node) =>
         Snapshot?.Edges
             .Where(e => e.FromNodeId == node.NodeId || e.ToNodeId == node.NodeId)
-            .OrderByDescending(e => e.IsManaged)
+            .Where(e => ShowAutoLinks || !e.IsAutoLink)
+            .OrderBy(e => e.IsAutoLink)
+            .ThenByDescending(e => e.IsManaged)
             .ThenBy(e => e.EdgeType, StringComparer.OrdinalIgnoreCase)
             ?? Enumerable.Empty<ProjectGraphEdge>();
 
@@ -829,13 +836,14 @@
 
     private static bool IsReservedEdgeType(string edgeType) =>
         string.Equals(edgeType?.Trim(), EntityService.HasChildEdgeType, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(edgeType?.Trim(), IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
+        || string.Equals(edgeType?.Trim(), IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(edgeType?.Trim(), GraphAutoLinkService.AutoMentionEdgeType, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsExtractedFrom(ProjectGraphEdge edge) =>
         string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
 
     private static string ReservedEdgeTypeMessage =>
-        "HasChild and ExtractedFrom are managed graph relationships and cannot be edited manually.";
+        "HasChild, ExtractedFrom, and AutoMention are managed graph relationships and cannot be edited manually.";
 
     private static string CitationKey(IngestWikiCitation citation) =>
         $"{citation.SourceId}:{citation.SourceChunkId}:{citation.SourceBlockId}:{citation.PageNumber}:{citation.Locator}";

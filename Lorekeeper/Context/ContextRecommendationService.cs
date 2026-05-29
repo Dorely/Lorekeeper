@@ -79,6 +79,7 @@ public sealed class ContextRecommendationService(
 
             foreach (var link in await entities.ListLinksAsync(projectId, root.Id, cancellationToken))
             {
+                if (link.IsAutoLink) continue;
                 if (!IsContextEntityType(link.OtherEntityType)) continue;
                 if (includedEntityIds.Contains(link.OtherEntityId)) continue;
 

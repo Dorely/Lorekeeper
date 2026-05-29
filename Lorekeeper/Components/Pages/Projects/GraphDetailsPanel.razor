@@ -36,6 +36,7 @@
 @code {
     [Parameter] public ProjectGraphSnapshot? Snapshot { get; set; }
     [Parameter] public long? SelectedNodeId { get; set; }
+    [Parameter] public bool ShowAutoLinks { get; set; }
     [Parameter] public EventCallback<long?> OnSelectNode { get; set; }
     [Parameter] public EventCallback<long> OnEditNode { get; set; }
     [Parameter] public EventCallback OnAddNode { get; set; }
@@ -96,6 +97,10 @@
                             @if (edge.IsManaged)
                             {
                                 <span class="badge text-bg-secondary">managed</span>
+                            }
+                            @if (edge.IsAutoLink)
+                            {
+                                <span class="badge text-bg-secondary">auto</span>
                             }
                             @if (edge.CanonSourceCount > 0)
                             {
@@ -163,7 +168,9 @@
     private IEnumerable<ProjectGraphEdge> AdjacentEdges(ProjectGraphNode node) =>
         Snapshot?.Edges
             .Where(e => e.FromNodeId == node.NodeId || e.ToNodeId == node.NodeId)
-            .OrderByDescending(e => e.IsManaged)
+            .Where(e => ShowAutoLinks || !e.IsAutoLink)
+            .OrderBy(e => e.IsAutoLink)
+            .ThenByDescending(e => e.IsManaged)
             .ThenBy(e => e.EdgeType, StringComparer.OrdinalIgnoreCase)
             ?? Enumerable.Empty<ProjectGraphEdge>();
 

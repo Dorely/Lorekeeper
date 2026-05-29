@@ -40,8 +40,11 @@ public sealed class ProjectGraphService(
         var parentByNodeId = new Dictionary<long, long>();
         foreach (var edge in allEdges)
         {
-            degreeByNodeId[edge.FromNodeId] = degreeByNodeId.GetValueOrDefault(edge.FromNodeId) + 1;
-            degreeByNodeId[edge.ToNodeId] = degreeByNodeId.GetValueOrDefault(edge.ToNodeId) + 1;
+            if (!GraphAutoLinkService.IsAutoMentionEdge(edge))
+            {
+                degreeByNodeId[edge.FromNodeId] = degreeByNodeId.GetValueOrDefault(edge.FromNodeId) + 1;
+                degreeByNodeId[edge.ToNodeId] = degreeByNodeId.GetValueOrDefault(edge.ToNodeId) + 1;
+            }
             if (string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
                 parentByNodeId.TryAdd(edge.ToNodeId, edge.FromNodeId);
         }
@@ -383,7 +386,8 @@ public sealed class ProjectGraphService(
             Read(edge.Properties, IngestWikiSheet.SummaryProperty) ?? string.Empty,
             IngestWikiSheet.ReadRelationshipCitations(edge.Properties),
             IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties),
-            IngestWikiSheet.ReadCanonSources(edge.Properties).Count);
+            IngestWikiSheet.ReadCanonSources(edge.Properties).Count,
+            GraphAutoLinkService.IsAutoMentionEdge(edge));
     }
 
     private static ProjectGraphNodeType ProjectType(EntityTypeDefinition typeDefinition, string color) =>
@@ -479,16 +483,18 @@ public sealed class ProjectGraphService(
         if (type.Length == 0)
             throw new ArgumentException("Relationship type is required.", nameof(edgeType));
         if (IsReservedEditableEdgeType(type))
-            throw new InvalidOperationException("Managed and provenance links cannot be edited directly.");
+            throw new InvalidOperationException("Managed, provenance, and auto-generated links cannot be edited directly.");
         return type;
     }
 
     private static bool IsReservedEditableEdgeType(string edgeType) =>
         string.Equals(edgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(edgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
+        || string.Equals(edgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(edgeType, GraphAutoLinkService.AutoMentionEdgeType, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsReadOnlyRelationship(GraphEdge edge) =>
         IsReservedEditableEdgeType(edge.EdgeType)
+        || GraphAutoLinkService.IsAutoMentionEdge(edge)
         || IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties)
         || IngestSourceAssertions.CountRelationshipSources(edge.Properties) > 0
         || IngestWikiSheet.ReadRelationshipCitations(edge.Properties).Count > 0
@@ -537,7 +543,8 @@ public sealed class ProjectGraphService(
         {
             if (IngestSourceAssertions.IsProtectedProperty(kv.Key)
                 || IngestWikiSheet.IsWikiStorageProperty(kv.Key)
-                || IngestWikiSheet.IsCanonSourceProperty(kv.Key))
+                || IngestWikiSheet.IsCanonSourceProperty(kv.Key)
+                || GraphAutoLinkService.IsProtectedAutoLinkProperty(kv.Key))
             {
                 continue;
             }

@@ -1,4 +1,5 @@
 using Lorekeeper.Context;
+using Lorekeeper.Graph;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
@@ -10,7 +11,8 @@ public sealed class EntityService(
     IGraphStore graph,
     IGraphNodeRepository nodes,
     IGraphEdgeRepository edges,
-    IContextIndexingService contextIndexing) : IEntityService
+    IContextIndexingService contextIndexing,
+    IGraphAutoLinkService autoLinks) : IEntityService
 {
     /// <summary>Canonical chapter <see cref="GraphNode.NodeType"/> for parent links.</summary>
     public const string ChapterNodeType = "Chapter";
@@ -111,6 +113,7 @@ public sealed class EntityService(
 
         var entity = Project(node, parentId);
         await contextIndexing.ReindexEntityAsync(projectId, entity.Id, cancellationToken);
+        await autoLinks.RefreshEntityAsync(projectId, entity.Id, cancellationToken);
         return entity;
     }
 
@@ -155,6 +158,7 @@ public sealed class EntityService(
         var parent = await FindParentAsync(node.Id, cancellationToken);
         var entity = Project(node, parent);
         await contextIndexing.ReindexEntityAsync(projectId, entity.Id, cancellationToken);
+        await autoLinks.RefreshEntityAsync(projectId, entity.Id, cancellationToken);
         return entity;
     }
 
@@ -305,8 +309,8 @@ public sealed class EntityService(
         CancellationToken cancellationToken = default)
     {
         var (edge, fromNode, toNode) = await GetRequiredProjectEdgeAsync(projectId, edgeId, cancellationToken);
-        if (string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Managed parent links cannot be edited directly.");
+        if (IsReadOnlyLink(edge))
+            throw new InvalidOperationException("Managed and auto-generated links cannot be edited directly.");
 
         edge.EdgeType = NormalizeEditableEdgeType(edgeType);
         edge.Properties = ToObjectDict(properties);
@@ -320,8 +324,8 @@ public sealed class EntityService(
     public async Task DeleteLinkAsync(Guid projectId, long edgeId, CancellationToken cancellationToken = default)
     {
         var (edge, fromNode, toNode) = await GetRequiredProjectEdgeAsync(projectId, edgeId, cancellationToken);
-        if (string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Managed parent links cannot be deleted directly.");
+        if (IsReadOnlyLink(edge))
+            throw new InvalidOperationException("Managed and auto-generated links cannot be deleted directly.");
 
         await graph.RemoveEdgeAsync(edge.Id, cancellationToken);
         await ReindexEntitiesAsync(projectId, EndpointEntityIds(fromNode, toNode), cancellationToken);
@@ -393,9 +397,15 @@ public sealed class EntityService(
                 CanonSources: [],
                 IsIngestCreated: IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties),
                 CanonSourceCount: IngestWikiSheet.ReadCanonSources(edge.Properties).Count,
+                IsAutoLink: GraphAutoLinkService.IsAutoMentionEdge(edge),
                 RelationshipCitations: IngestWikiSheet.ReadRelationshipCitations(edge.Properties)));
         }
-        return result;
+        return result
+            .OrderBy(link => link.IsAutoLink)
+            .ThenByDescending(link => string.Equals(link.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
+            .ThenBy(link => link.EdgeType, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(link => link.OtherEntityName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     // ---- helpers ---------------------------------------------------------
@@ -508,10 +518,15 @@ public sealed class EntityService(
         var type = (edgeType ?? string.Empty).Trim();
         if (type.Length == 0)
             throw new ArgumentException("Relationship type is required.", nameof(edgeType));
-        if (string.Equals(type, HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Managed parent links cannot be edited directly.");
+        if (string.Equals(type, HasChildEdgeType, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(type, GraphAutoLinkService.AutoMentionEdgeType, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Managed and auto-generated links cannot be edited directly.");
         return type;
     }
+
+    private static bool IsReadOnlyLink(GraphEdge edge) =>
+        string.Equals(edge.EdgeType, HasChildEdgeType, StringComparison.OrdinalIgnoreCase)
+        || GraphAutoLinkService.IsAutoMentionEdge(edge);
 
     private static bool IsContextEntityNode(GraphNode node) =>
         Guid.TryParseExact(node.Key, "N", out _)
@@ -533,7 +548,8 @@ public sealed class EntityService(
         {
             if (IngestSourceAssertions.IsProtectedProperty(kv.Key)
                 || IngestWikiSheet.IsWikiStorageProperty(kv.Key)
-                || IngestWikiSheet.IsCanonSourceProperty(kv.Key))
+                || IngestWikiSheet.IsCanonSourceProperty(kv.Key)
+                || GraphAutoLinkService.IsProtectedAutoLinkProperty(kv.Key))
             {
                 continue;
             }

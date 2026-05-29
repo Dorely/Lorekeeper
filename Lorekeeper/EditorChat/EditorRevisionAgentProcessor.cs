@@ -4,11 +4,11 @@ using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.Ingest;
-using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
@@ -22,8 +22,7 @@ public sealed class EditorRevisionAgentProcessor(
     IContextBuilder contextBuilder,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
-    IVectorStore vectors,
-    IEmbeddingService embeddings,
+    IProjectSearchService projectSearch,
     IAiChangeRepository changes,
     IProjectFactService projectFacts,
     IEntityService entities,
@@ -273,16 +272,32 @@ public sealed class EditorRevisionAgentProcessor(
 
     private async Task<IList<AITool>> BuildToolsAsync(Guid projectId, Guid assignedChapterId, CapturedChapterEdit edit, CancellationToken cancellationToken)
     {
-        var tools = new List<AITool>();
-        if (await embeddings.IsAvailableAsync(cancellationToken))
+        var tools = new List<AITool>
         {
-            tools.Add(AIFunctionFactory.Create(
-                method: (string query, int topK = 8) => VectorSearchAsync(projectId, query, topK),
-                name: "vector_search",
-                description: "Semantic search over indexed chapters and lore for the current project. Use focused queries for continuity evidence not already in the Context Feed."));
-        }
+            AIFunctionFactory.Create(
+                method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
+                    ListSearchSourcesAsync(projectId, query, sourceTypes, topK),
+                name: "list_search_sources",
+                description: "Resolve searchable project source ids by title/name/type. Use this before a source-filtered search when the user names a source but you need its id."),
 
-        tools.AddRange([
+            AIFunctionFactory.Create(
+                method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
+                    ReadProjectSourceAsync(projectId, sourceType, sourceId, pageNumber),
+                name: "read_project_source",
+                description: "Read one paginated project source by sourceType and sourceId. Use this before searching only inside a specific source text."),
+
+            AIFunctionFactory.Create(
+                method: (
+                    string query,
+                    int topK = 8,
+                    string[]? sourceTypes = null,
+                    string[]? sourceIds = null,
+                    Guid? containerSourceId = null,
+                    bool lexicalOnly = false) =>
+                    SearchProjectAsync(projectId, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
+                name: "search_project",
+                description: "Hybrid keyword + semantic search over indexed project text. Use sourceTypes/sourceIds/containerSourceId to manually restrict search to a specific source, chunk, chapter, act, or entity. Set lexicalOnly=true for exact names/phrases or source-scoped lookup."),
+
             AIFunctionFactory.Create(
                 method: () => ListChaptersAsync(projectId),
                 name: "list_chapters",
@@ -330,7 +345,7 @@ public sealed class EditorRevisionAgentProcessor(
                     "mutationKind must be replace_whole_body, replace_range, insert_before_line, or insert_after_line. " +
                     "Use line numbers from read_chapter or the Context Feed. replacementText must be prose only with no line numbers. " +
                     "Do not call any more tools after this."),
-        ]);
+        };
 
         return tools;
     }
@@ -381,32 +396,46 @@ public sealed class EditorRevisionAgentProcessor(
         return sb.ToString().TrimEnd();
     }
 
-    private async Task<string> VectorSearchAsync(Guid projectId, string query, int topK)
+    private async Task<string> ListSearchSourcesAsync(Guid projectId, string? query, string[]? sourceTypes, int topK)
+    {
+        topK = Math.Clamp(topK, 1, 30);
+        var sources = await projectSearch.ListSourcesAsync(projectId, query, sourceTypes, topK);
+        return JsonSerializer.Serialize(sources, JsonOptions);
+    }
+
+    private async Task<string> ReadProjectSourceAsync(Guid projectId, string sourceType, Guid sourceId, int? pageNumber)
+    {
+        var result = await projectSearch.ReadSourceAsync(projectId, sourceType, sourceId, pageNumber);
+        return result is null
+            ? $"Error: source {sourceType}/{sourceId:N} was not found in this project."
+            : JsonSerializer.Serialize(result, JsonOptions);
+    }
+
+    private async Task<string> SearchProjectAsync(
+        Guid projectId,
+        string query,
+        int topK,
+        string[]? sourceTypes,
+        string[]? sourceIds,
+        Guid? containerSourceId,
+        bool lexicalOnly)
     {
         if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
-        topK = Math.Clamp(topK, 1, 20);
+        var parsedSourceIds = ParseSourceIds(sourceIds, out var parseError);
+        if (parseError is not null) return parseError;
 
-        var embedding = await embeddings.GenerateEmbeddingAsync(query);
-        var results = await vectors.SearchAsync(embedding, Project.ScopeKey(projectId), topK);
-        if (results.Count == 0) return "No matches.";
+        var results = await projectSearch.SearchAsync(new ProjectSearchRequest(
+            projectId,
+            query.Trim(),
+            Math.Clamp(topK, 1, 30),
+            sourceTypes,
+            parsedSourceIds,
+            containerSourceId,
+            lexicalOnly));
 
-        var sb = new StringBuilder();
-        for (var i = 0; i < results.Count; i++)
-        {
-            var result = results[i];
-            sb.Append('[').Append(i + 1).Append("] ")
-              .Append(result.SourceType).Append('/').Append(result.SourceId ?? "?")
-              .Append(" row=").Append(result.RowId);
-            if (result.ChunkIndex is not null)
-                sb.Append(" fragment=").Append(result.ChunkIndex.Value + 1);
-            if (!string.IsNullOrWhiteSpace(result.Metadata))
-                sb.Append(" - ").Append(result.Metadata);
-            sb.Append(" (distance ").Append(result.Distance.ToString("F4")).AppendLine(")");
-            sb.AppendLine(result.Content);
-            sb.AppendLine();
-        }
-
-        return sb.ToString().TrimEnd();
+        return results.Count == 0
+            ? "No matches."
+            : JsonSerializer.Serialize(results.Select(SearchResultPayload), JsonOptions);
     }
 
     private async Task<string> ListChaptersAsync(Guid projectId)
@@ -561,6 +590,8 @@ public sealed class EditorRevisionAgentProcessor(
             return $"Error: entity {entityId} not found in this project.";
 
         var links = await entities.ListLinksAsync(projectId, entityId);
+        var manualLinks = links.Where(link => !link.IsAutoLink).Select(LinkPayload).ToList();
+        var autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload).ToList();
         var relationContext = await entityRelations.BuildForEntityAsync(projectId, entityId, EntityRelationOptions);
         return JsonSerializer.Serialize(new
         {
@@ -574,7 +605,9 @@ public sealed class EditorRevisionAgentProcessor(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
-            links = links.Select(LinkPayload),
+            links = manualLinks.Concat(autoMentionLinks),
+            manualLinks,
+            autoMentionLinks,
             relationContext,
         });
     }
@@ -960,6 +993,44 @@ public sealed class EditorRevisionAgentProcessor(
         properties = link.Properties,
         summary = link.Summary,
         relationshipCitations = link.RelationshipCitations,
+        isAutoLink = link.IsAutoLink,
+    };
+
+    private static IReadOnlyList<Guid>? ParseSourceIds(string[]? sourceIds, out string? error)
+    {
+        error = null;
+        if (sourceIds is not { Length: > 0 }) return null;
+
+        var parsed = new List<Guid>();
+        foreach (var value in sourceIds.Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            if (!Guid.TryParse(value, out var id))
+            {
+                error = $"Error: sourceId '{value}' is not a valid Guid.";
+                return null;
+            }
+            parsed.Add(id);
+        }
+
+        return parsed.Count == 0 ? null : parsed;
+    }
+
+    private static object SearchResultPayload(ProjectSearchResult result) => new
+    {
+        result.SourceType,
+        result.SourceId,
+        result.ContainerSourceId,
+        result.Title,
+        result.Snippet,
+        result.Metadata,
+        result.ChunkIndex,
+        result.LexicalRank,
+        result.LexicalPosition,
+        result.VectorDistance,
+        result.VectorPosition,
+        result.Score,
+        result.Reasons,
+        content = TruncateForPrompt(result.Content, 1_800),
     };
 
     private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>

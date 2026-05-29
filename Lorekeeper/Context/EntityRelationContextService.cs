@@ -18,13 +18,18 @@ public sealed class EntityRelationContextService(IEntityService entities) : IEnt
 
         var links = await entities.ListLinksAsync(projectId, entityId, cancellationToken);
         var directLinks = links
-            .Where(CanTraverse)
+            .Where(link => !link.IsAutoLink && CanTraverse(link))
+            .Take(resolvedOptions.MaxDirectLinks)
+            .Select(link => ProjectDirectLink(root, link))
+            .ToList();
+        var autoLinks = links
+            .Where(link => link.IsAutoLink && CanTraverse(link))
             .Take(resolvedOptions.MaxDirectLinks)
             .Select(link => ProjectDirectLink(root, link))
             .ToList();
         var traversalMap = await BuildTraversalMapAsync(projectId, [entityId], resolvedOptions, cancellationToken);
 
-        return new EntityRelationContext(directLinks, traversalMap);
+        return new EntityRelationContext(directLinks, traversalMap, autoLinks);
     }
 
     public async Task<IReadOnlyList<EntityTraversalPathContext>> BuildTraversalMapAsync(
@@ -58,7 +63,7 @@ public sealed class EntityRelationContextService(IEntityService entities) : IEnt
             var links = await entities.ListLinksAsync(projectId, current.EntityId, cancellationToken);
             foreach (var link in links.Take(resolvedOptions.MaxLinksPerNode))
             {
-                if (!CanTraverse(link) || link.OtherEntityId == Guid.Empty || !visited.Add(link.OtherEntityId))
+                if (link.IsAutoLink || !CanTraverse(link) || link.OtherEntityId == Guid.Empty || !visited.Add(link.OtherEntityId))
                     continue;
 
                 var other = await entities.GetAsync(projectId, link.OtherEntityId, cancellationToken);
@@ -103,7 +108,8 @@ public sealed class EntityRelationContextService(IEntityService entities) : IEnt
         link.OtherEntityType,
         link.SortOrder,
         link.Properties,
-        AppendHop(FormatEntity(root), link));
+        AppendHop(FormatEntity(root), link),
+        link.IsAutoLink);
 
     private static string AppendHop(string path, EntityLink link, StoryEntity other) => AppendHop(path, link, FormatEntity(other));
 

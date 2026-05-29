@@ -1,10 +1,12 @@
 using System.Text;
+using Lorekeeper.Graph;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Search;
 
 namespace Lorekeeper.Context;
 
@@ -12,6 +14,8 @@ public sealed class ContextIndexingService(
     IVectorStore vectors,
     IEmbeddingService embeddings,
     ITextChunker chunker,
+    IProjectSearchIndex projectSearch,
+    IGraphAutoLinkService autoLinks,
     IGraphNodeRepository nodes,
     IGraphEdgeRepository edges,
     IActRepository acts,
@@ -153,6 +157,7 @@ public sealed class ContextIndexingService(
                 Guid.ParseExact(node.Key, "N"),
                 $"{node.NodeType} {node.Label ?? node.Key}",
                 text,
+                null,
                 cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -170,6 +175,7 @@ public sealed class ContextIndexingService(
             chapter.Id,
             $"Chapter {chapter.Order + 1} {chapter.Title}",
             text,
+            null,
             cancellationToken);
     }
 
@@ -182,6 +188,7 @@ public sealed class ContextIndexingService(
             act.Id,
             $"Act {act.Order + 1} {act.Title}",
             text,
+            null,
             cancellationToken);
     }
 
@@ -194,6 +201,7 @@ public sealed class ContextIndexingService(
             source.Id,
             $"Source {source.Title}",
             text,
+            source.Id,
             cancellationToken);
 
         foreach (var sourceChunk in await ingest.ListSourceChunksAsync(source.Id, cancellationToken))
@@ -212,6 +220,7 @@ public sealed class ContextIndexingService(
             sourceChunk.Id,
             $"Source chunk {source.Title} part {sourceChunk.Index + 1}",
             text,
+            source.Id,
             cancellationToken);
     }
 
@@ -221,19 +230,41 @@ public sealed class ContextIndexingService(
         Guid sourceId,
         string metadata,
         string content,
+        Guid? containerSourceId,
         CancellationToken cancellationToken)
     {
         var scopeKey = Project.ScopeKey(projectId);
         var sourceKey = sourceId.ToString("N");
         await vectors.DeleteBySourceAsync(sourceType, sourceKey, scopeKey, cancellationToken);
+        await projectSearch.DeleteBySourceAsync(sourceType, sourceKey, scopeKey, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            await autoLinks.RefreshSourceAsync(projectId, sourceType, sourceId, cancellationToken);
+            return;
+        }
+
+        var chunks = chunker.Chunk(content);
+        if (chunks.Count == 0)
+        {
+            await autoLinks.RefreshSourceAsync(projectId, sourceType, sourceId, cancellationToken);
+            return;
+        }
+
+        await projectSearch.StoreManyAsync(chunks.Select(chunk => new ProjectSearchIndexChunk(
+            chunk.Content,
+            sourceType,
+            scopeKey,
+            sourceKey,
+            containerSourceId?.ToString("N"),
+            metadata,
+            chunks.Count == 1 ? metadata : $"{metadata} - Part {chunk.Index + 1}/{chunks.Count}",
+            chunk.Index)), cancellationToken);
+
+        await autoLinks.RefreshSourceAsync(projectId, sourceType, sourceId, cancellationToken);
 
         if (!await embeddings.IsAvailableAsync(cancellationToken))
             return;
-
-        if (string.IsNullOrWhiteSpace(content)) return;
-
-        var chunks = chunker.Chunk(content);
-        if (chunks.Count == 0) return;
 
         var contents = chunks.Select(chunk => chunk.Content).ToList();
         var embeddingVectors = await embeddings.GenerateEmbeddingsAsync(contents, cancellationToken);
@@ -255,7 +286,11 @@ public sealed class ContextIndexingService(
     {
         try
         {
-            await vectors.DeleteBySourceAsync(sourceType, sourceId.ToString("N"), Project.ScopeKey(projectId), cancellationToken);
+            var sourceKey = sourceId.ToString("N");
+            var scopeKey = Project.ScopeKey(projectId);
+            await vectors.DeleteBySourceAsync(sourceType, sourceKey, scopeKey, cancellationToken);
+            await projectSearch.DeleteBySourceAsync(sourceType, sourceKey, scopeKey, cancellationToken);
+            await autoLinks.RefreshSourceAsync(projectId, sourceType, sourceId, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -293,7 +328,9 @@ public sealed class ContextIndexingService(
             }
         }
 
-        var adjacent = await edges.GetAdjacentAsync(node.Id, EdgeDirection.Both, edgeTypes: null, MaxEntityLinks, cancellationToken);
+        var adjacent = (await edges.GetAdjacentAsync(node.Id, EdgeDirection.Both, edgeTypes: null, MaxEntityLinks, cancellationToken))
+            .Where(edge => !GraphAutoLinkService.IsAutoMentionEdge(edge))
+            .ToList();
         if (adjacent.Count > 0)
         {
             var otherIds = adjacent.Select(edge => edge.FromNodeId == node.Id ? edge.ToNodeId : edge.FromNodeId).Distinct();

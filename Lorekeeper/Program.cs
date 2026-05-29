@@ -79,6 +79,9 @@ builder.Services.AddScoped<IWebSearchClient, SerpApiWebSearchClient>();
 builder.Services.AddScoped<IWebSearchClient, BraveWebSearchClient>();
 builder.Services.AddScoped<IWebSearchProviderFactory, WebSearchProviderFactory>();
 builder.Services.AddScoped<ISearchProviderService, SearchProviderService>();
+builder.Services.AddScoped<IProjectSearchIndex, SqliteFtsProjectSearchIndex>();
+builder.Services.AddScoped<IProjectSearchService, ProjectSearchService>();
+builder.Services.AddScoped<IGraphAutoLinkService, GraphAutoLinkService>();
 
 // Token counting + prompt budgets
 builder.Services.Configure<TokenCountingOptions>(builder.Configuration.GetSection(TokenCountingOptions.SectionName));

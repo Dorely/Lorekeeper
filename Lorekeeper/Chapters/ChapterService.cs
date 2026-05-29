@@ -1,9 +1,11 @@
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Context;
+using Lorekeeper.Graph;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Search;
 
 namespace Lorekeeper.Chapters;
 
@@ -13,6 +15,8 @@ public class ChapterService(
     IVectorStore vectors,
     IEmbeddingService embeddings,
     ITextChunker chunker,
+    IProjectSearchIndex projectSearch,
+    IGraphAutoLinkService autoLinks,
     IOutlineGraphSync outlineGraphSync,
     IContextIndexingService contextIndexing,
     IVectorIndexWorkCoordinator indexWork,
@@ -217,6 +221,19 @@ public class ChapterService(
         try
         {
             await vectors.DeleteBySourceAsync("chapter", sourceId, scopeKey, cancellationToken);
+            await projectSearch.DeleteBySourceAsync(ProjectSearchSourceTypes.Chapter, sourceId, scopeKey, cancellationToken);
+
+            var searchText = BuildChapterSearchText(chapter);
+            var searchChunks = chunker.Chunk(searchText);
+            await projectSearch.StoreManyAsync(searchChunks.Select(chunk => new ProjectSearchIndexChunk(
+                chunk.Content,
+                ProjectSearchSourceTypes.Chapter,
+                scopeKey,
+                sourceId,
+                null,
+                $"Chapter {chapter.Order + 1} {chapter.Title}",
+                $"Chapter {chapter.Order + 1} - {chapter.Title}",
+                chunk.Index)), cancellationToken);
 
             if (!await embeddings.IsAvailableAsync(cancellationToken))
             {
@@ -226,6 +243,7 @@ public class ChapterService(
                 repo.Update(chapter);
                 await repo.SaveChangesAsync(cancellationToken);
                 await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
+                await autoLinks.RefreshSourceAsync(chapter.ProjectId, ProjectSearchSourceTypes.Chapter, chapter.Id, cancellationToken);
                 await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
                 logger.LogDebug("Skipped chapter vector indexing for {ChapterId}; no embedding model is configured.", chapter.Id);
                 return;
@@ -259,6 +277,7 @@ public class ChapterService(
             repo.Update(chapter);
             await repo.SaveChangesAsync(cancellationToken);
             await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
+            await autoLinks.RefreshSourceAsync(chapter.ProjectId, ProjectSearchSourceTypes.Chapter, chapter.Id, cancellationToken);
             await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
 
             logger.LogDebug("Reindexed chapter {ChapterId} with {Count} chunks", chapter.Id, chunks.Count);
@@ -277,5 +296,19 @@ public class ChapterService(
             catch (Exception saveEx) { logger.LogError(saveEx, "Failed to persist reindex failure for chapter {ChapterId}", chapter.Id); }
             throw;
         }
+    }
+
+    private static string BuildChapterSearchText(Chapter chapter)
+    {
+        var parts = new List<string>
+        {
+            $"Type: Chapter",
+            $"Title: {chapter.Title}",
+        };
+        if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
+            parts.Add($"Synopsis: {chapter.Synopsis}");
+        if (!string.IsNullOrWhiteSpace(chapter.Body))
+            parts.Add($"Body: {chapter.Body}");
+        return string.Join('\n', parts);
     }
 }

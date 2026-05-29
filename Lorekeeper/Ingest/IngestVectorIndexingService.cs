@@ -1,7 +1,9 @@
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Graph;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Search;
 
 namespace Lorekeeper.Ingest;
 
@@ -9,7 +11,9 @@ public sealed class IngestVectorIndexingService(
     IIngestRepository ingest,
     IVectorStore vectors,
     IEmbeddingService embeddings,
-    ITextChunker chunker) : IIngestVectorIndexingService
+    ITextChunker chunker,
+    IProjectSearchIndex projectSearch,
+    IGraphAutoLinkService autoLinks) : IIngestVectorIndexingService
 {
     public async Task EnsureVectorFragmentsAsync(IngestSource source, bool force = false, CancellationToken cancellationToken = default)
     {
@@ -17,9 +21,12 @@ public sealed class IngestVectorIndexingService(
         if (!force && source.VectorIndexState == VectorIndexState.UpToDate && existingFragments.Count > 0)
             return;
 
+        await DeleteExistingVectorRowsAsync(source, existingFragments, cancellationToken);
+        await StoreLexicalFragmentsAsync(source, cancellationToken);
+        await autoLinks.RefreshSourceAsync(source.ProjectId, ProjectSearchSourceTypes.RawIngestSource, source.Id, cancellationToken);
+
         if (!await embeddings.IsAvailableAsync(cancellationToken))
         {
-            await DeleteExistingVectorRowsAsync(source, existingFragments, cancellationToken);
             source.VectorIndexState = VectorIndexState.Disabled;
             source.VectorIndexedAt = null;
             source.VectorIndexError = null;
@@ -31,8 +38,6 @@ public sealed class IngestVectorIndexingService(
 
         try
         {
-            await DeleteExistingVectorRowsAsync(source, existingFragments, cancellationToken);
-
             var chunks = chunker.Chunk(source.SourceText);
             var sourceBlocks = await ingest.ListSourceBlocksAsync(source.Id, cancellationToken);
             if (chunks.Count > 0)
@@ -96,10 +101,30 @@ public sealed class IngestVectorIndexingService(
         IReadOnlyList<IngestVectorFragment> existingFragments,
         CancellationToken cancellationToken)
     {
-        await vectors.DeleteBySourceAsync("ingest_source", source.VectorSourceId, Project.ScopeKey(source.ProjectId), cancellationToken);
+        var scopeKey = Project.ScopeKey(source.ProjectId);
+        await vectors.DeleteBySourceAsync("ingest_source", source.VectorSourceId, scopeKey, cancellationToken);
+        await projectSearch.DeleteBySourceAsync(ProjectSearchSourceTypes.RawIngestSource, source.VectorSourceId, scopeKey, cancellationToken);
         foreach (var fragment in existingFragments)
             ingest.RemoveVectorFragment(fragment);
         await ingest.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task StoreLexicalFragmentsAsync(IngestSource source, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(source.SourceText)) return;
+
+        var chunks = chunker.Chunk(source.SourceText);
+        if (chunks.Count == 0) return;
+
+        await projectSearch.StoreManyAsync(chunks.Select(chunk => new ProjectSearchIndexChunk(
+            chunk.Content,
+            ProjectSearchSourceTypes.RawIngestSource,
+            Project.ScopeKey(source.ProjectId),
+            source.VectorSourceId,
+            source.Id.ToString("N"),
+            source.Title,
+            $"Raw source {source.Title} - Part {chunk.Index + 1}/{chunks.Count}",
+            chunk.Index)), cancellationToken);
     }
 
     private static int FindFragmentStart(string sourceText, string fragmentText, int cursor)

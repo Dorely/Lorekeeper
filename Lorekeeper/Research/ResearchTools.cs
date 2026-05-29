@@ -86,6 +86,9 @@ public sealed class ResearchTools(
         var allowedGraphToolNames = new HashSet<string>(StringComparer.Ordinal)
         {
             "list_entity_types",
+            "list_search_sources",
+            "read_project_source",
+            "search_project",
             "search_entities",
             "create_entity",
             "update_entity",
@@ -132,7 +135,10 @@ public sealed class ResearchTools(
 
     private async Task<string> ReadSearchResultAsync(ResearchToolContext context, Guid pageId, int? pageNumber)
     {
-        var read = await candidates.ReadCandidateForConversationAsync(pageId, context.ConversationId);
+        var read = await TryReadCandidateForToolAsync(context, pageId);
+        if (read is null)
+            return $"Error: search result pageId {pageId:N} was not found in this project. Run web_search again and use a page id from the returned results.";
+
         return SerializeReadPayload(read, pageNumber, WebReadToolKind.SearchResult);
     }
 
@@ -146,7 +152,10 @@ public sealed class ResearchTools(
     private async Task<string> FollowPageLinksAsync(ResearchToolContext context, Guid pageId, int count, bool sameDomainOnly)
     {
         count = Math.Clamp(count, 1, Math.Max(1, webOptions.Value.MaxFollowLinksPerPage));
-        var sourceRead = await candidates.ReadCandidateForConversationAsync(pageId, context.ConversationId);
+        var sourceRead = await TryReadCandidateForToolAsync(context, pageId);
+        if (sourceRead is null)
+            return $"Error: source pageId {pageId:N} was not found in this project. Run web_search or read_webpage again and use a page id from the returned page payload.";
+
         var sourceUrl = BestUrl(sourceRead.Candidate);
         var followed = new List<object>();
         var selectedLinks = linkPolicy.FilterAndPrioritizeLinks(
@@ -188,6 +197,21 @@ public sealed class ResearchTools(
         }, JsonOptions);
     }
 
+    private async Task<WebIngestCandidateReadResult?> TryReadCandidateForToolAsync(ResearchToolContext context, Guid pageId)
+    {
+        var cached = await candidates.GetCachedDetailAsync(context.ProjectId, pageId);
+        if (cached is null) return null;
+
+        try
+        {
+            return await candidates.ReadCandidateForConversationAsync(pageId, context.ConversationId);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("was not found", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+    }
+
     private async Task<string> ReadEntityAsync(ResearchToolContext context, Guid entityId)
     {
         if (context.Staging is not null)
@@ -198,6 +222,8 @@ public sealed class ResearchTools(
             return $"Error: entity {entityId} not found in this project.";
 
         var links = await entities.ListLinksAsync(context.ProjectId, entityId);
+        var manualLinks = links.Where(link => !link.IsAutoLink).Select(LinkPayload).ToList();
+        var autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload).ToList();
         var relationContext = await entityRelations.BuildForEntityAsync(context.ProjectId, entityId, EntityRelationOptions);
         return JsonSerializer.Serialize(new
         {
@@ -211,7 +237,9 @@ public sealed class ResearchTools(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
-            links = links.Select(LinkPayload),
+            links = manualLinks.Concat(autoMentionLinks),
+            manualLinks,
+            autoMentionLinks,
             relationContext,
         }, JsonOptions);
     }
@@ -241,6 +269,7 @@ public sealed class ResearchTools(
         properties = link.Properties,
         summary = link.Summary,
         relationshipCitations = link.RelationshipCitations,
+        isAutoLink = link.IsAutoLink,
     };
 
     private string SerializeReadPayload(WebIngestCandidateReadResult read, int? pageNumber, WebReadToolKind toolKind)

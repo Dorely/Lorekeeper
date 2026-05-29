@@ -3,11 +3,11 @@ using System.Text;
 using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.Graph;
 using Lorekeeper.Ingest;
-using Lorekeeper.Knowledge;
-using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.Outline;
@@ -31,11 +31,11 @@ public sealed class OutlineCollaborationTools(
     IEntityService entities,
     IEntityTypeService entityTypes,
     IProjectFactService projectFacts,
-    IVectorStore vectors,
-    IEmbeddingService embeddings,
     IAiChangeRepository changes,
     IProjectRepository projectRepository,
-    IEntityRelationContextService entityRelations)
+    IEntityRelationContextService entityRelations,
+    IProjectSearchService projectSearch,
+    IGraphAutoLinkService autoLinks)
 {
     private const string UnassignedSentinel = "unassigned";
     /// <summary>Canonical entity type for chapter-scoped beats.</summary>
@@ -62,6 +62,30 @@ public sealed class OutlineCollaborationTools(
     {
         var tools = new List<AITool>
         {
+            AIFunctionFactory.Create(
+                method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
+                    ListSearchSourcesAsync(context, query, sourceTypes, topK),
+                name: "list_search_sources",
+                description: "Resolve searchable project source ids by title/name/type. Use this before a source-filtered search when the user names a source but you need its id."),
+
+            AIFunctionFactory.Create(
+                method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
+                    ReadProjectSourceAsync(context, sourceType, sourceId, pageNumber),
+                name: "read_project_source",
+                description: "Read one paginated project source by sourceType and sourceId. Supports chapters, acts, entities, ingest sources, raw ingest source text, and ingest source chunks. Use this before searching only inside a specific source text."),
+
+            AIFunctionFactory.Create(
+                method: (
+                    string query,
+                    int topK = 8,
+                    string[]? sourceTypes = null,
+                    string[]? sourceIds = null,
+                    Guid? containerSourceId = null,
+                    bool lexicalOnly = false) =>
+                    SearchProjectAsync(context, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
+                name: "search_project",
+                description: "Hybrid keyword + semantic search over indexed project text. Use sourceTypes/sourceIds/containerSourceId to manually restrict search to a specific source, chunk, chapter, act, or entity. Set lexicalOnly=true for exact names/phrases or when the user asks to look in a specific source text."),
+
             AIFunctionFactory.Create(
                 method: () => ListOutlineAsync(context),
                 name: "list_outline",
@@ -153,16 +177,59 @@ public sealed class OutlineCollaborationTools(
                 name: "link_entities",
                 description: "Create a typed edge between two entities. propertiesJson is an optional JSON object string of edge metadata. Conventional edge types: 'AppearsIn' (Character -> Event/Chapter), 'LocatedAt' (Event -> Location), 'KnownTo' (Character -> Character). Other types are allowed; use camel-case verbs. Returns link details plus updated source and target payloads."),
 
-            AIFunctionFactory.Create(
-                method: (string query, int topK = 8) => VectorSearchAsync(context, query, topK),
-                name: "vector_search",
-                description: "Semantic search over indexed lore and chapters in the current project. Likely returns nothing during early outline work — that just means no lore has been indexed yet."),
         };
 
-        if (!await embeddings.IsAvailableAsync(cancellationToken))
-            tools.RemoveAll(tool => tool is AIFunction function && string.Equals(function.Name, "vector_search", StringComparison.Ordinal));
-
         return tools;
+    }
+
+    private async Task<string> ListSearchSourcesAsync(
+        OutlineCollaborationContext ctx,
+        string? query,
+        string[]? sourceTypes,
+        int topK)
+    {
+        topK = Math.Clamp(topK, 1, 30);
+        var sources = await projectSearch.ListSourcesAsync(ctx.ProjectId, query, sourceTypes, topK);
+        return JsonSerializer.Serialize(sources);
+    }
+
+    private async Task<string> ReadProjectSourceAsync(
+        OutlineCollaborationContext ctx,
+        string sourceType,
+        Guid sourceId,
+        int? pageNumber)
+    {
+        var result = await projectSearch.ReadSourceAsync(ctx.ProjectId, sourceType, sourceId, pageNumber);
+        return result is null
+            ? $"Error: source {sourceType}/{sourceId:N} was not found in this project."
+            : JsonSerializer.Serialize(result);
+    }
+
+    private async Task<string> SearchProjectAsync(
+        OutlineCollaborationContext ctx,
+        string query,
+        int topK,
+        string[]? sourceTypes,
+        string[]? sourceIds,
+        Guid? containerSourceId,
+        bool lexicalOnly)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
+        var parsedSourceIds = ParseSourceIds(sourceIds, out var parseError);
+        if (parseError is not null) return parseError;
+
+        var results = await projectSearch.SearchAsync(new ProjectSearchRequest(
+            ctx.ProjectId,
+            query.Trim(),
+            Math.Clamp(topK, 1, 30),
+            sourceTypes,
+            parsedSourceIds,
+            containerSourceId,
+            lexicalOnly));
+
+        return results.Count == 0
+            ? "No matches."
+            : JsonSerializer.Serialize(results.Select(SearchResultPayload));
     }
 
     // ---- list ------------------------------------------------------------
@@ -395,53 +462,6 @@ public sealed class OutlineCollaborationTools(
         return $"Reordered {final.Count} chapters in bucket {(bucket is null ? "unassigned" : bucket.ToString())}.";
     }
 
-    // ---- search ----------------------------------------------------------
-
-    private async Task<string> VectorSearchAsync(
-        OutlineCollaborationContext ctx,
-        [Description("Natural-language query to embed and search.")] string query,
-        [Description("Maximum number of results to return (1-20).")] int topK)
-    {
-        if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
-        topK = Math.Clamp(topK, 1, 20);
-
-        var embedding = await embeddings.GenerateEmbeddingAsync(query);
-        var results = await vectors.SearchAsync(embedding, Project.ScopeKey(ctx.ProjectId), topK);
-        if (results.Count == 0) return "No matches.";
-
-        var sb = new StringBuilder();
-        for (var i = 0; i < results.Count; i++)
-        {
-            var r = results[i];
-            sb.Append('[').Append(i + 1).Append("] ")
-              .Append(r.SourceType).Append('/').Append(r.SourceId ?? "?")
-              .Append(" row=").Append(r.RowId);
-            if (r.ChunkIndex is not null)
-                sb.Append(" fragment=").Append(r.ChunkIndex.Value + 1);
-            if (!string.IsNullOrWhiteSpace(r.Metadata))
-                sb.Append(" - ").Append(r.Metadata);
-            sb.Append(" (distance ").Append(r.Distance.ToString("F4")).Append(")\n");
-            sb.Append(r.Content).Append("\n\n");
-
-            if (string.Equals(r.SourceType, ContextVectorSourceTypes.Entity, StringComparison.Ordinal)
-                && !string.IsNullOrWhiteSpace(r.SourceId)
-                && Guid.TryParseExact(r.SourceId, "N", out var entityId))
-            {
-                var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, EntityRelationOptions);
-                if (relationContext.DirectLinks.Count > 0 || relationContext.TraversalMap.Count > 0)
-                {
-                    sb.AppendLine("Relation context:");
-                    foreach (var link in relationContext.DirectLinks)
-                        sb.Append("- ").AppendLine(link.Path);
-                    if (relationContext.TraversalMap.Count > 0)
-                        sb.AppendLine(entityRelations.FormatTraversalMap(relationContext.TraversalMap));
-                    sb.AppendLine();
-                }
-            }
-        }
-        return sb.ToString().TrimEnd();
-    }
-
     // ---- entity tools ----------------------------------------------------
 
     private async Task<string> ListEntityTypesAsync(OutlineCollaborationContext ctx)
@@ -642,6 +662,7 @@ public sealed class OutlineCollaborationTools(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
+            autoMentionLinks = await autoLinks.ListEntityAutoMentionLinksAsync(projectId, entity.Id),
             relationContext,
         };
     }
@@ -928,6 +949,43 @@ public sealed class OutlineCollaborationTools(
         properties = CompactProperties(entity.Properties),
     };
 
+    private static IReadOnlyList<Guid>? ParseSourceIds(string[]? sourceIds, out string? error)
+    {
+        error = null;
+        if (sourceIds is not { Length: > 0 }) return null;
+
+        var parsed = new List<Guid>();
+        foreach (var value in sourceIds.Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            if (!Guid.TryParse(value, out var id))
+            {
+                error = $"Error: sourceId '{value}' is not a valid Guid.";
+                return null;
+            }
+            parsed.Add(id);
+        }
+
+        return parsed.Count == 0 ? null : parsed;
+    }
+
+    private static object SearchResultPayload(ProjectSearchResult result) => new
+    {
+        result.SourceType,
+        result.SourceId,
+        result.ContainerSourceId,
+        result.Title,
+        result.Snippet,
+        result.Metadata,
+        result.ChunkIndex,
+        result.LexicalRank,
+        result.LexicalPosition,
+        result.VectorDistance,
+        result.VectorPosition,
+        result.Score,
+        result.Reasons,
+        content = TruncateForSearchPayload(result.Content, 1_800),
+    };
+
     private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>
         sources
             .Take(4)
@@ -966,6 +1024,9 @@ public sealed class OutlineCollaborationTools(
 
     private static string? TruncatePropertyValue(string? value) =>
         string.IsNullOrEmpty(value) || value.Length <= 240 ? value : value[..240] + "...";
+
+    private static string TruncateForSearchPayload(string value, int maxChars) =>
+        string.IsNullOrEmpty(value) || value.Length <= maxChars ? value : value[..maxChars] + "...";
 
     private static bool IsSearchableEntityType(string type) =>
         !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)

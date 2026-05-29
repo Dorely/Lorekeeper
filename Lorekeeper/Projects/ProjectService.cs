@@ -4,12 +4,14 @@ using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Search;
 
 namespace Lorekeeper.Projects;
 
 public class ProjectService(
     IProjectRepository repo,
     IVectorStore vectors,
+    IProjectSearchIndex projectSearch,
     IOutlineGraphSync outlineGraphSync) : IProjectService
 {
     public async Task<IReadOnlyList<Project>> ListAsync(CancellationToken cancellationToken = default) =>
@@ -106,7 +108,9 @@ public class ProjectService(
 
         // Wipe vector chunks first; if this fails we'd rather leave the project row in place
         // than orphan vectors with no owning scope.
-        await vectors.DeleteByScopeAsync(Project.ScopeKey(id), cancellationToken);
+        var scopeKey = Project.ScopeKey(id);
+        await vectors.DeleteByScopeAsync(scopeKey, cancellationToken);
+        await projectSearch.DeleteByScopeAsync(scopeKey, cancellationToken);
 
         repo.Remove(project);
         await repo.SaveChangesAsync(cancellationToken);

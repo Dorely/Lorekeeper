@@ -12,9 +12,17 @@ public sealed class EntityRelationContextOptions
 
 public sealed record EntityRelationContext(
     [property: JsonPropertyName("directLinks")] IReadOnlyList<EntityDirectLinkContext> DirectLinks,
-    [property: JsonPropertyName("traversalMap")] IReadOnlyList<EntityTraversalPathContext> TraversalMap)
+    [property: JsonPropertyName("traversalMap")] IReadOnlyList<EntityTraversalPathContext> TraversalMap,
+    [property: JsonPropertyName("autoMentionLinks")] IReadOnlyList<EntityDirectLinkContext> AutoMentionLinks)
 {
-    public static EntityRelationContext Empty { get; } = new([], []);
+    public EntityRelationContext(
+        IReadOnlyList<EntityDirectLinkContext> directLinks,
+        IReadOnlyList<EntityTraversalPathContext> traversalMap)
+        : this(directLinks, traversalMap, [])
+    {
+    }
+
+    public static EntityRelationContext Empty { get; } = new([], [], []);
 }
 
 public sealed record EntityDirectLinkContext(
@@ -26,7 +34,8 @@ public sealed record EntityDirectLinkContext(
     [property: JsonPropertyName("otherEntityType")] string OtherEntityType,
     [property: JsonPropertyName("sortOrder")] int? SortOrder,
     [property: JsonPropertyName("properties")] IReadOnlyDictionary<string, string?> Properties,
-    [property: JsonPropertyName("path")] string Path);
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("isAutoLink")] bool IsAutoLink = false);
 
 public sealed record EntityTraversalPathContext(
     [property: JsonPropertyName("depth")] int Depth,

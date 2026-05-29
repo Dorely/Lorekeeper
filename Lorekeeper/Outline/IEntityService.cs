@@ -129,6 +129,7 @@ public sealed record EntityLink(
     IReadOnlyList<IngestCanonSource> CanonSources,
     bool IsIngestCreated,
     int CanonSourceCount,
+    bool IsAutoLink,
     IReadOnlyList<IngestWikiCitation> RelationshipCitations);
 
 /// <summary>

@@ -44,7 +44,8 @@ public sealed record ProjectGraphEdge(
     string Summary,
     IReadOnlyList<IngestWikiCitation> Citations,
     bool IsIngestCreated,
-    int CanonSourceCount);
+    int CanonSourceCount,
+    bool IsAutoLink);
 
 public sealed record ProjectGraphNodeType(
     string Type,
