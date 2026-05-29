@@ -27,19 +27,7 @@ public sealed partial class GraphAutoLinkService(
     public const string RefreshedAtProperty = "autoLinkRefreshedAt";
 
     private const string Version = "1";
-    private const int EntityRefreshTopK = 80;
     private const int EvidenceRadius = 110;
-
-    private static readonly string[] SourceRefreshTypes =
-    [
-        ProjectSearchSourceTypes.Chapter,
-        ProjectSearchSourceTypes.ContextChapter,
-        ProjectSearchSourceTypes.Act,
-        ProjectSearchSourceTypes.Entity,
-        ProjectSearchSourceTypes.RawIngestSource,
-        ProjectSearchSourceTypes.IngestSource,
-        ProjectSearchSourceTypes.IngestSourceChunk,
-    ];
 
     private static readonly HashSet<string> WeakTerms = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -69,35 +57,23 @@ public sealed partial class GraphAutoLinkService(
         await RemoveIncomingAutoMentionsAsync(targetNode.Id, cancellationToken);
 
         var created = new Dictionary<long, GraphAutoMentionLink>();
-        foreach (var label in labels)
+        var sources = await ListProjectMentionSourcesAsync(projectId, cancellationToken);
+        foreach (var source in sources)
         {
-            var matches = await search.SearchAsync(
-                new ProjectSearchRequest(
-                    projectId,
-                    label.Text,
-                    EntityRefreshTopK,
-                    SourceRefreshTypes,
-                    null,
-                    null,
-                    LexicalOnly: true),
+            if (source.Node.Id == targetNode.Id) continue;
+
+            var content = await ReadAllSourceTextAsync(projectId, source.SourceType, source.SourceId, cancellationToken);
+            if (string.IsNullOrWhiteSpace(content)) continue;
+            if (!TryFindMention(content, labels, out var mention)) continue;
+
+            var link = await UpsertAutoMentionAsync(
+                source.Node,
+                targetNode,
+                source.SourceType,
+                source.SourceId,
+                mention,
                 cancellationToken);
-
-            foreach (var match in matches)
-            {
-                if (match.SourceId is not Guid sourceId) continue;
-                var sourceNode = await ResolveSourceNodeAsync(projectId, match.SourceType, sourceId, match.ContainerSourceId, cancellationToken);
-                if (sourceNode is null || sourceNode.Id == targetNode.Id) continue;
-                if (!TryFindMention(match.Content, [label], out var mention)) continue;
-
-                var link = await UpsertAutoMentionAsync(
-                    sourceNode,
-                    targetNode,
-                    ProjectSearchSourceTypes.Normalize(match.SourceType),
-                    sourceId,
-                    mention,
-                    cancellationToken);
-                created[sourceNode.Id] = link;
-            }
+            created[source.Node.Id] = link;
         }
 
         return created.Values
@@ -308,6 +284,38 @@ public sealed partial class GraphAutoLinkService(
         return string.Join('\n', pages);
     }
 
+    private async Task<IReadOnlyList<AutoLinkSourceRef>> ListProjectMentionSourcesAsync(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        var result = new List<AutoLinkSourceRef>();
+        foreach (var node in await nodes.ListByProjectAsync(projectId, cancellationToken))
+        {
+            if (!Guid.TryParseExact(node.Key, "N", out var sourceId)) continue;
+            var sourceType = SourceTypeForMentionSourceNode(node);
+            if (sourceType is null) continue;
+            result.Add(new AutoLinkSourceRef(node, sourceType, sourceId));
+        }
+
+        return result;
+    }
+
+    private static string? SourceTypeForMentionSourceNode(GraphNode node)
+    {
+        if (string.Equals(node.NodeType, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase))
+            return ProjectSearchSourceTypes.Chapter;
+        if (string.Equals(node.NodeType, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase))
+            return ProjectSearchSourceTypes.Act;
+        if (string.Equals(node.NodeType, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase))
+            return ProjectSearchSourceTypes.RawIngestSource;
+        if (string.Equals(node.NodeType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase))
+            return ProjectSearchSourceTypes.IngestSourceChunk;
+        if (IsMentionSourceEntityNode(node))
+            return ProjectSearchSourceTypes.Entity;
+
+        return null;
+    }
+
     private static IReadOnlyList<MentionLabel> BuildMentionLabels(GraphNode node)
     {
         var labels = new List<MentionLabel>();
@@ -396,10 +404,22 @@ public sealed partial class GraphAutoLinkService(
         && !string.Equals(node.NodeType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(node.NodeType, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsMentionSourceEntityNode(GraphNode node) =>
+        Guid.TryParseExact(node.Key, "N", out _)
+        && !string.Equals(node.NodeType, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
+
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();
 
     private readonly record struct MentionLabel(string Text, bool IsAlias);
 
     private readonly record struct MentionMatch(MentionLabel Label, string EvidenceExcerpt);
+
+    private sealed record AutoLinkSourceRef(GraphNode Node, string SourceType, Guid SourceId);
 }
