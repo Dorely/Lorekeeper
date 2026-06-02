@@ -10,22 +10,26 @@
 | File | Description |
 |------|-------------|
 | `VISION.md` | High-level project vision and success criteria. |
-| `README.md` | Project readme (currently a stub). |
+| `README.md` | Project readme with web, Electron desktop, packaging, and local-data notes. |
 | `FILEMAP.md` | This file — concise map of every source file. |
 | `Lorekeeper.sln` | Solution file containing the `Lorekeeper` project. |
 | `global.json` | Pins the .NET SDK version (`rollForward: latestFeature`). |
 | `.editorconfig` | C#/Razor formatting and naming rules. |
-| `.gitignore` | Standard .NET ignore patterns; ClickOnce publish output is scoped to the repo-root `/publish/` folder so source folders named `Publish` remain trackable. |
+| `.gitignore` | Standard .NET ignore patterns plus Lorekeeper local SQLite/temp data; publish output is scoped to the repo-root `/publish/` folder so source folders named `Publish` remain trackable. |
+| `.vscode/launch.json` | VS Code debug configurations; default F5 entry launches the Electron desktop shell, with a secondary web-hosted profile. |
+| `.vscode/tasks.json` | VS Code build task used by debug launch configurations. |
 | `.github/copilot-instructions.md` | Project guidelines for AI assistants. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
 
 | File | Description |
 |------|-------------|
-| `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors. EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI 2.8, sqlite-vec, Microsoft.ML.Tokenizers, SkiaSharp, EPUB/PDF ingestion packages, and patched Microsoft.Bcl.Memory. |
-| `Program.cs` | Host setup, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/publish/writing/editor-chat/contest/revision-agent services, internal project search, auto graph links, EF migrate at startup, optional sqlite-vec init from the active embedding config, outline graph repair, Codex OAuth endpoints. |
-| `appsettings.json` / `appsettings.Development.json` | Configuration: `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
-| `Properties/launchSettings.json` | Local launch profiles (HTTP pinned to `localhost:1455` for Codex OAuth redirect). |
+| `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors. EF Core SQLite, Electron.NET Core desktop packaging, Microsoft.Extensions.AI(.OpenAI), OpenAI 2.8, sqlite-vec, Microsoft.ML.Tokenizers, SkiaSharp, EPUB/PDF ingestion packages, and patched Microsoft.Bcl.Memory. |
+| `Program.cs` | Host setup, optional Electron desktop shell binding, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/publish/writing/editor-chat/contest/revision-agent services, EF migrate at startup, sqlite-vec init, graph repair, Codex OAuth endpoints. |
+| `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*`, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
+| `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
+| `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets and app metadata for Windows, Linux, and macOS desktop artifacts. |
+| `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained folder publish profiles used by Electron.NET packaging (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`). |
 
 ### Components/
 
@@ -251,7 +255,7 @@
 | `EmbeddingRebuildService.cs` | Bulk rebuild service: recreates sqlite-vec dimensions, marks indexes stale, reindexes chapter bodies, ingest source fragments, and context vectors with batch delay and retry backoff. |
 | `ILlmProviderService.cs` / `LlmProviderService.cs` | CRUD over providers, credential resolution, persisted chat/vision readiness, working-default selection, and Codex connection checks. |
 | `CodexProvider.cs` | Shared Codex provider name/endpoints/defaults plus OAuth JWT account-id parsing for Codex chat, images, and embeddings. |
-| `ICodexAuthService.cs` / `CodexAuthService.cs` | OpenAI Codex PKCE OAuth flow (start, handle callback returning provider id, refresh, revoke). Uses in-process pending state map. |
+| `ICodexAuthService.cs` / `CodexAuthService.cs` | OpenAI Codex PKCE OAuth flow (start, configured local redirect callback, refresh, revoke). Uses in-process pending state map. |
 | `ReasoningContent.cs` | `AIContent` subclass for Codex reasoning summary streaming. |
 | `ToolCallStreamingContent.cs` | `AIContent` subclasses for provider-level function-call start and argument-delta streaming. |
 | `ToolCallArguments.cs` | Shared parser/normalizer for tool-call argument JSON and SDK argument dictionaries before `AIFunction` invocation. |

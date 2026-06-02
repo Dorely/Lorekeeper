@@ -17,9 +17,13 @@ using Lorekeeper.Research;
 using Lorekeeper.Search;
 using Lorekeeper.Tokens;
 using Lorekeeper.Writing;
+using ElectronNET.API;
+using ElectronNET.API.Entities;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+var isElectronMode = IsElectronMode(args);
+var desktopUrl = isElectronMode ? GetDesktopUrl(builder.Configuration) : null;
 var maxInteractiveServerMessageSize = builder.Configuration.GetValue<long?>("Blazor:MaximumReceiveMessageSizeBytes")
     ?? 64L * 1024 * 1024;
 
@@ -29,6 +33,13 @@ builder.Services.AddRazorComponents()
     .AddHubOptions(options => options.MaximumReceiveMessageSize = maxInteractiveServerMessageSize);
 
 builder.Services.AddHttpClient();
+
+if (isElectronMode)
+{
+    builder.Services.AddElectron();
+    builder.UseElectron(args, () => ElectronAppReady(desktopUrl!));
+    builder.WebHost.UseUrls(desktopUrl!);
+}
 
 // Persistence
 builder.Services.AddLorekeeperPersistence(builder.Configuration);
@@ -212,18 +223,72 @@ using (var scope = app.Services.CreateScope())
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
-    app.UseHsts();
+    if (!isElectronMode)
+    {
+        // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
+        app.UseHsts();
+    }
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-app.UseHttpsRedirection();
+if (!isElectronMode)
+    app.UseHttpsRedirection();
 
 app.UseAntiforgery();
 
 app.MapStaticAssets();
-app.MapRazorComponents<App>()
+app.MapRazorComponents<Lorekeeper.Components.App>()
     .AddInteractiveServerRenderMode();
 
 app.MapCodexOAuth();
 
 app.Run();
+
+static async Task ElectronAppReady(string desktopUrl)
+{
+    var options = new BrowserWindowOptions
+    {
+        Title = "Lorekeeper",
+        Show = false,
+        Width = 1440,
+        Height = 960,
+        MinWidth = 1024,
+        MinHeight = 700,
+        Center = true,
+        IsRunningBlazor = true
+    };
+
+    if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+        options.AutoHideMenuBar = true;
+
+    var browserWindow = await Electron.WindowManager.CreateWindowAsync(options, desktopUrl);
+    browserWindow.OnReadyToShow += () => browserWindow.Show();
+}
+
+static bool IsElectronMode(string[] args) =>
+    args.Any(IsElectronArgument);
+
+static bool IsElectronArgument(string arg)
+{
+    var normalized = arg.TrimStart('-', '/');
+    return normalized.Equals("electron", StringComparison.OrdinalIgnoreCase)
+        || normalized.StartsWith("electronPort=", StringComparison.OrdinalIgnoreCase)
+        || normalized.StartsWith("electronPID=", StringComparison.OrdinalIgnoreCase)
+        || normalized.StartsWith("electronAuthToken=", StringComparison.OrdinalIgnoreCase);
+}
+
+static string GetDesktopUrl(IConfiguration configuration)
+{
+    var bindHost = configuration["Desktop:BindHost"];
+    if (string.IsNullOrWhiteSpace(bindHost))
+        throw new InvalidOperationException("Desktop:BindHost must be configured to run the desktop shell.");
+
+    if (bindHost.Contains("://", StringComparison.Ordinal))
+        throw new InvalidOperationException("Desktop:BindHost must be a host name only, without a URL scheme.");
+
+    var httpPort = configuration.GetValue<int?>("Desktop:HttpPort")
+        ?? throw new InvalidOperationException("Desktop:HttpPort must be configured to run the desktop shell.");
+    if (httpPort is <= 0 or > 65535)
+        throw new InvalidOperationException("Desktop:HttpPort must be between 1 and 65535.");
+
+    return $"http://{bindHost.Trim()}:{httpPort}";
+}

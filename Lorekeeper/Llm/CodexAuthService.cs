@@ -9,18 +9,21 @@ namespace Lorekeeper.Llm;
 
 /// <summary>
 /// OAuth2 PKCE flow for OpenAI's Codex Responses API. Reuses the official Codex CLI
-/// client_id, so the redirect URI is fixed at <c>http://localhost:1455/auth/callback</c>
-/// — local dev must run on port 1455 (see <c>Properties/launchSettings.json</c>).
+/// client_id, so the configured redirect URI must stay accepted by that client.
+/// The default remains <c>http://localhost:1455/auth/callback</c> to match local
+/// dev and the desktop shell's default port.
 /// </summary>
 public class CodexAuthService(
     IOAuthTokenRepository tokens,
-    IHttpClientFactory httpClientFactory) : ICodexAuthService
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration) : ICodexAuthService
 {
     private const string AuthEndpoint = "https://auth.openai.com/oauth/authorize";
     private const string TokenEndpoint = "https://auth.openai.com/oauth/token";
-    private const string RedirectUri = "http://localhost:1455/auth/callback";
     private const string ClientId = "app_EMoamEEZ73f0CkXaXp7hrann";
     private const string Scope = "openid profile email offline_access";
+    private readonly string _redirectUri = configuration["Auth:Codex:RedirectUri"]
+        ?? throw new InvalidOperationException("Auth:Codex:RedirectUri must be configured for Codex OAuth.");
 
     // In-process PKCE state. Single-user POC; if Lorekeeper ever runs multi-instance
     // this needs to move to a shared cache.
@@ -39,7 +42,7 @@ public class CodexAuthService(
         var url = $"{AuthEndpoint}?" +
             $"response_type=code&" +
             $"client_id={Uri.EscapeDataString(ClientId)}&" +
-            $"redirect_uri={Uri.EscapeDataString(RedirectUri)}&" +
+            $"redirect_uri={Uri.EscapeDataString(_redirectUri)}&" +
             $"scope={Uri.EscapeDataString(Scope)}&" +
             $"state={Uri.EscapeDataString(state)}&" +
             $"code_challenge={Uri.EscapeDataString(codeChallenge)}&" +
@@ -66,7 +69,7 @@ public class CodexAuthService(
             ["grant_type"] = "authorization_code",
             ["client_id"] = ClientId,
             ["code"] = code,
-            ["redirect_uri"] = RedirectUri,
+            ["redirect_uri"] = _redirectUri,
             ["code_verifier"] = pkce.CodeVerifier
         };
 

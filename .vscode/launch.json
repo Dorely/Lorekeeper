@@ -1,0 +1,40 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Lorekeeper Electron",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build Lorekeeper",
+      "program": "${workspaceFolder}/Lorekeeper/bin/Debug/net10.0/win-x64/Lorekeeper.exe",
+      "args": [
+        "--electron"
+      ],
+      "cwd": "${workspaceFolder}/Lorekeeper",
+      "console": "integratedTerminal",
+      "stopAtEntry": false,
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    {
+      "name": "Lorekeeper Web",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build Lorekeeper",
+      "program": "${workspaceFolder}/Lorekeeper/bin/Debug/net10.0/win-x64/Lorekeeper.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/Lorekeeper",
+      "console": "integratedTerminal",
+      "stopAtEntry": false,
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "http://localhost:1455"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+      }
+    }
+  ]
+}
