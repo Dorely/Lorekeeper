@@ -71,37 +71,47 @@
     {
         var paragraphs = SplitParagraphs(State.Body);
         var paragraphCount = Math.Max(1, paragraphs.Count);
-        <div class="prose-pages">
-            <section class="sim-page prose-page">
-                @if (paragraphs.Count == 0)
-                {
-                    <p class="empty-prose">(empty chapter)</p>
-                }
-                @for (var index = 0; index < paragraphCount; index++)
-                {
-                    var currentIndex = index;
-                    if (IsEditable)
+        <div class="@(IsEditable ? "prose-layout prose-layout--editable" : "prose-layout")">
+            @if (IsEditable)
+            {
+                <div class="picture-toolbar prose-toolbar">
+                    <div class="picture-toolbar__actions">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenImagesAsync">Images</button>
+                    </div>
+                </div>
+            }
+            <div class="prose-pages">
+                <section class="sim-page prose-page">
+                    @if (paragraphs.Count == 0)
                     {
-                        @RenderDropZone(currentIndex, ChapterImageAnchorPosition.BeforeParagraph)
+                        <p class="empty-prose">(empty chapter)</p>
                     }
-                    @foreach (var block in BlocksAt(currentIndex, ChapterImageAnchorPosition.BeforeParagraph))
+                    @for (var index = 0; index < paragraphCount; index++)
                     {
-                        @RenderIllustrationBlock(block)
+                        var currentIndex = index;
+                        if (IsEditable)
+                        {
+                            @RenderDropZone(currentIndex, ChapterImageAnchorPosition.BeforeParagraph)
+                        }
+                        @foreach (var block in BlocksAt(currentIndex, ChapterImageAnchorPosition.BeforeParagraph))
+                        {
+                            @RenderIllustrationBlock(block)
+                        }
+                        if (currentIndex < paragraphs.Count)
+                        {
+                            <p>@paragraphs[currentIndex]</p>
+                        }
+                        @foreach (var block in BlocksAt(currentIndex, ChapterImageAnchorPosition.AfterParagraph))
+                        {
+                            @RenderIllustrationBlock(block)
+                        }
+                        if (IsEditable)
+                        {
+                            @RenderDropZone(currentIndex, ChapterImageAnchorPosition.AfterParagraph)
+                        }
                     }
-                    if (currentIndex < paragraphs.Count)
-                    {
-                        <p>@paragraphs[currentIndex]</p>
-                    }
-                    @foreach (var block in BlocksAt(currentIndex, ChapterImageAnchorPosition.AfterParagraph))
-                    {
-                        @RenderIllustrationBlock(block)
-                    }
-                    if (IsEditable)
-                    {
-                        @RenderDropZone(currentIndex, ChapterImageAnchorPosition.AfterParagraph)
-                    }
-                }
-            </section>
+                </section>
+            </div>
         </div>
     }
 </div>
@@ -115,7 +125,6 @@
     [Parameter] public EventCallback OnImagesChanged { get; set; }
     [Parameter] public EventCallback OnOpenImages { get; set; }
 
-    private Guid? _draggingIllustrationId;
     private ElementReference _viewerRoot;
     private IJSObjectReference? _viewerModule;
     private DotNetObjectReference<PagedChapterViewer>? _selfRef;
@@ -123,23 +132,35 @@
 
     private RenderFragment RenderDropZone(int paragraphIndex, ChapterImageAnchorPosition position) =>
         @<button type="button" class="illustration-drop-zone"
-                 @ondragover="HandleDragOver" @ondragover:preventDefault="true"
-                 @ondrop="@(() => DropIllustrationAsync(paragraphIndex, position))">
+                 data-illustration-drop-target="true"
+                 data-illustration-paragraph-index="@paragraphIndex"
+                 data-illustration-anchor-position="@position.ToString()">
             @(position == ChapterImageAnchorPosition.BeforeParagraph ? "Drop image before paragraph" : "Drop image after paragraph")
         </button>;
 
     private RenderFragment RenderIllustrationBlock(IllustratedProseImageBlock block) =>
-        @<figure class="@($"illustration-block illustration-block--{block.Alignment.ToString().ToLowerInvariant()}")"
+        @<figure class="@IllustrationBlockClass(block)"
                  style="@($"width:{block.WidthPercent.ToString(CultureInfo.InvariantCulture)}%;")"
-                 draggable="@(IsEditable ? "true" : null)"
-                 @ondragstart="@(() => _draggingIllustrationId = block.Id)">
+                 data-illustration-id="@(IsEditable ? block.Id.ToString("N") : null)">
             @{
                 var image = ImageById(block.ImageId);
             }
-            @if (image is not null)
-            {
-                <img src="@image.PreviewUrl" alt="@(string.IsNullOrWhiteSpace(block.AltTextOverride) ? image.AltText : block.AltTextOverride)" />
-            }
+            <div class="illustration-image-box">
+                @if (image is not null)
+                {
+                    <img src="@image.PreviewUrl" alt="@(string.IsNullOrWhiteSpace(block.AltTextOverride) ? image.AltText : block.AltTextOverride)" />
+                }
+                @if (IsEditable)
+                {
+                    <div class="illustration-element-chrome">
+                        <button type="button" class="picture-corner-control picture-corner-control--move"
+                                data-illustration-move="true" title="Move" aria-label="Move illustration"></button>
+                        <button type="button" class="picture-corner-control picture-corner-control--remove"
+                                title="Remove" aria-label="Remove illustration"
+                                @onclick="@(() => RemoveIllustrationAsync(block.Id))"></button>
+                    </div>
+                }
+            </div>
             @if (!string.IsNullOrWhiteSpace(block.Caption))
             {
                 <figcaption>@block.Caption</figcaption>
@@ -147,12 +168,15 @@
             @if (IsEditable)
             {
                 <div class="illustration-controls">
-                    <input type="range" min="20" max="100" value="@block.WidthPercent.ToString(CultureInfo.InvariantCulture)"
+                    <input class="illustration-width-control" type="range" min="20" max="100"
+                           value="@block.WidthPercent.ToString(CultureInfo.InvariantCulture)"
+                           aria-label="Image width"
                            @onchange="@(e => UpdateIllustrationWidthAsync(block.Id, e.Value?.ToString()))" />
-                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="@(() => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Left))">Left</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="@(() => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Center))">Center</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="@(() => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Right))">Right</button>
-                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="@(() => RemoveIllustrationAsync(block.Id))">Remove</button>
+                    <div class="illustration-alignment-group" role="group" aria-label="Image alignment">
+                        <button type="button" class="@IllustrationAlignmentButtonClass(block.Alignment, ChapterImageAlignment.Left)" @onclick="@(() => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Left))">Left</button>
+                        <button type="button" class="@IllustrationAlignmentButtonClass(block.Alignment, ChapterImageAlignment.Center)" @onclick="@(() => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Center))">Center</button>
+                        <button type="button" class="@IllustrationAlignmentButtonClass(block.Alignment, ChapterImageAlignment.Right)" @onclick="@(() => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Right))">Right</button>
+                    </div>
                 </div>
             }
         </figure>;
@@ -169,29 +193,25 @@
             <span class="picture-corner-control picture-corner-control--resize" data-picture-resize="true" title="Resize" aria-label="@($"Resize {kind}")"></span>
         </div>;
 
-    private static void HandleDragOver()
-    {
-    }
-
     private IEnumerable<IllustratedProseImageBlock> BlocksAt(int paragraphIndex, ChapterImageAnchorPosition position) =>
         State.IllustrationLayout.Images
             .Where(block => block.ParagraphIndex == paragraphIndex && block.AnchorPosition == position)
             .OrderBy(block => block.SortOrder);
 
-    private async Task DropIllustrationAsync(int paragraphIndex, ChapterImageAnchorPosition position)
+    private string IllustrationBlockClass(IllustratedProseImageBlock block)
     {
-        if (_draggingIllustrationId is not Guid blockId) return;
-        var layout = State.IllustrationLayout with
-        {
-            Images = State.IllustrationLayout.Images
-                .Select(block => block.Id == blockId
-                    ? block with { ParagraphIndex = paragraphIndex, AnchorPosition = position }
-                    : block)
-                .ToList(),
-        };
-        await SaveIllustrationsAsync(layout);
-        _draggingIllustrationId = null;
+        var alignment = block.Alignment.ToString().ToLowerInvariant();
+        return IsEditable
+            ? $"illustration-block illustration-block--editable illustration-block--{alignment}"
+            : $"illustration-block illustration-block--{alignment}";
     }
+
+    private static string IllustrationAlignmentButtonClass(
+        ChapterImageAlignment current,
+        ChapterImageAlignment target) =>
+        current == target
+            ? "btn btn-sm btn-primary"
+            : "btn btn-sm btn-outline-secondary";
 
     private async Task UpdateIllustrationWidthAsync(Guid blockId, string? value)
     {
@@ -213,6 +233,39 @@
         {
             Images = State.IllustrationLayout.Images.Where(block => block.Id != blockId).ToList(),
         });
+
+    [JSInvokable]
+    public async Task MoveIllustrationBlockAsync(string blockId, int paragraphIndex, string anchorPosition)
+    {
+        if (!IsEditable
+            || State.VisualMode == ChapterVisualMode.PicturePage
+            || !Guid.TryParseExact(blockId, "N", out var id)
+            || !Enum.TryParse<ChapterImageAnchorPosition>(anchorPosition, ignoreCase: true, out var position))
+        {
+            return;
+        }
+
+        var block = State.IllustrationLayout.Images.FirstOrDefault(candidate => candidate.Id == id);
+        if (block is null)
+            return;
+
+        var paragraphs = SplitParagraphs(State.Body);
+        var clampedIndex = Math.Clamp(paragraphIndex, 0, Math.Max(0, paragraphs.Count - 1));
+        if (block.ParagraphIndex == clampedIndex && block.AnchorPosition == position)
+            return;
+
+        await SaveIllustrationsAsync(State.IllustrationLayout with
+        {
+            Images = State.IllustrationLayout.Images.Select(candidate => candidate.Id == id
+                ? candidate with
+                {
+                    ParagraphIndex = clampedIndex,
+                    AnchorPosition = position,
+                    ParagraphHash = string.Empty,
+                }
+                : candidate).ToList(),
+        });
+    }
 
     private async Task AddTextBoxAsync()
     {

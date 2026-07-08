@@ -43,6 +43,30 @@ export function attach(root, dotNetRef) {
         const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
 
+        const illustrationMove = target.closest("[data-illustration-move]");
+        if (illustrationMove) {
+            const block = illustrationMove.closest("[data-illustration-id]");
+            const id = block?.dataset.illustrationId;
+            if (!block || !id || !root.contains(block)) return;
+
+            state.active = {
+                type: "illustration",
+                pointerId: event.pointerId,
+                element: block,
+                id,
+                currentTarget: null,
+            };
+
+            block.classList.add("illustration-block--dragging");
+            root.classList.add("illustration-drag-active");
+            setIllustrationDropTarget(root, state.active, event.clientX, event.clientY);
+            window.addEventListener("pointermove", state.onPointerMove, true);
+            window.addEventListener("pointerup", state.onPointerUp, true);
+            window.addEventListener("pointercancel", state.onPointerCancel, true);
+            event.preventDefault();
+            return;
+        }
+
         if (target.closest("[data-picture-remove]")) return;
 
         const element = target.closest("[data-picture-element-id]");
@@ -63,6 +87,7 @@ export function attach(root, dotNetRef) {
         const elementRect = element.getBoundingClientRect();
         const start = elementPercents(pageRect, elementRect);
         state.active = {
+            type: "picture",
             pointerId: event.pointerId,
             element,
             page,
@@ -88,6 +113,12 @@ export function attach(root, dotNetRef) {
         const active = state.active;
         if (!active || active.pointerId !== event.pointerId) return;
         event.preventDefault();
+
+        if (active.type === "illustration") {
+            setIllustrationDropTarget(root, active, event.clientX, event.clientY);
+            return;
+        }
+
         applyPointerPreview(active, event.clientX, event.clientY);
     };
 
@@ -96,9 +127,26 @@ export function attach(root, dotNetRef) {
         if (!active || active.pointerId !== event.pointerId) return;
         event.preventDefault();
         state.active = null;
-        active.element.classList.remove("picture-element--active");
         removeActivePointerListeners(state);
 
+        if (active.type === "illustration") {
+            const target = setIllustrationDropTarget(root, active, event.clientX, event.clientY);
+            cleanupIllustrationDrag(root, active);
+            if (!target) return;
+
+            const paragraphIndex = Number.parseInt(target.dataset.illustrationParagraphIndex ?? "0", 10);
+            const anchorPosition = target.dataset.illustrationAnchorPosition ?? "";
+            if (Number.isNaN(paragraphIndex) || !anchorPosition) return;
+
+            await dotNetRef.invokeMethodAsync(
+                "MoveIllustrationBlockAsync",
+                active.id,
+                paragraphIndex,
+                anchorPosition);
+            return;
+        }
+
+        active.element.classList.remove("picture-element--active");
         const result = applyPointerPreview(active, event.clientX, event.clientY);
         if (active.mode === "resize") {
             await dotNetRef.invokeMethodAsync(
@@ -120,9 +168,14 @@ export function attach(root, dotNetRef) {
     state.onPointerCancel = (event) => {
         const active = state.active;
         if (!active || active.pointerId !== event.pointerId) return;
-        active.element.classList.remove("picture-element--active");
         state.active = null;
         removeActivePointerListeners(state);
+        if (active.type === "illustration") {
+            cleanupIllustrationDrag(root, active);
+            return;
+        }
+
+        active.element.classList.remove("picture-element--active");
     };
 
     state.onFocusOut = async (event) => {
@@ -155,7 +208,7 @@ export function detach(root) {
     root.removeEventListener("pointerdown", state.onPointerDown, true);
     root.removeEventListener("focusout", state.onFocusOut);
     removeActivePointerListeners(state);
-    state.active?.element?.classList.remove("picture-element--active");
+    cleanupActive(root, state.active);
     stateByRoot.delete(root);
 }
 
@@ -237,6 +290,41 @@ function removeActivePointerListeners(state) {
     window.removeEventListener("pointermove", state.onPointerMove, true);
     window.removeEventListener("pointerup", state.onPointerUp, true);
     window.removeEventListener("pointercancel", state.onPointerCancel, true);
+}
+
+function setIllustrationDropTarget(root, active, clientX, clientY) {
+    const next = illustrationDropTargetAt(root, clientX, clientY);
+    if (active.currentTarget === next) return next;
+
+    active.currentTarget?.classList.remove("illustration-drop-zone--active");
+    next?.classList.add("illustration-drop-zone--active");
+    active.currentTarget = next;
+    return next;
+}
+
+function illustrationDropTargetAt(root, clientX, clientY) {
+    const target = document.elementFromPoint(clientX, clientY);
+    const dropTarget = target instanceof Element
+        ? target.closest("[data-illustration-drop-target]")
+        : null;
+    return dropTarget && root.contains(dropTarget) ? dropTarget : null;
+}
+
+function cleanupActive(root, active) {
+    if (!active) return;
+    if (active.type === "illustration") {
+        cleanupIllustrationDrag(root, active);
+        return;
+    }
+
+    active.element?.classList.remove("picture-element--active");
+}
+
+function cleanupIllustrationDrag(root, active) {
+    active.element?.classList.remove("illustration-block--dragging");
+    active.currentTarget?.classList.remove("illustration-drop-zone--active");
+    active.currentTarget = null;
+    root.classList.remove("illustration-drag-active");
 }
 
 function isFormControl(target) {
