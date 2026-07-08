@@ -111,9 +111,7 @@ public sealed record ProjectExportChapter
     public string Synopsis { get; init; } = string.Empty;
     public int Order { get; init; }
     public ChapterVisualMode VisualMode { get; init; } = ChapterVisualMode.Prose;
-    public double PicturePageWidthInches { get; init; } = 8.5;
-    public double PicturePageHeightInches { get; init; } = 8.5;
-    public bool PicturePageIsSpread { get; init; }
+    public ChapterPageLayoutKind PageLayoutKind { get; init; } = ChapterPageLayoutKind.SinglePortrait;
     public string PageLayoutJson { get; init; } = string.Empty;
     public string IllustrationLayoutJson { get; init; } = string.Empty;
     public List<Guid> ExplicitImageContextImageIds { get; init; } = [];

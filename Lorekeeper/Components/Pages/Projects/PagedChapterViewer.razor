@@ -13,8 +13,7 @@
 <div class="paged-viewer" tabindex="0" @ref="_viewerRoot">
     @if (State.VisualMode == ChapterVisualMode.PicturePage)
     {
-        var ratioWidth = Math.Max(1, State.PicturePageIsSpread ? State.PicturePageWidthInches * 2 : State.PicturePageWidthInches);
-        var ratioHeight = Math.Max(1, State.PicturePageHeightInches);
+        var pageMetrics = PageMetrics(State.PageLayoutKind);
         <div class="@(IsEditable ? "picture-layout picture-layout--editable" : "picture-layout")">
             @if (IsEditable)
             {
@@ -26,7 +25,7 @@
                 </div>
             }
             <div class="picture-stage">
-                <section class="@(IsEditable ? "picture-page picture-page--editable" : "picture-page")" style="@PicturePageStyle(ratioWidth, ratioHeight)">
+                <section class="@PicturePageClass(pageMetrics)" style="@PicturePageStyle(pageMetrics)">
                     @foreach (var image in State.PageLayout.Images.OrderBy(image => image.ZIndex))
                     {
                         var projectImage = ImageById(image.ImageId);
@@ -70,7 +69,9 @@
     else
     {
         var paragraphs = SplitParagraphs(State.Body);
-        var paragraphCount = Math.Max(1, paragraphs.Count);
+        var pageMetrics = PageMetrics(State.PageLayoutKind);
+        var pages = BuildProsePages(paragraphs, pageMetrics);
+        var spreads = BuildProseSpreads(pages, pageMetrics.IsDouble);
         <div class="@(IsEditable ? "prose-layout prose-layout--editable" : "prose-layout")">
             @if (IsEditable)
             {
@@ -80,43 +81,48 @@
                     </div>
                 </div>
             }
-            <div class="prose-pages">
-                <section class="sim-page prose-page">
-                    @if (paragraphs.Count == 0)
-                    {
-                        <p class="empty-prose">(empty chapter)</p>
-                    }
-                    @for (var index = 0; index < paragraphCount; index++)
-                    {
-                        var currentIndex = index;
-                        if (IsEditable)
+            <div class="@ProsePagesClass(pageMetrics)" style="@ProsePageStyle(pageMetrics)">
+                @foreach (var spread in spreads)
+                {
+                    <div class="@ProseSpreadClass(pageMetrics)" @key="spread.SpreadNumber">
+                        @RenderProsePage(spread.Left)
+                        @if (spread.Right is not null)
                         {
-                            @RenderDropZone(currentIndex, ChapterImageAnchorPosition.BeforeParagraph)
+                            @RenderProsePage(spread.Right)
                         }
-                        @foreach (var block in BlocksAt(currentIndex, ChapterImageAnchorPosition.BeforeParagraph))
-                        {
-                            @RenderIllustrationBlock(block)
-                        }
-                        if (currentIndex < paragraphs.Count)
-                        {
-                            <p>@paragraphs[currentIndex]</p>
-                        }
-                        @foreach (var block in BlocksAt(currentIndex, ChapterImageAnchorPosition.AfterParagraph))
-                        {
-                            @RenderIllustrationBlock(block)
-                        }
-                        if (IsEditable)
-                        {
-                            @RenderDropZone(currentIndex, ChapterImageAnchorPosition.AfterParagraph)
-                        }
-                    }
-                </section>
+                    </div>
+                }
             </div>
         </div>
     }
 </div>
 
 @code {
+    private RenderFragment RenderProsePage(ProsePageModel page) =>
+        @<section class="@ProsePageClass(page)" aria-label="@($"Page {page.PageNumber}")">
+            @if (!page.IsBlank && page.Items.Count == 0)
+            {
+                <p class="empty-prose">(empty chapter)</p>
+            }
+            @if (!page.IsBlank)
+            {
+                @foreach (var item in page.Items)
+                {
+                    if (item.Kind == ProsePageItemKind.DropZone)
+                    {
+                        @RenderDropZone(item.ParagraphIndex, item.AnchorPosition)
+                    }
+                    else if (item.Kind == ProsePageItemKind.Illustration && item.Illustration is not null)
+                    {
+                        @RenderIllustrationBlock(item.Illustration)
+                    }
+                    else if (!string.IsNullOrWhiteSpace(item.Text))
+                    {
+                        <p>@item.Text</p>
+                    }
+                }
+            }
+        </section>;
     [Parameter, EditorRequired] public ChapterVisualState State { get; set; } = null!;
     [Parameter] public IReadOnlyList<ProjectImageView> Images { get; set; } = [];
     [Parameter] public bool IsEditable { get; set; }
@@ -129,6 +135,48 @@
     private IJSObjectReference? _viewerModule;
     private DotNetObjectReference<PagedChapterViewer>? _selfRef;
     private bool _disposed;
+    private const double PageMarginInches = 0.75;
+    private const double BodyLineHeightInches = 12.0 / 72.0 * 1.55;
+    private const double ParagraphSpacingInches = 0.14;
+    private const double FigureSpacingInches = 0.16;
+    private const double DropZoneHeightInches = 0.42;
+
+    private enum ProsePageItemKind
+    {
+        Paragraph,
+        Illustration,
+        DropZone,
+    }
+
+    private sealed record ProsePageItem(
+        ProsePageItemKind Kind,
+        int ParagraphIndex,
+        ChapterImageAnchorPosition AnchorPosition,
+        string Text,
+        IllustratedProseImageBlock? Illustration);
+
+    private sealed record ProsePageModel(
+        int PageNumber,
+        bool IsBlank,
+        IReadOnlyList<ProsePageItem> Items);
+
+    private sealed record ProseSpreadModel(
+        int SpreadNumber,
+        ProsePageModel Left,
+        ProsePageModel? Right);
+
+    private sealed class ProsePageBuilder
+    {
+        public List<ProsePageItem> Items { get; } = [];
+        public double UsedHeightInches { get; set; }
+    }
+
+    private readonly record struct PageLayoutMetrics(
+        double PageWidthInches,
+        double PageHeightInches,
+        bool IsDouble,
+        double SurfaceWidthInches,
+        double SurfaceHeightInches);
 
     private RenderFragment RenderDropZone(int paragraphIndex, ChapterImageAnchorPosition position) =>
         @<button type="button" class="illustration-drop-zone"
@@ -545,13 +593,228 @@
     private static string ElementStyle(double x, double y, double width, double height, int zIndex) =>
         $"left:{x.ToString(CultureInfo.InvariantCulture)}%;top:{y.ToString(CultureInfo.InvariantCulture)}%;width:{width.ToString(CultureInfo.InvariantCulture)}%;height:{height.ToString(CultureInfo.InvariantCulture)}%;z-index:{zIndex};";
 
-    private static string PicturePageStyle(double ratioWidth, double ratioHeight)
+    private IReadOnlyList<ProsePageModel> BuildProsePages(IReadOnlyList<string> paragraphs, PageLayoutMetrics metrics)
     {
-        var width = ratioWidth.ToString(CultureInfo.InvariantCulture);
-        var height = ratioHeight.ToString(CultureInfo.InvariantCulture);
-        var viewportMax = $"calc((100dvh - 12rem) * {width} / {height})";
-        return $"aspect-ratio:{width}/{height};max-width:min(100%, 8.5in, {viewportMax});";
+        var builders = new List<ProsePageBuilder>();
+        var current = NewPage();
+        var pageCapacity = Math.Max(1, metrics.PageHeightInches - (PageMarginInches * 2) - 0.25);
+        var contentWidth = Math.Max(1, metrics.PageWidthInches - (PageMarginInches * 2));
+        var charsPerLine = Math.Max(28, (int)Math.Floor(contentWidth * 9.2));
+
+        if (paragraphs.Count == 0)
+            return [new ProsePageModel(1, IsBlank: false, [])];
+
+        for (var index = 0; index < paragraphs.Count; index++)
+        {
+            if (IsEditable)
+            {
+                AddItem(new ProsePageItem(ProsePageItemKind.DropZone, index, ChapterImageAnchorPosition.BeforeParagraph, string.Empty, null), DropZoneHeightInches);
+            }
+
+            foreach (var block in BlocksAt(index, ChapterImageAnchorPosition.BeforeParagraph))
+                AddIllustration(block);
+
+            if (!string.IsNullOrWhiteSpace(paragraphs[index]))
+                AddParagraph(index, paragraphs[index]);
+
+            foreach (var block in BlocksAt(index, ChapterImageAnchorPosition.AfterParagraph))
+                AddIllustration(block);
+
+            if (IsEditable)
+            {
+                AddItem(new ProsePageItem(ProsePageItemKind.DropZone, index, ChapterImageAnchorPosition.AfterParagraph, string.Empty, null), DropZoneHeightInches);
+            }
+        }
+
+        return builders
+            .Select((builder, index) => new ProsePageModel(index + 1, IsBlank: false, builder.Items))
+            .ToList();
+
+        ProsePageBuilder NewPage()
+        {
+            var page = new ProsePageBuilder();
+            builders.Add(page);
+            return page;
+        }
+
+        void ForceNewPage()
+        {
+            if (current.Items.Count > 0)
+                current = NewPage();
+        }
+
+        void AddItem(ProsePageItem item, double heightInches, bool startOnNewPage = false)
+        {
+            if (startOnNewPage)
+                ForceNewPage();
+
+            var height = Math.Min(heightInches, pageCapacity);
+            if (current.Items.Count > 0 && current.UsedHeightInches + height > pageCapacity)
+                current = NewPage();
+
+            current.Items.Add(item);
+            current.UsedHeightInches += height;
+        }
+
+        void AddIllustration(IllustratedProseImageBlock block)
+        {
+            var height = EstimateIllustrationHeight(block, contentWidth, metrics.PageHeightInches, charsPerLine);
+            AddItem(
+                new ProsePageItem(ProsePageItemKind.Illustration, block.ParagraphIndex, block.AnchorPosition, string.Empty, block),
+                height,
+                block.StartOnNewPage);
+        }
+
+        void AddParagraph(int paragraphIndex, string paragraph)
+        {
+            var remaining = paragraph.Trim();
+            while (!string.IsNullOrWhiteSpace(remaining))
+            {
+                var available = pageCapacity - current.UsedHeightInches;
+                var minimumTextHeight = BodyLineHeightInches + ParagraphSpacingInches;
+                if (current.Items.Count > 0 && available < minimumTextHeight)
+                {
+                    current = NewPage();
+                    available = pageCapacity;
+                }
+
+                var wholeHeight = EstimateParagraphHeight(remaining, charsPerLine);
+                if (wholeHeight <= available || current.Items.Count == 0 && wholeHeight <= pageCapacity)
+                {
+                    AddItem(new ProsePageItem(ProsePageItemKind.Paragraph, paragraphIndex, ChapterImageAnchorPosition.AfterParagraph, remaining, null), wholeHeight);
+                    break;
+                }
+
+                var maxLines = Math.Max(1, (int)Math.Floor((available - ParagraphSpacingInches) / BodyLineHeightInches));
+                var maxChars = Math.Max(1, maxLines * charsPerLine);
+                var segment = TakeTextSegment(remaining, maxChars);
+                AddItem(
+                    new ProsePageItem(ProsePageItemKind.Paragraph, paragraphIndex, ChapterImageAnchorPosition.AfterParagraph, segment, null),
+                    EstimateParagraphHeight(segment, charsPerLine));
+                remaining = remaining[segment.Length..].TrimStart();
+            }
+        }
     }
+
+    private static IReadOnlyList<ProseSpreadModel> BuildProseSpreads(IReadOnlyList<ProsePageModel> pages, bool isDouble)
+    {
+        if (!isDouble)
+        {
+            return pages
+                .Select((page, index) => new ProseSpreadModel(index + 1, page, null))
+                .ToList();
+        }
+
+        var spreads = new List<ProseSpreadModel>();
+        for (var index = 0; index < pages.Count; index += 2)
+        {
+            var left = pages[index];
+            var right = index + 1 < pages.Count
+                ? pages[index + 1]
+                : new ProsePageModel(left.PageNumber + 1, IsBlank: true, []);
+            spreads.Add(new ProseSpreadModel(spreads.Count + 1, left, right));
+        }
+
+        return spreads;
+    }
+
+    private static double EstimateParagraphHeight(string text, int charsPerLine)
+    {
+        var normalized = NormalizeTextForMeasurement(text);
+        if (normalized.Length == 0)
+            return 0;
+
+        var lines = Math.Max(1, (int)Math.Ceiling(normalized.Length / (double)Math.Max(1, charsPerLine)));
+        return (lines * BodyLineHeightInches) + ParagraphSpacingInches;
+    }
+
+    private double EstimateIllustrationHeight(
+        IllustratedProseImageBlock block,
+        double contentWidthInches,
+        double pageHeightInches,
+        int charsPerLine)
+    {
+        var figureWidth = contentWidthInches * (Clamp(block.WidthPercent, 10, 100) / 100);
+        var imageHeight = Math.Min(Math.Min(6, pageHeightInches * 0.55), Math.Max(1.2, figureWidth * 0.72));
+        var captionHeight = string.IsNullOrWhiteSpace(block.Caption)
+            ? 0
+            : EstimateParagraphHeight(block.Caption, Math.Max(16, (int)Math.Round(charsPerLine * block.WidthPercent / 100))) * 0.75;
+        var controlsHeight = IsEditable ? 0.48 : 0;
+        return imageHeight + captionHeight + FigureSpacingInches + controlsHeight;
+    }
+
+    private static string TakeTextSegment(string text, int maxChars)
+    {
+        if (text.Length <= maxChars)
+            return text;
+
+        var limit = Math.Clamp(maxChars, 1, text.Length);
+        var splitAt = text.LastIndexOfAny([' ', '\n', '\t'], limit - 1, limit);
+        if (splitAt < Math.Min(24, limit / 2))
+            splitAt = limit;
+
+        return text[..splitAt].TrimEnd();
+    }
+
+    private static string NormalizeTextForMeasurement(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+        var previousWasWhiteSpace = false;
+        foreach (var ch in text)
+        {
+            if (char.IsWhiteSpace(ch))
+            {
+                if (!previousWasWhiteSpace)
+                    builder.Append(' ');
+                previousWasWhiteSpace = true;
+                continue;
+            }
+
+            builder.Append(ch);
+            previousWasWhiteSpace = false;
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static PageLayoutMetrics PageMetrics(ChapterPageLayoutKind kind)
+    {
+        var normalized = Enum.IsDefined(kind) ? kind : ChapterPageLayoutKind.SinglePortrait;
+        var isLandscape = normalized is ChapterPageLayoutKind.SingleLandscape or ChapterPageLayoutKind.DoubleLandscape;
+        var isDouble = normalized is ChapterPageLayoutKind.DoublePortrait or ChapterPageLayoutKind.DoubleLandscape;
+        var pageWidth = isLandscape ? 11 : 8.5;
+        var pageHeight = isLandscape ? 8.5 : 11;
+        return new PageLayoutMetrics(pageWidth, pageHeight, isDouble, isDouble ? pageWidth * 2 : pageWidth, pageHeight);
+    }
+
+    private string PicturePageClass(PageLayoutMetrics metrics)
+    {
+        var classes = IsEditable ? "picture-page picture-page--editable" : "picture-page";
+        if (metrics.IsDouble)
+            classes += " picture-page--double";
+        return classes;
+    }
+
+    private static string PicturePageStyle(PageLayoutMetrics metrics)
+    {
+        var width = metrics.SurfaceWidthInches.ToString(CultureInfo.InvariantCulture);
+        var height = metrics.SurfaceHeightInches.ToString(CultureInfo.InvariantCulture);
+        var maxWidth = metrics.IsDouble ? $"{metrics.SurfaceWidthInches.ToString(CultureInfo.InvariantCulture)}in" : $"{metrics.PageWidthInches.ToString(CultureInfo.InvariantCulture)}in";
+        var viewportMax = $"calc((100dvh - 12rem) * {width} / {height})";
+        return $"aspect-ratio:{width}/{height};max-width:min(100%, {maxWidth}, {viewportMax});";
+    }
+
+    private static string ProsePagesClass(PageLayoutMetrics metrics) =>
+        metrics.IsDouble ? "prose-pages prose-pages--double" : "prose-pages prose-pages--single";
+
+    private static string ProseSpreadClass(PageLayoutMetrics metrics) =>
+        metrics.IsDouble ? "prose-spread prose-spread--double" : "prose-spread prose-spread--single";
+
+    private static string ProsePageClass(ProsePageModel page) =>
+        page.IsBlank ? "sim-page prose-page prose-page--blank" : "sim-page prose-page";
+
+    private static string ProsePageStyle(PageLayoutMetrics metrics) =>
+        $"--page-width:{metrics.PageWidthInches.ToString(CultureInfo.InvariantCulture)}in;--page-height:{metrics.PageHeightInches.ToString(CultureInfo.InvariantCulture)}in;";
 
     private static string TextElementStyle(PicturePageTextElement text)
     {

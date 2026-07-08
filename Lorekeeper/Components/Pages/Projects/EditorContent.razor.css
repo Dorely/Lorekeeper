@@ -1184,6 +1184,10 @@
     flex: 0 0 10.5rem;
 }
 
+.chapter-page-layout {
+    flex: 0 0 12rem;
+}
+
 .chapter-metrics {
     color: var(--bs-secondary-color, #6c757d);
     white-space: nowrap;

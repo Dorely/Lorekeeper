@@ -164,12 +164,12 @@ public sealed class EditorChatTools(
                 "Returns a short change summary plus the edited line-numbered excerpt with nearby context lines."));
 
         tools.Add(AIFunctionFactory.Create(
-            method: (Guid chapterId, string visualMode, double? picturePageWidthInches = null, double? picturePageHeightInches = null, bool? picturePageIsSpread = null) =>
-                SetChapterVisualModeAsync(context, chapterId, visualMode, picturePageWidthInches, picturePageHeightInches, picturePageIsSpread),
+            method: (Guid chapterId, string visualMode, string? pageLayoutKind = null) =>
+                SetChapterVisualModeAsync(context, chapterId, visualMode, pageLayoutKind),
             name: "set_chapter_visual_mode",
             description:
                 "Live visual-layout mutation. Set a chapter visual mode to Prose, IllustratedProse, or PicturePage. " +
-                "Use picturePageWidthInches/picturePageHeightInches/picturePageIsSpread only when setting PicturePage."));
+                "Use pageLayoutKind for IllustratedProse or PicturePage; valid values are SinglePortrait, SingleLandscape, DoublePortrait, and DoubleLandscape."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, Guid[]? referenceImageIds = null, bool placeInCurrentChapter = false) =>
@@ -747,9 +747,7 @@ public sealed class EditorChatTools(
                 chapter.Synopsis,
             },
             state.VisualMode,
-            state.PicturePageWidthInches,
-            state.PicturePageHeightInches,
-            state.PicturePageIsSpread,
+            state.PageLayoutKind,
             state.IllustrationLayout,
             state.PageLayout,
             manifest = chapterVisuals.BuildManifest(state, imageNames),
@@ -760,9 +758,7 @@ public sealed class EditorChatTools(
         EditorChatContext ctx,
         Guid chapterId,
         string visualMode,
-        double? picturePageWidthInches,
-        double? picturePageHeightInches,
-        bool? picturePageIsSpread)
+        string? pageLayoutKind)
     {
         var chapter = await chapters.GetAsync(chapterId);
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
@@ -774,17 +770,27 @@ public sealed class EditorChatTools(
             return "Error: visualMode must be Prose, IllustratedProse, or PicturePage.";
         }
 
+        ChapterPageLayoutKind? parsedLayout = null;
+        if (!string.IsNullOrWhiteSpace(pageLayoutKind))
+        {
+            if (!Enum.TryParse<ChapterPageLayoutKind>(pageLayoutKind, ignoreCase: true, out var candidate)
+                || !Enum.IsDefined(candidate))
+            {
+                return "Error: pageLayoutKind must be SinglePortrait, SingleLandscape, DoublePortrait, or DoubleLandscape.";
+            }
+
+            parsedLayout = candidate;
+        }
+
         var state = await chapterVisuals.SetModeAsync(
             chapterId,
-            new ChapterVisualModeUpdate(parsedMode, picturePageWidthInches, picturePageHeightInches, picturePageIsSpread));
+            new ChapterVisualModeUpdate(parsedMode, parsedLayout));
         ctx.OnMutated();
         return JsonSerializer.Serialize(new
         {
             message = $"Chapter visual mode set to {state.VisualMode}.",
             state.VisualMode,
-            state.PicturePageWidthInches,
-            state.PicturePageHeightInches,
-            state.PicturePageIsSpread,
+            state.PageLayoutKind,
         });
     }
 

@@ -121,12 +121,25 @@ else
 
                 <select class="form-select form-select-sm chapter-visual-mode"
                         title="Chapter visual mode"
-                        value="@(_visualState?.VisualMode.ToString() ?? ChapterVisualMode.Prose.ToString())"
+                        value="@CurrentVisualMode().ToString()"
                         @onchange="ChangeVisualModeAsync">
                     <option value="@ChapterVisualMode.Prose">Prose</option>
                     <option value="@ChapterVisualMode.IllustratedProse">Illustrated prose</option>
                     <option value="@ChapterVisualMode.PicturePage">Picture page</option>
                 </select>
+
+                @if (ShowPageLayoutSelector)
+                {
+                    <select class="form-select form-select-sm chapter-page-layout"
+                            title="Page layout"
+                            value="@CurrentPageLayoutKind().ToString()"
+                            @onchange="ChangePageLayoutKindAsync">
+                        <option value="@ChapterPageLayoutKind.SinglePortrait">Single portrait</option>
+                        <option value="@ChapterPageLayoutKind.SingleLandscape">Single landscape</option>
+                        <option value="@ChapterPageLayoutKind.DoublePortrait">Double portrait</option>
+                        <option value="@ChapterPageLayoutKind.DoubleLandscape">Double landscape</option>
+                    </select>
+                }
 
                 <div class="small chapter-metrics" title="@ChapterMetricsTitle()">
                     @ChapterMetricsText()
@@ -767,6 +780,9 @@ else
     private bool EditorReadOnly => _chapterLocked || _mode is EditorMode.Read or EditorMode.Layout or EditorMode.Review;
     private bool IsPicturePageChapter => _visualState?.VisualMode == ChapterVisualMode.PicturePage
         || _current?.VisualMode == ChapterVisualMode.PicturePage;
+
+    private bool ShowPageLayoutSelector => CurrentVisualMode()
+        is ChapterVisualMode.IllustratedProse or ChapterVisualMode.PicturePage;
     private bool ContestReviewActive => _contestReviewProjection is not null;
     private bool EffectiveChatPaneCollapsed => ContestReviewActive || _chatPaneCollapsed;
     private bool EffectiveRightPaneCollapsed => ContestReviewActive || _rightPaneCollapsed;
@@ -931,6 +947,18 @@ else
         await OnVisualStateChangedAsync(updated);
     }
 
+    private async Task ChangePageLayoutKindAsync(ChangeEventArgs e)
+    {
+        if (_current is null) return;
+        if (!Enum.TryParse<ChapterPageLayoutKind>(e.Value?.ToString(), out var layoutKind))
+            return;
+
+        await FlushAsync();
+        var mode = CurrentVisualMode();
+        var updated = await Visuals.SetModeAsync(_current.Id, new ChapterVisualModeUpdate(mode, layoutKind));
+        await OnVisualStateChangedAsync(updated);
+    }
+
     private async Task OnVisualStateChangedAsync(ChapterVisualState state)
     {
         _visualState = state;
@@ -942,9 +970,7 @@ else
         if (_current is not null && _current.Id == state.ChapterId)
         {
             _current.VisualMode = state.VisualMode;
-            _current.PicturePageWidthInches = state.PicturePageWidthInches;
-            _current.PicturePageHeightInches = state.PicturePageHeightInches;
-            _current.PicturePageIsSpread = state.PicturePageIsSpread;
+            _current.PageLayoutKind = state.PageLayoutKind;
             if (!string.Equals(_current.Body, state.Body, StringComparison.Ordinal))
             {
                 _current.Body = state.Body;
@@ -1239,6 +1265,12 @@ else
         _mode == EditorMode.Read
             ? "form-control chapter-body chapter-body--read"
             : "form-control chapter-body";
+
+    private ChapterPageLayoutKind CurrentPageLayoutKind() =>
+        _visualState?.PageLayoutKind ?? _current?.PageLayoutKind ?? ChapterPageLayoutKind.SinglePortrait;
+
+    private ChapterVisualMode CurrentVisualMode() =>
+        _visualState?.VisualMode ?? _current?.VisualMode ?? ChapterVisualMode.Prose;
 
     private string ModeButtonClass(EditorMode mode) =>
         _mode == mode

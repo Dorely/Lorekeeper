@@ -289,9 +289,7 @@ public sealed class ProjectImportExportService(
             Synopsis = chapter.Synopsis,
             Order = chapter.Order,
             VisualMode = chapter.VisualMode,
-            PicturePageWidthInches = chapter.PicturePageWidthInches,
-            PicturePageHeightInches = chapter.PicturePageHeightInches,
-            PicturePageIsSpread = chapter.PicturePageIsSpread,
+            PageLayoutKind = chapter.PageLayoutKind,
             PageLayoutJson = chapter.PageLayoutJson,
             IllustrationLayoutJson = chapter.IllustrationLayoutJson,
             ExplicitImageContextImageIds = exportedImageContextIds.TryGetValue(chapter.Id, out var imageIds)

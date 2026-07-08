@@ -32,9 +32,7 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
     {
         var chapter = await GetChapterAsync(chapterId, cancellationToken);
         chapter.VisualMode = update.VisualMode;
-        chapter.PicturePageWidthInches = Clamp(update.PicturePageWidthInches ?? chapter.PicturePageWidthInches, 3, 24, 8.5);
-        chapter.PicturePageHeightInches = Clamp(update.PicturePageHeightInches ?? chapter.PicturePageHeightInches, 3, 24, 8.5);
-        chapter.PicturePageIsSpread = update.PicturePageIsSpread ?? chapter.PicturePageIsSpread;
+        chapter.PageLayoutKind = NormalizePageLayoutKind(update.PageLayoutKind ?? chapter.PageLayoutKind);
 
         if (chapter.VisualMode == ChapterVisualMode.PicturePage)
         {
@@ -235,7 +233,9 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         builder.AppendLine($"Visual mode: {state.VisualMode}");
         if (state.VisualMode == ChapterVisualMode.PicturePage)
         {
-            builder.AppendLine($"Picture page: {state.PicturePageWidthInches:0.##} x {state.PicturePageHeightInches:0.##} in; spread: {state.PicturePageIsSpread}");
+            var metrics = PageMetrics(state.PageLayoutKind);
+            builder.AppendLine(
+                $"Picture page layout: {state.PageLayoutKind}; physical page {metrics.PageWidthInches:0.##} x {metrics.PageHeightInches:0.##} in; spread: {metrics.IsDouble}");
             foreach (var text in state.PageLayout.TextElements.OrderBy(text => text.ReadingOrder))
                 builder.AppendLine($"Text box {text.ReadingOrder}: \"{text.Text}\" at {text.XPercent:0.#},{text.YPercent:0.#} size {text.WidthPercent:0.#}x{text.HeightPercent:0.#}");
             foreach (var image in state.PageLayout.Images.OrderBy(image => image.ZIndex))
@@ -243,6 +243,7 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
             return builder.ToString();
         }
 
+        builder.AppendLine($"Page layout: {state.PageLayoutKind}");
         foreach (var image in state.IllustrationLayout.Images.OrderBy(image => image.SortOrder))
         {
             builder.AppendLine(
@@ -254,6 +255,24 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
 
     private static string Name(Guid imageId, IReadOnlyDictionary<Guid, string>? imageNames) =>
         imageNames is not null && imageNames.TryGetValue(imageId, out var name) ? $"{name} ({imageId:N})" : imageId.ToString("N");
+
+    private static ChapterPageLayoutKind NormalizePageLayoutKind(ChapterPageLayoutKind kind) =>
+        Enum.IsDefined(kind) ? kind : ChapterPageLayoutKind.SinglePortrait;
+
+    private static (
+        double PageWidthInches,
+        double PageHeightInches,
+        bool IsDouble,
+        double SurfaceWidthInches,
+        double SurfaceHeightInches) PageMetrics(ChapterPageLayoutKind kind)
+    {
+        var normalized = NormalizePageLayoutKind(kind);
+        var isLandscape = normalized is ChapterPageLayoutKind.SingleLandscape or ChapterPageLayoutKind.DoubleLandscape;
+        var isDouble = normalized is ChapterPageLayoutKind.DoublePortrait or ChapterPageLayoutKind.DoubleLandscape;
+        var pageWidth = isLandscape ? 11 : 8.5;
+        var pageHeight = isLandscape ? 8.5 : 11;
+        return (pageWidth, pageHeight, isDouble, isDouble ? pageWidth * 2 : pageWidth, pageHeight);
+    }
 
     private async Task<IReadOnlyDictionary<Guid, PublishAsset>> LoadImageAssetsAsync(
         Guid projectId,
@@ -274,9 +293,8 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         IReadOnlyDictionary<Guid, PublishAsset> assets,
         int maxEdge)
     {
-        var pageWidthInches = Math.Max(1, state.PicturePageIsSpread ? state.PicturePageWidthInches * 2 : state.PicturePageWidthInches);
-        var pageHeightInches = Math.Max(1, state.PicturePageHeightInches);
-        var (width, height) = ScaledPagePixels(pageWidthInches, pageHeightInches, maxEdge);
+        var metrics = PageMetrics(state.PageLayoutKind);
+        var (width, height) = ScaledPagePixels(metrics.SurfaceWidthInches, metrics.SurfaceHeightInches, maxEdge);
 
         using var surface = CreatePageSurface(width, height);
         var canvas = surface.Canvas;
@@ -292,6 +310,8 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
 
         foreach (var text in state.PageLayout.TextElements.OrderBy(text => text.ZIndex))
             DrawPictureTextBox(canvas, text, width, height);
+        if (metrics.IsDouble)
+            DrawSpreadSplit(canvas, width, height);
 
         return new ChapterVisualSnapshot(1, $"chapter-{state.ChapterId:N}-page-1.png", SnapshotContentType, EncodePng(surface));
     }
@@ -302,8 +322,9 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         IReadOnlyDictionary<Guid, PublishAsset> assets,
         int maxEdge)
     {
-        var pageWidthInches = Clamp(profile?.PageWidthInches ?? 8.5, 3, 24, 8.5);
-        var pageHeightInches = Clamp(profile?.PageHeightInches ?? 11, 3, 24, 11);
+        var metrics = PageMetrics(state.PageLayoutKind);
+        var pageWidthInches = metrics.PageWidthInches;
+        var pageHeightInches = metrics.PageHeightInches;
         var pageMarginInches = Clamp(profile?.PageMarginInches ?? 0.75, 0.2, Math.Min(pageWidthInches, pageHeightInches) / 3, 0.75);
         var fontSizePoints = Clamp(profile?.BodyFontSizePoints ?? 12, 7, 24, 12);
         var lineHeightRatio = Clamp(profile?.BodyLineHeight ?? 1.55, 1, 2.4, 1.55);
@@ -493,6 +514,26 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         return (
             Math.Max(1, (int)Math.Round(widthInches * scale)),
             Math.Max(1, (int)Math.Round(heightInches * scale)));
+    }
+
+    private static void DrawSpreadSplit(SKCanvas canvas, int width, int height)
+    {
+        using var shadowPaint = new SKPaint
+        {
+            Color = new SKColor(15, 23, 42, 34),
+            IsAntialias = true,
+            StrokeWidth = Math.Max(2, width * 0.004f),
+        };
+        using var linePaint = new SKPaint
+        {
+            Color = new SKColor(15, 23, 42, 72),
+            IsAntialias = true,
+            StrokeWidth = Math.Max(1, width * 0.0015f),
+        };
+
+        var center = width / 2f;
+        canvas.DrawLine(center - shadowPaint.StrokeWidth, 0, center - shadowPaint.StrokeWidth, height, shadowPaint);
+        canvas.DrawLine(center, 0, center, height, linePaint);
     }
 
     private static byte[] EncodePng(SKSurface surface)
@@ -786,9 +827,7 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         new(
             chapter.Id,
             chapter.VisualMode,
-            Clamp(chapter.PicturePageWidthInches, 3, 24, 8.5),
-            Clamp(chapter.PicturePageHeightInches, 3, 24, 8.5),
-            chapter.PicturePageIsSpread,
+            NormalizePageLayoutKind(chapter.PageLayoutKind),
             NormalizeIllustrationLayout(ReadIllustrationLayout(chapter), chapter.Body),
             NormalizePageLayout(ReadPageLayout(chapter)),
             chapter.Body);

@@ -275,9 +275,7 @@ public sealed class ProjectImportJobProcessor(
                 ?? throw new InvalidOperationException($"Created chapter {created.Id} could not be reloaded.");
             tracked.Body = importedChapter.Body;
             tracked.VisualMode = importedChapter.VisualMode;
-            tracked.PicturePageWidthInches = importedChapter.PicturePageWidthInches;
-            tracked.PicturePageHeightInches = importedChapter.PicturePageHeightInches;
-            tracked.PicturePageIsSpread = importedChapter.PicturePageIsSpread;
+            tracked.PageLayoutKind = importedChapter.PageLayoutKind;
             tracked.PageLayoutJson = RewritePageLayoutJson(importedChapter.PageLayoutJson, state.ImageMap);
             tracked.IllustrationLayoutJson = RewriteIllustrationLayoutJson(importedChapter.IllustrationLayoutJson, state.ImageMap);
             tracked.VectorIndexState = string.IsNullOrWhiteSpace(importedChapter.Body) ? VectorIndexState.UpToDate : VectorIndexState.Stale;

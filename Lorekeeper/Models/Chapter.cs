@@ -28,11 +28,7 @@ public class Chapter
 
     public ChapterVisualMode VisualMode { get; set; } = ChapterVisualMode.Prose;
 
-    public double PicturePageWidthInches { get; set; } = 8.5;
-
-    public double PicturePageHeightInches { get; set; } = 8.5;
-
-    public bool PicturePageIsSpread { get; set; }
+    public ChapterPageLayoutKind PageLayoutKind { get; set; } = ChapterPageLayoutKind.SinglePortrait;
 
     public string PageLayoutJson { get; set; } = string.Empty;
 

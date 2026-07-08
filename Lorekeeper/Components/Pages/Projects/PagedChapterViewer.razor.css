@@ -30,12 +30,44 @@
     overflow: auto;
     display: grid;
     gap: 1rem;
-    justify-items: center;
+    justify-items: safe center;
+    align-content: start;
+}
+
+.prose-spread {
+    display: grid;
+    gap: 0.35rem;
+    width: max-content;
+}
+
+.prose-spread--single {
+    grid-template-columns: minmax(0, var(--page-width, 8.5in));
+    max-width: 100%;
+}
+
+.prose-spread--double {
+    position: relative;
+    grid-template-columns: var(--page-width, 8.5in) var(--page-width, 8.5in);
+}
+
+.prose-spread--double::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 0;
+    border-left: 1px solid rgba(15, 23, 42, 0.28);
+    box-shadow:
+        -0.16rem 0 0.45rem rgba(15, 23, 42, 0.08),
+        0.16rem 0 0.45rem rgba(15, 23, 42, 0.05);
+    pointer-events: none;
 }
 
 .sim-page {
-    width: min(100%, 8.5in);
-    min-height: 11in;
+    box-sizing: border-box;
+    width: min(100%, var(--page-width, 8.5in));
+    height: var(--page-height, 11in);
     padding: 0.75in;
     background: #fff;
     box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
@@ -43,6 +75,17 @@
     font-family: Georgia, "Times New Roman", serif;
     font-size: 12pt;
     line-height: 1.55;
+    overflow: hidden;
+}
+
+.prose-spread--double .sim-page {
+    width: var(--page-width, 8.5in);
+}
+
+.prose-page--blank {
+    background:
+        linear-gradient(90deg, rgba(15, 23, 42, 0.03), transparent 20%),
+        #fff;
 }
 
 .prose-page p {
@@ -226,7 +269,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
+    overflow: auto;
     padding: 0.85rem;
     border: 1px solid rgba(148, 163, 184, 0.42);
     border-radius: 0.5rem;
@@ -244,6 +287,21 @@
         0 18px 38px rgba(15, 23, 42, 0.18),
         0 0 0 1px rgba(15, 23, 42, 0.08);
     overflow: hidden;
+}
+
+.picture-page--double::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    z-index: 10000;
+    width: 0;
+    border-left: 1px solid rgba(15, 23, 42, 0.36);
+    box-shadow:
+        -0.18rem 0 0.5rem rgba(15, 23, 42, 0.12),
+        0.18rem 0 0.5rem rgba(15, 23, 42, 0.08);
+    pointer-events: none;
 }
 
 .picture-element {

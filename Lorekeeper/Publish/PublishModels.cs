@@ -231,9 +231,7 @@ public sealed record PublishChapterDocument(
     int Order,
     bool IncludeHeading,
     ChapterVisualMode VisualMode,
-    double PicturePageWidthInches,
-    double PicturePageHeightInches,
-    bool PicturePageIsSpread,
+    ChapterPageLayoutKind PageLayoutKind,
     IllustratedProseLayout IllustrationLayout,
     PicturePageLayout PageLayout);
 

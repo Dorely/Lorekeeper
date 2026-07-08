@@ -551,9 +551,7 @@ public sealed class PublishService(
             chapter.Order,
             profile.IncludeChapterHeadings,
             chapter.VisualMode,
-            chapter.PicturePageWidthInches,
-            chapter.PicturePageHeightInches,
-            chapter.PicturePageIsSpread,
+            chapter.PageLayoutKind,
             ReadIllustrationLayout(chapter),
             ReadPageLayout(chapter));
 

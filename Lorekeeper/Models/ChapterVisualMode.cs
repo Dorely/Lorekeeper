@@ -10,6 +10,15 @@ public enum ChapterVisualMode
     PicturePage,
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter<ChapterPageLayoutKind>))]
+public enum ChapterPageLayoutKind
+{
+    SinglePortrait,
+    SingleLandscape,
+    DoublePortrait,
+    DoubleLandscape,
+}
+
 [JsonConverter(typeof(JsonStringEnumConverter<ChapterImageFit>))]
 public enum ChapterImageFit
 {
