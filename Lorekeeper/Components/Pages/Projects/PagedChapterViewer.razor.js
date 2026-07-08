@@ -14,6 +14,7 @@ export function attach(root, dotNetRef) {
         onPointerMove: null,
         onPointerUp: null,
         onPointerCancel: null,
+        onFocusOut: null,
     };
 
     state.onPaste = async (event) => {
@@ -38,35 +39,48 @@ export function attach(root, dotNetRef) {
     };
 
     state.onPointerDown = (event) => {
-        const element = event.target.closest("[data-picture-element-id]");
+        if (event.button !== 0) return;
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target) return;
+
+        if (target.closest("[data-picture-remove]")) return;
+
+        const element = target.closest("[data-picture-element-id]");
         if (!element || !root.contains(element)) return;
 
-        const isResize = !!event.target.closest("[data-resize-handle]");
-        const isDragHandle = !!event.target.closest("[data-drag-handle]");
+        const isResize = !!target.closest("[data-picture-resize]");
+        const isMoveHandle = !!target.closest("[data-picture-move]");
         const kind = element.dataset.pictureElementKind;
-        if (!kind) return;
-        if (!isResize && kind === "text" && !isDragHandle) return;
-        if (!isResize && isFormControl(event.target) && !isDragHandle) return;
+        const id = element.dataset.pictureElementId;
+        if (!kind || !id) return;
+        if (!isResize && kind === "text" && !isMoveHandle) return;
+        if (!isResize && isFormControl(target) && !isMoveHandle) return;
 
         const page = element.closest(".picture-page");
         if (!page) return;
 
         const pageRect = page.getBoundingClientRect();
         const elementRect = element.getBoundingClientRect();
+        const start = elementPercents(pageRect, elementRect);
         state.active = {
             pointerId: event.pointerId,
             element,
             page,
             kind,
-            id: element.dataset.pictureElementId,
+            id,
             mode: isResize ? "resize" : "move",
-            pageRect,
-            offsetX: event.clientX - elementRect.left,
-            offsetY: event.clientY - elementRect.top,
+            offsetXPercent: ((event.clientX - elementRect.left) / pageRect.width) * 100,
+            offsetYPercent: ((event.clientY - elementRect.top) / pageRect.height) * 100,
+            startX: start.x,
+            startY: start.y,
+            startWidth: start.width,
+            startHeight: start.height,
         };
 
-        element.setPointerCapture?.(event.pointerId);
         element.classList.add("picture-element--active");
+        window.addEventListener("pointermove", state.onPointerMove, true);
+        window.addEventListener("pointerup", state.onPointerUp, true);
+        window.addEventListener("pointercancel", state.onPointerCancel, true);
         event.preventDefault();
     };
 
@@ -82,8 +96,8 @@ export function attach(root, dotNetRef) {
         if (!active || active.pointerId !== event.pointerId) return;
         event.preventDefault();
         state.active = null;
-        active.element.releasePointerCapture?.(event.pointerId);
         active.element.classList.remove("picture-element--active");
+        removeActivePointerListeners(state);
 
         const result = applyPointerPreview(active, event.clientX, event.clientY);
         if (active.mode === "resize") {
@@ -106,18 +120,28 @@ export function attach(root, dotNetRef) {
     state.onPointerCancel = (event) => {
         const active = state.active;
         if (!active || active.pointerId !== event.pointerId) return;
-        active.element.releasePointerCapture?.(event.pointerId);
         active.element.classList.remove("picture-element--active");
         state.active = null;
+        removeActivePointerListeners(state);
+    };
+
+    state.onFocusOut = async (event) => {
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        const editor = target?.closest("[data-picture-text-editor]");
+        if (!editor || !root.contains(editor)) return;
+
+        const element = editor.closest("[data-picture-element-id]");
+        const id = element?.dataset.pictureElementId;
+        if (!id || element?.dataset.pictureElementKind !== "text") return;
+
+        await dotNetRef.invokeMethodAsync("UpdatePictureTextBodyAsync", id, editableText(editor));
     };
 
     root.addEventListener("paste", state.onPaste);
     root.addEventListener("dragover", state.onDragOver);
     root.addEventListener("drop", state.onDrop);
-    root.addEventListener("pointerdown", state.onPointerDown);
-    root.addEventListener("pointermove", state.onPointerMove);
-    root.addEventListener("pointerup", state.onPointerUp);
-    root.addEventListener("pointercancel", state.onPointerCancel);
+    root.addEventListener("pointerdown", state.onPointerDown, true);
+    root.addEventListener("focusout", state.onFocusOut);
     stateByRoot.set(root, state);
 }
 
@@ -128,10 +152,10 @@ export function detach(root) {
     root.removeEventListener("paste", state.onPaste);
     root.removeEventListener("dragover", state.onDragOver);
     root.removeEventListener("drop", state.onDrop);
-    root.removeEventListener("pointerdown", state.onPointerDown);
-    root.removeEventListener("pointermove", state.onPointerMove);
-    root.removeEventListener("pointerup", state.onPointerUp);
-    root.removeEventListener("pointercancel", state.onPointerCancel);
+    root.removeEventListener("pointerdown", state.onPointerDown, true);
+    root.removeEventListener("focusout", state.onFocusOut);
+    removeActivePointerListeners(state);
+    state.active?.element?.classList.remove("picture-element--active");
     stateByRoot.delete(root);
 }
 
@@ -180,28 +204,49 @@ function pagePoint(root, clientX, clientY) {
 
 function applyPointerPreview(active, clientX, clientY) {
     const rect = active.page.getBoundingClientRect();
-    active.pageRect = rect;
 
     if (active.mode === "resize") {
-        const elementRect = active.element.getBoundingClientRect();
-        const width = clamp(((clientX - elementRect.left) / rect.width) * 100, 5, 100);
-        const height = clamp(((clientY - elementRect.top) / rect.height) * 100, 5, 100);
+        const pointerX = ((clientX - rect.left) / rect.width) * 100;
+        const pointerY = ((clientY - rect.top) / rect.height) * 100;
+        const width = clamp(pointerX - active.startX, 5, Math.max(5, 100 - active.startX));
+        const height = clamp(pointerY - active.startY, 5, Math.max(5, 100 - active.startY));
         active.element.style.width = `${width}%`;
         active.element.style.height = `${height}%`;
         return { width, height };
     }
 
-    const width = (active.element.getBoundingClientRect().width / rect.width) * 100;
-    const height = (active.element.getBoundingClientRect().height / rect.height) * 100;
-    const x = clamp(((clientX - active.offsetX - rect.left) / rect.width) * 100, 0, Math.max(0, 100 - width));
-    const y = clamp(((clientY - active.offsetY - rect.top) / rect.height) * 100, 0, Math.max(0, 100 - height));
+    const pointerX = ((clientX - rect.left) / rect.width) * 100;
+    const pointerY = ((clientY - rect.top) / rect.height) * 100;
+    const x = clamp(pointerX - active.offsetXPercent, 0, Math.max(0, 100 - active.startWidth));
+    const y = clamp(pointerY - active.offsetYPercent, 0, Math.max(0, 100 - active.startHeight));
     active.element.style.left = `${x}%`;
     active.element.style.top = `${y}%`;
     return { x, y };
 }
 
+function elementPercents(pageRect, elementRect) {
+    return {
+        x: ((elementRect.left - pageRect.left) / pageRect.width) * 100,
+        y: ((elementRect.top - pageRect.top) / pageRect.height) * 100,
+        width: (elementRect.width / pageRect.width) * 100,
+        height: (elementRect.height / pageRect.height) * 100,
+    };
+}
+
+function removeActivePointerListeners(state) {
+    window.removeEventListener("pointermove", state.onPointerMove, true);
+    window.removeEventListener("pointerup", state.onPointerUp, true);
+    window.removeEventListener("pointercancel", state.onPointerCancel, true);
+}
+
 function isFormControl(target) {
-    return !!target.closest("textarea,input,select,button");
+    return !!target.closest("input,select,button,[contenteditable='true']");
+}
+
+function editableText(editor) {
+    return (editor.innerText ?? editor.textContent ?? "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\u00a0/g, " ");
 }
 
 function clamp(value, min, max) {

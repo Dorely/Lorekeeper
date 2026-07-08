@@ -92,14 +92,27 @@
 
 .picture-layout {
     height: 100%;
+    width: 100%;
     min-height: 0;
     display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0.6rem;
+}
+
+.picture-layout--editable {
     grid-template-rows: auto minmax(0, 1fr);
-    gap: 0.65rem;
-    justify-items: center;
 }
 
 .picture-toolbar {
+    width: 100%;
+    min-height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+}
+
+.picture-toolbar__actions {
     width: min(100%, 8.5in);
     display: flex;
     align-items: center;
@@ -107,30 +120,46 @@
     gap: 0.45rem;
 }
 
+.picture-stage {
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    padding: 0.85rem;
+    border: 1px solid rgba(148, 163, 184, 0.42);
+    border-radius: 0.5rem;
+    background: #dfe7f1;
+}
+
 .picture-page {
     position: relative;
     container-type: inline-size;
     width: min(100%, 8.5in);
     max-height: 100%;
-    align-self: center;
+    flex: 0 1 auto;
     background: #fff;
-    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
+    box-shadow:
+        0 18px 38px rgba(15, 23, 42, 0.18),
+        0 0 0 1px rgba(15, 23, 42, 0.08);
     overflow: hidden;
 }
 
 .picture-element {
     position: absolute;
     box-sizing: border-box;
+    overflow: hidden;
 }
 
 .picture-element--editable {
-    outline: 1px solid transparent;
+    box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.35);
 }
 
 .picture-element--editable:hover,
 .picture-element--active,
 .picture-element--editable:focus-within {
-    outline-color: rgba(13, 110, 253, 0.6);
+    box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.78);
 }
 
 .picture-element--image.picture-element--editable {
@@ -148,7 +177,7 @@
 .picture-element--text {
     display: flex;
     justify-content: center;
-    padding: 0.2rem;
+    padding: 0.25rem;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
@@ -161,9 +190,8 @@
 .picture-text-editor {
     width: 100%;
     height: 100%;
-    resize: none;
     border: 0;
-    padding: 0.2rem;
+    padding: 0.35rem;
     background: transparent;
     color: inherit;
     font: inherit;
@@ -171,74 +199,117 @@
     text-align: inherit;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    overflow: hidden;
     outline: none;
+    cursor: text;
 }
 
-.picture-drag-handle,
-.picture-remove-button {
+.picture-element-chrome {
     position: absolute;
-    z-index: 4;
-    width: 1.35rem;
-    height: 1.35rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid rgba(15, 23, 42, 0.22);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.92);
-    color: #172033;
-    font-size: 0;
-    line-height: 1;
+    inset: 0;
+    z-index: 8;
+    pointer-events: none;
+}
+
+.picture-corner-control {
+    position: absolute;
+    width: 0.95rem;
+    height: 0.95rem;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 1px solid rgba(37, 99, 235, 0.68);
+    border-radius: 0.16rem;
+    background: rgba(255, 255, 255, 0.96);
+    color: #1d4ed8;
     opacity: 0;
+    pointer-events: auto;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18);
+    transition: opacity 0.12s ease, background-color 0.12s ease;
 }
 
-.picture-drag-handle::before,
-.picture-remove-button::before {
-    font-size: 0.78rem;
-}
-
-.picture-drag-handle::before {
-    content: "M";
-}
-
-.picture-remove-button::before {
-    content: "x";
-}
-
-.picture-drag-handle {
-    top: 0.25rem;
-    left: 0.25rem;
+.picture-corner-control--move {
+    top: 0.16rem;
+    left: 0.16rem;
     cursor: move;
 }
 
-.picture-remove-button {
-    top: 0.25rem;
-    right: 0.25rem;
+.picture-corner-control--move::before,
+.picture-corner-control--move::after {
+    content: "";
+    position: absolute;
+    inset: 0.28rem;
+    border-color: currentColor;
+    border-style: solid;
 }
 
-.picture-resize-handle {
+.picture-corner-control--move::before {
+    border-width: 1px 0;
+}
+
+.picture-corner-control--move::after {
+    border-width: 0 1px;
+}
+
+.picture-corner-control--remove {
+    top: 0.16rem;
+    right: 0.16rem;
+    cursor: pointer;
+}
+
+.picture-corner-control--remove::before,
+.picture-corner-control--remove::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0.48rem;
+    border-top: 1.5px solid currentColor;
+}
+
+.picture-corner-control--remove::before {
+    transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.picture-corner-control--remove::after {
+    transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.picture-corner-control--resize {
+    right: 0.12rem;
+    bottom: 0.12rem;
+    cursor: nwse-resize;
+    border-top: 0;
+    border-left: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.picture-corner-control--resize::before,
+.picture-corner-control--resize::after {
+    content: "";
     position: absolute;
     right: 0;
     bottom: 0;
-    z-index: 4;
-    width: 1rem;
-    height: 1rem;
-    border-top: 0.35rem solid transparent;
-    border-left: 0.35rem solid transparent;
-    border-right: 0.35rem solid rgba(13, 110, 253, 0.85);
-    border-bottom: 0.35rem solid rgba(13, 110, 253, 0.85);
-    cursor: nwse-resize;
-    opacity: 0;
+    border-right: 2px solid rgba(37, 99, 235, 0.9);
+    border-bottom: 2px solid rgba(37, 99, 235, 0.9);
 }
 
-.picture-element--editable:hover .picture-drag-handle,
-.picture-element--editable:hover .picture-remove-button,
-.picture-element--editable:hover .picture-resize-handle,
-.picture-element--active .picture-drag-handle,
-.picture-element--active .picture-remove-button,
-.picture-element--active .picture-resize-handle,
-.picture-element--editable:focus-within .picture-drag-handle,
-.picture-element--editable:focus-within .picture-remove-button,
-.picture-element--editable:focus-within .picture-resize-handle {
+.picture-corner-control--resize::before {
+    width: 0.72rem;
+    height: 0.72rem;
+}
+
+.picture-corner-control--resize::after {
+    width: 0.42rem;
+    height: 0.42rem;
+}
+
+.picture-element--editable .picture-corner-control {
     opacity: 1;
+}
+
+.picture-corner-control:hover {
+    background: #fff;
 }

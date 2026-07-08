@@ -2,7 +2,6 @@
 @using Lorekeeper.Images
 @using Lorekeeper.Models
 @using Lorekeeper.Publish
-@using Microsoft.AspNetCore.Components.Rendering
 @using Microsoft.JSInterop
 @using System.Globalization
 @using System.Text
@@ -14,11 +13,96 @@
 <div class="paged-viewer" tabindex="0" @ref="_viewerRoot">
     @if (State.VisualMode == ChapterVisualMode.PicturePage)
     {
-        @RenderPicturePage()
+        var ratioWidth = Math.Max(1, State.PicturePageIsSpread ? State.PicturePageWidthInches * 2 : State.PicturePageWidthInches);
+        var ratioHeight = Math.Max(1, State.PicturePageHeightInches);
+        <div class="@(IsEditable ? "picture-layout picture-layout--editable" : "picture-layout")">
+            @if (IsEditable)
+            {
+                <div class="picture-toolbar">
+                    <div class="picture-toolbar__actions">
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddTextBoxAsync">Add text box</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenImagesAsync">Images</button>
+                    </div>
+                </div>
+            }
+            <div class="picture-stage">
+                <section class="@(IsEditable ? "picture-page picture-page--editable" : "picture-page")" style="@PicturePageStyle(ratioWidth, ratioHeight)">
+                    @foreach (var image in State.PageLayout.Images.OrderBy(image => image.ZIndex))
+                    {
+                        var projectImage = ImageById(image.ImageId);
+                        <div class="@(IsEditable ? "picture-element picture-element--image picture-element--editable" : "picture-element picture-element--image")"
+                             style="@ElementStyle(image.XPercent, image.YPercent, image.WidthPercent, image.HeightPercent, image.ZIndex)"
+                             data-picture-element-kind="@(IsEditable ? "image" : null)"
+                             data-picture-element-id="@(IsEditable ? image.Id.ToString("N") : null)">
+                            @if (projectImage is not null)
+                            {
+                                <img src="@projectImage.PreviewUrl"
+                                     alt="@(string.IsNullOrWhiteSpace(image.AltTextOverride) ? projectImage.AltText : image.AltTextOverride)"
+                                     style="@($"object-fit:{FitCss(image.Fit)};opacity:{image.Opacity.ToString(CultureInfo.InvariantCulture)};")" />
+                            }
+                            @if (IsEditable)
+                            {
+                                @RenderPictureCornerControls("image", image.Id)
+                            }
+                        </div>
+                    }
+                    @foreach (var text in State.PageLayout.TextElements.OrderBy(text => text.ZIndex))
+                    {
+                        <div class="@(IsEditable ? "picture-element picture-element--text picture-element--editable" : "picture-element picture-element--text")"
+                             style="@TextElementStyle(text)"
+                             data-picture-element-kind="@(IsEditable ? "text" : null)"
+                             data-picture-element-id="@(IsEditable ? text.Id.ToString("N") : null)">
+                            @if (IsEditable)
+                            {
+                                <div class="picture-text-editor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="false" data-picture-text-editor="true">@text.Text</div>
+                                @RenderPictureCornerControls("text", text.Id)
+                            }
+                            else
+                            {
+                                @text.Text
+                            }
+                        </div>
+                    }
+                </section>
+            </div>
+        </div>
     }
     else
     {
-        @RenderProsePages()
+        var paragraphs = SplitParagraphs(State.Body);
+        var paragraphCount = Math.Max(1, paragraphs.Count);
+        <div class="prose-pages">
+            <section class="sim-page prose-page">
+                @if (paragraphs.Count == 0)
+                {
+                    <p class="empty-prose">(empty chapter)</p>
+                }
+                @for (var index = 0; index < paragraphCount; index++)
+                {
+                    var currentIndex = index;
+                    if (IsEditable)
+                    {
+                        @RenderDropZone(currentIndex, ChapterImageAnchorPosition.BeforeParagraph)
+                    }
+                    @foreach (var block in BlocksAt(currentIndex, ChapterImageAnchorPosition.BeforeParagraph))
+                    {
+                        @RenderIllustrationBlock(block)
+                    }
+                    if (currentIndex < paragraphs.Count)
+                    {
+                        <p>@paragraphs[currentIndex]</p>
+                    }
+                    @foreach (var block in BlocksAt(currentIndex, ChapterImageAnchorPosition.AfterParagraph))
+                    {
+                        @RenderIllustrationBlock(block)
+                    }
+                    if (IsEditable)
+                    {
+                        @RenderDropZone(currentIndex, ChapterImageAnchorPosition.AfterParagraph)
+                    }
+                }
+            </section>
+        </div>
     }
 </div>
 
@@ -29,243 +113,64 @@
     [Parameter] public Guid ProjectId { get; set; }
     [Parameter] public EventCallback<ChapterVisualState> OnChanged { get; set; }
     [Parameter] public EventCallback OnImagesChanged { get; set; }
+    [Parameter] public EventCallback OnOpenImages { get; set; }
 
     private Guid? _draggingIllustrationId;
     private ElementReference _viewerRoot;
     private IJSObjectReference? _viewerModule;
     private DotNetObjectReference<PagedChapterViewer>? _selfRef;
+    private bool _disposed;
 
-    private RenderFragment RenderProsePages() => builder =>
-    {
-        var sequence = 0;
-        var paragraphs = SplitParagraphs(State.Body);
-        builder.OpenElement(sequence++, "div");
-        builder.AddAttribute(sequence++, "class", "prose-pages");
-        builder.OpenElement(sequence++, "section");
-        builder.AddAttribute(sequence++, "class", "sim-page prose-page");
+    private RenderFragment RenderDropZone(int paragraphIndex, ChapterImageAnchorPosition position) =>
+        @<button type="button" class="illustration-drop-zone"
+                 @ondragover="HandleDragOver" @ondragover:preventDefault="true"
+                 @ondrop="@(() => DropIllustrationAsync(paragraphIndex, position))">
+            @(position == ChapterImageAnchorPosition.BeforeParagraph ? "Drop image before paragraph" : "Drop image after paragraph")
+        </button>;
 
-        if (paragraphs.Count == 0)
-        {
-            builder.OpenElement(sequence++, "p");
-            builder.AddAttribute(sequence++, "class", "empty-prose");
-            builder.AddContent(sequence++, "(empty chapter)");
-            builder.CloseElement();
-        }
-
-        for (var index = 0; index < Math.Max(1, paragraphs.Count); index++)
-        {
-            RenderDropZone(builder, ref sequence, index, ChapterImageAnchorPosition.BeforeParagraph);
-            foreach (var block in BlocksAt(index, ChapterImageAnchorPosition.BeforeParagraph))
-                RenderIllustrationBlock(builder, ref sequence, block);
-
-            if (index < paragraphs.Count)
-            {
-                builder.OpenElement(sequence++, "p");
-                builder.AddContent(sequence++, paragraphs[index]);
-                builder.CloseElement();
+    private RenderFragment RenderIllustrationBlock(IllustratedProseImageBlock block) =>
+        @<figure class="@($"illustration-block illustration-block--{block.Alignment.ToString().ToLowerInvariant()}")"
+                 style="@($"width:{block.WidthPercent.ToString(CultureInfo.InvariantCulture)}%;")"
+                 draggable="@(IsEditable ? "true" : null)"
+                 @ondragstart="@(() => _draggingIllustrationId = block.Id)">
+            @{
+                var image = ImageById(block.ImageId);
             }
-
-            foreach (var block in BlocksAt(index, ChapterImageAnchorPosition.AfterParagraph))
-                RenderIllustrationBlock(builder, ref sequence, block);
-            RenderDropZone(builder, ref sequence, index, ChapterImageAnchorPosition.AfterParagraph);
-        }
-
-        builder.CloseElement();
-        builder.CloseElement();
-    };
-
-    private RenderFragment RenderPicturePage() => builder =>
-    {
-        var sequence = 0;
-        var ratioWidth = Math.Max(1, State.PicturePageIsSpread ? State.PicturePageWidthInches * 2 : State.PicturePageWidthInches);
-        var ratioHeight = Math.Max(1, State.PicturePageHeightInches);
-
-        builder.OpenElement(sequence++, "div");
-        builder.AddAttribute(sequence++, "class", "picture-layout");
-
-        if (IsEditable)
-        {
-            builder.OpenElement(sequence++, "div");
-            builder.AddAttribute(sequence++, "class", "picture-toolbar");
-            builder.OpenElement(sequence++, "button");
-            builder.AddAttribute(sequence++, "type", "button");
-            builder.AddAttribute(sequence++, "class", "btn btn-sm btn-outline-primary");
-            builder.AddAttribute(sequence++, "onclick", EventCallback.Factory.Create(this, AddTextBoxAsync));
-            builder.AddContent(sequence++, "Add text box");
-            builder.CloseElement();
-            builder.CloseElement();
-        }
-
-        builder.OpenElement(sequence++, "section");
-        builder.AddAttribute(sequence++, "class", IsEditable ? "picture-page picture-page--editable" : "picture-page");
-        builder.AddAttribute(sequence++, "style", PicturePageStyle(ratioWidth, ratioHeight));
-
-        foreach (var image in State.PageLayout.Images.OrderBy(image => image.ZIndex))
-        {
-            var projectImage = ImageById(image.ImageId);
-            builder.OpenElement(sequence++, "div");
-            builder.AddAttribute(sequence++, "class", IsEditable ? "picture-element picture-element--image picture-element--editable" : "picture-element picture-element--image");
-            builder.AddAttribute(sequence++, "style", ElementStyle(image.XPercent, image.YPercent, image.WidthPercent, image.HeightPercent, image.ZIndex));
-            if (IsEditable)
+            @if (image is not null)
             {
-                builder.AddAttribute(sequence++, "data-picture-element-kind", "image");
-                builder.AddAttribute(sequence++, "data-picture-element-id", image.Id.ToString("N"));
+                <img src="@image.PreviewUrl" alt="@(string.IsNullOrWhiteSpace(block.AltTextOverride) ? image.AltText : block.AltTextOverride)" />
             }
-            if (projectImage is not null)
+            @if (!string.IsNullOrWhiteSpace(block.Caption))
             {
-                builder.OpenElement(sequence++, "img");
-                builder.AddAttribute(sequence++, "src", projectImage.PreviewUrl);
-                builder.AddAttribute(sequence++, "alt", string.IsNullOrWhiteSpace(image.AltTextOverride) ? projectImage.AltText : image.AltTextOverride);
-                builder.AddAttribute(sequence++, "style", $"object-fit:{FitCss(image.Fit)};opacity:{image.Opacity.ToString(CultureInfo.InvariantCulture)};");
-                builder.CloseElement();
+                <figcaption>@block.Caption</figcaption>
             }
-            if (IsEditable)
-                RenderPictureElementChrome(builder, ref sequence, "image", image.Id);
-            builder.CloseElement();
-        }
-
-        foreach (var text in State.PageLayout.TextElements.OrderBy(text => text.ZIndex))
-        {
-            builder.OpenElement(sequence++, "div");
-            builder.AddAttribute(sequence++, "class", IsEditable ? "picture-element picture-element--text picture-element--editable" : "picture-element picture-element--text");
-            builder.AddAttribute(sequence++, "style", TextElementStyle(text));
-            if (IsEditable)
+            @if (IsEditable)
             {
-                builder.AddAttribute(sequence++, "data-picture-element-kind", "text");
-                builder.AddAttribute(sequence++, "data-picture-element-id", text.Id.ToString("N"));
-                builder.OpenElement(sequence++, "button");
-                builder.AddAttribute(sequence++, "type", "button");
-                builder.AddAttribute(sequence++, "class", "picture-drag-handle");
-                builder.AddAttribute(sequence++, "data-drag-handle", "true");
-                builder.AddAttribute(sequence++, "title", "Move");
-                builder.AddAttribute(sequence++, "aria-label", "Move text box");
-                builder.AddContent(sequence++, "↕");
-                builder.CloseElement();
-                builder.OpenElement(sequence++, "textarea");
-                builder.AddAttribute(sequence++, "class", "picture-text-editor");
-                builder.AddAttribute(sequence++, "value", text.Text);
-                builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => UpdatePictureTextAsync(text.Id, body: e.Value?.ToString())));
-                builder.CloseElement();
-                RenderPictureElementChrome(builder, ref sequence, "text", text.Id, includeMoveHandle: false);
+                <div class="illustration-controls">
+                    <input type="range" min="20" max="100" value="@block.WidthPercent.ToString(CultureInfo.InvariantCulture)"
+                           @onchange="@(e => UpdateIllustrationWidthAsync(block.Id, e.Value?.ToString()))" />
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="@(() => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Left))">Left</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="@(() => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Center))">Center</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="@(() => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Right))">Right</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="@(() => RemoveIllustrationAsync(block.Id))">Remove</button>
+                </div>
             }
-            else
-            {
-                builder.AddContent(sequence++, text.Text);
+        </figure>;
+
+    private RenderFragment RenderPictureCornerControls(string kind, Guid elementId) =>
+        @<div class="picture-element-chrome">
+            @{
+                Func<Task> onRemove = kind == "image"
+                    ? () => RemovePictureImageAsync(elementId)
+                    : () => RemovePictureTextAsync(elementId);
             }
-            builder.CloseElement();
-        }
+            <span class="picture-corner-control picture-corner-control--move" data-picture-move="true" title="Move" aria-label="@($"Move {kind}")"></span>
+            <button type="button" class="picture-corner-control picture-corner-control--remove" data-picture-remove="true" title="Remove" aria-label="@($"Remove {kind}")" @onclick="onRemove"></button>
+            <span class="picture-corner-control picture-corner-control--resize" data-picture-resize="true" title="Resize" aria-label="@($"Resize {kind}")"></span>
+        </div>;
 
-        builder.CloseElement();
-
-        builder.CloseElement();
-    };
-
-    private void RenderDropZone(RenderTreeBuilder builder, ref int sequence, int paragraphIndex, ChapterImageAnchorPosition position)
+    private static void HandleDragOver()
     {
-        if (!IsEditable) return;
-
-        builder.OpenElement(sequence++, "button");
-        builder.AddAttribute(sequence++, "type", "button");
-        builder.AddAttribute(sequence++, "class", "illustration-drop-zone");
-        builder.AddAttribute(sequence++, "ondragover", EventCallback.Factory.Create<DragEventArgs>(this, () => { }));
-        builder.AddEventPreventDefaultAttribute(sequence++, "ondragover", true);
-        builder.AddAttribute(sequence++, "ondrop", EventCallback.Factory.Create(this, () => DropIllustrationAsync(paragraphIndex, position)));
-        builder.AddContent(sequence++, position == ChapterImageAnchorPosition.BeforeParagraph ? "Drop image before paragraph" : "Drop image after paragraph");
-        builder.CloseElement();
-    }
-
-    private void RenderIllustrationBlock(RenderTreeBuilder builder, ref int sequence, IllustratedProseImageBlock block)
-    {
-        var image = ImageById(block.ImageId);
-        builder.OpenElement(sequence++, "figure");
-        builder.AddAttribute(sequence++, "class", $"illustration-block illustration-block--{block.Alignment.ToString().ToLowerInvariant()}");
-        builder.AddAttribute(sequence++, "style", $"width:{block.WidthPercent.ToString(CultureInfo.InvariantCulture)}%;");
-        if (IsEditable)
-        {
-            builder.AddAttribute(sequence++, "draggable", "true");
-            builder.AddAttribute(sequence++, "ondragstart", EventCallback.Factory.Create(this, () => _draggingIllustrationId = block.Id));
-        }
-
-        if (image is not null)
-        {
-            builder.OpenElement(sequence++, "img");
-            builder.AddAttribute(sequence++, "src", image.PreviewUrl);
-            builder.AddAttribute(sequence++, "alt", string.IsNullOrWhiteSpace(block.AltTextOverride) ? image.AltText : block.AltTextOverride);
-            builder.CloseElement();
-        }
-
-        if (!string.IsNullOrWhiteSpace(block.Caption))
-        {
-            builder.OpenElement(sequence++, "figcaption");
-            builder.AddContent(sequence++, block.Caption);
-            builder.CloseElement();
-        }
-
-        if (IsEditable)
-        {
-            builder.OpenElement(sequence++, "div");
-            builder.AddAttribute(sequence++, "class", "illustration-controls");
-            builder.OpenElement(sequence++, "input");
-            builder.AddAttribute(sequence++, "type", "range");
-            builder.AddAttribute(sequence++, "min", "20");
-            builder.AddAttribute(sequence++, "max", "100");
-            builder.AddAttribute(sequence++, "value", block.WidthPercent.ToString(CultureInfo.InvariantCulture));
-            builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => UpdateIllustrationWidthAsync(block.Id, e.Value?.ToString())));
-            builder.CloseElement();
-            RenderSmallButton(builder, ref sequence, "Left", () => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Left));
-            RenderSmallButton(builder, ref sequence, "Center", () => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Center));
-            RenderSmallButton(builder, ref sequence, "Right", () => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Right));
-            RenderSmallButton(builder, ref sequence, "Remove", () => RemoveIllustrationAsync(block.Id), "btn-outline-danger");
-            builder.CloseElement();
-        }
-
-        builder.CloseElement();
-    }
-
-    private void RenderPictureElementChrome(
-        RenderTreeBuilder builder,
-        ref int sequence,
-        string kind,
-        Guid elementId,
-        bool includeMoveHandle = true)
-    {
-        if (includeMoveHandle)
-        {
-            builder.OpenElement(sequence++, "button");
-            builder.AddAttribute(sequence++, "type", "button");
-            builder.AddAttribute(sequence++, "class", "picture-drag-handle");
-            builder.AddAttribute(sequence++, "data-drag-handle", "true");
-            builder.AddAttribute(sequence++, "title", "Move");
-            builder.AddAttribute(sequence++, "aria-label", $"Move {kind}");
-            builder.AddContent(sequence++, "↕");
-            builder.CloseElement();
-        }
-
-        builder.OpenElement(sequence++, "button");
-        builder.AddAttribute(sequence++, "type", "button");
-        builder.AddAttribute(sequence++, "class", "picture-remove-button");
-        builder.AddAttribute(sequence++, "title", "Remove");
-        builder.AddAttribute(sequence++, "aria-label", $"Remove {kind}");
-        builder.AddAttribute(sequence++, "onclick", EventCallback.Factory.Create(this, kind == "image"
-            ? () => RemovePictureImageAsync(elementId)
-            : () => RemovePictureTextAsync(elementId)));
-        builder.AddContent(sequence++, "×");
-        builder.CloseElement();
-
-        builder.OpenElement(sequence++, "span");
-        builder.AddAttribute(sequence++, "class", "picture-resize-handle");
-        builder.AddAttribute(sequence++, "data-resize-handle", "true");
-        builder.CloseElement();
-    }
-
-    private void RenderSmallButton(RenderTreeBuilder builder, ref int sequence, string text, Func<Task> onClick, string style = "btn-outline-secondary")
-    {
-        builder.OpenElement(sequence++, "button");
-        builder.AddAttribute(sequence++, "type", "button");
-        builder.AddAttribute(sequence++, "class", $"btn btn-sm {style}");
-        builder.AddAttribute(sequence++, "onclick", EventCallback.Factory.Create(this, onClick));
-        builder.AddContent(sequence++, text);
-        builder.CloseElement();
     }
 
     private IEnumerable<IllustratedProseImageBlock> BlocksAt(int paragraphIndex, ChapterImageAnchorPosition position) =>
@@ -342,15 +247,39 @@
         await SavePageAsync(layout);
     }
 
+    private async Task OpenImagesAsync()
+    {
+        if (OnOpenImages.HasDelegate)
+            await OnOpenImages.InvokeAsync();
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
+        if (!firstRender || _disposed) return;
 
         _selfRef = DotNetObjectReference.Create(this);
-        _viewerModule = await JS.InvokeAsync<IJSObjectReference>(
-            "import",
-            "./Components/Pages/Projects/PagedChapterViewer.razor.js");
-        await _viewerModule.InvokeVoidAsync("attach", _viewerRoot, _selfRef);
+        IJSObjectReference? module = null;
+        try
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>(
+                "import",
+                "./Components/Pages/Projects/PagedChapterViewer.razor.js");
+
+            if (_disposed)
+            {
+                try { await module.DisposeAsync(); } catch { }
+                return;
+            }
+
+            _viewerModule = module;
+            await _viewerModule.InvokeVoidAsync("attach", _viewerRoot, _selfRef);
+        }
+        catch (ObjectDisposedException) when (_disposed)
+        {
+        }
+        catch (JSDisconnectedException)
+        {
+        }
     }
 
     private async Task UpdatePictureImageAsync(Guid elementId, double? x = null, double? y = null, double? width = null, double? height = null) =>
@@ -415,6 +344,19 @@
             id,
             width: Clamp(widthPercent, 5, Math.Max(5, 100 - text.XPercent)),
             height: Clamp(heightPercent, 5, Math.Max(5, 100 - text.YPercent)));
+    }
+
+    [JSInvokable]
+    public async Task UpdatePictureTextBodyAsync(string elementId, string body)
+    {
+        if (!IsEditable || State.VisualMode != ChapterVisualMode.PicturePage || !Guid.TryParseExact(elementId, "N", out var id))
+            return;
+
+        var text = State.PageLayout.TextElements.FirstOrDefault(candidate => candidate.Id == id);
+        if (text is null || string.Equals(text.Text, body, StringComparison.Ordinal))
+            return;
+
+        await UpdatePictureTextAsync(id, body: body);
     }
 
     [JSInvokable]
@@ -505,13 +447,17 @@
 
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
+
         if (_viewerModule is not null)
         {
             try { await _viewerModule.InvokeVoidAsync("detach", _viewerRoot); } catch { }
             try { await _viewerModule.DisposeAsync(); } catch { }
+            _viewerModule = null;
         }
 
         _selfRef?.Dispose();
+        _selfRef = null;
     }
 
     private ProjectImageView? ImageById(Guid id) => Images.FirstOrDefault(image => image.Id == id);
