@@ -21,10 +21,12 @@ public class PublishAsset
 
     public ICollection<PublishProfile> CoverProfiles { get; set; } = [];
     public ICollection<PublishImagePlacement> ImagePlacements { get; set; } = [];
+    public ICollection<ProjectImageMask> ImageMasks { get; set; } = [];
 }
 
 public enum PublishAssetSource
 {
     Uploaded,
     Generated,
+    Edited,
 }

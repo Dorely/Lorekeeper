@@ -30,6 +30,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<WritingCoachMessage> WritingCoachMessages => Set<WritingCoachMessage>();
     public DbSet<ResearchConversation> ResearchConversations => Set<ResearchConversation>();
     public DbSet<ResearchMessage> ResearchMessages => Set<ResearchMessage>();
+    public DbSet<ProjectImageConversation> ProjectImageConversations => Set<ProjectImageConversation>();
+    public DbSet<ProjectImageMessage> ProjectImageMessages => Set<ProjectImageMessage>();
+    public DbSet<ProjectImageMessageVisual> ProjectImageMessageVisuals => Set<ProjectImageMessageVisual>();
     public DbSet<AiChangeBatch> AiChangeBatches => Set<AiChangeBatch>();
     public DbSet<AiChange> AiChanges => Set<AiChange>();
     public DbSet<ContestBatch> ContestBatches => Set<ContestBatch>();
@@ -53,6 +56,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<ProjectImportReportItem> ProjectImportReportItems => Set<ProjectImportReportItem>();
     public DbSet<PublishProfile> PublishProfiles => Set<PublishProfile>();
     public DbSet<PublishAsset> PublishAssets => Set<PublishAsset>();
+    public DbSet<ProjectImageGenerationJob> ProjectImageGenerationJobs => Set<ProjectImageGenerationJob>();
+    public DbSet<ProjectImageMask> ProjectImageMasks => Set<ProjectImageMask>();
     public DbSet<PublishOutlineSelection> PublishOutlineSelections => Set<PublishOutlineSelection>();
     public DbSet<PublishImagePlacement> PublishImagePlacements => Set<PublishImagePlacement>();
 
@@ -238,6 +243,39 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Conversation)
                 .WithMany(c => c.Messages)
                 .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectImageConversation>(entity =>
+        {
+            entity.HasIndex(e => e.ProjectId).IsUnique();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.ProjectImageConversations)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectImageMessage>(entity =>
+        {
+            entity.HasIndex(e => new { e.ConversationId, e.Order });
+            entity.Property(e => e.Role).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Conversation)
+                .WithMany(c => c.Messages)
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectImageMessageVisual>(entity =>
+        {
+            entity.HasIndex(e => new { e.MessageId, e.SortOrder });
+            entity.HasIndex(e => new { e.ToolCallId, e.CreatedAt });
+
+            entity.HasOne(e => e.Message)
+                .WithMany(m => m.Visuals)
+                .HasForeignKey(e => e.MessageId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -653,6 +691,37 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.PublishAssets)
                 .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectImageGenerationJob>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
+            entity.HasIndex(e => new { e.ProjectId, e.Kind, e.CreatedAt });
+            entity.HasIndex(e => e.SourceImageId);
+            entity.HasIndex(e => e.MaskId);
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.ProjectImageGenerationJobs)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectImageMask>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.ImageId, e.CreatedAt });
+            entity.HasIndex(e => new { e.ProjectId, e.OwnerKind, e.OwnerId });
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.ProjectImageMasks)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Image)
+                .WithMany(a => a.ImageMasks)
+                .HasForeignKey(e => e.ImageId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

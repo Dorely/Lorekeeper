@@ -1,0 +1,392 @@
+@using Lorekeeper.Components.Chat
+@using Lorekeeper.ImagesChat
+@using Lorekeeper.Llm
+@using Lorekeeper.Models
+@using Lorekeeper.Tokens
+@implements IAsyncDisposable
+@inject IImagesChatService ImagesChat
+@inject ILlmProviderService Providers
+@inject ITokenCounter TokenCounter
+
+<ChatSurface Title="Images Chat"
+             TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel)"
+             TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel)"
+             Loading="@_loading"
+             Messages="@_renderable"
+             Live="@_live"
+             Error="@_error"
+             OnClearError="ClearError"
+             Input="@_input"
+             InputChanged="SetInput"
+             Placeholder="Ask for an image, edit, mask, or layout inspection..."
+             Running="@_running"
+             ComposerDisabled="@(ChatDisabled || _running)"
+             SendDisabled="@(ChatDisabled || string.IsNullOrWhiteSpace(_input))"
+             OnSend="SendAsync"
+             OnStop="CancelAsync"
+             ForceScrollKey="@_forceScrollKey"
+             ScrollKey="@_scrollKey"
+             AutoFollowKey="@_autoFollowKey"
+             ResetComposerKey="@_resetComposerKey">
+    <HeaderActions>
+        <button type="button" class="btn btn-link btn-sm images-chat-reset" title="Start over" disabled="@(ChatDisabled || _running)" @onclick="ResetAsync">Reset</button>
+    </HeaderActions>
+    <ExtraControls>
+        @if (ChatDisabled)
+        {
+            <div class="alert alert-warning py-2 small mb-2">
+                LLM chat is disabled. <a class="alert-link" href="/settings/providers">Configure and test a chat provider</a>.
+            </div>
+        }
+    </ExtraControls>
+</ChatSurface>
+
+@code {
+    private const string ConversationTokenUnitLabel = "conversation tokens";
+    private const string ConversationTokenTitleLabel = "conversation token count";
+
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public EventCallback OnImagesChanged { get; set; }
+
+    private int _forceScrollKey;
+    private int _scrollKey;
+    private int _autoFollowKey;
+    private int _resetComposerKey;
+    private ProjectImageConversation? _conversation;
+    private List<ProjectImageMessage> _messages = [];
+    private List<ChatRenderableMessage> _renderable = [];
+    private ChatLiveTurn? _live;
+    private string _input = string.Empty;
+    private bool _running;
+    private bool _loading = true;
+    private string? _error;
+    private CancellationTokenSource? _cts;
+    private Guid? _loadedProjectId;
+    private string? _pendingUserText;
+    private string _systemPrompt = string.Empty;
+    private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
+    private ChatProviderAvailability? _chatAvailability;
+
+    private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
+    private string ChatDisabledMessage => _chatAvailability?.Message
+        ?? "Configure and test a chat provider in Settings > Providers to enable LLM features.";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ProjectId == Guid.Empty || _loadedProjectId == ProjectId) return;
+        _loadedProjectId = ProjectId;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _conversation = await ImagesChat.GetOrCreateAsync(ProjectId);
+            _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
+            _messages = (await ImagesChat.LoadMessagesAsync(_conversation.Id)).ToList();
+            _systemPrompt = await ImagesChat.GetSystemPromptAsync(ProjectId);
+            RebuildRenderable();
+            _pendingUserText = null;
+            _live = null;
+            UpdateConversationTokenCount();
+        }
+        finally
+        {
+            _loading = false;
+        }
+        RequestScroll(force: true);
+    }
+
+    private async Task SendAsync()
+    {
+        var text = _input.Trim();
+        if (_running || string.IsNullOrWhiteSpace(text)) return;
+        if (ChatDisabled)
+        {
+            _error = ChatDisabledMessage;
+            return;
+        }
+
+        _input = string.Empty;
+        _running = true;
+        _error = null;
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        _resetComposerKey++;
+
+        _renderable.Add(new ChatRenderableMessage(
+            Guid.NewGuid(),
+            ChatMessageRole.User,
+            ChatMessageStatus.Completed,
+            [new ChatTextPart(text)]));
+        _live = new ChatLiveTurn();
+        _pendingUserText = text;
+        UpdateConversationTokenCount();
+        ResumeAutoFollow();
+        RequestScroll(force: true);
+        StateHasChanged();
+
+        try
+        {
+            await foreach (var update in ImagesChat.SendAsync(ProjectId, text, _cts.Token))
+            {
+                switch (update)
+                {
+                    case ImagesChatTextDelta delta:
+                        _live!.AppendText(delta.Text);
+                        UpdateConversationTokenCount();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+                    case ImagesChatToolCallStarted started:
+                        _live!.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
+                        UpdateConversationTokenCount();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+                    case ImagesChatToolCallArgumentsDelta delta:
+                        _live!.AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
+                        UpdateConversationTokenCount();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+                    case ImagesChatToolCallCompleted completed:
+                        _live!.CompleteToolCall(
+                            completed.CallId,
+                            completed.Result,
+                            completed.Error,
+                            completed.DurationMs,
+                            completed.Visuals.Select(ToChatImageVisual).ToList());
+                        UpdateConversationTokenCount();
+                        await OnImagesChanged.InvokeAsync();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+                    case ImagesChatMutated:
+                        await OnImagesChanged.InvokeAsync();
+                        break;
+                    case ImagesChatAssistantMessageCompleted:
+                        ReleaseRunningUi();
+                        await ReloadFromDbAsync();
+                        await OnImagesChanged.InvokeAsync();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+                    case ImagesChatTurnError error:
+                        _error = error.Cancelled ? null : error.Message;
+                        ReleaseRunningUi();
+                        await ReloadFromDbAsync();
+                        await OnImagesChanged.InvokeAsync();
+                        RequestScroll();
+                        StateHasChanged();
+                        break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            ReleaseRunningUi();
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    private async Task ResetAsync()
+    {
+        if (_running) return;
+        await ImagesChat.ResetAsync(ProjectId);
+        _loadedProjectId = null;
+        await LoadAsync();
+    }
+
+    private void CancelAsync() => _cts?.Cancel();
+
+    private void ReleaseRunningUi()
+    {
+        var wasRunning = _running;
+        var hadLive = _live is not null;
+        _running = false;
+        _live = null;
+        UpdateConversationTokenCount();
+        RequestScroll();
+        if (wasRunning || hadLive)
+            StateHasChanged();
+    }
+
+    private async Task ReloadFromDbAsync()
+    {
+        if (_conversation is null) return;
+        _messages = (await ImagesChat.LoadMessagesAsync(_conversation.Id)).ToList();
+        _systemPrompt = await ImagesChat.GetSystemPromptAsync(ProjectId);
+        RebuildRenderable();
+        _pendingUserText = null;
+        _live = null;
+        UpdateConversationTokenCount();
+    }
+
+    private void RebuildRenderable()
+    {
+        var byCallId = _messages
+            .Where(message => message.Role == ProjectImageMessageRole.Tool && message.ToolCallId is not null)
+            .ToDictionary(message => message.ToolCallId!, message => message);
+
+        _renderable = new List<ChatRenderableMessage>(_messages.Count);
+        foreach (var message in _messages)
+        {
+            if (message.Role is ProjectImageMessageRole.Tool or ProjectImageMessageRole.System) continue;
+            _renderable.Add(new ChatRenderableMessage(
+                message.Id,
+                message.Role == ProjectImageMessageRole.User ? ChatMessageRole.User : ChatMessageRole.Assistant,
+                ToChatStatus(message.Status),
+                BuildMessageParts(message, byCallId)));
+        }
+    }
+
+    private static ChatMessageStatus ToChatStatus(ProjectImageMessageStatus status) => status switch
+    {
+        ProjectImageMessageStatus.Failed => ChatMessageStatus.Failed,
+        ProjectImageMessageStatus.Cancelled => ChatMessageStatus.Cancelled,
+        ProjectImageMessageStatus.Pending => ChatMessageStatus.Pending,
+        _ => ChatMessageStatus.Completed,
+    };
+
+    private void UpdateConversationTokenCount()
+    {
+        _conversationTokens = ChatTranscriptTokenCounter.Count(
+            TokenCounter,
+            ModelReplayTokenMessages(),
+            message => message,
+            _live,
+            _pendingUserText,
+            _systemPrompt);
+    }
+
+    private IEnumerable<ChatTranscriptTokenMessage> ModelReplayTokenMessages()
+    {
+        foreach (var message in _messages)
+        {
+            var tokenMessage = ToModelReplayTokenMessage(message);
+            if (tokenMessage is not null)
+                yield return tokenMessage;
+        }
+    }
+
+    private static ChatTranscriptTokenMessage? ToModelReplayTokenMessage(ProjectImageMessage message) => message.Role switch
+    {
+        ProjectImageMessageRole.System when !string.IsNullOrWhiteSpace(message.Content) => new(message.Role.ToString(), message.Content),
+        ProjectImageMessageRole.User => new(message.Role.ToString(), message.Content),
+        ProjectImageMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new(message.Role.ToString(), message.Content),
+        _ => null,
+    };
+
+    private List<ChatMessagePart> BuildMessageParts(ProjectImageMessage message, IReadOnlyDictionary<string, ProjectImageMessage> byCallId)
+    {
+        if (message.Role != ProjectImageMessageRole.Assistant)
+            return string.IsNullOrEmpty(message.Content) ? [] : [new ChatTextPart(message.Content)];
+
+        var calls = ChatTranscriptHelpers.ReadPersistedCalls(message.ToolCallsJson);
+        if (calls.Count == 0)
+            return string.IsNullOrEmpty(message.Content) ? [] : [new ChatTextPart(message.Content)];
+
+        var parts = new List<ChatMessagePart>();
+        if (calls.All(call => call.TextOffset is not null))
+        {
+            var cursor = 0;
+            foreach (var item in calls.Select((call, index) => new { Call = call, Index = index })
+                                      .OrderBy(item => item.Call.TextOffset!.Value)
+                                      .ThenBy(item => item.Index))
+            {
+                var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, message.Content.Length);
+                if (offset > cursor)
+                {
+                    parts.Add(new ChatTextPart(message.Content[cursor..offset]));
+                    cursor = offset;
+                }
+                parts.Add(new ChatToolPart(BuildToolChip(item.Call, byCallId)));
+            }
+            if (cursor < message.Content.Length)
+                parts.Add(new ChatTextPart(message.Content[cursor..]));
+            return parts;
+        }
+
+        if (!string.IsNullOrEmpty(message.Content)) parts.Add(new ChatTextPart(message.Content));
+        foreach (var call in calls) parts.Add(new ChatToolPart(BuildToolChip(call, byCallId)));
+        return parts;
+    }
+
+    private ChatToolChip BuildToolChip(ChatPersistedToolCall call, IReadOnlyDictionary<string, ProjectImageMessage> byCallId)
+    {
+        byCallId.TryGetValue(call.CallId, out var resultMessage);
+        var chip = new ChatToolChip(call.CallId, call.Name, call.ArgumentsJson)
+        {
+            Result = resultMessage?.Status == ProjectImageMessageStatus.Completed ? resultMessage.Content : null,
+            Error = resultMessage?.Status == ProjectImageMessageStatus.Failed ? (resultMessage.ErrorMessage ?? resultMessage.Content) : null,
+            Completed = resultMessage is not null,
+        };
+
+        if (resultMessage is not null)
+            chip.Visuals.AddRange(resultMessage.Visuals.OrderBy(visual => visual.SortOrder).Select(ToChatImageVisual));
+        return chip;
+    }
+
+    private ChatImageVisual ToChatImageVisual(ProjectImageMessageVisual visual)
+    {
+        var (previewUrl, fullUrl) = VisualUrls(visual);
+        return new ChatImageVisual(
+            visual.Id,
+            visual.Title,
+            visual.Caption,
+            previewUrl,
+            fullUrl,
+            visual.Width,
+            visual.Height,
+            visual.ToolCallId);
+    }
+
+    private static ChatImageVisual ToChatImageVisual(ImagesChatVisualAttachment visual) =>
+        new(
+            visual.Id,
+            visual.Title,
+            visual.Caption,
+            visual.PreviewImageUrl,
+            visual.FullImageUrl,
+            visual.Width,
+            visual.Height,
+            visual.ToolCallId);
+
+    private (string PreviewUrl, string FullUrl) VisualUrls(ProjectImageMessageVisual visual)
+    {
+        if (string.Equals(visual.SourceKind, "projectImage", StringComparison.Ordinal)
+            && visual.SourceRefId is { } imageId)
+        {
+            return ($"/projects/{ProjectId:N}/images/{imageId:N}/content?maxEdge=640", $"/projects/{ProjectId:N}/images/{imageId:N}/content");
+        }
+
+        return ($"/projects/{ProjectId:N}/image-chat-visuals/{visual.Id:N}/content?maxEdge=640", $"/projects/{ProjectId:N}/image-chat-visuals/{visual.Id:N}/content");
+    }
+
+    private void RequestScroll(bool force = false)
+    {
+        _scrollKey++;
+        if (force) _forceScrollKey++;
+    }
+
+    private void ResumeAutoFollow() => _autoFollowKey++;
+
+    private void SetInput(string value) => _input = value;
+
+    private void ClearError() => _error = null;
+
+    public ValueTask DisposeAsync()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

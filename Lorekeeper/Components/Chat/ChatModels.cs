@@ -39,6 +39,21 @@ public sealed class ChatToolPart(ChatToolChip chip) : ChatMessagePart
     public ChatToolChip Chip { get; } = chip;
 }
 
+public sealed class ChatImagePart(ChatImageVisual visual) : ChatMessagePart
+{
+    public ChatImageVisual Visual { get; } = visual;
+}
+
+public sealed record ChatImageVisual(
+    Guid Id,
+    string Title,
+    string Caption,
+    string PreviewImageUrl,
+    string FullImageUrl,
+    int? Width,
+    int? Height,
+    string? ToolCallId = null);
+
 public sealed class ChatToolChip
 {
     private readonly StringBuilder _arguments = new();
@@ -62,6 +77,8 @@ public sealed class ChatToolChip
     public string? Error { get; set; }
 
     public ChatToolProgress? Progress { get; set; }
+
+    public List<ChatImageVisual> Visuals { get; } = [];
 
     public double? DurationMs { get; set; }
 
@@ -178,7 +195,12 @@ public sealed class ChatLiveTurn
         chip.AppendArguments(argumentsDelta, argumentsComplete);
     }
 
-    public void CompleteToolCall(string callId, string? result, string? error, double? durationMs = null)
+    public void CompleteToolCall(
+        string callId,
+        string? result,
+        string? error,
+        double? durationMs = null,
+        IReadOnlyList<ChatImageVisual>? visuals = null)
     {
         var chip = FindToolChip(callId);
         if (chip is not null)
@@ -188,6 +210,8 @@ public sealed class ChatLiveTurn
             chip.DurationMs = durationMs;
             chip.Completed = true;
             chip.MarkArgumentsComplete();
+            if (visuals is { Count: > 0 })
+                chip.Visuals.AddRange(visuals);
         }
 
         IsThinking = true;
@@ -294,6 +318,9 @@ public static class ChatTranscriptHelpers
                         break;
                     case ChatToolPart toolPart:
                         AppendToolChipForTokenCount(sb, toolPart.Chip);
+                        break;
+                    case ChatImagePart imagePart:
+                        sb.Append("Image: ").Append(imagePart.Visual.Title).Append(' ').AppendLine(imagePart.Visual.Caption);
                         break;
                 }
             }

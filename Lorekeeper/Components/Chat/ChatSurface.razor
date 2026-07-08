@@ -263,7 +263,40 @@
         else if (part is ChatToolPart toolPart)
         {
             <ChatToolChipView Chip="toolPart.Chip" />
+            @if (toolPart.Chip.Visuals.Count > 0)
+            {
+                @RenderVisualStrip(toolPart.Chip.Visuals)
+            }
         }
+        else if (part is ChatImagePart imagePart)
+        {
+            @RenderVisualStrip(new[] { imagePart.Visual })
+        }
+    };
+
+    private RenderFragment RenderVisualStrip(IReadOnlyList<ChatImageVisual> visuals) => __builder =>
+    {
+        <div class="chat-visual-strip">
+            @foreach (var visual in visuals)
+            {
+                <a class="chat-visual-card" href="@visual.FullImageUrl" target="_blank" title="@visual.Title">
+                    <span class="chat-visual-thumb">
+                        <img src="@visual.PreviewImageUrl" alt="@visual.Title" />
+                    </span>
+                    <span class="chat-visual-meta">
+                        <span class="chat-visual-title">@visual.Title</span>
+                        @if (!string.IsNullOrWhiteSpace(visual.Caption))
+                        {
+                            <span class="chat-visual-caption">@visual.Caption</span>
+                        }
+                        @if (visual.Width is int width && visual.Height is int height)
+                        {
+                            <span class="chat-visual-size">@width x @height</span>
+                        }
+                    </span>
+                </a>
+            }
+        </div>
     };
 
     private RenderFragment RenderToolGroup(IReadOnlyList<ChatToolChip> chips) => __builder =>

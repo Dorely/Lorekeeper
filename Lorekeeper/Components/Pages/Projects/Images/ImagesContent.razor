@@ -4,6 +4,8 @@
 @using Lorekeeper.Publish
 @implements IAsyncDisposable
 @inject IProjectImageService Images
+@inject IProjectImageJobService ImageJobs
+@inject IProjectImageGenerationRuntime ImageRuntime
 @inject IPublishService Publishing
 @inject ILlmProviderService Providers
 @inject IJSRuntime JS
@@ -19,6 +21,10 @@ else if (_loading)
 else
 {
     <div class="images-workspace">
+        <section class="images-chat-pane">
+            <ImagesChatPanel ProjectId="Project.Id" OnImagesChanged="ReloadAsync" />
+        </section>
+
         <section class="images-main">
             <div class="images-toolbar">
                 <input type="search"
@@ -38,49 +44,52 @@ else
                 <div class="alert alert-success py-2">@_status</div>
             }
 
-            @if (FilteredImages.Count == 0)
+            <div class="images-grid">
+                @foreach (var job in VisibleJobs)
+                {
+                    @RenderJobCard(job)
+                }
+
+                @foreach (var image in FilteredImages)
+                {
+                    var selected = _selectedReferenceImageIds.Contains(image.Id);
+                    <article class="image-card" @key="image.Id">
+                        <button type="button" class="image-preview-button" @onclick="() => SelectImage(image)">
+                            <img src="@image.PreviewUrl" alt="@ImageAlt(image)" />
+                        </button>
+                        <div class="image-card-body">
+                            <input class="form-control form-control-sm"
+                                   value="@image.FileName"
+                                   @onchange="e => UpdateImageAsync(image, fileName: e.Value?.ToString() ?? string.Empty, altText: image.AltText)" />
+                            <input class="form-control form-control-sm"
+                                   placeholder="Alt text"
+                                   value="@image.AltText"
+                                   @onchange="e => UpdateImageAsync(image, fileName: image.FileName, altText: e.Value?.ToString() ?? string.Empty)" />
+                            <div class="image-meta">
+                                <span>@image.Source</span>
+                                <span>@FormatBytes(image.SizeBytes)</span>
+                            </div>
+                            <div class="image-actions">
+                                <label class="form-check image-reference-check">
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           checked="@selected"
+                                           disabled="@(!selected && _selectedReferenceImageIds.Count >= MaxReferenceImages)"
+                                           @onchange="e => ToggleReference(image.Id, e)" />
+                                    <span class="form-check-label">Reference</span>
+                                </label>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetCoverAsync(image.Id)">Cover</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => DownloadAsync(image)">Download</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(image.Id)">Delete</button>
+                            </div>
+                        </div>
+                    </article>
+                }
+            </div>
+
+            @if (VisibleJobs.Count == 0 && FilteredImages.Count == 0)
             {
                 <div class="images-empty">No images match the current filter.</div>
-            }
-            else
-            {
-                <div class="images-grid">
-                    @foreach (var image in FilteredImages)
-                    {
-                        var selected = _selectedReferenceImageIds.Contains(image.Id);
-                        <article class="image-card" @key="image.Id">
-                            <button type="button" class="image-preview-button" @onclick="() => SelectImage(image)">
-                                <img src="@image.PreviewUrl" alt="@ImageAlt(image)" />
-                            </button>
-                            <div class="image-card-body">
-                                <input class="form-control form-control-sm"
-                                       value="@image.FileName"
-                                       @onchange="e => UpdateImageAsync(image, fileName: e.Value?.ToString() ?? string.Empty, altText: image.AltText)" />
-                                <input class="form-control form-control-sm"
-                                       placeholder="Alt text"
-                                       value="@image.AltText"
-                                       @onchange="e => UpdateImageAsync(image, fileName: image.FileName, altText: e.Value?.ToString() ?? string.Empty)" />
-                                <div class="image-meta">
-                                    <span>@image.Source</span>
-                                    <span>@FormatBytes(image.SizeBytes)</span>
-                                </div>
-                                <div class="image-actions">
-                                    <label class="form-check image-reference-check">
-                                        <input class="form-check-input"
-                                               type="checkbox"
-                                               checked="@selected"
-                                               disabled="@(!selected && _selectedReferenceImageIds.Count >= MaxReferenceImages)"
-                                               @onchange="e => ToggleReference(image.Id, e)" />
-                                        <span class="form-check-label">Reference</span>
-                                    </label>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetCoverAsync(image.Id)">Cover</button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => DownloadAsync(image)">Download</button>
-                                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(image.Id)">Delete</button>
-                                </div>
-                            </div>
-                        </article>
-                    }
-                </div>
             }
         </section>
 
@@ -130,6 +139,7 @@ else
                             <select class="form-select form-select-sm" @bind="_imageFormat">
                                 <option value="png">PNG</option>
                                 <option value="jpeg">JPEG</option>
+                                <option value="webp">WebP</option>
                             </select>
                         </label>
                         <label>
@@ -141,8 +151,8 @@ else
                         <span>Generated alt text</span>
                         <input class="form-control form-control-sm" @bind="_generatedAltText" />
                     </label>
-                    <button type="button" class="btn btn-sm btn-primary" disabled="@_generating" @onclick="GenerateAsync">
-                        @(_generating ? "Generating..." : "Generate image")
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@_queueingGenerate" @onclick="GenerateAsync">
+                        @(_queueingGenerate ? "Queueing..." : "Queue image")
                     </button>
                 }
             </section>
@@ -157,9 +167,49 @@ else
                     {
                         <p class="small mb-0">@_selectedImage.Prompt</p>
                     }
+                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="OpenMaskModal">Edit with mask</button>
                 </section>
             }
         </aside>
+    </div>
+}
+
+@if (_maskModalOpen && _selectedImage is not null)
+{
+    <div class="mask-modal-backdrop" @onclick="CloseMaskModal">
+        <section class="mask-modal" role="dialog" aria-modal="true" aria-label="Edit with mask" @onclick:stopPropagation="true">
+            <header class="mask-modal-header">
+                <div>
+                    <h5>Edit with mask</h5>
+                    <span>@_selectedImage.FileName</span>
+                </div>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseMaskModal"></button>
+            </header>
+            <div class="mask-modal-body">
+                <div class="mask-canvas-wrap">
+                    <canvas class="mask-canvas" @ref="_maskCanvas"></canvas>
+                </div>
+                <aside class="mask-tools">
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Mask tool">
+                        <button type="button" class="@BrushToolClass" @onclick='() => SetMaskToolAsync("brush")'>Brush</button>
+                        <button type="button" class="@EraserToolClass" @onclick='() => SetMaskToolAsync("erase")'>Eraser</button>
+                        <button type="button" class="@PanToolClass" @onclick='() => SetMaskToolAsync("pan")'>Pan</button>
+                    </div>
+                    <label>
+                        <span>Brush size</span>
+                        <input type="range" min="4" max="160" step="1" class="form-range" value="@_maskBrushSize" @oninput="OnMaskBrushInputAsync" />
+                    </label>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClearMaskAsync">Clear</button>
+                    <label>
+                        <span>Edit prompt</span>
+                        <textarea class="form-control form-control-sm" rows="7" @bind="_maskPrompt"></textarea>
+                    </label>
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@_sendingMaskEdit" @onclick="SendMaskEditAsync">
+                        @(_sendingMaskEdit ? "Sending..." : "Send edit")
+                    </button>
+                </aside>
+            </div>
+        </section>
     </div>
 }
 
@@ -170,9 +220,13 @@ else
     [CascadingParameter] public Project? Project { get; set; }
 
     private IReadOnlyList<ProjectImageView> _images = [];
+    private IReadOnlyList<ProjectImageJobView> _jobs = [];
+    private ProjectImageGenerationRuntimeSnapshot _runtimeSnapshot = new([]);
     private List<Guid> _selectedReferenceImageIds = [];
     private ProjectImageView? _selectedImage;
     private IJSObjectReference? _downloadModule;
+    private IJSObjectReference? _maskModule;
+    private ElementReference _maskCanvas;
     private string _query = string.Empty;
     private string _uploadAltText = string.Empty;
     private string _imagePrompt = string.Empty;
@@ -181,11 +235,17 @@ else
     private string _imageFormat = "png";
     private int? _imageCompression;
     private string _generatedAltText = string.Empty;
+    private string _maskPrompt = string.Empty;
+    private string _maskTool = "brush";
+    private int _maskBrushSize = 32;
     private string? _error;
     private string? _status;
     private bool _loading = true;
     private bool _codexConnected;
-    private bool _generating;
+    private bool _queueingGenerate;
+    private bool _maskModalOpen;
+    private bool _maskCanvasNeedsInit;
+    private bool _sendingMaskEdit;
     private Guid? _loadedProjectId;
 
     private IReadOnlyList<ProjectImageView> FilteredImages =>
@@ -194,6 +254,17 @@ else
             : _images.Where(image => image.FileName.Contains(_query, StringComparison.OrdinalIgnoreCase)
                 || image.AltText.Contains(_query, StringComparison.OrdinalIgnoreCase)
                 || image.Prompt.Contains(_query, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private IReadOnlyList<ProjectImageJobView> VisibleJobs =>
+        _jobs.Where(job => IsActiveJob(job.Status)
+            || job.OutputStates.Any(state => state.Status is ProjectImageOutputStatus.Failed)
+            || job.CreatedAt > DateTime.UtcNow.AddMinutes(-30))
+            .OrderBy(job => IsActiveJob(job.Status) ? 0 : 1)
+            .ThenByDescending(job => job.CreatedAt)
+            .ToList();
+
+    protected override void OnInitialized() =>
+        ImageRuntime.StateChanged += OnRuntimeStateChanged;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -204,11 +275,25 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
-        _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownloads.js");
+        if (firstRender)
+        {
+            _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownloads.js");
+            _maskModule = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/Projects/Images/ImagesContent.razor.js");
+        }
+
+        if (_maskCanvasNeedsInit && _maskModule is not null && _selectedImage is not null && Project is not null)
+        {
+            _maskCanvasNeedsInit = false;
+            await _maskModule.InvokeVoidAsync(
+                "loadMaskCanvas",
+                _maskCanvas,
+                $"/projects/{Project.Id:N}/images/{_selectedImage.Id:N}/content",
+                _maskTool,
+                _maskBrushSize);
+        }
     }
 
-    private async Task ReloadAsync()
+    public async Task ReloadAsync()
     {
         if (Project is null) return;
         _loading = true;
@@ -217,6 +302,8 @@ else
         {
             _codexConnected = await Providers.IsCodexConnectedAsync();
             _images = await Images.ListAsync(Project.Id);
+            _jobs = await ImageJobs.ListJobsAsync(Project.Id);
+            _runtimeSnapshot = ImageRuntime.GetSnapshot();
             PruneSelections();
         }
         catch (Exception ex)
@@ -226,6 +313,27 @@ else
         finally
         {
             _loading = false;
+        }
+    }
+
+    private async void OnRuntimeStateChanged(object? sender, EventArgs args)
+    {
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                _runtimeSnapshot = ImageRuntime.GetSnapshot();
+                if (Project is not null)
+                {
+                    _jobs = await ImageJobs.ListJobsAsync(Project.Id);
+                    _images = await Images.ListAsync(Project.Id);
+                    PruneSelections();
+                }
+                StateHasChanged();
+            });
+        }
+        catch
+        {
         }
     }
 
@@ -254,20 +362,23 @@ else
     private async Task GenerateAsync()
     {
         if (Project is null) return;
-        _generating = true;
+        _queueingGenerate = true;
         _error = null;
         _status = null;
         try
         {
-            await Images.GenerateAsync(Project.Id, new ProjectImageGenerationRequest(
+            await ImageJobs.CreateGenerateJobAsync(Project.Id, new ProjectImageGenerateJobRequest(
                 _imagePrompt,
                 _imageSize,
                 _imageQuality,
                 _imageFormat,
                 _imageFormat == "jpeg" ? _imageCompression : null,
                 _generatedAltText,
-                _selectedReferenceImageIds.ToList()));
-            _status = "Image generated.";
+                1,
+                _selectedReferenceImageIds.ToList(),
+                Label: "Manual generation"));
+            await ImageRuntime.EnqueueProjectAsync(Project.Id);
+            _status = "Image job queued.";
             await ReloadAsync();
         }
         catch (Exception ex)
@@ -276,7 +387,7 @@ else
         }
         finally
         {
-            _generating = false;
+            _queueingGenerate = false;
         }
     }
 
@@ -349,6 +460,160 @@ else
 
     private void SelectImage(ProjectImageView image) => _selectedImage = image;
 
+    private void OpenMaskModal()
+    {
+        if (_selectedImage is null) return;
+        _maskPrompt = string.Empty;
+        _maskTool = "brush";
+        _maskBrushSize = 32;
+        _maskModalOpen = true;
+        _maskCanvasNeedsInit = true;
+    }
+
+    private void CloseMaskModal() => _maskModalOpen = false;
+
+    private async Task SetMaskToolAsync(string tool)
+    {
+        _maskTool = tool;
+        if (_maskModule is not null)
+            await _maskModule.InvokeVoidAsync("setMaskTool", _maskCanvas, tool);
+    }
+
+    private async Task OnMaskBrushInputAsync(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var value))
+            _maskBrushSize = Math.Clamp(value, 4, 160);
+        if (_maskModule is not null)
+            await _maskModule.InvokeVoidAsync("setMaskBrushSize", _maskCanvas, _maskBrushSize);
+    }
+
+    private async Task ClearMaskAsync()
+    {
+        if (_maskModule is not null)
+            await _maskModule.InvokeVoidAsync("clearMask", _maskCanvas);
+    }
+
+    private async Task SendMaskEditAsync()
+    {
+        if (Project is null || _selectedImage is null || _maskModule is null) return;
+        _error = null;
+        _status = null;
+        if (string.IsNullOrWhiteSpace(_maskPrompt))
+        {
+            _error = "Edit prompt is required.";
+            return;
+        }
+
+        _sendingMaskEdit = true;
+        try
+        {
+            var hasPaint = await _maskModule.InvokeAsync<bool>("hasMaskPaint", _maskCanvas);
+            if (!hasPaint)
+            {
+                _error = "Paint the editable mask area first.";
+                return;
+            }
+
+            var maskDataUrl = await _maskModule.InvokeAsync<string>("exportMaskPng", _maskCanvas);
+            await ImageJobs.CreateEditJobAsync(Project.Id, new ProjectImageEditJobRequest(
+                _selectedImage.Id,
+                _maskPrompt,
+                _imageSize,
+                _imageQuality,
+                _imageFormat,
+                _imageFormat == "jpeg" ? _imageCompression : null,
+                _generatedAltText,
+                1,
+                maskDataUrl,
+                _selectedReferenceImageIds.Where(id => id != _selectedImage.Id).ToList(),
+                Label: $"Edit {_selectedImage.FileName}"));
+            await ImageRuntime.EnqueueProjectAsync(Project.Id);
+            _maskModalOpen = false;
+            _status = "Edit job queued.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _sendingMaskEdit = false;
+        }
+    }
+
+    private RenderFragment RenderJobCard(ProjectImageJobView job) => __builder =>
+    {
+        var runtimeJob = RuntimeJob(job.Id);
+        <article class="image-card image-job-card" @key="job.Id">
+            <div class="image-job-preview">
+                @if (runtimeJob?.Outputs.FirstOrDefault(output => !string.IsNullOrWhiteSpace(output.PartialImageDataUrl)) is { PartialImageDataUrl: { } partialUrl })
+                {
+                    <img src="@partialUrl" alt="Partial image preview" />
+                }
+                else if (job.OutputImageIds.FirstOrDefault() is Guid outputId && outputId != Guid.Empty)
+                {
+                    <img src="@ImagePreviewUrl(outputId)" alt="@job.Label" />
+                }
+                else
+                {
+                    <div class="image-job-spinner" aria-hidden="true"></div>
+                }
+            </div>
+            <div class="image-card-body">
+                <strong>@job.Label</strong>
+                <div class="image-meta">
+                    <span>@job.Kind</span>
+                    <span>@JobStatusText(job, runtimeJob)</span>
+                </div>
+                <p class="small mb-0">@Truncate(job.Prompt, 160)</p>
+                @if (!string.IsNullOrWhiteSpace(job.Error))
+                {
+                    <p class="small text-danger mb-0">@job.Error</p>
+                }
+                @foreach (var output in (runtimeJob?.Outputs ?? job.OutputStates.Select(ToRuntimeOutput)).OrderBy(output => output.OutputIndex))
+                {
+                    <div class="image-output-row">
+                        <span>@(output.OutputIndex + 1)</span>
+                        <span>@output.Status</span>
+                        <span>@output.Message</span>
+                    </div>
+                }
+            </div>
+        </article>
+    };
+
+    private ProjectImageGenerationJobRuntimeView? RuntimeJob(Guid jobId) =>
+        _runtimeSnapshot.Jobs.FirstOrDefault(job => job.JobId == jobId);
+
+    private static ProjectImageOutputRuntimeView ToRuntimeOutput(ProjectImageOutputStateView state) =>
+        new(
+            state.OutputIndex,
+            state.Status,
+            state.Attempt,
+            state.Message,
+            state.Error,
+            state.ErrorKind,
+            state.RequestId,
+            state.ResponseId,
+            state.CallId,
+            state.LastEventType,
+            state.EventCount,
+            PartialImageDataUrl: null);
+
+    private static bool IsActiveJob(ProjectImageGenerationJobStatus status) =>
+        status is ProjectImageGenerationJobStatus.Queued or ProjectImageGenerationJobStatus.Running;
+
+    private static string JobStatusText(ProjectImageJobView job, ProjectImageGenerationJobRuntimeView? runtimeJob)
+    {
+        if (runtimeJob is { IsRunning: true })
+            return "Running";
+        return job.Status.ToString();
+    }
+
+    private string ImagePreviewUrl(Guid imageId) =>
+        Project is null ? string.Empty : $"/projects/{Project.Id:N}/images/{imageId:N}/content?maxEdge=640";
+
     private void PruneSelections()
     {
         var ids = _images.Select(image => image.Id).ToHashSet();
@@ -365,11 +630,28 @@ else
             ? $"{bytes / 1024.0 / 1024.0:0.0} MB"
             : $"{Math.Max(1, bytes / 1024)} KB";
 
+    private string MaskToolClass(string tool) =>
+        string.Equals(_maskTool, tool, StringComparison.Ordinal) ? "btn-primary" : "btn-outline-secondary";
+
+    private string BrushToolClass => $"btn {MaskToolClass("brush")}";
+
+    private string EraserToolClass => $"btn {MaskToolClass("erase")}";
+
+    private string PanToolClass => $"btn {MaskToolClass("pan")}";
+
+    private static string Truncate(string value, int max) =>
+        value.Length <= max ? value : value[..max] + "...";
+
     public async ValueTask DisposeAsync()
     {
+        ImageRuntime.StateChanged -= OnRuntimeStateChanged;
         if (_downloadModule is not null)
         {
             try { await _downloadModule.DisposeAsync(); } catch (JSDisconnectedException) { }
+        }
+        if (_maskModule is not null)
+        {
+            try { await _maskModule.DisposeAsync(); } catch (JSDisconnectedException) { }
         }
     }
 }

@@ -44,9 +44,9 @@
 
 | File | Description |
 |------|-------------|
-| `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text parts, duration-aware tool-call chips, and transcript token-count helpers. |
+| `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text/image parts, duration-aware tool-call chips with visual strips, progress rows, and transcript token-count helpers. |
 | `ChatTranscriptTokenCounter.cs` | Shared transcript token-count adapter for `ChatSurface` panels: projects domain messages into a common token-count shape, includes pending/live turns, and formats exact/estimated count labels. |
-| `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell for transcript/live rendering, grouped adjacent tool-call chips, composer controls, scrolling, and textarea autosize behavior. |
+| `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell for transcript/live rendering, grouped adjacent tool-call chips, image visual strips, composer controls, scrolling, and textarea autosize behavior. |
 | `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments/results/errors and opens Editor Revision worker transcripts from `start_revision_agents` chips. |
 
 ### Components/Layout/
@@ -115,7 +115,8 @@
 
 | File | Description |
 |------|-------------|
-| `ImagesContent.razor` (+ `.razor.css`) | Project image-library workspace: upload, preview, download, delete, edit filename/alt metadata, choose cover art, select references, and generate Codex images into the shared project image library. |
+| `ImagesContent.razor` (+ `.razor.css`, `.razor.js`) | Three-pane image workspace with Images Chat, queued generation/edit job cards with partial previews, library actions, manual queued generation, and the mask edit canvas modal. |
+| `ImagesChatPanel.razor` | Images Chat adapter over `ChatSurface`: loads project image transcript, streams text/tool updates, renders generated-image visual strips, and refreshes the image grid after mutations. |
 
 ### Components/Pages/Projects/Publish/
 
@@ -161,7 +162,7 @@
 | `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing plus persisted chat- and vision-readiness test snapshots. |
 | `EmbeddingConfiguration.cs` | Singleton EF entity for the active embedding setup: top-level provider connection, embedding API kind, model id, dimensions, last-tested snapshot, and timestamps. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
-| `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; owns project settings and child navigation collections including conversations, contests, revision jobs, writing samples, import jobs, publish profiles/assets/selections/placements, and graph rows. |
+| `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; owns project settings and child navigation collections including conversations, image chats/jobs/masks, contests, revision jobs, writing samples, import jobs, publish profiles/assets/selections/placements, and graph rows. |
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF entity for a chapter (Title/Body/Synopsis/Order) under a `Project`, optionally assigned to an `Act`; stores visual mode, page layout kind, and visual layout JSON for illustrated prose/picture pages. Tracks vector-index state and exposes `VectorSourceId`. |
 | `ChapterVisualMode.cs` | Enums for chapter visual modes, page layout kinds, and reusable image/text layout choices such as image fit, alignment, anchor position, and text vertical alignment. |
@@ -198,7 +199,12 @@
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
 | `PublishProfile.cs` | EF entity for one saved publish profile per project: book metadata, front/back matter, output options, prose pagination settings, selected cover asset, and cover text layout JSON. |
-| `PublishAsset.cs` | EF entity for uploaded or Codex-generated PNG/JPEG project images with bytes, alt text, prompt/source metadata, and cover/placement navigation. |
+| `PublishAsset.cs` | EF entity for uploaded/generated/edited project images with bytes, alt text, prompt/source metadata, masks, and cover/placement navigation. |
+| `ProjectImageConversation.cs` | EF entity for the separate project-scoped Images Chat transcript. |
+| `ProjectImageMessage.cs` | EF entity for Images Chat messages with assistant tool-call manifests, tool result metadata, status, and errors. |
+| `ProjectImageMessageVisual.cs` | EF entity for Images Chat visual attachments, including project-image references or optional stored bytes. |
+| `ProjectImageGenerationJob.cs` | EF entity for queued/running/final image generate/edit jobs with settings, references, outputs, progress state JSON, and provider diagnostics. |
+| `ProjectImageMask.cs` | EF entity for validated PNG masks tied to source project images, using transparent pixels as editable regions. |
 | `PublishOutlineSelection.cs` | EF entity for per-project act/chapter publish inclusion flags; act selection controls the act page while chapters remain independently selectable. |
 | `PublishImagePlacement.cs` | EF entity for cover-independent interior image placements before/after acts or chapters and chapter openings/endings, with captions and ordering. |
 | `GraphNode.cs` | Generic graph node: `(ProjectId, NodeType, Key)` unique, JSON properties bag. Cascade-deleted with its `Project`. |
@@ -212,7 +218,7 @@
 | `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, publish profiles/assets/layouts, and chapter visual-mode fields. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish/cover-layout/revision-agent/embedding-config/chat-readiness/adaptive artifact ingest, ingest staging records/canon cleanup, ingest LLM token metadata, ingest report payload cleanup, editor chat/contest/web research cache, `AddChapterVisualModesAndImages`, and `ReplacePicturePageDimensionsWithLayoutKind`). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish/cover-layout/revision-agent/embedding-config/chat-readiness/adaptive artifact ingest, ingest staging records/canon cleanup, ingest LLM token metadata, ingest report payload cleanup, editor chat/contest/web research cache, `AddChapterVisualModesAndImages`, `ReplacePicturePageDimensionsWithLayoutKind`, and `AddImagesChatAndGenerationQueue`). |
 
 ### Persistence/Repositories/
 
@@ -234,6 +240,7 @@
 | `IWritingCoachConversationRepository.cs` / `WritingCoachConversationRepository.cs` | Persistence for the resettable project-level Writing Coach conversation + ordered messages, including assistant tool-call manifests and tool result rows. |
 | `ISearchProviderRepository.cs` / `SearchProviderRepository.cs` | CRUD plus active-provider selection for Research Mode search providers. |
 | `IResearchConversationRepository.cs` / `ResearchConversationRepository.cs` | Persistence for project-wide Research conversation + ordered messages, including assistant tool-call manifests and tool result rows. |
+| `IProjectImageConversationRepository.cs` / `ProjectImageConversationRepository.cs` | Persistence for project-wide Images Chat conversations, ordered messages, tool result rows, and message visuals. |
 | `IAiChangeRepository.cs` / `AiChangeRepository.cs` | Persistence for pending AI change batches and changes, including eager-loaded pending batch listing and change lookup for approval actions. |
 | `IContestRepository.cs` / `ContestRepository.cs` | Persistence for Editor Contest Mode batches and candidates, including current/history project batch listing, detail loading, candidate lookup, and status updates. |
 | `IEditorContextPreferenceRepository.cs` / `EditorContextPreferenceRepository.cs` | Persistence for active-chapter Context Feed include/exclude preferences, scoped by project, chapter, item kind, and item key. |
@@ -394,9 +401,24 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectImageModels.cs` | View/request/data records for shared project images, uploads, metadata updates, generation requests, thumbnails, and raw image payloads. |
-| `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: list/read bytes, upload, generate with references, update metadata, delete, thumbnail, and scrub image references. |
-| `ProjectImageEndpoints.cs` | Minimal API endpoint for scoped project image bytes at `/projects/{projectId}/images/{imageId}/content`, with optional max-edge thumbnailing. |
+| `ProjectImageModels.cs` | View/request/data records for project images plus persisted generation jobs, output state, masks, provider requests/results/progress, and runtime snapshots. |
+| `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: list/read bytes, upload, legacy blocking generation, update metadata, delete, thumbnail, and scrub image references. |
+| `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Persistence-facing image job service for create/list/start/complete jobs, output state/errors, saving generated assets, and validating PNG/shape masks. |
+| `IProjectImageGenerationRuntime.cs` / `ProjectImageGenerationRuntime.cs` | Singleton FIFO image generation queue with one active job per project, retries, runtime partial previews, completion waiters, and state notifications. |
+| `ProjectImageGenerationStartupWorker.cs` | Hosted startup worker that marks interrupted running image jobs failed and resumes queued project work. |
+| `IProjectImageProvider.cs` / `CodexProjectImageProvider.cs` | Responses image provider adapted from PixelChat for Codex/OpenAI account generation and masked edits with streamed partial images. |
+| `ProjectImageGenerationOptions.cs` | Configurable image model defaults, count/reference limits, retry/timeout settings, partial image count, and agent wait timeout. |
+| `DataUrl.cs` | Shared data URL parse/format helper for mask and provider payloads. |
+| `ProjectImageEndpoints.cs` | Minimal API endpoints for scoped project image bytes, masks, and Images Chat visual content, with optional image max-edge thumbnails. |
+
+### ImagesChat/
+
+| File | Description |
+|------|-------------|
+| `IImagesChatService.cs` / `ImagesChatService.cs` | Separate project-scoped Images Chat service with project context, tool streaming, persisted transcript/visuals, queued generation/edit tools, and model-only generated-image context for vision-ready turns. |
+| `ImagesChatTools.cs` | Images Chat LLM tools for project search/source reads, chapters, image library reads, visual layout manifests, rendered snapshot inspection, shape masks, queued generation/editing, and chapter image placement/context. |
+| `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, current tool metadata, visible visual attachments, model-only generated images, and mutation signaling. |
+| `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
 
 ### ChapterVisuals/
 

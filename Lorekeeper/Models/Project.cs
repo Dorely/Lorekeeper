@@ -63,6 +63,8 @@ public class Project
 
     public ICollection<ResearchConversation> ResearchConversations { get; set; } = [];
 
+    public ICollection<ProjectImageConversation> ProjectImageConversations { get; set; } = [];
+
     public ICollection<AiChangeBatch> AiChangeBatches { get; set; } = [];
 
     public ICollection<ContestBatch> ContestBatches { get; set; } = [];
@@ -82,6 +84,10 @@ public class Project
     public ICollection<PublishProfile> PublishProfiles { get; set; } = [];
 
     public ICollection<PublishAsset> PublishAssets { get; set; } = [];
+
+    public ICollection<ProjectImageGenerationJob> ProjectImageGenerationJobs { get; set; } = [];
+
+    public ICollection<ProjectImageMask> ProjectImageMasks { get; set; } = [];
 
     public ICollection<PublishOutlineSelection> PublishOutlineSelections { get; set; } = [];
 

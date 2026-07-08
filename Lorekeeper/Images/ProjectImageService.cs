@@ -1,24 +1,20 @@
-using System.Text.Json;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
-using Lorekeeper.Publish;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using SkiaSharp;
 
 namespace Lorekeeper.Images;
 
 public sealed class ProjectImageService(
     AppDbContext db,
-    ICodexImageGenerationService codexImages,
+    IProjectImageJobService imageJobs,
+    IProjectImageGenerationRuntime imageRuntime,
+    IOptions<ProjectImageGenerationOptions> imageOptions,
     IChapterVisualService chapterVisuals,
     ILogger<ProjectImageService> logger) : IProjectImageService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true,
-    };
-
     public async Task<IReadOnlyList<ProjectImageView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await db.PublishAssets
             .AsNoTracking()
@@ -83,63 +79,33 @@ public sealed class ProjectImageService(
         ProjectImageGenerationRequest request,
         CancellationToken cancellationToken = default)
     {
-        var project = await GetProjectAsync(projectId, cancellationToken);
         if (string.IsNullOrWhiteSpace(request.Prompt))
             throw new InvalidOperationException("Image prompt is required.");
 
-        var requestedReferenceIds = request.ReferenceImageIds.Distinct().ToList();
-        if (requestedReferenceIds.Count > 4)
-            throw new InvalidOperationException("Select no more than 4 reference images.");
-
-        var referenceAssets = requestedReferenceIds.Count == 0
-            ? new List<PublishAsset>()
-            : await db.PublishAssets
-                .Where(asset => asset.ProjectId == projectId && requestedReferenceIds.Contains(asset.Id))
-                .ToListAsync(cancellationToken);
-        if (referenceAssets.Count != requestedReferenceIds.Count)
-            throw new InvalidOperationException("One or more selected reference images could not be found.");
-
-        var referencesById = referenceAssets.ToDictionary(asset => asset.Id);
-        var orderedReferences = requestedReferenceIds.Select(id => referencesById[id]).ToList();
-        var generated = await codexImages.GenerateAsync(new CodexImageGenerationOptions(
+        var job = await imageJobs.CreateGenerateJobAsync(projectId, new ProjectImageGenerateJobRequest(
             request.Prompt.Trim(),
-            string.IsNullOrWhiteSpace(request.Size) ? "auto" : request.Size.Trim(),
-            string.IsNullOrWhiteSpace(request.Quality) ? "auto" : request.Quality.Trim(),
-            string.IsNullOrWhiteSpace(request.OutputFormat) ? "png" : request.OutputFormat.Trim(),
+            string.IsNullOrWhiteSpace(request.Size) ? imageOptions.Value.DefaultSize : request.Size.Trim(),
+            string.IsNullOrWhiteSpace(request.Quality) ? imageOptions.Value.DefaultQuality : request.Quality.Trim(),
+            string.IsNullOrWhiteSpace(request.OutputFormat) ? imageOptions.Value.DefaultOutputFormat : request.OutputFormat.Trim(),
             request.OutputCompression,
-            orderedReferences.Select(asset => new CodexImageReference(asset.FileName, asset.ContentType, asset.Data)).ToList()), cancellationToken);
+            Clean(request.AltText),
+            Count: 1,
+            request.ReferenceImageIds.Distinct().ToList(),
+            Label: "Generated image"), cancellationToken);
 
-        var asset = new PublishAsset
-        {
-            ProjectId = projectId,
-            Source = PublishAssetSource.Generated,
-            FileName = $"generated-{DateTime.UtcNow:yyyyMMddHHmmss}.{ExtensionForContentType(generated.ContentType)}",
-            ContentType = generated.ContentType,
-            Data = generated.Data,
-            AltText = Clean(request.AltText),
-            Prompt = request.Prompt.Trim(),
-            GenerationModel = generated.ImageModel,
-            SourceMetadataJson = JsonSerializer.Serialize(new
-            {
-                generated.MainlineModel,
-                generated.ImageModel,
-                generated.OutputFormat,
-                generated.RevisedPrompt,
-                generated.ResponseId,
-                generated.CallId,
-                ReferenceImages = orderedReferences.Select(asset => new
-                {
-                    asset.Id,
-                    asset.FileName,
-                    asset.ContentType,
-                }),
-            }, JsonOptions),
-        };
+        await imageRuntime.EnqueueProjectAsync(projectId, cancellationToken);
+        var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
+        if (!await imageRuntime.WaitForJobCompletionAsync(job.Id, timeout, cancellationToken))
+            throw new TimeoutException("Timed out waiting for the image generation job to complete.");
 
-        await db.PublishAssets.AddAsync(asset, cancellationToken);
-        project.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
-        return ToView(projectId, asset);
+        var completed = await imageJobs.GetJobAsync(projectId, job.Id, cancellationToken)
+            ?? throw new InvalidOperationException("Image generation job was not found after completion.");
+        var outputId = completed.OutputImageIds.FirstOrDefault();
+        if (outputId == Guid.Empty)
+            throw new InvalidOperationException(completed.Error.Length > 0 ? completed.Error : "Image generation did not produce an output image.");
+
+        return await GetAsync(projectId, outputId, cancellationToken)
+            ?? throw new InvalidOperationException("Generated image was not found after completion.");
     }
 
     public async Task<ProjectImageView> UpdateAsync(
@@ -185,7 +151,7 @@ public sealed class ProjectImageService(
         await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
         ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
-    private static ProjectImageView ToView(Guid projectId, PublishAsset asset) =>
+    public static ProjectImageView ToView(Guid projectId, PublishAsset asset) =>
         new(
             asset.Id,
             asset.FileName,

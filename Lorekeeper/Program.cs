@@ -6,6 +6,7 @@ using Lorekeeper.EditorChat;
 using Lorekeeper.Graph;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Images;
+using Lorekeeper.ImagesChat;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
@@ -60,6 +61,7 @@ builder.Services.AddScoped<IEditorConversationRepository, EditorConversationRepo
 builder.Services.AddScoped<IWritingSampleRepository, WritingSampleRepository>();
 builder.Services.AddScoped<IWritingCoachConversationRepository, WritingCoachConversationRepository>();
 builder.Services.AddScoped<IResearchConversationRepository, ResearchConversationRepository>();
+builder.Services.AddScoped<IProjectImageConversationRepository, ProjectImageConversationRepository>();
 builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
 builder.Services.AddScoped<IContestRepository, ContestRepository>();
 builder.Services.AddScoped<IEditorContextPreferenceRepository, EditorContextPreferenceRepository>();
@@ -115,6 +117,11 @@ builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>(
 builder.Services.AddScoped<IChapterService, ChapterService>();
 builder.Services.AddScoped<IChapterVisualService, ChapterVisualService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
+builder.Services.Configure<ProjectImageGenerationOptions>(builder.Configuration.GetSection(ProjectImageGenerationOptions.SectionName));
+builder.Services.AddScoped<IProjectImageProvider, CodexProjectImageProvider>();
+builder.Services.AddScoped<IProjectImageJobService, ProjectImageJobService>();
+builder.Services.AddSingleton<IProjectImageGenerationRuntime, ProjectImageGenerationRuntime>();
+builder.Services.AddHostedService<ProjectImageGenerationStartupWorker>();
 
 // Outline
 builder.Services.AddScoped<IActService, ActService>();
@@ -187,6 +194,8 @@ builder.Services.AddSingleton<IEditorRevisionJobNotifier, EditorRevisionJobNotif
 builder.Services.AddScoped<EditorRevisionAgentProcessor>();
 builder.Services.AddScoped<IEditorRevisionAgentService, EditorRevisionAgentService>();
 builder.Services.AddScoped<IEditorChatService, EditorChatService>();
+builder.Services.AddScoped<ImagesChatTools>();
+builder.Services.AddScoped<IImagesChatService, ImagesChatService>();
 
 var app = builder.Build();
 
