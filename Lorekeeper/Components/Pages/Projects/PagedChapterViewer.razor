@@ -14,6 +14,7 @@
     @if (State.VisualMode == ChapterVisualMode.PicturePage)
     {
         var pageMetrics = PageMetrics(State.PageLayoutKind);
+        var selectedText = SelectedPictureText;
         <div class="@(IsEditable ? "picture-layout picture-layout--editable" : "picture-layout")">
             @if (IsEditable)
             {
@@ -21,11 +22,45 @@
                     <div class="picture-toolbar__actions">
                         <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddTextBoxAsync">Add text box</button>
                         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenImagesAsync">Images</button>
+                        @if (selectedText is not null)
+                        {
+                            <div class="picture-text-toolbar" aria-label="Selected text box controls">
+                                <label class="picture-text-toolbar__field">
+                                    <span>Font</span>
+                                    <select class="form-select form-select-sm"
+                                            @bind:get="selectedText.FontFamily"
+                                            @bind:set="SetSelectedTextFontFamilyAsync">
+                                        <option value="@PublishCoverFontFamily.Serif">Serif</option>
+                                        <option value="@PublishCoverFontFamily.Sans">Sans</option>
+                                        <option value="@PublishCoverFontFamily.Display">Display</option>
+                                        <option value="@PublishCoverFontFamily.Monospace">Mono</option>
+                                    </select>
+                                </label>
+                                <label class="picture-text-toolbar__field picture-text-toolbar__field--size">
+                                    <span>Size</span>
+                                    <input class="form-control form-control-sm"
+                                           type="number"
+                                           min="1"
+                                           max="18"
+                                           step="0.1"
+                                           value="@selectedText.FontSizePercent.ToString("0.###", CultureInfo.InvariantCulture)"
+                                           @onchange="SetSelectedTextFontSizeAsync" />
+                                </label>
+                                <label class="picture-text-toolbar__field picture-text-toolbar__field--color">
+                                    <span>Color</span>
+                                    <input class="form-control form-control-color form-control-sm"
+                                           type="color"
+                                           value="@ColorInputValue(TextColorValue(selectedText))"
+                                           @oninput="PreviewSelectedTextColorAsync"
+                                           @onchange="SaveSelectedTextColorAsync" />
+                                </label>
+                            </div>
+                        }
                     </div>
                 </div>
             }
             <div class="picture-stage">
-                <section class="@PicturePageClass(pageMetrics)" style="@PicturePageStyle(pageMetrics)">
+                <section class="@PicturePageClass(pageMetrics)" style="@PicturePageStyle(pageMetrics)" @onclick="ClearSelectedPictureText">
                     @foreach (var image in State.PageLayout.Images.OrderBy(image => image.ZIndex))
                     {
                         var projectImage = ImageById(image.ImageId);
@@ -47,8 +82,11 @@
                     }
                     @foreach (var text in State.PageLayout.TextElements.OrderBy(text => text.ZIndex))
                     {
-                        <div class="@(IsEditable ? "picture-element picture-element--text picture-element--editable" : "picture-element picture-element--text")"
+                        <div class="@PictureTextElementClass(text)"
                              style="@TextElementStyle(text)"
+                             @onclick="@(() => SelectPictureText(text.Id))"
+                             @onclick:stopPropagation="true"
+                             @onfocusin="@(() => SelectPictureText(text.Id))"
                              data-picture-element-kind="@(IsEditable ? "text" : null)"
                              data-picture-element-id="@(IsEditable ? text.Id.ToString("N") : null)">
                             @if (IsEditable)
@@ -134,6 +172,9 @@
     private ElementReference _viewerRoot;
     private IJSObjectReference? _viewerModule;
     private DotNetObjectReference<PagedChapterViewer>? _selfRef;
+    private Guid? _selectedPictureTextId;
+    private readonly Dictionary<Guid, string> _textColorDrafts = [];
+    private CancellationTokenSource? _textColorSaveDebounce;
     private bool _disposed;
     private const double PageMarginInches = 0.75;
     private const double BodyLineHeightInches = 12.0 / 72.0 * 1.55;
@@ -177,6 +218,24 @@
         bool IsDouble,
         double SurfaceWidthInches,
         double SurfaceHeightInches);
+
+    private PicturePageTextElement? SelectedPictureText =>
+        _selectedPictureTextId is { } selectedId
+            ? State.PageLayout.TextElements.FirstOrDefault(text => text.Id == selectedId)
+            : null;
+
+    protected override void OnParametersSet()
+    {
+        if (_selectedPictureTextId is not { } selectedId)
+            return;
+
+        if (!IsEditable
+            || State.VisualMode != ChapterVisualMode.PicturePage
+            || State.PageLayout.TextElements.All(text => text.Id != selectedId))
+        {
+            _selectedPictureTextId = null;
+        }
+    }
 
     private RenderFragment RenderDropZone(int paragraphIndex, ChapterImageAnchorPosition position) =>
         @<button type="button" class="illustration-drop-zone"
@@ -261,6 +320,113 @@
             ? "btn btn-sm btn-primary"
             : "btn btn-sm btn-outline-secondary";
 
+    private void SelectPictureText(Guid textId)
+    {
+        if (!IsEditable
+            || State.VisualMode != ChapterVisualMode.PicturePage
+            || State.PageLayout.TextElements.All(text => text.Id != textId))
+        {
+            return;
+        }
+
+        _selectedPictureTextId = textId;
+    }
+
+    private void ClearSelectedPictureText() => _selectedPictureTextId = null;
+
+    private async Task SetSelectedTextFontFamilyAsync(PublishCoverFontFamily fontFamily)
+    {
+        if (_selectedPictureTextId is not { } selectedId)
+            return;
+
+        await UpdatePictureTextAsync(selectedId, fontFamily: fontFamily);
+    }
+
+    private async Task SetSelectedTextFontSizeAsync(ChangeEventArgs args)
+    {
+        if (_selectedPictureTextId is not { } selectedId
+            || !double.TryParse(args.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var fontSize))
+        {
+            return;
+        }
+
+        await UpdatePictureTextAsync(selectedId, fontSizePercent: Clamp(fontSize, 1, 18));
+    }
+
+    private async Task PreviewSelectedTextColorAsync(ChangeEventArgs args)
+    {
+        if (_selectedPictureTextId is not { } selectedId)
+            return;
+
+        var color = CleanColor(args.Value?.ToString());
+        if (color is null)
+            return;
+
+        if (State.PageLayout.TextElements.All(text => text.Id != selectedId))
+            return;
+
+        _textColorDrafts[selectedId] = color;
+        DebounceSelectedTextColorSave(selectedId, color);
+        await Task.CompletedTask;
+    }
+
+    private async Task SaveSelectedTextColorAsync(ChangeEventArgs args)
+    {
+        if (_selectedPictureTextId is not { } selectedId)
+            return;
+
+        var color = CleanColor(args.Value?.ToString());
+        if (color is null)
+            return;
+
+        _textColorSaveDebounce?.Cancel();
+        await PersistSelectedTextColorAsync(selectedId, color);
+    }
+
+    private void DebounceSelectedTextColorSave(Guid textId, string color)
+    {
+        _textColorSaveDebounce?.Cancel();
+        _textColorSaveDebounce?.Dispose();
+        _textColorSaveDebounce = new CancellationTokenSource();
+        var token = _textColorSaveDebounce.Token;
+
+        _ = SaveSelectedTextColorAfterDelayAsync(textId, color, token);
+    }
+
+    private async Task SaveSelectedTextColorAfterDelayAsync(Guid textId, string color, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(300, cancellationToken);
+            await InvokeAsync(() => PersistSelectedTextColorAsync(textId, color, cancellationToken));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task PersistSelectedTextColorAsync(Guid textId, string color, CancellationToken cancellationToken = default)
+    {
+        if (_disposed || cancellationToken.IsCancellationRequested)
+            return;
+
+        var selectedText = State.PageLayout.TextElements.FirstOrDefault(text => text.Id == textId);
+        if (selectedText is null)
+        {
+            _textColorDrafts.Remove(textId);
+            return;
+        }
+
+        if (string.Equals(CleanColor(selectedText.Color), color, StringComparison.Ordinal))
+        {
+            _textColorDrafts.Remove(textId);
+            return;
+        }
+
+        await UpdatePictureTextAsync(textId, color: color);
+        _textColorDrafts.Remove(textId);
+    }
+
     private async Task UpdateIllustrationWidthAsync(Guid blockId, string? value)
     {
         if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var width)) return;
@@ -317,6 +483,7 @@
 
     private async Task AddTextBoxAsync()
     {
+        var textId = Guid.NewGuid();
         var maxOrder = State.PageLayout.TextElements.Select(text => text.ReadingOrder).DefaultIfEmpty(-1).Max();
         var maxZ = State.PageLayout.Images.Select(image => image.ZIndex)
             .Concat(State.PageLayout.TextElements.Select(text => text.ZIndex))
@@ -326,7 +493,7 @@
         {
             TextElements = State.PageLayout.TextElements
                 .Append(new PicturePageTextElement(
-                    Guid.NewGuid(),
+                    textId,
                     "New text",
                     12,
                     70,
@@ -345,6 +512,7 @@
                     PublishCoverShadow.None))
                 .ToList(),
         };
+        _selectedPictureTextId = textId;
         await SavePageAsync(layout);
     }
 
@@ -513,7 +681,16 @@
         await OnChanged.InvokeAsync(state);
     }
 
-    private async Task UpdatePictureTextAsync(Guid elementId, string? body = null, double? x = null, double? y = null, double? width = null, double? height = null) =>
+    private async Task UpdatePictureTextAsync(
+        Guid elementId,
+        string? body = null,
+        double? x = null,
+        double? y = null,
+        double? width = null,
+        double? height = null,
+        PublishCoverFontFamily? fontFamily = null,
+        double? fontSizePercent = null,
+        string? color = null) =>
         await SavePageAsync(State.PageLayout with
         {
             TextElements = State.PageLayout.TextElements.Select(text => text.Id == elementId
@@ -524,6 +701,9 @@
                     YPercent = y ?? text.YPercent,
                     WidthPercent = width ?? text.WidthPercent,
                     HeightPercent = height ?? text.HeightPercent,
+                    FontFamily = fontFamily ?? text.FontFamily,
+                    FontSizePercent = fontSizePercent ?? text.FontSizePercent,
+                    Color = color ?? text.Color,
                 }
                 : text).ToList(),
         });
@@ -531,8 +711,14 @@
     private async Task RemovePictureImageAsync(Guid elementId) =>
         await SavePageAsync(State.PageLayout with { Images = State.PageLayout.Images.Where(image => image.Id != elementId).ToList() });
 
-    private async Task RemovePictureTextAsync(Guid elementId) =>
+    private async Task RemovePictureTextAsync(Guid elementId)
+    {
+        if (_selectedPictureTextId == elementId)
+            _selectedPictureTextId = null;
+        _textColorDrafts.Remove(elementId);
+
         await SavePageAsync(State.PageLayout with { TextElements = State.PageLayout.TextElements.Where(text => text.Id != elementId).ToList() });
+    }
 
     private async Task SaveIllustrationsAsync(IllustratedProseLayout layout)
     {
@@ -559,6 +745,9 @@
 
         _selfRef?.Dispose();
         _selfRef = null;
+        _textColorSaveDebounce?.Cancel();
+        _textColorSaveDebounce?.Dispose();
+        _textColorSaveDebounce = null;
     }
 
     private ProjectImageView? ImageById(Guid id) => Images.FirstOrDefault(image => image.Id == id);
@@ -592,6 +781,16 @@
 
     private static string ElementStyle(double x, double y, double width, double height, int zIndex) =>
         $"left:{x.ToString(CultureInfo.InvariantCulture)}%;top:{y.ToString(CultureInfo.InvariantCulture)}%;width:{width.ToString(CultureInfo.InvariantCulture)}%;height:{height.ToString(CultureInfo.InvariantCulture)}%;z-index:{zIndex};";
+
+    private string PictureTextElementClass(PicturePageTextElement text)
+    {
+        var classes = IsEditable
+            ? "picture-element picture-element--text picture-element--editable"
+            : "picture-element picture-element--text";
+        if (IsEditable && _selectedPictureTextId == text.Id)
+            classes += " picture-element--selected";
+        return classes;
+    }
 
     private IReadOnlyList<ProsePageModel> BuildProsePages(IReadOnlyList<string> paragraphs, PageLayoutMetrics metrics)
     {
@@ -816,7 +1015,7 @@
     private static string ProsePageStyle(PageLayoutMetrics metrics) =>
         $"--page-width:{metrics.PageWidthInches.ToString(CultureInfo.InvariantCulture)}in;--page-height:{metrics.PageHeightInches.ToString(CultureInfo.InvariantCulture)}in;";
 
-    private static string TextElementStyle(PicturePageTextElement text)
+    private string TextElementStyle(PicturePageTextElement text)
     {
         var justify = text.VerticalAlign switch
         {
@@ -825,7 +1024,34 @@
             _ => "center",
         };
         return ElementStyle(text.XPercent, text.YPercent, text.WidthPercent, text.HeightPercent, text.ZIndex)
-            + $"font-size:{text.FontSizePercent.ToString(CultureInfo.InvariantCulture)}cqw;line-height:{text.LineHeight.ToString(CultureInfo.InvariantCulture)};color:{text.Color};background:rgba(255,255,255,{text.BackgroundOpacity.ToString(CultureInfo.InvariantCulture)});text-align:{text.TextAlign.ToString().ToLowerInvariant()};align-items:{justify};";
+            + $"font-family:{FontFamilyCss(text.FontFamily)};font-size:{text.FontSizePercent.ToString(CultureInfo.InvariantCulture)}cqw;line-height:{text.LineHeight.ToString(CultureInfo.InvariantCulture)};color:{TextColorValue(text)};background:rgba(255,255,255,{text.BackgroundOpacity.ToString(CultureInfo.InvariantCulture)});text-align:{text.TextAlign.ToString().ToLowerInvariant()};align-items:{justify};";
+    }
+
+    private static string FontFamilyCss(PublishCoverFontFamily fontFamily) =>
+        fontFamily switch
+        {
+            PublishCoverFontFamily.Sans => "Arial, Helvetica, sans-serif",
+            PublishCoverFontFamily.Display => "\"Trebuchet MS\", \"Gill Sans\", Arial, sans-serif",
+            PublishCoverFontFamily.Monospace => "\"Courier New\", monospace",
+            _ => "Georgia, \"Times New Roman\", serif",
+        };
+
+    private static string ColorInputValue(string? value) =>
+        CleanColor(value) ?? "#111827";
+
+    private string TextColorValue(PicturePageTextElement text) =>
+        _textColorDrafts.TryGetValue(text.Id, out var draft)
+            ? draft
+            : text.Color;
+
+    private static string? CleanColor(string? value)
+    {
+        var trimmed = value?.Trim() ?? string.Empty;
+        return trimmed.Length == 7
+            && trimmed[0] == '#'
+            && trimmed.Skip(1).All(Uri.IsHexDigit)
+            ? trimmed.ToUpperInvariant()
+            : null;
     }
 
     private static string FitCss(ChapterImageFit fit) => fit switch
