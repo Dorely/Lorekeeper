@@ -15,6 +15,7 @@
     {
         var pageMetrics = PageMetrics(State.PageLayoutKind);
         var selectedText = SelectedPictureText;
+        var selectedLayer = SelectedPictureLayer;
         <div class="@(IsEditable ? "picture-layout picture-layout--editable" : "picture-layout")">
             @if (IsEditable)
             {
@@ -22,6 +23,30 @@
                     <div class="picture-toolbar__actions">
                         <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddTextBoxAsync">Add text box</button>
                         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenImagesAsync">Images</button>
+                        @if (selectedLayer is not null)
+                        {
+                            <div class="picture-layer-toolbar" aria-label="Selected element layer order">
+                                <span class="picture-layer-toolbar__label">Layer @SelectedPictureLayerPositionLabel()</span>
+                                <div class="picture-layer-toolbar__group" role="group" aria-label="Layer order controls">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                                            title="Send to back" aria-label="Send selected element to back"
+                                            disabled="@SelectedPictureLayerIsBackmost()"
+                                            @onclick="@(() => ReorderSelectedPictureLayerAsync(PictureLayerMove.ToBack))">To back</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                                            title="Send backward" aria-label="Send selected element backward"
+                                            disabled="@SelectedPictureLayerIsBackmost()"
+                                            @onclick="@(() => ReorderSelectedPictureLayerAsync(PictureLayerMove.Backward))">Back</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                                            title="Bring forward" aria-label="Bring selected element forward"
+                                            disabled="@SelectedPictureLayerIsFrontmost()"
+                                            @onclick="@(() => ReorderSelectedPictureLayerAsync(PictureLayerMove.Forward))">Forward</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                                            title="Bring to front" aria-label="Bring selected element to front"
+                                            disabled="@SelectedPictureLayerIsFrontmost()"
+                                            @onclick="@(() => ReorderSelectedPictureLayerAsync(PictureLayerMove.ToFront))">To front</button>
+                                </div>
+                            </div>
+                        }
                         @if (selectedText is not null)
                         {
                             <div class="picture-text-toolbar" aria-label="Selected text box controls">
@@ -60,12 +85,14 @@
                 </div>
             }
             <div class="picture-stage">
-                <section class="@PicturePageClass(pageMetrics)" style="@PicturePageStyle(pageMetrics)" @onclick="ClearSelectedPictureText">
+                <section class="@PicturePageClass(pageMetrics)" style="@PicturePageStyle(pageMetrics)" @onclick="ClearSelectedPictureElement">
                     @foreach (var image in State.PageLayout.Images.OrderBy(image => image.ZIndex))
                     {
                         var projectImage = ImageById(image.ImageId);
-                        <div class="@(IsEditable ? "picture-element picture-element--image picture-element--editable" : "picture-element picture-element--image")"
+                        <div class="@PictureImageElementClass(image)"
                              style="@ElementStyle(image.XPercent, image.YPercent, image.WidthPercent, image.HeightPercent, image.ZIndex)"
+                             @onclick="@(() => SelectPictureImage(image.Id))"
+                             @onclick:stopPropagation="true"
                              data-picture-element-kind="@(IsEditable ? "image" : null)"
                              data-picture-element-id="@(IsEditable ? image.Id.ToString("N") : null)">
                             @if (projectImage is not null)
@@ -172,7 +199,7 @@
     private ElementReference _viewerRoot;
     private IJSObjectReference? _viewerModule;
     private DotNetObjectReference<PagedChapterViewer>? _selfRef;
-    private Guid? _selectedPictureTextId;
+    private PictureElementSelection? _selectedPictureElement;
     private readonly Dictionary<Guid, string> _textColorDrafts = [];
     private CancellationTokenSource? _textColorSaveDebounce;
     private bool _disposed;
@@ -188,6 +215,28 @@
         Illustration,
         DropZone,
     }
+
+    private enum PictureElementKind
+    {
+        Image,
+        Text,
+    }
+
+    private enum PictureLayerMove
+    {
+        Backward,
+        Forward,
+        ToBack,
+        ToFront,
+    }
+
+    private readonly record struct PictureElementSelection(PictureElementKind Kind, Guid Id);
+
+    private sealed record PictureLayerItem(
+        PictureElementKind Kind,
+        Guid Id,
+        int ZIndex,
+        int OriginalIndex);
 
     private sealed record ProsePageItem(
         ProsePageItemKind Kind,
@@ -220,20 +269,25 @@
         double SurfaceHeightInches);
 
     private PicturePageTextElement? SelectedPictureText =>
-        _selectedPictureTextId is { } selectedId
+        _selectedPictureElement is { Kind: PictureElementKind.Text, Id: var selectedId }
             ? State.PageLayout.TextElements.FirstOrDefault(text => text.Id == selectedId)
+            : null;
+
+    private PictureLayerItem? SelectedPictureLayer =>
+        _selectedPictureElement is { } selected
+            ? OrderedPictureLayers().FirstOrDefault(layer => layer.Kind == selected.Kind && layer.Id == selected.Id)
             : null;
 
     protected override void OnParametersSet()
     {
-        if (_selectedPictureTextId is not { } selectedId)
+        if (_selectedPictureElement is not { } selected)
             return;
 
         if (!IsEditable
             || State.VisualMode != ChapterVisualMode.PicturePage
-            || State.PageLayout.TextElements.All(text => text.Id != selectedId))
+            || !PictureElementExists(selected.Kind, selected.Id))
         {
-            _selectedPictureTextId = null;
+            _selectedPictureElement = null;
         }
     }
 
@@ -296,7 +350,7 @@
                     : () => RemovePictureTextAsync(elementId);
             }
             <span class="picture-corner-control picture-corner-control--move" data-picture-move="true" title="Move" aria-label="@($"Move {kind}")"></span>
-            <button type="button" class="picture-corner-control picture-corner-control--remove" data-picture-remove="true" title="Remove" aria-label="@($"Remove {kind}")" @onclick="onRemove"></button>
+            <button type="button" class="picture-corner-control picture-corner-control--remove" data-picture-remove="true" title="Remove" aria-label="@($"Remove {kind}")" @onclick="onRemove" @onclick:stopPropagation="true"></button>
             <span class="picture-corner-control picture-corner-control--resize" data-picture-resize="true" title="Resize" aria-label="@($"Resize {kind}")"></span>
         </div>;
 
@@ -320,23 +374,34 @@
             ? "btn btn-sm btn-primary"
             : "btn btn-sm btn-outline-secondary";
 
-    private void SelectPictureText(Guid textId)
+    private void SelectPictureImage(Guid imageId) =>
+        SelectPictureElement(PictureElementKind.Image, imageId);
+
+    private void SelectPictureText(Guid textId) =>
+        SelectPictureElement(PictureElementKind.Text, textId);
+
+    private void SelectPictureElement(PictureElementKind kind, Guid elementId)
     {
         if (!IsEditable
             || State.VisualMode != ChapterVisualMode.PicturePage
-            || State.PageLayout.TextElements.All(text => text.Id != textId))
+            || !PictureElementExists(kind, elementId))
         {
             return;
         }
 
-        _selectedPictureTextId = textId;
+        _selectedPictureElement = new PictureElementSelection(kind, elementId);
     }
 
-    private void ClearSelectedPictureText() => _selectedPictureTextId = null;
+    private void ClearSelectedPictureElement() => _selectedPictureElement = null;
+
+    private bool PictureElementExists(PictureElementKind kind, Guid elementId) =>
+        kind == PictureElementKind.Image
+            ? State.PageLayout.Images.Any(image => image.Id == elementId)
+            : State.PageLayout.TextElements.Any(text => text.Id == elementId);
 
     private async Task SetSelectedTextFontFamilyAsync(PublishCoverFontFamily fontFamily)
     {
-        if (_selectedPictureTextId is not { } selectedId)
+        if (SelectedPictureText is not { Id: var selectedId })
             return;
 
         await UpdatePictureTextAsync(selectedId, fontFamily: fontFamily);
@@ -344,7 +409,7 @@
 
     private async Task SetSelectedTextFontSizeAsync(ChangeEventArgs args)
     {
-        if (_selectedPictureTextId is not { } selectedId
+        if (SelectedPictureText is not { Id: var selectedId }
             || !double.TryParse(args.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var fontSize))
         {
             return;
@@ -355,7 +420,7 @@
 
     private async Task PreviewSelectedTextColorAsync(ChangeEventArgs args)
     {
-        if (_selectedPictureTextId is not { } selectedId)
+        if (SelectedPictureText is not { Id: var selectedId })
             return;
 
         var color = CleanColor(args.Value?.ToString());
@@ -372,7 +437,7 @@
 
     private async Task SaveSelectedTextColorAsync(ChangeEventArgs args)
     {
-        if (_selectedPictureTextId is not { } selectedId)
+        if (SelectedPictureText is not { Id: var selectedId })
             return;
 
         var color = CleanColor(args.Value?.ToString());
@@ -481,6 +546,103 @@
         });
     }
 
+    private async Task ReorderSelectedPictureLayerAsync(PictureLayerMove move)
+    {
+        if (!IsEditable
+            || State.VisualMode != ChapterVisualMode.PicturePage
+            || _selectedPictureElement is not { } selected)
+        {
+            return;
+        }
+
+        var layers = OrderedPictureLayers().ToList();
+        var currentIndex = layers.FindIndex(layer => layer.Kind == selected.Kind && layer.Id == selected.Id);
+        if (currentIndex < 0)
+            return;
+
+        var targetIndex = move switch
+        {
+            PictureLayerMove.Backward => Math.Max(0, currentIndex - 1),
+            PictureLayerMove.Forward => Math.Min(layers.Count - 1, currentIndex + 1),
+            PictureLayerMove.ToBack => 0,
+            PictureLayerMove.ToFront => layers.Count - 1,
+            _ => currentIndex,
+        };
+
+        if (targetIndex == currentIndex)
+            return;
+
+        var selectedLayer = layers[currentIndex];
+        layers.RemoveAt(currentIndex);
+        layers.Insert(targetIndex, selectedLayer);
+
+        await SavePageAsync(ApplyPictureLayerOrder(State.PageLayout, layers));
+    }
+
+    private bool SelectedPictureLayerIsBackmost()
+    {
+        var (index, _) = SelectedPictureLayerPosition();
+        return index <= 0;
+    }
+
+    private bool SelectedPictureLayerIsFrontmost()
+    {
+        var (index, count) = SelectedPictureLayerPosition();
+        return count == 0 || index < 0 || index >= count - 1;
+    }
+
+    private string SelectedPictureLayerPositionLabel()
+    {
+        var (index, count) = SelectedPictureLayerPosition();
+        return index < 0 || count == 0
+            ? "-"
+            : $"{index + 1}/{count}";
+    }
+
+    private (int Index, int Count) SelectedPictureLayerPosition()
+    {
+        if (_selectedPictureElement is not { } selected)
+            return (-1, 0);
+
+        var layers = OrderedPictureLayers();
+        var index = layers.ToList().FindIndex(layer => layer.Kind == selected.Kind && layer.Id == selected.Id);
+        return (index, layers.Count);
+    }
+
+    private IReadOnlyList<PictureLayerItem> OrderedPictureLayers()
+    {
+        var imageLayers = State.PageLayout.Images.Select((image, index) =>
+            new PictureLayerItem(PictureElementKind.Image, image.Id, image.ZIndex, index));
+        var textOffset = State.PageLayout.Images.Count;
+        var textLayers = State.PageLayout.TextElements.Select((text, index) =>
+            new PictureLayerItem(PictureElementKind.Text, text.Id, text.ZIndex, textOffset + index));
+
+        return imageLayers
+            .Concat(textLayers)
+            .OrderBy(layer => layer.ZIndex)
+            .ThenBy(layer => layer.OriginalIndex)
+            .ToList();
+    }
+
+    private static PicturePageLayout ApplyPictureLayerOrder(
+        PicturePageLayout layout,
+        IReadOnlyList<PictureLayerItem> orderedLayers)
+    {
+        var zByLayer = orderedLayers
+            .Select((layer, index) => (Key: (layer.Kind, layer.Id), ZIndex: index + 1))
+            .ToDictionary(layer => layer.Key, layer => layer.ZIndex);
+
+        return layout with
+        {
+            Images = layout.Images.Select(image => zByLayer.TryGetValue((PictureElementKind.Image, image.Id), out var zIndex)
+                ? image with { ZIndex = zIndex }
+                : image).ToList(),
+            TextElements = layout.TextElements.Select(text => zByLayer.TryGetValue((PictureElementKind.Text, text.Id), out var zIndex)
+                ? text with { ZIndex = zIndex }
+                : text).ToList(),
+        };
+    }
+
     private async Task AddTextBoxAsync()
     {
         var textId = Guid.NewGuid();
@@ -512,7 +674,7 @@
                     PublishCoverShadow.None))
                 .ToList(),
         };
-        _selectedPictureTextId = textId;
+        _selectedPictureElement = new PictureElementSelection(PictureElementKind.Text, textId);
         await SavePageAsync(layout);
     }
 
@@ -575,6 +737,7 @@
         {
             var image = State.PageLayout.Images.FirstOrDefault(candidate => candidate.Id == id);
             if (image is null) return;
+            SelectPictureImage(id);
             await UpdatePictureImageAsync(
                 id,
                 Clamp(xPercent, 0, Math.Max(0, 100 - image.WidthPercent)),
@@ -584,6 +747,7 @@
 
         var text = State.PageLayout.TextElements.FirstOrDefault(candidate => candidate.Id == id);
         if (text is null) return;
+        SelectPictureText(id);
         await UpdatePictureTextAsync(
             id,
             x: Clamp(xPercent, 0, Math.Max(0, 100 - text.WidthPercent)),
@@ -600,6 +764,7 @@
         {
             var image = State.PageLayout.Images.FirstOrDefault(candidate => candidate.Id == id);
             if (image is null) return;
+            SelectPictureImage(id);
             await UpdatePictureImageAsync(
                 id,
                 width: Clamp(widthPercent, 5, Math.Max(5, 100 - image.XPercent)),
@@ -609,6 +774,7 @@
 
         var text = State.PageLayout.TextElements.FirstOrDefault(candidate => candidate.Id == id);
         if (text is null) return;
+        SelectPictureText(id);
         await UpdatePictureTextAsync(
             id,
             width: Clamp(widthPercent, 5, Math.Max(5, 100 - text.XPercent)),
@@ -625,6 +791,7 @@
         if (text is null || string.Equals(text.Text, body, StringComparison.Ordinal))
             return;
 
+        SelectPictureText(id);
         await UpdatePictureTextAsync(id, body: body);
     }
 
@@ -678,6 +845,7 @@
 
         if (OnImagesChanged.HasDelegate)
             await OnImagesChanged.InvokeAsync();
+        _selectedPictureElement = new PictureElementSelection(PictureElementKind.Image, placement.ElementId);
         await OnChanged.InvokeAsync(state);
     }
 
@@ -708,13 +876,18 @@
                 : text).ToList(),
         });
 
-    private async Task RemovePictureImageAsync(Guid elementId) =>
+    private async Task RemovePictureImageAsync(Guid elementId)
+    {
+        if (_selectedPictureElement is { Kind: PictureElementKind.Image, Id: var selectedId } && selectedId == elementId)
+            _selectedPictureElement = null;
+
         await SavePageAsync(State.PageLayout with { Images = State.PageLayout.Images.Where(image => image.Id != elementId).ToList() });
+    }
 
     private async Task RemovePictureTextAsync(Guid elementId)
     {
-        if (_selectedPictureTextId == elementId)
-            _selectedPictureTextId = null;
+        if (_selectedPictureElement is { Kind: PictureElementKind.Text, Id: var selectedId } && selectedId == elementId)
+            _selectedPictureElement = null;
         _textColorDrafts.Remove(elementId);
 
         await SavePageAsync(State.PageLayout with { TextElements = State.PageLayout.TextElements.Where(text => text.Id != elementId).ToList() });
@@ -782,15 +955,30 @@
     private static string ElementStyle(double x, double y, double width, double height, int zIndex) =>
         $"left:{x.ToString(CultureInfo.InvariantCulture)}%;top:{y.ToString(CultureInfo.InvariantCulture)}%;width:{width.ToString(CultureInfo.InvariantCulture)}%;height:{height.ToString(CultureInfo.InvariantCulture)}%;z-index:{zIndex};";
 
+    private string PictureImageElementClass(PicturePageImageElement image)
+    {
+        var classes = IsEditable
+            ? "picture-element picture-element--image picture-element--editable"
+            : "picture-element picture-element--image";
+        if (IsSelectedPictureElement(PictureElementKind.Image, image.Id))
+            classes += " picture-element--selected";
+        return classes;
+    }
+
     private string PictureTextElementClass(PicturePageTextElement text)
     {
         var classes = IsEditable
             ? "picture-element picture-element--text picture-element--editable"
             : "picture-element picture-element--text";
-        if (IsEditable && _selectedPictureTextId == text.Id)
+        if (IsSelectedPictureElement(PictureElementKind.Text, text.Id))
             classes += " picture-element--selected";
         return classes;
     }
+
+    private bool IsSelectedPictureElement(PictureElementKind kind, Guid id) =>
+        IsEditable && _selectedPictureElement is { Kind: var selectedKind, Id: var selectedId }
+        && selectedKind == kind
+        && selectedId == id;
 
     private IReadOnlyList<ProsePageModel> BuildProsePages(IReadOnlyList<string> paragraphs, PageLayoutMetrics metrics)
     {
