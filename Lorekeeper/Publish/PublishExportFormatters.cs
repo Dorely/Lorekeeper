@@ -40,7 +40,7 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
                     AppendHeading(sb, chapter.Title, '=');
                 if (document.Profile.IncludeChapterSynopses)
                     AppendText(sb, chapter.Synopsis);
-                AppendText(sb, chapter.Body);
+                AppendVisualText(sb, document, chapter);
             }
         }
 
@@ -108,6 +108,30 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
         sb.AppendLine(text.Trim());
     }
 
+    private static void AppendVisualText(StringBuilder sb, PublishDocument document, PublishChapterDocument chapter)
+    {
+        if (chapter.VisualMode == ChapterVisualMode.PicturePage)
+        {
+            AppendText(sb, chapter.Body);
+            foreach (var image in chapter.PageLayout.Images.OrderBy(image => image.ZIndex))
+            {
+                if (FindAsset(document, image.ImageId) is { } asset)
+                    sb.AppendLine().Append("[Picture page image: ").Append(asset.FileName).AppendLine("]");
+            }
+            return;
+        }
+
+        AppendText(sb, chapter.Body);
+        foreach (var image in chapter.IllustrationLayout.Images.OrderBy(image => image.SortOrder))
+        {
+            if (FindAsset(document, image.ImageId) is { } asset)
+                sb.AppendLine().Append("[Illustration: ").Append(asset.FileName).AppendLine(string.IsNullOrWhiteSpace(image.Caption) ? "]" : $" - {image.Caption}]");
+        }
+    }
+
+    private static PublishAssetDocument? FindAsset(PublishDocument document, Guid imageId) =>
+        document.Assets.FirstOrDefault(asset => asset.Id == imageId);
+
     private static void AppendGap(StringBuilder sb)
     {
         if (sb.Length > 0)
@@ -171,7 +195,7 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
                 if (document.Profile.IncludeChapterSynopses)
                     AppendBlockquote(sb, chapter.Synopsis);
                 AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterOpening);
-                sb.AppendLine().AppendLine(chapter.Body.TrimEnd());
+                AppendVisualMarkdown(sb, document, chapter);
                 AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding);
                 AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.AfterChapter);
             }
@@ -255,6 +279,80 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
         if (!string.IsNullOrWhiteSpace(caption))
             sb.Append("_").Append(EscapeInline(caption)).AppendLine("_");
     }
+
+    private static void AppendVisualMarkdown(StringBuilder sb, PublishDocument document, PublishChapterDocument chapter)
+    {
+        if (chapter.VisualMode == ChapterVisualMode.PicturePage)
+        {
+            sb.AppendLine();
+            sb.AppendLine("> Picture page");
+            foreach (var text in chapter.PageLayout.TextElements.OrderBy(text => text.ReadingOrder))
+                sb.AppendLine().AppendLine(text.Text.TrimEnd());
+            foreach (var image in chapter.PageLayout.Images.OrderBy(image => image.ZIndex))
+            {
+                if (FindAsset(document, image.ImageId) is { } asset)
+                    AppendImage(sb, asset, string.Empty);
+            }
+            return;
+        }
+
+        var paragraphs = SplitMarkdownParagraphs(chapter.Body);
+        var blocksByParagraph = chapter.IllustrationLayout.Images
+            .GroupBy(block => (block.ParagraphIndex, block.AnchorPosition))
+            .ToDictionary(group => group.Key, group => group.OrderBy(block => block.SortOrder).ToList());
+
+        for (var index = 0; index < paragraphs.Count; index++)
+        {
+            AppendIllustrationBlocks(sb, document, blocksByParagraph, index, ChapterImageAnchorPosition.BeforeParagraph);
+            sb.AppendLine().AppendLine(paragraphs[index].TrimEnd());
+            AppendIllustrationBlocks(sb, document, blocksByParagraph, index, ChapterImageAnchorPosition.AfterParagraph);
+        }
+    }
+
+    private static void AppendIllustrationBlocks(
+        StringBuilder sb,
+        PublishDocument document,
+        IReadOnlyDictionary<(int ParagraphIndex, ChapterImageAnchorPosition Position), List<IllustratedProseImageBlock>> blocksByParagraph,
+        int paragraphIndex,
+        ChapterImageAnchorPosition position)
+    {
+        if (!blocksByParagraph.TryGetValue((paragraphIndex, position), out var blocks)) return;
+        foreach (var block in blocks)
+        {
+            if (FindAsset(document, block.ImageId) is { } asset)
+                AppendImage(sb, asset, block.Caption);
+        }
+    }
+
+    private static IReadOnlyList<string> SplitMarkdownParagraphs(string text)
+    {
+        var paragraphs = new List<string>();
+        var current = new StringBuilder();
+        foreach (var line in SplitLines(text))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                Flush();
+                continue;
+            }
+
+            if (current.Length > 0) current.AppendLine();
+            current.Append(line.TrimEnd());
+        }
+
+        Flush();
+        return paragraphs;
+
+        void Flush()
+        {
+            if (current.Length == 0) return;
+            paragraphs.Add(current.ToString());
+            current.Clear();
+        }
+    }
+
+    private static PublishAssetDocument? FindAsset(PublishDocument document, Guid imageId) =>
+        document.Assets.FirstOrDefault(asset => asset.Id == imageId);
 
     private static string Anchor(string value)
     {
@@ -363,6 +461,20 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         var assets = new Dictionary<Guid, PublishAssetDocument>();
         foreach (var placement in document.Placements)
             assets[placement.Asset.Id] = placement.Asset;
+        foreach (var chapter in document.Sections.SelectMany(section => section.Chapters))
+        {
+            foreach (var block in chapter.IllustrationLayout.Images)
+            {
+                if (document.Assets.FirstOrDefault(asset => asset.Id == block.ImageId) is { } asset)
+                    assets[asset.Id] = asset;
+            }
+
+            foreach (var image in chapter.PageLayout.Images)
+            {
+                if (document.Assets.FirstOrDefault(asset => asset.Id == image.ImageId) is { } asset)
+                    assets[asset.Id] = asset;
+            }
+        }
 
         items.AddRange(assets.Values
             .Select(asset => new EpubImageItem($"img-{asset.Id:N}", $"images/{asset.Id:N}.{ImageExtension(asset.ContentType)}", asset, IsCover: false)));
@@ -443,9 +555,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         if (document.Profile.IncludeChapterSynopses)
             AppendTextBlocks(sb, chapter.Synopsis, "synopsis");
         AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterOpening);
-        sb.AppendLine("<div class=\"chapter-body\">");
-        AppendTextBlocks(sb, chapter.Body, "prose");
-        sb.AppendLine("</div>");
+        AppendVisualChapterBody(sb, chapter, imageItems);
         AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding);
         sb.AppendLine("</article>");
         AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.AfterChapter);
@@ -483,6 +593,69 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 sb.Append("<figcaption>").Append(Html(placement.Caption)).AppendLine("</figcaption>");
             sb.AppendLine("</figure>");
         }
+    }
+
+    private static void AppendVisualChapterBody(StringBuilder sb, PublishChapterDocument chapter, IReadOnlyList<EpubImageItem> imageItems)
+    {
+        if (chapter.VisualMode == ChapterVisualMode.PicturePage)
+        {
+            sb.AppendLine("<div class=\"picture-page-body\">");
+            foreach (var text in chapter.PageLayout.TextElements.OrderBy(text => text.ReadingOrder))
+                AppendTextBlocks(sb, text.Text, "prose picture-text");
+            foreach (var image in chapter.PageLayout.Images.OrderBy(image => image.ZIndex))
+                AppendAssetFigure(sb, imageItems, image.ImageId, string.Empty);
+            sb.AppendLine("</div>");
+            return;
+        }
+
+        sb.AppendLine("<div class=\"chapter-body\">");
+        var paragraphs = SplitParagraphs(chapter.Body);
+        var blocksByParagraph = chapter.IllustrationLayout.Images
+            .GroupBy(block => (block.ParagraphIndex, block.AnchorPosition))
+            .ToDictionary(group => group.Key, group => group.OrderBy(block => block.SortOrder).ToList());
+
+        for (var index = 0; index < paragraphs.Count; index++)
+        {
+            AppendIllustrationFigures(sb, imageItems, blocksByParagraph, index, ChapterImageAnchorPosition.BeforeParagraph);
+            AppendParagraph(sb, paragraphs[index], "prose");
+            AppendIllustrationFigures(sb, imageItems, blocksByParagraph, index, ChapterImageAnchorPosition.AfterParagraph);
+        }
+
+        sb.AppendLine("</div>");
+    }
+
+    private static void AppendIllustrationFigures(
+        StringBuilder sb,
+        IReadOnlyList<EpubImageItem> imageItems,
+        IReadOnlyDictionary<(int ParagraphIndex, ChapterImageAnchorPosition Position), List<IllustratedProseImageBlock>> blocksByParagraph,
+        int paragraphIndex,
+        ChapterImageAnchorPosition position)
+    {
+        if (!blocksByParagraph.TryGetValue((paragraphIndex, position), out var blocks)) return;
+        foreach (var block in blocks)
+            AppendAssetFigure(sb, imageItems, block.ImageId, block.Caption);
+    }
+
+    private static void AppendAssetFigure(StringBuilder sb, IReadOnlyList<EpubImageItem> imageItems, Guid imageId, string caption)
+    {
+        var href = ImageHref(imageItems, imageId);
+        if (href is null) return;
+
+        sb.Append("<figure class=\"figure\"><img src=\"").Append(Html(href)).AppendLine("\" alt=\"\" />");
+        if (!string.IsNullOrWhiteSpace(caption))
+            sb.Append("<figcaption>").Append(Html(caption)).AppendLine("</figcaption>");
+        sb.AppendLine("</figure>");
+    }
+
+    private static void AppendParagraph(StringBuilder sb, IReadOnlyList<string> paragraph, string cssClass)
+    {
+        sb.Append("<p class=\"").Append(cssClass).Append("\">");
+        for (var i = 0; i < paragraph.Count; i++)
+        {
+            if (i > 0) sb.Append("<br />");
+            sb.Append(Html(paragraph[i]));
+        }
+        sb.AppendLine("</p>");
     }
 
     private static string RenderXhtmlPage(PublishDocument document, string title, string body) =>

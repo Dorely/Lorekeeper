@@ -29,6 +29,16 @@ public class PublishProfile
     public bool NumberActs { get; set; }
     public bool NumberChapters { get; set; }
 
+    public double PageWidthInches { get; set; } = 8.5;
+
+    public double PageHeightInches { get; set; } = 11;
+
+    public double PageMarginInches { get; set; } = 0.75;
+
+    public double BodyFontSizePoints { get; set; } = 12;
+
+    public double BodyLineHeight { get; set; } = 1.55;
+
     public Guid? SelectedCoverAssetId { get; set; }
     public PublishAsset? SelectedCoverAsset { get; set; }
 

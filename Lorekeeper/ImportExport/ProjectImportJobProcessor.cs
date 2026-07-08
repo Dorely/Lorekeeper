@@ -6,12 +6,15 @@ using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.ImportExport;
 
 public sealed class ProjectImportJobProcessor(
     IProjectImportRepository imports,
+    AppDbContext db,
     IProjectRepository projects,
     IGraphNodeRepository nodes,
     IGraphEdgeRepository edges,
@@ -50,6 +53,7 @@ public sealed class ProjectImportJobProcessor(
     private sealed class ImportState
     {
         public Dictionary<string, GraphNode> NodeMap { get; } = new(StringComparer.Ordinal);
+        public Dictionary<Guid, Guid> ImageMap { get; } = [];
         public List<Guid> CreatedActIds { get; } = [];
         public List<Guid> CreatedChapterIds { get; } = [];
         public List<Guid> ContextEntityIdsToReindex { get; } = [];
@@ -75,6 +79,9 @@ public sealed class ProjectImportJobProcessor(
             await SeedProjectNodeMapAsync(project, document, state, cancellationToken);
             await ImportEntityTypesAsync(job, document, cancellationToken);
             await StepAsync(job, "Imported entity type definitions.", cancellationToken);
+
+            await ImportProjectImagesAndPublishSettingsAsync(job, document, state, cancellationToken);
+            await StepAsync(job, "Imported project images and publish page settings.", cancellationToken);
 
             if (document.ExportKind == ProjectExportKind.Full)
             {
@@ -127,7 +134,7 @@ public sealed class ProjectImportJobProcessor(
 
         if (!string.Equals(document.FormatId, ProjectExportDocument.CurrentFormatId, StringComparison.Ordinal))
             throw new InvalidOperationException($"Unsupported import format '{document.FormatId}'.");
-        if (document.FormatVersion != ProjectExportDocument.CurrentFormatVersion)
+        if (document.FormatVersion < 1 || document.FormatVersion > ProjectExportDocument.CurrentFormatVersion)
             throw new InvalidOperationException($"Unsupported import format version {document.FormatVersion}.");
 
         var duplicateNode = document.Nodes
@@ -267,12 +274,24 @@ public sealed class ProjectImportJobProcessor(
             var tracked = await chapterRepo.GetByIdAsync(created.Id, cancellationToken)
                 ?? throw new InvalidOperationException($"Created chapter {created.Id} could not be reloaded.");
             tracked.Body = importedChapter.Body;
+            tracked.VisualMode = importedChapter.VisualMode;
+            tracked.PicturePageWidthInches = importedChapter.PicturePageWidthInches;
+            tracked.PicturePageHeightInches = importedChapter.PicturePageHeightInches;
+            tracked.PicturePageIsSpread = importedChapter.PicturePageIsSpread;
+            tracked.PageLayoutJson = RewritePageLayoutJson(importedChapter.PageLayoutJson, state.ImageMap);
+            tracked.IllustrationLayoutJson = RewriteIllustrationLayoutJson(importedChapter.IllustrationLayoutJson, state.ImageMap);
             tracked.VectorIndexState = string.IsNullOrWhiteSpace(importedChapter.Body) ? VectorIndexState.UpToDate : VectorIndexState.Stale;
             tracked.VectorIndexedAt = null;
             tracked.VectorIndexError = null;
             tracked.UpdatedAt = DateTime.UtcNow;
             chapterRepo.Update(tracked);
             await chapterRepo.SaveChangesAsync(cancellationToken);
+            await AddImageContextPreferencesAsync(
+                job.ProjectId,
+                tracked.Id,
+                importedChapter.ExplicitImageContextImageIds,
+                state.ImageMap,
+                cancellationToken);
             await outlineGraphSync.EnsureChapterAsync(tracked, cancellationToken);
 
             job.CreatedChapterCount++;
@@ -320,6 +339,79 @@ public sealed class ProjectImportJobProcessor(
             job.CreatedBeatCount++;
             await AddReportAsync(job, ProjectImportReportItemKind.Structural, $"Appended beat {created.Label ?? created.Key}", "Imported as a new beat under an imported chapter.", "Event", created.Key, entityId: Guid.ParseExact(localKey, "N"), graphNodeId: created.Id, cancellationToken: cancellationToken);
         }
+    }
+
+    private async Task ImportProjectImagesAndPublishSettingsAsync(
+        ProjectImportJob job,
+        ProjectExportDocument document,
+        ImportState state,
+        CancellationToken cancellationToken)
+    {
+        if (document.ExportKind != ProjectExportKind.Full)
+            return;
+
+        foreach (var importedImage in document.Images)
+        {
+            if (importedImage.Data.Length == 0 || !importedImage.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                await AddWarningAsync(job, $"Skipped image {importedImage.FileName}", "The exported image was empty or did not have an image content type.", cancellationToken);
+                continue;
+            }
+
+            var localId = Guid.NewGuid();
+            state.ImageMap[importedImage.Id] = localId;
+            await db.PublishAssets.AddAsync(new PublishAsset
+            {
+                Id = localId,
+                ProjectId = job.ProjectId,
+                Source = importedImage.Source,
+                FileName = string.IsNullOrWhiteSpace(importedImage.FileName) ? $"imported-image-{localId:N}.png" : importedImage.FileName.Trim(),
+                ContentType = importedImage.ContentType.Trim(),
+                Data = importedImage.Data,
+                AltText = importedImage.AltText,
+                Prompt = importedImage.Prompt,
+                GenerationModel = importedImage.GenerationModel,
+                SourceMetadataJson = importedImage.SourceMetadataJson,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            }, cancellationToken);
+        }
+
+        if (state.ImageMap.Count > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            await AddReportAsync(job, ProjectImportReportItemKind.Structural, $"Imported {state.ImageMap.Count} project image(s)", "Images were added to the project image library.", "ProjectImage", job.ProjectId.ToString("N"), cancellationToken: cancellationToken);
+        }
+
+        if (document.PublishProfiles.FirstOrDefault() is { } importedProfile)
+            await ImportPublishProfileSettingsAsync(job.ProjectId, importedProfile, state.ImageMap, cancellationToken);
+    }
+
+    private async Task ImportPublishProfileSettingsAsync(
+        Guid projectId,
+        ProjectExportPublishProfile importedProfile,
+        IReadOnlyDictionary<Guid, Guid> imageMap,
+        CancellationToken cancellationToken)
+    {
+        var profile = await db.PublishProfiles.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId, cancellationToken);
+        if (profile is null)
+        {
+            profile = new PublishProfile { ProjectId = projectId };
+            await db.PublishProfiles.AddAsync(profile, cancellationToken);
+        }
+
+        profile.CoverLayoutJson = importedProfile.CoverLayoutJson;
+        profile.PageWidthInches = importedProfile.PageWidthInches;
+        profile.PageHeightInches = importedProfile.PageHeightInches;
+        profile.PageMarginInches = importedProfile.PageMarginInches;
+        profile.BodyFontSizePoints = importedProfile.BodyFontSizePoints;
+        profile.BodyLineHeight = importedProfile.BodyLineHeight;
+        profile.SelectedCoverAssetId = importedProfile.SelectedCoverAssetId is Guid coverId
+            && imageMap.TryGetValue(coverId, out var localCoverId)
+                ? localCoverId
+                : profile.SelectedCoverAssetId;
+        profile.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private async Task ImportGraphNodesAsync(
@@ -497,6 +589,79 @@ public sealed class ProjectImportJobProcessor(
             .ThenBy(chapter => chapter.ActId is null ? 1 : 0)
             .ThenBy(chapter => chapter.Order)
             .ToList();
+    }
+
+    private async Task AddImageContextPreferencesAsync(
+        Guid projectId,
+        Guid chapterId,
+        IReadOnlyList<Guid> exportedImageIds,
+        IReadOnlyDictionary<Guid, Guid> imageMap,
+        CancellationToken cancellationToken)
+    {
+        foreach (var exportedImageId in exportedImageIds.Distinct())
+        {
+            if (!imageMap.TryGetValue(exportedImageId, out var localImageId))
+                continue;
+
+            await db.EditorContextPreferences.AddAsync(new EditorContextPreference
+            {
+                ProjectId = projectId,
+                ChapterId = chapterId,
+                Kind = ContextItemKind.ProjectImage.ToString(),
+                Key = EditorContextKeys.ProjectImage(localImageId),
+                IsIncluded = true,
+            }, cancellationToken);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string RewriteIllustrationLayoutJson(
+        string layoutJson,
+        IReadOnlyDictionary<Guid, Guid> imageMap)
+    {
+        if (string.IsNullOrWhiteSpace(layoutJson) || imageMap.Count == 0)
+            return layoutJson;
+
+        try
+        {
+            var layout = JsonSerializer.Deserialize<IllustratedProseLayout>(layoutJson, JsonOptions)
+                ?? new IllustratedProseLayout([]);
+            var images = layout.Images
+                .Select(image => imageMap.TryGetValue(image.ImageId, out var localImageId)
+                    ? image with { ImageId = localImageId }
+                    : image)
+                .ToList();
+            return JsonSerializer.Serialize(layout with { Images = images }, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return layoutJson;
+        }
+    }
+
+    private static string RewritePageLayoutJson(
+        string layoutJson,
+        IReadOnlyDictionary<Guid, Guid> imageMap)
+    {
+        if (string.IsNullOrWhiteSpace(layoutJson) || imageMap.Count == 0)
+            return layoutJson;
+
+        try
+        {
+            var layout = JsonSerializer.Deserialize<PicturePageLayout>(layoutJson, JsonOptions)
+                ?? new PicturePageLayout([], []);
+            var images = layout.Images
+                .Select(image => imageMap.TryGetValue(image.ImageId, out var localImageId)
+                    ? image with { ImageId = localImageId }
+                    : image)
+                .ToList();
+            return JsonSerializer.Serialize(layout with { Images = images }, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return layoutJson;
+        }
     }
 
     private async Task MarkRunningAsync(ProjectImportJob job, CancellationToken cancellationToken)

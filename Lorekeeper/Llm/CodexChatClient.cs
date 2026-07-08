@@ -466,7 +466,7 @@ public sealed class CodexChatClient : IChatClient
                 inputItems.Add(new Dictionary<string, object>
                 {
                     ["role"] = "user",
-                    ["content"] = new[] { new { type = "input_text", text } }
+                    ["content"] = BuildUserContent(msg)
                 });
             }
             else if (msg.Role == ChatRole.Assistant)
@@ -532,6 +532,54 @@ public sealed class CodexChatClient : IChatClient
         }
 
         return body;
+    }
+
+    private static IReadOnlyList<object> BuildUserContent(ChatMessage message)
+    {
+        var content = new List<object>();
+        var textParts = message.Contents.OfType<TextContent>()
+            .Where(textContent => !string.IsNullOrEmpty(textContent.Text))
+            .ToList();
+
+        if (textParts.Count > 0)
+        {
+            foreach (var textPart in textParts)
+            {
+                content.Add(new Dictionary<string, object>
+                {
+                    ["type"] = "input_text",
+                    ["text"] = textPart.Text!,
+                });
+            }
+        }
+        else if (!string.IsNullOrEmpty(message.Text))
+        {
+            content.Add(new Dictionary<string, object>
+            {
+                ["type"] = "input_text",
+                ["text"] = message.Text,
+            });
+        }
+
+        foreach (var image in message.Contents.OfType<DataContent>().Where(content => content.HasTopLevelMediaType("image")))
+        {
+            content.Add(new Dictionary<string, object>
+            {
+                ["type"] = "input_image",
+                ["image_url"] = image.Uri,
+            });
+        }
+
+        if (content.Count == 0)
+        {
+            content.Add(new Dictionary<string, object>
+            {
+                ["type"] = "input_text",
+                ["text"] = string.Empty,
+            });
+        }
+
+        return content;
     }
 
     private static JsonElement PrepareStrictSchema(JsonElement schema)

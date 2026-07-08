@@ -4,6 +4,7 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Publish
 @using Lorekeeper.Projects
+@using Microsoft.AspNetCore.Components.Rendering
 @implements IAsyncDisposable
 @inject IProjectService Projects
 @inject IPublishService Publishing
@@ -156,12 +157,7 @@ else if (_document is not null)
                         {
                             @RenderFigure(placement)
                         }
-                        <div class="manuscript-prose">
-                            @foreach (var paragraph in SplitParagraphs(chapter.Body))
-                            {
-                                <p>@RenderParagraph(paragraph)</p>
-                            }
-                        </div>
+                        @RenderChapterBody(chapter)
                         @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding))
                         {
                             @RenderFigure(placement)
@@ -337,6 +333,88 @@ else if (_document is not null)
             builder.AddContent(sequence++, lines[i]);
         }
     };
+
+    private RenderFragment RenderChapterBody(PublishChapterDocument chapter) => builder =>
+    {
+        var sequence = 0;
+        if (chapter.VisualMode == ChapterVisualMode.PicturePage)
+        {
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "manuscript-picture-page");
+            foreach (var text in chapter.PageLayout.TextElements.OrderBy(text => text.ReadingOrder))
+            {
+                foreach (var paragraph in SplitParagraphs(text.Text))
+                {
+                    builder.OpenElement(sequence++, "p");
+                    builder.AddContent(sequence++, RenderParagraph(paragraph));
+                    builder.CloseElement();
+                }
+            }
+
+            foreach (var image in chapter.PageLayout.Images.OrderBy(image => image.ZIndex))
+            {
+                if (FindAsset(image.ImageId) is { } asset)
+                    RenderVisualFigure(builder, ref sequence, asset, string.Empty);
+            }
+
+            builder.CloseElement();
+            return;
+        }
+
+        builder.OpenElement(sequence++, "div");
+        builder.AddAttribute(sequence++, "class", "manuscript-prose");
+        var paragraphs = SplitParagraphs(chapter.Body);
+        var blocksByParagraph = chapter.IllustrationLayout.Images
+            .GroupBy(block => (block.ParagraphIndex, block.AnchorPosition))
+            .ToDictionary(group => group.Key, group => group.OrderBy(block => block.SortOrder).ToList());
+
+        for (var index = 0; index < paragraphs.Count; index++)
+        {
+            RenderIllustrationBlocks(builder, ref sequence, blocksByParagraph, index, ChapterImageAnchorPosition.BeforeParagraph);
+            builder.OpenElement(sequence++, "p");
+            builder.AddContent(sequence++, RenderParagraph(paragraphs[index]));
+            builder.CloseElement();
+            RenderIllustrationBlocks(builder, ref sequence, blocksByParagraph, index, ChapterImageAnchorPosition.AfterParagraph);
+        }
+
+        builder.CloseElement();
+    };
+
+    private void RenderIllustrationBlocks(
+        RenderTreeBuilder builder,
+        ref int sequence,
+        IReadOnlyDictionary<(int ParagraphIndex, ChapterImageAnchorPosition Position), List<IllustratedProseImageBlock>> blocksByParagraph,
+        int paragraphIndex,
+        ChapterImageAnchorPosition position)
+    {
+        if (!blocksByParagraph.TryGetValue((paragraphIndex, position), out var blocks)) return;
+        foreach (var block in blocks)
+        {
+            if (FindAsset(block.ImageId) is { } asset)
+                RenderVisualFigure(builder, ref sequence, asset, block.Caption);
+        }
+    }
+
+    private PublishAssetDocument? FindAsset(Guid assetId) =>
+        _document?.Assets.FirstOrDefault(asset => asset.Id == assetId);
+
+    private static void RenderVisualFigure(RenderTreeBuilder builder, ref int sequence, PublishAssetDocument asset, string caption)
+    {
+        builder.OpenElement(sequence++, "figure");
+        builder.AddAttribute(sequence++, "class", "manuscript-figure manuscript-figure--inline");
+        builder.OpenElement(sequence++, "img");
+        builder.AddAttribute(sequence++, "src", ImageDataUrl(asset));
+        builder.AddAttribute(sequence++, "alt", asset.AltText);
+        builder.CloseElement();
+        if (!string.IsNullOrWhiteSpace(caption))
+        {
+            builder.OpenElement(sequence++, "figcaption");
+            builder.AddContent(sequence++, caption);
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    }
 
     private static RenderFragment RenderFigure(PublishImagePlacementDocument placement) => builder =>
     {

@@ -40,6 +40,8 @@ public enum ContextItemKind
     ActReference,
     IngestSourceReference,
     IngestSourceChunkReference,
+    ProjectImage,
+    ChapterVisualLayout,
 }
 
 public sealed record ContextAssembly(IReadOnlyList<ContextItem> Items)

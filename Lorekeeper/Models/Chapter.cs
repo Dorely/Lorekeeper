@@ -26,6 +26,18 @@ public class Chapter
 
     public string Synopsis { get; set; } = string.Empty;
 
+    public ChapterVisualMode VisualMode { get; set; } = ChapterVisualMode.Prose;
+
+    public double PicturePageWidthInches { get; set; } = 8.5;
+
+    public double PicturePageHeightInches { get; set; } = 8.5;
+
+    public bool PicturePageIsSpread { get; set; }
+
+    public string PageLayoutJson { get; set; } = string.Empty;
+
+    public string IllustrationLayoutJson { get; set; } = string.Empty;
+
     /// <summary>0-based display order within the chapter's act bucket (or the unassigned bucket).</summary>
     public int Order { get; set; }
 

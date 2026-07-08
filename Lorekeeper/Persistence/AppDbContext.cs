@@ -128,6 +128,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasIndex(e => new { e.ProjectId, e.Order });
             entity.HasIndex(e => new { e.ActId, e.Order });
             entity.Property(e => e.VectorIndexState).HasConversion<string>();
+            entity.Property(e => e.VisualMode).HasConversion<string>();
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.Chapters)

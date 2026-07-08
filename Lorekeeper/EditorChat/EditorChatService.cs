@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.Llm;
@@ -18,6 +19,7 @@ public sealed class EditorChatService(
     IChapterService chapters,
     IEditorConversationRepository conversations,
     IContextBuilder contextBuilder,
+    IChapterVisualService chapterVisuals,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     IEmbeddingService embeddings,
@@ -171,6 +173,7 @@ public sealed class EditorChatService(
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
         EditorChatContext editorContext = null!;
+        Chapter? currentChapter = null;
         var contestModeEnabled = false;
         string systemPrompt = string.Empty;
         string? setupError = null;
@@ -179,7 +182,6 @@ public sealed class EditorChatService(
             var project = await projects.GetByIdAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
-            Chapter? currentChapter = null;
             if (currentChapterId is { } chapterId)
             {
                 currentChapter = await chapters.GetAsync(chapterId, cancellationToken);
@@ -239,6 +241,7 @@ public sealed class EditorChatService(
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         messages.AddRange(BuildModelHistory(history));
+        await AddAutomaticVisualSnapshotsAsync(messages, currentChapter, providerAvailability.Provider, cancellationToken);
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -664,6 +667,48 @@ public sealed class EditorChatService(
         EditorMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new ChatMessage(ChatRole.Assistant, message.Content),
         _ => null,
     };
+
+    private async Task AddAutomaticVisualSnapshotsAsync(
+        List<ChatMessage> messages,
+        Chapter? currentChapter,
+        LlmProvider? provider,
+        CancellationToken cancellationToken)
+    {
+        if (currentChapter is null || provider is null || !CodexProvider.IsCodex(provider))
+            return;
+        if (!await providerService.IsVisionProviderWorkingAsync(provider.Id, cancellationToken))
+            return;
+
+        IReadOnlyList<ChapterVisualSnapshot> snapshots;
+        try
+        {
+            snapshots = await chapterVisuals.RenderSnapshotsAsync(currentChapter.Id, cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to render automatic chapter visual snapshots for chapter {ChapterId}", currentChapter.Id);
+            return;
+        }
+
+        if (snapshots.Count == 0)
+            return;
+
+        var contents = new List<AIContent>
+        {
+            new TextContent(
+                "Automatic visual context for the current chapter follows. These are rendered paginated snapshots of the chapter layout, provided with the text visual manifest already included in system context."),
+        };
+        foreach (var snapshot in snapshots)
+        {
+            contents.Add(new TextContent($"\nPage {snapshot.PageNumber}: {snapshot.FileName}"));
+            contents.Add(new DataContent(snapshot.Data, snapshot.ContentType)
+            {
+                Name = snapshot.FileName,
+            });
+        }
+
+        messages.Add(new ChatMessage(ChatRole.User, contents));
+    }
 
     private static IReadOnlyList<ContestChatMessageSnapshot> BuildContestSnapshotMessages(
         IReadOnlyList<ChatMessage> messages,

@@ -183,6 +183,7 @@ public sealed record PublishDocument(
     PublishAssetDocument? RenderedCoverAsset,
     PublishCoverLayoutView CoverLayout,
     IReadOnlyList<PublishSectionDocument> Sections,
+    IReadOnlyList<PublishAssetDocument> Assets,
     IReadOnlyList<PublishImagePlacementDocument> Placements)
 {
     public string DisplayTitle => string.IsNullOrWhiteSpace(Profile.TitleOverride)
@@ -228,7 +229,13 @@ public sealed record PublishChapterDocument(
     string Body,
     string Synopsis,
     int Order,
-    bool IncludeHeading);
+    bool IncludeHeading,
+    ChapterVisualMode VisualMode,
+    double PicturePageWidthInches,
+    double PicturePageHeightInches,
+    bool PicturePageIsSpread,
+    IllustratedProseLayout IllustrationLayout,
+    PicturePageLayout PageLayout);
 
 public sealed record PublishAssetDocument(
     Guid Id,

@@ -1,5 +1,7 @@
 using System.Text;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
+using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -16,7 +18,9 @@ public sealed class ContextBuilder(
     IProjectFactService projectFacts,
     IWritingSampleService writingSamples,
     IEntityService entities,
-    IIngestRepository ingest) : IEditorContextService
+    IIngestRepository ingest,
+    IProjectImageService images,
+    IChapterVisualService chapterVisuals) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         Project project,
@@ -56,6 +60,10 @@ public sealed class ContextBuilder(
                 Body: ChapterFormatting.WithLineNumbers(currentChapter.Body),
                 IsEnabled: IsIncluded(preferenceMap, ContextItemKind.CurrentChapter, EditorContextKeys.CurrentChapter, defaultIncluded: true),
                 IsRemovable: true));
+
+            var visualItem = await BuildChapterVisualLayoutItemAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken);
+            if (visualItem is not null)
+                items.Add(visualItem);
 
             var structuralReferenceKeysToSkip = new HashSet<string>(StringComparer.Ordinal);
             var previousChapterItem = await BuildPreviousChapterReferenceItemAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken);
@@ -346,9 +354,69 @@ public sealed class ContextBuilder(
                 var item = await BuildIngestSourceChunkReferenceItemAsync(projectId, sourceChunkId, cancellationToken);
                 if (item is not null) items.Add(item);
             }
+            else if (string.Equals(preference.Kind, ContextItemKind.ProjectImage.ToString(), StringComparison.Ordinal)
+                && EditorContextKeys.TryParseProjectImage(preference.Key, out var imageId))
+            {
+                var item = await BuildProjectImageItemAsync(projectId, imageId, cancellationToken);
+                if (item is not null) items.Add(item);
+            }
         }
 
         return items;
+    }
+
+    private async Task<ContextItem?> BuildChapterVisualLayoutItemAsync(
+        Guid projectId,
+        Guid chapterId,
+        IReadOnlyDictionary<string, EditorContextPreference> preferenceMap,
+        CancellationToken cancellationToken)
+    {
+        var state = await chapterVisuals.GetAsync(chapterId, cancellationToken);
+        if (state is null) return null;
+
+        var hasVisuals = state.VisualMode == ChapterVisualMode.PicturePage
+            || state.IllustrationLayout.Images.Count > 0
+            || state.PageLayout.Images.Count > 0
+            || state.PageLayout.TextElements.Count > 0;
+        if (!hasVisuals) return null;
+
+        var imageNames = (await images.ListAsync(projectId, cancellationToken))
+            .ToDictionary(image => image.Id, image => image.FileName);
+        var key = EditorContextKeys.ChapterVisualLayout(chapterId);
+        return new ContextItem(
+            Key: key,
+            Kind: ContextItemKind.ChapterVisualLayout,
+            Label: "Current Chapter Visual Layout",
+            Body: chapterVisuals.BuildManifest(state, imageNames),
+            IsEnabled: IsIncluded(preferenceMap, ContextItemKind.ChapterVisualLayout, key, defaultIncluded: true),
+            IsRemovable: true,
+            Badge: "Visual");
+    }
+
+    private async Task<ContextItem?> BuildProjectImageItemAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken)
+    {
+        var image = await images.GetAsync(projectId, imageId, cancellationToken);
+        if (image is null) return null;
+
+        var body = new StringBuilder();
+        body.Append("Filename: ").AppendLine(image.FileName);
+        body.Append("Content type: ").AppendLine(image.ContentType);
+        body.Append("Source: ").AppendLine(image.Source.ToString());
+        body.Append("Size: ").Append(image.SizeBytes).AppendLine(" bytes");
+        AppendOptionalIndented(body, "Alt text", image.AltText, 0);
+        AppendOptionalIndented(body, "Prompt", image.Prompt, 0);
+        AppendOptionalIndented(body, "Generation model", image.GenerationModel, 0);
+        AppendOptionalIndented(body, "Source metadata JSON", image.SourceMetadataJson, 0);
+
+        return new ContextItem(
+            Key: EditorContextKeys.ProjectImage(image.Id),
+            Kind: ContextItemKind.ProjectImage,
+            Label: $"Image - {image.FileName}",
+            Body: body.ToString().TrimEnd(),
+            IsEnabled: true,
+            IsRemovable: true,
+            Badge: "Image",
+            Reason: "Selected project image");
     }
 
     private async Task<ContextItem?> BuildPreviousChapterReferenceItemAsync(

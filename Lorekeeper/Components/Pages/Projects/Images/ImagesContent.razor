@@ -1,0 +1,375 @@
+@using Lorekeeper.Images
+@using Lorekeeper.Llm
+@using Lorekeeper.Models
+@using Lorekeeper.Publish
+@implements IAsyncDisposable
+@inject IProjectImageService Images
+@inject IPublishService Publishing
+@inject ILlmProviderService Providers
+@inject IJSRuntime JS
+
+@if (Project is null)
+{
+    <p class="text-muted"><em>Loading...</em></p>
+}
+else if (_loading)
+{
+    <p class="text-muted"><em>Loading images...</em></p>
+}
+else
+{
+    <div class="images-workspace">
+        <section class="images-main">
+            <div class="images-toolbar">
+                <input type="search"
+                       class="form-control form-control-sm"
+                       placeholder="Search images..."
+                       @bind="_query"
+                       @bind:event="oninput" />
+                <span class="images-count">@FilteredImages.Count image@((FilteredImages.Count == 1) ? string.Empty : "s")</span>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="alert alert-danger py-2">@_error</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_status))
+            {
+                <div class="alert alert-success py-2">@_status</div>
+            }
+
+            @if (FilteredImages.Count == 0)
+            {
+                <div class="images-empty">No images match the current filter.</div>
+            }
+            else
+            {
+                <div class="images-grid">
+                    @foreach (var image in FilteredImages)
+                    {
+                        var selected = _selectedReferenceImageIds.Contains(image.Id);
+                        <article class="image-card" @key="image.Id">
+                            <button type="button" class="image-preview-button" @onclick="() => SelectImage(image)">
+                                <img src="@image.PreviewUrl" alt="@ImageAlt(image)" />
+                            </button>
+                            <div class="image-card-body">
+                                <input class="form-control form-control-sm"
+                                       value="@image.FileName"
+                                       @onchange="e => UpdateImageAsync(image, fileName: e.Value?.ToString() ?? string.Empty, altText: image.AltText)" />
+                                <input class="form-control form-control-sm"
+                                       placeholder="Alt text"
+                                       value="@image.AltText"
+                                       @onchange="e => UpdateImageAsync(image, fileName: image.FileName, altText: e.Value?.ToString() ?? string.Empty)" />
+                                <div class="image-meta">
+                                    <span>@image.Source</span>
+                                    <span>@FormatBytes(image.SizeBytes)</span>
+                                </div>
+                                <div class="image-actions">
+                                    <label class="form-check image-reference-check">
+                                        <input class="form-check-input"
+                                               type="checkbox"
+                                               checked="@selected"
+                                               disabled="@(!selected && _selectedReferenceImageIds.Count >= MaxReferenceImages)"
+                                               @onchange="e => ToggleReference(image.Id, e)" />
+                                        <span class="form-check-label">Reference</span>
+                                    </label>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetCoverAsync(image.Id)">Cover</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => DownloadAsync(image)">Download</button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(image.Id)">Delete</button>
+                                </div>
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+
+        <aside class="images-side">
+            <section class="image-tool-panel">
+                <h6>Upload</h6>
+                <label>
+                    <span>Alt text</span>
+                    <input class="form-control form-control-sm" @bind="_uploadAltText" />
+                </label>
+                <InputFile OnChange="UploadAsync" class="form-control form-control-sm" />
+            </section>
+
+            <section class="image-tool-panel">
+                <h6>Generate</h6>
+                @if (!_codexConnected)
+                {
+                    <p class="text-muted small mb-0">Connect Codex in Providers to generate images.</p>
+                }
+                else
+                {
+                    <label>
+                        <span>Prompt</span>
+                        <textarea class="form-control form-control-sm" rows="6" @bind="_imagePrompt"></textarea>
+                    </label>
+                    <div class="image-form-grid">
+                        <label>
+                            <span>Size</span>
+                            <select class="form-select form-select-sm" @bind="_imageSize">
+                                <option value="auto">Auto</option>
+                                <option value="1024x1024">Square</option>
+                                <option value="1024x1536">Portrait</option>
+                                <option value="1536x1024">Landscape</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>Quality</span>
+                            <select class="form-select form-select-sm" @bind="_imageQuality">
+                                <option value="auto">Auto</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>Format</span>
+                            <select class="form-select form-select-sm" @bind="_imageFormat">
+                                <option value="png">PNG</option>
+                                <option value="jpeg">JPEG</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>JPEG compression</span>
+                            <input class="form-control form-control-sm" type="number" min="0" max="100" @bind="_imageCompression" disabled="@(_imageFormat != "jpeg")" />
+                        </label>
+                    </div>
+                    <label>
+                        <span>Generated alt text</span>
+                        <input class="form-control form-control-sm" @bind="_generatedAltText" />
+                    </label>
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@_generating" @onclick="GenerateAsync">
+                        @(_generating ? "Generating..." : "Generate image")
+                    </button>
+                }
+            </section>
+
+            @if (_selectedImage is not null)
+            {
+                <section class="image-tool-panel">
+                    <h6>Selected</h6>
+                    <img class="selected-image-preview" src="@_selectedImage.PreviewUrl" alt="@ImageAlt(_selectedImage)" />
+                    <strong>@_selectedImage.FileName</strong>
+                    @if (!string.IsNullOrWhiteSpace(_selectedImage.Prompt))
+                    {
+                        <p class="small mb-0">@_selectedImage.Prompt</p>
+                    }
+                </section>
+            }
+        </aside>
+    </div>
+}
+
+@code {
+    private const long MaxImageBytes = 20L * 1024 * 1024;
+    private const int MaxReferenceImages = 4;
+
+    [CascadingParameter] public Project? Project { get; set; }
+
+    private IReadOnlyList<ProjectImageView> _images = [];
+    private List<Guid> _selectedReferenceImageIds = [];
+    private ProjectImageView? _selectedImage;
+    private IJSObjectReference? _downloadModule;
+    private string _query = string.Empty;
+    private string _uploadAltText = string.Empty;
+    private string _imagePrompt = string.Empty;
+    private string _imageSize = "auto";
+    private string _imageQuality = "auto";
+    private string _imageFormat = "png";
+    private int? _imageCompression;
+    private string _generatedAltText = string.Empty;
+    private string? _error;
+    private string? _status;
+    private bool _loading = true;
+    private bool _codexConnected;
+    private bool _generating;
+    private Guid? _loadedProjectId;
+
+    private IReadOnlyList<ProjectImageView> FilteredImages =>
+        string.IsNullOrWhiteSpace(_query)
+            ? _images
+            : _images.Where(image => image.FileName.Contains(_query, StringComparison.OrdinalIgnoreCase)
+                || image.AltText.Contains(_query, StringComparison.OrdinalIgnoreCase)
+                || image.Prompt.Contains(_query, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Project is null || _loadedProjectId == Project.Id) return;
+        _loadedProjectId = Project.Id;
+        await ReloadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownloads.js");
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (Project is null) return;
+        _loading = true;
+        _error = null;
+        try
+        {
+            _codexConnected = await Providers.IsCodexConnectedAsync();
+            _images = await Images.ListAsync(Project.Id);
+            PruneSelections();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        if (Project is null) return;
+        _error = null;
+        _status = null;
+        try
+        {
+            var file = e.File;
+            await using var stream = file.OpenReadStream(MaxImageBytes);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            await Images.UploadAsync(Project.Id, new ProjectImageUpload(file.Name, file.ContentType, memory.ToArray(), _uploadAltText));
+            _uploadAltText = string.Empty;
+            _status = "Image uploaded.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task GenerateAsync()
+    {
+        if (Project is null) return;
+        _generating = true;
+        _error = null;
+        _status = null;
+        try
+        {
+            await Images.GenerateAsync(Project.Id, new ProjectImageGenerationRequest(
+                _imagePrompt,
+                _imageSize,
+                _imageQuality,
+                _imageFormat,
+                _imageFormat == "jpeg" ? _imageCompression : null,
+                _generatedAltText,
+                _selectedReferenceImageIds.ToList()));
+            _status = "Image generated.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _generating = false;
+        }
+    }
+
+    private async Task UpdateImageAsync(ProjectImageView image, string fileName, string altText)
+    {
+        if (Project is null) return;
+        _error = null;
+        try
+        {
+            await Images.UpdateAsync(Project.Id, image.Id, new ProjectImageUpdate(fileName, altText));
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task DeleteAsync(Guid imageId)
+    {
+        if (Project is null) return;
+        _error = null;
+        try
+        {
+            await Images.DeleteAsync(Project.Id, imageId);
+            _status = "Image deleted.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task SetCoverAsync(Guid imageId)
+    {
+        if (Project is null) return;
+        _error = null;
+        try
+        {
+            await Publishing.SetCoverAssetAsync(Project.Id, imageId);
+            _status = "Cover image updated.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task DownloadAsync(ProjectImageView image)
+    {
+        if (_downloadModule is null || Project is null) return;
+        var data = await Images.GetDataAsync(Project.Id, image.Id);
+        if (data is null) return;
+        await _downloadModule.InvokeVoidAsync("downloadBytes", data.FileName, data.ContentType, Convert.ToBase64String(data.Data));
+    }
+
+    private void ToggleReference(Guid imageId, ChangeEventArgs e)
+    {
+        var selected = e.Value is bool value && value;
+        if (selected)
+        {
+            if (!_selectedReferenceImageIds.Contains(imageId) && _selectedReferenceImageIds.Count < MaxReferenceImages)
+                _selectedReferenceImageIds.Add(imageId);
+            return;
+        }
+
+        _selectedReferenceImageIds.Remove(imageId);
+    }
+
+    private void SelectImage(ProjectImageView image) => _selectedImage = image;
+
+    private void PruneSelections()
+    {
+        var ids = _images.Select(image => image.Id).ToHashSet();
+        _selectedReferenceImageIds = _selectedReferenceImageIds.Where(ids.Contains).ToList();
+        if (_selectedImage is not null)
+            _selectedImage = _images.FirstOrDefault(image => image.Id == _selectedImage.Id);
+    }
+
+    private static string ImageAlt(ProjectImageView image) =>
+        string.IsNullOrWhiteSpace(image.AltText) ? image.FileName : image.AltText;
+
+    private static string FormatBytes(long bytes) =>
+        bytes >= 1024 * 1024
+            ? $"{bytes / 1024.0 / 1024.0:0.0} MB"
+            : $"{Math.Max(1, bytes / 1024)} KB";
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_downloadModule is not null)
+        {
+            try { await _downloadModule.DisposeAsync(); } catch (JSDisconnectedException) { }
+        }
+    }
+}

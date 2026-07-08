@@ -1,10 +1,12 @@
 @using System.Text.Json
 @using System.Text.Json.Serialization
 @using System.Globalization
+@using Lorekeeper.ChapterVisuals
 @using Lorekeeper.Chapters
 @using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.Context
 @using Lorekeeper.EditorChat
+@using Lorekeeper.Images
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
 @using Lorekeeper.Tokens
@@ -12,6 +14,8 @@
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IChapterService Chapters
+@inject IChapterVisualService Visuals
+@inject IProjectImageService Images
 @inject IActService Acts
 @inject IEditorChatService Chat
 @inject IAiChangeApprovalService ChangeApproval
@@ -115,6 +119,15 @@ else
                 <button type="button" class="btn btn-sm btn-outline-secondary chapter-icon-btn"
                         title="New chapter" @onclick="CreateAndGoToOutlineAsync">+</button>
 
+                <select class="form-select form-select-sm chapter-visual-mode"
+                        title="Chapter visual mode"
+                        value="@(_visualState?.VisualMode.ToString() ?? ChapterVisualMode.Prose.ToString())"
+                        @onchange="ChangeVisualModeAsync">
+                    <option value="@ChapterVisualMode.Prose">Prose</option>
+                    <option value="@ChapterVisualMode.IllustratedProse">Illustrated prose</option>
+                    <option value="@ChapterVisualMode.PicturePage">Picture page</option>
+                </select>
+
                 <div class="small chapter-metrics" title="@ChapterMetricsTitle()">
                     @ChapterMetricsText()
                 </div>
@@ -125,16 +138,24 @@ else
             </div>
 
             <div class="chapter-mode-bar" role="group" aria-label="Chapter mode">
-                <button type="button"
-                        class="@ModeButtonClass(EditorMode.Edit)"
-                        disabled="@ContestReviewActive"
-                        aria-pressed="@(_mode == EditorMode.Edit)"
-                        @onclick="() => SetModeAsync(EditorMode.Edit)">Edit</button>
+                @if (!IsPicturePageChapter)
+                {
+                    <button type="button"
+                            class="@ModeButtonClass(EditorMode.Edit)"
+                            disabled="@ContestReviewActive"
+                            aria-pressed="@(_mode == EditorMode.Edit)"
+                            @onclick="() => SetModeAsync(EditorMode.Edit)">Edit</button>
+                }
                 <button type="button"
                         class="@ModeButtonClass(EditorMode.Read)"
                         disabled="@ContestReviewActive"
                         aria-pressed="@(_mode == EditorMode.Read)"
                         @onclick="() => SetModeAsync(EditorMode.Read)">Read</button>
+                <button type="button"
+                        class="@ModeButtonClass(EditorMode.Layout)"
+                        disabled="@ContestReviewActive"
+                        aria-pressed="@(_mode == EditorMode.Layout)"
+                        @onclick="() => SetModeAsync(EditorMode.Layout)">Layout</button>
                 <button type="button"
                         class="@ModeButtonClass(EditorMode.Review)"
                         aria-pressed="@(_mode == EditorMode.Review)"
@@ -149,6 +170,16 @@ else
                               readonly="@EditorReadOnly"
                               placeholder="Start writing your chapter..."></textarea>
                 </div>
+
+                @if (_mode is EditorMode.Read or EditorMode.Layout && _visualState is not null)
+                {
+                    <PagedChapterViewer State="_visualState"
+                                        Images="_projectImages"
+                                        ProjectId="Project.Id"
+                                        IsEditable="@(_mode == EditorMode.Layout)"
+                                        OnImagesChanged="OnViewerImagesChangedAsync"
+                                        OnChanged="OnVisualStateChangedAsync" />
+                }
 
                 @if (_mode == EditorMode.Review)
                 {
@@ -629,7 +660,7 @@ else
                 </section>
 
                 <section class='@(PanelClass("panel-recommendations", _recommendedContextOpen))'>
-                    <h6 class="panel-title">
+                    <h6 class="panel-title panel-title--with-action">
                         <button type="button"
                                 class="panel-title-toggle"
                                 title='@(PanelToggleTitle("Search", _recommendedContextOpen))'
@@ -638,6 +669,12 @@ else
                                 @onclick="ToggleRecommendedContext">
                             <span class="caret">@PanelCaret(_recommendedContextOpen)</span>
                             <span class="panel-title-text">Search</span>
+                        </button>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary panel-title-action"
+                                disabled="@(_activeChapterId is null)"
+                                @onclick="OpenImagesModal">
+                            Images
                         </button>
                     </h6>
                     <div id="recommended-context-panel-content"
@@ -653,6 +690,12 @@ else
         }
     </div>
 
+    <ProjectImagePickerModal ProjectId="Project.Id"
+                             ChapterId="_activeChapterId"
+                             IsOpen="_imagesModalOpen"
+                             OnClose="CloseImagesModal"
+                             OnAddToChapter="AddImageToChapterAsync"
+                             OnContextChanged="OnContextChangedAsync" />
 }
 
 @code {
@@ -699,6 +742,10 @@ else
     private ContextFeedPanel? _contextPanel;
     private int _contextRefreshSignal;
     private int _reviewRefreshSignal;
+    private ChapterVisualState? _visualState;
+    private IReadOnlyList<ProjectImageView> _projectImages = [];
+    private bool _imagesModalOpen;
+    private string? _layoutError;
     private int _chapterWordCount;
     private int _chapterTokenCount;
     private bool _chapterTokenIsExact = true;
@@ -716,7 +763,9 @@ else
     private string? _rejectingReviewBlockId;
     private string _reviewRejectionMessage = string.Empty;
 
-    private bool EditorReadOnly => _chapterLocked || _mode == EditorMode.Review;
+    private bool EditorReadOnly => _chapterLocked || _mode is EditorMode.Read or EditorMode.Layout or EditorMode.Review;
+    private bool IsPicturePageChapter => _visualState?.VisualMode == ChapterVisualMode.PicturePage
+        || _current?.VisualMode == ChapterVisualMode.PicturePage;
     private bool ContestReviewActive => _contestReviewProjection is not null;
     private bool EffectiveChatPaneCollapsed => ContestReviewActive || _chatPaneCollapsed;
     private bool EffectiveRightPaneCollapsed => ContestReviewActive || _rightPaneCollapsed;
@@ -754,6 +803,7 @@ else
             ResetInlineReviewState();
             _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
             _acts = (await Acts.ListAsync(Project.Id)).ToList();
+            await LoadProjectImagesAsync();
             _loading = false;
         }
 
@@ -765,6 +815,7 @@ else
             _pendingRememberChapterId = null;
             _contestReviewBatches = [];
             _contestReviewProjection = null;
+            _visualState = null;
             UpdateChapterMetrics(string.Empty);
             return;
         }
@@ -783,6 +834,7 @@ else
             }
 
             _current = null;
+            _visualState = null;
             _restoreChapterAfterRender = true;
             return;
         }
@@ -811,6 +863,7 @@ else
         UpdateChapterMetrics(_current.Body);
         _saveState = SaveState.Idle;
         _saveError = null;
+        await LoadVisualStateAsync();
         _pendingRememberChapterId = targetId;
 
         await InvokeEditorVoidAsync("setValue", _current.Body);
@@ -818,6 +871,105 @@ else
         {
             await RefreshReviewChangesAsync();
         }
+    }
+
+    private async Task LoadProjectImagesAsync()
+    {
+        if (Project is null)
+        {
+            _projectImages = [];
+            return;
+        }
+
+        try
+        {
+            _projectImages = await Images.ListAsync(Project.Id);
+        }
+        catch (Exception ex)
+        {
+            _layoutError = ex.Message;
+            _projectImages = [];
+        }
+    }
+
+    private async Task OnViewerImagesChangedAsync()
+    {
+        await LoadProjectImagesAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadVisualStateAsync()
+    {
+        if (_current is null)
+        {
+            _visualState = null;
+            return;
+        }
+
+        try
+        {
+            _visualState = await Visuals.GetAsync(_current.Id);
+            if (_visualState?.VisualMode == ChapterVisualMode.PicturePage && _mode == EditorMode.Edit)
+                _mode = EditorMode.Layout;
+        }
+        catch (Exception ex)
+        {
+            _layoutError = ex.Message;
+            _visualState = null;
+        }
+    }
+
+    private async Task ChangeVisualModeAsync(ChangeEventArgs e)
+    {
+        if (_current is null) return;
+        if (!Enum.TryParse<ChapterVisualMode>(e.Value?.ToString(), out var mode))
+            return;
+
+        await FlushAsync();
+        var updated = await Visuals.SetModeAsync(_current.Id, new ChapterVisualModeUpdate(mode));
+        await OnVisualStateChangedAsync(updated);
+    }
+
+    private async Task OnVisualStateChangedAsync(ChapterVisualState state)
+    {
+        _visualState = state;
+        if (state.VisualMode == ChapterVisualMode.PicturePage && _mode == EditorMode.Edit)
+        {
+            _mode = EditorMode.Layout;
+            await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
+        }
+        if (_current is not null && _current.Id == state.ChapterId)
+        {
+            _current.VisualMode = state.VisualMode;
+            _current.PicturePageWidthInches = state.PicturePageWidthInches;
+            _current.PicturePageHeightInches = state.PicturePageHeightInches;
+            _current.PicturePageIsSpread = state.PicturePageIsSpread;
+            if (!string.Equals(_current.Body, state.Body, StringComparison.Ordinal))
+            {
+                _current.Body = state.Body;
+                UpdateChapterMetrics(state.Body);
+                await InvokeEditorVoidAsync("setValue", state.Body);
+            }
+        }
+
+        await RefreshContextSurfacesAsync();
+    }
+
+    private void OpenImagesModal() => _imagesModalOpen = true;
+
+    private void CloseImagesModal() => _imagesModalOpen = false;
+
+    private async Task AddImageToChapterAsync(Guid imageId)
+    {
+        if (Project is null || _activeChapterId is not Guid chapterId) return;
+        await FlushAsync();
+        var result = await Visuals.AddImageToChapterAsync(Project.Id, chapterId, imageId);
+        await OnVisualStateChangedAsync(result.State);
+        await LoadProjectImagesAsync();
+        if (_mode != EditorMode.Layout)
+            _mode = EditorMode.Layout;
+        await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
+        StateHasChanged();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -1040,7 +1192,7 @@ else
     private string EditorGridClass()
     {
         var classes = "editor-grid";
-        if (_mode is EditorMode.Read or EditorMode.Review)
+        if (_mode is EditorMode.Read or EditorMode.Layout or EditorMode.Review)
         {
             classes += " editor-grid--focus";
         }
@@ -1078,7 +1230,7 @@ else
     }
 
     private string EditSurfaceClass() =>
-        _mode == EditorMode.Review
+        _mode is EditorMode.Read or EditorMode.Layout or EditorMode.Review
             ? "chapter-edit-surface chapter-edit-surface--hidden"
             : "chapter-edit-surface";
 
@@ -1094,10 +1246,12 @@ else
 
     private async Task SetModeAsync(EditorMode mode)
     {
+        if (mode == EditorMode.Edit && IsPicturePageChapter)
+            mode = EditorMode.Layout;
         if (_mode == mode) return;
         if (ContestReviewActive && mode != EditorMode.Review) return;
 
-        if (mode == EditorMode.Review)
+        if (mode is EditorMode.Read or EditorMode.Layout or EditorMode.Review)
         {
             await FlushAsync();
             await _saveGate.WaitAsync();
@@ -1105,6 +1259,11 @@ else
         }
 
         _mode = mode;
+        if (_mode is EditorMode.Read or EditorMode.Layout)
+        {
+            await LoadVisualStateAsync();
+            await LoadProjectImagesAsync();
+        }
         await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
 
         if (_mode == EditorMode.Review)
@@ -1448,7 +1607,7 @@ else
 
         if (_contestReviewProjection is null && _reviewProjection?.HasChanges != true)
         {
-            _mode = EditorMode.Edit;
+            _mode = IsPicturePageChapter ? EditorMode.Layout : EditorMode.Edit;
             await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
         }
     }
@@ -2704,7 +2863,7 @@ else
 
     private enum SaveState { Idle, Saving, Saved, IndexFailed, SaveFailed }
 
-    private enum EditorMode { Edit, Read, Review }
+    private enum EditorMode { Edit, Read, Layout, Review }
 
     private sealed record ReviewProjection(
         bool HasChanges,

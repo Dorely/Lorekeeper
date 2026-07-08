@@ -1,0 +1,579 @@
+@using Lorekeeper.ChapterVisuals
+@using Lorekeeper.Images
+@using Lorekeeper.Models
+@using Lorekeeper.Publish
+@using Microsoft.AspNetCore.Components.Rendering
+@using Microsoft.JSInterop
+@using System.Globalization
+@using System.Text
+@implements IAsyncDisposable
+@inject IChapterVisualService Visuals
+@inject IProjectImageService ProjectImages
+@inject IJSRuntime JS
+
+<div class="paged-viewer" tabindex="0" @ref="_viewerRoot">
+    @if (State.VisualMode == ChapterVisualMode.PicturePage)
+    {
+        @RenderPicturePage()
+    }
+    else
+    {
+        @RenderProsePages()
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ChapterVisualState State { get; set; } = null!;
+    [Parameter] public IReadOnlyList<ProjectImageView> Images { get; set; } = [];
+    [Parameter] public bool IsEditable { get; set; }
+    [Parameter] public Guid ProjectId { get; set; }
+    [Parameter] public EventCallback<ChapterVisualState> OnChanged { get; set; }
+    [Parameter] public EventCallback OnImagesChanged { get; set; }
+
+    private Guid? _draggingIllustrationId;
+    private ElementReference _viewerRoot;
+    private IJSObjectReference? _viewerModule;
+    private DotNetObjectReference<PagedChapterViewer>? _selfRef;
+
+    private RenderFragment RenderProsePages() => builder =>
+    {
+        var sequence = 0;
+        var paragraphs = SplitParagraphs(State.Body);
+        builder.OpenElement(sequence++, "div");
+        builder.AddAttribute(sequence++, "class", "prose-pages");
+        builder.OpenElement(sequence++, "section");
+        builder.AddAttribute(sequence++, "class", "sim-page prose-page");
+
+        if (paragraphs.Count == 0)
+        {
+            builder.OpenElement(sequence++, "p");
+            builder.AddAttribute(sequence++, "class", "empty-prose");
+            builder.AddContent(sequence++, "(empty chapter)");
+            builder.CloseElement();
+        }
+
+        for (var index = 0; index < Math.Max(1, paragraphs.Count); index++)
+        {
+            RenderDropZone(builder, ref sequence, index, ChapterImageAnchorPosition.BeforeParagraph);
+            foreach (var block in BlocksAt(index, ChapterImageAnchorPosition.BeforeParagraph))
+                RenderIllustrationBlock(builder, ref sequence, block);
+
+            if (index < paragraphs.Count)
+            {
+                builder.OpenElement(sequence++, "p");
+                builder.AddContent(sequence++, paragraphs[index]);
+                builder.CloseElement();
+            }
+
+            foreach (var block in BlocksAt(index, ChapterImageAnchorPosition.AfterParagraph))
+                RenderIllustrationBlock(builder, ref sequence, block);
+            RenderDropZone(builder, ref sequence, index, ChapterImageAnchorPosition.AfterParagraph);
+        }
+
+        builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private RenderFragment RenderPicturePage() => builder =>
+    {
+        var sequence = 0;
+        var ratioWidth = Math.Max(1, State.PicturePageIsSpread ? State.PicturePageWidthInches * 2 : State.PicturePageWidthInches);
+        var ratioHeight = Math.Max(1, State.PicturePageHeightInches);
+
+        builder.OpenElement(sequence++, "div");
+        builder.AddAttribute(sequence++, "class", "picture-layout");
+
+        if (IsEditable)
+        {
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "picture-toolbar");
+            builder.OpenElement(sequence++, "button");
+            builder.AddAttribute(sequence++, "type", "button");
+            builder.AddAttribute(sequence++, "class", "btn btn-sm btn-outline-primary");
+            builder.AddAttribute(sequence++, "onclick", EventCallback.Factory.Create(this, AddTextBoxAsync));
+            builder.AddContent(sequence++, "Add text box");
+            builder.CloseElement();
+            builder.CloseElement();
+        }
+
+        builder.OpenElement(sequence++, "section");
+        builder.AddAttribute(sequence++, "class", IsEditable ? "picture-page picture-page--editable" : "picture-page");
+        builder.AddAttribute(sequence++, "style", PicturePageStyle(ratioWidth, ratioHeight));
+
+        foreach (var image in State.PageLayout.Images.OrderBy(image => image.ZIndex))
+        {
+            var projectImage = ImageById(image.ImageId);
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", IsEditable ? "picture-element picture-element--image picture-element--editable" : "picture-element picture-element--image");
+            builder.AddAttribute(sequence++, "style", ElementStyle(image.XPercent, image.YPercent, image.WidthPercent, image.HeightPercent, image.ZIndex));
+            if (IsEditable)
+            {
+                builder.AddAttribute(sequence++, "data-picture-element-kind", "image");
+                builder.AddAttribute(sequence++, "data-picture-element-id", image.Id.ToString("N"));
+            }
+            if (projectImage is not null)
+            {
+                builder.OpenElement(sequence++, "img");
+                builder.AddAttribute(sequence++, "src", projectImage.PreviewUrl);
+                builder.AddAttribute(sequence++, "alt", string.IsNullOrWhiteSpace(image.AltTextOverride) ? projectImage.AltText : image.AltTextOverride);
+                builder.AddAttribute(sequence++, "style", $"object-fit:{FitCss(image.Fit)};opacity:{image.Opacity.ToString(CultureInfo.InvariantCulture)};");
+                builder.CloseElement();
+            }
+            if (IsEditable)
+                RenderPictureElementChrome(builder, ref sequence, "image", image.Id);
+            builder.CloseElement();
+        }
+
+        foreach (var text in State.PageLayout.TextElements.OrderBy(text => text.ZIndex))
+        {
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", IsEditable ? "picture-element picture-element--text picture-element--editable" : "picture-element picture-element--text");
+            builder.AddAttribute(sequence++, "style", TextElementStyle(text));
+            if (IsEditable)
+            {
+                builder.AddAttribute(sequence++, "data-picture-element-kind", "text");
+                builder.AddAttribute(sequence++, "data-picture-element-id", text.Id.ToString("N"));
+                builder.OpenElement(sequence++, "button");
+                builder.AddAttribute(sequence++, "type", "button");
+                builder.AddAttribute(sequence++, "class", "picture-drag-handle");
+                builder.AddAttribute(sequence++, "data-drag-handle", "true");
+                builder.AddAttribute(sequence++, "title", "Move");
+                builder.AddAttribute(sequence++, "aria-label", "Move text box");
+                builder.AddContent(sequence++, "↕");
+                builder.CloseElement();
+                builder.OpenElement(sequence++, "textarea");
+                builder.AddAttribute(sequence++, "class", "picture-text-editor");
+                builder.AddAttribute(sequence++, "value", text.Text);
+                builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => UpdatePictureTextAsync(text.Id, body: e.Value?.ToString())));
+                builder.CloseElement();
+                RenderPictureElementChrome(builder, ref sequence, "text", text.Id, includeMoveHandle: false);
+            }
+            else
+            {
+                builder.AddContent(sequence++, text.Text);
+            }
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+
+        builder.CloseElement();
+    };
+
+    private void RenderDropZone(RenderTreeBuilder builder, ref int sequence, int paragraphIndex, ChapterImageAnchorPosition position)
+    {
+        if (!IsEditable) return;
+
+        builder.OpenElement(sequence++, "button");
+        builder.AddAttribute(sequence++, "type", "button");
+        builder.AddAttribute(sequence++, "class", "illustration-drop-zone");
+        builder.AddAttribute(sequence++, "ondragover", EventCallback.Factory.Create<DragEventArgs>(this, () => { }));
+        builder.AddEventPreventDefaultAttribute(sequence++, "ondragover", true);
+        builder.AddAttribute(sequence++, "ondrop", EventCallback.Factory.Create(this, () => DropIllustrationAsync(paragraphIndex, position)));
+        builder.AddContent(sequence++, position == ChapterImageAnchorPosition.BeforeParagraph ? "Drop image before paragraph" : "Drop image after paragraph");
+        builder.CloseElement();
+    }
+
+    private void RenderIllustrationBlock(RenderTreeBuilder builder, ref int sequence, IllustratedProseImageBlock block)
+    {
+        var image = ImageById(block.ImageId);
+        builder.OpenElement(sequence++, "figure");
+        builder.AddAttribute(sequence++, "class", $"illustration-block illustration-block--{block.Alignment.ToString().ToLowerInvariant()}");
+        builder.AddAttribute(sequence++, "style", $"width:{block.WidthPercent.ToString(CultureInfo.InvariantCulture)}%;");
+        if (IsEditable)
+        {
+            builder.AddAttribute(sequence++, "draggable", "true");
+            builder.AddAttribute(sequence++, "ondragstart", EventCallback.Factory.Create(this, () => _draggingIllustrationId = block.Id));
+        }
+
+        if (image is not null)
+        {
+            builder.OpenElement(sequence++, "img");
+            builder.AddAttribute(sequence++, "src", image.PreviewUrl);
+            builder.AddAttribute(sequence++, "alt", string.IsNullOrWhiteSpace(block.AltTextOverride) ? image.AltText : block.AltTextOverride);
+            builder.CloseElement();
+        }
+
+        if (!string.IsNullOrWhiteSpace(block.Caption))
+        {
+            builder.OpenElement(sequence++, "figcaption");
+            builder.AddContent(sequence++, block.Caption);
+            builder.CloseElement();
+        }
+
+        if (IsEditable)
+        {
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "illustration-controls");
+            builder.OpenElement(sequence++, "input");
+            builder.AddAttribute(sequence++, "type", "range");
+            builder.AddAttribute(sequence++, "min", "20");
+            builder.AddAttribute(sequence++, "max", "100");
+            builder.AddAttribute(sequence++, "value", block.WidthPercent.ToString(CultureInfo.InvariantCulture));
+            builder.AddAttribute(sequence++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, e => UpdateIllustrationWidthAsync(block.Id, e.Value?.ToString())));
+            builder.CloseElement();
+            RenderSmallButton(builder, ref sequence, "Left", () => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Left));
+            RenderSmallButton(builder, ref sequence, "Center", () => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Center));
+            RenderSmallButton(builder, ref sequence, "Right", () => UpdateIllustrationAlignmentAsync(block.Id, ChapterImageAlignment.Right));
+            RenderSmallButton(builder, ref sequence, "Remove", () => RemoveIllustrationAsync(block.Id), "btn-outline-danger");
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    }
+
+    private void RenderPictureElementChrome(
+        RenderTreeBuilder builder,
+        ref int sequence,
+        string kind,
+        Guid elementId,
+        bool includeMoveHandle = true)
+    {
+        if (includeMoveHandle)
+        {
+            builder.OpenElement(sequence++, "button");
+            builder.AddAttribute(sequence++, "type", "button");
+            builder.AddAttribute(sequence++, "class", "picture-drag-handle");
+            builder.AddAttribute(sequence++, "data-drag-handle", "true");
+            builder.AddAttribute(sequence++, "title", "Move");
+            builder.AddAttribute(sequence++, "aria-label", $"Move {kind}");
+            builder.AddContent(sequence++, "↕");
+            builder.CloseElement();
+        }
+
+        builder.OpenElement(sequence++, "button");
+        builder.AddAttribute(sequence++, "type", "button");
+        builder.AddAttribute(sequence++, "class", "picture-remove-button");
+        builder.AddAttribute(sequence++, "title", "Remove");
+        builder.AddAttribute(sequence++, "aria-label", $"Remove {kind}");
+        builder.AddAttribute(sequence++, "onclick", EventCallback.Factory.Create(this, kind == "image"
+            ? () => RemovePictureImageAsync(elementId)
+            : () => RemovePictureTextAsync(elementId)));
+        builder.AddContent(sequence++, "×");
+        builder.CloseElement();
+
+        builder.OpenElement(sequence++, "span");
+        builder.AddAttribute(sequence++, "class", "picture-resize-handle");
+        builder.AddAttribute(sequence++, "data-resize-handle", "true");
+        builder.CloseElement();
+    }
+
+    private void RenderSmallButton(RenderTreeBuilder builder, ref int sequence, string text, Func<Task> onClick, string style = "btn-outline-secondary")
+    {
+        builder.OpenElement(sequence++, "button");
+        builder.AddAttribute(sequence++, "type", "button");
+        builder.AddAttribute(sequence++, "class", $"btn btn-sm {style}");
+        builder.AddAttribute(sequence++, "onclick", EventCallback.Factory.Create(this, onClick));
+        builder.AddContent(sequence++, text);
+        builder.CloseElement();
+    }
+
+    private IEnumerable<IllustratedProseImageBlock> BlocksAt(int paragraphIndex, ChapterImageAnchorPosition position) =>
+        State.IllustrationLayout.Images
+            .Where(block => block.ParagraphIndex == paragraphIndex && block.AnchorPosition == position)
+            .OrderBy(block => block.SortOrder);
+
+    private async Task DropIllustrationAsync(int paragraphIndex, ChapterImageAnchorPosition position)
+    {
+        if (_draggingIllustrationId is not Guid blockId) return;
+        var layout = State.IllustrationLayout with
+        {
+            Images = State.IllustrationLayout.Images
+                .Select(block => block.Id == blockId
+                    ? block with { ParagraphIndex = paragraphIndex, AnchorPosition = position }
+                    : block)
+                .ToList(),
+        };
+        await SaveIllustrationsAsync(layout);
+        _draggingIllustrationId = null;
+    }
+
+    private async Task UpdateIllustrationWidthAsync(Guid blockId, string? value)
+    {
+        if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var width)) return;
+        await SaveIllustrationsAsync(State.IllustrationLayout with
+        {
+            Images = State.IllustrationLayout.Images.Select(block => block.Id == blockId ? block with { WidthPercent = width } : block).ToList(),
+        });
+    }
+
+    private async Task UpdateIllustrationAlignmentAsync(Guid blockId, ChapterImageAlignment alignment) =>
+        await SaveIllustrationsAsync(State.IllustrationLayout with
+        {
+            Images = State.IllustrationLayout.Images.Select(block => block.Id == blockId ? block with { Alignment = alignment } : block).ToList(),
+        });
+
+    private async Task RemoveIllustrationAsync(Guid blockId) =>
+        await SaveIllustrationsAsync(State.IllustrationLayout with
+        {
+            Images = State.IllustrationLayout.Images.Where(block => block.Id != blockId).ToList(),
+        });
+
+    private async Task AddTextBoxAsync()
+    {
+        var maxOrder = State.PageLayout.TextElements.Select(text => text.ReadingOrder).DefaultIfEmpty(-1).Max();
+        var maxZ = State.PageLayout.Images.Select(image => image.ZIndex)
+            .Concat(State.PageLayout.TextElements.Select(text => text.ZIndex))
+            .DefaultIfEmpty(0)
+            .Max();
+        var layout = State.PageLayout with
+        {
+            TextElements = State.PageLayout.TextElements
+                .Append(new PicturePageTextElement(
+                    Guid.NewGuid(),
+                    "New text",
+                    12,
+                    70,
+                    76,
+                    16,
+                    maxZ + 1,
+                    maxOrder + 1,
+                    PublishCoverFontFamily.Serif,
+                    4.5,
+                    1.25,
+                    "#111827",
+                    "#FFFFFF",
+                    0,
+                    PublishCoverTextAlign.Center,
+                    ChapterTextVerticalAlign.Middle,
+                    PublishCoverShadow.None))
+                .ToList(),
+        };
+        await SavePageAsync(layout);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _selfRef = DotNetObjectReference.Create(this);
+        _viewerModule = await JS.InvokeAsync<IJSObjectReference>(
+            "import",
+            "./Components/Pages/Projects/PagedChapterViewer.razor.js");
+        await _viewerModule.InvokeVoidAsync("attach", _viewerRoot, _selfRef);
+    }
+
+    private async Task UpdatePictureImageAsync(Guid elementId, double? x = null, double? y = null, double? width = null, double? height = null) =>
+        await SavePageAsync(State.PageLayout with
+        {
+            Images = State.PageLayout.Images.Select(image => image.Id == elementId
+                ? image with
+                {
+                    XPercent = x ?? image.XPercent,
+                    YPercent = y ?? image.YPercent,
+                    WidthPercent = width ?? image.WidthPercent,
+                    HeightPercent = height ?? image.HeightPercent,
+                }
+                : image).ToList(),
+        });
+
+    [JSInvokable]
+    public async Task MovePictureElementAsync(string kind, string elementId, double xPercent, double yPercent)
+    {
+        if (!IsEditable || State.VisualMode != ChapterVisualMode.PicturePage || !Guid.TryParseExact(elementId, "N", out var id))
+            return;
+
+        if (string.Equals(kind, "image", StringComparison.OrdinalIgnoreCase))
+        {
+            var image = State.PageLayout.Images.FirstOrDefault(candidate => candidate.Id == id);
+            if (image is null) return;
+            await UpdatePictureImageAsync(
+                id,
+                Clamp(xPercent, 0, Math.Max(0, 100 - image.WidthPercent)),
+                Clamp(yPercent, 0, Math.Max(0, 100 - image.HeightPercent)));
+            return;
+        }
+
+        var text = State.PageLayout.TextElements.FirstOrDefault(candidate => candidate.Id == id);
+        if (text is null) return;
+        await UpdatePictureTextAsync(
+            id,
+            x: Clamp(xPercent, 0, Math.Max(0, 100 - text.WidthPercent)),
+            y: Clamp(yPercent, 0, Math.Max(0, 100 - text.HeightPercent)));
+    }
+
+    [JSInvokable]
+    public async Task ResizePictureElementAsync(string kind, string elementId, double widthPercent, double heightPercent)
+    {
+        if (!IsEditable || State.VisualMode != ChapterVisualMode.PicturePage || !Guid.TryParseExact(elementId, "N", out var id))
+            return;
+
+        if (string.Equals(kind, "image", StringComparison.OrdinalIgnoreCase))
+        {
+            var image = State.PageLayout.Images.FirstOrDefault(candidate => candidate.Id == id);
+            if (image is null) return;
+            await UpdatePictureImageAsync(
+                id,
+                width: Clamp(widthPercent, 5, Math.Max(5, 100 - image.XPercent)),
+                height: Clamp(heightPercent, 5, Math.Max(5, 100 - image.YPercent)));
+            return;
+        }
+
+        var text = State.PageLayout.TextElements.FirstOrDefault(candidate => candidate.Id == id);
+        if (text is null) return;
+        await UpdatePictureTextAsync(
+            id,
+            width: Clamp(widthPercent, 5, Math.Max(5, 100 - text.XPercent)),
+            height: Clamp(heightPercent, 5, Math.Max(5, 100 - text.YPercent)));
+    }
+
+    [JSInvokable]
+    public async Task AddDroppedImageAsync(
+        string fileName,
+        string contentType,
+        string base64Data,
+        double? xPercent,
+        double? yPercent)
+    {
+        if (!IsEditable || ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(base64Data))
+            return;
+
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromBase64String(base64Data);
+        }
+        catch (FormatException)
+        {
+            return;
+        }
+
+        var uploaded = await ProjectImages.UploadAsync(ProjectId, new ProjectImageUpload(
+            fileName,
+            contentType,
+            bytes,
+            string.Empty));
+
+        var placement = await Visuals.AddImageToChapterAsync(ProjectId, State.ChapterId, uploaded.Id);
+        var state = placement.State;
+        if (state.VisualMode == ChapterVisualMode.PicturePage
+            && xPercent is double centerX
+            && yPercent is double centerY)
+        {
+            var image = state.PageLayout.Images.FirstOrDefault(candidate => candidate.Id == placement.ElementId);
+            if (image is not null)
+            {
+                var x = Clamp(centerX - image.WidthPercent / 2, 0, Math.Max(0, 100 - image.WidthPercent));
+                var y = Clamp(centerY - image.HeightPercent / 2, 0, Math.Max(0, 100 - image.HeightPercent));
+                var adjustedLayout = state.PageLayout with
+                {
+                    Images = state.PageLayout.Images.Select(candidate => candidate.Id == placement.ElementId
+                        ? candidate with { XPercent = x, YPercent = y }
+                        : candidate).ToList(),
+                };
+                state = await Visuals.SavePageLayoutAsync(State.ChapterId, adjustedLayout);
+            }
+        }
+
+        if (OnImagesChanged.HasDelegate)
+            await OnImagesChanged.InvokeAsync();
+        await OnChanged.InvokeAsync(state);
+    }
+
+    private async Task UpdatePictureTextAsync(Guid elementId, string? body = null, double? x = null, double? y = null, double? width = null, double? height = null) =>
+        await SavePageAsync(State.PageLayout with
+        {
+            TextElements = State.PageLayout.TextElements.Select(text => text.Id == elementId
+                ? text with
+                {
+                    Text = body ?? text.Text,
+                    XPercent = x ?? text.XPercent,
+                    YPercent = y ?? text.YPercent,
+                    WidthPercent = width ?? text.WidthPercent,
+                    HeightPercent = height ?? text.HeightPercent,
+                }
+                : text).ToList(),
+        });
+
+    private async Task RemovePictureImageAsync(Guid elementId) =>
+        await SavePageAsync(State.PageLayout with { Images = State.PageLayout.Images.Where(image => image.Id != elementId).ToList() });
+
+    private async Task RemovePictureTextAsync(Guid elementId) =>
+        await SavePageAsync(State.PageLayout with { TextElements = State.PageLayout.TextElements.Where(text => text.Id != elementId).ToList() });
+
+    private async Task SaveIllustrationsAsync(IllustratedProseLayout layout)
+    {
+        var updated = await Visuals.SaveIllustrationLayoutAsync(State.ChapterId, layout);
+        await OnChanged.InvokeAsync(updated);
+    }
+
+    private async Task SavePageAsync(PicturePageLayout layout)
+    {
+        var updated = await Visuals.SavePageLayoutAsync(State.ChapterId, layout);
+        await OnChanged.InvokeAsync(updated);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_viewerModule is not null)
+        {
+            try { await _viewerModule.InvokeVoidAsync("detach", _viewerRoot); } catch { }
+            try { await _viewerModule.DisposeAsync(); } catch { }
+        }
+
+        _selfRef?.Dispose();
+    }
+
+    private ProjectImageView? ImageById(Guid id) => Images.FirstOrDefault(image => image.Id == id);
+
+    private static IReadOnlyList<string> SplitParagraphs(string body)
+    {
+        var paragraphs = new List<string>();
+        var current = new StringBuilder();
+        foreach (var line in body.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n'))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                Flush();
+                continue;
+            }
+
+            if (current.Length > 0) current.AppendLine();
+            current.Append(line.TrimEnd());
+        }
+
+        Flush();
+        return paragraphs;
+
+        void Flush()
+        {
+            if (current.Length == 0) return;
+            paragraphs.Add(current.ToString());
+            current.Clear();
+        }
+    }
+
+    private static string ElementStyle(double x, double y, double width, double height, int zIndex) =>
+        $"left:{x.ToString(CultureInfo.InvariantCulture)}%;top:{y.ToString(CultureInfo.InvariantCulture)}%;width:{width.ToString(CultureInfo.InvariantCulture)}%;height:{height.ToString(CultureInfo.InvariantCulture)}%;z-index:{zIndex};";
+
+    private static string PicturePageStyle(double ratioWidth, double ratioHeight)
+    {
+        var width = ratioWidth.ToString(CultureInfo.InvariantCulture);
+        var height = ratioHeight.ToString(CultureInfo.InvariantCulture);
+        var viewportMax = $"calc((100dvh - 12rem) * {width} / {height})";
+        return $"aspect-ratio:{width}/{height};max-width:min(100%, 8.5in, {viewportMax});";
+    }
+
+    private static string TextElementStyle(PicturePageTextElement text)
+    {
+        var justify = text.VerticalAlign switch
+        {
+            ChapterTextVerticalAlign.Top => "flex-start",
+            ChapterTextVerticalAlign.Bottom => "flex-end",
+            _ => "center",
+        };
+        return ElementStyle(text.XPercent, text.YPercent, text.WidthPercent, text.HeightPercent, text.ZIndex)
+            + $"font-size:{text.FontSizePercent.ToString(CultureInfo.InvariantCulture)}cqw;line-height:{text.LineHeight.ToString(CultureInfo.InvariantCulture)};color:{text.Color};background:rgba(255,255,255,{text.BackgroundOpacity.ToString(CultureInfo.InvariantCulture)});text-align:{text.TextAlign.ToString().ToLowerInvariant()};align-items:{justify};";
+    }
+
+    private static string FitCss(ChapterImageFit fit) => fit switch
+    {
+        ChapterImageFit.Cover => "cover",
+        ChapterImageFit.Fill => "fill",
+        _ => "contain",
+    };
+
+    private static double Clamp(double value, double min, double max) =>
+        Math.Min(max, Math.Max(min, value));
+
+}

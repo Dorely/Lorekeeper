@@ -1,7 +1,9 @@
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -22,6 +24,8 @@ public sealed class EditorChatTools(
     IProjectSearchService projectSearch,
     IEditorRevisionAgentService revisionAgents,
     OutlineCollaborationTools outlineTools,
+    IProjectImageService projectImages,
+    IChapterVisualService chapterVisuals,
     IOptions<EditorChatOptions> editorOptions)
 {
     private static readonly EntityRelationContextOptions _listEntityRelationOptions = new()
@@ -122,6 +126,16 @@ public sealed class EditorChatTools(
                     "Use chapter ids from the Context Feed outline when available; use list_chapters for missing ids, line counts, and page counts. " +
                     "Provide pageNumber to read a specific page of the full chapter; omit it to read page 1. " +
                     "Always returns content plus pagination metadata. If this turn already staged an edit to the chapter, returns the latest staged body for this turn."),
+
+            AIFunctionFactory.Create(
+                method: () => ListProjectImagesAsync(context),
+                name: "list_project_images",
+                description: "List the project image library with ids, filenames, alt text, source, prompt, model, size, and preview URL. Read-only and available in Contest preparation."),
+
+            AIFunctionFactory.Create(
+                method: (Guid chapterId) => ReadChapterVisualLayoutAsync(context, chapterId),
+                name: "read_chapter_visual_layout",
+                description: "Read a chapter's visual mode and layout manifest, including visible placed images, text boxes, anchors, captions, and reading order. Read-only and available in Contest preparation."),
         ]);
 
         if (mode == EditorChatToolMode.ContestPreparation)
@@ -148,6 +162,38 @@ public sealed class EditorChatTools(
                 "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
                 "`content` should not contain line numbers. " +
                 "Returns a short change summary plus the edited line-numbered excerpt with nearby context lines."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid chapterId, string visualMode, double? picturePageWidthInches = null, double? picturePageHeightInches = null, bool? picturePageIsSpread = null) =>
+                SetChapterVisualModeAsync(context, chapterId, visualMode, picturePageWidthInches, picturePageHeightInches, picturePageIsSpread),
+            name: "set_chapter_visual_mode",
+            description:
+                "Live visual-layout mutation. Set a chapter visual mode to Prose, IllustratedProse, or PicturePage. " +
+                "Use picturePageWidthInches/picturePageHeightInches/picturePageIsSpread only when setting PicturePage."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, Guid[]? referenceImageIds = null, bool placeInCurrentChapter = false) =>
+                GenerateProjectImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, referenceImageIds, placeInCurrentChapter),
+            name: "generate_project_image",
+            description:
+                "Generate an image and save it to the project image library. Optional referenceImageIds use existing project images as references. " +
+                "Set placeInCurrentChapter=true only when the user wants the generated image inserted into the current chapter immediately."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid chapterId, Guid imageId) => AddProjectImageToChapterAsync(context, chapterId, imageId),
+            name: "add_project_image_to_chapter",
+            description:
+                "Live visual-layout mutation. Place an existing project image into a chapter. Prose converts to IllustratedProse, IllustratedProse adds an anchored figure, and PicturePage adds a centered freeform image element."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid chapterId, Guid imageId) => AddProjectImageToContextAsync(context, chapterId, imageId),
+            name: "add_project_image_to_context",
+            description: "Add an existing project image as explicit context for a chapter without placing it into the chapter layout."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid chapterId, Guid imageId) => RemoveProjectImageFromContextAsync(context, chapterId, imageId),
+            name: "remove_project_image_from_context",
+            description: "Remove an explicit project image context inclusion from a chapter without deleting the image or changing chapter layout."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (EditorRevisionAgentAssignmentInput[] chapters) => StartRevisionAgentsAsync(context, chapters),
@@ -656,6 +702,191 @@ public sealed class EditorChatTools(
                 : null,
             content,
         });
+    }
+
+    private async Task<string> ListProjectImagesAsync(EditorChatContext ctx)
+    {
+        var images = await projectImages.ListAsync(ctx.ProjectId);
+        if (images.Count == 0)
+            return "No project images.";
+
+        return JsonSerializer.Serialize(images.Select(image => new
+        {
+            image.Id,
+            image.FileName,
+            image.ContentType,
+            image.PreviewUrl,
+            image.AltText,
+            image.Source,
+            image.Prompt,
+            image.GenerationModel,
+            image.CreatedAt,
+            image.UpdatedAt,
+            image.SizeBytes,
+        }));
+    }
+
+    private async Task<string> ReadChapterVisualLayoutAsync(EditorChatContext ctx, Guid chapterId)
+    {
+        var chapter = await chapters.GetAsync(chapterId);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId} not found in this project.";
+
+        var state = await chapterVisuals.GetAsync(chapterId);
+        if (state is null)
+            return $"Error: visual layout for chapter {chapterId} was not found.";
+
+        var imageNames = (await projectImages.ListAsync(ctx.ProjectId))
+            .ToDictionary(image => image.Id, image => image.FileName);
+        return JsonSerializer.Serialize(new
+        {
+            chapter = new
+            {
+                id = chapter.Id,
+                chapter.Title,
+                chapter.Synopsis,
+            },
+            state.VisualMode,
+            state.PicturePageWidthInches,
+            state.PicturePageHeightInches,
+            state.PicturePageIsSpread,
+            state.IllustrationLayout,
+            state.PageLayout,
+            manifest = chapterVisuals.BuildManifest(state, imageNames),
+        });
+    }
+
+    private async Task<string> SetChapterVisualModeAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        string visualMode,
+        double? picturePageWidthInches,
+        double? picturePageHeightInches,
+        bool? picturePageIsSpread)
+    {
+        var chapter = await chapters.GetAsync(chapterId);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId} not found in this project.";
+
+        if (!Enum.TryParse<ChapterVisualMode>(visualMode, ignoreCase: true, out var parsedMode)
+            || !Enum.IsDefined(parsedMode))
+        {
+            return "Error: visualMode must be Prose, IllustratedProse, or PicturePage.";
+        }
+
+        var state = await chapterVisuals.SetModeAsync(
+            chapterId,
+            new ChapterVisualModeUpdate(parsedMode, picturePageWidthInches, picturePageHeightInches, picturePageIsSpread));
+        ctx.OnMutated();
+        return JsonSerializer.Serialize(new
+        {
+            message = $"Chapter visual mode set to {state.VisualMode}.",
+            state.VisualMode,
+            state.PicturePageWidthInches,
+            state.PicturePageHeightInches,
+            state.PicturePageIsSpread,
+        });
+    }
+
+    private async Task<string> GenerateProjectImageAsync(
+        EditorChatContext ctx,
+        string prompt,
+        string? altText,
+        string? size,
+        string? quality,
+        string? outputFormat,
+        int? outputCompression,
+        Guid[]? referenceImageIds,
+        bool placeInCurrentChapter)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+            return "Error: prompt is required.";
+        if (placeInCurrentChapter && ctx.CurrentChapterId is null)
+            return "Error: placeInCurrentChapter requires an active current chapter.";
+
+        var image = await projectImages.GenerateAsync(ctx.ProjectId, new ProjectImageGenerationRequest(
+            prompt.Trim(),
+            string.IsNullOrWhiteSpace(size) ? "auto" : size.Trim(),
+            string.IsNullOrWhiteSpace(quality) ? "auto" : quality.Trim(),
+            string.IsNullOrWhiteSpace(outputFormat) ? "png" : outputFormat.Trim(),
+            outputCompression,
+            altText?.Trim() ?? string.Empty,
+            (referenceImageIds ?? []).Distinct().ToList()));
+
+        object? placement = null;
+        if (placeInCurrentChapter)
+        {
+            var chapterId = ctx.CurrentChapterId!.Value;
+            var placed = await chapterVisuals.AddImageToChapterAsync(ctx.ProjectId, chapterId, image.Id);
+            placement = new
+            {
+                chapterId,
+                elementId = placed.ElementId,
+                placed.State.VisualMode,
+            };
+        }
+
+        ctx.OnMutated();
+        return JsonSerializer.Serialize(new
+        {
+            image.Id,
+            image.FileName,
+            image.ContentType,
+            image.PreviewUrl,
+            image.AltText,
+            image.Source,
+            image.Prompt,
+            image.GenerationModel,
+            placement,
+        });
+    }
+
+    private async Task<string> AddProjectImageToChapterAsync(EditorChatContext ctx, Guid chapterId, Guid imageId)
+    {
+        var result = await chapterVisuals.AddImageToChapterAsync(ctx.ProjectId, chapterId, imageId);
+        ctx.OnMutated();
+        return JsonSerializer.Serialize(new
+        {
+            message = "Image placed in chapter.",
+            chapterId,
+            imageId,
+            elementId = result.ElementId,
+            result.State.VisualMode,
+        });
+    }
+
+    private async Task<string> AddProjectImageToContextAsync(EditorChatContext ctx, Guid chapterId, Guid imageId)
+    {
+        var chapter = await chapters.GetAsync(chapterId);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId} not found in this project.";
+        if (await projectImages.GetAsync(ctx.ProjectId, imageId) is null)
+            return $"Error: image {imageId} not found in this project.";
+
+        await editorContext.SetItemIncludedAsync(
+            ctx.ProjectId,
+            chapterId,
+            ContextItemKind.ProjectImage,
+            EditorContextKeys.ProjectImage(imageId),
+            isIncluded: true);
+        ctx.OnMutated();
+        return "Image added to chapter context.";
+    }
+
+    private async Task<string> RemoveProjectImageFromContextAsync(EditorChatContext ctx, Guid chapterId, Guid imageId)
+    {
+        var chapter = await chapters.GetAsync(chapterId);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId} not found in this project.";
+
+        await editorContext.SetItemIncludedAsync(
+            ctx.ProjectId,
+            chapterId,
+            ContextItemKind.ProjectImage,
+            EditorContextKeys.ProjectImage(imageId),
+            isIncluded: false);
+        ctx.OnMutated();
+        return "Image removed from chapter context.";
     }
 
     private int EffectiveReadChapterPageMaxChars() => Math.Max(256, editorOptions.Value.ReadChapterPageMaxChars);

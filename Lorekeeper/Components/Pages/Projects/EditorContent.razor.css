@@ -318,6 +318,24 @@
     color: var(--bs-secondary-color, #6c757d);
 }
 
+.panel-title--with-action {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.45rem;
+}
+
+.panel-title--with-action .panel-title-toggle {
+    min-width: 0;
+}
+
+.panel-title-action {
+    flex: 0 0 auto;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.72rem;
+}
+
 .panel--collapsed .panel-title {
     margin-bottom: 0;
 }
@@ -1160,6 +1178,10 @@
 .chapter-icon-btn {
     line-height: 1;
     padding: 0.2rem 0.5rem;
+}
+
+.chapter-visual-mode {
+    flex: 0 0 10.5rem;
 }
 
 .chapter-metrics {

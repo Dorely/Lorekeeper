@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.Models;
 
 namespace Lorekeeper.ImportExport;
 
@@ -17,7 +18,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 1;
+    public const int CurrentFormatVersion = 2;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -25,6 +26,8 @@ public sealed record ProjectExportDocument
     public DateTime ExportedAtUtc { get; init; } = DateTime.UtcNow;
     public required ProjectExportProject Project { get; init; }
     public List<ProjectExportEntityType> EntityTypes { get; init; } = [];
+    public List<ProjectExportImage> Images { get; init; } = [];
+    public List<ProjectExportPublishProfile> PublishProfiles { get; init; } = [];
     public List<ProjectExportAct> Acts { get; init; } = [];
     public List<ProjectExportChapter> Chapters { get; init; } = [];
     public List<ProjectExportNode> Nodes { get; init; } = [];
@@ -57,13 +60,64 @@ public sealed record ProjectExportAct(
     string Synopsis,
     int Order);
 
-public sealed record ProjectExportChapter(
+public sealed record ProjectExportImage(
     Guid Id,
-    Guid? ActId,
-    string Title,
-    string Body,
-    string Synopsis,
-    int Order);
+    string FileName,
+    string ContentType,
+    byte[] Data,
+    string AltText,
+    PublishAssetSource Source,
+    string Prompt,
+    string GenerationModel,
+    string SourceMetadataJson,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public sealed record ProjectExportPublishProfile(
+    Guid Id,
+    string TitleOverride,
+    string Subtitle,
+    string Author,
+    string Language,
+    string Publisher,
+    string Copyright,
+    string Isbn,
+    string Description,
+    string Dedication,
+    string Acknowledgments,
+    string References,
+    bool IncludeTableOfContents,
+    bool IncludeVisibleTableOfContents,
+    bool IncludeActSynopses,
+    bool IncludeChapterSynopses,
+    bool IncludeActHeadings,
+    bool IncludeChapterHeadings,
+    bool NumberActs,
+    bool NumberChapters,
+    string CoverLayoutJson,
+    double PageWidthInches,
+    double PageHeightInches,
+    double PageMarginInches,
+    double BodyFontSizePoints,
+    double BodyLineHeight,
+    Guid? SelectedCoverAssetId);
+
+public sealed record ProjectExportChapter
+{
+    public Guid Id { get; init; }
+    public Guid? ActId { get; init; }
+    public string Title { get; init; } = string.Empty;
+    public string Body { get; init; } = string.Empty;
+    public string Synopsis { get; init; } = string.Empty;
+    public int Order { get; init; }
+    public ChapterVisualMode VisualMode { get; init; } = ChapterVisualMode.Prose;
+    public double PicturePageWidthInches { get; init; } = 8.5;
+    public double PicturePageHeightInches { get; init; } = 8.5;
+    public bool PicturePageIsSpread { get; init; }
+    public string PageLayoutJson { get; init; } = string.Empty;
+    public string IllustrationLayoutJson { get; init; } = string.Empty;
+    public List<Guid> ExplicitImageContextImageIds { get; init; } = [];
+}
 
 public sealed record ProjectExportNode(
     string NodeType,

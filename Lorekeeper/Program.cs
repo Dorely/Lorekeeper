@@ -4,6 +4,8 @@ using Lorekeeper.Components;
 using Lorekeeper.Context;
 using Lorekeeper.EditorChat;
 using Lorekeeper.Graph;
+using Lorekeeper.ChapterVisuals;
+using Lorekeeper.Images;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
@@ -111,6 +113,8 @@ builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>(
 
 // Chapters
 builder.Services.AddScoped<IChapterService, ChapterService>();
+builder.Services.AddScoped<IChapterVisualService, ChapterVisualService>();
+builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
 
 // Outline
 builder.Services.AddScoped<IActService, ActService>();
@@ -240,6 +244,7 @@ app.MapRazorComponents<Lorekeeper.Components.App>()
     .AddInteractiveServerRenderMode();
 
 app.MapCodexOAuth();
+app.MapProjectImages();
 
 app.Run();
 

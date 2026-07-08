@@ -1,11 +1,15 @@
 using System.Text.Json;
+using Lorekeeper.Context;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.ImportExport;
 
 public sealed class ProjectImportExportService(
+    AppDbContext db,
     IProjectRepository projects,
     IActRepository acts,
     IChapterRepository chapters,
@@ -38,6 +42,7 @@ public sealed class ProjectImportExportService(
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         await entityTypeService.EnsureDefaultsAsync(projectId, cancellationToken);
+        var exportedImageContextIds = await ListExportedImageContextIdsAsync(projectId, cancellationToken);
 
         var allNodes = await nodes.ListByProjectAsync(projectId, cancellationToken);
         var nodeById = allNodes.ToDictionary(node => node.Id);
@@ -82,11 +87,29 @@ public sealed class ProjectImportExportService(
                 .Where(type => ShouldExportType(kind, type))
                 .Select(ProjectEntityType)
                 .ToList(),
+            Images = kind == ProjectExportKind.Full
+                ? await db.PublishAssets
+                    .AsNoTracking()
+                    .Where(asset => asset.ProjectId == projectId)
+                    .OrderBy(asset => asset.CreatedAt)
+                    .Select(asset => ProjectImage(asset))
+                    .ToListAsync(cancellationToken)
+                : [],
+            PublishProfiles = kind == ProjectExportKind.Full
+                ? await db.PublishProfiles
+                    .AsNoTracking()
+                    .Where(profile => profile.ProjectId == projectId)
+                    .OrderBy(profile => profile.CreatedAt)
+                    .Select(profile => ProjectPublishProfile(profile))
+                    .ToListAsync(cancellationToken)
+                : [],
             Acts = kind == ProjectExportKind.Full
                 ? (await acts.ListByProjectAsync(projectId, cancellationToken)).Select(ProjectAct).ToList()
                 : [],
             Chapters = kind == ProjectExportKind.Full
-                ? (await chapters.ListByProjectAsync(projectId, cancellationToken)).Select(ProjectChapter).ToList()
+                ? (await chapters.ListByProjectAsync(projectId, cancellationToken))
+                    .Select(chapter => ProjectChapter(chapter, exportedImageContextIds))
+                    .ToList()
                 : [],
             Nodes = allNodes
                 .Where(node => includedNodeKeys.Contains(NodeStableKey(node)))
@@ -124,7 +147,7 @@ public sealed class ProjectImportExportService(
             FormatVersion = formatVersion,
             ExportKind = exportKind,
             Status = ProjectImportJobStatus.Queued,
-            TotalSteps = 8,
+            TotalSteps = 9,
             CurrentMessage = "Queued for import.",
         };
 
@@ -210,8 +233,98 @@ public sealed class ProjectImportExportService(
     private static ProjectExportAct ProjectAct(Act act) =>
         new(act.Id, act.Title, act.Synopsis, act.Order);
 
-    private static ProjectExportChapter ProjectChapter(Chapter chapter) =>
-        new(chapter.Id, chapter.ActId, chapter.Title, chapter.Body, chapter.Synopsis, chapter.Order);
+    private static ProjectExportImage ProjectImage(PublishAsset asset) =>
+        new(
+            asset.Id,
+            asset.FileName,
+            asset.ContentType,
+            asset.Data,
+            asset.AltText,
+            asset.Source,
+            asset.Prompt,
+            asset.GenerationModel,
+            asset.SourceMetadataJson,
+            asset.CreatedAt,
+            asset.UpdatedAt);
+
+    private static ProjectExportPublishProfile ProjectPublishProfile(PublishProfile profile) =>
+        new(
+            profile.Id,
+            profile.TitleOverride,
+            profile.Subtitle,
+            profile.Author,
+            profile.Language,
+            profile.Publisher,
+            profile.Copyright,
+            profile.Isbn,
+            profile.Description,
+            profile.Dedication,
+            profile.Acknowledgments,
+            profile.References,
+            profile.IncludeTableOfContents,
+            profile.IncludeVisibleTableOfContents,
+            profile.IncludeActSynopses,
+            profile.IncludeChapterSynopses,
+            profile.IncludeActHeadings,
+            profile.IncludeChapterHeadings,
+            profile.NumberActs,
+            profile.NumberChapters,
+            profile.CoverLayoutJson,
+            profile.PageWidthInches,
+            profile.PageHeightInches,
+            profile.PageMarginInches,
+            profile.BodyFontSizePoints,
+            profile.BodyLineHeight,
+            profile.SelectedCoverAssetId);
+
+    private static ProjectExportChapter ProjectChapter(
+        Chapter chapter,
+        IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> exportedImageContextIds) =>
+        new()
+        {
+            Id = chapter.Id,
+            ActId = chapter.ActId,
+            Title = chapter.Title,
+            Body = chapter.Body,
+            Synopsis = chapter.Synopsis,
+            Order = chapter.Order,
+            VisualMode = chapter.VisualMode,
+            PicturePageWidthInches = chapter.PicturePageWidthInches,
+            PicturePageHeightInches = chapter.PicturePageHeightInches,
+            PicturePageIsSpread = chapter.PicturePageIsSpread,
+            PageLayoutJson = chapter.PageLayoutJson,
+            IllustrationLayoutJson = chapter.IllustrationLayoutJson,
+            ExplicitImageContextImageIds = exportedImageContextIds.TryGetValue(chapter.Id, out var imageIds)
+                ? imageIds.ToList()
+                : [],
+        };
+
+    private async Task<IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>> ListExportedImageContextIdsAsync(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        var preferences = await db.EditorContextPreferences
+            .AsNoTracking()
+            .Where(preference =>
+                preference.ProjectId == projectId
+                && preference.IsIncluded
+                && preference.Kind == ContextItemKind.ProjectImage.ToString())
+            .ToListAsync(cancellationToken);
+
+        return preferences
+            .Select(preference => new
+            {
+                preference.ChapterId,
+                ImageId = EditorContextKeys.TryParseProjectImage(preference.Key, out var imageId)
+                    ? imageId
+                    : (Guid?)null,
+            })
+            .Where(item => item.ImageId is not null)
+            .GroupBy(item => item.ChapterId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<Guid>)group.Select(item => item.ImageId!.Value).Distinct().ToList());
+    }
 
     private static string NodeStableKey(GraphNode node) =>
         $"{node.NodeType}/{node.Key}";

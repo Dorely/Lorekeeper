@@ -1,0 +1,13 @@
+@page "/projects/{Slug}/images"
+@rendermode InteractiveServer
+@using Lorekeeper.Components.Pages.Projects.Images
+
+<PageTitle>Images</PageTitle>
+
+<ProjectLayout Slug="@Slug" Tab="images">
+    <ImagesContent />
+</ProjectLayout>
+
+@code {
+    [Parameter] public string Slug { get; set; } = string.Empty;
+}

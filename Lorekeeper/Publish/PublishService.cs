@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -12,6 +13,7 @@ public sealed class PublishService(
     AppDbContext db,
     ICodexImageGenerationService codexImages,
     IPublishCoverRenderer coverRenderer,
+    IChapterVisualService chapterVisuals,
     IEnumerable<IPublishExportFormatter> formatters) : IPublishService
 {
     private static readonly PublishCoverLayerKind[] CoverLayerOrder =
@@ -236,6 +238,8 @@ public sealed class PublishService(
         foreach (var profile in await db.PublishProfiles.Where(profile => profile.ProjectId == projectId && profile.SelectedCoverAssetId == assetId).ToListAsync(cancellationToken))
             profile.SelectedCoverAssetId = null;
 
+        await chapterVisuals.RemoveImageReferencesAsync(projectId, assetId, cancellationToken);
+
         db.PublishAssets.Remove(asset);
         project.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
@@ -393,6 +397,7 @@ public sealed class PublishService(
             renderedCover,
             coverLayout,
             sections,
+            assets.Values.Select(AssetDocument).ToList(),
             placementDocuments);
     }
 
@@ -544,10 +549,48 @@ public sealed class PublishService(
             chapter.Body,
             chapter.Synopsis,
             chapter.Order,
-            profile.IncludeChapterHeadings);
+            profile.IncludeChapterHeadings,
+            chapter.VisualMode,
+            chapter.PicturePageWidthInches,
+            chapter.PicturePageHeightInches,
+            chapter.PicturePageIsSpread,
+            ReadIllustrationLayout(chapter),
+            ReadPageLayout(chapter));
 
     private static PublishAssetDocument AssetDocument(PublishAsset asset) =>
         new(asset.Id, asset.FileName, asset.ContentType, asset.Data, asset.AltText);
+
+    private static IllustratedProseLayout ReadIllustrationLayout(Chapter chapter)
+    {
+        if (string.IsNullOrWhiteSpace(chapter.IllustrationLayoutJson))
+            return new IllustratedProseLayout([]);
+
+        try
+        {
+            return JsonSerializer.Deserialize<IllustratedProseLayout>(chapter.IllustrationLayoutJson, JsonOptions)
+                ?? new IllustratedProseLayout([]);
+        }
+        catch (JsonException)
+        {
+            return new IllustratedProseLayout([]);
+        }
+    }
+
+    private static PicturePageLayout ReadPageLayout(Chapter chapter)
+    {
+        if (string.IsNullOrWhiteSpace(chapter.PageLayoutJson))
+            return new PicturePageLayout([], []);
+
+        try
+        {
+            return JsonSerializer.Deserialize<PicturePageLayout>(chapter.PageLayoutJson, JsonOptions)
+                ?? new PicturePageLayout([], []);
+        }
+        catch (JsonException)
+        {
+            return new PicturePageLayout([], []);
+        }
+    }
 
     private static PublishCoverLayoutView ReadCoverLayout(PublishProfile profile)
     {

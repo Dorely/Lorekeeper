@@ -43,6 +43,8 @@ public static class EditorContextKeys
     public static string ActReference(Guid actId) => $"act:{actId:N}";
     public static string IngestSourceReference(Guid sourceId) => $"ingest-source:{sourceId:N}";
     public static string IngestSourceChunkReference(Guid sourceChunkId) => $"ingest-source-chunk:{sourceChunkId:N}";
+    public static string ProjectImage(Guid imageId) => $"project-image:{imageId:N}";
+    public static string ChapterVisualLayout(Guid chapterId) => $"chapter-visual-layout:{chapterId:N}";
 
     public static bool TryParseEntity(string key, out Guid entityId)
     {
@@ -67,6 +69,9 @@ public static class EditorContextKeys
 
     public static bool TryParseIngestSourceChunkReference(string key, out Guid sourceChunkId) =>
         TryParseGuidKey(key, "ingest-source-chunk:", out sourceChunkId);
+
+    public static bool TryParseProjectImage(string key, out Guid imageId) =>
+        TryParseGuidKey(key, "project-image:", out imageId);
 
     private static bool TryParseGuidKey(string key, string prefix, out Guid id)
     {

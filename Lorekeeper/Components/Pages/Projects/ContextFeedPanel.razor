@@ -139,7 +139,8 @@ else
             or ContextItemKind.ChapterReference
             or ContextItemKind.ActReference
             or ContextItemKind.IngestSourceReference
-            or ContextItemKind.IngestSourceChunkReference;
+            or ContextItemKind.IngestSourceChunkReference
+            or ContextItemKind.ProjectImage;
 
     private static string ContextActionButtonClass(ContextItem item) =>
         IsRemoveAction(item)

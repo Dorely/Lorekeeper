@@ -1,0 +1,146 @@
+@using Lorekeeper.Context
+@using Lorekeeper.Images
+@inject IProjectImageService Images
+@inject IEditorContextService EditorContext
+
+@if (IsOpen)
+{
+    <div class="image-modal-backdrop" @onclick="CloseAsync">
+        <section class="image-modal" role="dialog" aria-modal="true" aria-label="Project images" @onclick:stopPropagation="true">
+            <header class="image-modal-header">
+                <h5>Images</h5>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
+            </header>
+
+            <div class="image-modal-toolbar">
+                <input type="search"
+                       class="form-control form-control-sm"
+                       placeholder="Search images..."
+                       @bind="_query"
+                       @bind:event="oninput" />
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ReloadAsync">Refresh</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="alert alert-danger py-2">@_error</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_status))
+            {
+                <div class="alert alert-success py-2">@_status</div>
+            }
+
+            @if (_loading)
+            {
+                <p class="text-muted"><em>Loading images...</em></p>
+            }
+            else if (FilteredImages.Count == 0)
+            {
+                <div class="image-modal-empty">No images found.</div>
+            }
+            else
+            {
+                <div class="image-modal-grid">
+                    @foreach (var image in FilteredImages)
+                    {
+                        <article class="image-modal-card" @key="image.Id">
+                            <img src="@image.PreviewUrl" alt="@ImageAlt(image)" />
+                            <div class="image-modal-card-body">
+                                <strong>@image.FileName</strong>
+                                @if (!string.IsNullOrWhiteSpace(image.AltText))
+                                {
+                                    <span>@image.AltText</span>
+                                }
+                                <div class="image-modal-actions">
+                                    <button type="button" class="btn btn-sm btn-primary" @onclick="() => AddToChapterAsync(image.Id)">Add to chapter</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => AddToContextAsync(image.Id)">Add to context</button>
+                                </div>
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public Guid? ChapterId { get; set; }
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<Guid> OnAddToChapter { get; set; }
+    [Parameter] public EventCallback OnContextChanged { get; set; }
+
+    private IReadOnlyList<ProjectImageView> _images = [];
+    private bool _loading;
+    private string _query = string.Empty;
+    private string? _error;
+    private string? _status;
+    private bool _wasOpen;
+
+    private IReadOnlyList<ProjectImageView> FilteredImages =>
+        string.IsNullOrWhiteSpace(_query)
+            ? _images
+            : _images.Where(image => image.FileName.Contains(_query, StringComparison.OrdinalIgnoreCase)
+                || image.AltText.Contains(_query, StringComparison.OrdinalIgnoreCase)
+                || image.Prompt.Contains(_query, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsOpen && !_wasOpen)
+            await ReloadAsync();
+        _wasOpen = IsOpen;
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = null;
+        _status = null;
+        try
+        {
+            _images = await Images.ListAsync(ProjectId);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task AddToChapterAsync(Guid imageId)
+    {
+        if (ChapterId is null) return;
+        await OnAddToChapter.InvokeAsync(imageId);
+        _status = "Image added to chapter.";
+    }
+
+    private async Task AddToContextAsync(Guid imageId)
+    {
+        if (ChapterId is null) return;
+        _error = null;
+        try
+        {
+            await EditorContext.SetItemIncludedAsync(ProjectId, ChapterId.Value, ContextItemKind.ProjectImage, EditorContextKeys.ProjectImage(imageId), isIncluded: true);
+            _status = "Image added to context.";
+            await OnContextChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        if (OnClose.HasDelegate)
+            await OnClose.InvokeAsync();
+    }
+
+    private static string ImageAlt(ProjectImageView image) =>
+        string.IsNullOrWhiteSpace(image.AltText) ? image.FileName : image.AltText;
+}

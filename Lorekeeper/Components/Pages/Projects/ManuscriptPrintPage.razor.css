@@ -153,6 +153,21 @@
     text-align: center;
 }
 
+.manuscript-figure--inline {
+    break-before: auto;
+    margin: 0.18in auto;
+}
+
+.manuscript-picture-page {
+    break-before: page;
+    min-height: 8.5in;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.16in;
+    text-align: center;
+}
+
 .manuscript-figure img {
     display: block;
     max-width: 100%;
