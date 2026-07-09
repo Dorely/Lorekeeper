@@ -48,12 +48,15 @@ public static class AiChangeReviewDiffBuilder
 
         if (AiChangeReviewDrafts.TryGetEditablePayload(change, out var editablePayload))
         {
+            var fields = editablePayload.Fields
+                .Select(field => new DiffFieldInput(field.Key, field.Label, field.OldText, field.NewText, EditableOwnerChangeId(change, hasAfterPayload: true)))
+                .ToList();
+            AppendReadOnlyChapterVisualFields(change, fields);
+
             diff = Build(
                 editablePayload.Title,
                 editablePayload.Subtitle,
-                editablePayload.Fields
-                    .Select(field => new DiffFieldInput(field.Key, field.Label, field.OldText, field.NewText, EditableOwnerChangeId(change, hasAfterPayload: true)))
-                    .ToList(),
+                fields,
                 showSingleFieldLabel: editablePayload.Fields.Count != 1 || !string.Equals(editablePayload.Fields[0].Key, "Body", StringComparison.OrdinalIgnoreCase));
             return true;
         }
@@ -216,6 +219,8 @@ public static class AiChangeReviewDiffBuilder
             var ownerChangeId = EditableOwnerChangeId(change, after is not null);
             AddOrUpdateField(fields, "Title", before?.Title ?? string.Empty, after?.Title ?? string.Empty, ownerChangeId);
             AddOrUpdateField(fields, "Synopsis", before?.Synopsis ?? string.Empty, after?.Synopsis ?? string.Empty, ownerChangeId);
+            AddOrUpdateField(fields, "Visual mode", before?.VisualMode.ToString() ?? string.Empty, after?.VisualMode.ToString() ?? string.Empty, ownerChangeId: null);
+            AddOrUpdateField(fields, "Page layout", before?.PageLayoutKind.ToString() ?? string.Empty, after?.PageLayoutKind.ToString() ?? string.Empty, ownerChangeId: null);
             return true;
         }
 
@@ -293,6 +298,30 @@ public static class AiChangeReviewDiffBuilder
         }
 
         fields[key] = new DiffFieldInput(key, oldText, newText, ownerChangeId);
+    }
+
+    private static void AppendReadOnlyChapterVisualFields(AiChange change, List<DiffFieldInput> fields)
+    {
+        if (!IsTool(change, "create_chapter", "update_chapter", "delete_chapter"))
+            return;
+
+        var before = ReadOptional<OutlineChapterChange>(change.BeforeJson);
+        var after = ReadOptional<OutlineChapterChange>(AiChangeReviewDrafts.EffectiveAfterJson(change));
+        if (before is null && after is null)
+            return;
+
+        fields.Add(new DiffFieldInput(
+            "VisualMode",
+            "Visual mode",
+            before?.VisualMode.ToString() ?? string.Empty,
+            after?.VisualMode.ToString() ?? string.Empty,
+            OwnerChangeId: null));
+        fields.Add(new DiffFieldInput(
+            "PageLayoutKind",
+            "Page layout",
+            before?.PageLayoutKind.ToString() ?? string.Empty,
+            after?.PageLayoutKind.ToString() ?? string.Empty,
+            OwnerChangeId: null));
     }
 
     private static string GetPropertyValue(Dictionary<string, string?>? properties, string propertyName, out bool exists)

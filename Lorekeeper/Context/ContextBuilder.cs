@@ -485,6 +485,8 @@ public sealed class ContextBuilder(
         var body = new StringBuilder();
         body.Append("Title: ").AppendLine(chapter.Title);
         AppendOptionalIndented(body, "Synopsis", chapter.Synopsis, 0);
+        body.Append("Visual mode: ").Append(chapter.VisualMode)
+            .Append("; page layout: ").AppendLine(chapter.PageLayoutKind.ToString());
         body.AppendLine("Body (line-numbered):");
         body.AppendLine(string.IsNullOrWhiteSpace(chapter.Body) ? "(empty)" : ChapterFormatting.WithLineNumbers(chapter.Body));
 
@@ -740,6 +742,8 @@ public sealed class ContextBuilder(
             var beats = await entities.ListAsync(chapter.ProjectId, EntityTypeService.EventNodeType, chapter.Id, cancellationToken);
             sb.Append("  Chapter ").Append(chapter.Order + 1).Append(": ").Append(chapter.Title);
             sb.Append(" [id: ").Append(chapter.Id).Append(']');
+            sb.Append(" [visual: ").Append(chapter.VisualMode)
+                .Append("; pageLayout: ").Append(chapter.PageLayoutKind).Append(']');
             if (chapter.Id == currentChapterId)
                 sb.Append(" (current)");
             sb.AppendLine();

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.Graph;
@@ -33,6 +34,7 @@ public sealed class OutlineCollaborationTools(
     IProjectFactService projectFacts,
     IAiChangeRepository changes,
     IProjectRepository projectRepository,
+    IChapterVisualService chapterVisuals,
     IEntityRelationContextService entityRelations,
     IProjectSearchService projectSearch,
     IGraphAutoLinkService autoLinks)
@@ -54,7 +56,7 @@ public sealed class OutlineCollaborationTools(
         Guid conversationId,
         AiChangeConversationKind conversationKind = AiChangeConversationKind.Outline,
         Action? onDirectMutationApplied = null) =>
-        new(projectId, conversationId, conversationKind, changes, projectRepository, acts, chapters, entities, entityTypes, onDirectMutationApplied);
+        new(projectId, conversationId, conversationKind, changes, projectRepository, acts, chapters, chapterVisuals, entities, entityTypes, onDirectMutationApplied);
 
     public async Task<IList<AITool>> BuildAsync(
         OutlineCollaborationContext context,
@@ -107,14 +109,27 @@ public sealed class OutlineCollaborationTools(
                 description: "Delete an act. Any chapters it owned move to the project's unassigned bucket."),
 
             AIFunctionFactory.Create(
-                method: (string title, string synopsis, string? actId = null) => CreateChapterAsync(context, actId, title, synopsis),
+                method: (
+                    string title,
+                    string synopsis,
+                    string? actId = null,
+                    string? visualMode = null,
+                    string? pageLayoutKind = null) =>
+                    CreateChapterAsync(context, actId, title, synopsis, visualMode, pageLayoutKind),
                 name: "create_chapter",
-                description: "Create a chapter. Pass actId as the act's Guid to place it in that act, or omit/null/'unassigned' to land in the unassigned bucket. Order is auto-assigned to the end of the chosen bucket."),
+                description: "Create a chapter. Pass actId as the act's Guid to place it in that act, or omit/null/'unassigned' to land in the unassigned bucket. Optional visualMode is Prose, IllustratedProse, or PicturePage. Optional pageLayoutKind is SinglePortrait, SingleLandscape, DoublePortrait, or DoubleLandscape and only applies to IllustratedProse/PicturePage. Order is auto-assigned to the end of the chosen bucket."),
 
             AIFunctionFactory.Create(
-                method: (Guid chapterId, string? title = null, string? synopsis = null, string? actId = null) => UpdateChapterAsync(context, chapterId, title, synopsis, actId),
+                method: (
+                    Guid chapterId,
+                    string? title = null,
+                    string? synopsis = null,
+                    string? actId = null,
+                    string? visualMode = null,
+                    string? pageLayoutKind = null) =>
+                    UpdateChapterAsync(context, chapterId, title, synopsis, actId, visualMode, pageLayoutKind),
                 name: "update_chapter",
-                description: "Update a chapter's title/synopsis and/or move it between act buckets. Pass null to leave a field unchanged. For actId: omit/null = leave act unchanged; 'unassigned' = move to unassigned; or pass a Guid to move into that act."),
+                description: "Update a chapter's title/synopsis, visual mode/page layout, and/or move it between act buckets. Pass null to leave a field unchanged. For actId: omit/null = leave act unchanged; 'unassigned' = move to unassigned; or pass a Guid to move into that act. visualMode must be Prose, IllustratedProse, or PicturePage. pageLayoutKind is valid only when the final visual mode is IllustratedProse or PicturePage."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int? startLine = null, int? endLine = null) => ReadChapterAsync(context, chapterId, startLine, endLine),
@@ -263,6 +278,8 @@ public sealed class OutlineCollaborationTools(
             order = c.Order,
             title = c.Title,
             synopsis = c.Synopsis,
+            visualMode = c.VisualMode,
+            pageLayoutKind = c.PageLayoutKind,
             beatCount = beatCounts.TryGetValue(c.Id, out var n) ? n : 0,
         };
 
@@ -336,18 +353,34 @@ public sealed class OutlineCollaborationTools(
         OutlineCollaborationContext ctx,
         string? actId,
         string title,
-        string synopsis)
+        string synopsis,
+        string? visualMode,
+        string? pageLayoutKind)
     {
         if (string.IsNullOrWhiteSpace(title)) return "Error: title is required.";
         var (resolvedActId, error) = await ResolveActAsync(ctx, actId, allowUnassigned: true);
         if (error is not null) return error;
 
         if (ctx.Staging is not null)
-            return await ctx.Staging.CreateChapterAsync(resolvedActId, title, synopsis);
+            return await ctx.Staging.CreateChapterAsync(resolvedActId, title, synopsis, visualMode, pageLayoutKind);
+
+        var visual = ResolveChapterVisualArgs(
+            currentMode: ChapterVisualMode.Prose,
+            currentLayoutKind: ChapterPageLayoutKind.SinglePortrait,
+            visualMode,
+            pageLayoutKind);
+        if (visual.Error is not null) return visual.Error;
 
         var ch = await chapters.CreateAsync(ctx.ProjectId, resolvedActId, title.Trim(), synopsis?.Trim());
+        if (visual.ShouldApply)
+        {
+            var state = await chapterVisuals.SetModeAsync(ch.Id, new ChapterVisualModeUpdate(visual.Mode, visual.LayoutKind));
+            ch.VisualMode = state.VisualMode;
+            ch.PageLayoutKind = state.PageLayoutKind;
+        }
+
         ctx.OnMutated();
-        return JsonSerializer.Serialize(new { id = ch.Id, order = ch.Order, actId = ch.ActId, title = ch.Title, synopsis = ch.Synopsis });
+        return JsonSerializer.Serialize(ChapterPayload(ch));
     }
 
     private async Task<string> UpdateChapterAsync(
@@ -355,7 +388,9 @@ public sealed class OutlineCollaborationTools(
         Guid chapterId,
         string? title,
         string? synopsis,
-        string? actId)
+        string? actId,
+        string? visualMode,
+        string? pageLayoutKind)
     {
         ChapterActAssignment? assignment = null;
         if (actId is not null)
@@ -366,15 +401,33 @@ public sealed class OutlineCollaborationTools(
         }
 
         if (ctx.Staging is not null)
-            return await ctx.Staging.UpdateChapterAsync(chapterId, title, synopsis, assignment?.Value, moveChapter: actId is not null);
+            return await ctx.Staging.UpdateChapterAsync(
+                chapterId,
+                title,
+                synopsis,
+                assignment?.Value,
+                moveChapter: actId is not null,
+                visualMode: visualMode,
+                pageLayoutKind: pageLayoutKind);
 
         var existing = await chapters.GetAsync(chapterId);
         if (existing is null || existing.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
+        var visual = ResolveChapterVisualArgs(existing.VisualMode, existing.PageLayoutKind, visualMode, pageLayoutKind);
+        if (visual.Error is not null) return visual.Error;
+
         var updated = await chapters.UpdateAsync(chapterId, title?.Trim(), body: null, synopsis?.Trim(), assignment);
+        if (visual.ShouldApply
+            && (updated.VisualMode != visual.Mode || updated.PageLayoutKind != visual.LayoutKind))
+        {
+            var state = await chapterVisuals.SetModeAsync(chapterId, new ChapterVisualModeUpdate(visual.Mode, visual.LayoutKind));
+            updated.VisualMode = state.VisualMode;
+            updated.PageLayoutKind = state.PageLayoutKind;
+        }
+
         ctx.OnMutated();
-        return JsonSerializer.Serialize(new { id = updated.Id, actId = updated.ActId, order = updated.Order, title = updated.Title, synopsis = updated.Synopsis });
+        return JsonSerializer.Serialize(ChapterPayload(updated));
     }
 
     private async Task<string> ReadChapterAsync(OutlineCollaborationContext ctx, Guid chapterId, int? startLine, int? endLine)
@@ -391,6 +444,8 @@ public sealed class OutlineCollaborationTools(
         sb.Append("# ").AppendLine(chapter.Title);
         if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
             sb.Append("Synopsis: ").AppendLine(chapter.Synopsis.Trim());
+        sb.Append("Visual mode: ").Append(chapter.VisualMode)
+            .Append("; page layout: ").AppendLine(chapter.PageLayoutKind.ToString());
         if (rangeLabel is not null)
             sb.Append("Range: ").AppendLine(rangeLabel);
         sb.AppendLine();
@@ -986,6 +1041,17 @@ public sealed class OutlineCollaborationTools(
         content = TruncateForSearchPayload(result.Content, 1_800),
     };
 
+    private static object ChapterPayload(Chapter chapter) => new
+    {
+        id = chapter.Id,
+        actId = chapter.ActId,
+        order = chapter.Order,
+        title = chapter.Title,
+        synopsis = chapter.Synopsis,
+        visualMode = chapter.VisualMode,
+        pageLayoutKind = chapter.PageLayoutKind,
+    };
+
     private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>
         sources
             .Take(4)
@@ -1112,5 +1178,53 @@ public sealed class OutlineCollaborationTools(
             return (null, $"Error: act {parsed} not found in this project.");
 
         return (parsed, null);
+    }
+
+    private static ChapterVisualArgResolution ResolveChapterVisualArgs(
+        ChapterVisualMode currentMode,
+        ChapterPageLayoutKind currentLayoutKind,
+        string? visualMode,
+        string? pageLayoutKind)
+    {
+        var mode = currentMode;
+        var layoutKind = currentLayoutKind;
+        var shouldApply = false;
+
+        if (!string.IsNullOrWhiteSpace(visualMode))
+        {
+            if (!Enum.TryParse<ChapterVisualMode>(visualMode.Trim(), ignoreCase: true, out mode)
+                || !Enum.IsDefined(mode))
+            {
+                return ChapterVisualArgResolution.Fail("Error: visualMode must be Prose, IllustratedProse, or PicturePage.");
+            }
+
+            shouldApply = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(pageLayoutKind))
+        {
+            if (!Enum.TryParse<ChapterPageLayoutKind>(pageLayoutKind.Trim(), ignoreCase: true, out layoutKind)
+                || !Enum.IsDefined(layoutKind))
+            {
+                return ChapterVisualArgResolution.Fail("Error: pageLayoutKind must be SinglePortrait, SingleLandscape, DoublePortrait, or DoubleLandscape.");
+            }
+
+            shouldApply = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(pageLayoutKind) && mode == ChapterVisualMode.Prose)
+            return ChapterVisualArgResolution.Fail("Error: pageLayoutKind only applies to IllustratedProse or PicturePage chapters. Set visualMode first or omit pageLayoutKind.");
+
+        return new ChapterVisualArgResolution(mode, layoutKind, shouldApply, Error: null);
+    }
+
+    private sealed record ChapterVisualArgResolution(
+        ChapterVisualMode Mode,
+        ChapterPageLayoutKind LayoutKind,
+        bool ShouldApply,
+        string? Error)
+    {
+        public static ChapterVisualArgResolution Fail(string error) =>
+            new(ChapterVisualMode.Prose, ChapterPageLayoutKind.SinglePortrait, ShouldApply: false, error);
     }
 }

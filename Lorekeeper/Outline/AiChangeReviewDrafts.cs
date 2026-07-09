@@ -270,7 +270,11 @@ public static class AiChangeReviewDrafts
             return false;
         }
 
-        if (draft.Id != original.Id || draft.Order != original.Order || draft.ActId != original.ActId)
+        if (draft.Id != original.Id
+            || draft.Order != original.Order
+            || draft.ActId != original.ActId
+            || draft.VisualMode != original.VisualMode
+            || draft.PageLayoutKind != original.PageLayoutKind)
         {
             error = "The chapter draft changed immutable metadata.";
             return false;

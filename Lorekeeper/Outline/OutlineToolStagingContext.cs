@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Context;
 using Lorekeeper.Chapters;
 using Lorekeeper.Ingest;
@@ -15,6 +16,7 @@ public sealed class OutlineToolStagingContext(
     IProjectRepository projects,
     IActService acts,
     IChapterService chapters,
+    IChapterVisualService chapterVisuals,
     IEntityService entities,
     IEntityTypeService entityTypes,
     Action? onDirectMutationApplied = null)
@@ -76,6 +78,8 @@ public sealed class OutlineToolStagingContext(
             order = chapter.Order,
             title = chapter.Title,
             synopsis = chapter.Synopsis,
+            visualMode = chapter.VisualMode,
+            pageLayoutKind = chapter.PageLayoutKind,
             beatCount = _entities.Values.Count(entity =>
                 !entity.Deleted
                 && string.Equals(entity.Type, _eventNodeType, StringComparison.OrdinalIgnoreCase)
@@ -305,40 +309,84 @@ public sealed class OutlineToolStagingContext(
         return result;
     }
 
-    public async Task<string> CreateChapterAsync(Guid? actId, string title, string? synopsis, CancellationToken cancellationToken = default)
+    public async Task<string> CreateChapterAsync(
+        Guid? actId,
+        string title,
+        string? synopsis,
+        string? visualMode,
+        string? pageLayoutKind,
+        CancellationToken cancellationToken = default)
     {
         await EnsureLoadedAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(title)) return "Error: title is required.";
         if (actId is not null && !TryGetAct(actId.Value, out _)) return $"Error: act {actId} not found in this project.";
 
+        var visual = ResolveChapterVisualArgs(
+            currentMode: ChapterVisualMode.Prose,
+            currentLayoutKind: ChapterPageLayoutKind.SinglePortrait,
+            visualMode,
+            pageLayoutKind);
+        if (visual.Error is not null) return visual.Error;
+
         var created = await chapters.CreateAsync(ProjectId, actId, title.Trim(), synopsis?.Trim(), cancellationToken: cancellationToken);
-        var chapter = new ChapterState(created.Id, created.ActId, created.Order, created.Title, created.Synopsis, Deleted: false);
+        if (visual.ShouldApply)
+        {
+            var state = await chapterVisuals.SetModeAsync(created.Id, new ChapterVisualModeUpdate(visual.Mode, visual.LayoutKind), cancellationToken);
+            created.VisualMode = state.VisualMode;
+            created.PageLayoutKind = state.PageLayoutKind;
+        }
+
+        var chapter = new ChapterState(created.Id, created.ActId, created.Order, created.Title, created.Synopsis, created.VisualMode, created.PageLayoutKind, Deleted: false);
         _chapters[chapter.Id] = chapter;
         MarkDirectlyCreated(Resource("Chapter", chapter.Id));
         onDirectMutationApplied?.Invoke();
 
-        var result = Serialize(new { id = chapter.Id, order = chapter.Order, actId = chapter.ActId, title = chapter.Title, synopsis = chapter.Synopsis });
+        var result = Serialize(ChapterPayload(chapter));
         return result;
     }
 
-    public async Task<string> UpdateChapterAsync(Guid chapterId, string? title, string? synopsis, Guid? newActId, bool moveChapter, CancellationToken cancellationToken = default)
+    public async Task<string> UpdateChapterAsync(
+        Guid chapterId,
+        string? title,
+        string? synopsis,
+        Guid? newActId,
+        bool moveChapter,
+        string? visualMode,
+        string? pageLayoutKind,
+        CancellationToken cancellationToken = default)
     {
         await EnsureLoadedAsync(cancellationToken);
         if (!TryGetChapter(chapterId, out var chapter)) return $"Error: chapter {chapterId} not found in this project.";
         if (moveChapter && newActId is not null && !TryGetAct(newActId.Value, out _)) return $"Error: act {newActId} not found in this project.";
 
+        var visual = ResolveChapterVisualArgs(chapter.VisualMode, chapter.PageLayoutKind, visualMode, pageLayoutKind);
+        if (visual.Error is not null) return visual.Error;
+
         if (IsDirectlyCreated(Resource("Chapter", chapterId)))
         {
             var assignment = moveChapter ? new ChapterActAssignment(newActId) : (ChapterActAssignment?)null;
             var updated = await chapters.UpdateAsync(chapterId, title?.Trim(), body: null, synopsis?.Trim(), assignment, cancellationToken);
-            _chapters[updated.Id] = new ChapterState(updated.Id, updated.ActId, updated.Order, updated.Title, updated.Synopsis, Deleted: false);
+            if (visual.ShouldApply
+                && (updated.VisualMode != visual.Mode || updated.PageLayoutKind != visual.LayoutKind))
+            {
+                var state = await chapterVisuals.SetModeAsync(updated.Id, new ChapterVisualModeUpdate(visual.Mode, visual.LayoutKind), cancellationToken);
+                updated.VisualMode = state.VisualMode;
+                updated.PageLayoutKind = state.PageLayoutKind;
+            }
+
+            _chapters[updated.Id] = new ChapterState(updated.Id, updated.ActId, updated.Order, updated.Title, updated.Synopsis, updated.VisualMode, updated.PageLayoutKind, Deleted: false);
             onDirectMutationApplied?.Invoke();
-            return Serialize(new { id = updated.Id, actId = updated.ActId, order = updated.Order, title = updated.Title, synopsis = updated.Synopsis });
+            return Serialize(ChapterPayload(_chapters[updated.Id]));
         }
 
         var before = chapter.ToChange();
         if (title is not null) chapter.Title = title.Trim();
         if (synopsis is not null) chapter.Synopsis = synopsis.Trim();
+        if (visual.ShouldApply)
+        {
+            chapter.VisualMode = visual.Mode;
+            chapter.PageLayoutKind = visual.LayoutKind;
+        }
         if (moveChapter && chapter.ActId != newActId)
         {
             chapter.ActId = newActId;
@@ -348,7 +396,7 @@ public sealed class OutlineToolStagingContext(
         var after = chapter.ToChange();
         var references = new List<string> { Resource("Chapter", chapter.Id) };
         if (newActId is not null) references.Add(Resource("Act", newActId.Value));
-        var result = Serialize(new { id = chapter.Id, actId = chapter.ActId, order = chapter.Order, title = chapter.Title, synopsis = chapter.Synopsis });
+        var result = Serialize(ChapterPayload(chapter));
         await StageChangeAsync(
             summary: $"Update chapter '{chapter.Title}'",
             before: before,
@@ -701,7 +749,15 @@ public sealed class OutlineToolStagingContext(
             _acts[act.Id] = new ActState(act.Id, act.Order, act.Title, act.Synopsis, Deleted: false);
 
         foreach (var chapter in await chapters.ListAsync(ProjectId, cancellationToken))
-            _chapters[chapter.Id] = new ChapterState(chapter.Id, chapter.ActId, chapter.Order, chapter.Title, chapter.Synopsis, Deleted: false);
+            _chapters[chapter.Id] = new ChapterState(
+                chapter.Id,
+                chapter.ActId,
+                chapter.Order,
+                chapter.Title,
+                chapter.Synopsis,
+                chapter.VisualMode,
+                chapter.PageLayoutKind,
+                Deleted: false);
 
         var typeList = await entityTypes.ListAsync(ProjectId, includeStructural: true, cancellationToken);
         foreach (var typeDefinition in typeList)
@@ -1362,7 +1418,66 @@ public sealed class OutlineToolStagingContext(
         && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
+    private static object ChapterPayload(ChapterState chapter) => new
+    {
+        id = chapter.Id,
+        actId = chapter.ActId,
+        order = chapter.Order,
+        title = chapter.Title,
+        synopsis = chapter.Synopsis,
+        visualMode = chapter.VisualMode,
+        pageLayoutKind = chapter.PageLayoutKind,
+    };
+
+    private static ChapterVisualArgResolution ResolveChapterVisualArgs(
+        ChapterVisualMode currentMode,
+        ChapterPageLayoutKind currentLayoutKind,
+        string? visualMode,
+        string? pageLayoutKind)
+    {
+        var mode = currentMode;
+        var layoutKind = currentLayoutKind;
+        var shouldApply = false;
+
+        if (!string.IsNullOrWhiteSpace(visualMode))
+        {
+            if (!Enum.TryParse<ChapterVisualMode>(visualMode.Trim(), ignoreCase: true, out mode)
+                || !Enum.IsDefined(mode))
+            {
+                return ChapterVisualArgResolution.Fail("Error: visualMode must be Prose, IllustratedProse, or PicturePage.");
+            }
+
+            shouldApply = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(pageLayoutKind))
+        {
+            if (!Enum.TryParse<ChapterPageLayoutKind>(pageLayoutKind.Trim(), ignoreCase: true, out layoutKind)
+                || !Enum.IsDefined(layoutKind))
+            {
+                return ChapterVisualArgResolution.Fail("Error: pageLayoutKind must be SinglePortrait, SingleLandscape, DoublePortrait, or DoubleLandscape.");
+            }
+
+            shouldApply = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(pageLayoutKind) && mode == ChapterVisualMode.Prose)
+            return ChapterVisualArgResolution.Fail("Error: pageLayoutKind only applies to IllustratedProse or PicturePage chapters. Set visualMode first or omit pageLayoutKind.");
+
+        return new ChapterVisualArgResolution(mode, layoutKind, shouldApply, Error: null);
+    }
+
     private static string Serialize(object? value) => JsonSerializer.Serialize(value, JsonSerializerOptions.Default);
+
+    private sealed record ChapterVisualArgResolution(
+        ChapterVisualMode Mode,
+        ChapterPageLayoutKind LayoutKind,
+        bool ShouldApply,
+        string? Error)
+    {
+        public static ChapterVisualArgResolution Fail(string error) =>
+            new(ChapterVisualMode.Prose, ChapterPageLayoutKind.SinglePortrait, ShouldApply: false, error);
+    }
 
     private sealed record ActState(Guid Id, int Order, string Title, string Synopsis, bool Deleted)
     {
@@ -1374,15 +1489,25 @@ public sealed class OutlineToolStagingContext(
         public OutlineActChange ToChange() => new(Id, Order, Title, Synopsis);
     }
 
-    private sealed record ChapterState(Guid Id, Guid? ActId, int Order, string Title, string Synopsis, bool Deleted)
+    private sealed record ChapterState(
+        Guid Id,
+        Guid? ActId,
+        int Order,
+        string Title,
+        string Synopsis,
+        ChapterVisualMode VisualMode,
+        ChapterPageLayoutKind PageLayoutKind,
+        bool Deleted)
     {
         public Guid? ActId { get; set; } = ActId;
         public int Order { get; set; } = Order;
         public string Title { get; set; } = Title;
         public string Synopsis { get; set; } = Synopsis;
+        public ChapterVisualMode VisualMode { get; set; } = VisualMode;
+        public ChapterPageLayoutKind PageLayoutKind { get; set; } = PageLayoutKind;
         public bool Deleted { get; set; } = Deleted;
 
-        public OutlineChapterChange ToChange() => new(Id, ActId, Order, Title, Synopsis);
+        public OutlineChapterChange ToChange() => new(Id, ActId, Order, Title, Synopsis, VisualMode, PageLayoutKind);
     }
 
     private sealed record EntityState(

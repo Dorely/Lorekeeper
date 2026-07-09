@@ -7,6 +7,7 @@ using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Publish;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -82,7 +83,7 @@ public sealed class EditorChatTools(
             AIFunctionFactory.Create(
                 method: () => ListChaptersAsync(context),
                 name: "list_chapters",
-                description: "List every chapter in the current project (id, order, title, synopsis, body line count, and read_chapter page count)."),
+                description: "List every chapter in the current project (id, order, title, synopsis, visual mode, page layout, body line count, and read_chapter page count)."),
 
             AIFunctionFactory.Create(
                 method: (
@@ -145,6 +146,7 @@ public sealed class EditorChatTools(
                 name: "start_contest",
                 description:
                     "Start a Contest Mode generation job for chapter-body mutations. " +
+                    "Requires a Prose or IllustratedProse chapter; PicturePage chapters must be edited with visual layout tools. " +
                     "Call this exactly once after gathering enough read-only context. "));
             return tools;
         }
@@ -155,6 +157,7 @@ public sealed class EditorChatTools(
             name: "edit_chapter",
             description:
                 "Edit a chapter using line-based semantics. " +
+                "Requires a Prose or IllustratedProse chapter; PicturePage text must be edited with picture-page layout tools. " +
                 "To Append: Leave both startLine and endLine null: appends `content` to the end of the chapter. " +
                 "For an empty chapter, leave both startLine and endLine null to write the first content. " +
                 "To Insert: Provide only startLine and leave endLine null: insert `content` BEFORE that line (1-based). " +
@@ -177,13 +180,84 @@ public sealed class EditorChatTools(
             name: "generate_project_image",
             description:
                 "Generate an image and save it to the project image library. Optional referenceImageIds use existing project images as references. " +
-                "Set placeInCurrentChapter=true only when the user wants the generated image inserted into the current chapter immediately."));
+                "Set placeInCurrentChapter=true only when the user wants the generated image inserted into the current chapter immediately; the current chapter must already be IllustratedProse or PicturePage."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid chapterId, Guid imageId) => AddProjectImageToChapterAsync(context, chapterId, imageId),
             name: "add_project_image_to_chapter",
             description:
-                "Live visual-layout mutation. Place an existing project image into a chapter. Prose converts to IllustratedProse, IllustratedProse adds an anchored figure, and PicturePage adds a centered freeform image element."));
+                "Live visual-layout mutation. Place an existing project image into an IllustratedProse or PicturePage chapter. Prose chapters must first be converted with set_chapter_visual_mode."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (
+                Guid chapterId,
+                Guid imageBlockId,
+                string? anchorPosition = null,
+                int? paragraphIndex = null,
+                double? widthPercent = null,
+                string? alignment = null,
+                string? caption = null,
+                string? altTextOverride = null,
+                int? sortOrder = null,
+                bool? startOnNewPage = null) =>
+                UpdateIllustratedProseImageAsync(context, chapterId, imageBlockId, anchorPosition, paragraphIndex, widthPercent, alignment, caption, altTextOverride, sortOrder, startOnNewPage),
+            name: "update_illustrated_prose_image",
+            description:
+                "Live visual-layout mutation for IllustratedProse chapters only. Update an existing anchored image block's anchorPosition (BeforeParagraph/AfterParagraph), paragraphIndex, widthPercent, alignment (Left/Center/Right), caption, altTextOverride, sortOrder, or startOnNewPage."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid chapterId, Guid imageBlockId) =>
+                RemoveIllustratedProseImageAsync(context, chapterId, imageBlockId),
+            name: "remove_illustrated_prose_image",
+            description: "Live visual-layout mutation for IllustratedProse chapters only. Remove an anchored image block."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (
+                Guid chapterId,
+                Guid imageElementId,
+                double? xPercent = null,
+                double? yPercent = null,
+                double? widthPercent = null,
+                double? heightPercent = null,
+                string? fit = null,
+                double? opacity = null,
+                int? zIndex = null,
+                string? altTextOverride = null) =>
+                UpdatePicturePageImageAsync(context, chapterId, imageElementId, xPercent, yPercent, widthPercent, heightPercent, fit, opacity, zIndex, altTextOverride),
+            name: "update_picture_page_image",
+            description:
+                "Live visual-layout mutation for PicturePage chapters only. Update an existing image element's percentage bounds, fit (Contain/Cover/Fill), opacity, zIndex, or altTextOverride."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (
+                Guid chapterId,
+                Guid? textElementId = null,
+                string? text = null,
+                double? xPercent = null,
+                double? yPercent = null,
+                double? widthPercent = null,
+                double? heightPercent = null,
+                int? zIndex = null,
+                int? readingOrder = null,
+                string? fontFamily = null,
+                double? fontSizePercent = null,
+                double? lineHeight = null,
+                string? color = null,
+                string? backgroundColor = null,
+                double? backgroundOpacity = null,
+                string? textAlign = null,
+                string? verticalAlign = null,
+                string? shadow = null) =>
+                UpsertPicturePageTextAsync(context, chapterId, textElementId, text, xPercent, yPercent, widthPercent, heightPercent, zIndex, readingOrder, fontFamily, fontSizePercent, lineHeight, color, backgroundColor, backgroundOpacity, textAlign, verticalAlign, shadow),
+            name: "upsert_picture_page_text",
+            description:
+                "Live visual-layout mutation for PicturePage chapters only. Create a new text box when textElementId is omitted, or update an existing text box. This is the correct way to edit PicturePage chapter text; it also updates the projected chapter body."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid chapterId, string elementKind, Guid elementId) =>
+                RemovePicturePageElementAsync(context, chapterId, elementKind, elementId),
+            name: "remove_picture_page_element",
+            description: "Live visual-layout mutation for PicturePage chapters only. Remove an image or text element. elementKind must be image or text."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid chapterId, Guid imageId) => AddProjectImageToContextAsync(context, chapterId, imageId),
@@ -277,6 +351,8 @@ public sealed class EditorChatTools(
 
             sb.Append(chapter.Order + 1).Append(". ").Append(chapter.Title)
               .Append(" - id=").Append(chapter.Id)
+              .Append(" - visualMode=").Append(chapter.VisualMode)
+              .Append(" - pageLayoutKind=").Append(chapter.PageLayoutKind)
               .Append(" - lines=").Append(lineCount)
               .Append(" - bodyChars=").Append(chapter.Body.Length)
               .Append(" - readChapterPages=").Append(pageCount);
@@ -380,15 +456,29 @@ public sealed class EditorChatTools(
         });
     }
 
-    private async Task<string> StartRevisionAgentsAsync(EditorChatContext ctx, EditorRevisionAgentAssignmentInput[] chapters)
+    private async Task<string> StartRevisionAgentsAsync(EditorChatContext ctx, EditorRevisionAgentAssignmentInput[] assignments)
     {
+        if (assignments is null || assignments.Length == 0)
+            return "Error: chapters is required.";
+
+        foreach (var assignment in assignments)
+        {
+            if (assignment is null)
+                return "Error: each revision-agent assignment is required.";
+            var chapter = await chapters.GetAsync(assignment.ChapterId);
+            if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+                return $"Error: chapter {assignment.ChapterId} not found in this project.";
+            if (chapter.VisualMode == ChapterVisualMode.PicturePage)
+                return $"Error: start_revision_agents cannot target PicturePage chapter '{chapter.Title}' ({chapter.Id}) because revision workers can only edit prose. Use Picture Page visual layout tools instead.";
+        }
+
         var request = new EditorRevisionAgentRunRequest(
             ctx.ProjectId,
             ctx.ConversationId,
             ctx.CurrentAssistantMessageId,
             ctx.CurrentToolCallId,
             ctx.CurrentArgumentsJson,
-            chapters);
+            assignments);
         var result = await revisionAgents.RunAsync(request);
         if (!ctx.ReviewEdits && result.Sessions.Any(session => session.Status == EditorRevisionSessionStatus.Completed))
             ctx.OnMutated();
@@ -665,6 +755,8 @@ public sealed class EditorChatTools(
                 id = chapter.Id,
                 chapter.Title,
                 chapter.Synopsis,
+                chapter.VisualMode,
+                chapter.PageLayoutKind,
                 source,
             },
             request = new
@@ -750,6 +842,7 @@ public sealed class EditorChatTools(
             state.PageLayoutKind,
             state.IllustrationLayout,
             state.PageLayout,
+            projectedBody = state.VisualMode == ChapterVisualMode.PicturePage ? chapter.Body : null,
             manifest = chapterVisuals.BuildManifest(state, imageNames),
         });
     }
@@ -781,17 +874,14 @@ public sealed class EditorChatTools(
 
             parsedLayout = candidate;
         }
+        if (parsedMode == ChapterVisualMode.Prose && parsedLayout is not null)
+            return "Error: pageLayoutKind only applies to IllustratedProse or PicturePage chapters. Omit pageLayoutKind when setting Prose.";
 
         var state = await chapterVisuals.SetModeAsync(
             chapterId,
             new ChapterVisualModeUpdate(parsedMode, parsedLayout));
         ctx.OnMutated();
-        return JsonSerializer.Serialize(new
-        {
-            message = $"Chapter visual mode set to {state.VisualMode}.",
-            state.VisualMode,
-            state.PageLayoutKind,
-        });
+        return await VisualStatePayloadAsync(ctx, state, $"Chapter visual mode set to {state.VisualMode}.");
     }
 
     private async Task<string> GenerateProjectImageAsync(
@@ -809,6 +899,14 @@ public sealed class EditorChatTools(
             return "Error: prompt is required.";
         if (placeInCurrentChapter && ctx.CurrentChapterId is null)
             return "Error: placeInCurrentChapter requires an active current chapter.";
+        if (placeInCurrentChapter && ctx.CurrentChapterId is { } activeChapterId)
+        {
+            var chapter = await chapters.GetAsync(activeChapterId);
+            if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+                return $"Error: chapter {activeChapterId} not found in this project.";
+            if (chapter.VisualMode == ChapterVisualMode.Prose)
+                return "Error: placeInCurrentChapter requires the current chapter to already be IllustratedProse or PicturePage. Call set_chapter_visual_mode first.";
+        }
 
         var image = await projectImages.GenerateAsync(ctx.ProjectId, new ProjectImageGenerationRequest(
             prompt.Trim(),
@@ -829,6 +927,7 @@ public sealed class EditorChatTools(
                 chapterId,
                 elementId = placed.ElementId,
                 placed.State.VisualMode,
+                visualLayout = await VisualStatePayloadObjectAsync(ctx, placed.State, "Image placed in chapter.", placed.ElementId),
             };
         }
 
@@ -849,16 +948,259 @@ public sealed class EditorChatTools(
 
     private async Task<string> AddProjectImageToChapterAsync(EditorChatContext ctx, Guid chapterId, Guid imageId)
     {
+        var chapter = await chapters.GetAsync(chapterId);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId} not found in this project.";
+        if (chapter.VisualMode == ChapterVisualMode.Prose)
+            return "Error: add_project_image_to_chapter requires an IllustratedProse or PicturePage chapter. Call set_chapter_visual_mode first.";
+
         var result = await chapterVisuals.AddImageToChapterAsync(ctx.ProjectId, chapterId, imageId);
         ctx.OnMutated();
-        return JsonSerializer.Serialize(new
+        return await VisualStatePayloadAsync(ctx, result.State, "Image placed in chapter.", result.ElementId);
+    }
+
+    private async Task<string> UpdateIllustratedProseImageAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        Guid imageBlockId,
+        string? anchorPosition,
+        int? paragraphIndex,
+        double? widthPercent,
+        string? alignment,
+        string? caption,
+        string? altTextOverride,
+        int? sortOrder,
+        bool? startOnNewPage)
+    {
+        var resolved = await RequireVisualModeAsync(ctx, chapterId, ChapterVisualMode.IllustratedProse);
+        if (resolved.Error is not null) return resolved.Error;
+
+        var state = resolved.State!;
+        var block = state.IllustrationLayout.Images.FirstOrDefault(candidate => candidate.Id == imageBlockId);
+        if (block is null)
+            return $"Error: illustrated prose image block {imageBlockId} was not found in chapter {chapterId}.";
+
+        if (!TryParseOptionalEnum(anchorPosition, out ChapterImageAnchorPosition? parsedAnchor, out var anchorError))
+            return anchorError!;
+        if (!TryParseOptionalEnum(alignment, out ChapterImageAlignment? parsedAlignment, out var alignmentError))
+            return alignmentError!;
+
+        var movedAnchor = parsedAnchor is not null || paragraphIndex is not null;
+        var updatedBlock = block with
         {
-            message = "Image placed in chapter.",
+            AnchorPosition = parsedAnchor ?? block.AnchorPosition,
+            ParagraphIndex = paragraphIndex ?? block.ParagraphIndex,
+            ParagraphHash = movedAnchor ? string.Empty : block.ParagraphHash,
+            WidthPercent = widthPercent ?? block.WidthPercent,
+            Alignment = parsedAlignment ?? block.Alignment,
+            Caption = caption ?? block.Caption,
+            AltTextOverride = altTextOverride ?? block.AltTextOverride,
+            SortOrder = sortOrder ?? block.SortOrder,
+            StartOnNewPage = startOnNewPage ?? block.StartOnNewPage,
+        };
+
+        var updated = await chapterVisuals.SaveIllustrationLayoutAsync(
             chapterId,
-            imageId,
-            elementId = result.ElementId,
-            result.State.VisualMode,
-        });
+            state.IllustrationLayout with
+            {
+                Images = state.IllustrationLayout.Images
+                    .Select(candidate => candidate.Id == imageBlockId ? updatedBlock : candidate)
+                    .ToList(),
+            });
+
+        ctx.OnMutated();
+        return await VisualStatePayloadAsync(ctx, updated, "Illustrated prose image updated.", imageBlockId);
+    }
+
+    private async Task<string> RemoveIllustratedProseImageAsync(EditorChatContext ctx, Guid chapterId, Guid imageBlockId)
+    {
+        var resolved = await RequireVisualModeAsync(ctx, chapterId, ChapterVisualMode.IllustratedProse);
+        if (resolved.Error is not null) return resolved.Error;
+
+        var state = resolved.State!;
+        if (state.IllustrationLayout.Images.All(candidate => candidate.Id != imageBlockId))
+            return $"Error: illustrated prose image block {imageBlockId} was not found in chapter {chapterId}.";
+
+        var updated = await chapterVisuals.SaveIllustrationLayoutAsync(
+            chapterId,
+            state.IllustrationLayout with
+            {
+                Images = state.IllustrationLayout.Images.Where(candidate => candidate.Id != imageBlockId).ToList(),
+            });
+
+        ctx.OnMutated();
+        return await VisualStatePayloadAsync(ctx, updated, "Illustrated prose image removed.", imageBlockId);
+    }
+
+    private async Task<string> UpdatePicturePageImageAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        Guid imageElementId,
+        double? xPercent,
+        double? yPercent,
+        double? widthPercent,
+        double? heightPercent,
+        string? fit,
+        double? opacity,
+        int? zIndex,
+        string? altTextOverride)
+    {
+        var resolved = await RequireVisualModeAsync(ctx, chapterId, ChapterVisualMode.PicturePage);
+        if (resolved.Error is not null) return resolved.Error;
+
+        var state = resolved.State!;
+        var image = state.PageLayout.Images.FirstOrDefault(candidate => candidate.Id == imageElementId);
+        if (image is null)
+            return $"Error: picture page image element {imageElementId} was not found in chapter {chapterId}.";
+
+        if (!TryParseOptionalEnum(fit, out ChapterImageFit? parsedFit, out var fitError))
+            return fitError!;
+
+        var updatedImage = image with
+        {
+            XPercent = xPercent ?? image.XPercent,
+            YPercent = yPercent ?? image.YPercent,
+            WidthPercent = widthPercent ?? image.WidthPercent,
+            HeightPercent = heightPercent ?? image.HeightPercent,
+            Fit = parsedFit ?? image.Fit,
+            Opacity = opacity ?? image.Opacity,
+            ZIndex = zIndex ?? image.ZIndex,
+            AltTextOverride = altTextOverride ?? image.AltTextOverride,
+        };
+
+        var updated = await chapterVisuals.SavePageLayoutAsync(
+            chapterId,
+            state.PageLayout with
+            {
+                Images = state.PageLayout.Images
+                    .Select(candidate => candidate.Id == imageElementId ? updatedImage : candidate)
+                    .ToList(),
+            });
+
+        ctx.OnMutated();
+        return await VisualStatePayloadAsync(ctx, updated, "Picture page image updated.", imageElementId);
+    }
+
+    private async Task<string> UpsertPicturePageTextAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        Guid? textElementId,
+        string? text,
+        double? xPercent,
+        double? yPercent,
+        double? widthPercent,
+        double? heightPercent,
+        int? zIndex,
+        int? readingOrder,
+        string? fontFamily,
+        double? fontSizePercent,
+        double? lineHeight,
+        string? color,
+        string? backgroundColor,
+        double? backgroundOpacity,
+        string? textAlign,
+        string? verticalAlign,
+        string? shadow)
+    {
+        var resolved = await RequireVisualModeAsync(ctx, chapterId, ChapterVisualMode.PicturePage);
+        if (resolved.Error is not null) return resolved.Error;
+
+        if (!TryParseOptionalEnum(fontFamily, out PublishCoverFontFamily? parsedFontFamily, out var fontError))
+            return fontError!;
+        if (!TryParseOptionalEnum(textAlign, out PublishCoverTextAlign? parsedTextAlign, out var alignError))
+            return alignError!;
+        if (!TryParseOptionalEnum(verticalAlign, out ChapterTextVerticalAlign? parsedVerticalAlign, out var verticalError))
+            return verticalError!;
+        if (!TryParseOptionalEnum(shadow, out PublishCoverShadow? parsedShadow, out var shadowError))
+            return shadowError!;
+
+        var state = resolved.State!;
+        PicturePageTextElement? existing = null;
+        if (textElementId is Guid requestedId && requestedId != Guid.Empty)
+            existing = state.PageLayout.TextElements.FirstOrDefault(candidate => candidate.Id == requestedId);
+        if (textElementId is Guid requestedTextId && requestedTextId != Guid.Empty && existing is null)
+            return $"Error: picture page text element {requestedTextId} was not found in chapter {chapterId}.";
+        if (existing is null && string.IsNullOrWhiteSpace(text))
+            return "Error: text is required when creating a new PicturePage text element.";
+
+        var elementId = existing?.Id ?? Guid.NewGuid();
+        var maxZ = state.PageLayout.Images.Select(image => image.ZIndex)
+            .Concat(state.PageLayout.TextElements.Select(textElement => textElement.ZIndex))
+            .DefaultIfEmpty(0)
+            .Max();
+        var maxReadingOrder = state.PageLayout.TextElements.Select(textElement => textElement.ReadingOrder)
+            .DefaultIfEmpty(-1)
+            .Max();
+
+        var updatedText = new PicturePageTextElement(
+            elementId,
+            text ?? existing?.Text ?? string.Empty,
+            xPercent ?? existing?.XPercent ?? 12,
+            yPercent ?? existing?.YPercent ?? 70,
+            widthPercent ?? existing?.WidthPercent ?? 76,
+            heightPercent ?? existing?.HeightPercent ?? 16,
+            zIndex ?? existing?.ZIndex ?? maxZ + 1,
+            readingOrder ?? existing?.ReadingOrder ?? maxReadingOrder + 1,
+            parsedFontFamily ?? existing?.FontFamily ?? PublishCoverFontFamily.Serif,
+            fontSizePercent ?? existing?.FontSizePercent ?? 4.5,
+            lineHeight ?? existing?.LineHeight ?? 1.25,
+            color ?? existing?.Color ?? "#111827",
+            backgroundColor ?? existing?.BackgroundColor ?? "#FFFFFF",
+            backgroundOpacity ?? existing?.BackgroundOpacity ?? 0,
+            parsedTextAlign ?? existing?.TextAlign ?? PublishCoverTextAlign.Center,
+            parsedVerticalAlign ?? existing?.VerticalAlign ?? ChapterTextVerticalAlign.Middle,
+            parsedShadow ?? existing?.Shadow ?? PublishCoverShadow.None);
+
+        var updated = await chapterVisuals.SavePageLayoutAsync(
+            chapterId,
+            state.PageLayout with
+            {
+                TextElements = existing is null
+                    ? state.PageLayout.TextElements.Append(updatedText).ToList()
+                    : state.PageLayout.TextElements
+                        .Select(candidate => candidate.Id == elementId ? updatedText : candidate)
+                        .ToList(),
+            });
+
+        ctx.OnMutated();
+        return await VisualStatePayloadAsync(ctx, updated, existing is null ? "Picture page text created." : "Picture page text updated.", elementId);
+    }
+
+    private async Task<string> RemovePicturePageElementAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        string elementKind,
+        Guid elementId)
+    {
+        var resolved = await RequireVisualModeAsync(ctx, chapterId, ChapterVisualMode.PicturePage);
+        if (resolved.Error is not null) return resolved.Error;
+
+        var state = resolved.State!;
+        if (string.Equals(elementKind, "image", StringComparison.OrdinalIgnoreCase))
+        {
+            if (state.PageLayout.Images.All(candidate => candidate.Id != elementId))
+                return $"Error: picture page image element {elementId} was not found in chapter {chapterId}.";
+
+            var updated = await chapterVisuals.SavePageLayoutAsync(
+                chapterId,
+                state.PageLayout with { Images = state.PageLayout.Images.Where(candidate => candidate.Id != elementId).ToList() });
+            ctx.OnMutated();
+            return await VisualStatePayloadAsync(ctx, updated, "Picture page image removed.", elementId);
+        }
+
+        if (string.Equals(elementKind, "text", StringComparison.OrdinalIgnoreCase))
+        {
+            if (state.PageLayout.TextElements.All(candidate => candidate.Id != elementId))
+                return $"Error: picture page text element {elementId} was not found in chapter {chapterId}.";
+
+            var updated = await chapterVisuals.SavePageLayoutAsync(
+                chapterId,
+                state.PageLayout with { TextElements = state.PageLayout.TextElements.Where(candidate => candidate.Id != elementId).ToList() });
+            ctx.OnMutated();
+            return await VisualStatePayloadAsync(ctx, updated, "Picture page text removed.", elementId);
+        }
+
+        return "Error: elementKind must be image or text.";
     }
 
     private async Task<string> AddProjectImageToContextAsync(EditorChatContext ctx, Guid chapterId, Guid imageId)
@@ -893,6 +1235,83 @@ public sealed class EditorChatTools(
             isIncluded: false);
         ctx.OnMutated();
         return "Image removed from chapter context.";
+    }
+
+    private async Task<VisualModeResolution> RequireVisualModeAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        ChapterVisualMode requiredMode)
+    {
+        var chapter = await chapters.GetAsync(chapterId);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return VisualModeResolution.Fail($"Error: chapter {chapterId} not found in this project.");
+        if (chapter.VisualMode != requiredMode)
+        {
+            return VisualModeResolution.Fail(
+                $"Error: this tool requires a {requiredMode} chapter, but '{chapter.Title}' is {chapter.VisualMode}. Call set_chapter_visual_mode first or choose the correct tool family.");
+        }
+
+        var state = await chapterVisuals.GetAsync(chapterId);
+        return state is null
+            ? VisualModeResolution.Fail($"Error: visual layout for chapter {chapterId} was not found.")
+            : new VisualModeResolution(state, Error: null);
+    }
+
+    private async Task<string> VisualStatePayloadAsync(
+        EditorChatContext ctx,
+        ChapterVisualState state,
+        string message,
+        Guid? elementId = null) =>
+        JsonSerializer.Serialize(await VisualStatePayloadObjectAsync(ctx, state, message, elementId));
+
+    private async Task<object> VisualStatePayloadObjectAsync(
+        EditorChatContext ctx,
+        ChapterVisualState state,
+        string message,
+        Guid? elementId = null)
+    {
+        var imageNames = (await projectImages.ListAsync(ctx.ProjectId))
+            .ToDictionary(image => image.Id, image => image.FileName);
+        var chapter = state.VisualMode == ChapterVisualMode.PicturePage
+            ? await chapters.GetAsync(state.ChapterId)
+            : null;
+
+        return new
+        {
+            message,
+            chapterId = state.ChapterId,
+            elementId,
+            state.VisualMode,
+            state.PageLayoutKind,
+            state.IllustrationLayout,
+            state.PageLayout,
+            projectedBody = state.VisualMode == ChapterVisualMode.PicturePage ? chapter?.Body ?? string.Empty : null,
+            manifest = chapterVisuals.BuildManifest(state, imageNames),
+        };
+    }
+
+    private static bool TryParseOptionalEnum<TEnum>(string? value, out TEnum? parsed, out string? error)
+        where TEnum : struct, Enum
+    {
+        parsed = null;
+        error = null;
+        if (string.IsNullOrWhiteSpace(value))
+            return true;
+
+        if (Enum.TryParse<TEnum>(value.Trim(), ignoreCase: true, out var candidate)
+            && Enum.IsDefined(candidate))
+        {
+            parsed = candidate;
+            return true;
+        }
+
+        error = $"Error: {typeof(TEnum).Name} must be one of: {string.Join(", ", Enum.GetNames<TEnum>())}.";
+        return false;
+    }
+
+    private sealed record VisualModeResolution(ChapterVisualState? State, string? Error)
+    {
+        public static VisualModeResolution Fail(string error) => new(null, error);
     }
 
     private int EffectiveReadChapterPageMaxChars() => Math.Max(256, editorOptions.Value.ReadChapterPageMaxChars);
@@ -1115,6 +1534,8 @@ public sealed class EditorChatTools(
         var chapter = await chapters.GetAsync(chapterId);
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
+        if (chapter.VisualMode == ChapterVisualMode.PicturePage)
+            return "Error: edit_chapter cannot edit PicturePage chapters because their body is projected from layout text boxes. Use upsert_picture_page_text or other Picture Page visual layout tools.";
 
         content ??= string.Empty;
         var existingBody = chapter.Body;
@@ -1256,16 +1677,22 @@ public sealed class EditorChatTools(
         return result;
     }
 
-    private Task<string> StartContestAsync(
+    private async Task<string> StartContestAsync(
         EditorChatContext ctx,
         Guid chapterId)
     {
         if (chapterId == Guid.Empty)
-            return Task.FromResult("Error: chapterId is required.");
+            return "Error: chapterId is required.";
+
+        var chapter = await chapters.GetAsync(chapterId);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId} not found in this project.";
+        if (chapter.VisualMode == ChapterVisualMode.PicturePage)
+            return "Error: start_contest cannot target PicturePage chapters because contest candidates mutate chapter prose. Use Picture Page visual layout tools instead.";
 
         ctx.RequestContest(new EditorContestStartRequest(chapterId));
 
-        return Task.FromResult("Contest started. Candidate responses will stream into the review modal.");
+        return "Contest started. Candidate responses will stream into the review modal.";
     }
 
     private async Task<IReadOnlyList<OrderedChapter>> ListOrderedChaptersAsync(Guid projectId)

@@ -1,8 +1,17 @@
+using Lorekeeper.Models;
+
 namespace Lorekeeper.Outline;
 
 public sealed record OutlineActChange(Guid Id, int Order, string Title, string Synopsis);
 
-public sealed record OutlineChapterChange(Guid Id, Guid? ActId, int Order, string Title, string Synopsis);
+public sealed record OutlineChapterChange(
+    Guid Id,
+    Guid? ActId,
+    int Order,
+    string Title,
+    string Synopsis,
+    ChapterVisualMode VisualMode,
+    ChapterPageLayoutKind PageLayoutKind);
 
 public sealed record ChapterBodyChange(Guid Id, string Title, string Body);
 
