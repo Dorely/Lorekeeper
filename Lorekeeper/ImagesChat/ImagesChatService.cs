@@ -6,8 +6,10 @@ using Lorekeeper.Context;
 using Lorekeeper.Images;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.ImagesChat;
@@ -15,6 +17,7 @@ namespace Lorekeeper.ImagesChat;
 public sealed class ImagesChatService(
     IProjectRepository projects,
     IProjectImageConversationRepository conversations,
+    AppDbContext db,
     IContextBuilder contextBuilder,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
@@ -66,6 +69,80 @@ public sealed class ImagesChatService(
     public async Task<IReadOnlyList<ProjectImageMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
         await conversations.LoadMessagesAsync(conversationId, cancellationToken);
 
+    public async Task<IReadOnlyList<ProjectImageChatAttachmentView>> ListAttachmentsAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var attachments = await db.ProjectImageChatAttachments
+            .AsNoTracking()
+            .Include(attachment => attachment.Image)
+            .Where(attachment => attachment.ProjectId == projectId)
+            .OrderBy(attachment => attachment.SortOrder)
+            .ToListAsync(cancellationToken);
+
+        return attachments.Select(ToAttachmentView).ToList();
+    }
+
+    public async Task<ProjectImageChatAttachmentView> AttachImageAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default)
+    {
+        _ = await projects.GetByIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+
+        var image = await db.PublishAssets
+            .FirstOrDefaultAsync(asset => asset.ProjectId == projectId && asset.Id == imageId, cancellationToken)
+            ?? throw new InvalidOperationException($"Image {imageId} was not found in this project.");
+
+        var existing = await db.ProjectImageChatAttachments
+            .Include(attachment => attachment.Image)
+            .FirstOrDefaultAsync(
+                attachment => attachment.ProjectId == projectId && attachment.ImageId == imageId,
+                cancellationToken);
+        if (existing is not null)
+            return ToAttachmentView(existing);
+
+        var nextOrder = await db.ProjectImageChatAttachments
+            .Where(attachment => attachment.ProjectId == projectId)
+            .Select(attachment => (int?)attachment.SortOrder)
+            .MaxAsync(cancellationToken) ?? -1;
+
+        var now = DateTime.UtcNow;
+        var attachment = new ProjectImageChatAttachment
+        {
+            ProjectId = projectId,
+            ImageId = imageId,
+            Image = image,
+            Label = string.IsNullOrWhiteSpace(image.AltText) ? image.FileName : image.AltText.Trim(),
+            SortOrder = nextOrder + 1,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+
+        await db.ProjectImageChatAttachments.AddAsync(attachment, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return ToAttachmentView(attachment);
+    }
+
+    public async Task RemoveAttachmentAsync(Guid projectId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        var attachment = await db.ProjectImageChatAttachments
+            .FirstOrDefaultAsync(item => item.ProjectId == projectId && item.Id == attachmentId, cancellationToken);
+        if (attachment is null)
+            return;
+
+        db.ProjectImageChatAttachments.Remove(attachment);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ClearAttachmentsAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var attachments = await db.ProjectImageChatAttachments
+            .Where(attachment => attachment.ProjectId == projectId)
+            .ToListAsync(cancellationToken);
+        if (attachments.Count == 0)
+            return;
+
+        db.ProjectImageChatAttachments.RemoveRange(attachments);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
@@ -100,17 +177,21 @@ public sealed class ImagesChatService(
 
         var chatProvider = providerAvailability.Provider;
         var visionReady = await providerService.IsVisionProviderWorkingAsync(chatProvider.Id, cancellationToken);
+        var turnAttachments = await ListAttachmentsAsync(projectId, cancellationToken);
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
-        await conversations.AddMessageAsync(new ProjectImageMessage
+        var userMessage = new ProjectImageMessage
         {
             ConversationId = conversation.Id,
             Order = nextOrder++,
             Role = ProjectImageMessageRole.User,
             Content = userText.Trim(),
             Status = ProjectImageMessageStatus.Completed,
-        }, cancellationToken);
+        };
+        await conversations.AddMessageAsync(userMessage, cancellationToken);
         conversation.UpdatedAt = DateTime.UtcNow;
         await conversations.SaveChangesAsync(cancellationToken);
+        if (turnAttachments.Count > 0)
+            await PersistVisualsAsync(userMessage.Id, toolCallId: null, BuildAttachmentVisuals(turnAttachments));
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
@@ -147,6 +228,8 @@ public sealed class ImagesChatService(
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         messages.AddRange(BuildModelHistory(history));
+        if (turnAttachments.Count > 0)
+            messages.Add(await BuildAttachedImagesMessageAsync(projectId, turnAttachments, visionReady, cancellationToken));
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -394,6 +477,38 @@ public sealed class ImagesChatService(
         return assembly.Assemble();
     }
 
+    private static IReadOnlyList<ImagesChatVisualAttachment> BuildAttachmentVisuals(
+        IReadOnlyList<ProjectImageChatAttachmentView> attachments) =>
+        attachments
+            .Select(attachment => new ImagesChatVisualAttachment(
+                Guid.NewGuid(),
+                attachment.Label,
+                "Attached to Images Chat context.",
+                attachment.PreviewImageUrl,
+                attachment.FullImageUrl,
+                Width: null,
+                Height: null,
+                ToolCallId: null,
+                SourceKind: "projectImage",
+                SourceRefId: attachment.ImageId,
+                ContentType: attachment.ContentType,
+                FileName: attachment.FileName))
+            .ToList();
+
+    private static ProjectImageChatAttachmentView ToAttachmentView(ProjectImageChatAttachment attachment) =>
+        new(
+            attachment.Id,
+            attachment.ImageId,
+            attachment.Label,
+            attachment.Image.FileName,
+            attachment.Image.AltText,
+            attachment.Image.ContentType,
+            $"/projects/{attachment.ProjectId:N}/images/{attachment.ImageId:N}/content?maxEdge=160",
+            $"/projects/{attachment.ProjectId:N}/images/{attachment.ImageId:N}/content",
+            attachment.SortOrder,
+            attachment.CreatedAt,
+            attachment.UpdatedAt);
+
     private void OnToolMutated() => _mutatedSinceYield = true;
 
     private bool DrainMutated()
@@ -403,16 +518,17 @@ public sealed class ImagesChatService(
         return true;
     }
 
-    private async Task PersistVisualsAsync(Guid messageId, string toolCallId, IReadOnlyList<ImagesChatVisualAttachment> visuals)
+    private async Task PersistVisualsAsync(Guid messageId, string? toolCallId, IReadOnlyList<ImagesChatVisualAttachment> visuals)
     {
         if (visuals.Count == 0)
             return;
 
         await conversations.AddMessageVisualsAsync(visuals.Select((visual, index) => new ProjectImageMessageVisual
         {
+            Id = visual.Id,
             MessageId = messageId,
             SortOrder = index,
-            ToolCallId = toolCallId,
+            ToolCallId = visual.ToolCallId ?? toolCallId,
             Title = visual.Title,
             Caption = visual.Caption,
             SourceKind = visual.SourceKind,
@@ -421,18 +537,52 @@ public sealed class ImagesChatService(
             FileName = visual.FileName,
             Width = visual.Width,
             Height = visual.Height,
+            Data = visual.Data,
         }), CancellationToken.None);
         await conversations.SaveChangesAsync(CancellationToken.None);
+    }
+
+    private async Task<ChatMessage> BuildAttachedImagesMessageAsync(
+        Guid projectId,
+        IReadOnlyList<ProjectImageChatAttachmentView> attachments,
+        bool visionReady,
+        CancellationToken cancellationToken)
+    {
+        var contents = new List<AIContent>
+        {
+            new TextContent("Images currently attached to Images Chat for this turn. Treat these as user-provided visual context."),
+        };
+
+        foreach (var attachment in attachments)
+        {
+            contents.Add(new TextContent($"\nAttached image {attachment.ImageId:N}: {attachment.Label} ({attachment.FileName})"));
+            if (!visionReady)
+                continue;
+
+            var data = await projectImages.GetDataAsync(projectId, attachment.ImageId, cancellationToken: cancellationToken);
+            if (data is null)
+                continue;
+
+            contents.Add(new DataContent(data.Data, data.ContentType)
+            {
+                Name = data.FileName,
+            });
+        }
+
+        if (!visionReady)
+            contents.Add(new TextContent("\nThe active chat provider is not vision-ready, so only attachment metadata is available."));
+
+        return new ChatMessage(ChatRole.User, contents);
     }
 
     private async Task<ChatMessage> BuildModelOnlyImageMessageAsync(Guid projectId, IReadOnlyList<ProjectImageView> images)
     {
         var contents = new List<AIContent>
         {
-            new TextContent("Generated image outputs from the previous tool call are attached for visual context. Use these images when deciding whether further edits are needed."),
+            new TextContent("Project images returned by the previous tool call are attached as model-only visual context. Use these images when deciding whether further edits or layout actions are needed."),
         };
 
-        foreach (var image in images)
+        foreach (var image in images.DistinctBy(image => image.Id))
         {
             var data = await projectImages.GetDataAsync(projectId, image.Id, cancellationToken: CancellationToken.None);
             if (data is null) continue;

@@ -225,9 +225,23 @@ public sealed class ImagesChatTools(
     private async Task<string> ReadProjectImageAsync(ImagesChatToolContext ctx, Guid imageId)
     {
         var image = await projectImages.GetAsync(ctx.ProjectId, imageId);
-        return image is null
-            ? $"Error: image {imageId:N} was not found in this project."
-            : JsonSerializer.Serialize(ImagePayload(image), JsonOptions);
+        if (image is null)
+            return $"Error: image {imageId:N} was not found in this project.";
+
+        ctx.AddVisual(await BuildVisualAsync(
+            ctx,
+            image,
+            title: image.FileName,
+            caption: "Model-only image returned by read_project_image."));
+        ctx.AddModelOnlyImage(image);
+
+        return JsonSerializer.Serialize(new
+        {
+            image = ImagePayload(image),
+            delivery = ctx.VisionReady
+                ? "full image bytes will be supplied to the model on the next iteration"
+                : "metadata only; the active chat provider is not vision-ready",
+        }, JsonOptions);
     }
 
     private async Task<string> ReadChapterVisualLayoutAsync(ImagesChatToolContext ctx, Guid chapterId)
@@ -269,6 +283,23 @@ public sealed class ImagesChatTools(
         var analyses = new List<object>();
         foreach (var snapshot in snapshots)
         {
+            var visualId = Guid.NewGuid();
+            var size = ReadSize(snapshot.Data);
+            ctx.AddVisual(new ImagesChatVisualAttachment(
+                visualId,
+                $"Rendered page {snapshot.PageNumber}",
+                $"Rendered snapshot inspected for chapter '{chapter.Title}'.",
+                $"/projects/{ctx.ProjectId:N}/image-chat-visuals/{visualId:N}/content?maxEdge=640",
+                $"/projects/{ctx.ProjectId:N}/image-chat-visuals/{visualId:N}/content",
+                size.Width,
+                size.Height,
+                ctx.CurrentToolCallId,
+                SourceKind: "renderedChapterSnapshot",
+                SourceRefId: chapter.Id,
+                ContentType: snapshot.ContentType,
+                FileName: snapshot.FileName,
+                Data: snapshot.Data));
+
             var prompt = $"""
                 Inspect this rendered chapter page for Lorekeeper's Images tab.
                 Chapter: {chapter.Title}
@@ -407,7 +438,10 @@ public sealed class ImagesChatTools(
             if (image is null)
                 continue;
 
-            ctx.AddVisual(await BuildVisualAsync(ctx, image));
+            var caption = string.Equals(ctx.CurrentToolName, "edit_image", StringComparison.Ordinal)
+                ? "Edited output saved to the image library."
+                : "Generated output saved to the image library.";
+            ctx.AddVisual(await BuildVisualAsync(ctx, image, title: image.FileName, caption: caption));
             ctx.AddModelOnlyImage(image);
             outputs.Add(ImagePayload(image));
         }
@@ -454,14 +488,18 @@ public sealed class ImagesChatTools(
         return "Image added to chapter context.";
     }
 
-    private async Task<ImagesChatVisualAttachment> BuildVisualAsync(ImagesChatToolContext ctx, ProjectImageView image)
+    private async Task<ImagesChatVisualAttachment> BuildVisualAsync(
+        ImagesChatToolContext ctx,
+        ProjectImageView image,
+        string? title = null,
+        string? caption = null)
     {
         var data = await projectImages.GetDataAsync(ctx.ProjectId, image.Id, maxEdge: null, CancellationToken.None);
         var size = data is null ? (Width: (int?)null, Height: (int?)null) : ReadSize(data.Data);
         return new ImagesChatVisualAttachment(
-            image.Id,
-            image.FileName,
-            string.IsNullOrWhiteSpace(image.Prompt) ? image.Source.ToString() : Truncate(image.Prompt, 120),
+            Guid.NewGuid(),
+            title ?? image.FileName,
+            caption ?? (string.IsNullOrWhiteSpace(image.Prompt) ? image.Source.ToString() : Truncate(image.Prompt, 120)),
             image.PreviewUrl,
             $"/projects/{ctx.ProjectId:N}/images/{image.Id:N}/content",
             size.Width,

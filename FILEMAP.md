@@ -115,8 +115,8 @@
 
 | File | Description |
 |------|-------------|
-| `ImagesContent.razor` (+ `.razor.css`, `.razor.js`) | Three-pane image workspace with Images Chat, queued generation/edit job cards with partial previews, library actions, manual queued generation, and the mask edit canvas modal. |
-| `ImagesChatPanel.razor` | Images Chat adapter over `ChatSurface`: loads project image transcript, streams text/tool updates, renders generated-image visual strips, and refreshes the image grid after mutations. |
+| `ImagesContent.razor` (+ `.razor.css`, `.razor.js`) | Three-pane image workspace with Images Chat, queued generation/edit job cards, attach-to-chat/library actions, full-size image viewing, manual queued generation, and mask edit modal. |
+| `ImagesChatPanel.razor` (+ `.razor.css`) | Images Chat adapter over `ChatSurface`: loads transcript, streams text/tool updates, manages attached image context chips, renders image visual strips, and refreshes the image grid after mutations. |
 
 ### Components/Pages/Projects/Publish/
 
@@ -162,7 +162,7 @@
 | `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing plus persisted chat- and vision-readiness test snapshots. |
 | `EmbeddingConfiguration.cs` | Singleton EF entity for the active embedding setup: top-level provider connection, embedding API kind, model id, dimensions, last-tested snapshot, and timestamps. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
-| `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; owns project settings and child navigation collections including conversations, image chats/jobs/masks, contests, revision jobs, writing samples, import jobs, publish profiles/assets/selections/placements, and graph rows. |
+| `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; owns project settings and child navigation collections including conversations, image chats/attachments/jobs/masks, contests, revision jobs, writing samples, import jobs, publish profiles/assets/selections/placements, and graph rows. |
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF entity for a chapter (Title/Body/Synopsis/Order) under a `Project`, optionally assigned to an `Act`; stores visual mode, page layout kind, and visual layout JSON for illustrated prose/picture pages. Tracks vector-index state and exposes `VectorSourceId`. |
 | `ChapterVisualMode.cs` | Enums for chapter visual modes, page layout kinds, and reusable image/text layout choices such as image fit, alignment, anchor position, and text vertical alignment. |
@@ -201,6 +201,7 @@
 | `PublishProfile.cs` | EF entity for one saved publish profile per project: book metadata, front/back matter, output options, prose pagination settings, selected cover asset, and cover text layout JSON. |
 | `PublishAsset.cs` | EF entity for uploaded/generated/edited project images with bytes, alt text, prompt/source metadata, masks, and cover/placement navigation. |
 | `ProjectImageConversation.cs` | EF entity for the separate project-scoped Images Chat transcript. |
+| `ProjectImageChatAttachment.cs` | EF entity for project image assets explicitly attached as visible Images Chat context chips. |
 | `ProjectImageMessage.cs` | EF entity for Images Chat messages with assistant tool-call manifests, tool result metadata, status, and errors. |
 | `ProjectImageMessageVisual.cs` | EF entity for Images Chat visual attachments, including project-image references or optional stored bytes. |
 | `ProjectImageGenerationJob.cs` | EF entity for queued/running/final image generate/edit jobs with settings, references, outputs, progress state JSON, and provider diagnostics. |
@@ -218,7 +219,7 @@
 | `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, publish profiles/assets/layouts, and chapter visual-mode fields. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish/cover-layout/revision-agent/embedding-config/chat-readiness/adaptive artifact ingest, ingest staging records/canon cleanup, ingest LLM token metadata, ingest report payload cleanup, editor chat/contest/web research cache, `AddChapterVisualModesAndImages`, `ReplacePicturePageDimensionsWithLayoutKind`, and `AddImagesChatAndGenerationQueue`). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish/cover-layout/revision-agent/embedding-config/chat-readiness/adaptive artifact ingest, ingest staging records/canon cleanup, ingest LLM token metadata, ingest report payload cleanup, editor chat/contest/web research cache, `AddChapterVisualModesAndImages`, `ReplacePicturePageDimensionsWithLayoutKind`, `AddImagesChatAndGenerationQueue`, and `AddProjectImageChatAttachments`). |
 
 ### Persistence/Repositories/
 
@@ -415,8 +416,8 @@
 
 | File | Description |
 |------|-------------|
-| `IImagesChatService.cs` / `ImagesChatService.cs` | Separate project-scoped Images Chat service with project context, tool streaming, persisted transcript/visuals, queued generation/edit tools, and model-only generated-image context for vision-ready turns. |
-| `ImagesChatTools.cs` | Images Chat LLM tools for project search/source reads, chapters, image library reads, visual layout manifests, rendered snapshot inspection, shape masks, queued generation/editing, and chapter image placement/context. |
+| `IImagesChatService.cs` / `ImagesChatService.cs` | Separate project-scoped Images Chat service with project context, attached image context, tool streaming, persisted transcript/visuals, queued generation/edit tools, and model-only image context for vision-ready turns. |
+| `ImagesChatTools.cs` | Images Chat LLM tools for project search/source reads, chapters, image library reads with visual chips, visual layout manifests, rendered snapshot inspection, shape masks, queued generation/editing, and chapter image placement/context. |
 | `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, current tool metadata, visible visual attachments, model-only generated images, and mutation signaling. |
 | `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
 

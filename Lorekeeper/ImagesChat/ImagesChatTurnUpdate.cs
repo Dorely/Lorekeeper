@@ -50,4 +50,5 @@ public sealed record ImagesChatVisualAttachment(
     string SourceKind = "",
     Guid? SourceRefId = null,
     string ContentType = "",
-    string FileName = "");
+    string FileName = "",
+    [property: JsonIgnore] byte[]? Data = null);

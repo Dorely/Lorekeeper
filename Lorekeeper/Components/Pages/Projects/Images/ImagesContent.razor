@@ -1,12 +1,12 @@
 @using Lorekeeper.Images
+@using Lorekeeper.ImagesChat
 @using Lorekeeper.Llm
 @using Lorekeeper.Models
-@using Lorekeeper.Publish
 @implements IAsyncDisposable
 @inject IProjectImageService Images
 @inject IProjectImageJobService ImageJobs
 @inject IProjectImageGenerationRuntime ImageRuntime
-@inject IPublishService Publishing
+@inject IImagesChatService ImagesChat
 @inject ILlmProviderService Providers
 @inject IJSRuntime JS
 
@@ -22,7 +22,7 @@ else
 {
     <div class="images-workspace">
         <section class="images-chat-pane">
-            <ImagesChatPanel ProjectId="Project.Id" OnImagesChanged="ReloadAsync" />
+            <ImagesChatPanel ProjectId="Project.Id" OnImagesChanged="ReloadAsync" AttachmentRefreshKey="_attachmentRefreshKey" />
         </section>
 
         <section class="images-main">
@@ -52,9 +52,8 @@ else
 
                 @foreach (var image in FilteredImages)
                 {
-                    var selected = _selectedReferenceImageIds.Contains(image.Id);
                     <article class="image-card" @key="image.Id">
-                        <button type="button" class="image-preview-button" @onclick="() => SelectImage(image)">
+                        <button type="button" class="image-preview-button" @onclick="() => OpenImageModal(image)">
                             <img src="@image.PreviewUrl" alt="@ImageAlt(image)" />
                         </button>
                         <div class="image-card-body">
@@ -70,15 +69,8 @@ else
                                 <span>@FormatBytes(image.SizeBytes)</span>
                             </div>
                             <div class="image-actions">
-                                <label class="form-check image-reference-check">
-                                    <input class="form-check-input"
-                                           type="checkbox"
-                                           checked="@selected"
-                                           disabled="@(!selected && _selectedReferenceImageIds.Count >= MaxReferenceImages)"
-                                           @onchange="e => ToggleReference(image.Id, e)" />
-                                    <span class="form-check-label">Reference</span>
-                                </label>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetCoverAsync(image.Id)">Cover</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AttachToChatAsync(image)">Attach to Chat</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenMaskModal(image)">Edit</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => DownloadAsync(image)">Download</button>
                                 <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(image.Id)">Delete</button>
                             </div>
@@ -157,31 +149,39 @@ else
                 }
             </section>
 
-            @if (_selectedImage is not null)
-            {
-                <section class="image-tool-panel">
-                    <h6>Selected</h6>
-                    <img class="selected-image-preview" src="@_selectedImage.PreviewUrl" alt="@ImageAlt(_selectedImage)" />
-                    <strong>@_selectedImage.FileName</strong>
-                    @if (!string.IsNullOrWhiteSpace(_selectedImage.Prompt))
-                    {
-                        <p class="small mb-0">@_selectedImage.Prompt</p>
-                    }
-                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="OpenMaskModal">Edit with mask</button>
-                </section>
-            }
         </aside>
     </div>
 }
 
-@if (_maskModalOpen && _selectedImage is not null)
+@if (_viewImage is not null)
+{
+    <div class="image-view-modal-backdrop" @onclick="CloseImageModal">
+        <section class="image-view-modal" role="dialog" aria-modal="true" aria-label="View image" @onclick:stopPropagation="true">
+            <header class="image-view-modal-header">
+                <div>
+                    <h5>@_viewImage.FileName</h5>
+                    @if (!string.IsNullOrWhiteSpace(_viewImage.AltText))
+                    {
+                        <span>@_viewImage.AltText</span>
+                    }
+                </div>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseImageModal"></button>
+            </header>
+            <div class="image-view-modal-body">
+                <img src="@($"/projects/{Project!.Id:N}/images/{_viewImage.Id:N}/content")" alt="@ImageAlt(_viewImage)" />
+            </div>
+        </section>
+    </div>
+}
+
+@if (_maskModalOpen && _editingImage is not null)
 {
     <div class="mask-modal-backdrop" @onclick="CloseMaskModal">
         <section class="mask-modal" role="dialog" aria-modal="true" aria-label="Edit with mask" @onclick:stopPropagation="true">
             <header class="mask-modal-header">
                 <div>
                     <h5>Edit with mask</h5>
-                    <span>@_selectedImage.FileName</span>
+                    <span>@_editingImage.FileName</span>
                 </div>
                 <button type="button" class="btn-close" aria-label="Close" @onclick="CloseMaskModal"></button>
             </header>
@@ -215,15 +215,14 @@ else
 
 @code {
     private const long MaxImageBytes = 20L * 1024 * 1024;
-    private const int MaxReferenceImages = 4;
 
     [CascadingParameter] public Project? Project { get; set; }
 
     private IReadOnlyList<ProjectImageView> _images = [];
     private IReadOnlyList<ProjectImageJobView> _jobs = [];
     private ProjectImageGenerationRuntimeSnapshot _runtimeSnapshot = new([]);
-    private List<Guid> _selectedReferenceImageIds = [];
-    private ProjectImageView? _selectedImage;
+    private ProjectImageView? _editingImage;
+    private ProjectImageView? _viewImage;
     private IJSObjectReference? _downloadModule;
     private IJSObjectReference? _maskModule;
     private ElementReference _maskCanvas;
@@ -247,6 +246,7 @@ else
     private bool _maskCanvasNeedsInit;
     private bool _sendingMaskEdit;
     private Guid? _loadedProjectId;
+    private int _attachmentRefreshKey;
 
     private IReadOnlyList<ProjectImageView> FilteredImages =>
         string.IsNullOrWhiteSpace(_query)
@@ -257,8 +257,7 @@ else
 
     private IReadOnlyList<ProjectImageJobView> VisibleJobs =>
         _jobs.Where(job => IsActiveJob(job.Status)
-            || job.OutputStates.Any(state => state.Status is ProjectImageOutputStatus.Failed)
-            || job.CreatedAt > DateTime.UtcNow.AddMinutes(-30))
+            || JobHasProblem(job))
             .OrderBy(job => IsActiveJob(job.Status) ? 0 : 1)
             .ThenByDescending(job => job.CreatedAt)
             .ToList();
@@ -281,13 +280,13 @@ else
             _maskModule = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/Projects/Images/ImagesContent.razor.js");
         }
 
-        if (_maskCanvasNeedsInit && _maskModule is not null && _selectedImage is not null && Project is not null)
+        if (_maskCanvasNeedsInit && _maskModule is not null && _editingImage is not null && Project is not null)
         {
             _maskCanvasNeedsInit = false;
             await _maskModule.InvokeVoidAsync(
                 "loadMaskCanvas",
                 _maskCanvas,
-                $"/projects/{Project.Id:N}/images/{_selectedImage.Id:N}/content",
+                $"/projects/{Project.Id:N}/images/{_editingImage.Id:N}/content",
                 _maskTool,
                 _maskBrushSize);
         }
@@ -304,7 +303,7 @@ else
             _images = await Images.ListAsync(Project.Id);
             _jobs = await ImageJobs.ListJobsAsync(Project.Id);
             _runtimeSnapshot = ImageRuntime.GetSnapshot();
-            PruneSelections();
+            RefreshOpenImages();
         }
         catch (Exception ex)
         {
@@ -327,7 +326,7 @@ else
                 {
                     _jobs = await ImageJobs.ListJobsAsync(Project.Id);
                     _images = await Images.ListAsync(Project.Id);
-                    PruneSelections();
+                    RefreshOpenImages();
                 }
                 StateHasChanged();
             });
@@ -375,7 +374,7 @@ else
                 _imageFormat == "jpeg" ? _imageCompression : null,
                 _generatedAltText,
                 1,
-                _selectedReferenceImageIds.ToList(),
+                [],
                 Label: "Manual generation"));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
             _status = "Image job queued.";
@@ -422,14 +421,15 @@ else
         }
     }
 
-    private async Task SetCoverAsync(Guid imageId)
+    private async Task AttachToChatAsync(ProjectImageView image)
     {
         if (Project is null) return;
         _error = null;
         try
         {
-            await Publishing.SetCoverAssetAsync(Project.Id, imageId);
-            _status = "Cover image updated.";
+            await ImagesChat.AttachImageAsync(Project.Id, image.Id);
+            _attachmentRefreshKey++;
+            _status = "Image attached to Images Chat.";
         }
         catch (Exception ex)
         {
@@ -445,24 +445,13 @@ else
         await _downloadModule.InvokeVoidAsync("downloadBytes", data.FileName, data.ContentType, Convert.ToBase64String(data.Data));
     }
 
-    private void ToggleReference(Guid imageId, ChangeEventArgs e)
+    private void OpenImageModal(ProjectImageView image) => _viewImage = image;
+
+    private void CloseImageModal() => _viewImage = null;
+
+    private void OpenMaskModal(ProjectImageView image)
     {
-        var selected = e.Value is bool value && value;
-        if (selected)
-        {
-            if (!_selectedReferenceImageIds.Contains(imageId) && _selectedReferenceImageIds.Count < MaxReferenceImages)
-                _selectedReferenceImageIds.Add(imageId);
-            return;
-        }
-
-        _selectedReferenceImageIds.Remove(imageId);
-    }
-
-    private void SelectImage(ProjectImageView image) => _selectedImage = image;
-
-    private void OpenMaskModal()
-    {
-        if (_selectedImage is null) return;
+        _editingImage = image;
         _maskPrompt = string.Empty;
         _maskTool = "brush";
         _maskBrushSize = 32;
@@ -495,7 +484,7 @@ else
 
     private async Task SendMaskEditAsync()
     {
-        if (Project is null || _selectedImage is null || _maskModule is null) return;
+        if (Project is null || _editingImage is null || _maskModule is null) return;
         _error = null;
         _status = null;
         if (string.IsNullOrWhiteSpace(_maskPrompt))
@@ -516,7 +505,7 @@ else
 
             var maskDataUrl = await _maskModule.InvokeAsync<string>("exportMaskPng", _maskCanvas);
             await ImageJobs.CreateEditJobAsync(Project.Id, new ProjectImageEditJobRequest(
-                _selectedImage.Id,
+                _editingImage.Id,
                 _maskPrompt,
                 _imageSize,
                 _imageQuality,
@@ -525,8 +514,8 @@ else
                 _generatedAltText,
                 1,
                 maskDataUrl,
-                _selectedReferenceImageIds.Where(id => id != _selectedImage.Id).ToList(),
-                Label: $"Edit {_selectedImage.FileName}"));
+                [],
+                Label: $"Edit {_editingImage.FileName}"));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
             _maskModalOpen = false;
             _status = "Edit job queued.";
@@ -604,6 +593,14 @@ else
     private static bool IsActiveJob(ProjectImageGenerationJobStatus status) =>
         status is ProjectImageGenerationJobStatus.Queued or ProjectImageGenerationJobStatus.Running;
 
+    private static bool JobHasProblem(ProjectImageJobView job) =>
+        job.Status is ProjectImageGenerationJobStatus.Failed
+            or ProjectImageGenerationJobStatus.CompletedWithErrors
+            or ProjectImageGenerationJobStatus.Cancelled
+        || !string.IsNullOrWhiteSpace(job.Error)
+        || job.OutputErrors.Count > 0
+        || job.OutputStates.Any(state => state.Status is ProjectImageOutputStatus.Failed or ProjectImageOutputStatus.Cancelled);
+
     private static string JobStatusText(ProjectImageJobView job, ProjectImageGenerationJobRuntimeView? runtimeJob)
     {
         if (runtimeJob is { IsRunning: true })
@@ -614,12 +611,21 @@ else
     private string ImagePreviewUrl(Guid imageId) =>
         Project is null ? string.Empty : $"/projects/{Project.Id:N}/images/{imageId:N}/content?maxEdge=640";
 
-    private void PruneSelections()
+    private void RefreshOpenImages()
     {
         var ids = _images.Select(image => image.Id).ToHashSet();
-        _selectedReferenceImageIds = _selectedReferenceImageIds.Where(ids.Contains).ToList();
-        if (_selectedImage is not null)
-            _selectedImage = _images.FirstOrDefault(image => image.Id == _selectedImage.Id);
+        if (_viewImage is not null)
+            _viewImage = ids.Contains(_viewImage.Id) ? _images.First(image => image.Id == _viewImage.Id) : null;
+        if (_editingImage is not null && !ids.Contains(_editingImage.Id))
+        {
+            _editingImage = null;
+            _maskModalOpen = false;
+            _maskCanvasNeedsInit = false;
+        }
+        else if (_editingImage is not null)
+        {
+            _editingImage = _images.First(image => image.Id == _editingImage.Id);
+        }
     }
 
     private static string ImageAlt(ProjectImageView image) =>

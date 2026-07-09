@@ -1,0 +1,97 @@
+.images-chat-attachment-bar {
+    display: grid;
+    gap: 0.45rem;
+    padding: 0.55rem 0.65rem;
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+    background: var(--bs-body-bg, #fff);
+}
+
+.images-chat-attachment-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.images-chat-attachment-list {
+    display: flex;
+    gap: 0.45rem;
+    overflow-x: auto;
+    padding-bottom: 0.1rem;
+}
+
+.images-chat-attachment-chip {
+    min-width: 10rem;
+    max-width: 15rem;
+    display: grid;
+    grid-template-columns: 2.6rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.35rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.375rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.images-chat-attachment-thumb {
+    width: 2.6rem;
+    height: 2.6rem;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.25rem;
+    overflow: hidden;
+    background: var(--bs-body-bg, #fff);
+}
+
+.images-chat-attachment-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.images-chat-attachment-text {
+    min-width: 0;
+    display: grid;
+}
+
+.images-chat-attachment-text small,
+.images-chat-attachment-text strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.images-chat-attachment-text small {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+}
+
+.images-chat-attachment-text strong {
+    font-size: 0.8rem;
+}
+
+.images-chat-attachment-remove {
+    width: 1.4rem;
+    height: 1.4rem;
+    border: 0;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    color: var(--bs-secondary-color, #6c757d);
+    background: transparent;
+    line-height: 1;
+}
+
+.images-chat-attachment-remove:hover,
+.images-chat-attachment-remove:focus-visible {
+    color: var(--bs-danger, #dc3545);
+    background: rgba(220, 53, 69, 0.1);
+}

@@ -65,6 +65,8 @@ public class Project
 
     public ICollection<ProjectImageConversation> ProjectImageConversations { get; set; } = [];
 
+    public ICollection<ProjectImageChatAttachment> ProjectImageChatAttachments { get; set; } = [];
+
     public ICollection<AiChangeBatch> AiChangeBatches { get; set; } = [];
 
     public ICollection<ContestBatch> ContestBatches { get; set; } = [];

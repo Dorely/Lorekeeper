@@ -32,6 +32,34 @@
         <button type="button" class="btn btn-link btn-sm images-chat-reset" title="Start over" disabled="@(ChatDisabled || _running)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
     <ExtraControls>
+        @if (_attachments.Count > 0)
+        {
+            <div class="images-chat-attachment-bar">
+                <div class="images-chat-attachment-head">
+                    <span>Attached to chat</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_running" @onclick="ClearAttachmentsAsync">Clear</button>
+                </div>
+                <div class="images-chat-attachment-list">
+                    @foreach (var attachment in _attachments)
+                    {
+                        <span class="images-chat-attachment-chip" @key="attachment.Id">
+                            <a class="images-chat-attachment-thumb" href="@attachment.FullImageUrl" target="_blank" title="@attachment.Label">
+                                <img src="@attachment.PreviewImageUrl" alt="@attachment.Label" />
+                            </a>
+                            <span class="images-chat-attachment-text">
+                                <small>Image</small>
+                                <strong>@attachment.Label</strong>
+                            </span>
+                            <button type="button"
+                                    class="images-chat-attachment-remove"
+                                    title="Remove"
+                                    disabled="@_running"
+                                    @onclick="() => RemoveAttachmentAsync(attachment.Id)">x</button>
+                        </span>
+                    }
+                </div>
+            </div>
+        }
         @if (ChatDisabled)
         {
             <div class="alert alert-warning py-2 small mb-2">
@@ -47,6 +75,7 @@
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public EventCallback OnImagesChanged { get; set; }
+    [Parameter] public int AttachmentRefreshKey { get; set; }
 
     private int _forceScrollKey;
     private int _scrollKey;
@@ -54,6 +83,7 @@
     private int _resetComposerKey;
     private ProjectImageConversation? _conversation;
     private List<ProjectImageMessage> _messages = [];
+    private List<ProjectImageChatAttachmentView> _attachments = [];
     private List<ChatRenderableMessage> _renderable = [];
     private ChatLiveTurn? _live;
     private string _input = string.Empty;
@@ -66,6 +96,7 @@
     private string _systemPrompt = string.Empty;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private ChatProviderAvailability? _chatAvailability;
+    private int _seenAttachmentRefreshKey;
 
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
     private string ChatDisabledMessage => _chatAvailability?.Message
@@ -73,9 +104,21 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (ProjectId == Guid.Empty || _loadedProjectId == ProjectId) return;
-        _loadedProjectId = ProjectId;
-        await LoadAsync();
+        if (ProjectId == Guid.Empty) return;
+
+        if (_loadedProjectId != ProjectId)
+        {
+            _loadedProjectId = ProjectId;
+            _seenAttachmentRefreshKey = AttachmentRefreshKey;
+            await LoadAsync();
+            return;
+        }
+
+        if (_seenAttachmentRefreshKey != AttachmentRefreshKey)
+        {
+            _seenAttachmentRefreshKey = AttachmentRefreshKey;
+            await LoadAttachmentsAsync();
+        }
     }
 
     private async Task LoadAsync()
@@ -86,6 +129,7 @@
             _conversation = await ImagesChat.GetOrCreateAsync(ProjectId);
             _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
             _messages = (await ImagesChat.LoadMessagesAsync(_conversation.Id)).ToList();
+            await LoadAttachmentsAsync();
             _systemPrompt = await ImagesChat.GetSystemPromptAsync(ProjectId);
             RebuildRenderable();
             _pendingUserText = null;
@@ -120,7 +164,7 @@
             Guid.NewGuid(),
             ChatMessageRole.User,
             ChatMessageStatus.Completed,
-            [new ChatTextPart(text)]));
+            BuildUserPendingParts(text)));
         _live = new ChatLiveTurn();
         _pendingUserText = text;
         UpdateConversationTokenCount();
@@ -203,6 +247,21 @@
         await ImagesChat.ResetAsync(ProjectId);
         _loadedProjectId = null;
         await LoadAsync();
+    }
+
+    private async Task LoadAttachmentsAsync() =>
+        _attachments = (await ImagesChat.ListAttachmentsAsync(ProjectId)).ToList();
+
+    private async Task RemoveAttachmentAsync(Guid attachmentId)
+    {
+        await ImagesChat.RemoveAttachmentAsync(ProjectId, attachmentId);
+        await LoadAttachmentsAsync();
+    }
+
+    private async Task ClearAttachmentsAsync()
+    {
+        await ImagesChat.ClearAttachmentsAsync(ProjectId);
+        await LoadAttachmentsAsync();
     }
 
     private void CancelAsync() => _cts?.Cancel();
@@ -288,7 +347,13 @@
     private List<ChatMessagePart> BuildMessageParts(ProjectImageMessage message, IReadOnlyDictionary<string, ProjectImageMessage> byCallId)
     {
         if (message.Role != ProjectImageMessageRole.Assistant)
-            return string.IsNullOrEmpty(message.Content) ? [] : [new ChatTextPart(message.Content)];
+        {
+            var messageParts = new List<ChatMessagePart>();
+            if (!string.IsNullOrEmpty(message.Content))
+                messageParts.Add(new ChatTextPart(message.Content));
+            messageParts.AddRange(message.Visuals.OrderBy(visual => visual.SortOrder).Select(visual => new ChatImagePart(ToChatImageVisual(visual))));
+            return messageParts;
+        }
 
         var calls = ChatTranscriptHelpers.ReadPersistedCalls(message.ToolCallsJson);
         if (calls.Count == 0)
@@ -359,6 +424,23 @@
             visual.Width,
             visual.Height,
             visual.ToolCallId);
+
+    private List<ChatMessagePart> BuildUserPendingParts(string text)
+    {
+        var parts = new List<ChatMessagePart> { new ChatTextPart(text) };
+        parts.AddRange(_attachments.Select(attachment => new ChatImagePart(ToChatImageVisual(attachment))));
+        return parts;
+    }
+
+    private static ChatImageVisual ToChatImageVisual(ProjectImageChatAttachmentView attachment) =>
+        new(
+            attachment.Id,
+            attachment.Label,
+            "Attached to Images Chat context.",
+            attachment.PreviewImageUrl,
+            attachment.FullImageUrl,
+            Width: null,
+            Height: null);
 
     private (string PreviewUrl, string FullUrl) VisualUrls(ProjectImageMessageVisual visual)
     {

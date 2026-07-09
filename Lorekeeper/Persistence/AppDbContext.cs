@@ -33,6 +33,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<ProjectImageConversation> ProjectImageConversations => Set<ProjectImageConversation>();
     public DbSet<ProjectImageMessage> ProjectImageMessages => Set<ProjectImageMessage>();
     public DbSet<ProjectImageMessageVisual> ProjectImageMessageVisuals => Set<ProjectImageMessageVisual>();
+    public DbSet<ProjectImageChatAttachment> ProjectImageChatAttachments => Set<ProjectImageChatAttachment>();
     public DbSet<AiChangeBatch> AiChangeBatches => Set<AiChangeBatch>();
     public DbSet<AiChange> AiChanges => Set<AiChange>();
     public DbSet<ContestBatch> ContestBatches => Set<ContestBatch>();
@@ -276,6 +277,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Message)
                 .WithMany(m => m.Visuals)
                 .HasForeignKey(e => e.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectImageChatAttachment>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.SortOrder });
+            entity.HasIndex(e => new { e.ProjectId, e.ImageId }).IsUnique();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.ProjectImageChatAttachments)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Image)
+                .WithMany(a => a.ImageChatAttachments)
+                .HasForeignKey(e => e.ImageId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
