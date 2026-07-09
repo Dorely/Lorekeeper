@@ -1,9 +1,12 @@
+@using Lorekeeper.ChatTurns
 @using Lorekeeper.Models
 @using Lorekeeper.Llm
 @using Lorekeeper.Tokens
 @using Lorekeeper.Writing
+@using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IWritingCoachService Coach
+@inject IWritingCoachTurnRunner ChatTurns
 @inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
 
@@ -64,7 +67,8 @@
     private bool _running;
     private bool _loading = true;
     private string? _error;
-    private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _listenCts;
+    private Guid? _listeningTurnId;
     private Guid? _loadedProjectId;
     private string? _pendingUserText;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
@@ -84,15 +88,33 @@
 
     private async Task LoadAsync()
     {
+        StopListening();
         _loading = true;
         try
         {
             _conversation = await Coach.GetOrCreateAsync(ProjectId);
             _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
             _messages = (await Coach.LoadMessagesAsync(_conversation.Id)).ToList();
-            RebuildRenderable();
-            _pendingUserText = null;
-            _live = null;
+            var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
+            RebuildRenderable(activeTurn?.StartedAtUtc);
+            if (activeTurn is not null)
+            {
+                _renderable.Add(new ChatRenderableMessage(
+                    Id: Guid.NewGuid(),
+                    Role: ChatMessageRole.User,
+                    Status: ChatMessageStatus.Completed,
+                    Parts: [new ChatTextPart(activeTurn.UserText)]));
+                _pendingUserText = activeTurn.UserText;
+                _live = new ChatLiveTurn();
+                _running = true;
+                await ListenToActiveTurnAsync(activeTurn);
+            }
+            else
+            {
+                _pendingUserText = null;
+                _live = null;
+                _running = false;
+            }
             UpdateConversationTokenCount();
         }
         finally
@@ -119,8 +141,6 @@
         _input = string.Empty;
         _running = true;
         _error = null;
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource();
         _resetComposerKey++;
 
         _renderable.Add(new ChatRenderableMessage(
@@ -135,67 +155,17 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        try
+        if (!ChatTurns.TryStart(ProjectId, text, draft.Title, draft.Body))
         {
-            await foreach (var update in Coach.SendAsync(ProjectId, text, draft.Title, draft.Body, _cts.Token))
-            {
-                switch (update)
-                {
-                    case WritingCoachTextDelta delta:
-                        _live!.AppendText(delta.Text);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case WritingCoachToolCallStarted started:
-                        _live!.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case WritingCoachToolCallArgumentsDelta delta:
-                        _live!.AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case WritingCoachToolCallCompleted completed:
-                        _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case WritingCoachAssistantMessageCompleted:
-                        ReleaseRunningUi();
-                        await ReloadFromDbAsync();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case WritingCoachTurnError error:
-                        _error = error.Cancelled ? null : error.Message;
-                        ReleaseRunningUi();
-                        await ReloadFromDbAsync();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
-        finally
-        {
+            _error = "Writing Coach already has a running turn.";
             ReleaseRunningUi();
-            _cts?.Dispose();
-            _cts = null;
+            if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)
+                await ListenToActiveTurnAsync(existingTurn);
+            return;
         }
+
+        if (ChatTurns.GetActiveTurn(ProjectId) is { } activeTurn)
+            await ListenToActiveTurnAsync(activeTurn);
     }
 
     private async Task ResetAsync()
@@ -206,7 +176,99 @@
         await LoadAsync();
     }
 
-    private void CancelAsync() => _cts?.Cancel();
+    private async Task ListenToActiveTurnAsync(ChatTurnSnapshot activeTurn)
+    {
+        if (_listeningTurnId == activeTurn.TurnId)
+            return;
+
+        StopListening();
+        var subscription = ChatTurns.Subscribe(ProjectId);
+        if (subscription is null)
+        {
+            ReleaseRunningUi();
+            return;
+        }
+
+        _listeningTurnId = subscription.TurnId;
+        _listenCts = new CancellationTokenSource();
+        _ = ListenToTurnAsync(subscription, _listenCts.Token);
+        await Task.CompletedTask;
+    }
+
+    private void StopListening()
+    {
+        _listenCts?.Cancel();
+        _listenCts?.Dispose();
+        _listenCts = null;
+        _listeningTurnId = null;
+    }
+
+    private async Task ListenToTurnAsync(
+        IChatTurnSubscription<WritingCoachTurnUpdate> subscription,
+        CancellationToken cancellationToken)
+    {
+        await using (subscription)
+        {
+            try
+            {
+                await foreach (var update in subscription.ReadAllAsync(cancellationToken))
+                    await InvokeAsync(() => ApplyTurnUpdateAsync(update));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            catch (JSDisconnectedException) { }
+        }
+    }
+
+    private async Task ApplyTurnUpdateAsync(WritingCoachTurnUpdate update)
+    {
+        switch (update)
+        {
+            case WritingCoachTextDelta delta:
+                _live!.AppendText(delta.Text);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case WritingCoachToolCallStarted started:
+                _live!.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case WritingCoachToolCallArgumentsDelta delta:
+                _live!.AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case WritingCoachToolCallCompleted completed:
+                _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case WritingCoachAssistantMessageCompleted:
+                ReleaseRunningUi();
+                await ReloadFromDbAsync();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case WritingCoachTurnError error:
+                _error = error.Cancelled ? null : error.Message;
+                ReleaseRunningUi();
+                await ReloadFromDbAsync();
+                RequestScroll();
+                StateHasChanged();
+                break;
+        }
+    }
+
+    private void CancelAsync() => ChatTurns.Cancel(ProjectId);
 
     private void ReleaseRunningUi()
     {
@@ -230,14 +292,18 @@
         UpdateConversationTokenCount();
     }
 
-    private void RebuildRenderable()
+    private void RebuildRenderable(DateTime? excludeMessagesCreatedAtOrAfter = null)
     {
-        var byCallId = _messages
+        var messages = excludeMessagesCreatedAtOrAfter is { } cutoff
+            ? _messages.Where(message => message.CreatedAt < cutoff).ToList()
+            : _messages;
+
+        var byCallId = messages
             .Where(message => message.Role == WritingCoachMessageRole.Tool && message.ToolCallId is not null)
             .ToDictionary(message => message.ToolCallId!, message => message);
 
-        _renderable = new List<ChatRenderableMessage>(_messages.Count);
-        foreach (var message in _messages)
+        _renderable = new List<ChatRenderableMessage>(messages.Count);
+        foreach (var message in messages)
         {
             if (message.Role == WritingCoachMessageRole.Tool) continue;
             if (message.Role == WritingCoachMessageRole.System) continue;
@@ -350,8 +416,7 @@
 
     public ValueTask DisposeAsync()
     {
-        _cts?.Cancel();
-        _cts?.Dispose();
+        StopListening();
         return ValueTask.CompletedTask;
     }
 }

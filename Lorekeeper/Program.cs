@@ -132,11 +132,13 @@ builder.Services.AddScoped<IOutlineGraphSync, OutlineGraphSync>();
 builder.Services.AddScoped<OutlineCollaborationTools>();
 builder.Services.AddScoped<IAiChangeApprovalService, AiChangeApprovalService>();
 builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationService>();
+builder.Services.AddSingleton<IOutlineChatTurnRunner, OutlineChatTurnRunner>();
 
 // Writing samples
 builder.Services.AddScoped<IWritingSampleService, WritingSampleService>();
 builder.Services.AddScoped<WritingCoachTools>();
 builder.Services.AddScoped<IWritingCoachService, WritingCoachService>();
+builder.Services.AddSingleton<IWritingCoachTurnRunner, WritingCoachTurnRunner>();
 
 // Ingest
 builder.Services.Configure<IngestSourceStructureOptions>(builder.Configuration.GetSection(IngestSourceStructureOptions.SectionName));
@@ -164,6 +166,7 @@ builder.Services.AddScoped<IWebPageReader, HttpWebPageReader>();
 builder.Services.AddScoped<IWebIngestCandidateService, WebIngestCandidateService>();
 builder.Services.AddScoped<ResearchTools>();
 builder.Services.AddScoped<IResearchService, ResearchService>();
+builder.Services.AddSingleton<IResearchChatTurnRunner, ResearchChatTurnRunner>();
 
 // Import / export
 builder.Services.AddSingleton<IProjectImportJobQueue, ProjectImportJobQueue>();
@@ -194,8 +197,10 @@ builder.Services.AddSingleton<IEditorRevisionJobNotifier, EditorRevisionJobNotif
 builder.Services.AddScoped<EditorRevisionAgentProcessor>();
 builder.Services.AddScoped<IEditorRevisionAgentService, EditorRevisionAgentService>();
 builder.Services.AddScoped<IEditorChatService, EditorChatService>();
+builder.Services.AddSingleton<IEditorChatTurnRunner, EditorChatTurnRunner>();
 builder.Services.AddScoped<ImagesChatTools>();
 builder.Services.AddScoped<IImagesChatService, ImagesChatService>();
+builder.Services.AddSingleton<IImagesChatTurnRunner, ImagesChatTurnRunner>();
 
 var app = builder.Build();
 

@@ -1,10 +1,13 @@
 @using Lorekeeper.Components.Chat
+@using Lorekeeper.ChatTurns
 @using Lorekeeper.ImagesChat
 @using Lorekeeper.Llm
 @using Lorekeeper.Models
 @using Lorekeeper.Tokens
+@using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IImagesChatService ImagesChat
+@inject IImagesChatTurnRunner ChatTurns
 @inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
 
@@ -90,7 +93,8 @@
     private bool _running;
     private bool _loading = true;
     private string? _error;
-    private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _listenCts;
+    private Guid? _listeningTurnId;
     private Guid? _loadedProjectId;
     private string? _pendingUserText;
     private string _systemPrompt = string.Empty;
@@ -123,6 +127,7 @@
 
     private async Task LoadAsync()
     {
+        StopListening();
         _loading = true;
         try
         {
@@ -131,9 +136,26 @@
             _messages = (await ImagesChat.LoadMessagesAsync(_conversation.Id)).ToList();
             await LoadAttachmentsAsync();
             _systemPrompt = await ImagesChat.GetSystemPromptAsync(ProjectId);
-            RebuildRenderable();
-            _pendingUserText = null;
-            _live = null;
+            var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
+            RebuildRenderable(activeTurn?.StartedAtUtc);
+            if (activeTurn is not null)
+            {
+                _renderable.Add(new ChatRenderableMessage(
+                    Guid.NewGuid(),
+                    ChatMessageRole.User,
+                    ChatMessageStatus.Completed,
+                    [new ChatTextPart(activeTurn.UserText)]));
+                _pendingUserText = activeTurn.UserText;
+                _live = new ChatLiveTurn();
+                _running = true;
+                await ListenToActiveTurnAsync(activeTurn);
+            }
+            else
+            {
+                _pendingUserText = null;
+                _live = null;
+                _running = false;
+            }
             UpdateConversationTokenCount();
         }
         finally
@@ -156,8 +178,6 @@
         _input = string.Empty;
         _running = true;
         _error = null;
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource();
         _resetComposerKey++;
 
         _renderable.Add(new ChatRenderableMessage(
@@ -172,73 +192,17 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        try
+        if (!ChatTurns.TryStart(ProjectId, text))
         {
-            await foreach (var update in ImagesChat.SendAsync(ProjectId, text, _cts.Token))
-            {
-                switch (update)
-                {
-                    case ImagesChatTextDelta delta:
-                        _live!.AppendText(delta.Text);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-                    case ImagesChatToolCallStarted started:
-                        _live!.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-                    case ImagesChatToolCallArgumentsDelta delta:
-                        _live!.AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-                    case ImagesChatToolCallCompleted completed:
-                        _live!.CompleteToolCall(
-                            completed.CallId,
-                            completed.Result,
-                            completed.Error,
-                            completed.DurationMs,
-                            completed.Visuals.Select(ToChatImageVisual).ToList());
-                        UpdateConversationTokenCount();
-                        await OnImagesChanged.InvokeAsync();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-                    case ImagesChatMutated:
-                        await OnImagesChanged.InvokeAsync();
-                        break;
-                    case ImagesChatAssistantMessageCompleted:
-                        ReleaseRunningUi();
-                        await ReloadFromDbAsync();
-                        await OnImagesChanged.InvokeAsync();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-                    case ImagesChatTurnError error:
-                        _error = error.Cancelled ? null : error.Message;
-                        ReleaseRunningUi();
-                        await ReloadFromDbAsync();
-                        await OnImagesChanged.InvokeAsync();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
-        finally
-        {
+            _error = "Images Chat already has a running turn.";
             ReleaseRunningUi();
-            _cts?.Dispose();
-            _cts = null;
+            if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)
+                await ListenToActiveTurnAsync(existingTurn);
+            return;
         }
+
+        if (ChatTurns.GetActiveTurn(ProjectId) is { } activeTurn)
+            await ListenToActiveTurnAsync(activeTurn);
     }
 
     private async Task ResetAsync()
@@ -247,6 +211,104 @@
         await ImagesChat.ResetAsync(ProjectId);
         _loadedProjectId = null;
         await LoadAsync();
+    }
+
+    private async Task ListenToActiveTurnAsync(ChatTurnSnapshot activeTurn)
+    {
+        if (_listeningTurnId == activeTurn.TurnId)
+            return;
+
+        StopListening();
+        var subscription = ChatTurns.Subscribe(ProjectId);
+        if (subscription is null)
+        {
+            ReleaseRunningUi();
+            return;
+        }
+
+        _listeningTurnId = subscription.TurnId;
+        _listenCts = new CancellationTokenSource();
+        _ = ListenToTurnAsync(subscription, _listenCts.Token);
+        await Task.CompletedTask;
+    }
+
+    private void StopListening()
+    {
+        _listenCts?.Cancel();
+        _listenCts?.Dispose();
+        _listenCts = null;
+        _listeningTurnId = null;
+    }
+
+    private async Task ListenToTurnAsync(
+        IChatTurnSubscription<ImagesChatTurnUpdate> subscription,
+        CancellationToken cancellationToken)
+    {
+        await using (subscription)
+        {
+            try
+            {
+                await foreach (var update in subscription.ReadAllAsync(cancellationToken))
+                    await InvokeAsync(async () => await ApplyTurnUpdateAsync(update));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            catch (JSDisconnectedException) { }
+        }
+    }
+
+    private async Task ApplyTurnUpdateAsync(ImagesChatTurnUpdate update)
+    {
+        switch (update)
+        {
+            case ImagesChatTextDelta delta:
+                _live!.AppendText(delta.Text);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+            case ImagesChatToolCallStarted started:
+                _live!.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+            case ImagesChatToolCallArgumentsDelta delta:
+                _live!.AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+            case ImagesChatToolCallCompleted completed:
+                _live!.CompleteToolCall(
+                    completed.CallId,
+                    completed.Result,
+                    completed.Error,
+                    completed.DurationMs,
+                    completed.Visuals.Select(ToChatImageVisual).ToList());
+                UpdateConversationTokenCount();
+                await OnImagesChanged.InvokeAsync();
+                RequestScroll();
+                StateHasChanged();
+                break;
+            case ImagesChatMutated:
+                await OnImagesChanged.InvokeAsync();
+                break;
+            case ImagesChatAssistantMessageCompleted:
+                ReleaseRunningUi();
+                await ReloadFromDbAsync();
+                await OnImagesChanged.InvokeAsync();
+                RequestScroll();
+                StateHasChanged();
+                break;
+            case ImagesChatTurnError error:
+                _error = error.Cancelled ? null : error.Message;
+                ReleaseRunningUi();
+                await ReloadFromDbAsync();
+                await OnImagesChanged.InvokeAsync();
+                RequestScroll();
+                StateHasChanged();
+                break;
+        }
     }
 
     private async Task LoadAttachmentsAsync() =>
@@ -264,7 +326,7 @@
         await LoadAttachmentsAsync();
     }
 
-    private void CancelAsync() => _cts?.Cancel();
+    private void CancelAsync() => ChatTurns.Cancel(ProjectId);
 
     private void ReleaseRunningUi()
     {
@@ -289,14 +351,18 @@
         UpdateConversationTokenCount();
     }
 
-    private void RebuildRenderable()
+    private void RebuildRenderable(DateTime? excludeMessagesCreatedAtOrAfter = null)
     {
-        var byCallId = _messages
+        var messages = excludeMessagesCreatedAtOrAfter is { } cutoff
+            ? _messages.Where(message => message.CreatedAt < cutoff).ToList()
+            : _messages;
+
+        var byCallId = messages
             .Where(message => message.Role == ProjectImageMessageRole.Tool && message.ToolCallId is not null)
             .ToDictionary(message => message.ToolCallId!, message => message);
 
-        _renderable = new List<ChatRenderableMessage>(_messages.Count);
-        foreach (var message in _messages)
+        _renderable = new List<ChatRenderableMessage>(messages.Count);
+        foreach (var message in messages)
         {
             if (message.Role is ProjectImageMessageRole.Tool or ProjectImageMessageRole.System) continue;
             _renderable.Add(new ChatRenderableMessage(
@@ -467,8 +533,7 @@
 
     public ValueTask DisposeAsync()
     {
-        _cts?.Cancel();
-        _cts?.Dispose();
+        StopListening();
         return ValueTask.CompletedTask;
     }
 }

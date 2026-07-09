@@ -1,4 +1,5 @@
 @using System.Text.Json
+@using Lorekeeper.ChatTurns
 @using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.Chapters
 @using Lorekeeper.Context
@@ -10,6 +11,7 @@
 @using Lorekeeper.Tokens
 @implements IAsyncDisposable
 @inject IEditorChatService Chat
+@inject IEditorChatTurnRunner ChatTurns
 @inject IContextBuilder ContextBuilder
 @inject IProjectRepository Projects
 @inject IChapterService Chapters
@@ -117,7 +119,8 @@
     private bool _approvalEnabled = true;
     private bool _showPendingChanges;
     private string? _error;
-    private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _listenCts;
+    private Guid? _listeningTurnId;
     private Guid? _loadedProjectId;
     private Guid? _loadedChapterId;
     private int _loadedContextRefreshSignal;
@@ -179,6 +182,7 @@
 
     private async Task LoadAsync()
     {
+        await StopListeningAsync();
         _loading = true;
         try
         {
@@ -195,9 +199,29 @@
             await RefreshSystemPromptAsync();
             await LoadPendingChangesAsync(openIfPending: false);
             await LoadContestBatchesAsync(openIfAvailable: false);
-            RebuildRenderable();
-            _pendingUserText = null;
-            _live = null;
+            var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
+            RebuildRenderable(activeTurn?.StartedAtUtc);
+            if (activeTurn is not null)
+            {
+                _renderable.Add(new ChatRenderableMessage(
+                    Id: Guid.NewGuid(),
+                    Role: ChatMessageRole.User,
+                    Status: ChatMessageStatus.Completed,
+                    Parts: [new ChatTextPart(activeTurn.UserText)]));
+                _pendingUserText = activeTurn.UserText;
+                _live = new ChatLiveTurn();
+                _running = true;
+                if (OnAiTurnStarting.HasDelegate)
+                    await OnAiTurnStarting.InvokeAsync();
+                await ListenToActiveTurnAsync(activeTurn);
+            }
+            else
+            {
+                _pendingUserText = null;
+                _live = null;
+                _running = false;
+                await NotifyAiTurnCompletedAsync();
+            }
             UpdateConversationTokenCount();
         }
         finally
@@ -240,8 +264,6 @@
         _input = string.Empty;
         _running = true;
         _error = null;
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource();
         _resetComposerKey++;
 
         _renderable.Add(new ChatRenderableMessage(
@@ -257,15 +279,9 @@
         StateHasChanged();
 
         var phase = "pre-turn editor flush/lock";
-        var turnCts = _cts;
-        var completionNotified = false;
         async Task ReleaseTurnAsync()
         {
             ReleaseRunningUi();
-            if (completionNotified)
-                return;
-
-            completionNotified = true;
             await NotifyAiTurnCompletedAsync();
         }
 
@@ -274,124 +290,24 @@
             if (OnAiTurnStarting.HasDelegate)
                 await OnAiTurnStarting.InvokeAsync();
 
-            phase = "streaming editor chat turn";
-            await foreach (var update in Chat.SendAsync(ProjectId, CurrentChapterId, text, _cts.Token))
+            phase = "starting editor chat turn";
+            if (!ChatTurns.TryStart(ProjectId, CurrentChapterId, text))
             {
-                phase = $"processing {update.GetType().Name}";
-                switch (update)
-                {
-                    case EditorChatTextDelta delta:
-                        LiveTurn().AppendText(delta.Text);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case EditorChatToolCallStarted started:
-                        LiveTurn().StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case EditorChatToolCallArgumentsDelta delta:
-                        LiveTurn().AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case EditorChatToolCallCompleted completed:
-                        LiveTurn().CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case EditorChatMutated:
-                        await TryRunPostToolUiRefreshAsync("editor mutation refresh", async () =>
-                        {
-                            if (OnAiChangesApplied.HasDelegate)
-                                await OnAiChangesApplied.InvokeAsync();
-                            await RefreshSystemPromptAsync();
-                            UpdateConversationTokenCount();
-                            StateHasChanged();
-                        });
-                        break;
-
-                    case EditorChatPendingAiChangeCreated:
-                        await TryRunPostToolUiRefreshAsync("pending change refresh", async () =>
-                        {
-                            await LoadPendingChangesAsync(openIfPending: false);
-                            StateHasChanged();
-                        });
-                        break;
-
-                    case EditorChatContestStarted:
-                        await TryRunPostToolUiRefreshAsync("contest start refresh", async () =>
-                        {
-                            await LoadContestBatchesAsync(openIfAvailable: true);
-                            StateHasChanged();
-                        });
-                        break;
-
-                    case EditorChatContestCandidateUpdated:
-                        await TryRunPostToolUiRefreshAsync("contest candidate refresh", async () =>
-                        {
-                            await LoadContestBatchesAsync(openIfAvailable: true);
-                            StateHasChanged();
-                        });
-                        break;
-
-                    case EditorChatContestCandidateJsonDelta delta:
-                        ApplyContestCandidateRawResponseDelta(delta.CandidateId, delta.RawResponse);
-                        StateHasChanged();
-                        break;
-
-                    case EditorChatContestCompleted:
-                        await TryRunPostToolUiRefreshAsync("contest completion refresh", async () =>
-                        {
-                            await LoadContestBatchesAsync(openIfAvailable: true);
-                            StateHasChanged();
-                        });
-                        break;
-
-                    case EditorChatRevisionJobUpdated revision:
-                        LiveTurn().UpdateToolProgress(revision.ToolCallId, "start_revision_agents", ToChatToolProgress(revision.Progress));
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case EditorChatAssistantMessageCompleted:
-                        await ReleaseTurnAsync();
-                        await TryRunPostToolUiRefreshAsync("assistant completion refresh", async () =>
-                        {
-                            await ReloadFromDbAsync();
-                            await LoadPendingChangesAsync(openIfPending: true, routeActiveChapterBodyToParent: true);
-                            await LoadContestBatchesAsync(openIfAvailable: false);
-                        });
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case EditorChatTurnError error:
-                        _error = error.Cancelled ? null : error.Message;
-                        await ReleaseTurnAsync();
-                        await TryRunPostToolUiRefreshAsync("turn error refresh", async () =>
-                        {
-                            await ReloadFromDbAsync();
-                            await LoadPendingChangesAsync(openIfPending: false);
-                            await LoadContestBatchesAsync(openIfAvailable: false);
-                        });
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-                }
+                _error = "Editor chat already has a running turn.";
+                await ReleaseTurnAsync();
+                if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)
+                    await ListenToActiveTurnAsync(existingTurn);
+                return;
             }
+
+            phase = "subscribing to editor chat turn";
+            if (ChatTurns.GetActiveTurn(ProjectId) is { } activeTurn)
+                await ListenToActiveTurnAsync(activeTurn);
         }
-        catch (OperationCanceledException) when (turnCts?.IsCancellationRequested == true)
+        catch (OperationCanceledException)
         {
             _error = null;
+            await ReleaseTurnAsync();
         }
         catch (Exception ex)
         {
@@ -407,9 +323,6 @@
         }
         finally
         {
-            await ReleaseTurnAsync();
-            _cts?.Dispose();
-            _cts = null;
             await TryRunPostToolUiRefreshAsync("final prompt refresh", async () =>
             {
                 await RefreshSystemPromptAsync();
@@ -420,7 +333,7 @@
         }
     }
 
-    private void CancelAsync() => _cts?.Cancel();
+    private void CancelAsync() => ChatTurns.Cancel(ProjectId);
 
     private void ReleaseRunningUi()
     {
@@ -472,6 +385,168 @@
                 ProjectId,
                 CurrentChapterId);
         }
+    }
+
+    private async Task ListenToActiveTurnAsync(ChatTurnSnapshot activeTurn)
+    {
+        if (_listeningTurnId == activeTurn.TurnId)
+            return;
+
+        await StopListeningAsync();
+        var subscription = ChatTurns.Subscribe(ProjectId);
+        if (subscription is null)
+        {
+            await ReleaseTurnUiAsync();
+            return;
+        }
+
+        _listeningTurnId = subscription.TurnId;
+        _listenCts = new CancellationTokenSource();
+        _ = ListenToTurnAsync(subscription, _listenCts.Token);
+    }
+
+    private Task StopListeningAsync()
+    {
+        _listenCts?.Cancel();
+        _listenCts?.Dispose();
+        _listenCts = null;
+        _listeningTurnId = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task ListenToTurnAsync(
+        IChatTurnSubscription<EditorChatTurnUpdate> subscription,
+        CancellationToken cancellationToken)
+    {
+        await using (subscription)
+        {
+            try
+            {
+                await foreach (var update in subscription.ReadAllAsync(cancellationToken))
+                    await InvokeAsync(async () => await ApplyTurnUpdateAsync(update));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            catch (JSDisconnectedException) { }
+        }
+    }
+
+    private async Task ApplyTurnUpdateAsync(EditorChatTurnUpdate update)
+    {
+        switch (update)
+        {
+            case EditorChatTextDelta delta:
+                LiveTurn().AppendText(delta.Text);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case EditorChatToolCallStarted started:
+                LiveTurn().StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case EditorChatToolCallArgumentsDelta delta:
+                LiveTurn().AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case EditorChatToolCallCompleted completed:
+                LiveTurn().CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case EditorChatMutated:
+                await TryRunPostToolUiRefreshAsync("editor mutation refresh", async () =>
+                {
+                    if (OnAiChangesApplied.HasDelegate)
+                        await OnAiChangesApplied.InvokeAsync();
+                    await RefreshSystemPromptAsync();
+                    UpdateConversationTokenCount();
+                    StateHasChanged();
+                });
+                break;
+
+            case EditorChatPendingAiChangeCreated:
+                await TryRunPostToolUiRefreshAsync("pending change refresh", async () =>
+                {
+                    await LoadPendingChangesAsync(openIfPending: false);
+                    StateHasChanged();
+                });
+                break;
+
+            case EditorChatContestStarted:
+                await TryRunPostToolUiRefreshAsync("contest start refresh", async () =>
+                {
+                    await LoadContestBatchesAsync(openIfAvailable: true);
+                    StateHasChanged();
+                });
+                break;
+
+            case EditorChatContestCandidateUpdated:
+                await TryRunPostToolUiRefreshAsync("contest candidate refresh", async () =>
+                {
+                    await LoadContestBatchesAsync(openIfAvailable: true);
+                    StateHasChanged();
+                });
+                break;
+
+            case EditorChatContestCandidateJsonDelta delta:
+                ApplyContestCandidateRawResponseDelta(delta.CandidateId, delta.RawResponse);
+                StateHasChanged();
+                break;
+
+            case EditorChatContestCompleted:
+                await TryRunPostToolUiRefreshAsync("contest completion refresh", async () =>
+                {
+                    await LoadContestBatchesAsync(openIfAvailable: true);
+                    StateHasChanged();
+                });
+                break;
+
+            case EditorChatRevisionJobUpdated revision:
+                LiveTurn().UpdateToolProgress(revision.ToolCallId, "start_revision_agents", ToChatToolProgress(revision.Progress));
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case EditorChatAssistantMessageCompleted:
+                await ReleaseTurnUiAsync();
+                await TryRunPostToolUiRefreshAsync("assistant completion refresh", async () =>
+                {
+                    await ReloadFromDbAsync();
+                    await LoadPendingChangesAsync(openIfPending: true, routeActiveChapterBodyToParent: true);
+                    await LoadContestBatchesAsync(openIfAvailable: false);
+                });
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case EditorChatTurnError error:
+                _error = error.Cancelled ? null : error.Message;
+                await ReleaseTurnUiAsync();
+                await TryRunPostToolUiRefreshAsync("turn error refresh", async () =>
+                {
+                    await ReloadFromDbAsync();
+                    await LoadPendingChangesAsync(openIfPending: false);
+                    await LoadContestBatchesAsync(openIfAvailable: false);
+                });
+                RequestScroll();
+                StateHasChanged();
+                break;
+        }
+    }
+
+    private async Task ReleaseTurnUiAsync()
+    {
+        ReleaseRunningUi();
+        await NotifyAiTurnCompletedAsync();
     }
 
     private async Task ResetAsync()
@@ -690,14 +765,18 @@
         PropertyNameCaseInsensitive = true,
     };
 
-    private void RebuildRenderable()
+    private void RebuildRenderable(DateTime? excludeMessagesCreatedAtOrAfter = null)
     {
-        var byCallId = _messages
+        var messages = excludeMessagesCreatedAtOrAfter is { } cutoff
+            ? _messages.Where(message => message.CreatedAt < cutoff).ToList()
+            : _messages;
+
+        var byCallId = messages
             .Where(message => message.Role == EditorMessageRole.Tool && message.ToolCallId is not null)
             .ToDictionary(message => message.ToolCallId!, message => message);
 
-        _renderable = new List<ChatRenderableMessage>(_messages.Count);
-        foreach (var message in _messages)
+        _renderable = new List<ChatRenderableMessage>(messages.Count);
+        foreach (var message in messages)
         {
             if (message.Role is EditorMessageRole.Tool or EditorMessageRole.System) continue;
 
@@ -878,8 +957,8 @@
 
     public ValueTask DisposeAsync()
     {
-        _cts?.Cancel();
-        _cts?.Dispose();
+        _listenCts?.Cancel();
+        _listenCts?.Dispose();
         return ValueTask.CompletedTask;
     }
 }

@@ -49,6 +49,12 @@
 | `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell for transcript/live rendering, grouped adjacent tool-call chips, image visual strips, composer controls, scrolling, and textarea autosize behavior. |
 | `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments/results/errors and opens Editor Revision worker transcripts from `start_revision_agents` chips. |
 
+### ChatTurns/
+
+| File | Description |
+|------|-------------|
+| `ChatTurnRuntime.cs` | Shared singleton-friendly active-turn runtime for chat surfaces: one running turn per project, buffered subscriber replay, and explicit cancellation separate from component disposal. |
+
 ### Components/Layout/
 
 | File | Description |
@@ -307,6 +313,7 @@
 | `IResearchService.cs` / `ResearchService.cs` | Persistent streaming Research chat: builds project-level guidance/facts/outline context, replays text-only history to the model, streams cache-first web + graph tool calls, stages Review edits, and derives current-conversation activity. |
 | `ResearchTools.cs` | Research LLM tools: cache-first `web_search`, paginated `read_search_result`/`read_webpage`, filtered/throttled `follow_page_links`, read-only entity detail/link tools, and selected graph create/update/link tools reused from outline collaboration. |
 | `ResearchTurnUpdate.cs` | Streaming update records consumed by `ResearchChatPanel`: text/tool updates, pending AI change creation, graph mutation refreshes, assistant completion, and turn errors/cancellation. |
+| `ResearchChatTurnRunner.cs` | Background turn runner for Research chat: keeps active turns alive across component disposal and provides buffered update subscriptions. |
 | `ResearchActivityModels.cs` | Read models for Research Activity sidebar entity/source summaries and cache-only source detail modals. |
 | `WebResearchOptions.cs` | Configurable webpage read limits and polite-fetch defaults: user agent, timeout, max bytes, read-page size, retry timing, max links, robots, throttling, cooldowns, and private-network blocking. |
 | `WebPageReader.cs` | Composed webpage reader for Research Mode: validates targets, applies robots/private-network policy, prefers source adapters, falls back to filtered HTML/text extraction, and returns diagnostics. |
@@ -339,6 +346,7 @@
 | `IWritingCoachService.cs` / `WritingCoachService.cs` | Resettable project-level Writing Coach chat service. Mirrors the Outline chat streaming/tool-call loop with a coach prompt and read-only tool set; streams tool arguments and persists assistant tool calls plus tool-result rows. |
 | `WritingCoachTools.cs` | Read-only Writing Coach tool builder. Exposes `read_current_section` for the latest editor draft and `list_project_facts` for graph-backed ProjectFact context. |
 | `WritingCoachTurnUpdate.cs` | Streaming update records consumed by the Writing Coach panel: text deltas, tool-call start/argument/completion updates, assistant completion, and turn errors/cancellation. |
+| `WritingCoachTurnRunner.cs` | Background turn runner for Writing Coach: owns per-project active turns, fresh scoped service execution, buffered UI subscription, and Stop-only cancellation. |
 
 ### Context/
 
@@ -420,6 +428,7 @@
 | `ImagesChatTools.cs` | Images Chat LLM tools for project search/source reads, chapters, image library reads with visual chips, visual layout manifests, rendered snapshot inspection, shape masks, queued generation/editing, and chapter image placement/context. |
 | `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, current tool metadata, visible visual attachments, model-only generated images, and mutation signaling. |
 | `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
+| `ImagesChatTurnRunner.cs` | Background turn runner for Images Chat: executes scoped chat turns outside component lifetime and replays buffered live updates to reopened panels. |
 
 ### ChapterVisuals/
 
@@ -457,6 +466,7 @@
 | `EditorChatTools.cs` | Editor chat LLM tools for assembled context, impact scoping, filtered hybrid project search/source reads, chapter reads, facts, entities, project image/visual-layout operations, normal `edit_chapter`/outline mutations, revision-agent spawning, and Contest preparation. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
+| `EditorChatTurnRunner.cs` | Background turn runner for Editor Chat: preserves active turns across tab changes while leaving explicit Stop as the cancellation path. |
 | `EditorContestModels.cs` | DTOs and helper records for Contest Mode settings, start requests, captured chat-context snapshots, model responses, mutation JSON, and streaming contest status/raw-response updates. |
 | `IEditorContestService.cs` / `EditorContestService.cs` | Contest Mode application service: persists project settings, starts terminal contest batches, runs selected models without tools, streams raw Candidate JSON, validates JSON chapter-body mutations, builds proposed bodies, and resolves inline candidate review decisions. |
 | `EditorRevisionAgentModels.cs` | DTOs for prose-only revision assignments, run results, job/session details, and transcript projections used by tools and UI. |
@@ -471,6 +481,7 @@
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt`, keeps Act graph nodes/structural edges synchronized, and updates targeted act context vectors on mutations. |
 | `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Multi-turn collaborative outline chat. Streams LLM text/tool updates, persists chat history, stages mutating tool calls when project approval is enabled, blocks new turns while pending changes remain, and instructs the LLM to persist project-level truths as `ProjectFact` graph nodes. |
 | `OutlineCollaborationTools.cs` | `AIFunction` definitions exposed to the outline LLM, including filtered project source search/read tools. `list_outline` includes `projectFacts`; ProjectFact creation uses generic entity tools and is parented to the Project graph node. Entity create/update payloads include auto mention hints. |
+| `OutlineChatTurnRunner.cs` | Background turn runner for Outline chat: owns active turn cancellation/subscription outside the Blazor component lifetime. |
 | `IAiChangeApprovalService.cs` / `AiChangeApprovalService.cs` | Applies or rejects queued AI changes from outline/editor/research chat, including outline/entity mutations and editor chapter-body edits; enforces dependency application/rejection cascading and writes hidden correction messages to the owning transcript. |
 | `AiChangeReviewDrafts.cs` | Typed helper for persisted pending-change review drafts: reads editable text fields, updates draft payload JSON, validates draft metadata, and resolves effective after-payloads. |
 | `OutlineToolStagingContext.cs` | Per-turn working snapshot for approval mode: applies new acts/chapters/entities directly, overlays staged existing-data edits/reorders/links, keeps auto links low-priority in read payloads, and persists `AiChange` rows with dependency metadata. |

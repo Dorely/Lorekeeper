@@ -1,9 +1,12 @@
+@using Lorekeeper.ChatTurns
 @using Lorekeeper.Models
 @using Lorekeeper.Llm
 @using Lorekeeper.Outline
 @using Lorekeeper.Tokens
+@using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IOutlineCollaborationService Collab
+@inject IOutlineChatTurnRunner ChatTurns
 @inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
 
@@ -86,7 +89,8 @@
     private bool _approvalEnabled;
     private bool _showPendingChanges;
     private string? _error;
-    private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _listenCts;
+    private Guid? _listeningTurnId;
     private Guid? _loadedProjectId;
     private List<AiChangeBatch> _pendingBatches = [];
     private string? _pendingUserText;
@@ -108,6 +112,7 @@
 
     private async Task LoadAsync()
     {
+        StopListening();
         _loading = true;
         try
         {
@@ -116,9 +121,26 @@
             _messages = (await Collab.LoadMessagesAsync(_conversation.Id)).ToList();
             _approvalEnabled = await Collab.GetAiChangeApprovalEnabledAsync(ProjectId);
             await LoadPendingChangesAsync(openIfPending: false);
-            RebuildRenderable();
-            _pendingUserText = null;
-            _live = null;
+            var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
+            RebuildRenderable(activeTurn?.StartedAtUtc);
+            if (activeTurn is not null)
+            {
+                _renderable.Add(new ChatRenderableMessage(
+                    Id: Guid.NewGuid(),
+                    Role: ChatMessageRole.User,
+                    Status: ChatMessageStatus.Completed,
+                    Parts: [new ChatTextPart(activeTurn.UserText)]));
+                _pendingUserText = activeTurn.UserText;
+                _live = new ChatLiveTurn();
+                _running = true;
+                await ListenToActiveTurnAsync(activeTurn);
+            }
+            else
+            {
+                _pendingUserText = null;
+                _live = null;
+                _running = false;
+            }
             UpdateConversationTokenCount();
         }
         finally
@@ -146,8 +168,6 @@
         _input = string.Empty;
         _running = true;
         _error = null;
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource();
         _resetComposerKey++;
 
         _renderable.Add(new ChatRenderableMessage(
@@ -162,83 +182,124 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        try
+        if (!ChatTurns.TryStart(ProjectId, text))
         {
-            await foreach (var update in Collab.SendAsync(ProjectId, text, _cts.Token))
-            {
-                switch (update)
-                {
-                    case TextDelta td:
-                        _live!.AppendText(td.Text);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case ToolCallStarted ts:
-                        _live!.StartToolCall(ts.CallId, ts.ToolName, ts.ArgumentsJson, ts.ArgumentsComplete);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case ToolCallArgumentsDelta delta:
-                        _live!.AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case ToolCallCompleted tc:
-                        _live!.CompleteToolCall(tc.CallId, tc.Result, tc.Error, tc.DurationMs);
-                        UpdateConversationTokenCount();
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case OutlineMutated:
-                        if (OnOutlineChanged.HasDelegate)
-                            await OnOutlineChanged.InvokeAsync();
-                        break;
-
-                    case PendingAiChangeCreated:
-                        await LoadPendingChangesAsync(openIfPending: true);
-                        StateHasChanged();
-                        break;
-
-                    case AssistantMessageCompleted:
-                        // Reload from DB so we render the canonical persisted state.
-                        ReleaseRunningUi();
-                        await ReloadFromDbAsync();
-                        await LoadPendingChangesAsync(openIfPending: true);
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-
-                    case TurnError err:
-                        _error = err.Cancelled ? null : err.Message;
-                        ReleaseRunningUi();
-                        await ReloadFromDbAsync();
-                        await LoadPendingChangesAsync(openIfPending: false);
-                        RequestScroll();
-                        StateHasChanged();
-                        break;
-                }
-            }
+            _error = "Outline Chat already has a running turn.";
+            ReleaseRunningUi();
+            if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)
+                await ListenToActiveTurnAsync(existingTurn);
+            return;
         }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
-        finally
+
+        if (ChatTurns.GetActiveTurn(ProjectId) is { } activeTurn)
+            await ListenToActiveTurnAsync(activeTurn);
+    }
+
+    private async Task ListenToActiveTurnAsync(ChatTurnSnapshot activeTurn)
+    {
+        if (_listeningTurnId == activeTurn.TurnId)
+            return;
+
+        StopListening();
+        var subscription = ChatTurns.Subscribe(ProjectId);
+        if (subscription is null)
         {
             ReleaseRunningUi();
-            _cts?.Dispose();
-            _cts = null;
+            return;
+        }
+
+        _listeningTurnId = subscription.TurnId;
+        _listenCts = new CancellationTokenSource();
+        _ = ListenToTurnAsync(subscription, _listenCts.Token);
+        await Task.CompletedTask;
+    }
+
+    private void StopListening()
+    {
+        _listenCts?.Cancel();
+        _listenCts?.Dispose();
+        _listenCts = null;
+        _listeningTurnId = null;
+    }
+
+    private async Task ListenToTurnAsync(
+        IChatTurnSubscription<OutlineTurnUpdate> subscription,
+        CancellationToken cancellationToken)
+    {
+        await using (subscription)
+        {
+            try
+            {
+                await foreach (var update in subscription.ReadAllAsync(cancellationToken))
+                    await InvokeAsync(async () => await ApplyTurnUpdateAsync(update));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            catch (JSDisconnectedException) { }
         }
     }
 
-    private void CancelAsync() => _cts?.Cancel();
+    private async Task ApplyTurnUpdateAsync(OutlineTurnUpdate update)
+    {
+        switch (update)
+        {
+            case TextDelta td:
+                _live!.AppendText(td.Text);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case ToolCallStarted ts:
+                _live!.StartToolCall(ts.CallId, ts.ToolName, ts.ArgumentsJson, ts.ArgumentsComplete);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case ToolCallArgumentsDelta delta:
+                _live!.AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case ToolCallCompleted tc:
+                _live!.CompleteToolCall(tc.CallId, tc.Result, tc.Error, tc.DurationMs);
+                UpdateConversationTokenCount();
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case OutlineMutated:
+                if (OnOutlineChanged.HasDelegate)
+                    await OnOutlineChanged.InvokeAsync();
+                break;
+
+            case PendingAiChangeCreated:
+                await LoadPendingChangesAsync(openIfPending: true);
+                StateHasChanged();
+                break;
+
+            case AssistantMessageCompleted:
+                ReleaseRunningUi();
+                await ReloadFromDbAsync();
+                await LoadPendingChangesAsync(openIfPending: true);
+                RequestScroll();
+                StateHasChanged();
+                break;
+
+            case TurnError err:
+                _error = err.Cancelled ? null : err.Message;
+                ReleaseRunningUi();
+                await ReloadFromDbAsync();
+                await LoadPendingChangesAsync(openIfPending: false);
+                RequestScroll();
+                StateHasChanged();
+                break;
+        }
+    }
+
+    private void CancelAsync() => ChatTurns.Cancel(ProjectId);
 
     private void ReleaseRunningUi()
     {
@@ -303,16 +364,20 @@
         StateHasChanged();
     }
 
-    private void RebuildRenderable()
+    private void RebuildRenderable(DateTime? excludeMessagesCreatedAtOrAfter = null)
     {
+        var messages = excludeMessagesCreatedAtOrAfter is { } cutoff
+            ? _messages.Where(message => message.CreatedAt < cutoff).ToList()
+            : _messages;
+
         // Group: user messages and assistant messages render as bubbles. Tool messages render
         // as result attachments to the chip in the assistant bubble that emitted the call.
-        var byCallId = _messages
+        var byCallId = messages
             .Where(m => m.Role == OutlineMessageRole.Tool && m.ToolCallId is not null)
             .ToDictionary(m => m.ToolCallId!, m => m);
 
-        _renderable = new List<ChatRenderableMessage>(_messages.Count);
-        foreach (var m in _messages)
+        _renderable = new List<ChatRenderableMessage>(messages.Count);
+        foreach (var m in messages)
         {
             if (m.Role == OutlineMessageRole.Tool) continue; // attached, not rendered standalone
             if (m.Role == OutlineMessageRole.System) continue;
@@ -425,8 +490,7 @@
 
     public ValueTask DisposeAsync()
     {
-        _cts?.Cancel();
-        _cts?.Dispose();
+        StopListening();
         return ValueTask.CompletedTask;
     }
 }
