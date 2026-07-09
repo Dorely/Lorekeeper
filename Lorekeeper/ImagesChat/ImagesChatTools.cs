@@ -95,13 +95,13 @@ public sealed class ImagesChatTools(
                 method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, string? label = null, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
                     GenerateImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, label, targetChapterId, targetPictureImageElementId),
                 name: "generate_image",
-                description: "Queue one or more image generations, wait for completion, save outputs to the image library, and return final image ids. Optional referenceImageIds use existing project images. For PicturePage targets, pass targetChapterId and optionally targetPictureImageElementId; omit size to use the layout-native recommended size."),
+                description: "Queue one or more image generations, wait for completion, save outputs to the image library, and return final image ids. Optional referenceImageIds accepts multiple existing project image ids, up to the configured reference-image limit; use them for recurring characters, outfits, settings, props, and style continuity. For PicturePage targets, pass targetChapterId and optionally targetPictureImageElementId; omit size to use the layout-native recommended size."),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, string prompt, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, string? label = null) =>
                     EditImageAsync(context, sourceImageId, prompt, maskId, maskShapes, maskLabel, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, label),
                 name: "edit_image",
-                description: "Queue a masked or unmasked edit for an existing project image, wait for completion, save outputs, and return final image ids. Use create_shape_mask or maskShapes for targeted edits."),
+                description: "Queue a masked or unmasked edit for an existing project image, wait for completion, save outputs, and return final image ids. Optional referenceImageIds accepts multiple existing project image ids, up to the configured reference-image limit, to preserve continuity while editing. Use create_shape_mask or maskShapes for targeted edits."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, Guid imageId) => AddProjectImageToChapterAsync(context, chapterId, imageId),

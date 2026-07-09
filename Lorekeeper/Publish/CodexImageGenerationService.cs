@@ -187,7 +187,7 @@ public sealed class CodexImageGenerationService(
         return new Dictionary<string, object?>
         {
             ["model"] = mainlineModel,
-            ["instructions"] = "Use the image_generation tool to create one publish-ready image from the user's prompt.",
+            ["instructions"] = "Use the image_generation tool to create one publish-ready image from the user's prompt. Treat any supplied input images as visual continuity references for character design, clothes, hair, palette, medium, props, settings, and style unless the prompt explicitly asks for a redesign or style break.",
             ["input"] = new[]
             {
                 new Dictionary<string, object?>

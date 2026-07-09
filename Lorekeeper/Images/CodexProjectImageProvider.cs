@@ -397,7 +397,7 @@ public sealed class CodexProjectImageProvider(
             mainlineModel,
             content,
             BaseImageTool(request.Size, request.Quality, request.OutputFormat, request.OutputCompression, imageModel),
-            "Use the image_generation tool to create one story illustration or project image from the user's prompt.");
+            "Use the image_generation tool to create one story illustration or project image from the user's prompt. Treat any supplied input images as visual continuity references for character design, clothes, hair, palette, medium, props, settings, and style unless the prompt explicitly asks for a redesign or style break.");
     }
 
     private Dictionary<string, object?> BuildEditPayload(
@@ -431,7 +431,7 @@ public sealed class CodexProjectImageProvider(
             mainlineModel,
             content,
             tool,
-            "Use the image_generation tool to edit the first supplied image. If a mask is supplied, apply it to guide the targeted edit.");
+            "Use the image_generation tool to edit the first supplied image. If a mask is supplied, apply it to guide the targeted edit. Treat any additional supplied input images as visual continuity references for character design, clothes, hair, palette, medium, props, settings, and style unless the prompt explicitly asks for a redesign or style break.");
     }
 
     private static Dictionary<string, object?> BasePayload(

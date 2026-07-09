@@ -188,7 +188,7 @@ public sealed class EditorChatTools(
                 GenerateProjectImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, referenceImageIds, placeInCurrentChapter, targetChapterId, targetPictureImageElementId),
             name: "generate_project_image",
             description:
-                "Generate an image and save it to the project image library. Optional referenceImageIds use existing project images as references. " +
+                "Generate an image and save it to the project image library. Optional referenceImageIds accepts multiple existing project image ids, up to the configured reference-image limit; use them for recurring characters, outfits, settings, props, and style continuity, or any other reason you need to referene an existing image. " +
                 "For PicturePage targets, pass targetChapterId and optionally targetPictureImageElementId; omit size to use the layout-native recommended size. " +
                 "Set placeInCurrentChapter=true only when the user wants the generated image inserted into the current chapter immediately; the current chapter must already be IllustratedProse or PicturePage."));
 

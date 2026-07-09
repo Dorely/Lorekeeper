@@ -35,6 +35,8 @@ public sealed class ImagesChatService(
         - Use rendered snapshot inspection when the user asks about the actual visible layout and the provider is vision-ready.
         - For targeted edits, use masks. User-painted masks and agent-created shape masks follow the same convention: transparent pixels are editable and opaque pixels are preserved.
         - Write generation prompts as compact image briefs with use case, asset type, subject, style/medium, composition/framing, lighting/mood, and constraints. Label reference images by role, preserve explicit edit invariants, and avoid text, logos, and watermarks unless the user explicitly asks for them.
+        - For picture books, recurring characters, recurring settings, series art, or any continuity-sensitive image, look for relevant existing project images first. Use multiple referenceImageIds when useful to preserve the same character design, clothes, hair, age, proportions, palette, medium, important props, and setting traits across pages. Do not use continuity references when the user clearly asks for a redesign, variant, or style break.
+        - After a successful continuity-sensitive generation, treat the saved output as a future project reference image for that character, outfit, prop, setting, or style.
         - For PicturePage image generation, read the chapter visual layout when needed and pass targetChapterId plus targetPictureImageElementId when filling an existing image frame. Omit size only when you want the tool to use the layout-native recommended size; preserve explicit user-supplied sizes. Prompt for the page or slot shape, leave quiet negative space under text boxes, and keep important subjects away from text overlays and the center gutter on spreads.
         - Queue image generation/edit jobs with generate_image or edit_image. These tools wait for completion; after a successful job, the generated images are supplied back to your model context when the provider supports vision.
         - Do not claim an image was generated or edited unless the tool returns final saved image ids.
@@ -552,7 +554,7 @@ public sealed class ImagesChatService(
     {
         var contents = new List<AIContent>
         {
-            new TextContent("Images currently attached to Images Chat for this turn. Treat these as user-provided visual context."),
+            new TextContent("Images currently attached to Images Chat for this turn. Treat these as user-provided visual context. When generating or editing a continuity-related image, pass relevant attached image ids in referenceImageIds."),
         };
 
         foreach (var attachment in attachments)
@@ -581,7 +583,7 @@ public sealed class ImagesChatService(
     {
         var contents = new List<AIContent>
         {
-            new TextContent("Project images returned by the previous tool call are attached as model-only visual context. Use these images when deciding whether further edits or layout actions are needed."),
+            new TextContent("Project images returned by the previous tool call are attached as model-only visual context. Use these images when deciding whether further edits, layout actions, or future referenceImageIds are needed for visual continuity."),
         };
 
         foreach (var image in images.DistinctBy(image => image.Id))
