@@ -121,6 +121,7 @@ else
 
                 <select class="form-select form-select-sm chapter-visual-mode"
                         title="Chapter visual mode"
+                        disabled="@LayoutControlsLocked"
                         value="@CurrentVisualMode().ToString()"
                         @onchange="ChangeVisualModeAsync">
                     <option value="@ChapterVisualMode.Prose">Prose</option>
@@ -132,6 +133,7 @@ else
                 {
                     <select class="form-select form-select-sm chapter-page-layout"
                             title="Page layout"
+                            disabled="@LayoutControlsLocked"
                             value="@CurrentPageLayoutKind().ToString()"
                             @onchange="ChangePageLayoutKindAsync">
                         <option value="@ChapterPageLayoutKind.SinglePortrait">Single portrait</option>
@@ -190,6 +192,7 @@ else
                                         Images="_projectImages"
                                         ProjectId="Project.Id"
                                         IsEditable="@(_mode == EditorMode.Layout)"
+                                        IsLocked="@LayoutControlsLocked"
                                         OnImagesChanged="OnViewerImagesChangedAsync"
                                         OnOpenImages="OpenImagesModal"
                                         OnChanged="OnVisualStateChangedAsync" />
@@ -686,7 +689,7 @@ else
                         </button>
                         <button type="button"
                                 class="btn btn-sm btn-outline-secondary panel-title-action"
-                                disabled="@(_activeChapterId is null)"
+                                disabled="@(_activeChapterId is null || LayoutControlsLocked)"
                                 @onclick="OpenImagesModal">
                             Images
                         </button>
@@ -707,6 +710,7 @@ else
     <ProjectImagePickerModal ProjectId="Project.Id"
                              ChapterId="_activeChapterId"
                              IsOpen="_imagesModalOpen"
+                             CanAddToChapter="@(!LayoutControlsLocked)"
                              OnClose="CloseImagesModal"
                              OnAddToChapter="AddImageToChapterAsync"
                              OnContextChanged="OnContextChangedAsync" />
@@ -778,6 +782,7 @@ else
     private string _reviewRejectionMessage = string.Empty;
 
     private bool EditorReadOnly => _chapterLocked || _mode is EditorMode.Read or EditorMode.Layout or EditorMode.Review;
+    private bool LayoutControlsLocked => _chapterLocked;
     private bool IsPicturePageChapter => _visualState?.VisualMode == ChapterVisualMode.PicturePage
         || _current?.VisualMode == ChapterVisualMode.PicturePage;
 
@@ -938,6 +943,7 @@ else
 
     private async Task ChangeVisualModeAsync(ChangeEventArgs e)
     {
+        if (LayoutControlsLocked) return;
         if (_current is null) return;
         if (!Enum.TryParse<ChapterVisualMode>(e.Value?.ToString(), out var mode))
             return;
@@ -949,6 +955,7 @@ else
 
     private async Task ChangePageLayoutKindAsync(ChangeEventArgs e)
     {
+        if (LayoutControlsLocked) return;
         if (_current is null) return;
         if (!Enum.TryParse<ChapterPageLayoutKind>(e.Value?.ToString(), out var layoutKind))
             return;
@@ -982,12 +989,17 @@ else
         await RefreshContextSurfacesAsync();
     }
 
-    private void OpenImagesModal() => _imagesModalOpen = true;
+    private void OpenImagesModal()
+    {
+        if (LayoutControlsLocked) return;
+        _imagesModalOpen = true;
+    }
 
     private void CloseImagesModal() => _imagesModalOpen = false;
 
     private async Task AddImageToChapterAsync(Guid imageId)
     {
+        if (LayoutControlsLocked) return;
         if (Project is null || _activeChapterId is not Guid chapterId) return;
         await FlushAsync();
         var result = await Visuals.AddImageToChapterAsync(Project.Id, chapterId, imageId);
@@ -2840,7 +2852,10 @@ else
             {
                 _current = fresh;
                 UpdateChapterMetrics(fresh.Body);
+                await LoadVisualStateAsync();
+                await LoadProjectImagesAsync();
                 await InvokeEditorVoidAsync("setValue", fresh.Body);
+                await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
                 await RefreshContextSurfacesAsync();
             }
         }

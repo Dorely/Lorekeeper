@@ -52,7 +52,10 @@
                                     <span>@image.AltText</span>
                                 }
                                 <div class="image-modal-actions">
-                                    <button type="button" class="btn btn-sm btn-primary" @onclick="() => AddToChapterAsync(image.Id)">Add to chapter</button>
+                                    <button type="button"
+                                            class="btn btn-sm btn-primary"
+                                            disabled="@(!CanAddToChapter)"
+                                            @onclick="() => AddToChapterAsync(image.Id)">Add to chapter</button>
                                     <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => AddToContextAsync(image.Id)">Add to context</button>
                                 </div>
                             </div>
@@ -68,6 +71,7 @@
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid? ChapterId { get; set; }
     [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public bool CanAddToChapter { get; set; } = true;
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback<Guid> OnAddToChapter { get; set; }
     [Parameter] public EventCallback OnContextChanged { get; set; }
@@ -114,6 +118,7 @@
 
     private async Task AddToChapterAsync(Guid imageId)
     {
+        if (!CanAddToChapter) return;
         if (ChapterId is null) return;
         await OnAddToChapter.InvokeAsync(imageId);
         _status = "Image added to chapter.";

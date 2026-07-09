@@ -16,8 +16,8 @@
         var pageMetrics = PageMetrics(State.PageLayoutKind);
         var selectedText = SelectedPictureText;
         var selectedLayer = SelectedPictureLayer;
-        <div class="@(IsEditable ? "picture-layout picture-layout--editable" : "picture-layout")">
-            @if (IsEditable)
+        <div class="@(CanEditLayout ? "picture-layout picture-layout--editable" : "picture-layout")">
+            @if (CanEditLayout)
             {
                 <div class="picture-toolbar">
                     <div class="picture-toolbar__actions">
@@ -93,15 +93,15 @@
                              style="@ElementStyle(image.XPercent, image.YPercent, image.WidthPercent, image.HeightPercent, image.ZIndex)"
                              @onclick="@(() => SelectPictureImage(image.Id))"
                              @onclick:stopPropagation="true"
-                             data-picture-element-kind="@(IsEditable ? "image" : null)"
-                             data-picture-element-id="@(IsEditable ? image.Id.ToString("N") : null)">
+                             data-picture-element-kind="@(CanEditLayout ? "image" : null)"
+                             data-picture-element-id="@(CanEditLayout ? image.Id.ToString("N") : null)">
                             @if (projectImage is not null)
                             {
                                 <img src="@projectImage.PreviewUrl"
                                      alt="@(string.IsNullOrWhiteSpace(image.AltTextOverride) ? projectImage.AltText : image.AltTextOverride)"
                                      style="@($"object-fit:{FitCss(image.Fit)};opacity:{image.Opacity.ToString(CultureInfo.InvariantCulture)};")" />
                             }
-                            @if (IsEditable)
+                            @if (CanEditLayout)
                             {
                                 @RenderPictureCornerControls("image", image.Id)
                             }
@@ -114,9 +114,9 @@
                              @onclick="@(() => SelectPictureText(text.Id))"
                              @onclick:stopPropagation="true"
                              @onfocusin="@(() => SelectPictureText(text.Id))"
-                             data-picture-element-kind="@(IsEditable ? "text" : null)"
-                             data-picture-element-id="@(IsEditable ? text.Id.ToString("N") : null)">
-                            @if (IsEditable)
+                             data-picture-element-kind="@(CanEditLayout ? "text" : null)"
+                             data-picture-element-id="@(CanEditLayout ? text.Id.ToString("N") : null)">
+                            @if (CanEditLayout)
                             {
                                 <div class="picture-text-editor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="false" data-picture-text-editor="true">@text.Text</div>
                                 @RenderPictureCornerControls("text", text.Id)
@@ -137,8 +137,8 @@
         var pageMetrics = PageMetrics(State.PageLayoutKind);
         var pages = BuildProsePages(paragraphs, pageMetrics);
         var spreads = BuildProseSpreads(pages, pageMetrics.IsDouble);
-        <div class="@(IsEditable ? "prose-layout prose-layout--editable" : "prose-layout")">
-            @if (IsEditable)
+        <div class="@(CanEditLayout ? "prose-layout prose-layout--editable" : "prose-layout")">
+            @if (CanEditLayout)
             {
                 <div class="picture-toolbar prose-toolbar">
                     <div class="picture-toolbar__actions">
@@ -191,6 +191,7 @@
     [Parameter, EditorRequired] public ChapterVisualState State { get; set; } = null!;
     [Parameter] public IReadOnlyList<ProjectImageView> Images { get; set; } = [];
     [Parameter] public bool IsEditable { get; set; }
+    [Parameter] public bool IsLocked { get; set; }
     [Parameter] public Guid ProjectId { get; set; }
     [Parameter] public EventCallback<ChapterVisualState> OnChanged { get; set; }
     [Parameter] public EventCallback OnImagesChanged { get; set; }
@@ -208,6 +209,7 @@
     private const double ParagraphSpacingInches = 0.14;
     private const double FigureSpacingInches = 0.16;
     private const double DropZoneHeightInches = 0.42;
+    private bool CanEditLayout => IsEditable && !IsLocked;
 
     private enum ProsePageItemKind
     {
@@ -283,7 +285,7 @@
         if (_selectedPictureElement is not { } selected)
             return;
 
-        if (!IsEditable
+        if (!CanEditLayout
             || State.VisualMode != ChapterVisualMode.PicturePage
             || !PictureElementExists(selected.Kind, selected.Id))
         {
@@ -302,7 +304,7 @@
     private RenderFragment RenderIllustrationBlock(IllustratedProseImageBlock block) =>
         @<figure class="@IllustrationBlockClass(block)"
                  style="@($"width:{block.WidthPercent.ToString(CultureInfo.InvariantCulture)}%;")"
-                 data-illustration-id="@(IsEditable ? block.Id.ToString("N") : null)">
+                 data-illustration-id="@(CanEditLayout ? block.Id.ToString("N") : null)">
             @{
                 var image = ImageById(block.ImageId);
             }
@@ -311,7 +313,7 @@
                 {
                     <img src="@image.PreviewUrl" alt="@(string.IsNullOrWhiteSpace(block.AltTextOverride) ? image.AltText : block.AltTextOverride)" />
                 }
-                @if (IsEditable)
+                @if (CanEditLayout)
                 {
                     <div class="illustration-element-chrome">
                         <button type="button" class="picture-corner-control picture-corner-control--move"
@@ -326,7 +328,7 @@
             {
                 <figcaption>@block.Caption</figcaption>
             }
-            @if (IsEditable)
+            @if (CanEditLayout)
             {
                 <div class="illustration-controls">
                     <input class="illustration-width-control" type="range" min="20" max="100"
@@ -362,7 +364,7 @@
     private string IllustrationBlockClass(IllustratedProseImageBlock block)
     {
         var alignment = block.Alignment.ToString().ToLowerInvariant();
-        return IsEditable
+        return CanEditLayout
             ? $"illustration-block illustration-block--editable illustration-block--{alignment}"
             : $"illustration-block illustration-block--{alignment}";
     }
@@ -382,7 +384,7 @@
 
     private void SelectPictureElement(PictureElementKind kind, Guid elementId)
     {
-        if (!IsEditable
+        if (!CanEditLayout
             || State.VisualMode != ChapterVisualMode.PicturePage
             || !PictureElementExists(kind, elementId))
         {
@@ -401,7 +403,7 @@
 
     private async Task SetSelectedTextFontFamilyAsync(PublishCoverFontFamily fontFamily)
     {
-        if (SelectedPictureText is not { Id: var selectedId })
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId })
             return;
 
         await UpdatePictureTextAsync(selectedId, fontFamily: fontFamily);
@@ -409,7 +411,8 @@
 
     private async Task SetSelectedTextFontSizeAsync(ChangeEventArgs args)
     {
-        if (SelectedPictureText is not { Id: var selectedId }
+        if (!CanEditLayout
+            || SelectedPictureText is not { Id: var selectedId }
             || !double.TryParse(args.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var fontSize))
         {
             return;
@@ -420,7 +423,7 @@
 
     private async Task PreviewSelectedTextColorAsync(ChangeEventArgs args)
     {
-        if (SelectedPictureText is not { Id: var selectedId })
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId })
             return;
 
         var color = CleanColor(args.Value?.ToString());
@@ -437,7 +440,7 @@
 
     private async Task SaveSelectedTextColorAsync(ChangeEventArgs args)
     {
-        if (SelectedPictureText is not { Id: var selectedId })
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId })
             return;
 
         var color = CleanColor(args.Value?.ToString());
@@ -472,7 +475,7 @@
 
     private async Task PersistSelectedTextColorAsync(Guid textId, string color, CancellationToken cancellationToken = default)
     {
-        if (_disposed || cancellationToken.IsCancellationRequested)
+        if (_disposed || !CanEditLayout || cancellationToken.IsCancellationRequested)
             return;
 
         var selectedText = State.PageLayout.TextElements.FirstOrDefault(text => text.Id == textId);
@@ -494,29 +497,35 @@
 
     private async Task UpdateIllustrationWidthAsync(Guid blockId, string? value)
     {
-        if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var width)) return;
+        if (!CanEditLayout || !double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var width)) return;
         await SaveIllustrationsAsync(State.IllustrationLayout with
         {
             Images = State.IllustrationLayout.Images.Select(block => block.Id == blockId ? block with { WidthPercent = width } : block).ToList(),
         });
     }
 
-    private async Task UpdateIllustrationAlignmentAsync(Guid blockId, ChapterImageAlignment alignment) =>
+    private async Task UpdateIllustrationAlignmentAsync(Guid blockId, ChapterImageAlignment alignment)
+    {
+        if (!CanEditLayout) return;
         await SaveIllustrationsAsync(State.IllustrationLayout with
         {
             Images = State.IllustrationLayout.Images.Select(block => block.Id == blockId ? block with { Alignment = alignment } : block).ToList(),
         });
+    }
 
-    private async Task RemoveIllustrationAsync(Guid blockId) =>
+    private async Task RemoveIllustrationAsync(Guid blockId)
+    {
+        if (!CanEditLayout) return;
         await SaveIllustrationsAsync(State.IllustrationLayout with
         {
             Images = State.IllustrationLayout.Images.Where(block => block.Id != blockId).ToList(),
         });
+    }
 
     [JSInvokable]
     public async Task MoveIllustrationBlockAsync(string blockId, int paragraphIndex, string anchorPosition)
     {
-        if (!IsEditable
+        if (!CanEditLayout
             || State.VisualMode == ChapterVisualMode.PicturePage
             || !Guid.TryParseExact(blockId, "N", out var id)
             || !Enum.TryParse<ChapterImageAnchorPosition>(anchorPosition, ignoreCase: true, out var position))
@@ -548,7 +557,7 @@
 
     private async Task ReorderSelectedPictureLayerAsync(PictureLayerMove move)
     {
-        if (!IsEditable
+        if (!CanEditLayout
             || State.VisualMode != ChapterVisualMode.PicturePage
             || _selectedPictureElement is not { } selected)
         {
@@ -645,6 +654,7 @@
 
     private async Task AddTextBoxAsync()
     {
+        if (!CanEditLayout) return;
         var textId = Guid.NewGuid();
         var maxOrder = State.PageLayout.TextElements.Select(text => text.ReadingOrder).DefaultIfEmpty(-1).Max();
         var maxZ = State.PageLayout.Images.Select(image => image.ZIndex)
@@ -680,6 +690,7 @@
 
     private async Task OpenImagesAsync()
     {
+        if (!CanEditLayout) return;
         if (OnOpenImages.HasDelegate)
             await OnOpenImages.InvokeAsync();
     }
@@ -730,7 +741,7 @@
     [JSInvokable]
     public async Task MovePictureElementAsync(string kind, string elementId, double xPercent, double yPercent)
     {
-        if (!IsEditable || State.VisualMode != ChapterVisualMode.PicturePage || !Guid.TryParseExact(elementId, "N", out var id))
+        if (!CanEditLayout || State.VisualMode != ChapterVisualMode.PicturePage || !Guid.TryParseExact(elementId, "N", out var id))
             return;
 
         if (string.Equals(kind, "image", StringComparison.OrdinalIgnoreCase))
@@ -757,7 +768,7 @@
     [JSInvokable]
     public async Task ResizePictureElementAsync(string kind, string elementId, double widthPercent, double heightPercent)
     {
-        if (!IsEditable || State.VisualMode != ChapterVisualMode.PicturePage || !Guid.TryParseExact(elementId, "N", out var id))
+        if (!CanEditLayout || State.VisualMode != ChapterVisualMode.PicturePage || !Guid.TryParseExact(elementId, "N", out var id))
             return;
 
         if (string.Equals(kind, "image", StringComparison.OrdinalIgnoreCase))
@@ -784,7 +795,7 @@
     [JSInvokable]
     public async Task UpdatePictureTextBodyAsync(string elementId, string body)
     {
-        if (!IsEditable || State.VisualMode != ChapterVisualMode.PicturePage || !Guid.TryParseExact(elementId, "N", out var id))
+        if (!CanEditLayout || State.VisualMode != ChapterVisualMode.PicturePage || !Guid.TryParseExact(elementId, "N", out var id))
             return;
 
         var text = State.PageLayout.TextElements.FirstOrDefault(candidate => candidate.Id == id);
@@ -803,7 +814,7 @@
         double? xPercent,
         double? yPercent)
     {
-        if (!IsEditable || ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(base64Data))
+        if (!CanEditLayout || ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(base64Data))
             return;
 
         byte[] bytes;
@@ -822,6 +833,9 @@
             bytes,
             string.Empty));
 
+        if (!CanEditLayout)
+            return;
+
         var placement = await Visuals.AddImageToChapterAsync(ProjectId, State.ChapterId, uploaded.Id);
         var state = placement.State;
         if (state.VisualMode == ChapterVisualMode.PicturePage
@@ -829,7 +843,7 @@
             && yPercent is double centerY)
         {
             var image = state.PageLayout.Images.FirstOrDefault(candidate => candidate.Id == placement.ElementId);
-            if (image is not null)
+            if (image is not null && CanEditLayout)
             {
                 var x = Clamp(centerX - image.WidthPercent / 2, 0, Math.Max(0, 100 - image.WidthPercent));
                 var y = Clamp(centerY - image.HeightPercent / 2, 0, Math.Max(0, 100 - image.HeightPercent));
@@ -878,6 +892,7 @@
 
     private async Task RemovePictureImageAsync(Guid elementId)
     {
+        if (!CanEditLayout) return;
         if (_selectedPictureElement is { Kind: PictureElementKind.Image, Id: var selectedId } && selectedId == elementId)
             _selectedPictureElement = null;
 
@@ -886,6 +901,7 @@
 
     private async Task RemovePictureTextAsync(Guid elementId)
     {
+        if (!CanEditLayout) return;
         if (_selectedPictureElement is { Kind: PictureElementKind.Text, Id: var selectedId } && selectedId == elementId)
             _selectedPictureElement = null;
         _textColorDrafts.Remove(elementId);
@@ -895,12 +911,14 @@
 
     private async Task SaveIllustrationsAsync(IllustratedProseLayout layout)
     {
+        if (!CanEditLayout) return;
         var updated = await Visuals.SaveIllustrationLayoutAsync(State.ChapterId, layout);
         await OnChanged.InvokeAsync(updated);
     }
 
     private async Task SavePageAsync(PicturePageLayout layout)
     {
+        if (!CanEditLayout) return;
         var updated = await Visuals.SavePageLayoutAsync(State.ChapterId, layout);
         await OnChanged.InvokeAsync(updated);
     }
@@ -957,7 +975,7 @@
 
     private string PictureImageElementClass(PicturePageImageElement image)
     {
-        var classes = IsEditable
+        var classes = CanEditLayout
             ? "picture-element picture-element--image picture-element--editable"
             : "picture-element picture-element--image";
         if (IsSelectedPictureElement(PictureElementKind.Image, image.Id))
@@ -967,7 +985,7 @@
 
     private string PictureTextElementClass(PicturePageTextElement text)
     {
-        var classes = IsEditable
+        var classes = CanEditLayout
             ? "picture-element picture-element--text picture-element--editable"
             : "picture-element picture-element--text";
         if (IsSelectedPictureElement(PictureElementKind.Text, text.Id))
@@ -976,7 +994,7 @@
     }
 
     private bool IsSelectedPictureElement(PictureElementKind kind, Guid id) =>
-        IsEditable && _selectedPictureElement is { Kind: var selectedKind, Id: var selectedId }
+        CanEditLayout && _selectedPictureElement is { Kind: var selectedKind, Id: var selectedId }
         && selectedKind == kind
         && selectedId == id;
 
@@ -993,7 +1011,7 @@
 
         for (var index = 0; index < paragraphs.Count; index++)
         {
-            if (IsEditable)
+            if (CanEditLayout)
             {
                 AddItem(new ProsePageItem(ProsePageItemKind.DropZone, index, ChapterImageAnchorPosition.BeforeParagraph, string.Empty, null), DropZoneHeightInches);
             }
@@ -1007,7 +1025,7 @@
             foreach (var block in BlocksAt(index, ChapterImageAnchorPosition.AfterParagraph))
                 AddIllustration(block);
 
-            if (IsEditable)
+            if (CanEditLayout)
             {
                 AddItem(new ProsePageItem(ProsePageItemKind.DropZone, index, ChapterImageAnchorPosition.AfterParagraph, string.Empty, null), DropZoneHeightInches);
             }
@@ -1126,7 +1144,7 @@
         var captionHeight = string.IsNullOrWhiteSpace(block.Caption)
             ? 0
             : EstimateParagraphHeight(block.Caption, Math.Max(16, (int)Math.Round(charsPerLine * block.WidthPercent / 100))) * 0.75;
-        var controlsHeight = IsEditable ? 0.48 : 0;
+        var controlsHeight = CanEditLayout ? 0.48 : 0;
         return imageHeight + captionHeight + FigureSpacingInches + controlsHeight;
     }
 
@@ -1176,7 +1194,7 @@
 
     private string PicturePageClass(PageLayoutMetrics metrics)
     {
-        var classes = IsEditable ? "picture-page picture-page--editable" : "picture-page";
+        var classes = CanEditLayout ? "picture-page picture-page--editable" : "picture-page";
         if (metrics.IsDouble)
             classes += " picture-page--double";
         return classes;
