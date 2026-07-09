@@ -79,6 +79,25 @@
                                            @oninput="PreviewSelectedTextColorAsync"
                                            @onchange="SaveSelectedTextColorAsync" />
                                 </label>
+                                <label class="picture-text-toolbar__field picture-text-toolbar__field--background-color">
+                                    <span>Background</span>
+                                    <input class="form-control form-control-color form-control-sm"
+                                           type="color"
+                                           value="@(ColorInputValue(TextBackgroundColorValue(selectedText), "#FFFFFF"))"
+                                           @oninput="PreviewSelectedTextBackgroundColorAsync"
+                                           @onchange="SaveSelectedTextBackgroundColorAsync" />
+                                </label>
+                                <label class="picture-text-toolbar__field picture-text-toolbar__field--opacity">
+                                    <span>Opacity</span>
+                                    <input class="form-range picture-text-toolbar__range"
+                                           type="range"
+                                           min="0"
+                                           max="1"
+                                           step="0.05"
+                                           value="@(TextBackgroundOpacityValue(selectedText).ToString("0.##", CultureInfo.InvariantCulture))"
+                                           @oninput="PreviewSelectedTextBackgroundOpacityAsync"
+                                           @onchange="SaveSelectedTextBackgroundOpacityAsync" />
+                                </label>
                             </div>
                         }
                     </div>
@@ -202,7 +221,9 @@
     private DotNetObjectReference<PagedChapterViewer>? _selfRef;
     private PictureElementSelection? _selectedPictureElement;
     private readonly Dictionary<Guid, string> _textColorDrafts = [];
-    private CancellationTokenSource? _textColorSaveDebounce;
+    private readonly Dictionary<Guid, string> _textBackgroundColorDrafts = [];
+    private readonly Dictionary<Guid, double> _textBackgroundOpacityDrafts = [];
+    private CancellationTokenSource? _textStyleSaveDebounce;
     private bool _disposed;
     private const double PageMarginInches = 0.75;
     private const double BodyLineHeightInches = 12.0 / 72.0 * 1.55;
@@ -434,7 +455,7 @@
             return;
 
         _textColorDrafts[selectedId] = color;
-        DebounceSelectedTextColorSave(selectedId, color);
+        DebounceSelectedTextStyleSave(selectedId);
         await Task.CompletedTask;
     }
 
@@ -447,33 +468,97 @@
         if (color is null)
             return;
 
-        _textColorSaveDebounce?.Cancel();
-        await PersistSelectedTextColorAsync(selectedId, color);
+        _textColorDrafts[selectedId] = color;
+        _textStyleSaveDebounce?.Cancel();
+        await PersistSelectedTextStyleAsync(selectedId);
     }
 
-    private void DebounceSelectedTextColorSave(Guid textId, string color)
+    private async Task PreviewSelectedTextBackgroundColorAsync(ChangeEventArgs args)
     {
-        _textColorSaveDebounce?.Cancel();
-        _textColorSaveDebounce?.Dispose();
-        _textColorSaveDebounce = new CancellationTokenSource();
-        var token = _textColorSaveDebounce.Token;
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId } selectedText)
+            return;
 
-        _ = SaveSelectedTextColorAfterDelayAsync(textId, color, token);
+        var color = CleanColor(args.Value?.ToString());
+        if (color is null)
+            return;
+
+        if (State.PageLayout.TextElements.All(text => text.Id != selectedId))
+            return;
+
+        _textBackgroundColorDrafts[selectedId] = color;
+        if (TextBackgroundOpacityValue(selectedText) <= 0)
+            _textBackgroundOpacityDrafts[selectedId] = 0.85;
+
+        DebounceSelectedTextStyleSave(selectedId);
+        await Task.CompletedTask;
     }
 
-    private async Task SaveSelectedTextColorAfterDelayAsync(Guid textId, string color, CancellationToken cancellationToken)
+    private async Task SaveSelectedTextBackgroundColorAsync(ChangeEventArgs args)
+    {
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId } selectedText)
+            return;
+
+        var color = CleanColor(args.Value?.ToString());
+        if (color is null)
+            return;
+
+        _textBackgroundColorDrafts[selectedId] = color;
+        if (TextBackgroundOpacityValue(selectedText) <= 0)
+            _textBackgroundOpacityDrafts[selectedId] = 0.85;
+
+        _textStyleSaveDebounce?.Cancel();
+        await PersistSelectedTextStyleAsync(selectedId);
+    }
+
+    private async Task PreviewSelectedTextBackgroundOpacityAsync(ChangeEventArgs args)
+    {
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId })
+            return;
+
+        if (!TryParseOpacity(args.Value?.ToString(), out var opacity))
+            return;
+
+        _textBackgroundOpacityDrafts[selectedId] = opacity;
+        DebounceSelectedTextStyleSave(selectedId);
+        await Task.CompletedTask;
+    }
+
+    private async Task SaveSelectedTextBackgroundOpacityAsync(ChangeEventArgs args)
+    {
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId })
+            return;
+
+        if (!TryParseOpacity(args.Value?.ToString(), out var opacity))
+            return;
+
+        _textBackgroundOpacityDrafts[selectedId] = opacity;
+        _textStyleSaveDebounce?.Cancel();
+        await PersistSelectedTextStyleAsync(selectedId);
+    }
+
+    private void DebounceSelectedTextStyleSave(Guid textId)
+    {
+        _textStyleSaveDebounce?.Cancel();
+        _textStyleSaveDebounce?.Dispose();
+        _textStyleSaveDebounce = new CancellationTokenSource();
+        var token = _textStyleSaveDebounce.Token;
+
+        _ = SaveSelectedTextStyleAfterDelayAsync(textId, token);
+    }
+
+    private async Task SaveSelectedTextStyleAfterDelayAsync(Guid textId, CancellationToken cancellationToken)
     {
         try
         {
             await Task.Delay(300, cancellationToken);
-            await InvokeAsync(() => PersistSelectedTextColorAsync(textId, color, cancellationToken));
+            await InvokeAsync(() => PersistSelectedTextStyleAsync(textId, cancellationToken));
         }
         catch (OperationCanceledException)
         {
         }
     }
 
-    private async Task PersistSelectedTextColorAsync(Guid textId, string color, CancellationToken cancellationToken = default)
+    private async Task PersistSelectedTextStyleAsync(Guid textId, CancellationToken cancellationToken = default)
     {
         if (_disposed || !CanEditLayout || cancellationToken.IsCancellationRequested)
             return;
@@ -481,18 +566,42 @@
         var selectedText = State.PageLayout.TextElements.FirstOrDefault(text => text.Id == textId);
         if (selectedText is null)
         {
-            _textColorDrafts.Remove(textId);
+            ClearTextStyleDrafts(textId);
             return;
         }
 
-        if (string.Equals(CleanColor(selectedText.Color), color, StringComparison.Ordinal))
+        var color = _textColorDrafts.TryGetValue(textId, out var colorDraft)
+            ? CleanColor(colorDraft) ?? selectedText.Color
+            : null;
+        var backgroundColor = _textBackgroundColorDrafts.TryGetValue(textId, out var backgroundColorDraft)
+            ? CleanColor(backgroundColorDraft) ?? selectedText.BackgroundColor
+            : null;
+        var backgroundOpacity = _textBackgroundOpacityDrafts.TryGetValue(textId, out var backgroundOpacityDraft)
+            ? ClampOpacity(backgroundOpacityDraft)
+            : (double?)null;
+
+        var changed = (color is not null && !string.Equals(CleanColor(selectedText.Color), color, StringComparison.Ordinal))
+            || (backgroundColor is not null && !string.Equals(CleanColor(selectedText.BackgroundColor), backgroundColor, StringComparison.Ordinal))
+            || (backgroundOpacity is not null && Math.Abs(selectedText.BackgroundOpacity - backgroundOpacity.Value) > 0.0001);
+        if (!changed)
         {
-            _textColorDrafts.Remove(textId);
+            ClearTextStyleDrafts(textId);
             return;
         }
 
-        await UpdatePictureTextAsync(textId, color: color);
+        await UpdatePictureTextAsync(
+            textId,
+            color: color,
+            backgroundColor: backgroundColor,
+            backgroundOpacity: backgroundOpacity);
+        ClearTextStyleDrafts(textId);
+    }
+
+    private void ClearTextStyleDrafts(Guid textId)
+    {
         _textColorDrafts.Remove(textId);
+        _textBackgroundColorDrafts.Remove(textId);
+        _textBackgroundOpacityDrafts.Remove(textId);
     }
 
     private async Task UpdateIllustrationWidthAsync(Guid blockId, string? value)
@@ -872,7 +981,9 @@
         double? height = null,
         PublishCoverFontFamily? fontFamily = null,
         double? fontSizePercent = null,
-        string? color = null) =>
+        string? color = null,
+        string? backgroundColor = null,
+        double? backgroundOpacity = null) =>
         await SavePageAsync(State.PageLayout with
         {
             TextElements = State.PageLayout.TextElements.Select(text => text.Id == elementId
@@ -886,6 +997,8 @@
                     FontFamily = fontFamily ?? text.FontFamily,
                     FontSizePercent = fontSizePercent ?? text.FontSizePercent,
                     Color = color ?? text.Color,
+                    BackgroundColor = backgroundColor ?? text.BackgroundColor,
+                    BackgroundOpacity = backgroundOpacity ?? text.BackgroundOpacity,
                 }
                 : text).ToList(),
         });
@@ -904,7 +1017,7 @@
         if (!CanEditLayout) return;
         if (_selectedPictureElement is { Kind: PictureElementKind.Text, Id: var selectedId } && selectedId == elementId)
             _selectedPictureElement = null;
-        _textColorDrafts.Remove(elementId);
+        ClearTextStyleDrafts(elementId);
 
         await SavePageAsync(State.PageLayout with { TextElements = State.PageLayout.TextElements.Where(text => text.Id != elementId).ToList() });
     }
@@ -936,9 +1049,9 @@
 
         _selfRef?.Dispose();
         _selfRef = null;
-        _textColorSaveDebounce?.Cancel();
-        _textColorSaveDebounce?.Dispose();
-        _textColorSaveDebounce = null;
+        _textStyleSaveDebounce?.Cancel();
+        _textStyleSaveDebounce?.Dispose();
+        _textStyleSaveDebounce = null;
     }
 
     private ProjectImageView? ImageById(Guid id) => Images.FirstOrDefault(image => image.Id == id);
@@ -1230,7 +1343,7 @@
             _ => "center",
         };
         return ElementStyle(text.XPercent, text.YPercent, text.WidthPercent, text.HeightPercent, text.ZIndex)
-            + $"font-family:{FontFamilyCss(text.FontFamily)};font-size:{text.FontSizePercent.ToString(CultureInfo.InvariantCulture)}cqw;line-height:{text.LineHeight.ToString(CultureInfo.InvariantCulture)};color:{TextColorValue(text)};background:rgba(255,255,255,{text.BackgroundOpacity.ToString(CultureInfo.InvariantCulture)});text-align:{text.TextAlign.ToString().ToLowerInvariant()};align-items:{justify};";
+            + $"font-family:{FontFamilyCss(text.FontFamily)};font-size:{text.FontSizePercent.ToString(CultureInfo.InvariantCulture)}cqw;line-height:{text.LineHeight.ToString(CultureInfo.InvariantCulture)};color:{TextColorValue(text)};background:{CssRgba(TextBackgroundColorValue(text), TextBackgroundOpacityValue(text))};text-align:{text.TextAlign.ToString().ToLowerInvariant()};align-items:{justify};";
     }
 
     private static string FontFamilyCss(PublishCoverFontFamily fontFamily) =>
@@ -1242,13 +1355,49 @@
             _ => "Georgia, \"Times New Roman\", serif",
         };
 
-    private static string ColorInputValue(string? value) =>
-        CleanColor(value) ?? "#111827";
+    private static string ColorInputValue(string? value, string fallback = "#111827") =>
+        CleanColor(value) ?? fallback;
 
     private string TextColorValue(PicturePageTextElement text) =>
         _textColorDrafts.TryGetValue(text.Id, out var draft)
             ? draft
             : text.Color;
+
+    private string TextBackgroundColorValue(PicturePageTextElement text) =>
+        _textBackgroundColorDrafts.TryGetValue(text.Id, out var draft)
+            ? draft
+            : text.BackgroundColor;
+
+    private double TextBackgroundOpacityValue(PicturePageTextElement text) =>
+        _textBackgroundOpacityDrafts.TryGetValue(text.Id, out var draft)
+            ? ClampOpacity(draft)
+            : ClampOpacity(text.BackgroundOpacity);
+
+    private static string CssRgba(string? color, double opacity)
+    {
+        var clean = CleanColor(color) ?? "#FFFFFF";
+        var red = Convert.ToInt32(clean[1..3], 16);
+        var green = Convert.ToInt32(clean[3..5], 16);
+        var blue = Convert.ToInt32(clean[5..7], 16);
+        return $"rgba({red},{green},{blue},{ClampOpacity(opacity).ToString(CultureInfo.InvariantCulture)})";
+    }
+
+    private static bool TryParseOpacity(string? value, out double opacity)
+    {
+        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+        {
+            opacity = ClampOpacity(parsed);
+            return true;
+        }
+
+        opacity = 0;
+        return false;
+    }
+
+    private static double ClampOpacity(double value) =>
+        double.IsNaN(value) || double.IsInfinity(value)
+            ? 0
+            : Clamp(value, 0, 1);
 
     private static string? CleanColor(string? value)
     {
