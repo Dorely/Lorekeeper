@@ -39,6 +39,9 @@
 | `Routes.razor` | `<Router>` wiring `MainLayout` and `NotFound`. |
 | `_Imports.razor` | Shared `@using` directives for all components. |
 | `EntityKnowledgeView.razor` (+ `.razor.css`) | Shared read-only entity knowledge renderer for structured wiki data and source-backed canon markdown used by graph, outline, and context entity detail surfaces. |
+| `EntityVisualExamples.razor` (+ `.razor.css`) | Reusable ordered entity visual gallery/editor with library attach, upload, labels, ordering, full-size viewing, and detach. |
+| `ImageEntityAssociations.razor` (+ `.razor.css`) | Image-side attached-entity chips and association editor used by the Images workspace. |
+| `EntityVisualTargetPicker.razor` (+ `.razor.css`) | Reusable multi-entity target picker for image generation and editing. |
 
 ### Components/Chat/
 
@@ -207,11 +210,13 @@
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
 | `PublishProfile.cs` | EF entity for one saved publish profile per project: book metadata, front/back matter, output options, prose pagination settings, selected cover asset, and cover text layout JSON. |
 | `PublishAsset.cs` | EF entity for uploaded/generated/edited project images with bytes, alt text, prompt/source metadata, masks, and cover/placement navigation. |
+| `EntityVisualExample.cs` | Ordered labeled many-to-many link between an eligible graph entity and project image, with origin and source provenance. |
+| `SourceVisualCandidate.cs` | Cached normalized Research/Ingest image bytes and artifact/web provenance before project-library promotion. |
 | `ProjectImageConversation.cs` | EF entity for the separate project-scoped Images Chat transcript. |
 | `ProjectImageChatAttachment.cs` | EF entity for project image assets explicitly attached as visible Images Chat context chips. |
 | `ProjectImageMessage.cs` | EF entity for Images Chat messages with assistant tool-call manifests, tool result metadata, status, and errors. |
 | `ProjectImageMessageVisual.cs` | EF entity for Images Chat visual attachments, including project-image references or optional stored bytes. |
-| `ProjectImageGenerationJob.cs` | EF entity for queued/running/final image generate/edit jobs with settings, references, outputs, progress state JSON, and provider diagnostics. |
+| `ProjectImageGenerationJob.cs` | EF entity for queued/running/final image jobs with references, entity visual targets/inheritance, outputs, progress, and diagnostics. |
 | `ProjectImageMask.cs` | EF entity for validated PNG masks tied to source project images, using transparent pixels as editable regions. |
 | `PublishOutlineSelection.cs` | EF entity for per-project act/chapter publish inclusion flags; act selection controls the act page while chapters remain independently selectable. |
 | `PublishImagePlacement.cs` | EF entity for cover-independent interior image placements before/after acts or chapters and chapter openings/endings, with captions and ordering. |
@@ -226,7 +231,7 @@
 | `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor chat visuals, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, publish profiles/assets/layouts, and chapter visual-mode fields. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish/cover-layout/revision-agent/embedding-config/chat-readiness/adaptive artifact ingest, ingest staging records/canon cleanup, ingest LLM token metadata, ingest report payload cleanup, editor chat/contest/web research cache, `AddChapterVisualModesAndImages`, `ReplacePicturePageDimensionsWithLayoutKind`, `AddImagesChatAndGenerationQueue`, `AddProjectImageChatAttachments`, and `AddEditorChatMessageVisuals`). |
+| `Migrations/` | EF Core migrations through `AddEntityVisualExamples`, including entity-image links, cached source visuals/web images, and image-job entity targets. |
 
 ### Persistence/Repositories/
 
@@ -312,19 +317,19 @@
 | File | Description |
 |------|-------------|
 | `IResearchService.cs` / `ResearchService.cs` | Persistent streaming Research chat: builds project-level guidance/facts/outline context, replays text-only history to the model, streams cache-first web + graph tool calls, stages Review edits, and derives current-conversation activity. |
-| `ResearchTools.cs` | Research LLM tools: cache-first `web_search`, paginated `read_search_result`/`read_webpage`, filtered/throttled `follow_page_links`, read-only entity detail/link tools, and selected graph create/update/link tools reused from outline collaboration. |
+| `ResearchTools.cs` | Research tools for cache-first web reads, safe webpage-image inspection/confirmed import, entity visuals, and staged graph mutations. |
 | `ResearchTurnUpdate.cs` | Streaming update records consumed by `ResearchChatPanel`: text/tool updates, pending AI change creation, graph mutation refreshes, assistant completion, and turn errors/cancellation. |
 | `ResearchChatTurnRunner.cs` | Background turn runner for Research chat: keeps active turns alive across component disposal and provides buffered update subscriptions. |
 | `ResearchActivityModels.cs` | Read models for Research Activity sidebar entity/source summaries and cache-only source detail modals. |
 | `WebResearchOptions.cs` | Configurable webpage read limits and polite-fetch defaults: user agent, timeout, max bytes, read-page size, retry timing, max links, robots, throttling, cooldowns, and private-network blocking. |
-| `WebPageReader.cs` | Composed webpage reader for Research Mode: validates targets, applies robots/private-network policy, prefers source adapters, falls back to filtered HTML/text extraction, and returns diagnostics. |
+| `WebPageReader.cs` | Safe webpage/image reader applying URL, robots, private-network, redirect, throttle, byte, and supported-raster checks. |
 | `WebFetchCoordinator.cs` | Per-host fetch coordinator for polite web reads: serializes requests, enforces host delay/jitter, and applies cooldowns after blocked or repeated failed responses. |
 | `WebHttpFetchClient.cs` | Shared coordinated HTTP GET helper for webpage, robots, and source-adapter reads with byte limits, timeout handling, retryability, and status diagnostics. |
 | `WebLinkPolicy.cs` | URL normalization and link hygiene policy for web research: filters navigation/admin/wiki namespace/static links and prioritizes likely content links. |
-| `WebPageTextExtractor.cs` | Shared HTML/text extraction helpers for titles, canonical URLs, main-content text, outgoing links, decoding, and truncation. |
+| `WebPageTextExtractor.cs` | HTML/text extraction for titles, canonical URLs, text, links, normalized `src`/`srcset` images, alt/captions, and decoding. |
 | `WebRobotsPolicy.cs` | Lightweight cached `robots.txt` policy reader/parser used before webpage and source-adapter fetches when enabled. |
 | `MediaWikiWebPageSourceReader.cs` | MediaWiki source adapter for `/wiki/{title}` pages: reads allowed `api.php` extract/parse endpoints and returns plain text plus namespace-0 article links. |
-| `IWebIngestCandidateService.cs` / `WebIngestCandidateService.cs` | Application service for cached webpage sources: search-result persistence, conversation-aware cache-first URL/page reading with recent-failure cooldown reuse, cache-only source details, and manual Ingest queueing support. |
+| `IWebIngestCandidateService.cs` / `WebIngestCandidateService.cs` | Cached webpage source lifecycle with page/link/image metadata, source details, staging, and manual Ingest queueing. |
 | `WebIngestCandidateModels.cs` | UI/read helper records for webpage candidate lists and read results. |
 
 ### Auth/
@@ -361,6 +366,15 @@
 | `IEntityRelationContextService.cs` / `EntityRelationContextService.cs` | Shared bounded graph relation/traversal map builder for Context Feed and agent tool payloads that return entity information. |
 | `ChapterFormatting.cs` | `WithLineNumbers` / `SplitLines` / `JoinLines` helpers shared by the editor gutter, Context Feed preview, and AI tool reads so user and LLM see identical line numbers. |
 
+### EntityVisuals/
+
+| File | Description |
+|------|-------------|
+| `EntityVisualModels.cs` | Read/request/change records for visual examples, entity targets, and source candidates. |
+| `EntityVisualContextOptions.cs` | Limits for images per entity/turn, model input edge, and source visuals per ingest chunk. |
+| `IEntityVisualExampleService.cs` / `EntityVisualExampleService.cs` | Association/candidate reads and mutations, promotion, cleanup, and entity reindexing. |
+| `EntityVisualContextService.cs` | Bounded, deduplicated multimodal entity context assembly for agent turns. |
+
 ### Tokens/
 
 | File | Description |
@@ -380,7 +394,7 @@
 | `IngestCreateJobRequest.cs` | Request DTO for creating ingest jobs with source text or uploaded artifact bytes, metadata, model/profile choice, PDF options, encoding/chunk-size override, and optional webpage fetch provenance. |
 | `IngestExtractionProfile.cs` | Enum for adaptive ingest profile selection: Auto, Story/Worldbuilding, or Research/Nonfiction. |
 | `BookArtifactIngestOptions.cs` | Options for artifact ingestion limits and PDF vision rendering defaults such as max file size/pages, DPI, image pixels, and vision output tokens. |
-| `IBookArtifactPreprocessor.cs` / `BookArtifactPreprocessor.cs` | EPUB/PDF/text artifact preprocessor: extracts EPUB sections, PDF embedded text, vision-read rendered PDF pages, and source page/block locator drafts before job creation. |
+| `IBookArtifactPreprocessor.cs` / `BookArtifactPreprocessor.cs` | Text/image/EPUB/PDF preprocessor for text, embedded/rendered visual candidates, vision reads, deduplication, and source locators. |
 | `IIngestSourceStructureBuilder.cs` / `IngestSourceStructureBuilder.cs` | Splits raw source text into logical source chunks using headings/scene breaks, then merges adjacent sections with configurable target/soft token limits; source chunks are independent from vector fragments. |
 | `IngestSourceStructureOptions.cs` | Configurable source sectioning defaults for ingest chunk target tokens, soft max ratio, and small-section merge threshold. |
 | `IIngestGraphSync.cs` / `IngestGraphSync.cs` | Projects ingest sources, source synopsis, source chunks, and source blocks into structural graph nodes and ordered `HasChild` edges, including webpage/artifact provenance on source nodes when present. |
@@ -392,14 +406,14 @@
 | `IngestSourceAssertions.cs` | Legacy helper/model for protected source-scoped node/edge assertion JSON, ingest-created graph origin markers, report graph-action payloads, and source-subtraction operations. |
 | `IngestWikiSheet.cs` | Shared wiki/canon helper/models for ingest-managed summaries, aliases, wiki sections, source-backed `canonSource.*` markdown, canon metadata cleanup, citations, and search projection helpers. |
 | `IngestJobWorker.cs` | Hosted background worker that marks interrupted jobs/chunks stopped at startup, notifies the UI, and drains queued ingest jobs in scoped processors. |
-| `IngestJobProcessor.cs` | Runs ingest jobs with streaming chunk staging, per-entity final canon-source markdown synthesis, simple relationship promotion, compact source/entity memory, retry-aware partial-work context, diagnostics, and indexing updates. |
-| `IngestAgentTools.cs` | Ingest LLM tools for compact entity identity indexes, bulk mention resolution, staged entity observations, staged relationship markers, per-entity canon-source markdown writes, and rolling source progress updates. |
+| `IngestJobProcessor.cs` | Runs ingest with streaming staging, bounded source/entity visuals, final synthesis, relationship promotion, retries, diagnostics, and indexing. |
+| `IngestAgentTools.cs` | Ingest tools for identity/observations/relationships, clear source-visual promotion, final canon writes, and source progress. |
 
 ### ImportExport/
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | Portable export DTOs/enums for Lorekeeper packages, stable graph node refs, project images, publish page settings, chapter visual fields, explicit image context inclusions, and downloadable export file metadata. |
+| `ProjectExportModels.cs` | v3 portable export DTOs for stable graph refs, entity visuals/associations, publish settings, chapter visuals, and image context. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
@@ -411,7 +425,7 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectImageModels.cs` | View/request/data records for project images plus persisted generation jobs, output state, masks, provider requests/results/progress, and runtime snapshots. |
+| `ProjectImageModels.cs` | Image and entity-target requests/views plus persisted jobs, output state, masks, provider progress, and runtime snapshots. |
 | `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: list/read bytes, upload, legacy blocking generation, update metadata, delete, thumbnail, and scrub image references. |
 | `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Persistence-facing image job service for create/list/start/complete jobs, output state/errors, saving generated assets, and validating PNG/shape masks. |
 | `IProjectImageGenerationRuntime.cs` / `ProjectImageGenerationRuntime.cs` | Singleton FIFO image generation queue with one active job per project, retries, runtime partial previews, completion waiters, and state notifications. |
@@ -419,6 +433,8 @@
 | `IProjectImageProvider.cs` / `CodexProjectImageProvider.cs` | Responses image provider adapted from PixelChat for Codex/OpenAI account generation and masked edits with streamed partial images. |
 | `ProjectImageGenerationOptions.cs` | Configurable image model defaults, count/reference limits, retry/timeout settings, partial image count, and agent wait timeout. |
 | `DataUrl.cs` | Shared data URL parse/format helper for mask and provider payloads. |
+| `ProjectImageBinary.cs` | Validates PNG/JPEG/WebP raster input and normalizes WebP library output. |
+| `ProjectImageResize.cs` | Shared bounded-edge image resize helper for model and preview delivery. |
 | `ProjectImageEndpoints.cs` | Minimal API endpoints for scoped project image bytes, masks, Images Chat visuals, and Editor Chat visual content, with optional image max-edge thumbnails. |
 
 ### ImagesChat/

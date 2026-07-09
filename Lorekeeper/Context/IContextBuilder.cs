@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.EntityVisuals;
 
 namespace Lorekeeper.Context;
 
@@ -25,7 +26,8 @@ public sealed record ContextItem(
     bool IsEnabled,
     bool IsRemovable,
     string? Badge = null,
-    string? Reason = null);
+    string? Reason = null,
+    IReadOnlyList<EntityVisualContextReference>? Visuals = null);
 
 public enum ContextItemKind
 {
@@ -46,6 +48,11 @@ public enum ContextItemKind
 
 public sealed record ContextAssembly(IReadOnlyList<ContextItem> Items)
 {
+    public IReadOnlyList<EntityVisualContextReference> Visuals => Items
+        .Where(item => item.IsEnabled)
+        .SelectMany(item => item.Visuals ?? [])
+        .ToList();
+
     /// <summary>
     /// Concatenates every enabled item's body, in display order, separated by labeled
     /// section headers. The result is the literal system message sent to the LLM.

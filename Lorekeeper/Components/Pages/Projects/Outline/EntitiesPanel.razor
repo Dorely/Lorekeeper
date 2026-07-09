@@ -4,6 +4,7 @@
 @implements IAsyncDisposable
 @inject IEntityService Entities
 @inject IEntityTypeService EntityTypes
+@inject IEntityVisualExampleService EntityVisuals
 @inject IJSRuntime JS
 
 <div class="entities-panel" @ref="_rootEl">
@@ -69,11 +70,19 @@
                     @foreach (var e in sec.Items)
                     {
                         <div class="entities-item" @key="e.Id">
+                            @if (_visuals.GetValueOrDefault(e.Id)?.FirstOrDefault() is { } leadingVisual)
+                            {
+                                <img class="entities-item-visual" src="@leadingVisual.Image.PreviewUrl" alt="@leadingVisual.Image.AltText" />
+                            }
                             <button type="button" class="entities-item-name"
                                     @onclick="() => OpenModalAsync(e)">@e.Name</button>
                             @if (e.CanonSourceCount > 0)
                             {
                                 <div class="entities-item-meta small">@e.CanonSourceCount canon source@(PluralSuffix(e.CanonSourceCount))</div>
+                            }
+                            @if (_visuals.GetValueOrDefault(e.Id) is { Count: > 0 } entityVisuals)
+                            {
+                                <div class="entities-item-meta small">@entityVisuals.Count visual@(entityVisuals.Count == 1 ? string.Empty : "s")</div>
                             }
                             @if (EntitySubtitle(e) is { Length: > 0 } subtitle)
                             {
@@ -143,6 +152,10 @@
                                          Aliases="@_modalEntity.Aliases"
                                          WikiSections="@_modalEntity.WikiSections"
                                          CanonSources="@_modalEntity.CanonSources" />
+
+                    <div class="mb-3">
+                        <EntityVisualExamples ProjectId="@ProjectId" EntityId="@_modalEntity.Id" Editable="true" />
+                    </div>
 
                     <div class="mb-0">
                         <label class="form-label small text-muted">Links</label>
@@ -232,6 +245,7 @@
 
     // Modal state
     private StoryEntity? _modalEntity;
+    private IReadOnlyDictionary<Guid, IReadOnlyList<EntityVisualExampleView>> _visuals = new Dictionary<Guid, IReadOnlyList<EntityVisualExampleView>>();
     private string _editName = string.Empty;
     private List<KeyValuePair<string, string>> _editProps = [];
     private IReadOnlyDictionary<string, string?> _editOriginalProps = new Dictionary<string, string?>();
@@ -310,6 +324,7 @@
                 var items = await Entities.ListAsync(ProjectId, s.Type);
                 s.Items = items.OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase).ToList();
             }
+            _visuals = await EntityVisuals.ListForEntitiesAsync(ProjectId, _sections.SelectMany(section => section.Items).Select(item => item.Id).ToList());
             // Drop the modal if the entity disappeared.
             if (_modalEntity is { } cur && !_sections.SelectMany(s => s.Items).Any(i => i.Id == cur.Id))
             {

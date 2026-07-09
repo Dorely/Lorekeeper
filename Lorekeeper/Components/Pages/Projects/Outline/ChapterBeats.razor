@@ -2,6 +2,7 @@
 @using Lorekeeper.Outline
 @implements IAsyncDisposable
 @inject IEntityService Entities
+@inject IEntityVisualExampleService EntityVisuals
 @inject IJSRuntime JS
 
 <div class="chapter-beats" @ref="_rootEl">
@@ -49,6 +50,9 @@
                                           rows="2"
                                           placeholder="Beat summary…"
                                           @bind="_editSummary" @bind:event="oninput"></textarea>
+                                <div class="mt-2">
+                                    <EntityVisualExamples ProjectId="@ProjectId" EntityId="@b.Id" Editable="true" />
+                                </div>
                                 <div class="chapter-beat-actions mt-1">
                                     <button type="button" class="btn btn-sm btn-primary"
                                             @onclick="() => SaveEditAsync(b)">Save</button>
@@ -70,11 +74,19 @@
                             }
                             else
                             {
+                                @if (_visuals.GetValueOrDefault(b.Id)?.FirstOrDefault() is { } leadingVisual)
+                                {
+                                    <img class="chapter-beat-visual" src="@leadingVisual.Image.PreviewUrl" alt="@leadingVisual.Image.AltText" />
+                                }
                                 <button type="button" class="chapter-beat-name"
                                         @onclick="() => StartEdit(b)">@b.Name</button>
                                 @if (b.Properties.TryGetValue("summary", out var s) && !string.IsNullOrWhiteSpace(s))
                                 {
                                     <div class="chapter-beat-summary text-muted small">@s</div>
+                                }
+                                @if (_visuals.GetValueOrDefault(b.Id) is { Count: > 0 } beatVisuals)
+                                {
+                                    <div class="chapter-beat-summary text-muted small">@beatVisuals.Count visual@(beatVisuals.Count == 1 ? string.Empty : "s")</div>
                                 }
                             }
                         </div>
@@ -130,6 +142,7 @@
     private const string EventNodeType = "Event";
 
     private List<StoryEntity> _beats = [];
+    private IReadOnlyDictionary<Guid, IReadOnlyList<EntityVisualExampleView>> _visuals = new Dictionary<Guid, IReadOnlyList<EntityVisualExampleView>>();
     private bool _loading = true;
     private Guid? _editingId;
     private string _editName = string.Empty;
@@ -191,6 +204,7 @@
         {
             var items = await Entities.ListAsync(ProjectId, EventNodeType, ChapterId);
             _beats = items.OrderBy(b => b.Order ?? int.MaxValue).ThenBy(b => b.Name).ToList();
+            _visuals = await EntityVisuals.ListForEntitiesAsync(ProjectId, _beats.Select(beat => beat.Id).ToList());
             if (_editingId is { } id && !_beats.Any(b => b.Id == id)) CancelEdit();
         }
         catch (Exception ex) { _error = ex.Message; }

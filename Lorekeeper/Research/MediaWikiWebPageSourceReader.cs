@@ -52,10 +52,12 @@ public sealed class MediaWikiWebPageSourceReader(
             ["action"] = "query",
             ["titles"] = title,
             ["redirects"] = "1",
-            ["prop"] = "extracts|links",
+            ["prop"] = "extracts|links|pageimages",
             ["plnamespace"] = "0",
             ["pllimit"] = Math.Clamp(options.Value.MaxLinksReturned, 1, 500).ToString(),
             ["explaintext"] = "1",
+            ["piprop"] = "original",
+            ["pilicense"] = "any",
             ["format"] = "json",
             ["formatversion"] = "2",
         });
@@ -98,7 +100,7 @@ public sealed class MediaWikiWebPageSourceReader(
                 options.Value.MaxLinksReturned,
                 out _);
 
-            return Success(requestedUrl, finalUrl, finalTitle, text, links, result.StatusCode is null ? null : (int)result.StatusCode);
+            return Success(requestedUrl, finalUrl, finalTitle, text, links, ReadQueryImages(page), result.StatusCode is null ? null : (int)result.StatusCode);
         }
         catch (JsonException ex)
         {
@@ -158,8 +160,9 @@ public sealed class MediaWikiWebPageSourceReader(
                 sameDomainOnly: false,
                 options.Value.MaxLinksReturned,
                 out _);
+            var images = WebPageTextExtractor.ExtractImages(html, finalUrl);
 
-            return Success(requestedUrl, finalUrl, finalTitle, text, links, result.StatusCode is null ? null : (int)result.StatusCode);
+            return Success(requestedUrl, finalUrl, finalTitle, text, links, images, result.StatusCode is null ? null : (int)result.StatusCode);
         }
         catch (JsonException ex)
         {
@@ -196,12 +199,21 @@ public sealed class MediaWikiWebPageSourceReader(
             .ToList();
     }
 
+    private static IReadOnlyList<WebPageImage> ReadQueryImages(JsonElement page)
+    {
+        if (!page.TryGetProperty("original", out var original) || original.ValueKind != JsonValueKind.Object)
+            return [];
+        var source = ReadString(original, "source");
+        return Uri.TryCreate(source, UriKind.Absolute, out _) ? [new WebPageImage(source!, string.Empty, "Lead page image")] : [];
+    }
+
     private static WebPageSourceReadResult Success(
         string requestedUrl,
         string finalUrl,
         string title,
         string text,
         IReadOnlyList<WebPageLink> links,
+        IReadOnlyList<WebPageImage> images,
         int? statusCode)
     {
         var excerpt = WebPageTextExtractor.Truncate(text, 2_000);
@@ -215,6 +227,7 @@ public sealed class MediaWikiWebPageSourceReader(
                 text,
                 excerpt,
                 links,
+                images,
                 Success: true,
                 Diagnostics: string.Empty,
                 StatusCode: statusCode,

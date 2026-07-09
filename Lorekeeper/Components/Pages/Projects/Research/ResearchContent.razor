@@ -242,6 +242,30 @@ else
                     }
 
                     <section class="research-detail-section">
+                        <h6>Webpage visual candidates</h6>
+                        @if (_selectedSourceDetail.DiscoveredImages.Count > 0)
+                        {
+                            <p class="text-muted small">@_selectedSourceDetail.DiscoveredImages.Count discovered from page markup; inspect an image in Research Chat before importing it.</p>
+                        }
+                        @if (_selectedSourceDetail.Visuals.Count == 0)
+                        {
+                            <p class="text-muted small mb-0"><em>No webpage images have been inspected yet.</em></p>
+                        }
+                        else
+                        {
+                            <div class="research-source-visuals">
+                                @foreach (var visual in _selectedSourceDetail.Visuals)
+                                {
+                                    <a href="@($"/projects/{Project!.Id:N}/source-visuals/{visual.Id:N}/content")" target="_blank" title="@visual.Caption">
+                                        <img src="@visual.PreviewUrl" alt="@visual.AltText" />
+                                        <span>@visual.Status · @visual.AttachedEntityCount attached · @(string.IsNullOrWhiteSpace(visual.Caption) ? visual.FileName : visual.Caption)</span>
+                                    </a>
+                                }
+                            </div>
+                        }
+                    </section>
+
+                    <section class="research-detail-section">
                         <h6>Cached links</h6>
                         @if (_selectedSourceDetail.Links.Count == 0)
                         {

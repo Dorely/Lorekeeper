@@ -96,3 +96,4 @@
 .chapter-beats-add {
     margin-top: 0.4rem;
 }
+.chapter-beat-visual { width: 2.5rem; height: 2.5rem; object-fit: cover; border-radius: .3rem; float: left; margin: 0 .45rem .2rem 0; }

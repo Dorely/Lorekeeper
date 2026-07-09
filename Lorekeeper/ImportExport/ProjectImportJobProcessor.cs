@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
@@ -27,6 +28,7 @@ public sealed class ProjectImportJobProcessor(
     IEntityTypeService entityTypeService,
     IOutlineGraphSync outlineGraphSync,
     IContextIndexingService contextIndexing,
+    IEntityVisualExampleService entityVisualExamples,
     IProjectImportJobNotifier notifier,
     ILogger<ProjectImportJobProcessor> logger)
 {
@@ -98,6 +100,8 @@ public sealed class ProjectImportJobProcessor(
 
             await ImportGraphEdgesAsync(job, document, state, cancellationToken);
             await StepAsync(job, "Merged graph relationships.", cancellationToken);
+
+            await ImportEntityVisualExamplesAsync(job, document, state, cancellationToken);
 
             await outlineGraphSync.RepairProjectAsync(project.Id, cancellationToken);
             await StepAsync(job, "Repaired graph outline links.", cancellationToken);
@@ -345,9 +349,6 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
-        if (document.ExportKind != ProjectExportKind.Full)
-            return;
-
         foreach (var importedImage in document.Images)
         {
             if (importedImage.Data.Length == 0 || !importedImage.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
@@ -381,8 +382,50 @@ public sealed class ProjectImportJobProcessor(
             await AddReportAsync(job, ProjectImportReportItemKind.Structural, $"Imported {state.ImageMap.Count} project image(s)", "Images were added to the project image library.", "ProjectImage", job.ProjectId.ToString("N"), cancellationToken: cancellationToken);
         }
 
-        if (document.PublishProfiles.FirstOrDefault() is { } importedProfile)
+        if (document.ExportKind == ProjectExportKind.Full && document.PublishProfiles.FirstOrDefault() is { } importedProfile)
             await ImportPublishProfileSettingsAsync(job.ProjectId, importedProfile, state.ImageMap, cancellationToken);
+    }
+
+    private async Task ImportEntityVisualExamplesAsync(
+        ProjectImportJob job,
+        ProjectExportDocument document,
+        ImportState state,
+        CancellationToken cancellationToken)
+    {
+        foreach (var group in document.EntityVisualExamples
+            .GroupBy(example => example.Entity.StableKey, StringComparer.Ordinal))
+        {
+            if (!state.NodeMap.TryGetValue(group.Key, out var localNode)
+                || !Guid.TryParseExact(localNode.Key, "N", out var entityId))
+            {
+                await AddWarningAsync(job, $"Skipped {group.Count()} visual association(s)", $"Entity '{group.Key}' was not imported.", cancellationToken);
+                continue;
+            }
+
+            var attachedIds = new List<Guid>();
+            foreach (var imported in group.OrderBy(example => example.SortOrder))
+            {
+                if (!state.ImageMap.TryGetValue(imported.ImageId, out var imageId))
+                {
+                    await AddWarningAsync(job, "Skipped entity visual", $"Image {imported.ImageId:N} was not imported.", cancellationToken);
+                    continue;
+                }
+                var attached = await entityVisualExamples.AttachAsync(
+                    job.ProjectId, entityId, imageId, imported.Label, EntityVisualExampleOrigin.Import,
+                    cancellationToken: cancellationToken);
+                attachedIds.Add(attached.Id);
+            }
+            if (attachedIds.Count > 1)
+            {
+                var all = await entityVisualExamples.ListForEntityAsync(job.ProjectId, entityId, cancellationToken);
+                var importedSet = attachedIds.ToHashSet();
+                var order = all.Where(example => importedSet.Contains(example.Id)).OrderBy(example => attachedIds.IndexOf(example.Id))
+                    .Concat(all.Where(example => !importedSet.Contains(example.Id)))
+                    .Select(example => example.Id)
+                    .ToList();
+                await entityVisualExamples.ReorderAsync(job.ProjectId, entityId, order, markManual: false, cancellationToken: cancellationToken);
+            }
+        }
     }
 
     private async Task ImportPublishProfileSettingsAsync(

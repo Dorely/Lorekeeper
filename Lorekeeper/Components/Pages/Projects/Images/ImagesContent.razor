@@ -68,6 +68,7 @@ else
                                 <span>@image.Source</span>
                                 <span>@FormatBytes(image.SizeBytes)</span>
                             </div>
+                            <ImageEntityAssociations ProjectId="@Project.Id" ImageId="@image.Id" />
                             <div class="image-actions">
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AttachToChatAsync(image)">Attach to Chat</button>
                                 <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenMaskModal(image)">Edit</button>
@@ -143,6 +144,8 @@ else
                         <span>Generated alt text</span>
                         <input class="form-control form-control-sm" @bind="_generatedAltText" />
                     </label>
+                    <label><span>Represented entities</span></label>
+                    <EntityVisualTargetPicker ProjectId="@Project.Id" @bind-Targets="_generationEntityTargets" />
                     <button type="button" class="btn btn-sm btn-primary" disabled="@_queueingGenerate" @onclick="GenerateAsync">
                         @(_queueingGenerate ? "Queueing..." : "Queue image")
                     </button>
@@ -204,6 +207,12 @@ else
                         <span>Edit prompt</span>
                         <textarea class="form-control form-control-sm" rows="7" @bind="_maskPrompt"></textarea>
                     </label>
+                    <label><span>Additional represented entities</span></label>
+                    <EntityVisualTargetPicker ProjectId="@Project!.Id" @bind-Targets="_editEntityTargets" />
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" @bind="_inheritEditEntityTargets" />
+                        <span class="form-check-label">Inherit source image entity associations</span>
+                    </label>
                     <button type="button" class="btn btn-sm btn-primary" disabled="@_sendingMaskEdit" @onclick="SendMaskEditAsync">
                         @(_sendingMaskEdit ? "Sending..." : "Send edit")
                     </button>
@@ -222,6 +231,9 @@ else
     private IReadOnlyList<ProjectImageJobView> _jobs = [];
     private ProjectImageGenerationRuntimeSnapshot _runtimeSnapshot = new([]);
     private ProjectImageView? _editingImage;
+    private List<EntityVisualTarget> _generationEntityTargets = [];
+    private List<EntityVisualTarget> _editEntityTargets = [];
+    private bool _inheritEditEntityTargets = true;
     private ProjectImageView? _viewImage;
     private IJSObjectReference? _downloadModule;
     private IJSObjectReference? _maskModule;
@@ -375,7 +387,8 @@ else
                 _generatedAltText,
                 1,
                 [],
-                Label: "Manual generation"));
+                Label: "Manual generation",
+                EntityTargets: _generationEntityTargets));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
             _status = "Image job queued.";
             await ReloadAsync();
@@ -453,6 +466,8 @@ else
     {
         _editingImage = image;
         _maskPrompt = string.Empty;
+        _editEntityTargets = [];
+        _inheritEditEntityTargets = true;
         _maskTool = "brush";
         _maskBrushSize = 32;
         _maskModalOpen = true;
@@ -515,7 +530,9 @@ else
                 1,
                 maskDataUrl,
                 [],
-                Label: $"Edit {_editingImage.FileName}"));
+                Label: $"Edit {_editingImage.FileName}",
+                EntityTargets: _editEntityTargets,
+                InheritSourceEntityTargets: _inheritEditEntityTargets));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
             _maskModalOpen = false;
             _status = "Edit job queued.";

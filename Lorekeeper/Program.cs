@@ -3,6 +3,7 @@ using Lorekeeper.Chapters;
 using Lorekeeper.Components;
 using Lorekeeper.Context;
 using Lorekeeper.EditorChat;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Graph;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Images;
@@ -117,6 +118,9 @@ builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>(
 builder.Services.AddScoped<IChapterService, ChapterService>();
 builder.Services.AddScoped<IChapterVisualService, ChapterVisualService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
+builder.Services.Configure<EntityVisualContextOptions>(builder.Configuration.GetSection(EntityVisualContextOptions.SectionName));
+builder.Services.AddScoped<IEntityVisualExampleService, EntityVisualExampleService>();
+builder.Services.AddScoped<IEntityVisualContextService, EntityVisualContextService>();
 builder.Services.Configure<ProjectImageGenerationOptions>(builder.Configuration.GetSection(ProjectImageGenerationOptions.SectionName));
 builder.Services.AddScoped<IProjectImageProvider, CodexProjectImageProvider>();
 builder.Services.AddScoped<IProjectImageJobService, ProjectImageJobService>();

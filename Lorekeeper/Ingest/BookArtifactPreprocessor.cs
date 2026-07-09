@@ -32,9 +32,34 @@ public sealed partial class BookArtifactPreprocessor(
         {
             ".epub" => await PreprocessEpubAsync(request, cancellationToken),
             ".pdf" => await PreprocessPdfAsync(request, cancellationToken),
+            ".png" or ".jpg" or ".jpeg" or ".webp" => await PreprocessImageAsync(request, cancellationToken),
             ".txt" or ".md" or ".markdown" => PreprocessPlainText(request),
-            _ => throw new InvalidOperationException("Unsupported source file type. Use .txt, .md, .epub, or .pdf."),
+            _ => throw new InvalidOperationException("Unsupported source file type. Use .txt, .md, .epub, .pdf, .png, .jpg, .jpeg, or .webp."),
         };
+    }
+
+    private async Task<BookArtifactPreprocessResult> PreprocessImageAsync(BookArtifactPreprocessRequest request, CancellationToken cancellationToken)
+    {
+        if (request.ProviderId is not int providerId || !await providers.IsVisionProviderWorkingAsync(providerId, cancellationToken))
+            throw new InvalidOperationException("Standalone image ingestion requires a vision-ready model. Select one and run Test Vision in Settings > Providers.");
+        var contentType = ImageContentType(request.FileName, request.ContentType);
+        if (!TryVisualDraft(request.FileName, contentType, request.Bytes, Path.GetFileName(request.FileName), null, null, out var visual))
+            throw new InvalidOperationException("The image is invalid, unsupported, or too small to ingest as a visual source.");
+        var description = NormalizeText(await visionModels.ReadImageAsync(
+            providerId, request.Bytes, contentType,
+            "Describe this source image factually for entity ingestion. Identify only clearly visible people, creatures, locations, objects, labels, and continuity-relevant appearance details. Note ambiguity explicitly and do not guess identities.",
+            options.Value.VisionPageMaxOutputTokens, cancellationToken));
+        if (string.IsNullOrWhiteSpace(description)) throw new InvalidOperationException("The vision model returned no readable description for this image.");
+        var sourceText = $"# {Path.GetFileNameWithoutExtension(request.FileName)}\n\n{description}\n";
+        visual = visual! with { StartChar = 0, EndChar = sourceText.Length };
+        return new BookArtifactPreprocessResult(
+            sourceText, "Image source", contentType,
+            JsonSerializer.Serialize(new { artifact = "image", request.FileName, request.ExtractionProfile, sourceHash = ComputeHash(request.Bytes), visionProviderId = providerId }),
+            Pages: [],
+            Blocks: [new IngestSourceBlockDraft(Guid.NewGuid(), null, 0, "Image", Path.GetFileNameWithoutExtension(request.FileName), request.FileName, null, 0, sourceText.Length, "{}")],
+            Visuals: [visual],
+            UsedVision: true,
+            Diagnostics: "Read standalone image with the selected vision model.");
     }
 
     private static BookArtifactPreprocessResult PreprocessPlainText(BookArtifactPreprocessRequest request)
@@ -69,6 +94,7 @@ public sealed partial class BookArtifactPreprocessor(
             }),
             Pages: [],
             Blocks: [block],
+            Visuals: [],
             UsedVision: false,
             Diagnostics: "Read text file.");
     }
@@ -81,6 +107,8 @@ public sealed partial class BookArtifactPreprocessor(
         var book = await EpubReader.ReadBookAsync(stream);
         var sb = new StringBuilder();
         var blocks = new List<IngestSourceBlockDraft>();
+        var visuals = new List<IngestVisualCandidateDraft>();
+        var epubSections = new List<(string Html, int Start, int End, string FilePath)>();
         var index = 0;
 
         foreach (var file in book.ReadingOrder)
@@ -100,6 +128,7 @@ public sealed partial class BookArtifactPreprocessor(
             sb.AppendLine();
             sb.AppendLine(sectionText);
             var end = sb.Length;
+            epubSections.Add((file.Content, start, end, filePath));
 
             blocks.Add(new IngestSourceBlockDraft(
                 Guid.NewGuid(),
@@ -118,6 +147,18 @@ public sealed partial class BookArtifactPreprocessor(
         if (sb.Length == 0)
             throw new InvalidOperationException("The EPUB did not contain readable text.");
 
+        foreach (var image in book.Content.Images.Local)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var fileName = Path.GetFileName(image.FilePath);
+            var matchingSection = epubSections.FirstOrDefault(section =>
+                section.Html.Contains(image.FilePath, StringComparison.OrdinalIgnoreCase)
+                || section.Html.Contains(fileName, StringComparison.OrdinalIgnoreCase));
+            (int Start, int End)? range = matchingSection == default ? null : (matchingSection.Start, matchingSection.End);
+            if (TryVisualDraft(fileName, image.ContentMimeType, image.Content, image.FilePath, null, range, out var visual))
+                visuals.Add(visual!);
+        }
+
         return new BookArtifactPreprocessResult(
             sb.ToString(),
             "EPUB book",
@@ -133,6 +174,7 @@ public sealed partial class BookArtifactPreprocessor(
             }),
             Pages: [],
             Blocks: blocks,
+            Visuals: DeduplicateVisuals(visuals),
             UsedVision: false,
             Diagnostics: $"Read {blocks.Count:N0} EPUB section(s).");
     }
@@ -147,6 +189,7 @@ public sealed partial class BookArtifactPreprocessor(
         var embeddedMinChars = Math.Max(0, options.Value.EmbeddedTextMinCharsPerPage);
         var pages = new List<IngestSourcePageDraft>();
         var blocks = new List<IngestSourceBlockDraft>();
+        var visuals = new List<IngestVisualCandidateDraft>();
         var sb = new StringBuilder();
         var usedVision = false;
         var visionProvider = request.ProviderId is int providerId
@@ -172,6 +215,7 @@ public sealed partial class BookArtifactPreprocessor(
             var pageHeight = (int)Math.Ceiling(page.Height);
 
             var useVision = request.PdfOptions.ForceVision || pageText.Length < embeddedMinChars;
+            byte[]? renderedPageBytes = null;
             if (useVision)
             {
                 if (request.ProviderId is not int visionProviderId)
@@ -180,6 +224,7 @@ public sealed partial class BookArtifactPreprocessor(
                     throw new InvalidOperationException("The selected model is not vision-ready. Run Test Vision in Settings > Providers before ingesting this PDF.");
 
                 var render = RenderPdfPage(request.Bytes, page.Number, page.Width, page.Height, dpi, maxImagePixels);
+                renderedPageBytes = render.ImageBytes;
                 imageHash = ComputeHash(render.ImageBytes);
                 renderSettingsJson = JsonSerializer.Serialize(new
                 {
@@ -241,6 +286,24 @@ public sealed partial class BookArtifactPreprocessor(
                 start,
                 end,
                 JsonSerializer.Serialize(new { page.Number, extractionMethod, request.ExtractionProfile })));
+
+            var embeddedIndex = 0;
+            foreach (var embedded in page.GetImages())
+            {
+                try
+                {
+                    if (!embedded.IsImageMask && embedded.TryGetPng(out var png)
+                        && TryVisualDraft($"page-{page.Number}-image-{++embeddedIndex}.png", "image/png", png, $"p. {page.Number} embedded image {embeddedIndex}", page.Number, (start, end), out var visual))
+                        visuals.Add(visual!);
+                }
+                catch
+                {
+                    // Unsupported/malformed embedded image data must not block text ingestion.
+                }
+            }
+            if (renderedPageBytes is not null
+                && TryVisualDraft($"page-{page.Number}-render.png", "image/png", renderedPageBytes, $"p. {page.Number} rendered page", page.Number, (start, end), out var renderedVisual))
+                visuals.Add(renderedVisual! with { MetadataJson = JsonSerializer.Serialize(new { kind = "renderedPage", extractionMethod }) });
         }
 
         if (sb.Length == 0)
@@ -269,6 +332,7 @@ public sealed partial class BookArtifactPreprocessor(
             }),
             pages,
             blocks,
+            DeduplicateVisuals(visuals),
             usedVision,
             diagnosticsSummary);
     }
@@ -339,6 +403,47 @@ public sealed partial class BookArtifactPreprocessor(
             ".md" or ".markdown" => "Markdown source",
             _ => "Text source",
         };
+
+    private static string ImageContentType(string fileName, string? contentType)
+    {
+        if (contentType is "image/png" or "image/jpeg" or "image/webp") return contentType;
+        return Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            _ => "image/jpeg",
+        };
+    }
+
+    private static bool TryVisualDraft(
+        string fileName,
+        string contentType,
+        byte[] data,
+        string locator,
+        int? pageNumber,
+        (int Start, int End)? charRange,
+        out IngestVisualCandidateDraft? visual)
+    {
+        visual = null;
+        if (contentType is not ("image/png" or "image/jpeg" or "image/webp") || data.Length == 0) return false;
+        using var bitmap = SKBitmap.Decode(data);
+        if (bitmap is null || bitmap.Width < 64 || bitmap.Height < 64 || (long)bitmap.Width * bitmap.Height < 16_384) return false;
+        visual = new IngestVisualCandidateDraft(
+            string.IsNullOrWhiteSpace(fileName) ? "source-image" : fileName,
+            contentType,
+            data,
+            AltText: string.Empty,
+            Caption: string.Empty,
+            locator,
+            pageNumber,
+            charRange?.Start,
+            charRange?.End,
+            JsonSerializer.Serialize(new { bitmap.Width, bitmap.Height, sourceHash = ComputeHash(data) }));
+        return true;
+    }
+
+    private static IReadOnlyList<IngestVisualCandidateDraft> DeduplicateVisuals(IEnumerable<IngestVisualCandidateDraft> visuals) =>
+        visuals.GroupBy(visual => ComputeHash(visual.Data), StringComparer.Ordinal).Select(group => group.First()).ToList();
 
     private static string ComputeHash(byte[] bytes) =>
         Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();

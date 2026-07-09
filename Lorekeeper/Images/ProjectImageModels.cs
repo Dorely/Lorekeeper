@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.EntityVisuals;
 
 namespace Lorekeeper.Images;
 
@@ -33,7 +34,8 @@ public sealed record ProjectImageGenerationRequest(
     string OutputFormat,
     int? OutputCompression,
     string AltText,
-    IReadOnlyList<Guid> ReferenceImageIds);
+    IReadOnlyList<Guid> ReferenceImageIds,
+    IReadOnlyList<EntityVisualTarget>? EntityTargets = null);
 
 public sealed record ProjectImageData(
     Guid Id,
@@ -52,7 +54,8 @@ public sealed record ProjectImageGenerateJobRequest(
     string AltText,
     int Count,
     IReadOnlyList<Guid> ReferenceImageIds,
-    string? Label = null);
+    string? Label = null,
+    IReadOnlyList<EntityVisualTarget>? EntityTargets = null);
 
 public sealed record ProjectImageEditJobRequest(
     Guid SourceImageId,
@@ -66,7 +69,9 @@ public sealed record ProjectImageEditJobRequest(
     string? MaskPngDataUrl,
     IReadOnlyList<Guid> ReferenceImageIds,
     string? Label = null,
-    Guid? ExistingMaskId = null);
+    Guid? ExistingMaskId = null,
+    IReadOnlyList<EntityVisualTarget>? EntityTargets = null,
+    bool InheritSourceEntityTargets = true);
 
 public sealed record ProjectImageJobView(
     Guid Id,
@@ -93,7 +98,9 @@ public sealed record ProjectImageJobView(
     DateTime CreatedAt,
     DateTime UpdatedAt,
     DateTime? StartedAt,
-    DateTime? CompletedAt);
+    DateTime? CompletedAt,
+    IReadOnlyList<EntityVisualTarget> EntityTargets,
+    bool InheritSourceEntityTargets);
 
 public sealed record ProjectImageOutputStateView(
     int OutputIndex,

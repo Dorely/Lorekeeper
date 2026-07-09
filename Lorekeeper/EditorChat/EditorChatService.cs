@@ -5,6 +5,7 @@ using System.Text.Json;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -22,6 +23,7 @@ public sealed class EditorChatService(
     IContextBuilder contextBuilder,
     IChapterVisualService chapterVisuals,
     IProjectImageService projectImages,
+    IEntityVisualContextService entityVisualContext,
     IProjectImageGenerationRuntime imageRuntime,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
@@ -179,6 +181,7 @@ public sealed class EditorChatService(
         Chapter? currentChapter = null;
         var contestModeEnabled = false;
         var visionReady = false;
+        IReadOnlyList<EntityVisualContextReference> initialEntityVisuals = [];
         string systemPrompt = string.Empty;
         string? setupError = null;
         try
@@ -194,11 +197,13 @@ public sealed class EditorChatService(
             }
 
             var assembly = await contextBuilder.BuildAsync(project, currentChapter, cancellationToken);
+            initialEntityVisuals = assembly.Visuals;
             contestModeEnabled = project.ContestModeEnabled;
             var vectorSearchAvailable = await embeddings.IsAvailableAsync(cancellationToken);
-            systemPrompt = assembly.Assemble(contestModeEnabled
+            systemPrompt = assembly.Assemble((contestModeEnabled
                 ? AssistantWorkflowInstructions.EditorContestPreparation
-                : AssistantWorkflowInstructions.EditorChatFor(vectorSearchAvailable));
+                : AssistantWorkflowInstructions.EditorChatFor(vectorSearchAvailable))
+                + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples);
 
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
             visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
@@ -248,6 +253,15 @@ public sealed class EditorChatService(
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         messages.AddRange(BuildModelHistory(history));
+        if (await entityVisualContext.BuildVisionMessageAsync(
+            projectId,
+            initialEntityVisuals,
+            visionReady,
+            "Automatic entity and explicit-image visual context follows. Treat these as canonical visual examples for the entities and roles named in the text context.",
+            cancellationToken) is { } entityVisualMessage)
+        {
+            messages.Add(entityVisualMessage);
+        }
         await AddAutomaticVisualSnapshotsAsync(messages, currentChapter, providerAvailability.Provider, cancellationToken);
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
@@ -652,9 +666,9 @@ public sealed class EditorChatService(
                         .Where(result => result.CallId != pendingCall.CallId)
                         .Cast<AIContent>()
                         .ToList();
-                    var snapshot = new ContestTurnSnapshot(BuildContestSnapshotMessages(
-                        messages,
-                        contestSnapshotToolResults));
+                    var snapshot = new ContestTurnSnapshot(
+                        BuildContestSnapshotMessages(messages, contestSnapshotToolResults),
+                        initialEntityVisuals);
 
                     await foreach (var contestUpdate in contestService.StartContestAsync(
                         projectId,

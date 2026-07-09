@@ -806,6 +806,55 @@ namespace Lorekeeper.Persistence.Migrations
                     b.ToTable("EmbeddingConfigurations");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.EntityVisualExample", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("GraphNodeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ImageId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("SourceVisualCandidateId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ImageId");
+
+                    b.HasIndex("SourceVisualCandidateId");
+
+                    b.HasIndex("GraphNodeId", "ImageId")
+                        .IsUnique();
+
+                    b.HasIndex("ProjectId", "GraphNodeId", "SortOrder");
+
+                    b.ToTable("EntityVisualExamples");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.GraphEdge", b =>
                 {
                     b.Property<long>("Id")
@@ -1924,6 +1973,10 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("EntityVisualTargetsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Error")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1931,6 +1984,9 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<string>("ImageModel")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("InheritSourceEntityTargets")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Kind")
                         .IsRequired()
@@ -2697,10 +2753,107 @@ namespace Lorekeeper.Persistence.Migrations
                     b.ToTable("SearchProviders");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.SourceVisualCandidate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AltText")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Caption")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<int?>("EndChar")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ErrorMessage")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("IngestSourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Locator")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MetadataJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PromotedImageId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUrl")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("StartChar")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("WebIngestCandidateId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IngestSourceId");
+
+                    b.HasIndex("PromotedImageId");
+
+                    b.HasIndex("WebIngestCandidateId");
+
+                    b.HasIndex("ProjectId", "ContentHash");
+
+                    b.HasIndex("ProjectId", "Kind", "Status", "CreatedAt");
+
+                    b.ToTable("SourceVisualCandidates");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.WebIngestCandidate", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CachedImagesJson")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CachedLinksJson")
@@ -3092,6 +3245,40 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Provider");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.EntityVisualExample", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.GraphNode", "GraphNode")
+                        .WithMany("VisualExamples")
+                        .HasForeignKey("GraphNodeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Lorekeeper.Models.PublishAsset", "Image")
+                        .WithMany("EntityVisualExamples")
+                        .HasForeignKey("ImageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Lorekeeper.Models.Project", "Project")
+                        .WithMany("EntityVisualExamples")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Lorekeeper.Models.SourceVisualCandidate", "SourceVisualCandidate")
+                        .WithMany("EntityVisualExamples")
+                        .HasForeignKey("SourceVisualCandidateId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("GraphNode");
+
+                    b.Navigation("Image");
+
+                    b.Navigation("Project");
+
+                    b.Navigation("SourceVisualCandidate");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.GraphEdge", b =>
@@ -3525,6 +3712,38 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Conversation");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.SourceVisualCandidate", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.IngestSource", "IngestSource")
+                        .WithMany("VisualCandidates")
+                        .HasForeignKey("IngestSourceId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Lorekeeper.Models.Project", "Project")
+                        .WithMany("SourceVisualCandidates")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Lorekeeper.Models.PublishAsset", "PromotedImage")
+                        .WithMany("SourceVisualCandidates")
+                        .HasForeignKey("PromotedImageId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Lorekeeper.Models.WebIngestCandidate", "WebIngestCandidate")
+                        .WithMany("VisualCandidates")
+                        .HasForeignKey("WebIngestCandidateId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("IngestSource");
+
+                    b.Navigation("Project");
+
+                    b.Navigation("PromotedImage");
+
+                    b.Navigation("WebIngestCandidate");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.WebIngestCandidate", b =>
                 {
                     b.HasOne("Lorekeeper.Models.Project", "Project")
@@ -3614,6 +3833,8 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("IncomingEdges");
 
                     b.Navigation("OutgoingEdges");
+
+                    b.Navigation("VisualExamples");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestJob", b =>
@@ -3640,6 +3861,8 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("StagingRecords");
 
                     b.Navigation("VectorFragments");
+
+                    b.Navigation("VisualCandidates");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSourceChunk", b =>
@@ -3686,6 +3909,8 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.Navigation("EntityTypes");
 
+                    b.Navigation("EntityVisualExamples");
+
                     b.Navigation("IngestJobs");
 
                     b.Navigation("IngestSources");
@@ -3714,6 +3939,8 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.Navigation("ResearchConversations");
 
+                    b.Navigation("SourceVisualCandidates");
+
                     b.Navigation("WebIngestCandidates");
 
                     b.Navigation("WritingCoachConversations");
@@ -3740,16 +3967,30 @@ namespace Lorekeeper.Persistence.Migrations
                 {
                     b.Navigation("CoverProfiles");
 
+                    b.Navigation("EntityVisualExamples");
+
                     b.Navigation("ImageChatAttachments");
 
                     b.Navigation("ImageMasks");
 
                     b.Navigation("ImagePlacements");
+
+                    b.Navigation("SourceVisualCandidates");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ResearchConversation", b =>
                 {
                     b.Navigation("Messages");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.SourceVisualCandidate", b =>
+                {
+                    b.Navigation("EntityVisualExamples");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.WebIngestCandidate", b =>
+                {
+                    b.Navigation("VisualCandidates");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.WritingCoachConversation", b =>

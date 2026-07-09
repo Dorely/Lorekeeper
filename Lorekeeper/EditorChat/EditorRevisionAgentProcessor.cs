@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -20,6 +21,7 @@ public sealed class EditorRevisionAgentProcessor(
     IEditorConversationRepository conversations,
     IEditorRevisionRepository revisions,
     IContextBuilder contextBuilder,
+    IEntityVisualContextService entityVisualContext,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     IProjectSearchService projectSearch,
@@ -78,8 +80,8 @@ public sealed class EditorRevisionAgentProcessor(
             await revisions.SaveChangesAsync(cancellationToken);
             NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
 
-            var systemPrompt = (await contextBuilder.BuildAsync(project, chapter, cancellationToken))
-                .Assemble(AssistantWorkflowInstructions.EditorRevisionWorker);
+            var contextAssembly = await contextBuilder.BuildAsync(project, chapter, cancellationToken);
+            var systemPrompt = contextAssembly.Assemble(AssistantWorkflowInstructions.EditorRevisionWorker);
             var userPrompt = await BuildWorkerUserPromptAsync(job, session, cancellationToken);
             var nextOrder = await revisions.GetMaxMessageOrderAsync(session.Id, cancellationToken) + 1;
             await revisions.AddMessageAsync(new EditorRevisionMessage
@@ -107,6 +109,15 @@ public sealed class EditorRevisionAgentProcessor(
                 new(ChatRole.System, systemPrompt),
                 new(ChatRole.User, userPrompt),
             };
+            if (await entityVisualContext.BuildVisionMessageAsync(
+                job.ProjectId,
+                contextAssembly.Visuals,
+                await providerService.IsVisionProviderWorkingAsync(provider.Id, cancellationToken),
+                "Entity visual examples for this revision assignment follow. Preserve the established visual continuity they show.",
+                cancellationToken) is { } visualMessage)
+            {
+                messages.Add(visualMessage);
+            }
             var tools = await BuildToolsAsync(job.ProjectId, session.ChapterId, edit, cancellationToken);
             var chatOptions = new ChatOptions
             {

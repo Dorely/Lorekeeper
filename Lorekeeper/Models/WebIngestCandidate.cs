@@ -26,6 +26,7 @@ public class WebIngestCandidate
     public string Excerpt { get; set; } = string.Empty;
     public string ExtractedText { get; set; } = string.Empty;
     public string CachedLinksJson { get; set; } = "[]";
+    public string CachedImagesJson { get; set; } = "[]";
     public string ContentHash { get; set; } = string.Empty;
     public string ContentType { get; set; } = string.Empty;
 
@@ -43,6 +44,8 @@ public class WebIngestCandidate
     public DateTime? QueuedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<SourceVisualCandidate> VisualCandidates { get; set; } = [];
 }
 
 public enum WebIngestCandidateDiscoveryKind

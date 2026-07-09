@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using Lorekeeper.Models;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -10,6 +11,7 @@ namespace Lorekeeper.Images;
 
 public sealed class ProjectImageJobService(
     AppDbContext db,
+    IEntityVisualExampleService entityVisualExamples,
     IOptions<ProjectImageGenerationOptions> options) : IProjectImageJobService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -50,6 +52,7 @@ public sealed class ProjectImageJobService(
         var project = await GetProjectAsync(projectId, cancellationToken);
         var prompt = CleanRequired(request.Prompt, "Image prompt is required.");
         var referenceIds = await ValidateReferenceIdsAsync(projectId, request.ReferenceImageIds, sourceImageId: null, cancellationToken);
+        var entityTargets = await ValidateEntityTargetsAsync(projectId, request.EntityTargets, cancellationToken);
         var count = ClampCount(request.Count);
         var now = DateTime.UtcNow;
         var job = new ProjectImageGenerationJob
@@ -66,6 +69,8 @@ public sealed class ProjectImageJobService(
             Count = count,
             AltText = Clean(request.AltText),
             ReferenceImageIdsJson = SerializeIds(referenceIds),
+            EntityVisualTargetsJson = SerializeTargets(entityTargets),
+            InheritSourceEntityTargets = false,
             OutputStatesJson = SerializeOutputStates(CreateInitialOutputStates(count)),
             MainlineModel = options.Value.DefaultMainlineModel,
             ImageModel = options.Value.DefaultImageModel,
@@ -89,6 +94,10 @@ public sealed class ProjectImageJobService(
         var source = await GetImageAssetAsync(projectId, request.SourceImageId, cancellationToken);
         var referenceIds = await ValidateReferenceIdsAsync(projectId, request.ReferenceImageIds, source.Id, cancellationToken);
         var count = ClampCount(request.Count);
+        var targets = (await ValidateEntityTargetsAsync(projectId, request.EntityTargets, cancellationToken)).ToList();
+        if (request.InheritSourceEntityTargets)
+            targets.AddRange((await entityVisualExamples.ListForImageAsync(projectId, source.Id, cancellationToken))
+                .Select(example => new EntityVisualTarget(example.EntityId, example.Label)));
         var now = DateTime.UtcNow;
         var jobId = Guid.NewGuid();
         ProjectImageMaskView? mask = null;
@@ -128,6 +137,8 @@ public sealed class ProjectImageJobService(
             SourceImageId = source.Id,
             MaskId = mask?.Id,
             ReferenceImageIdsJson = SerializeIds(referenceIds),
+            EntityVisualTargetsJson = SerializeTargets(targets),
+            InheritSourceEntityTargets = request.InheritSourceEntityTargets,
             OutputStatesJson = SerializeOutputStates(CreateInitialOutputStates(count)),
             MainlineModel = options.Value.DefaultMainlineModel,
             ImageModel = options.Value.DefaultImageModel,
@@ -284,6 +295,8 @@ public sealed class ProjectImageJobService(
         job.UpdatedAt = now;
         project.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
+        foreach (var target in DeserializeTargets(job.EntityVisualTargetsJson))
+            await entityVisualExamples.AttachAsync(projectId, target.EntityId, asset.Id, target.Label, EntityVisualExampleOrigin.Agent, cancellationToken: cancellationToken);
         return ProjectImageService.ToView(projectId, asset);
     }
 
@@ -483,7 +496,39 @@ public sealed class ProjectImageJobService(
             job.CreatedAt,
             job.UpdatedAt,
             job.StartedAt,
-            job.CompletedAt);
+            job.CompletedAt,
+            DeserializeTargets(job.EntityVisualTargetsJson),
+            job.InheritSourceEntityTargets);
+
+    private static string SerializeTargets(IEnumerable<EntityVisualTarget>? targets) => JsonSerializer.Serialize(
+        (targets ?? []).Where(target => target.EntityId != Guid.Empty).DistinctBy(target => target.EntityId).ToList(), JsonOptions);
+
+    private static IReadOnlyList<EntityVisualTarget> DeserializeTargets(string json)
+    {
+        try { return JsonSerializer.Deserialize<List<EntityVisualTarget>>(json, JsonOptions) ?? []; }
+        catch { return []; }
+    }
+
+    private async Task<IReadOnlyList<EntityVisualTarget>> ValidateEntityTargetsAsync(
+        Guid projectId,
+        IEnumerable<EntityVisualTarget>? targets,
+        CancellationToken cancellationToken)
+    {
+        var normalized = (targets ?? [])
+            .Where(target => target.EntityId != Guid.Empty)
+            .Select(target => new EntityVisualTarget(target.EntityId, target.Label?.Trim() ?? string.Empty))
+            .DistinctBy(target => target.EntityId)
+            .ToList();
+        foreach (var target in normalized)
+        {
+            var key = target.EntityId.ToString("N");
+            var node = await db.GraphNodes.AsNoTracking().FirstOrDefaultAsync(
+                candidate => candidate.ProjectId == projectId && candidate.Key == key, cancellationToken);
+            if (node is null || !EntityVisualExampleService.IsEligible(node))
+                throw new InvalidOperationException($"Entity {target.EntityId} is not eligible for visual examples.");
+        }
+        return normalized;
+    }
 
     private static ProjectImageMaskView ToMaskView(ProjectImageMask mask) =>
         new(

@@ -1,12 +1,14 @@
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Options;
+using Lorekeeper.Images;
 
 namespace Lorekeeper.Research;
 
 public interface IWebPageReader
 {
     Task<WebPageReadResult> ReadAsync(string url, CancellationToken cancellationToken = default);
+    Task<WebImageReadResult> ReadImageAsync(string url, CancellationToken cancellationToken = default);
 }
 
 public sealed record WebPageReadResult(
@@ -18,12 +20,15 @@ public sealed record WebPageReadResult(
     string Text,
     string Excerpt,
     IReadOnlyList<WebPageLink> Links,
+    IReadOnlyList<WebPageImage> Images,
     bool Success,
     string Diagnostics,
     int? StatusCode = null,
     string SourceKind = "");
 
 public sealed record WebPageLink(string Url, string Text);
+public sealed record WebPageImage(string Url, string AltText, string Caption);
+public sealed record WebImageReadResult(string Url, string FinalUrl, string ContentType, byte[] Data, bool Success, string Diagnostics);
 
 public sealed class HttpWebPageReader(
     IWebHttpFetchClient fetchClient,
@@ -32,6 +37,31 @@ public sealed class HttpWebPageReader(
     IWebRobotsPolicy robots,
     IOptions<WebResearchOptions> options) : IWebPageReader
 {
+    public async Task<WebImageReadResult> ReadImageAsync(string url, CancellationToken cancellationToken = default)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+            return new(url, url, string.Empty, [], false, "Only absolute HTTP or HTTPS image URLs can be read.");
+        var rejection = await ValidateTargetAsync(uri, cancellationToken);
+        if (rejection is not null) return new(url, url, string.Empty, [], false, rejection);
+
+        var result = await fetchClient.GetAsync(uri, "image/png,image/jpeg,image/webp;q=0.9,*/*;q=0.1", cancellationToken);
+        if (!result.Success) return new(url, result.FinalUrl, result.ContentType, [], false, result.Diagnostics);
+        if (!Uri.TryCreate(result.FinalUrl, UriKind.Absolute, out var finalUri))
+            return new(url, result.FinalUrl, result.ContentType, [], false, "The redirected image URL is invalid.");
+        var finalRejection = await ValidateTargetAsync(finalUri, cancellationToken);
+        if (finalRejection is not null)
+            return new(url, result.FinalUrl, result.ContentType, [], false, finalRejection);
+        try
+        {
+            var normalized = ProjectImageBinary.Normalize(result.Content, result.ContentType, Path.GetFileName(finalUri.LocalPath));
+            return new(url, result.FinalUrl, normalized.ContentType, normalized.Data, true, string.Empty);
+        }
+        catch (Exception ex)
+        {
+            return new(url, result.FinalUrl, result.ContentType, [], false, ex.Message);
+        }
+    }
+
     public async Task<WebPageReadResult> ReadAsync(string url, CancellationToken cancellationToken = default)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
@@ -114,6 +144,7 @@ public sealed class HttpWebPageReader(
         var contentHtml = isHtml ? WebPageTextExtractor.ExtractMainContentHtml(raw) : string.Empty;
         var text = isHtml ? WebPageTextExtractor.ExtractText(contentHtml) : WebPageTextExtractor.NormalizePlainText(raw);
         var rawLinks = isHtml ? WebPageTextExtractor.ExtractLinks(contentHtml, result.FinalUrl) : [];
+        var images = isHtml ? WebPageTextExtractor.ExtractImages(contentHtml, result.FinalUrl) : [];
         var links = linkPolicy.FilterAndPrioritizeLinks(
             rawLinks,
             result.FinalUrl,
@@ -132,6 +163,7 @@ public sealed class HttpWebPageReader(
                 text,
                 excerpt,
                 links,
+                images,
                 Success: true,
                 Diagnostics: string.Empty,
                 StatusCode: result.StatusCode is null ? null : (int)result.StatusCode,
@@ -154,6 +186,15 @@ public sealed class HttpWebPageReader(
         {
             return false;
         }
+    }
+
+    private async Task<string?> ValidateTargetAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        if (!linkPolicy.CanFetchDirectUrl(uri, out var rejectedReason)) return rejectedReason;
+        if (options.Value.BlockPrivateNetworkTargets && await IsPrivateNetworkTargetAsync(uri, cancellationToken))
+            return "Private, loopback, and link-local network targets are blocked.";
+        var robotDecision = await robots.IsAllowedAsync(uri, cancellationToken);
+        return robotDecision.Allowed ? null : robotDecision.Diagnostics;
     }
 
     private static bool IsPrivateAddress(IPAddress address)
@@ -209,6 +250,7 @@ public static class WebPageReadResultFactory
             string.Empty,
             string.Empty,
             string.Empty,
+            [],
             [],
             Success: false,
             diagnostics,

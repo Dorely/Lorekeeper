@@ -1,9 +1,9 @@
 using Lorekeeper.ChapterVisuals;
+using Lorekeeper.Context;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using SkiaSharp;
 
 namespace Lorekeeper.Images;
 
@@ -13,7 +13,7 @@ public sealed class ProjectImageService(
     IProjectImageGenerationRuntime imageRuntime,
     IOptions<ProjectImageGenerationOptions> imageOptions,
     IChapterVisualService chapterVisuals,
-    ILogger<ProjectImageService> logger) : IProjectImageService
+    IContextIndexingService contextIndexing) : IProjectImageService
 {
     public async Task<IReadOnlyList<ProjectImageView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await db.PublishAssets
@@ -44,7 +44,7 @@ public sealed class ProjectImageService(
         if (asset is null) return null;
 
         var data = maxEdge is int edge && edge > 0
-            ? ResizeImage(asset.Data, asset.ContentType, edge)
+            ? ProjectImageResize.Resize(asset.Data, asset.ContentType, edge)
             : asset.Data;
 
         return new ProjectImageData(asset.Id, asset.FileName, asset.ContentType, data, asset.AltText, asset.UpdatedAt);
@@ -53,18 +53,15 @@ public sealed class ProjectImageService(
     public async Task<ProjectImageView> UploadAsync(Guid projectId, ProjectImageUpload upload, CancellationToken cancellationToken = default)
     {
         var project = await GetProjectAsync(projectId, cancellationToken);
-        var contentType = NormalizeImageContentType(upload.ContentType)
-            ?? throw new InvalidOperationException("Only PNG and JPEG images can be used.");
-        if (upload.Data.Length == 0)
-            throw new InvalidOperationException("Image file is empty.");
+        var normalized = ProjectImageBinary.Normalize(upload.Data, upload.ContentType, upload.FileName);
 
         var asset = new PublishAsset
         {
             ProjectId = projectId,
             Source = PublishAssetSource.Uploaded,
-            FileName = SafeFileName(upload.FileName, contentType),
-            ContentType = contentType,
-            Data = upload.Data,
+            FileName = normalized.FileName,
+            ContentType = normalized.ContentType,
+            Data = normalized.Data,
             AltText = Clean(upload.AltText),
         };
 
@@ -91,7 +88,8 @@ public sealed class ProjectImageService(
             Clean(request.AltText),
             Count: 1,
             request.ReferenceImageIds.Distinct().ToList(),
-            Label: "Generated image"), cancellationToken);
+            Label: "Generated image",
+            EntityTargets: request.EntityTargets), cancellationToken);
 
         await imageRuntime.EnqueueProjectAsync(projectId, cancellationToken);
         var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
@@ -125,6 +123,8 @@ public sealed class ProjectImageService(
         asset.UpdatedAt = DateTime.UtcNow;
         project.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        foreach (var entityId in await AttachedEntityIdsAsync(projectId, imageId, cancellationToken))
+            await contextIndexing.ReindexEntityAsync(projectId, entityId, cancellationToken);
         return ToView(projectId, asset);
     }
 
@@ -133,6 +133,7 @@ public sealed class ProjectImageService(
         var project = await GetProjectAsync(projectId, cancellationToken);
         var asset = await db.PublishAssets.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken);
         if (asset is null) return;
+        var entityIds = await AttachedEntityIdsAsync(projectId, imageId, cancellationToken);
 
         foreach (var profile in await db.PublishProfiles.Where(profile => profile.ProjectId == projectId && profile.SelectedCoverAssetId == imageId).ToListAsync(cancellationToken))
             profile.SelectedCoverAssetId = null;
@@ -145,6 +146,8 @@ public sealed class ProjectImageService(
         db.PublishAssets.Remove(asset);
         project.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        foreach (var entityId in entityIds)
+            await contextIndexing.ReindexEntityAsync(projectId, entityId, cancellationToken);
     }
 
     private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
@@ -166,58 +169,15 @@ public sealed class ProjectImageService(
             asset.UpdatedAt,
             asset.Data.LongLength);
 
-    private byte[] ResizeImage(byte[] data, string contentType, int maxEdge)
+    private async Task<IReadOnlyList<Guid>> AttachedEntityIdsAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken)
     {
-        try
-        {
-            using var bitmap = SKBitmap.Decode(data);
-            if (bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0)
-                return data;
-
-            var currentEdge = Math.Max(bitmap.Width, bitmap.Height);
-            if (currentEdge <= maxEdge)
-                return data;
-
-            var scale = (double)maxEdge / currentEdge;
-            var targetWidth = Math.Max(1, (int)Math.Round(bitmap.Width * scale));
-            var targetHeight = Math.Max(1, (int)Math.Round(bitmap.Height * scale));
-            using var resized = bitmap.Resize(new SKImageInfo(targetWidth, targetHeight), SKSamplingOptions.Default);
-            if (resized is null)
-                return data;
-
-            using var image = SKImage.FromBitmap(resized);
-            using var encoded = image.Encode(
-                contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ? SKEncodedImageFormat.Jpeg : SKEncodedImageFormat.Png,
-                84);
-            return encoded?.ToArray() ?? data;
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "Image thumbnail generation failed; returning original bytes.");
-            return data;
-        }
+        var keys = await db.EntityVisualExamples
+            .AsNoTracking()
+            .Where(example => example.ProjectId == projectId && example.ImageId == imageId)
+            .Select(example => example.GraphNode.Key)
+            .ToListAsync(cancellationToken);
+        return keys.Where(key => Guid.TryParseExact(key, "N", out _)).Select(key => Guid.ParseExact(key, "N")).ToList();
     }
-
-    private static string? NormalizeImageContentType(string contentType) =>
-        contentType.Trim().ToLowerInvariant() switch
-        {
-            "image/png" => "image/png",
-            "image/jpeg" => "image/jpeg",
-            "image/jpg" => "image/jpeg",
-            _ => null,
-        };
-
-    private static string SafeFileName(string fileName, string contentType)
-    {
-        var clean = Clean(fileName);
-        if (!string.IsNullOrWhiteSpace(clean))
-            return clean;
-
-        return $"image-{DateTime.UtcNow:yyyyMMddHHmmss}.{ExtensionForContentType(contentType)}";
-    }
-
-    private static string ExtensionForContentType(string contentType) =>
-        contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ? "jpg" : "png";
 
     private static string Clean(string? value) => value?.Trim() ?? string.Empty;
 }

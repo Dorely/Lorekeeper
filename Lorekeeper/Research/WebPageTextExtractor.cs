@@ -10,6 +10,10 @@ public static class WebPageTextExtractor
     private static readonly Regex CanonicalRegex = new(@"<link\s+[^>]*rel\s*=\s*['""]?canonical['""]?[^>]*>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex HrefRegex = new(@"href\s*=\s*(['""])(?<href>.*?)\1", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex AnchorRegex = new(@"<a\s+[^>]*href\s*=\s*(['""])(?<href>.*?)\1[^>]*>(?<text>.*?)</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex ImageRegex = new(@"<img\b(?<attrs>[^>]*)>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex AttributeRegex = new(@"(?<name>[a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:(['""])(?<quoted>.*?)\2|(?<bare>[^\s>]+))", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex FigureRegex = new(@"<figure\b[^>]*>(?<html>.*?)</figure>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex FigCaptionRegex = new(@"<figcaption\b[^>]*>(?<html>.*?)</figcaption>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex MainRegex = new(@"<main\b[^>]*>(?<html>.*?)</main>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex ArticleRegex = new(@"<article\b[^>]*>(?<html>.*?)</article>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex MediaWikiContentRegex = new(
@@ -78,6 +82,63 @@ public static class WebPageTextExtractor
         }
 
         return links;
+    }
+
+    public static IReadOnlyList<WebPageImage> ExtractImages(string html, string baseUrl)
+    {
+        var captions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match figure in FigureRegex.Matches(html))
+        {
+            var captionMatch = FigCaptionRegex.Match(figure.Groups["html"].Value);
+            var caption = captionMatch.Success ? NormalizeInline(ExtractText(captionMatch.Groups["html"].Value)) : string.Empty;
+            if (string.IsNullOrWhiteSpace(caption)) continue;
+            foreach (Match image in ImageRegex.Matches(figure.Groups["html"].Value))
+            {
+                var attrs = ReadAttributes(image.Groups["attrs"].Value);
+                var source = BestImageSource(attrs);
+                var absolute = source is null ? null : ToAbsoluteUrl(baseUrl, source);
+                if (absolute is not null) captions[absolute] = Truncate(caption, 500);
+            }
+        }
+
+        var result = new List<WebPageImage>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in ImageRegex.Matches(html))
+        {
+            var attrs = ReadAttributes(match.Groups["attrs"].Value);
+            var source = BestImageSource(attrs);
+            var absolute = source is null ? null : ToAbsoluteUrl(baseUrl, source);
+            if (absolute is null || !seen.Add(absolute)) continue;
+            attrs.TryGetValue("alt", out var alt);
+            attrs.TryGetValue("title", out var title);
+            result.Add(new WebPageImage(
+                absolute,
+                NormalizeInline(WebUtility.HtmlDecode(alt ?? string.Empty)),
+                captions.GetValueOrDefault(absolute, NormalizeInline(WebUtility.HtmlDecode(title ?? string.Empty)))));
+        }
+        return result;
+    }
+
+    private static Dictionary<string, string> ReadAttributes(string value) => AttributeRegex.Matches(value)
+        .Cast<Match>()
+        .GroupBy(match => match.Groups["name"].Value, StringComparer.OrdinalIgnoreCase)
+        .ToDictionary(
+            group => group.Key,
+            group => WebUtility.HtmlDecode(group.Last().Groups["quoted"].Success ? group.Last().Groups["quoted"].Value : group.Last().Groups["bare"].Value),
+            StringComparer.OrdinalIgnoreCase);
+
+    private static string? BestImageSource(IReadOnlyDictionary<string, string> attrs)
+    {
+        if (attrs.TryGetValue("srcset", out var srcset) && !string.IsNullOrWhiteSpace(srcset))
+        {
+            var candidate = srcset.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(value => value.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0])
+                .LastOrDefault();
+            if (!string.IsNullOrWhiteSpace(candidate)) return candidate;
+        }
+        foreach (var key in new[] { "src", "data-src", "data-original" })
+            if (attrs.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)) return value;
+        return null;
     }
 
     public static string ExtractText(string html)

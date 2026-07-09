@@ -110,7 +110,8 @@ else
             </div>
         </section>
 
-        <GraphDetailsPanel Snapshot="@_snapshot"
+        <GraphDetailsPanel ProjectId="@Project.Id"
+                           Snapshot="@_snapshot"
                            SelectedNodeId="@_selectedNodeId"
                            ShowAutoLinks="@_showAutoLinks"
                            OnSelectNode="SelectNodeFromPanelAsync"

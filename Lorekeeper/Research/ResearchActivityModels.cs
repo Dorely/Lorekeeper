@@ -59,6 +59,8 @@ public sealed record ResearchSourceDetail(
     DateTime? FetchedAt,
     DateTime UpdatedAt,
     string ExtractedText,
-    IReadOnlyList<ResearchSourceLink> Links);
+    IReadOnlyList<ResearchSourceLink> Links,
+    IReadOnlyList<WebPageImage> DiscoveredImages,
+    IReadOnlyList<EntityVisuals.SourceVisualCandidateView> Visuals);
 
 public sealed record ResearchSourceLink(string Url, string Text);

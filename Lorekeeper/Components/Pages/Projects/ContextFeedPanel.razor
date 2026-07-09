@@ -63,6 +63,16 @@ else
                     </button>
                 }
             </div>
+            @if (item.Visuals is { Count: > 0 })
+            {
+                <div class="ctx-visuals" title="@($"{item.Visuals.Count} visual example(s)")">
+                    @foreach (var visual in item.Visuals.Take(4))
+                    {
+                        <img src="@($"/projects/{Project.Id:N}/images/{visual.ImageId:N}/content?maxEdge=160")" alt="@visual.AltText" title="@visual.Label" />
+                    }
+                    <span>@item.Visuals.Count visual@(item.Visuals.Count == 1 ? string.Empty : "s")</span>
+                </div>
+            }
         </div>
     }
 }

@@ -1,5 +1,6 @@
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.EntityVisuals;
 
 namespace Lorekeeper.EditorChat;
 
@@ -13,7 +14,8 @@ public sealed record EditorContestStartRequest(
     Guid ChapterId);
 
 public sealed record ContestTurnSnapshot(
-    IReadOnlyList<ContestChatMessageSnapshot> Messages);
+    IReadOnlyList<ContestChatMessageSnapshot> Messages,
+    IReadOnlyList<EntityVisualContextReference> Visuals);
 
 public sealed record ContestChatMessageSnapshot(
     string Role,

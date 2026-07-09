@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -9,11 +10,25 @@ using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Research;
 
-public sealed record ResearchToolContext(
-    Guid ProjectId,
-    Guid ConversationId,
-    Action OnMutated,
-    OutlineToolStagingContext? Staging = null);
+public sealed class ResearchToolContext(
+    Guid projectId,
+    Guid conversationId,
+    Action onMutated,
+    OutlineToolStagingContext? staging = null,
+    bool visionReady = false)
+{
+    private readonly List<EntityVisualContextReference> _entityVisuals = [];
+    private readonly List<SourceVisualCandidateData> _sourceVisuals = [];
+    public Guid ProjectId { get; } = projectId;
+    public Guid ConversationId { get; } = conversationId;
+    public Action OnMutated { get; } = onMutated;
+    public OutlineToolStagingContext? Staging { get; } = staging;
+    public bool VisionReady { get; } = visionReady;
+    public void QueueEntityVisuals(IEnumerable<EntityVisualContextReference> values) => _entityVisuals.AddRange(values);
+    public void QueueSourceVisual(SourceVisualCandidateData value) => _sourceVisuals.Add(value);
+    public IReadOnlyList<EntityVisualContextReference> DrainEntityVisuals() { var result = _entityVisuals.ToList(); _entityVisuals.Clear(); return result; }
+    public IReadOnlyList<SourceVisualCandidateData> DrainSourceVisuals() { var result = _sourceVisuals.ToList(); _sourceVisuals.Clear(); return result; }
+}
 
 public sealed class ResearchTools(
     ISearchProviderService searchProviders,
@@ -21,6 +36,8 @@ public sealed class ResearchTools(
     OutlineCollaborationTools outlineTools,
     IEntityService entities,
     IEntityRelationContextService entityRelations,
+    IEntityVisualExampleService entityVisualExamples,
+    IWebPageReader pageReader,
     IWebLinkPolicy linkPolicy,
     IOptions<WebResearchOptions> webOptions)
 {
@@ -81,6 +98,16 @@ public sealed class ResearchTools(
                 method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
                 name: "list_entity_links",
                 description: "List all graph links adjacent to an entity, including structural HasChild links and semantic story relationships. When Review edits is enabled, includes staged entity and link changes from this turn."),
+
+            AIFunctionFactory.Create(
+                method: (Guid pageId, string? imageUrl = null) => InspectWebImageAsync(context, pageId, imageUrl),
+                name: "inspect_web_image",
+                description: "Safely fetch, validate, cache, and visually inspect an image discovered on a read webpage. Use the exact image URL returned by the page read when more than one is available."),
+
+            AIFunctionFactory.Create(
+                method: (Guid candidateId, EntityVisualTarget[] entityTargets) => ImportWebImageAsync(context, candidateId, entityTargets),
+                name: "import_web_image_to_entities",
+                description: "After the user confirms storage, promote an inspected web image into the project library and attach it to every unambiguously represented entity. Never guess ambiguous associations."),
         };
 
         var allowedGraphToolNames = new HashSet<string>(StringComparer.Ordinal)
@@ -93,9 +120,14 @@ public sealed class ResearchTools(
             "create_entity",
             "update_entity",
             "link_entities",
+            "list_entity_visual_examples",
+            "attach_entity_visual_example",
+            "update_entity_visual_example",
+            "detach_entity_visual_example",
         };
 
-        var outlineContext = new OutlineCollaborationContext(context.ProjectId, context.OnMutated, context.Staging);
+        var outlineContext = new OutlineCollaborationContext(
+            context.ProjectId, context.OnMutated, context.Staging, context.VisionReady, context.QueueEntityVisuals);
         foreach (var tool in (await outlineTools.BuildAsync(outlineContext, cancellationToken)).OfType<AIFunction>())
         {
             if (allowedGraphToolNames.Contains(tool.Name))
@@ -215,7 +247,10 @@ public sealed class ResearchTools(
     private async Task<string> ReadEntityAsync(ResearchToolContext context, Guid entityId)
     {
         if (context.Staging is not null)
+        {
+            await QueueEntityVisualsAsync(context, entityId);
             return await context.Staging.ReadEntityAsync(entityId, addedToContextFeed: false, EntityRelationOptions);
+        }
 
         var entity = await entities.GetAsync(context.ProjectId, entityId);
         if (entity is null)
@@ -225,6 +260,7 @@ public sealed class ResearchTools(
         var manualLinks = links.Where(link => !link.IsAutoLink).Select(LinkPayload).ToList();
         var autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload).ToList();
         var relationContext = await entityRelations.BuildForEntityAsync(context.ProjectId, entityId, EntityRelationOptions);
+        var visualExamples = await QueueEntityVisualsAsync(context, entityId);
         return JsonSerializer.Serialize(new
         {
             id = entity.Id,
@@ -237,11 +273,96 @@ public sealed class ResearchTools(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
+            visualExamples = visualExamples.Select(VisualPayload),
             links = manualLinks.Concat(autoMentionLinks),
             manualLinks,
             autoMentionLinks,
             relationContext,
         }, JsonOptions);
+    }
+
+    private async Task<string> InspectWebImageAsync(ResearchToolContext context, Guid pageId, string? imageUrl)
+    {
+        var read = await TryReadCandidateForToolAsync(context, pageId);
+        if (read is null) return $"Error: webpage {pageId:N} was not found in this project.";
+        var image = string.IsNullOrWhiteSpace(imageUrl)
+            ? read.Images.Count == 1 ? read.Images[0] : null
+            : read.Images.FirstOrDefault(candidate => string.Equals(candidate.Url, imageUrl.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (image is null)
+            return read.Images.Count == 0
+                ? "Error: this page did not expose any supported image candidates."
+                : $"Error: choose an exact image URL from the page's {read.Images.Count} image candidates.";
+
+        var fetched = await pageReader.ReadImageAsync(image.Url);
+        if (!fetched.Success) return $"Error: {fetched.Diagnostics}";
+        try
+        {
+            var candidate = await entityVisualExamples.CreateCandidateAsync(new SourceVisualCandidateCreateRequest(
+                context.ProjectId,
+                SourceVisualCandidateKind.ResearchWeb,
+                FileNameFromUrl(fetched.FinalUrl, fetched.ContentType),
+                fetched.ContentType,
+                fetched.Data,
+                image.AltText,
+                image.Caption,
+                fetched.FinalUrl,
+                Locator: image.Url,
+                MetadataJson: JsonSerializer.Serialize(new { pageId, pageUrl = BestUrl(read.Candidate), imageUrl = image.Url, fetched.FinalUrl }),
+                WebIngestCandidateId: pageId));
+            var data = await entityVisualExamples.GetCandidateDataAsync(context.ProjectId, candidate.Id, maxEdge: 1024);
+            if (data is not null && context.VisionReady) context.QueueSourceVisual(data);
+            return JsonSerializer.Serialize(new
+            {
+                candidate,
+                delivery = context.VisionReady ? "image bytes supplied on the next model round" : "metadata only; provider is not vision-ready",
+                instruction = "Do not import until the user confirms storage and the represented entity is unambiguous.",
+            }, JsonOptions);
+        }
+        catch (Exception ex) { return $"Error: {ex.Message}"; }
+    }
+
+    private async Task<string> ImportWebImageAsync(ResearchToolContext context, Guid candidateId, EntityVisualTarget[] entityTargets)
+    {
+        var targets = entityTargets.Where(target => target.EntityId != Guid.Empty).DistinctBy(target => target.EntityId).ToList();
+        if (targets.Count == 0) return "Error: at least one unambiguous entity target is required.";
+        if (context.Staging is not null)
+        {
+            var after = new EntityVisualChange("import", CandidateId: candidateId, Targets: targets);
+            return await context.Staging.StageExternalChangeAsync(
+                "Import a researched image and attach it to entities", null, after,
+                new { status = "staged", candidateId, targets }, "EntityVisualExample", candidateId.ToString("N"));
+        }
+        var attached = new List<EntityVisualExampleView>();
+        try
+        {
+            foreach (var target in targets)
+                attached.Add(await entityVisualExamples.PromoteAndAttachAsync(context.ProjectId, candidateId, target.EntityId, target.Label, EntityVisualExampleOrigin.Research));
+            context.OnMutated();
+            return JsonSerializer.Serialize(new { status = "imported", attached = attached.Select(VisualPayload) }, JsonOptions);
+        }
+        catch (Exception ex) { return $"Error: {ex.Message}"; }
+    }
+
+    private async Task<IReadOnlyList<EntityVisualExampleView>> QueueEntityVisualsAsync(ResearchToolContext context, Guid entityId)
+    {
+        var examples = await entityVisualExamples.ListForEntityAsync(context.ProjectId, entityId);
+        context.QueueEntityVisuals(examples.Select(example => new EntityVisualContextReference(
+            example.Image.Id, example.EntityId, example.EntityType, example.EntityName, example.Label,
+            example.SortOrder, example.Image.FileName, example.Image.AltText, example.Image.Prompt)));
+        return examples;
+    }
+
+    private static object VisualPayload(EntityVisualExampleView example) => new
+    {
+        example.Id, example.EntityId, example.EntityName, example.Label, example.SortOrder,
+        image = new { example.Image.Id, example.Image.FileName, example.Image.PreviewUrl, example.Image.AltText, example.Image.Prompt },
+    };
+
+    private static string FileNameFromUrl(string url, string contentType)
+    {
+        var name = Uri.TryCreate(url, UriKind.Absolute, out var uri) ? Path.GetFileName(uri.LocalPath) : string.Empty;
+        if (!string.IsNullOrWhiteSpace(name)) return name;
+        return contentType == "image/png" ? "research-image.png" : contentType == "image/webp" ? "research-image.webp" : "research-image.jpg";
     }
 
     private async Task<string> ListEntityLinksAsync(ResearchToolContext context, Guid entityId)
@@ -315,6 +436,7 @@ public sealed class ResearchTools(
                 : null,
             text = pageText,
             links = read.Links.Take(Math.Max(0, webOptions.Value.MaxLinksReturnedToModel)).Select(link => new { link.Url, link.Text }),
+            images = read.Images.Take(30).Select(image => new { image.Url, image.AltText, image.Caption }),
         }, JsonOptions);
     }
 

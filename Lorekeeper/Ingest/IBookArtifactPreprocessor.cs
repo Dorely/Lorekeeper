@@ -22,6 +22,7 @@ public sealed record BookArtifactPreprocessResult(
     string SourceMetadataJson,
     IReadOnlyList<IngestSourcePageDraft> Pages,
     IReadOnlyList<IngestSourceBlockDraft> Blocks,
+    IReadOnlyList<IngestVisualCandidateDraft> Visuals,
     bool UsedVision,
     string Diagnostics);
 
@@ -50,4 +51,16 @@ public sealed record IngestSourceBlockDraft(
     int? PageNumber,
     int StartChar,
     int EndChar,
+    string MetadataJson);
+
+public sealed record IngestVisualCandidateDraft(
+    string FileName,
+    string ContentType,
+    byte[] Data,
+    string AltText,
+    string Caption,
+    string Locator,
+    int? PageNumber,
+    int? StartChar,
+    int? EndChar,
     string MetadataJson);

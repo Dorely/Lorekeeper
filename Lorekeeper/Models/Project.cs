@@ -79,6 +79,10 @@ public class Project
 
     public ICollection<WebIngestCandidate> WebIngestCandidates { get; set; } = [];
 
+    public ICollection<SourceVisualCandidate> SourceVisualCandidates { get; set; } = [];
+
+    public ICollection<EntityVisualExample> EntityVisualExamples { get; set; } = [];
+
     public ICollection<IngestJob> IngestJobs { get; set; } = [];
 
     public ICollection<ProjectImportJob> ProjectImportJobs { get; set; } = [];

@@ -312,3 +312,4 @@
     font-weight: 500;
     overflow-wrap: anywhere;
 }
+.entities-item-visual { width: 2.25rem; height: 2.25rem; object-fit: cover; border-radius: .3rem; float: left; margin-right: .45rem; }

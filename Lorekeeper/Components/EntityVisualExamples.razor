@@ -1,0 +1,212 @@
+@using Lorekeeper.EntityVisuals
+@using Lorekeeper.Images
+@using Lorekeeper.Models
+@inject IEntityVisualExampleService EntityVisuals
+@inject IProjectImageService ProjectImages
+
+<section class="entity-visuals">
+    <div class="entity-visuals-heading">
+        <div>
+            <h6 class="mb-0">Visual examples</h6>
+            <span class="text-muted small">@(_examples.Count == 0 ? "No examples attached" : $"{_examples.Count} attached")</span>
+        </div>
+        @if (Editable)
+        {
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleAddAsync">@(_showAdd ? "Done" : "Add")</button>
+        }
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger py-2 small">@_error</div>
+    }
+
+    @if (_loading)
+    {
+        <div class="text-muted small">Loading visual examples…</div>
+    }
+    else if (_examples.Count > 0)
+    {
+        <div class="entity-visuals-grid">
+            @foreach (var example in _examples.OrderBy(item => item.SortOrder))
+            {
+                <article class="entity-visual-card" @key="example.Id">
+                    <a class="entity-visual-thumb" href="@($"/projects/{ProjectId:N}/images/{example.Image.Id:N}/content")" target="_blank" title="Open full-size image">
+                        <img src="@example.Image.PreviewUrl" alt="@example.Image.AltText" />
+                        @if (example.SortOrder == 0)
+                        {
+                            <span class="entity-visual-leading">Leading</span>
+                        }
+                    </a>
+                    @if (Editable)
+                    {
+                        <input class="form-control form-control-sm" value="@example.Label" aria-label="Visual example label"
+                               @onchange="args => RelabelAsync(example, args.Value?.ToString() ?? string.Empty)" />
+                        <div class="entity-visual-actions">
+                            <button type="button" class="btn btn-sm btn-link" disabled="@(example.SortOrder == 0 || _saving)" @onclick="() => MoveAsync(example, -1)" title="Move earlier">↑</button>
+                            <button type="button" class="btn btn-sm btn-link" disabled="@(example.SortOrder >= _examples.Count - 1 || _saving)" @onclick="() => MoveAsync(example, 1)" title="Move later">↓</button>
+                            <button type="button" class="btn btn-sm btn-link text-danger ms-auto" disabled="@_saving" @onclick="() => DetachAsync(example)">Detach</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="entity-visual-label">@(string.IsNullOrWhiteSpace(example.Label) ? example.Image.AltText : example.Label)</div>
+                    }
+                </article>
+            }
+        </div>
+    }
+
+    @if (_showAdd && Editable)
+    {
+        <div class="entity-visual-add">
+            <label class="form-label small" for="@_pickerId">Attach from image library</label>
+            <div class="input-group input-group-sm">
+                <select id="@_pickerId" class="form-select" @bind="_selectedImageId">
+                    <option value="">Choose an image…</option>
+                    @foreach (var image in _library.Where(image => _examples.All(example => example.Image.Id != image.Id)))
+                    {
+                        <option value="@image.Id">@image.FileName</option>
+                    }
+                </select>
+                <input class="form-control" placeholder="Role label (optional)" @bind="_newLabel" />
+                <button type="button" class="btn btn-outline-primary" disabled="@(_saving || _selectedImageId == Guid.Empty)" @onclick="AttachSelectedAsync">Attach</button>
+            </div>
+            <div class="entity-visual-upload">
+                <label class="form-label small mb-1">Or upload a PNG, JPEG, or WebP</label>
+                <InputFile OnChange="UploadAsync" accept="image/png,image/jpeg,image/webp" disabled="@_saving" />
+            </div>
+        </div>
+    }
+</section>
+
+@code {
+    private const long MaxUploadBytes = 25 * 1024 * 1024;
+    private readonly string _pickerId = $"entity-visual-picker-{Guid.NewGuid():N}";
+    private List<EntityVisualExampleView> _examples = [];
+    private List<ProjectImageView> _library = [];
+    private Guid _selectedImageId;
+    private string _newLabel = string.Empty;
+    private string _error = string.Empty;
+    private bool _loading;
+    private bool _saving;
+    private bool _showAdd;
+    private Guid _loadedEntityId;
+
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter, EditorRequired] public Guid EntityId { get; set; }
+    [Parameter] public bool Editable { get; set; } = true;
+    [Parameter] public EventCallback Changed { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (EntityId == Guid.Empty || (_loadedEntityId == EntityId && !_loading))
+            return;
+
+        _loadedEntityId = EntityId;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = string.Empty;
+        try
+        {
+            _examples = (await EntityVisuals.ListForEntityAsync(ProjectId, EntityId)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ToggleAddAsync()
+    {
+        _showAdd = !_showAdd;
+        if (_showAdd && _library.Count == 0)
+            _library = (await ProjectImages.ListAsync(ProjectId)).ToList();
+    }
+
+    private async Task AttachSelectedAsync()
+    {
+        if (_selectedImageId == Guid.Empty) return;
+        await MutateAsync(() => EntityVisuals.AttachAsync(ProjectId, EntityId, _selectedImageId, _newLabel, EntityVisualExampleOrigin.Manual));
+        _selectedImageId = Guid.Empty;
+        _newLabel = string.Empty;
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs args)
+    {
+        _saving = true;
+        _error = string.Empty;
+        try
+        {
+            var file = args.File;
+            await using var stream = file.OpenReadStream(MaxUploadBytes);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            var image = await ProjectImages.UploadAsync(ProjectId, new ProjectImageUpload(file.Name, file.ContentType, memory.ToArray(), file.Name));
+            await EntityVisuals.AttachAsync(ProjectId, EntityId, image.Id, _newLabel, EntityVisualExampleOrigin.Manual);
+            _library.Insert(0, image);
+            _newLabel = string.Empty;
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private Task RelabelAsync(EntityVisualExampleView example, string label) =>
+        MutateAsync(() => EntityVisuals.UpdateAsync(ProjectId, example.Id, label, null, EntityVisualExampleOrigin.Manual));
+
+    private async Task MoveAsync(EntityVisualExampleView example, int offset)
+    {
+        var ordered = _examples.OrderBy(item => item.SortOrder).ToList();
+        var from = ordered.FindIndex(item => item.Id == example.Id);
+        var to = Math.Clamp(from + offset, 0, ordered.Count - 1);
+        if (from < 0 || from == to) return;
+        (ordered[from], ordered[to]) = (ordered[to], ordered[from]);
+        await MutateAsync(async () =>
+        {
+            await EntityVisuals.ReorderAsync(ProjectId, EntityId, ordered.Select(item => item.Id).ToList());
+            return example;
+        });
+    }
+
+    private Task DetachAsync(EntityVisualExampleView example) => MutateAsync(async () =>
+    {
+        await EntityVisuals.DetachAsync(ProjectId, example.Id);
+        return example;
+    });
+
+    private async Task MutateAsync(Func<Task<EntityVisualExampleView>> action)
+    {
+        _saving = true;
+        _error = string.Empty;
+        try
+        {
+            await action();
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

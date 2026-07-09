@@ -4,6 +4,7 @@ using System.Runtime.ExceptionServices;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 
@@ -19,6 +20,7 @@ public sealed class AiChangeApprovalService(
     IChapterVisualService chapterVisuals,
     IEntityService entities,
     IVectorIndexWorkCoordinator indexWork,
+    IEntityVisualExampleService entityVisualExamples,
     ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
 {
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
@@ -452,6 +454,34 @@ public sealed class AiChangeApprovalService(
             {
                 var after = ReadRequired<OutlineEntityLinkChange>(afterJson);
                 await entities.LinkAsync(projectId, after.FromId, after.ToId, after.EdgeType, after.Properties, cancellationToken);
+                break;
+            }
+            case "attach_project_image_to_entity":
+            case "attach_entity_visual_example":
+            case "generate_project_image":
+            {
+                var after = ReadRequired<EntityVisualChange>(afterJson);
+                await entityVisualExamples.AttachAsync(projectId, after.EntityId!.Value, after.ImageId!.Value, after.Label, EntityVisualExampleOrigin.Agent, cancellationToken: cancellationToken);
+                break;
+            }
+            case "update_entity_visual_example":
+            {
+                var after = ReadRequired<EntityVisualChange>(afterJson);
+                await entityVisualExamples.UpdateAsync(projectId, after.ExampleId!.Value, after.Label, after.SortOrder, cancellationToken: cancellationToken);
+                break;
+            }
+            case "detach_project_image_from_entity":
+            case "detach_entity_visual_example":
+            {
+                var before = ReadRequired<EntityVisualChange>(change.BeforeJson);
+                await entityVisualExamples.DetachAsync(projectId, before.ExampleId!.Value, cancellationToken);
+                break;
+            }
+            case "import_web_image_to_entities":
+            {
+                var after = ReadRequired<EntityVisualChange>(afterJson);
+                foreach (var target in after.Targets ?? [])
+                    await entityVisualExamples.PromoteAndAttachAsync(projectId, after.CandidateId!.Value, target.EntityId, target.Label, EntityVisualExampleOrigin.Research, cancellationToken);
                 break;
             }
             default:

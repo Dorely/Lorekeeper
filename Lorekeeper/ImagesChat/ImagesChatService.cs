@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -22,6 +23,7 @@ public sealed class ImagesChatService(
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     IProjectImageService projectImages,
+    IEntityVisualContextService entityVisualContext,
     ImagesChatTools tools,
     IOptions<AgentOptions> options,
     ILogger<ImagesChatService> logger) : IImagesChatService
@@ -201,12 +203,14 @@ public sealed class ImagesChatService(
         IList<AITool> aiTools = null!;
         ImagesChatToolContext toolContext = null!;
         string systemPrompt = string.Empty;
+        ContextAssembly? initialAssembly = null;
         string? setupError = null;
         try
         {
             var project = await projects.GetByIdAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            systemPrompt = await BuildSystemPromptAsync(project, cancellationToken);
+            initialAssembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples, cancellationToken);
+            systemPrompt = initialAssembly.Assemble();
             chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
             toolContext = new ImagesChatToolContext(projectId, conversation.Id, chatProvider.Id, visionReady, OnToolMutated);
             aiTools = await tools.BuildAsync(toolContext, cancellationToken);
@@ -234,6 +238,13 @@ public sealed class ImagesChatService(
         messages.AddRange(BuildModelHistory(history));
         if (turnAttachments.Count > 0)
             messages.Add(await BuildAttachedImagesMessageAsync(projectId, turnAttachments, visionReady, cancellationToken));
+        if (initialAssembly is not null)
+        {
+            var visualMessage = await entityVisualContext.BuildVisionMessageAsync(
+                projectId, initialAssembly.Visuals, visionReady,
+                "Entity visual examples from the initial project context. Reuse them as references for continuity-sensitive image work.", cancellationToken);
+            if (visualMessage is not null) messages.Add(visualMessage);
+        }
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -477,7 +488,7 @@ public sealed class ImagesChatService(
 
     private async Task<string> BuildSystemPromptAsync(Project project, CancellationToken cancellationToken)
     {
-        var assembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions, cancellationToken);
+        var assembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples, cancellationToken);
         return assembly.Assemble();
     }
 

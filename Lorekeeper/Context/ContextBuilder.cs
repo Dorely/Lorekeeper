@@ -1,6 +1,7 @@
 using System.Text;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Llm;
@@ -20,6 +21,7 @@ public sealed class ContextBuilder(
     IEntityService entities,
     IIngestRepository ingest,
     IProjectImageService images,
+    IEntityVisualExampleService entityVisualExamples,
     IChapterVisualService chapterVisuals) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
@@ -108,18 +110,21 @@ public sealed class ContextBuilder(
             }
 
             var contextEntities = await ListContextEntitiesAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken);
+            var visualsByEntity = await entityVisualExamples.ListForEntitiesAsync(project.Id, contextEntities.Select(entity => entity.Id).ToList(), cancellationToken);
             foreach (var entity in contextEntities)
             {
                 var key = EditorContextKeys.Entity(entity.Id);
+                var examples = visualsByEntity.GetValueOrDefault(entity.Id) ?? [];
                 items.Add(new ContextItem(
                     Key: key,
                     Kind: ContextItemKind.Entity,
                     Label: $"{entity.Type} — {entity.Name}",
-                    Body: await BuildEntityBlockAsync(project.Id, entity, cancellationToken),
+                    Body: await BuildEntityBlockAsync(project.Id, entity, examples, cancellationToken),
                     IsEnabled: true,
                     IsRemovable: true,
                     Badge: entity.Type,
-                    Reason: entity.ParentId == currentChapter.Id ? "Chapter beat" : "Related to current chapter context"));
+                    Reason: entity.ParentId == currentChapter.Id ? "Chapter beat" : "Related to current chapter context",
+                    Visuals: examples.Select(EntityVisualContextService.ToReference).ToList()));
             }
         }
 
@@ -416,7 +421,21 @@ public sealed class ContextBuilder(
             IsEnabled: true,
             IsRemovable: true,
             Badge: "Image",
-            Reason: "Selected project image");
+            Reason: "Selected project image",
+            Visuals:
+            [
+                new EntityVisualContextReference(
+                    image.Id,
+                    EntityId: null,
+                    EntityType: string.Empty,
+                    EntityName: string.Empty,
+                    Label: string.IsNullOrWhiteSpace(image.AltText) ? image.FileName : image.AltText,
+                    SortOrder: 0,
+                    image.FileName,
+                    image.AltText,
+                    image.Prompt,
+                    IsExplicitImage: true),
+            ]);
     }
 
     private async Task<ContextItem?> BuildPreviousChapterReferenceItemAsync(
@@ -656,7 +675,11 @@ public sealed class ContextBuilder(
         return $"# {sample.Title}\n\n{body}";
     }
 
-    private async Task<string> BuildEntityBlockAsync(Guid projectId, StoryEntity entity, CancellationToken cancellationToken)
+    private async Task<string> BuildEntityBlockAsync(
+        Guid projectId,
+        StoryEntity entity,
+        IReadOnlyList<EntityVisualExampleView> visualExamples,
+        CancellationToken cancellationToken)
     {
         var sb = new StringBuilder();
         sb.Append("Type: ").AppendLine(entity.Type);
@@ -696,6 +719,19 @@ public sealed class ContextBuilder(
             {
                 sb.Append("# ").Append(source.SourceTitle).AppendLine();
                 sb.AppendLine(source.Markdown);
+            }
+        }
+
+        if (visualExamples.Count > 0)
+        {
+            sb.AppendLine("Visual examples:");
+            foreach (var example in visualExamples.OrderBy(example => example.SortOrder))
+            {
+                sb.Append("- ").Append(example.Label)
+                  .Append(" [imageId: ").Append(example.Image.Id.ToString("N"))
+                  .Append("; file: ").Append(example.Image.FileName).AppendLine("]");
+                AppendOptionalIndented(sb, "Alt text", example.Image.AltText, 2);
+                AppendOptionalIndented(sb, "Generation prompt", example.Image.Prompt, 2);
             }
         }
 

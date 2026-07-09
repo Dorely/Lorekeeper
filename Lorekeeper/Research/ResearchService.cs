@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -25,6 +26,7 @@ public sealed class ResearchService(
     IWebIngestCandidateService webCandidates,
     IEntityService entities,
     ResearchTools tools,
+    IEntityVisualContextService entityVisualContext,
     IOptions<AgentOptions> options,
     ILogger<ResearchService> logger) : IResearchService
 {
@@ -244,18 +246,23 @@ public sealed class ResearchService(
         IList<AITool> aiTools = null!;
         OutlineToolStagingContext? staging = null;
         string systemPrompt = string.Empty;
+        ContextAssembly? initialAssembly = null;
+        ResearchToolContext? toolContext = null;
         string? setupError = null;
         try
         {
             chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
-            systemPrompt = await BuildSystemPromptAsync(project, cancellationToken);
+            initialAssembly = await contextBuilder.BuildProjectAsync(project, ResearchWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples, cancellationToken);
+            systemPrompt = initialAssembly.Assemble();
             if (project.AiChangeApprovalEnabled)
                 staging = outlineTools.CreateStagingContext(
                     projectId,
                     conversation.Id,
                     AiChangeConversationKind.Research,
                     OnToolMutated);
-            aiTools = await tools.BuildAsync(new ResearchToolContext(projectId, conversation.Id, OnToolMutated, staging), cancellationToken);
+            var visionReady = await providerService.IsVisionProviderWorkingAsync(chatProvider.Id, cancellationToken);
+            toolContext = new ResearchToolContext(projectId, conversation.Id, OnToolMutated, staging, visionReady);
+            aiTools = await tools.BuildAsync(toolContext, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -278,6 +285,13 @@ public sealed class ResearchService(
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         messages.AddRange(BuildModelHistory(history));
+        if (initialAssembly is not null && toolContext is not null)
+        {
+            var initialVisuals = await entityVisualContext.BuildVisionMessageAsync(
+                projectId, initialAssembly.Visuals, toolContext.VisionReady,
+                "Visual examples from the initial project context. Use them only for factual identity and continuity grounding.", cancellationToken);
+            if (initialVisuals is not null) messages.Add(initialVisuals);
+        }
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -527,6 +541,25 @@ public sealed class ResearchService(
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+            if (toolContext is not null)
+            {
+                var entityMessage = await entityVisualContext.BuildVisionMessageAsync(
+                    projectId, toolContext.DrainEntityVisuals(), toolContext.VisionReady,
+                    "Visual examples for entities loaded by the preceding research tools.", cancellationToken);
+                if (entityMessage is not null) messages.Add(entityMessage);
+
+                var sourceVisuals = toolContext.DrainSourceVisuals();
+                if (toolContext.VisionReady && sourceVisuals.Count > 0)
+                {
+                    var contents = new List<AIContent> { new TextContent("Inspected webpage image candidates. These are cached previews, not stored project images until the user confirms import.") };
+                    foreach (var source in sourceVisuals.DistinctBy(source => source.Id))
+                    {
+                        contents.Add(new TextContent($"Candidate {source.Id:N}: {source.FileName}. Alt: {source.AltText}"));
+                        contents.Add(new DataContent(source.Data, source.ContentType) { Name = source.FileName });
+                    }
+                    messages.Add(new ChatMessage(ChatRole.User, contents));
+                }
+            }
 
             if (iteration == maxIterations - 1)
             {
@@ -952,7 +985,7 @@ public sealed class ResearchService(
 
     private async Task<string> BuildSystemPromptAsync(Project project, CancellationToken cancellationToken)
     {
-        var assembly = await contextBuilder.BuildProjectAsync(project, ResearchWorkflowInstructions, cancellationToken);
+        var assembly = await contextBuilder.BuildProjectAsync(project, ResearchWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples, cancellationToken);
         return assembly.Assemble();
     }
 

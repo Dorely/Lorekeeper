@@ -28,4 +28,5 @@ public class GraphNode
 
     public ICollection<GraphEdge> OutgoingEdges { get; set; } = [];
     public ICollection<GraphEdge> IncomingEdges { get; set; } = [];
+    public ICollection<EntityVisualExample> VisualExamples { get; set; } = [];
 }

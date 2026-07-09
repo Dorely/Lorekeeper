@@ -34,6 +34,7 @@
 </aside>
 
 @code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public ProjectGraphSnapshot? Snapshot { get; set; }
     [Parameter] public long? SelectedNodeId { get; set; }
     [Parameter] public bool ShowAutoLinks { get; set; }
@@ -70,6 +71,11 @@
                              Aliases="@selected.Aliases"
                              WikiSections="@selected.WikiSections"
                              CanonSources="@selected.CanonSources" />
+
+        @if (TryEntityId(selected, out var entityId))
+        {
+            <EntityVisualExamples ProjectId="@ProjectId" EntityId="@entityId" Editable="false" />
+        }
 
         <div class="graph-links-section">
             <div class="graph-links-header">
@@ -126,6 +132,12 @@
             }
         </div>
     </div>;
+
+    private static bool TryEntityId(ProjectGraphNode selected, out Guid entityId)
+    {
+        entityId = Guid.Empty;
+        return !selected.IsStructural && Guid.TryParse(selected.Key, out entityId);
+    }
 
     private RenderFragment RenderProperties(ProjectGraphNode selected) => @<div>
         @if (selected.Properties.Count > 0)

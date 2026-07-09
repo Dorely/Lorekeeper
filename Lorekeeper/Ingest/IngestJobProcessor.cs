@@ -5,6 +5,7 @@ using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -29,6 +30,9 @@ public sealed class IngestJobProcessor(
     IGraphNodeRepository nodes,
     IGraphEdgeRepository edges,
     IOptions<AgentOptions> options,
+    IOptions<EntityVisualContextOptions> visualOptions,
+    IEntityVisualExampleService entityVisualExamples,
+    IEntityVisualContextService entityVisualContext,
     ILogger<IngestJobProcessor> logger)
 {
     private const string _systemPrompt = """
@@ -582,12 +586,30 @@ public sealed class IngestJobProcessor(
             ToolMode = ChatToolMode.Auto,
         };
 
-        var chunkPrompt = await BuildChunkPromptAsync(job, sourceChunk, attempt, maxAttempts, cancellationToken);
+        var sourceVisuals = await ListRelevantVisualsAsync(job, sourceChunk, cancellationToken);
+        var chunkPrompt = await BuildChunkPromptAsync(job, sourceChunk, sourceVisuals, attempt, maxAttempts, cancellationToken);
         var messages = new List<ChatMessage>
         {
-            new(ChatRole.System, _systemPrompt),
+            new(ChatRole.System, _systemPrompt + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples),
             new(ChatRole.User, chunkPrompt),
         };
+        if (job.ProviderId is int providerId
+            && await providerService.IsVisionProviderWorkingAsync(providerId, cancellationToken)
+            && sourceVisuals.Count > 0)
+        {
+            var visualContents = new List<AIContent>
+            {
+                new TextContent("Bounded source visual candidates relevant to this chunk. Candidate IDs and locators match the metadata in the chunk prompt. Attach only when the visual clearly depicts the resolved entity."),
+            };
+            foreach (var candidate in sourceVisuals)
+            {
+                var data = await entityVisualExamples.GetCandidateDataAsync(job.ProjectId, candidate.Id, visualOptions.Value.MaxImageEdge, cancellationToken);
+                if (data is null) continue;
+                visualContents.Add(new TextContent($"Candidate {candidate.Id:N}; locator: {candidate.Locator}; page: {candidate.MetadataJson}; alt/caption: {candidate.AltText} {candidate.Caption}"));
+                visualContents.Add(new DataContent(data.Data, data.ContentType) { Name = data.FileName });
+            }
+            messages.Add(new ChatMessage(ChatRole.User, visualContents));
+        }
         var tokenTracker = new IngestChunkTokenTracker(messages);
         var toolCallCounts = new Dictionary<string, int>(StringComparer.Ordinal);
         var peakTokenCount = 0;
@@ -806,9 +828,20 @@ public sealed class IngestJobProcessor(
         };
         var messages = new List<ChatMessage>
         {
-            new(ChatRole.System, BuildFinalReviewSystemPrompt()),
+            new(ChatRole.System, BuildFinalReviewSystemPrompt() + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples),
             new(ChatRole.User, BuildFinalReviewPrompt(job, context, attempt, maxAttempts)),
         };
+        if (job.ProviderId is int finalProviderId)
+        {
+            var entityVisuals = await entityVisualContext.ListForEntitiesAsync(job.ProjectId, [context.EntityId], cancellationToken);
+            var visualMessage = await entityVisualContext.BuildVisionMessageAsync(
+                job.ProjectId,
+                entityVisuals,
+                await providerService.IsVisionProviderWorkingAsync(finalProviderId, cancellationToken),
+                "Existing visual examples for the entity being finalized. Use them for identity grounding; do not infer unsupported textual facts from appearance.",
+                cancellationToken);
+            if (visualMessage is not null) messages.Add(visualMessage);
+        }
 
         string? finalText = null;
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -1188,6 +1221,7 @@ public sealed class IngestJobProcessor(
     private async Task<string> BuildChunkPromptAsync(
         IngestJob job,
         IngestSourceChunk sourceChunk,
+        IReadOnlyList<SourceVisualCandidateView> sourceVisuals,
         int attempt,
         int maxAttempts,
         CancellationToken cancellationToken)
@@ -1201,6 +1235,9 @@ public sealed class IngestJobProcessor(
         var chunkProgress = BuildChunkProgressMap(job, sourceChunk.Index);
         var knownEntityTypes = await BuildKnownEntityTypesAsync(job.ProjectId, cancellationToken);
         var extractionProfile = BuildExtractionProfilePrompt(job);
+        var visualSummary = sourceVisuals.Count == 0
+            ? "None for this chunk."
+            : string.Join("\n", sourceVisuals.Select(visual => $"- candidateId={visual.Id:N}; status={visual.Status}; locator={visual.Locator}; alt={visual.AltText}; caption={visual.Caption}; page/metadata={visual.MetadataJson}"));
 
         return $$"""
             Source title: {{job.Source.Title}}
@@ -1238,6 +1275,16 @@ public sealed class IngestJobProcessor(
             Known project entity types:
             {{knownEntityTypes}}
 
+            Source visual candidates for this chunk ({{sourceVisuals.Count}}):
+            {{visualSummary}}
+
+            Visual association rules:
+            - For a candidate that clearly depicts a resolved entity, call promote_ingest_visual_candidate after resolving that entity.
+            - Attach the same candidate to every clearly represented entity when appropriate.
+            - Skip decorative/layout-only art, masks, logos, and any candidate whose identity is ambiguous. Never guess from nearby text alone.
+            - Use skip_ingest_visual_candidate only when a candidate is unusable as any entity example; otherwise leave an unattached candidate inspected for later review.
+            - Vision-ready runs receive bounded candidate bytes in a separate model-only message. Other runs receive this metadata only.
+
             Entity matching workflow for this chunk:
             1. Start from the compact touched-entity index above.
             2. Batch likely source mentions through resolve_project_entity_mentions before creating anything.
@@ -1262,6 +1309,21 @@ public sealed class IngestJobProcessor(
             {{currentText}}
             ```
             """;
+    }
+
+    private async Task<IReadOnlyList<SourceVisualCandidateView>> ListRelevantVisualsAsync(
+        IngestJob job,
+        IngestSourceChunk sourceChunk,
+        CancellationToken cancellationToken)
+    {
+        var candidates = await entityVisualExamples.ListIngestCandidatesAsync(job.ProjectId, job.SourceId, cancellationToken);
+        var max = Math.Max(1, visualOptions.Value.MaxSourceVisualsPerIngestChunk);
+        return candidates
+            .Where(candidate => candidate.Status is SourceVisualCandidateStatus.Inspected or SourceVisualCandidateStatus.Promoted)
+            .Where(candidate => candidate.StartChar is null || candidate.EndChar is null
+                || candidate.StartChar < sourceChunk.EndChar && candidate.EndChar > sourceChunk.StartChar)
+            .Take(max)
+            .ToList();
     }
 
     private async Task<string> BuildTouchedEntityIndexAsync(Guid jobId, Guid? sourceChunkId, CancellationToken cancellationToken)
@@ -1633,6 +1695,8 @@ public sealed class IngestJobProcessor(
     private static bool IsChunkWriteTool(string toolName) =>
         string.Equals(toolName, "append_ingest_entity_observation", StringComparison.Ordinal)
         || string.Equals(toolName, "append_ingest_relationship_observation", StringComparison.Ordinal)
+        || string.Equals(toolName, "promote_ingest_visual_candidate", StringComparison.Ordinal)
+        || string.Equals(toolName, "skip_ingest_visual_candidate", StringComparison.Ordinal)
         || string.Equals(toolName, "update_ingest_source_progress", StringComparison.Ordinal);
 
     private static bool IsFinalReviewWriteTool(string toolName) =>

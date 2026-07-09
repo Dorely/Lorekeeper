@@ -33,6 +33,10 @@ public class ProjectImageGenerationJob
 
     public string ReferenceImageIdsJson { get; set; } = "[]";
 
+    public string EntityVisualTargetsJson { get; set; } = "[]";
+
+    public bool InheritSourceEntityTargets { get; set; } = true;
+
     public string OutputImageIdsJson { get; set; } = "[]";
 
     public string OutputStatesJson { get; set; } = "[]";

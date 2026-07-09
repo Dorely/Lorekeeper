@@ -3,6 +3,7 @@ using System.Text.Json;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
@@ -27,6 +28,7 @@ public sealed class EditorChatTools(
     IEditorRevisionAgentService revisionAgents,
     OutlineCollaborationTools outlineTools,
     IProjectImageService projectImages,
+    IEntityVisualExampleService entityVisualExamples,
     IProjectImageJobService imageJobs,
     IProjectImageGenerationRuntime imageRuntime,
     IChapterVisualService chapterVisuals,
@@ -123,6 +125,11 @@ public sealed class EditorChatTools(
                 description: "List all graph links adjacent to an entity, including structural HasChild links and semantic story relationships. When Review edits is enabled, includes staged entity and link changes from this turn."),
 
             AIFunctionFactory.Create(
+                method: (Guid entityId) => ListEntityVisualExamplesAsync(context, entityId),
+                name: "list_entity_visual_examples",
+                description: "List the ordered visual examples attached to one entity. Full image bytes are supplied on the next iteration when the provider is vision-ready."),
+
+            AIFunctionFactory.Create(
                 method: (Guid chapterId, int? pageNumber = null) =>
                     ReadChapterAsync(context, chapterId, pageNumber),
                 name: "read_chapter",
@@ -160,6 +167,21 @@ public sealed class EditorChatTools(
             return tools;
         }
 
+        tools.AddRange([
+            AIFunctionFactory.Create(
+                method: (Guid entityId, Guid imageId, string? label = null) => AttachProjectImageToEntityAsync(context, entityId, imageId, label),
+                name: "attach_project_image_to_entity",
+                description: "Attach an existing project image to a non-structural entity as an ordered visual example. Use a concise entity-specific role label such as 'default appearance', 'winter outfit', or 'exterior view'."),
+            AIFunctionFactory.Create(
+                method: (Guid exampleId, string label, int? sortOrder = null) => UpdateEntityVisualExampleAsync(context, exampleId, label, sortOrder),
+                name: "update_entity_visual_example",
+                description: "Update an entity visual example's role label and optionally its zero-based order."),
+            AIFunctionFactory.Create(
+                method: (Guid exampleId) => DetachProjectImageFromEntityAsync(context, exampleId),
+                name: "detach_project_image_from_entity",
+                description: "Detach one visual example association without deleting the project image."),
+        ]);
+
         tools.Add(AIFunctionFactory.Create(
             method: (Guid chapterId, string content, int? startLine = null, int? endLine = null) =>
                 EditChapterAsync(context, chapterId, content, startLine, endLine),
@@ -184,11 +206,11 @@ public sealed class EditorChatTools(
                 "Use pageLayoutKind for IllustratedProse or PicturePage; valid values are SinglePortrait, SingleLandscape, DoublePortrait, and DoubleLandscape."));
 
         tools.Add(AIFunctionFactory.Create(
-            method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, Guid[]? referenceImageIds = null, bool placeInCurrentChapter = false, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
-                GenerateProjectImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, referenceImageIds, placeInCurrentChapter, targetChapterId, targetPictureImageElementId),
+            method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, bool placeInCurrentChapter = false, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
+                GenerateProjectImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, referenceImageIds, entityTargets, placeInCurrentChapter, targetChapterId, targetPictureImageElementId),
             name: "generate_project_image",
             description:
-                "Generate an image and save it to the project image library. Optional referenceImageIds accepts multiple existing project image ids, up to the configured reference-image limit; use them for recurring characters, outfits, settings, props, and style continuity, or any other reason you need to referene an existing image. " +
+                "Generate an image and save it to the project image library. Pass entityTargets [{entityId,label}] for every clearly represented entity; successful outputs are attached automatically. Optional referenceImageIds accepts multiple existing project image ids, up to the configured reference-image limit; use attached examples for recurring characters, outfits, settings, props, and style continuity. Do not attach decorative/layout-only art or guess ambiguous associations. " +
                 "For PicturePage targets, pass targetChapterId and optionally targetPictureImageElementId; omit size to use the layout-native recommended size. " +
                 "Set placeInCurrentChapter=true only when the user wants the generated image inserted into the current chapter immediately; the current chapter must already be IllustratedProse or PicturePage."));
 
@@ -316,9 +338,10 @@ public sealed class EditorChatTools(
         int? pageNumber)
     {
         var result = await projectSearch.ReadSourceAsync(ctx.ProjectId, sourceType, sourceId, pageNumber);
-        return result is null
-            ? $"Error: source {sourceType}/{sourceId:N} was not found in this project."
-            : JsonSerializer.Serialize(result);
+        if (result is null) return $"Error: source {sourceType}/{sourceId:N} was not found in this project.";
+        if (string.Equals(sourceType, ProjectSearchSourceTypes.Entity, StringComparison.OrdinalIgnoreCase))
+            await AddEntityVisualsToModelAsync(ctx, sourceId);
+        return JsonSerializer.Serialize(result);
     }
 
     private async Task<string> SearchProjectAsync(
@@ -561,12 +584,15 @@ public sealed class EditorChatTools(
                 .Where(match => match.Score > 0));
         }
 
-        var payload = matches
+        var selected = matches
             .OrderByDescending(match => match.Score)
             .ThenBy(match => match.Entity.Type, StringComparer.OrdinalIgnoreCase)
             .ThenBy(match => match.Entity.Name, StringComparer.OrdinalIgnoreCase)
             .Take(topK)
-            .Select(match => CompactEntitySearchPayload(match.Entity, match.Score));
+            .ToList();
+        var visuals = await entityVisualExamples.ListForEntitiesAsync(ctx.ProjectId, selected.Select(match => match.Entity.Id).ToList());
+        var payload = selected.Select(match => CompactEntitySearchPayload(
+            match.Entity, match.Score, visuals.GetValueOrDefault(match.Entity.Id, [])));
 
         return JsonSerializer.Serialize(payload);
     }
@@ -604,6 +630,7 @@ public sealed class EditorChatTools(
                 stagedAddedToContextFeed = true;
             }
 
+            await AddEntityVisualsToModelAsync(ctx, entityId);
             return await ctx.OutlineStaging.ReadEntityAsync(entityId, stagedAddedToContextFeed, _detailEntityRelationOptions);
         }
 
@@ -628,6 +655,7 @@ public sealed class EditorChatTools(
         var manualLinks = links.Where(link => !link.IsAutoLink).Select(LinkPayload).ToList();
         var autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload).ToList();
         var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, _detailEntityRelationOptions);
+        var visualExamples = await AddEntityVisualsToModelAsync(ctx, entityId);
         return JsonSerializer.Serialize(new
         {
             id = entity.Id,
@@ -641,12 +669,111 @@ public sealed class EditorChatTools(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
+            visualExamples = visualExamples.Select(VisualExamplePayload),
             links = manualLinks.Concat(autoMentionLinks),
             manualLinks,
             autoMentionLinks,
             relationContext,
         });
     }
+
+    private async Task<string> ListEntityVisualExamplesAsync(EditorChatContext ctx, Guid entityId)
+    {
+        if (await entities.GetAsync(ctx.ProjectId, entityId) is null)
+            return $"Error: entity {entityId} not found in this project.";
+        var examples = await AddEntityVisualsToModelAsync(ctx, entityId);
+        return JsonSerializer.Serialize(examples.Select(VisualExamplePayload));
+    }
+
+    private async Task<string> AttachProjectImageToEntityAsync(EditorChatContext ctx, Guid entityId, Guid imageId, string? label)
+    {
+        try
+        {
+            if (ctx.OutlineStaging is not null)
+            {
+                var after = new EntityVisualChange("attach", EntityId: entityId, ImageId: imageId, Label: label?.Trim() ?? string.Empty);
+                return await ctx.OutlineStaging.StageExternalChangeAsync(
+                    "Attach a visual example to an entity", null, after,
+                    new { status = "staged", entityId, imageId, label }, "EntityVisualExample", $"{entityId:N}/{imageId:N}");
+            }
+            var example = await entityVisualExamples.AttachAsync(ctx.ProjectId, entityId, imageId, label, EntityVisualExampleOrigin.Agent);
+            ctx.AddModelOnlyImage(example.Image);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(VisualExamplePayload(example));
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<string> UpdateEntityVisualExampleAsync(EditorChatContext ctx, Guid exampleId, string label, int? sortOrder)
+    {
+        try
+        {
+            if (ctx.OutlineStaging is not null)
+            {
+                var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
+                if (current is null) return "Error: entity visual example was not found.";
+                var before = new EntityVisualChange("update", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
+                var after = before with { Label = label.Trim(), SortOrder = sortOrder ?? current.SortOrder };
+                return await ctx.OutlineStaging.StageExternalChangeAsync(
+                    "Update an entity visual example", before, after,
+                    new { status = "staged", exampleId, label, sortOrder }, "EntityVisualExample", exampleId.ToString("N"));
+            }
+            var example = await entityVisualExamples.UpdateAsync(ctx.ProjectId, exampleId, label, sortOrder);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(VisualExamplePayload(example));
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<string> DetachProjectImageFromEntityAsync(EditorChatContext ctx, Guid exampleId)
+    {
+        if (ctx.OutlineStaging is not null)
+        {
+            var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
+            if (current is null) return "Error: entity visual example was not found.";
+            var before = new EntityVisualChange("detach", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
+            return await ctx.OutlineStaging.StageExternalChangeAsync(
+                "Detach an entity visual example", before, null,
+                new { status = "staged", exampleId }, "EntityVisualExample", exampleId.ToString("N"));
+        }
+        await entityVisualExamples.DetachAsync(ctx.ProjectId, exampleId);
+        ctx.OnMutated();
+        return JsonSerializer.Serialize(new { status = "detached", exampleId });
+    }
+
+    private async Task<IReadOnlyList<EntityVisualExampleView>> AddEntityVisualsToModelAsync(EditorChatContext ctx, Guid entityId)
+    {
+        var examples = await entityVisualExamples.ListForEntityAsync(ctx.ProjectId, entityId);
+        foreach (var example in examples)
+            ctx.AddModelOnlyImage(example.Image);
+        return examples;
+    }
+
+    private static object VisualExamplePayload(EntityVisualExampleView example) => new
+    {
+        example.Id,
+        example.EntityId,
+        example.EntityType,
+        example.EntityName,
+        example.Label,
+        example.SortOrder,
+        example.Origin,
+        image = new
+        {
+            example.Image.Id,
+            example.Image.FileName,
+            example.Image.ContentType,
+            example.Image.PreviewUrl,
+            example.Image.AltText,
+            example.Image.Prompt,
+        },
+    };
 
     private async Task<object> EntityPayloadAsync(
         Guid projectId,
@@ -938,6 +1065,7 @@ public sealed class EditorChatTools(
         string? outputFormat,
         int? outputCompression,
         Guid[]? referenceImageIds,
+        EntityVisualTarget[]? entityTargets,
         bool placeInCurrentChapter,
         Guid? targetChapterId,
         Guid? targetPictureImageElementId)
@@ -984,7 +1112,8 @@ public sealed class EditorChatTools(
             altText?.Trim() ?? string.Empty,
             1,
             (referenceImageIds ?? []).Distinct().ToList(),
-            Label: "Editor chat image"));
+            Label: "Editor chat image",
+            EntityTargets: ctx.OutlineStaging is null ? entityTargets : null));
         ctx.TrackImageGenerationJob(job.Id);
 
         await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, CancellationToken.None);
@@ -1005,6 +1134,21 @@ public sealed class EditorChatTools(
                     title: image.FileName,
                     caption: "Generated output saved to the image library."));
                 ctx.AddModelOnlyImage(image);
+                foreach (var entityTarget in (entityTargets ?? []).Where(item => item.EntityId != Guid.Empty).DistinctBy(item => item.EntityId))
+                {
+                    if (ctx.OutlineStaging is null)
+                    {
+                        await entityVisualExamples.AttachAsync(ctx.ProjectId, entityTarget.EntityId, image.Id, entityTarget.Label, EntityVisualExampleOrigin.Agent);
+                    }
+                    else
+                    {
+                        var after = new EntityVisualChange("attach", EntityId: entityTarget.EntityId, ImageId: image.Id, Label: entityTarget.Label);
+                        await ctx.OutlineStaging.StageExternalChangeAsync(
+                            $"Attach generated image to entity {entityTarget.EntityId:N}", null, after,
+                            new { status = "staged", entityTarget.EntityId, imageId = image.Id, entityTarget.Label },
+                            "EntityVisualExample", $"{entityTarget.EntityId:N}/{image.Id:N}");
+                    }
+                }
             }
         }
 
@@ -2087,7 +2231,7 @@ public sealed class EditorChatTools(
         return value.Contains(query, StringComparison.OrdinalIgnoreCase) ? detailWeight : 0;
     }
 
-    private static object CompactEntitySearchPayload(StoryEntity entity, int score) => new
+    private static object CompactEntitySearchPayload(StoryEntity entity, int score, IReadOnlyList<EntityVisualExampleView>? visuals = null) => new
     {
         id = entity.Id,
         type = entity.Type,
@@ -2100,6 +2244,8 @@ public sealed class EditorChatTools(
         wikiSections = CompactWikiSections(entity.WikiSections),
         canonSources = CompactCanonSources(entity.CanonSources),
         properties = CompactProperties(entity.Properties),
+        visualCount = visuals?.Count ?? 0,
+        visualExamples = (visuals ?? []).Select(example => new { example.Image.Id, example.Label, example.SortOrder, example.Image.AltText, example.Image.Prompt }),
     };
 
     private static IReadOnlyList<Guid>? ParseSourceIds(string[]? sourceIds, out string? error)

@@ -303,6 +303,13 @@
                              WikiSections="@selected.WikiSections"
                              CanonSources="@selected.CanonSources" />
 
+        @if (!selected.IsStructural && Guid.TryParse(selected.Key, out var visualEntityId))
+        {
+            <section class="graph-edit-section">
+                <EntityVisualExamples ProjectId="@ProjectId" EntityId="@visualEntityId" Editable="true" />
+            </section>
+        }
+
         <section class="graph-edit-section">
             <div class="graph-edit-section-head">
                 <h6>Relationships</h6>

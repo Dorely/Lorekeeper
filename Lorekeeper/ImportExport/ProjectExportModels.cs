@@ -18,7 +18,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 2;
+    public const int CurrentFormatVersion = 3;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -27,6 +27,7 @@ public sealed record ProjectExportDocument
     public required ProjectExportProject Project { get; init; }
     public List<ProjectExportEntityType> EntityTypes { get; init; } = [];
     public List<ProjectExportImage> Images { get; init; } = [];
+    public List<ProjectExportEntityVisualExample> EntityVisualExamples { get; init; } = [];
     public List<ProjectExportPublishProfile> PublishProfiles { get; init; } = [];
     public List<ProjectExportAct> Acts { get; init; } = [];
     public List<ProjectExportChapter> Chapters { get; init; } = [];
@@ -72,6 +73,15 @@ public sealed record ProjectExportImage(
     string SourceMetadataJson,
     DateTime CreatedAt,
     DateTime UpdatedAt);
+
+public sealed record ProjectExportEntityVisualExample(
+    ProjectExportNodeRef Entity,
+    Guid ImageId,
+    string Label,
+    int SortOrder,
+    EntityVisualExampleOrigin Origin,
+    string SourceUrl,
+    string SourceLocator);
 
 public sealed record ProjectExportPublishProfile(
     Guid Id,

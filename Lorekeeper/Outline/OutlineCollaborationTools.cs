@@ -4,6 +4,7 @@ using System.Text.Json;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Graph;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
@@ -18,7 +19,31 @@ namespace Lorekeeper.Outline;
 /// is invoked after every successful mutating tool call so the streaming service can emit
 /// an <see cref="OutlineMutated"/> event to refresh the live tree in the UI.
 /// </summary>
-public sealed record OutlineCollaborationContext(Guid ProjectId, Action OnMutated, OutlineToolStagingContext? Staging = null);
+public sealed class OutlineCollaborationContext(
+    Guid projectId,
+    Action onMutated,
+    OutlineToolStagingContext? staging = null,
+    bool visionReady = false,
+    Action<IEnumerable<EntityVisualContextReference>>? onVisualsQueued = null)
+{
+    private readonly List<EntityVisualContextReference> _pendingVisuals = [];
+    public Guid ProjectId { get; } = projectId;
+    public Action OnMutated { get; } = onMutated;
+    public OutlineToolStagingContext? Staging { get; } = staging;
+    public bool VisionReady { get; } = visionReady;
+    public void QueueVisuals(IEnumerable<EntityVisualContextReference> visuals)
+    {
+        var list = visuals.ToList();
+        _pendingVisuals.AddRange(list);
+        onVisualsQueued?.Invoke(list);
+    }
+    public IReadOnlyList<EntityVisualContextReference> DrainVisuals()
+    {
+        var result = _pendingVisuals.ToList();
+        _pendingVisuals.Clear();
+        return result;
+    }
+}
 
 /// <summary>
 /// Builds the set of <see cref="AITool"/>s exposed to the LLM during an Outline
@@ -37,7 +62,8 @@ public sealed class OutlineCollaborationTools(
     IChapterVisualService chapterVisuals,
     IEntityRelationContextService entityRelations,
     IProjectSearchService projectSearch,
-    IGraphAutoLinkService autoLinks)
+    IGraphAutoLinkService autoLinks,
+    IEntityVisualExampleService entityVisualExamples)
 {
     private const string UnassignedSentinel = "unassigned";
     /// <summary>Canonical entity type for chapter-scoped beats.</summary>
@@ -164,6 +190,21 @@ public sealed class OutlineCollaborationTools(
                 description: "Bounded search for graph entities by name, type, property text, aliases, and wiki text. Use type or parentId to narrow results when known. When Review edits is enabled, returns staged state. Returns compact matches; call read_entity or list_entity_links for details."),
 
             AIFunctionFactory.Create(
+                method: (Guid entityId) => ReadEntityAsync(context, entityId),
+                name: "read_entity",
+                description: "Read one full entity with properties, knowledge, relationships, and ordered visual examples. Vision-ready providers receive its image bytes on the next model round."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
+                name: "list_entity_links",
+                description: "List all graph links adjacent to an entity."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId) => ListEntityVisualExamplesAsync(context, entityId),
+                name: "list_entity_visual_examples",
+                description: "List ordered visual examples attached to an entity and supply their bytes to a vision-ready provider on the next model round."),
+
+            AIFunctionFactory.Create(
                 method: (string type, string name, string? propertiesJson = null, string? parentId = null, int? order = null) =>
                     CreateEntityAsync(context, type, name, propertiesJson, parentId, order),
                 name: "create_entity",
@@ -192,6 +233,21 @@ public sealed class OutlineCollaborationTools(
                 name: "link_entities",
                 description: "Create a typed edge between two entities. propertiesJson is an optional JSON object string of edge metadata. Conventional edge types: 'AppearsIn' (Character -> Event/Chapter), 'LocatedAt' (Event -> Location), 'KnownTo' (Character -> Character). Other types are allowed; use camel-case verbs. Returns link details plus updated source and target payloads."),
 
+            AIFunctionFactory.Create(
+                method: (Guid entityId, Guid imageId, string? label = null) => AttachEntityVisualAsync(context, entityId, imageId, label),
+                name: "attach_entity_visual_example",
+                description: "Attach an existing project image to a non-structural entity as a labeled visual example."),
+
+            AIFunctionFactory.Create(
+                method: (Guid exampleId, string label, int? sortOrder = null) => UpdateEntityVisualAsync(context, exampleId, label, sortOrder),
+                name: "update_entity_visual_example",
+                description: "Relabel or reorder an attached entity visual example."),
+
+            AIFunctionFactory.Create(
+                method: (Guid exampleId) => DetachEntityVisualAsync(context, exampleId),
+                name: "detach_entity_visual_example",
+                description: "Detach an entity visual example without deleting its image."),
+
         };
 
         return tools;
@@ -215,10 +271,110 @@ public sealed class OutlineCollaborationTools(
         int? pageNumber)
     {
         var result = await projectSearch.ReadSourceAsync(ctx.ProjectId, sourceType, sourceId, pageNumber);
-        return result is null
-            ? $"Error: source {sourceType}/{sourceId:N} was not found in this project."
-            : JsonSerializer.Serialize(result);
+        if (result is null)
+            return $"Error: source {sourceType}/{sourceId:N} was not found in this project.";
+        if (string.Equals(sourceType, ProjectSearchSourceTypes.Entity, StringComparison.OrdinalIgnoreCase))
+            await QueueEntityVisualsAsync(ctx, sourceId);
+        return JsonSerializer.Serialize(result);
     }
+
+    private async Task<string> ReadEntityAsync(OutlineCollaborationContext ctx, Guid entityId)
+    {
+        if (ctx.Staging is not null)
+        {
+            await QueueEntityVisualsAsync(ctx, entityId);
+            return await ctx.Staging.ReadEntityAsync(entityId, addedToContextFeed: false, EntityRelationOptions);
+        }
+        var entity = await entities.GetAsync(ctx.ProjectId, entityId);
+        if (entity is null) return $"Error: entity {entityId} not found in this project.";
+        var payload = await EntityPayloadAsync(ctx.ProjectId, entity);
+        var visuals = await QueueEntityVisualsAsync(ctx, entityId);
+        return JsonSerializer.Serialize(new { entity = payload, visualExamples = visuals.Select(VisualPayload) });
+    }
+
+    private async Task<string> ListEntityLinksAsync(OutlineCollaborationContext ctx, Guid entityId)
+    {
+        if (ctx.Staging is not null) return await ctx.Staging.ListEntityLinksAsync(entityId);
+        if (await entities.GetAsync(ctx.ProjectId, entityId) is null) return $"Error: entity {entityId} not found in this project.";
+        return JsonSerializer.Serialize(await entities.ListLinksAsync(ctx.ProjectId, entityId));
+    }
+
+    private async Task<string> ListEntityVisualExamplesAsync(OutlineCollaborationContext ctx, Guid entityId)
+    {
+        if (await entities.GetAsync(ctx.ProjectId, entityId) is null) return $"Error: entity {entityId} not found in this project.";
+        return JsonSerializer.Serialize((await QueueEntityVisualsAsync(ctx, entityId)).Select(VisualPayload));
+    }
+
+    private async Task<string> AttachEntityVisualAsync(OutlineCollaborationContext ctx, Guid entityId, Guid imageId, string? label)
+    {
+        try
+        {
+            if (ctx.Staging is not null)
+            {
+                var after = new EntityVisualChange("attach", EntityId: entityId, ImageId: imageId, Label: label?.Trim() ?? string.Empty);
+                return await ctx.Staging.StageExternalChangeAsync(
+                    "Attach a visual example to an entity", null, after,
+                    new { status = "staged", entityId, imageId, label }, "EntityVisualExample", $"{entityId:N}/{imageId:N}");
+            }
+            var example = await entityVisualExamples.AttachAsync(ctx.ProjectId, entityId, imageId, label, EntityVisualExampleOrigin.Agent);
+            ctx.OnMutated();
+            await QueueEntityVisualsAsync(ctx, entityId);
+            return JsonSerializer.Serialize(VisualPayload(example));
+        }
+        catch (Exception ex) { return $"Error: {ex.Message}"; }
+    }
+
+    private async Task<string> UpdateEntityVisualAsync(OutlineCollaborationContext ctx, Guid exampleId, string label, int? sortOrder)
+    {
+        try
+        {
+            if (ctx.Staging is not null)
+            {
+                var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
+                if (current is null) return "Error: entity visual example was not found.";
+                var before = new EntityVisualChange("update", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
+                var after = before with { Label = label.Trim(), SortOrder = sortOrder ?? current.SortOrder };
+                return await ctx.Staging.StageExternalChangeAsync(
+                    "Update an entity visual example", before, after,
+                    new { status = "staged", exampleId, label, sortOrder }, "EntityVisualExample", exampleId.ToString("N"));
+            }
+            var example = await entityVisualExamples.UpdateAsync(ctx.ProjectId, exampleId, label, sortOrder);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(VisualPayload(example));
+        }
+        catch (Exception ex) { return $"Error: {ex.Message}"; }
+    }
+
+    private async Task<string> DetachEntityVisualAsync(OutlineCollaborationContext ctx, Guid exampleId)
+    {
+        if (ctx.Staging is not null)
+        {
+            var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
+            if (current is null) return "Error: entity visual example was not found.";
+            var before = new EntityVisualChange("detach", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
+            return await ctx.Staging.StageExternalChangeAsync(
+                "Detach an entity visual example", before, null,
+                new { status = "staged", exampleId }, "EntityVisualExample", exampleId.ToString("N"));
+        }
+        await entityVisualExamples.DetachAsync(ctx.ProjectId, exampleId);
+        ctx.OnMutated();
+        return JsonSerializer.Serialize(new { status = "detached", exampleId });
+    }
+
+    private async Task<IReadOnlyList<EntityVisualExampleView>> QueueEntityVisualsAsync(OutlineCollaborationContext ctx, Guid entityId)
+    {
+        var examples = await entityVisualExamples.ListForEntityAsync(ctx.ProjectId, entityId);
+        ctx.QueueVisuals(examples.Select(example => new EntityVisualContextReference(
+            example.Image.Id, example.EntityId, example.EntityType, example.EntityName, example.Label,
+            example.SortOrder, example.Image.FileName, example.Image.AltText, example.Image.Prompt)));
+        return examples;
+    }
+
+    private static object VisualPayload(EntityVisualExampleView example) => new
+    {
+        example.Id, example.EntityId, example.Label, example.SortOrder, example.Origin,
+        image = new { example.Image.Id, example.Image.FileName, example.Image.AltText, example.Image.Prompt, example.Image.PreviewUrl },
+    };
 
     private async Task<string> SearchProjectAsync(
         OutlineCollaborationContext ctx,
@@ -562,12 +718,15 @@ public sealed class OutlineCollaborationTools(
                 .Where(match => match.Score > 0));
         }
 
-        var payload = matches
+        var selected = matches
             .OrderByDescending(match => match.Score)
             .ThenBy(match => match.Entity.Type, StringComparer.OrdinalIgnoreCase)
             .ThenBy(match => match.Entity.Name, StringComparer.OrdinalIgnoreCase)
             .Take(topK)
-            .Select(match => CompactEntitySearchPayload(match.Entity, match.Score));
+            .ToList();
+        var visuals = await entityVisualExamples.ListForEntitiesAsync(ctx.ProjectId, selected.Select(match => match.Entity.Id).ToList());
+        var payload = selected.Select(match => CompactEntitySearchPayload(
+            match.Entity, match.Score, visuals.GetValueOrDefault(match.Entity.Id, [])));
 
         return JsonSerializer.Serialize(payload);
     }
@@ -989,7 +1148,7 @@ public sealed class OutlineCollaborationTools(
         return value.Contains(query, StringComparison.OrdinalIgnoreCase) ? detailWeight : 0;
     }
 
-    private static object CompactEntitySearchPayload(StoryEntity entity, int score) => new
+    private static object CompactEntitySearchPayload(StoryEntity entity, int score, IReadOnlyList<EntityVisualExampleView>? visuals = null) => new
     {
         id = entity.Id,
         type = entity.Type,
@@ -1002,6 +1161,8 @@ public sealed class OutlineCollaborationTools(
         wikiSections = CompactWikiSections(entity.WikiSections),
         canonSources = CompactCanonSources(entity.CanonSources),
         properties = CompactProperties(entity.Properties),
+        visualCount = visuals?.Count ?? 0,
+        visualExamples = (visuals ?? []).Select(example => new { example.Image.Id, example.Label, example.SortOrder, example.Image.AltText, example.Image.Prompt }),
     };
 
     private static IReadOnlyList<Guid>? ParseSourceIds(string[]? sourceIds, out string? error)

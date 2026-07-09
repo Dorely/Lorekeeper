@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Llm;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
@@ -16,6 +17,7 @@ public sealed class OutlineCollaborationService(
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     OutlineCollaborationTools tools,
+    IEntityVisualContextService entityVisualContext,
     IAiChangeApprovalService changeApproval,
     IOptions<AgentOptions> options,
     ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
@@ -75,6 +77,8 @@ When to use tools:
     you enough information to do so usefully.
 
 {{AssistantWorkflowInstructions.OutlineChat}}
+
+{{AssistantWorkflowInstructions.EntityVisualExamples}}
 
 Entity conventions:
 - The outline spine is also represented in the graph: Project -> Act ->
@@ -221,6 +225,7 @@ they commit to a direction, act on it without a second confirmation.
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
         OutlineToolStagingContext? staging = null;
+        OutlineCollaborationContext? toolContext = null;
         string? setupError = null;
         try
         {
@@ -232,7 +237,9 @@ they commit to a direction, act on it without a second confirmation.
                 staging = tools.CreateStagingContext(projectId, conversation.Id, onDirectMutationApplied: OnToolMutated);
 
             // OnMutated is captured by every mutating tool; we drain it via _mutatedSinceYield.
-            aiTools = await tools.BuildAsync(new OutlineCollaborationContext(projectId, OnToolMutated, staging), cancellationToken);
+            var visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
+            toolContext = new OutlineCollaborationContext(projectId, OnToolMutated, staging, visionReady);
+            aiTools = await tools.BuildAsync(toolContext, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -504,6 +511,17 @@ they commit to a direction, act on it without a second confirmation.
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+            if (toolContext is not null)
+            {
+                var visualMessage = await entityVisualContext.BuildVisionMessageAsync(
+                    projectId,
+                    toolContext.DrainVisuals(),
+                    toolContext.VisionReady,
+                    "Visual examples for the entities loaded by the preceding tools. Preserve the text mappings to every represented entity.",
+                    cancellationToken);
+                if (visualMessage is not null)
+                    messages.Add(visualMessage);
+            }
 
             if (iteration == maxIterations - 1)
             {

@@ -3,11 +3,13 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Components.Chat
 @using Lorekeeper.Research
+@using Lorekeeper.EntityVisuals
 @implements IAsyncDisposable
 @inject IIngestService Ingest
 @inject ILlmProviderService Providers
 @inject IIngestJobNotifier Notifier
 @inject IWebIngestCandidateService WebCandidates
+@inject IEntityVisualExampleService EntityVisuals
 
 @if (Project is null)
 {
@@ -120,7 +122,7 @@ else
             }
             <div class="mb-2">
                 <label class="form-label small text-muted">Source text</label>
-                <InputFile OnChange="OnFileSelectedAsync" class="form-control form-control-sm mb-2" />
+                <InputFile OnChange="OnFileSelectedAsync" class="form-control form-control-sm mb-2" accept=".txt,.md,.markdown,.epub,.pdf,.png,.jpg,.jpeg,.webp" />
                 @if (!string.IsNullOrWhiteSpace(_artifactFileName))
                 {
                     <div class="ingest-artifact-status">
@@ -311,6 +313,20 @@ else
                         <span class="ingest-finalization-hint">Graph relationship links are built after entity final review.</span>
                     </button>
                 </div>
+                @if (_sourceVisuals.Count > 0)
+                {
+                    <div class="ingest-section-title mt-3">Source visuals</div>
+                    <div class="ingest-source-visuals">
+                        @foreach (var visual in _sourceVisuals)
+                        {
+                            <a href="@($"/projects/{Project!.Id:N}/source-visuals/{visual.Id:N}/content")" target="_blank" title="@visual.Locator">
+                                <img src="@visual.PreviewUrl" alt="@visual.AltText" />
+                                <span>@visual.Status</span>
+                                <small>@visual.Locator</small>
+                            </a>
+                        }
+                    </div>
+                }
 
                 @if (!_followCurrentChunk && IsBusy(_selectedJob))
                 {
@@ -468,6 +484,7 @@ else
     private List<IngestJobListItem> _jobs = [];
     private IngestJobDetailView? _selectedJob;
     private List<IngestReportItemView> _reportItems = [];
+    private List<SourceVisualCandidateView> _sourceVisuals = [];
     private IngestSourceChunkExcerpt? _sourceExcerpt;
     private List<LlmProvider> _providers = [];
     private HashSet<int> _visionProviderIds = [];
@@ -605,7 +622,9 @@ else
             ? "PDF artifact"
             : string.Equals(Path.GetExtension(_artifactFileName), ".epub", StringComparison.OrdinalIgnoreCase)
                 ? "EPUB artifact"
-                : "Text artifact";
+                : Path.GetExtension(_artifactFileName ?? string.Empty).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".webp"
+                    ? "Image artifact"
+                    : "Text artifact";
 
     protected override async Task OnParametersSetAsync()
     {
@@ -995,6 +1014,7 @@ else
         {
             _selectedJob = await Ingest.GetJobViewAsync(jobId, cancellationToken);
             if (_selectedJob is null) return;
+            _sourceVisuals = (await EntityVisuals.ListIngestCandidatesAsync(_selectedJob.ProjectId, _selectedJob.SourceId, cancellationToken)).ToList();
             _resumeProviderId = _selectedJob.ProviderId ?? DefaultProviderId;
             SetFollowTarget(_selectedJob);
             await LoadSelectedChunkDataAsync(cancellationToken);
@@ -1016,6 +1036,7 @@ else
             _selectedChunkId = null;
             _selectedFinalization = false;
             _reportItems = [];
+            _sourceVisuals = [];
             _sourceExcerpt = null;
             if (_jobs.Count > 0)
                 await SelectJobAsync(_jobs[0].Id);
@@ -1023,6 +1044,7 @@ else
         }
 
         _selectedJob = refreshed;
+        _sourceVisuals = (await EntityVisuals.ListIngestCandidatesAsync(refreshed.ProjectId, refreshed.SourceId)).ToList();
         if (previousFollow)
         {
             SetFollowTarget(refreshed);
@@ -1319,6 +1341,7 @@ else
         {
             ".pdf" => "PDF book",
             ".epub" => "EPUB book",
+            ".png" or ".jpg" or ".jpeg" or ".webp" => "Image source",
             ".md" or ".markdown" => "Markdown source",
             _ => "Text source",
         };

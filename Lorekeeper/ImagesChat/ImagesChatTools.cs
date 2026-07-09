@@ -4,6 +4,7 @@ using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EditorChat;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -19,6 +20,8 @@ public sealed class ImagesChatTools(
     IChapterService chapters,
     IProjectSearchService projectSearch,
     IProjectImageService projectImages,
+    IEntityVisualExampleService entityVisualExamples,
+    IEntityService entities,
     IProjectImageJobService imageJobs,
     IProjectImageGenerationRuntime imageRuntime,
     IChapterVisualService chapterVisuals,
@@ -75,6 +78,31 @@ public sealed class ImagesChatTools(
                 description: "Read one project image's metadata and URLs. Use inspect_rendered_chapter_snapshots for visual layout inspection."),
 
             AIFunctionFactory.Create(
+                method: (Guid entityId) => ReadEntityAsync(context, entityId),
+                name: "read_entity",
+                description: "Read a full entity and its ordered visual examples. Vision-ready providers receive the image bytes on the next round."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId) => ListEntityVisualsAsync(context, entityId),
+                name: "list_entity_visual_examples",
+                description: "List and visually load the examples attached to an entity."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId, Guid imageId, string? label = null) => AttachEntityVisualAsync(context, entityId, imageId, label),
+                name: "attach_entity_visual_example",
+                description: "Attach an existing project image to a non-structural entity as a labeled visual example."),
+
+            AIFunctionFactory.Create(
+                method: (Guid exampleId, string label, int? sortOrder = null) => UpdateEntityVisualAsync(context, exampleId, label, sortOrder),
+                name: "update_entity_visual_example",
+                description: "Relabel or reorder an entity visual example."),
+
+            AIFunctionFactory.Create(
+                method: (Guid exampleId) => DetachEntityVisualAsync(context, exampleId),
+                name: "detach_entity_visual_example",
+                description: "Detach an entity visual example without deleting the library image."),
+
+            AIFunctionFactory.Create(
                 method: (Guid chapterId) => ReadChapterVisualLayoutAsync(context, chapterId),
                 name: "read_chapter_visual_layout",
                 description: "Read a chapter visual mode and layout manifest, including placed image ids, text boxes, anchors, captions, and reading order."),
@@ -92,16 +120,16 @@ public sealed class ImagesChatTools(
                 description: "Create a PNG edit mask for an existing image from percentage-based rect/ellipse/polygon shapes. Transparent pixels are the editable regions."),
 
             AIFunctionFactory.Create(
-                method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, string? label = null, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
-                    GenerateImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, label, targetChapterId, targetPictureImageElementId),
+                method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, string? label = null, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
+                    GenerateImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, entityTargets, label, targetChapterId, targetPictureImageElementId),
                 name: "generate_image",
-                description: "Queue one or more image generations, wait for completion, save outputs to the image library, and return final image ids. Optional referenceImageIds accepts multiple existing project image ids, up to the configured reference-image limit; use them for recurring characters, outfits, settings, props, and style continuity. For PicturePage targets, pass targetChapterId and optionally targetPictureImageElementId; omit size to use the layout-native recommended size."),
+                description: "Generate library images. Pass entityTargets [{entityId,label}] for every clearly represented entity so each output is attached automatically. Reuse existing visual examples through referenceImageIds for continuity. Do not target decorative/layout-only art or guess ambiguous associations."),
 
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, string prompt, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, string? label = null) =>
-                    EditImageAsync(context, sourceImageId, prompt, maskId, maskShapes, maskLabel, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, label),
+                method: (Guid sourceImageId, string prompt, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, bool inheritSourceEntityTargets = true, string? label = null) =>
+                    EditImageAsync(context, sourceImageId, prompt, maskId, maskShapes, maskLabel, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, entityTargets, inheritSourceEntityTargets, label),
                 name: "edit_image",
-                description: "Queue a masked or unmasked edit for an existing project image, wait for completion, save outputs, and return final image ids. Optional referenceImageIds accepts multiple existing project image ids, up to the configured reference-image limit, to preserve continuity while editing. Use create_shape_mask or maskShapes for targeted edits."),
+                description: "Edit a project image. Outputs inherit the source image's entity targets by default; pass inheritSourceEntityTargets=false to disable, or entityTargets to add/override clearly represented entities."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, Guid imageId) => AddProjectImageToChapterAsync(context, chapterId, imageId),
@@ -127,9 +155,58 @@ public sealed class ImagesChatTools(
     private async Task<string> ReadProjectSourceAsync(ImagesChatToolContext ctx, string sourceType, Guid sourceId, int? pageNumber)
     {
         var result = await projectSearch.ReadSourceAsync(ctx.ProjectId, sourceType, sourceId, pageNumber);
-        return result is null
-            ? $"Error: source {sourceType}/{sourceId:N} was not found in this project."
-            : JsonSerializer.Serialize(result, JsonOptions);
+        if (result is null) return $"Error: source {sourceType}/{sourceId:N} was not found in this project.";
+        if (string.Equals(sourceType, ProjectSearchSourceTypes.Entity, StringComparison.OrdinalIgnoreCase))
+            await QueueEntityVisualsAsync(ctx, sourceId);
+        return JsonSerializer.Serialize(result, JsonOptions);
+    }
+
+    private async Task<string> ReadEntityAsync(ImagesChatToolContext ctx, Guid entityId)
+    {
+        var entity = await entities.GetAsync(ctx.ProjectId, entityId);
+        if (entity is null) return $"Error: entity {entityId} not found in this project.";
+        var visuals = await QueueEntityVisualsAsync(ctx, entityId);
+        return JsonSerializer.Serialize(new { entity, visualExamples = visuals.Select(VisualPayload) }, JsonOptions);
+    }
+
+    private async Task<string> ListEntityVisualsAsync(ImagesChatToolContext ctx, Guid entityId) =>
+        JsonSerializer.Serialize((await QueueEntityVisualsAsync(ctx, entityId)).Select(VisualPayload), JsonOptions);
+
+    private async Task<string> AttachEntityVisualAsync(ImagesChatToolContext ctx, Guid entityId, Guid imageId, string? label)
+    {
+        try
+        {
+            var example = await entityVisualExamples.AttachAsync(ctx.ProjectId, entityId, imageId, label, EntityVisualExampleOrigin.Agent);
+            ctx.AddModelOnlyImage(example.Image);
+            ctx.MarkMutated();
+            return JsonSerializer.Serialize(VisualPayload(example), JsonOptions);
+        }
+        catch (Exception ex) { return $"Error: {ex.Message}"; }
+    }
+
+    private async Task<string> UpdateEntityVisualAsync(ImagesChatToolContext ctx, Guid exampleId, string label, int? sortOrder)
+    {
+        try
+        {
+            var example = await entityVisualExamples.UpdateAsync(ctx.ProjectId, exampleId, label, sortOrder);
+            ctx.MarkMutated();
+            return JsonSerializer.Serialize(VisualPayload(example), JsonOptions);
+        }
+        catch (Exception ex) { return $"Error: {ex.Message}"; }
+    }
+
+    private async Task<string> DetachEntityVisualAsync(ImagesChatToolContext ctx, Guid exampleId)
+    {
+        await entityVisualExamples.DetachAsync(ctx.ProjectId, exampleId);
+        ctx.MarkMutated();
+        return JsonSerializer.Serialize(new { status = "detached", exampleId }, JsonOptions);
+    }
+
+    private async Task<IReadOnlyList<EntityVisualExampleView>> QueueEntityVisualsAsync(ImagesChatToolContext ctx, Guid entityId)
+    {
+        var visuals = await entityVisualExamples.ListForEntityAsync(ctx.ProjectId, entityId);
+        foreach (var visual in visuals) ctx.AddModelOnlyImage(visual.Image);
+        return visuals;
     }
 
     private async Task<string> SearchProjectAsync(
@@ -356,6 +433,7 @@ public sealed class ImagesChatTools(
         int? outputCompression,
         int count,
         Guid[]? referenceImageIds,
+        EntityVisualTarget[]? entityTargets,
         string? label,
         Guid? targetChapterId,
         Guid? targetPictureImageElementId)
@@ -383,8 +461,9 @@ public sealed class ImagesChatTools(
             altText?.Trim() ?? string.Empty,
             Math.Clamp(count, 1, Math.Max(1, imageOptions.Value.MaxOutputs)),
             (referenceImageIds ?? []).Distinct().ToList(),
-            label));
-        return await RunQueuedJobToolAsync(ctx, job.Id);
+            label,
+            NormalizeTargets(entityTargets)));
+        return await RunQueuedJobToolAsync(ctx, job.Id, NormalizeTargets(entityTargets));
     }
 
     private async Task<ImageGenerationTargetResolution> ResolvePicturePageGenerationTargetAsync(
@@ -428,6 +507,8 @@ public sealed class ImagesChatTools(
         int? outputCompression,
         int count,
         Guid[]? referenceImageIds,
+        EntityVisualTarget[]? entityTargets,
+        bool inheritSourceEntityTargets,
         string? label)
     {
         if (sourceImageId == Guid.Empty)
@@ -458,11 +539,19 @@ public sealed class ImagesChatTools(
             MaskPngDataUrl: null,
             ReferenceImageIds: (referenceImageIds ?? []).Distinct().ToList(),
             Label: label,
-            ExistingMaskId: effectiveMaskId));
-        return await RunQueuedJobToolAsync(ctx, job.Id);
+            ExistingMaskId: effectiveMaskId,
+            EntityTargets: NormalizeTargets(entityTargets),
+            InheritSourceEntityTargets: inheritSourceEntityTargets));
+        var targets = NormalizeTargets(entityTargets).ToList();
+        if (inheritSourceEntityTargets)
+        {
+            targets.AddRange((await entityVisualExamples.ListForImageAsync(ctx.ProjectId, sourceImageId))
+                .Select(example => new EntityVisualTarget(example.EntityId, example.Label)));
+        }
+        return await RunQueuedJobToolAsync(ctx, job.Id, targets.DistinctBy(target => target.EntityId).ToList());
     }
 
-    private async Task<string> RunQueuedJobToolAsync(ImagesChatToolContext ctx, Guid jobId)
+    private async Task<string> RunQueuedJobToolAsync(ImagesChatToolContext ctx, Guid jobId, IReadOnlyList<EntityVisualTarget>? targets = null)
     {
         await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, CancellationToken.None);
         var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
@@ -483,6 +572,8 @@ public sealed class ImagesChatTools(
                 : "Generated output saved to the image library.";
             ctx.AddVisual(await BuildVisualAsync(ctx, image, title: image.FileName, caption: caption));
             ctx.AddModelOnlyImage(image);
+            foreach (var target in targets ?? [])
+                await entityVisualExamples.AttachAsync(ctx.ProjectId, target.EntityId, image.Id, target.Label, EntityVisualExampleOrigin.Agent);
             outputs.Add(ImagePayload(image));
         }
 
@@ -594,6 +685,18 @@ public sealed class ImagesChatTools(
         result.Score,
         result.Reasons,
         content = Truncate(result.Content, 1_800),
+    };
+
+    private static IReadOnlyList<EntityVisualTarget> NormalizeTargets(IEnumerable<EntityVisualTarget>? targets) =>
+        (targets ?? []).Where(target => target.EntityId != Guid.Empty)
+            .Select(target => new EntityVisualTarget(target.EntityId, target.Label?.Trim() ?? string.Empty))
+            .DistinctBy(target => target.EntityId)
+            .ToList();
+
+    private static object VisualPayload(EntityVisualExampleView example) => new
+    {
+        example.Id, example.EntityId, example.EntityName, example.EntityType, example.Label, example.SortOrder,
+        image = ImagePayload(example.Image),
     };
 
     private static object ImagePayload(ProjectImageView image) => new

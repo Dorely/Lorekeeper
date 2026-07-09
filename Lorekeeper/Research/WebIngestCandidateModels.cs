@@ -32,4 +32,5 @@ public sealed record WebIngestCandidateView(
 public sealed record WebIngestCandidateReadResult(
     WebIngestCandidate Candidate,
     IReadOnlyList<WebPageLink> Links,
+    IReadOnlyList<WebPageImage> Images,
     bool FromCache = false);

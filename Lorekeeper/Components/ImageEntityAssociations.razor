@@ -1,0 +1,99 @@
+@using Lorekeeper.EntityVisuals
+@using Lorekeeper.Outline
+@inject IEntityVisualExampleService EntityVisuals
+@inject IEntityService Entities
+@inject IEntityTypeService EntityTypes
+
+<div class="image-entity-associations">
+    <div class="association-chips">
+        @foreach (var example in _examples)
+        {
+            <span class="badge rounded-pill text-bg-secondary" title="@example.Label">
+                @example.EntityName
+                <button type="button" class="association-remove" title="Detach from @example.EntityName" @onclick="() => DetachAsync(example)">×</button>
+            </span>
+        }
+        @if (_examples.Count == 0)
+        {
+            <span class="text-muted small">Not attached to an entity</span>
+        }
+    </div>
+    <div class="input-group input-group-sm">
+        <select class="form-select" @bind="_selectedEntityId" @onfocus="LoadEntitiesAsync">
+            <option value="">Attach to entity…</option>
+            @foreach (var entity in _entities.Where(entity => _examples.All(example => example.EntityId != entity.Id)))
+            {
+                <option value="@entity.Id">@entity.Name (@entity.Type)</option>
+            }
+        </select>
+        <button type="button" class="btn btn-outline-secondary" disabled="@(_selectedEntityId == Guid.Empty || _saving)" @onclick="AttachAsync">Attach</button>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <span class="text-danger small">@_error</span>
+    }
+</div>
+
+@code {
+    private List<EntityVisualExampleView> _examples = [];
+    private List<StoryEntity> _entities = [];
+    private Guid _selectedEntityId;
+    private Guid _loadedImageId;
+    private bool _saving;
+    private string _error = string.Empty;
+
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter, EditorRequired] public Guid ImageId { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ImageId == Guid.Empty || ImageId == _loadedImageId) return;
+        _loadedImageId = ImageId;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync() =>
+        _examples = (await EntityVisuals.ListForImageAsync(ProjectId, ImageId)).ToList();
+
+    private async Task LoadEntitiesAsync()
+    {
+        if (_entities.Count > 0) return;
+        var types = await EntityTypes.ListAsync(ProjectId, includeStructural: false);
+        foreach (var type in types.OrderBy(type => type.SortOrder))
+            _entities.AddRange(await Entities.ListAsync(ProjectId, type.Type));
+        _entities = _entities.OrderBy(entity => entity.Type).ThenBy(entity => entity.Name).ToList();
+    }
+
+    private async Task AttachAsync()
+    {
+        if (_selectedEntityId == Guid.Empty) return;
+        await ChangeAsync(async () =>
+        {
+            await EntityVisuals.AttachAsync(ProjectId, _selectedEntityId, ImageId);
+            _selectedEntityId = Guid.Empty;
+        });
+    }
+
+    private Task DetachAsync(EntityVisualExampleView example) => ChangeAsync(() => EntityVisuals.DetachAsync(ProjectId, example.Id));
+
+    private async Task ChangeAsync(Func<Task> action)
+    {
+        _saving = true;
+        _error = string.Empty;
+        try
+        {
+            await action();
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

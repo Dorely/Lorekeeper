@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -19,6 +20,7 @@ public sealed class EditorContestService(
     IChapterService chapters,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
+    IEntityVisualContextService entityVisualContext,
     IContestRepository contests,
     ILogger<EditorContestService> logger) : IEditorContestService
 {
@@ -794,6 +796,15 @@ public sealed class EditorContestService(
             new(ChatRole.System, BuildContestSystemPrompt()),
             new(ChatRole.User, BuildContestUserPrompt(batch, candidate, snapshot)),
         };
+        if (await entityVisualContext.BuildVisionMessageAsync(
+            batch.ProjectId,
+            snapshot.Visuals,
+            await providerService.IsVisionProviderWorkingAsync(candidate.ProviderId, cancellationToken),
+            "Canonical entity visual examples captured with the contest context follow.",
+            cancellationToken) is { } visualMessage)
+        {
+            messages.Add(visualMessage);
+        }
 
         var raw = await RequestCandidateResponseAsync(chat, messages, candidate, progressWriter, cancellationToken);
         ContestCandidateResponse response;

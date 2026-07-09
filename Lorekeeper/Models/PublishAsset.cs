@@ -24,6 +24,8 @@ public class PublishAsset
     public ICollection<ProjectImageMask> ImageMasks { get; set; } = [];
 
     public ICollection<ProjectImageChatAttachment> ImageChatAttachments { get; set; } = [];
+    public ICollection<EntityVisualExample> EntityVisualExamples { get; set; } = [];
+    public ICollection<SourceVisualCandidate> SourceVisualCandidates { get; set; } = [];
 }
 
 public enum PublishAssetSource
@@ -31,4 +33,5 @@ public enum PublishAssetSource
     Uploaded,
     Generated,
     Edited,
+    Imported,
 }

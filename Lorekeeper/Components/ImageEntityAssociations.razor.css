@@ -1,0 +1,3 @@
+.image-entity-associations { display: grid; gap: .4rem; }
+.association-chips { display: flex; flex-wrap: wrap; gap: .25rem; }
+.association-remove { margin: -.15rem -.25rem -.15rem .2rem; padding: 0 .2rem; border: 0; color: inherit; background: transparent; }

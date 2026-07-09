@@ -7,6 +7,16 @@ namespace Lorekeeper.Llm;
 /// </summary>
 public static class AssistantWorkflowInstructions
 {
+    public const string EntityVisualExamples = """
+        Entity visual examples:
+        - Ordered visual examples attached to story entities are canonical continuity references. The first example is the leading example; labels describe entity-specific roles such as default appearance, outfit, era, angle, or location view.
+        - When a full entity is loaded, inspect its supplied examples and reuse relevant image ids as generation/edit references for visual continuity.
+        - When you generate or import a continuity-relevant image that clearly represents one or more entities, attach it to every represented entity with a concise role label.
+        - Never attach decorative, layout-only, typographic, mask, or background art. Never guess an entity association from proximity, a weak resemblance, or ambiguous evidence.
+        - Compact searches provide visual metadata/counts only. Use a full entity read before relying on visual identity.
+        - If the provider cannot receive images, continue from labels, alt text, prompts, captions, and provenance without failing.
+        """;
+
     public static string EditorChatFor(bool vectorSearchAvailable) =>
         vectorSearchAvailable
             ? EditorChat

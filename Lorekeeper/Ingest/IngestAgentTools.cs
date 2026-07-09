@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -15,7 +16,8 @@ public sealed class IngestAgentTools(
     IGraphStore graph,
     IGraphNodeRepository nodes,
     IEntityTypeService entityTypes,
-    IContextIndexingService contextIndexing)
+    IContextIndexingService contextIndexing,
+    IEntityVisualExampleService entityVisualExamples)
 {
     public IList<AITool> Build(IngestAgentContext context) =>
     [
@@ -50,11 +52,61 @@ public sealed class IngestAgentTools(
             description: "Append one temporary relationship marker with only endpoints and edge type. Relationship markers are promoted to simple graph edges during finalization; put all narrative detail in entity observations."),
 
         AIFunctionFactory.Create(
+            method: (Guid candidateId, Guid entityId, string? label = null) => PromoteIngestVisualAsync(context, candidateId, entityId, label),
+            name: "promote_ingest_visual_candidate",
+            description: "Promote a source visual candidate and attach it to a resolved entity only when the visual clearly depicts that exact entity. Never infer identity from proximity alone or attach ambiguous/decorative images."),
+
+        AIFunctionFactory.Create(
+            method: (Guid candidateId, string reason) => SkipIngestVisualAsync(context, candidateId, reason),
+            name: "skip_ingest_visual_candidate",
+            description: "Mark a source visual as skipped only when it is clearly decorative, a mask/logo, unusable, or too ambiguous to serve as any entity example. Give a concise reason."),
+
+        AIFunctionFactory.Create(
             method: (string chunkSummary, string sourceSynopsis, string? notes = null) =>
                 UpdateIngestSourceProgressAsync(context, chunkSummary, sourceSynopsis, notes),
             name: "update_ingest_source_progress",
             description: "Record a concise completed chunk summary and rolling source synopsis. Call exactly once after finishing each source chunk. Keep sourceSynopsis around 1500 words and notes short/operational."),
     ];
+
+    private async Task<string> PromoteIngestVisualAsync(IngestAgentContext context, Guid candidateId, Guid entityId, string? label)
+    {
+        try
+        {
+            var candidate = await entityVisualExamples.GetCandidateAsync(context.ProjectId, candidateId);
+            if (candidate is null || candidate.IngestSourceId != context.SourceId)
+                return "Error: visual candidate was not found for this ingest source.";
+            if (candidate.StartChar is int start && candidate.EndChar is int end && (start < 0 || end <= start))
+                return "Error: visual candidate has invalid source bounds.";
+            var example = await entityVisualExamples.PromoteAndAttachAsync(
+                context.ProjectId, candidateId, entityId, label, EntityVisualExampleOrigin.Ingest);
+            context.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                status = "promoted_and_attached",
+                example.Id,
+                example.EntityId,
+                example.EntityName,
+                example.Label,
+                image = new { example.Image.Id, example.Image.FileName, example.Image.AltText, example.Image.PreviewUrl },
+            });
+        }
+        catch (Exception ex) { return $"Error: {ex.Message}"; }
+    }
+
+    private async Task<string> SkipIngestVisualAsync(IngestAgentContext context, Guid candidateId, string reason)
+    {
+        try
+        {
+            var candidate = await entityVisualExamples.GetCandidateAsync(context.ProjectId, candidateId);
+            if (candidate is null || candidate.IngestSourceId != context.SourceId)
+                return "Error: visual candidate was not found for this ingest source.";
+            var updated = await entityVisualExamples.SetCandidateStatusAsync(
+                context.ProjectId, candidateId, SourceVisualCandidateStatus.Skipped, reason);
+            context.OnMutated();
+            return JsonSerializer.Serialize(new { status = updated.Status, updated.Id, reason });
+        }
+        catch (Exception ex) { return $"Error: {ex.Message}"; }
+    }
 
     public IList<AITool> BuildFinalReview(IngestFinalReviewContext context) =>
     [

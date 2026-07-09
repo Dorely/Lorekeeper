@@ -62,6 +62,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<ProjectImageMask> ProjectImageMasks => Set<ProjectImageMask>();
     public DbSet<PublishOutlineSelection> PublishOutlineSelections => Set<PublishOutlineSelection>();
     public DbSet<PublishImagePlacement> PublishImagePlacements => Set<PublishImagePlacement>();
+    public DbSet<EntityVisualExample> EntityVisualExamples => Set<EntityVisualExample>();
+    public DbSet<SourceVisualCandidate> SourceVisualCandidates => Set<SourceVisualCandidate>();
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
         SaveChangesWithLockRetryAsync(acceptAllChangesOnSuccess: true, cancellationToken);
@@ -721,6 +723,66 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
                 .WithMany(p => p.PublishAssets)
                 .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SourceVisualCandidate>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Kind, e.Status, e.CreatedAt });
+            entity.HasIndex(e => e.IngestSourceId);
+            entity.HasIndex(e => e.WebIngestCandidateId);
+            entity.HasIndex(e => e.PromotedImageId);
+            entity.HasIndex(e => new { e.ProjectId, e.ContentHash });
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.SourceVisualCandidates)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.IngestSource)
+                .WithMany(s => s.VisualCandidates)
+                .HasForeignKey(e => e.IngestSourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.WebIngestCandidate)
+                .WithMany(s => s.VisualCandidates)
+                .HasForeignKey(e => e.WebIngestCandidateId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.PromotedImage)
+                .WithMany(a => a.SourceVisualCandidates)
+                .HasForeignKey(e => e.PromotedImageId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<EntityVisualExample>(entity =>
+        {
+            entity.HasIndex(e => new { e.GraphNodeId, e.ImageId }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.GraphNodeId, e.SortOrder });
+            entity.HasIndex(e => e.ImageId);
+            entity.HasIndex(e => e.SourceVisualCandidateId);
+            entity.Property(e => e.Origin).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.EntityVisualExamples)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.GraphNode)
+                .WithMany(n => n.VisualExamples)
+                .HasForeignKey(e => e.GraphNodeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Image)
+                .WithMany(a => a.EntityVisualExamples)
+                .HasForeignKey(e => e.ImageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SourceVisualCandidate)
+                .WithMany(c => c.EntityVisualExamples)
+                .HasForeignKey(e => e.SourceVisualCandidateId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<ProjectImageGenerationJob>(entity =>

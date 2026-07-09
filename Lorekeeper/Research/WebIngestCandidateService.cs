@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Ingest;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
@@ -13,6 +14,7 @@ public sealed class WebIngestCandidateService(
     IWebIngestCandidateRepository candidates,
     IWebPageReader pageReader,
     IIngestService ingest,
+    IEntityVisualExampleService entityVisualExamples,
     IOptions<WebResearchOptions> webOptions) : IWebIngestCandidateService
 {
     private const string WebFactSheetIngestGuidance = """
@@ -37,9 +39,8 @@ public sealed class WebIngestCandidateService(
     public async Task<ResearchSourceDetail?> GetCachedDetailAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default)
     {
         var candidate = await candidates.GetByIdAsync(candidateId, cancellationToken);
-        return candidate is null || candidate.ProjectId != projectId
-            ? null
-            : ToDetail(candidate);
+        if (candidate is null || candidate.ProjectId != projectId) return null;
+        return ToDetail(candidate, await entityVisualExamples.ListWebCandidatesAsync(projectId, candidateId, cancellationToken));
     }
 
     public async Task<WebIngestCandidate> CreateFromSearchResultAsync(
@@ -307,7 +308,7 @@ public sealed class WebIngestCandidateService(
             candidate.UpdatedAt = DateTime.UtcNow;
             candidates.Update(candidate);
             await candidates.SaveChangesAsync(cancellationToken);
-            return new WebIngestCandidateReadResult(candidate, ReadCachedLinks(candidate.CachedLinksJson), FromCache: true);
+            return new WebIngestCandidateReadResult(candidate, ReadCachedLinks(candidate.CachedLinksJson), ReadCachedImages(candidate.CachedImagesJson), FromCache: true);
         }
 
         if (ShouldReuseRecentFailure(candidate, out var cooldownDiagnostics))
@@ -316,7 +317,7 @@ public sealed class WebIngestCandidateService(
             candidate.UpdatedAt = DateTime.UtcNow;
             candidates.Update(candidate);
             await candidates.SaveChangesAsync(cancellationToken);
-            return new WebIngestCandidateReadResult(candidate, ReadCachedLinks(candidate.CachedLinksJson), FromCache: true);
+            return new WebIngestCandidateReadResult(candidate, ReadCachedLinks(candidate.CachedLinksJson), ReadCachedImages(candidate.CachedImagesJson), FromCache: true);
         }
 
         var result = await pageReader.ReadAsync(url, cancellationToken);
@@ -332,6 +333,7 @@ public sealed class WebIngestCandidateService(
             candidate.Title = string.IsNullOrWhiteSpace(result.Title) ? candidate.Title : result.Title;
             candidate.ExtractedText = result.Text;
             candidate.CachedLinksJson = JsonSerializer.Serialize(result.Links);
+            candidate.CachedImagesJson = JsonSerializer.Serialize(result.Images);
             candidate.ContentHash = ContentHash(result.Text);
             candidate.Excerpt = result.Excerpt;
             if (candidate.Status is not WebIngestCandidateStatus.Staged and not WebIngestCandidateStatus.Queued)
@@ -344,7 +346,7 @@ public sealed class WebIngestCandidateService(
 
         candidates.Update(candidate);
         await candidates.SaveChangesAsync(cancellationToken);
-        return new WebIngestCandidateReadResult(candidate, result.Links, FromCache: false);
+        return new WebIngestCandidateReadResult(candidate, result.Links, result.Images, FromCache: false);
     }
 
     private bool ShouldReuseRecentFailure(WebIngestCandidate candidate, out string diagnostics)
@@ -390,6 +392,13 @@ public sealed class WebIngestCandidateService(
         }
     }
 
+    private static IReadOnlyList<WebPageImage> ReadCachedImages(string imagesJson)
+    {
+        if (string.IsNullOrWhiteSpace(imagesJson) || imagesJson == "[]") return [];
+        try { return JsonSerializer.Deserialize<List<WebPageImage>>(imagesJson) ?? []; }
+        catch { return []; }
+    }
+
     private static void AssignConversation(WebIngestCandidate candidate, Guid? conversationId)
     {
         if (conversationId is not null && candidate.ResearchConversationId != conversationId)
@@ -424,7 +433,7 @@ public sealed class WebIngestCandidateService(
             candidate.CreatedAt,
             candidate.UpdatedAt);
 
-    private static ResearchSourceDetail ToDetail(WebIngestCandidate candidate) =>
+    private static ResearchSourceDetail ToDetail(WebIngestCandidate candidate, IReadOnlyList<SourceVisualCandidateView> visuals) =>
         new(
             candidate.Id,
             candidate.Status,
@@ -444,7 +453,9 @@ public sealed class WebIngestCandidateService(
             candidate.ExtractedText,
             ReadCachedLinks(candidate.CachedLinksJson)
                 .Select(link => new ResearchSourceLink(link.Url, link.Text))
-                .ToList());
+                .ToList(),
+            ReadCachedImages(candidate.CachedImagesJson),
+            visuals);
 
     private static string BuildWebIngestInstructions(string? instructions, IReadOnlyList<WebIngestCandidate> queuedCandidates)
     {

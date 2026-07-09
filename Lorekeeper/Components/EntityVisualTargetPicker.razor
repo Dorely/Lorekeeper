@@ -1,0 +1,63 @@
+@using Lorekeeper.EntityVisuals
+@using Lorekeeper.Outline
+@inject IEntityService Entities
+@inject IEntityTypeService EntityTypes
+
+<div class="entity-target-picker">
+    @if (Targets.Count > 0)
+    {
+        <div class="entity-target-list">
+            @foreach (var target in Targets)
+            {
+                var entity = _entities.FirstOrDefault(item => item.Id == target.EntityId);
+                <span class="badge text-bg-secondary">@(entity?.Name ?? target.EntityId.ToString("N")): @target.Label
+                    <button type="button" @onclick="() => RemoveAsync(target.EntityId)">×</button>
+                </span>
+            }
+        </div>
+    }
+    <div class="input-group input-group-sm">
+        <select class="form-select" @bind="_selectedId" @onfocus="LoadAsync">
+            <option value="">Represented entity…</option>
+            @foreach (var entity in _entities.Where(entity => Targets.All(target => target.EntityId != entity.Id)))
+            {
+                <option value="@entity.Id">@entity.Name (@entity.Type)</option>
+            }
+        </select>
+        <input class="form-control" placeholder="Role label" @bind="_label" />
+        <button type="button" class="btn btn-outline-secondary" disabled="@(_selectedId == Guid.Empty)" @onclick="AddAsync">Add</button>
+    </div>
+</div>
+
+@code {
+    private List<StoryEntity> _entities = [];
+    private Guid _selectedId;
+    private string _label = string.Empty;
+
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public List<EntityVisualTarget> Targets { get; set; } = [];
+    [Parameter] public EventCallback<List<EntityVisualTarget>> TargetsChanged { get; set; }
+
+    private async Task LoadAsync()
+    {
+        if (_entities.Count > 0) return;
+        foreach (var type in await EntityTypes.ListAsync(ProjectId, includeStructural: false))
+            _entities.AddRange(await Entities.ListAsync(ProjectId, type.Type));
+        _entities = _entities.OrderBy(entity => entity.Type).ThenBy(entity => entity.Name).ToList();
+    }
+
+    private async Task AddAsync()
+    {
+        if (_selectedId == Guid.Empty) return;
+        Targets = Targets.Append(new EntityVisualTarget(_selectedId, _label.Trim())).DistinctBy(target => target.EntityId).ToList();
+        _selectedId = Guid.Empty;
+        _label = string.Empty;
+        await TargetsChanged.InvokeAsync(Targets);
+    }
+
+    private async Task RemoveAsync(Guid entityId)
+    {
+        Targets = Targets.Where(target => target.EntityId != entityId).ToList();
+        await TargetsChanged.InvokeAsync(Targets);
+    }
+}

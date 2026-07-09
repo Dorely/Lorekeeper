@@ -5,8 +5,10 @@ using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
+using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Context;
 
@@ -21,6 +23,7 @@ public sealed class ContextIndexingService(
     IActRepository acts,
     IChapterRepository chapters,
     IIngestRepository ingest,
+    AppDbContext db,
     IVectorIndexWorkCoordinator indexWork,
     ILogger<ContextIndexingService> logger) : IContextIndexingService
 {
@@ -312,6 +315,23 @@ public sealed class ContextIndexingService(
         {
             sb.AppendLine("Aliases:");
             sb.Append("- ").AppendLine(string.Join(", ", aliases));
+        }
+
+        var visualExamples = await db.EntityVisualExamples
+            .AsNoTracking()
+            .Include(example => example.Image)
+            .Where(example => example.GraphNodeId == node.Id)
+            .OrderBy(example => example.SortOrder)
+            .ToListAsync(cancellationToken);
+        if (visualExamples.Count > 0)
+        {
+            sb.AppendLine("Visual examples:");
+            foreach (var example in visualExamples)
+            {
+                sb.Append("- ").Append(example.Label).Append(" [imageId: ").Append(example.ImageId.ToString("N")).AppendLine("]");
+                AppendOptional(sb, "  Alt text", example.Image.AltText);
+                AppendOptional(sb, "  Prompt", example.Image.Prompt);
+            }
         }
 
         var sections = IngestWikiSheet.ReadSections(node.Properties);

@@ -51,6 +51,25 @@ public sealed class ProjectImportExportService(
             .Select(NodeStableKey)
             .ToHashSet(StringComparer.Ordinal);
         var warnings = new List<string>();
+        var visualExamples = await db.EntityVisualExamples
+            .AsNoTracking()
+            .Include(example => example.GraphNode)
+            .Include(example => example.SourceVisualCandidate)
+            .Where(example => example.ProjectId == projectId)
+            .OrderBy(example => example.SortOrder)
+            .ToListAsync(cancellationToken);
+        var exportedVisualExamples = visualExamples
+            .Where(example => includedNodeKeys.Contains(NodeStableKey(example.GraphNode)))
+            .Select(example => new ProjectExportEntityVisualExample(
+                new ProjectExportNodeRef(example.GraphNode.NodeType, example.GraphNode.Key),
+                example.ImageId,
+                example.Label,
+                example.SortOrder,
+                example.Origin,
+                example.SourceVisualCandidate?.SourceUrl ?? string.Empty,
+                example.SourceVisualCandidate?.Locator ?? string.Empty))
+            .ToList();
+        var referencedVisualImageIds = exportedVisualExamples.Select(example => example.ImageId).ToHashSet();
 
         var exportedEdges = new List<ProjectExportEdge>();
         foreach (var edge in await edges.ListByProjectAsync(projectId, cancellationToken))
@@ -87,14 +106,14 @@ public sealed class ProjectImportExportService(
                 .Where(type => ShouldExportType(kind, type))
                 .Select(ProjectEntityType)
                 .ToList(),
-            Images = kind == ProjectExportKind.Full
-                ? await db.PublishAssets
+            Images = await db.PublishAssets
                     .AsNoTracking()
-                    .Where(asset => asset.ProjectId == projectId)
+                    .Where(asset => asset.ProjectId == projectId
+                        && (kind == ProjectExportKind.Full || referencedVisualImageIds.Contains(asset.Id)))
                     .OrderBy(asset => asset.CreatedAt)
                     .Select(asset => ProjectImage(asset))
-                    .ToListAsync(cancellationToken)
-                : [],
+                    .ToListAsync(cancellationToken),
+            EntityVisualExamples = exportedVisualExamples,
             PublishProfiles = kind == ProjectExportKind.Full
                 ? await db.PublishProfiles
                     .AsNoTracking()

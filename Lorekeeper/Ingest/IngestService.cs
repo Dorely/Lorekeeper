@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -14,6 +15,7 @@ public sealed class IngestService(
     IProjectRepository projects,
     IIngestSourceStructureBuilder structureBuilder,
     IBookArtifactPreprocessor artifactPreprocessor,
+    IEntityVisualExampleService entityVisualExamples,
     IIngestGraphSync graphSync,
     IIngestJobQueue queue,
     ILlmProviderService providers,
@@ -70,6 +72,7 @@ public sealed class IngestService(
         var sourceMetadataJson = string.IsNullOrWhiteSpace(request.SourceMetadataJson) ? "{}" : request.SourceMetadataJson.Trim();
         IReadOnlyList<IngestSourcePageDraft> pageDrafts = [];
         IReadOnlyList<IngestSourceBlockDraft> blockDrafts = [];
+        IReadOnlyList<IngestVisualCandidateDraft> visualDrafts = [];
 
         if (request.ArtifactBytes is { Length: > 0 } artifactBytes)
         {
@@ -84,6 +87,7 @@ public sealed class IngestService(
             sourceText = preprocessed.SourceText;
             pageDrafts = preprocessed.Pages;
             blockDrafts = preprocessed.Blocks;
+            visualDrafts = preprocessed.Visuals;
             if (string.IsNullOrWhiteSpace(sourceKind))
                 sourceKind = preprocessed.SourceKind;
             if (string.IsNullOrWhiteSpace(contentType))
@@ -120,6 +124,24 @@ public sealed class IngestService(
         };
 
         await ingest.AddSourceAsync(source, cancellationToken);
+
+        foreach (var visual in visualDrafts)
+        {
+            await entityVisualExamples.CreateCandidateAsync(new SourceVisualCandidateCreateRequest(
+                projectId,
+                SourceVisualCandidateKind.IngestArtifact,
+                visual.FileName,
+                visual.ContentType,
+                visual.Data,
+                visual.AltText,
+                visual.Caption,
+                SourceUrl: request.SourceUrl ?? string.Empty,
+                Locator: visual.Locator,
+                MetadataJson: visual.MetadataJson,
+                IngestSourceId: source.Id,
+                StartChar: visual.StartChar,
+                EndChar: visual.EndChar), cancellationToken);
+        }
 
         foreach (var pageDraft in pageDrafts)
         {
@@ -336,6 +358,8 @@ public sealed class IngestService(
 
         queue.RequestCancellation(job.Id);
 
+        await entityVisualExamples.RemoveIngestOwnedAsync(job.ProjectId, job.SourceId, deleteCandidates: false, cancellationToken: cancellationToken);
+
         var cleanup = await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.StagingRecords, cancellationToken);
         await ApplyGraphCleanupContextUpdatesAsync(job.ProjectId, cleanup, cancellationToken);
 
@@ -392,6 +416,7 @@ public sealed class IngestService(
 
         var projectId = job.ProjectId;
         queue.RequestCancellation(job.Id);
+        await entityVisualExamples.RemoveIngestOwnedAsync(job.ProjectId, job.SourceId, deleteCandidates: true, cancellationToken: cancellationToken);
         var cleanup = await graphCleanup.RemoveSourceGraphContributionsAsync(job.ProjectId, job.SourceId, job.StagingRecords, cancellationToken);
         await ApplyGraphCleanupContextUpdatesAsync(job.ProjectId, cleanup, cancellationToken);
         await vectors.DeleteBySourceAsync("ingest_source", job.Source.VectorSourceId, Project.ScopeKey(job.ProjectId), cancellationToken);

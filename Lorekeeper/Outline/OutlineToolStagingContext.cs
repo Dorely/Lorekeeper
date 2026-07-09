@@ -166,6 +166,23 @@ public sealed class OutlineToolStagingContext(
         return Serialize(matches);
     }
 
+    public async Task<string> StageExternalChangeAsync(
+        string summary,
+        object? before,
+        object? after,
+        object result,
+        string resourceKind,
+        string resourceId,
+        IReadOnlyCollection<string>? referencedResources = null,
+        CancellationToken cancellationToken = default)
+    {
+        var resultJson = Serialize(result);
+        await StageChangeAsync(
+            summary, before, after, resultJson, resourceKind, resourceId,
+            createdResources: [], referencedResources ?? [], cancellationToken);
+        return resultJson;
+    }
+
     public async Task<string?> GetEntityTypeAsync(Guid entityId, CancellationToken cancellationToken = default)
     {
         await EnsureLoadedAsync(cancellationToken);

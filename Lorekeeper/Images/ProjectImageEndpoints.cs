@@ -1,4 +1,5 @@
 using Lorekeeper.Persistence;
+using Lorekeeper.EntityVisuals;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -51,6 +52,21 @@ public static class ProjectImageEndpoints
                     lastModified: mask.UpdatedAt,
                     entityTag: new Microsoft.Net.Http.Headers.EntityTagHeaderValue(etag),
                     enableRangeProcessing: true);
+            });
+
+        endpoints.MapGet(
+            "/projects/{projectId:guid}/source-visuals/{candidateId:guid}/content",
+            async (
+                Guid projectId,
+                Guid candidateId,
+                [FromQuery] int? maxEdge,
+                IEntityVisualExampleService visuals,
+                CancellationToken cancellationToken) =>
+            {
+                var candidate = await visuals.GetCandidateDataAsync(projectId, candidateId, maxEdge, cancellationToken);
+                return candidate is null
+                    ? Results.NotFound()
+                    : Results.File(candidate.Data, candidate.ContentType, enableRangeProcessing: true);
             });
 
         endpoints.MapGet(
