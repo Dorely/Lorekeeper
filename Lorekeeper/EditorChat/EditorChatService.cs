@@ -5,6 +5,7 @@ using System.Text.Json;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.Images;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -20,6 +21,8 @@ public sealed class EditorChatService(
     IEditorConversationRepository conversations,
     IContextBuilder contextBuilder,
     IChapterVisualService chapterVisuals,
+    IProjectImageService projectImages,
+    IProjectImageGenerationRuntime imageRuntime,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     IEmbeddingService embeddings,
@@ -175,6 +178,7 @@ public sealed class EditorChatService(
         EditorChatContext editorContext = null!;
         Chapter? currentChapter = null;
         var contestModeEnabled = false;
+        var visionReady = false;
         string systemPrompt = string.Empty;
         string? setupError = null;
         try
@@ -197,6 +201,7 @@ public sealed class EditorChatService(
                 : AssistantWorkflowInstructions.EditorChatFor(vectorSearchAvailable));
 
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
+            visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
 
             OutlineToolStagingContext? outlineStaging = null;
             EditorChatChangeStagingContext? editorStaging = null;
@@ -214,6 +219,8 @@ public sealed class EditorChatService(
                 projectId,
                 conversation.Id,
                 currentChapterId,
+                providerAvailability.Provider.Id,
+                visionReady,
                 OnToolMutated,
                 project.AiChangeApprovalEnabled,
                 autoPinReadEntities: !contestModeEnabled,
@@ -424,6 +431,7 @@ public sealed class EditorChatService(
             messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantToolCallContents(manifest)));
 
             var resultContents = new List<AIContent>();
+            var modelOnlyImagesForNextRound = new List<ProjectImageView>();
             foreach (var pendingCall in pendingCalls)
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -518,6 +526,60 @@ public sealed class EditorChatService(
                         }
                     }
                 }
+                else if (IsImageGenerationTool(pendingCall.Name))
+                {
+                    string? lastProgressKey = null;
+                    var invokeTask = InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
+
+                    while (!invokeTask.IsCompleted)
+                    {
+                        if (await TryBuildImageGenerationJobUpdateAsync(
+                                editorContext,
+                                projectId,
+                                pendingCall.CallId,
+                                cancellationToken) is { } imageUpdate)
+                        {
+                            var progressKey = ImageProgressKey(imageUpdate);
+                            if (!string.Equals(progressKey, lastProgressKey, StringComparison.Ordinal))
+                            {
+                                lastProgressKey = progressKey;
+                                yield return imageUpdate;
+                            }
+                        }
+
+                        using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        var updateTask = WaitForImageRuntimeChangeAsync(waitCts.Token);
+                        var completed = await Task.WhenAny(invokeTask, updateTask);
+                        if (completed == invokeTask)
+                        {
+                            await waitCts.CancelAsync();
+                            try { await updateTask; }
+                            catch (OperationCanceledException) { }
+                            break;
+                        }
+
+                        try
+                        {
+                            await updateTask;
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            break;
+                        }
+                    }
+
+                    toolOutcome = await invokeTask;
+                    if (await TryBuildImageGenerationJobUpdateAsync(
+                            editorContext,
+                            projectId,
+                            pendingCall.CallId,
+                            CancellationToken.None) is { } finalImageUpdate)
+                    {
+                        var progressKey = ImageProgressKey(finalImageUpdate);
+                        if (!string.Equals(progressKey, lastProgressKey, StringComparison.Ordinal))
+                            yield return finalImageUpdate;
+                    }
+                }
                 else
                 {
                     toolOutcome = await InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
@@ -532,6 +594,7 @@ public sealed class EditorChatService(
 
                 var toolResult = toolOutcome.Result;
                 var toolError = toolOutcome.Error;
+                var visuals = editorContext.DrainVisuals(pendingCall.CallId);
                 var toolMessage = new EditorMessage
                 {
                     ConversationId = conversation.Id,
@@ -545,10 +608,14 @@ public sealed class EditorChatService(
                 };
                 await conversations.AddMessageAsync(toolMessage, CancellationToken.None);
                 await conversations.SaveChangesAsync(CancellationToken.None);
+                await PersistVisualsAsync(toolMessage.Id, pendingCall.CallId, visuals);
 
                 resultContents.Add(new FunctionResultContent(
                     pendingCall.CallId,
                     BuildToolResultForModel(pendingCall.Name, toolResult ?? string.Empty, EffectiveMaxToolResultCharsForModel())));
+                var modelImages = editorContext.DrainModelOnlyImages();
+                if (modelImages.Count > 0)
+                    modelOnlyImagesForNextRound.AddRange(modelImages);
                 foreach (var pendingChange in editorContext.OutlineStaging?.DrainNewChanges() ?? [])
                 {
                     yield return new EditorChatPendingAiChangeCreated(
@@ -568,7 +635,13 @@ public sealed class EditorChatService(
                         pendingChange.Summary);
                 }
 
-                yield return new EditorChatToolCallCompleted(pendingCall.CallId, pendingCall.Name, toolError is null ? toolResult : null, toolError, stopwatch.Elapsed.TotalMilliseconds);
+                yield return new EditorChatToolCallCompleted(
+                    pendingCall.CallId,
+                    pendingCall.Name,
+                    toolError is null ? toolResult : null,
+                    toolError,
+                    stopwatch.Elapsed.TotalMilliseconds,
+                    visuals);
 
                 if (toolError is null
                     && string.Equals(pendingCall.Name, "start_contest", StringComparison.Ordinal)
@@ -619,6 +692,8 @@ public sealed class EditorChatService(
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+            if (modelOnlyImagesForNextRound.Count > 0)
+                messages.Add(await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound));
 
             if (iteration == maxIterations - 1)
             {
@@ -648,6 +723,62 @@ public sealed class EditorChatService(
         {
             logger.LogError(ex, "Failed to persist editor chat message {MessageId}", message.Id);
         }
+    }
+
+    private async Task PersistVisualsAsync(
+        Guid messageId,
+        string? toolCallId,
+        IReadOnlyList<EditorChatVisualAttachment> visuals)
+    {
+        if (visuals.Count == 0)
+            return;
+
+        await conversations.AddMessageVisualsAsync(visuals.Select((visual, index) => new EditorMessageVisual
+        {
+            Id = visual.Id,
+            MessageId = messageId,
+            SortOrder = index,
+            ToolCallId = visual.ToolCallId ?? toolCallId,
+            Title = visual.Title,
+            Caption = visual.Caption,
+            SourceKind = visual.SourceKind,
+            SourceRefId = visual.SourceRefId,
+            ContentType = visual.ContentType,
+            FileName = visual.FileName,
+            Width = visual.Width,
+            Height = visual.Height,
+            Data = visual.Data,
+        }), CancellationToken.None);
+        await conversations.SaveChangesAsync(CancellationToken.None);
+    }
+
+    private async Task<ChatMessage> BuildModelOnlyImageMessageAsync(
+        Guid projectId,
+        IReadOnlyList<ProjectImageView> images)
+    {
+        var contents = new List<AIContent>
+        {
+            new TextContent("Project images returned by the previous Editor Chat tool call are attached as model-only visual context. Use these images when deciding whether further edits or layout actions are needed."),
+        };
+
+        var seen = new HashSet<Guid>();
+        foreach (var image in images)
+        {
+            if (!seen.Add(image.Id))
+                continue;
+
+            var data = await projectImages.GetDataAsync(projectId, image.Id, cancellationToken: CancellationToken.None);
+            if (data is null)
+                continue;
+
+            contents.Add(new TextContent($"\nImage {image.Id:N}: {image.FileName}"));
+            contents.Add(new DataContent(data.Data, data.ContentType)
+            {
+                Name = data.FileName,
+            });
+        }
+
+        return new ChatMessage(ChatRole.User, contents);
     }
 
     private static IEnumerable<ChatMessage> BuildModelHistory(IEnumerable<EditorMessage> history)
@@ -851,8 +982,176 @@ public sealed class EditorChatService(
         return job is null ? null : EditorRevisionAgentService.ToProgress(job);
     }
 
+    private async Task<EditorChatImageGenerationJobUpdated?> TryBuildImageGenerationJobUpdateAsync(
+        EditorChatContext editorContext,
+        Guid projectId,
+        string toolCallId,
+        CancellationToken cancellationToken)
+    {
+        if (editorContext.CurrentImageGenerationJobId is not { } jobId)
+            return null;
+
+        var runtimeJob = imageRuntime.GetSnapshot().Jobs
+            .FirstOrDefault(job => job.ProjectId == projectId && job.JobId == jobId);
+        if (runtimeJob is not null)
+            return BuildImageGenerationJobUpdate(toolCallId, runtimeJob);
+
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var scopedImageJobs = scope.ServiceProvider.GetRequiredService<IProjectImageJobService>();
+        var persisted = await scopedImageJobs.GetJobAsync(projectId, jobId, cancellationToken);
+        return persisted is null ? null : BuildImageGenerationJobUpdate(toolCallId, persisted);
+    }
+
+    private static EditorChatImageGenerationJobUpdated BuildImageGenerationJobUpdate(
+        string toolCallId,
+        ProjectImageGenerationJobRuntimeView job)
+    {
+        var outputs = job.Outputs
+            .OrderBy(output => output.OutputIndex)
+            .Select(output => new EditorChatImageGenerationOutputProgress(
+                output.OutputIndex,
+                output.Status.ToString(),
+                output.Message,
+                string.IsNullOrWhiteSpace(output.Error) ? null : output.Error,
+                output.Attempt,
+                output.PartialImageDataUrl))
+            .ToList();
+
+        return BuildImageGenerationJobUpdate(
+            toolCallId,
+            job.JobId,
+            job.IsRunning ? "Running" : StatusFromOutputs(outputs),
+            outputs);
+    }
+
+    private static EditorChatImageGenerationJobUpdated BuildImageGenerationJobUpdate(
+        string toolCallId,
+        ProjectImageJobView job)
+    {
+        var outputs = job.OutputStates
+            .OrderBy(output => output.OutputIndex)
+            .Select(output => new EditorChatImageGenerationOutputProgress(
+                output.OutputIndex,
+                output.Status.ToString(),
+                output.Message,
+                string.IsNullOrWhiteSpace(output.Error) ? null : output.Error,
+                output.Attempt,
+                PartialImageDataUrl: null))
+            .ToList();
+
+        return BuildImageGenerationJobUpdate(
+            toolCallId,
+            job.Id,
+            job.Status.ToString(),
+            outputs);
+    }
+
+    private static EditorChatImageGenerationJobUpdated BuildImageGenerationJobUpdate(
+        string toolCallId,
+        Guid jobId,
+        string status,
+        IReadOnlyList<EditorChatImageGenerationOutputProgress> outputs)
+    {
+        var total = outputs.Count;
+        return new EditorChatImageGenerationJobUpdated(
+            toolCallId,
+            jobId,
+            status,
+            DateTime.UtcNow,
+            total,
+            CountOutputs(outputs, ProjectImageOutputStatus.Queued.ToString()),
+            CountOutputs(outputs, ProjectImageOutputStatus.Running.ToString(), ProjectImageOutputStatus.Generating.ToString()),
+            CountOutputs(outputs, ProjectImageOutputStatus.Succeeded.ToString()),
+            CountOutputs(outputs, ProjectImageOutputStatus.Failed.ToString()),
+            CountOutputs(outputs, ProjectImageOutputStatus.Cancelled.ToString()),
+            outputs,
+            outputs.LastOrDefault(output => !string.IsNullOrWhiteSpace(output.PartialImageDataUrl))?.PartialImageDataUrl);
+    }
+
+    private Task WaitForImageRuntimeChangeAsync(CancellationToken cancellationToken)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationTokenRegistration registration = default;
+        EventHandler? handler = null;
+        handler = (_, _) =>
+        {
+            imageRuntime.StateChanged -= handler;
+            registration.Dispose();
+            completion.TrySetResult();
+        };
+
+        imageRuntime.StateChanged += handler;
+        if (cancellationToken.CanBeCanceled)
+        {
+            registration = cancellationToken.Register(() =>
+            {
+                imageRuntime.StateChanged -= handler;
+                completion.TrySetCanceled(cancellationToken);
+            });
+        }
+
+        return completion.Task;
+    }
+
+    private static string ImageProgressKey(EditorChatImageGenerationJobUpdated progress)
+    {
+        var sb = new StringBuilder()
+            .Append(progress.JobId).Append('|')
+            .Append(progress.Status).Append('|')
+            .Append(progress.TotalCount).Append('|')
+            .Append(progress.QueuedCount).Append('|')
+            .Append(progress.RunningCount).Append('|')
+            .Append(progress.CompletedCount).Append('|')
+            .Append(progress.FailedCount).Append('|')
+            .Append(progress.CancelledCount).Append('|')
+            .Append(StableStringHash(progress.LatestPartialImageDataUrl));
+
+        foreach (var output in progress.Outputs)
+        {
+            sb.Append('|')
+                .Append(output.OutputIndex).Append(':')
+                .Append(output.Status).Append(':')
+                .Append(output.Attempt).Append(':')
+                .Append(output.Message).Append(':')
+                .Append(output.ErrorMessage).Append(':')
+                .Append(StableStringHash(output.PartialImageDataUrl));
+        }
+
+        return sb.ToString();
+    }
+
+    private static string StatusFromOutputs(IReadOnlyList<EditorChatImageGenerationOutputProgress> outputs)
+    {
+        if (outputs.Count == 0)
+            return "Running";
+        if (outputs.All(output => output.Status == ProjectImageOutputStatus.Succeeded.ToString()))
+            return ProjectImageGenerationJobStatus.Succeeded.ToString();
+        if (outputs.Any(output => output.Status == ProjectImageOutputStatus.Succeeded.ToString()))
+            return ProjectImageGenerationJobStatus.CompletedWithErrors.ToString();
+        if (outputs.Any(output => output.Status == ProjectImageOutputStatus.Failed.ToString()))
+            return ProjectImageGenerationJobStatus.Failed.ToString();
+        if (outputs.Any(output => output.Status == ProjectImageOutputStatus.Cancelled.ToString()))
+            return ProjectImageGenerationJobStatus.Cancelled.ToString();
+        if (outputs.Any(output => output.Status == ProjectImageOutputStatus.Running.ToString()
+            || output.Status == ProjectImageOutputStatus.Generating.ToString()))
+        {
+            return ProjectImageGenerationJobStatus.Running.ToString();
+        }
+
+        return ProjectImageGenerationJobStatus.Queued.ToString();
+    }
+
+    private static int CountOutputs(IReadOnlyList<EditorChatImageGenerationOutputProgress> outputs, params string[] statuses) =>
+        outputs.Count(output => statuses.Contains(output.Status, StringComparer.Ordinal));
+
+    private static int StableStringHash(string? value) =>
+        string.IsNullOrEmpty(value) ? 0 : StringComparer.Ordinal.GetHashCode(value);
+
     private static bool IsRevisionAgentsTool(string toolName) =>
         string.Equals(toolName, "start_revision_agents", StringComparison.Ordinal);
+
+    private static bool IsImageGenerationTool(string toolName) =>
+        string.Equals(toolName, "generate_project_image", StringComparison.Ordinal);
 
     private static EditorRevisionJobUpdateKind RevisionUpdateKindForStatus(EditorRevisionJobStatus status) => status switch
     {

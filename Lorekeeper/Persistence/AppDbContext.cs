@@ -25,6 +25,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<OutlineMessage> OutlineMessages => Set<OutlineMessage>();
     public DbSet<EditorConversation> EditorConversations => Set<EditorConversation>();
     public DbSet<EditorMessage> EditorMessages => Set<EditorMessage>();
+    public DbSet<EditorMessageVisual> EditorMessageVisuals => Set<EditorMessageVisual>();
     public DbSet<WritingSample> WritingSamples => Set<WritingSample>();
     public DbSet<WritingCoachConversation> WritingCoachConversations => Set<WritingCoachConversation>();
     public DbSet<WritingCoachMessage> WritingCoachMessages => Set<WritingCoachMessage>();
@@ -189,6 +190,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Conversation)
                 .WithMany(c => c.Messages)
                 .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EditorMessageVisual>(entity =>
+        {
+            entity.HasIndex(e => new { e.MessageId, e.SortOrder });
+            entity.HasIndex(e => new { e.ToolCallId, e.CreatedAt });
+
+            entity.HasOne(e => e.Message)
+                .WithMany(m => m.Visuals)
+                .HasForeignKey(e => e.MessageId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

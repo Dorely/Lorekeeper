@@ -11,6 +11,7 @@ using Lorekeeper.Publish;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
+using SkiaSharp;
 
 namespace Lorekeeper.EditorChat;
 
@@ -26,8 +27,11 @@ public sealed class EditorChatTools(
     IEditorRevisionAgentService revisionAgents,
     OutlineCollaborationTools outlineTools,
     IProjectImageService projectImages,
+    IProjectImageJobService imageJobs,
+    IProjectImageGenerationRuntime imageRuntime,
     IChapterVisualService chapterVisuals,
-    IOptions<EditorChatOptions> editorOptions)
+    IOptions<EditorChatOptions> editorOptions,
+    IOptions<ProjectImageGenerationOptions> imageOptions)
 {
     private static readonly EntityRelationContextOptions _listEntityRelationOptions = new()
     {
@@ -132,6 +136,11 @@ public sealed class EditorChatTools(
                 method: () => ListProjectImagesAsync(context),
                 name: "list_project_images",
                 description: "List the project image library with ids, filenames, alt text, source, prompt, model, size, and preview URL. Read-only and available in Contest preparation."),
+
+            AIFunctionFactory.Create(
+                method: (Guid imageId) => ReadProjectImageAsync(context, imageId),
+                name: "read_project_image",
+                description: "Read one project image's metadata and expose it as explicit visual context. If the active provider is vision-ready, the image bytes are supplied to the model on the next iteration."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId) => ReadChapterVisualLayoutAsync(context, chapterId),
@@ -819,6 +828,41 @@ public sealed class EditorChatTools(
         }));
     }
 
+    private async Task<string> ReadProjectImageAsync(EditorChatContext ctx, Guid imageId)
+    {
+        var image = await projectImages.GetAsync(ctx.ProjectId, imageId);
+        if (image is null)
+            return $"Error: image {imageId:N} was not found in this project.";
+
+        ctx.AddVisual(await BuildVisualAsync(
+            ctx,
+            image,
+            title: image.FileName,
+            caption: "Image read into Editor Chat context."));
+        ctx.AddModelOnlyImage(image);
+
+        return JsonSerializer.Serialize(new
+        {
+            image = new
+            {
+                image.Id,
+                image.FileName,
+                image.ContentType,
+                image.PreviewUrl,
+                image.AltText,
+                image.Source,
+                image.Prompt,
+                image.GenerationModel,
+                image.CreatedAt,
+                image.UpdatedAt,
+                image.SizeBytes,
+            },
+            delivery = ctx.VisionReady
+                ? "full image bytes will be supplied to the model on the next iteration"
+                : "metadata only; the active chat provider is not vision-ready",
+        });
+    }
+
     private async Task<string> ReadChapterVisualLayoutAsync(EditorChatContext ctx, Guid chapterId)
     {
         var chapter = await chapters.GetAsync(chapterId);
@@ -931,20 +975,44 @@ public sealed class EditorChatTools(
             ? target.RecommendedSize
             : string.IsNullOrWhiteSpace(size) ? "auto" : size.Trim();
 
-        var image = await projectImages.GenerateAsync(ctx.ProjectId, new ProjectImageGenerationRequest(
+        var job = await imageJobs.CreateGenerateJobAsync(ctx.ProjectId, new ProjectImageGenerateJobRequest(
             promptText,
             effectiveSize,
             string.IsNullOrWhiteSpace(quality) ? "auto" : quality.Trim(),
             string.IsNullOrWhiteSpace(outputFormat) ? "png" : outputFormat.Trim(),
             outputCompression,
             altText?.Trim() ?? string.Empty,
-            (referenceImageIds ?? []).Distinct().ToList()));
+            1,
+            (referenceImageIds ?? []).Distinct().ToList(),
+            Label: "Editor chat image"));
+        ctx.TrackImageGenerationJob(job.Id);
+
+        await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, CancellationToken.None);
+        var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
+        var completed = await imageRuntime.WaitForJobCompletionAsync(job.Id, timeout, CancellationToken.None);
+        job = await imageJobs.GetJobAsync(ctx.ProjectId, job.Id, CancellationToken.None)
+            ?? throw new InvalidOperationException($"Image generation job {job.Id:N} was not found after queueing.");
+
+        var outputImages = new List<ProjectImageView>();
+        foreach (var imageId in job.OutputImageIds)
+        {
+            if (await projectImages.GetAsync(ctx.ProjectId, imageId, CancellationToken.None) is { } image)
+            {
+                outputImages.Add(image);
+                ctx.AddVisual(await BuildVisualAsync(
+                    ctx,
+                    image,
+                    title: image.FileName,
+                    caption: "Generated output saved to the image library."));
+                ctx.AddModelOnlyImage(image);
+            }
+        }
 
         object? placement = null;
-        if (placeInCurrentChapter)
+        if (placeInCurrentChapter && outputImages.FirstOrDefault() is { } placedImage)
         {
             var chapterId = ctx.CurrentChapterId!.Value;
-            var placed = await chapterVisuals.AddImageToChapterAsync(ctx.ProjectId, chapterId, image.Id);
+            var placed = await chapterVisuals.AddImageToChapterAsync(ctx.ProjectId, chapterId, placedImage.Id);
             placement = new
             {
                 chapterId,
@@ -957,18 +1025,44 @@ public sealed class EditorChatTools(
         ctx.OnMutated();
         return JsonSerializer.Serialize(new
         {
-            image.Id,
-            image.FileName,
-            image.ContentType,
-            image.PreviewUrl,
-            image.AltText,
-            image.Source,
-            image.Prompt,
-            image.GenerationModel,
+            completed,
+            job = new
+            {
+                job.Id,
+                job.Kind,
+                job.Status,
+                job.Label,
+                job.Size,
+                job.Quality,
+                job.OutputFormat,
+                job.Count,
+                job.OutputImageIds,
+                job.OutputStates,
+                job.OutputErrors,
+                job.Error,
+                job.CreatedAt,
+                job.StartedAt,
+                job.CompletedAt,
+            },
+            images = outputImages.Select(image => new
+            {
+                image.Id,
+                image.FileName,
+                image.ContentType,
+                image.PreviewUrl,
+                image.AltText,
+                image.Source,
+                image.Prompt,
+                image.GenerationModel,
+                image.CreatedAt,
+                image.UpdatedAt,
+                image.SizeBytes,
+            }),
             imageGenerationTarget = targetResolution.Target is null
                 ? null
                 : PicturePageImageGenerationGuidance.DescribeTarget(targetResolution.Target),
             placement,
+            note = completed ? null : "Timed out waiting for the image job. The Images tab will continue showing progress.",
         });
     }
 
@@ -1892,6 +1986,37 @@ public sealed class EditorChatTools(
         if (start > 0) snippet = "..." + snippet;
         if (start + length < text.Length) snippet += "...";
         return snippet;
+    }
+
+    private async Task<EditorChatVisualAttachment> BuildVisualAsync(
+        EditorChatContext ctx,
+        ProjectImageView image,
+        string? title = null,
+        string? caption = null)
+    {
+        var data = await projectImages.GetDataAsync(ctx.ProjectId, image.Id, maxEdge: null, CancellationToken.None);
+        var size = data is null ? (Width: (int?)null, Height: (int?)null) : ReadSize(data.Data);
+        return new EditorChatVisualAttachment(
+            Guid.NewGuid(),
+            title ?? image.FileName,
+            caption ?? (string.IsNullOrWhiteSpace(image.Prompt) ? image.Source.ToString() : Truncate(image.Prompt, 120)),
+            image.PreviewUrl,
+            $"/projects/{ctx.ProjectId:N}/images/{image.Id:N}/content",
+            size.Width,
+            size.Height,
+            ctx.CurrentToolCallId,
+            SourceKind: "projectImage",
+            SourceRefId: image.Id,
+            ContentType: image.ContentType,
+            FileName: image.FileName);
+    }
+
+    private static (int? Width, int? Height) ReadSize(byte[] data)
+    {
+        using var bitmap = SKBitmap.Decode(data);
+        return bitmap is null
+            ? ((int?)null, (int?)null)
+            : (bitmap.Width, bitmap.Height);
     }
 
     private static string Truncate(string value, int max) =>

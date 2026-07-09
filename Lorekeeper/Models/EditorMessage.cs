@@ -24,6 +24,8 @@ public class EditorMessage
     public string? ErrorMessage { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<EditorMessageVisual> Visuals { get; set; } = [];
 }
 
 public enum EditorMessageRole

@@ -14,6 +14,7 @@ public interface IEditorConversationRepository
 
     Task AddConversationAsync(EditorConversation conversation, CancellationToken cancellationToken = default);
     Task AddMessageAsync(EditorMessage message, CancellationToken cancellationToken = default);
+    Task AddMessageVisualsAsync(IEnumerable<EditorMessageVisual> visuals, CancellationToken cancellationToken = default);
     void UpdateMessage(EditorMessage message);
     void RemoveConversation(EditorConversation conversation);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);

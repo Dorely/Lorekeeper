@@ -9,9 +9,11 @@ public sealed class EditorConversationRepository(AppDbContext db) : IEditorConve
         db.EditorConversations.FirstOrDefaultAsync(conversation => conversation.ProjectId == projectId, cancellationToken);
 
     public Task<List<EditorMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        db.EditorMessages.Where(message => message.ConversationId == conversationId)
-                         .OrderBy(message => message.Order)
-                         .ToListAsync(cancellationToken);
+        db.EditorMessages
+            .Include(message => message.Visuals)
+            .Where(message => message.ConversationId == conversationId)
+            .OrderBy(message => message.Order)
+            .ToListAsync(cancellationToken);
 
     public Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
         db.EditorConversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
@@ -28,6 +30,9 @@ public sealed class EditorConversationRepository(AppDbContext db) : IEditorConve
 
     public async Task AddMessageAsync(EditorMessage message, CancellationToken cancellationToken = default) =>
         await db.EditorMessages.AddAsync(message, cancellationToken);
+
+    public async Task AddMessageVisualsAsync(IEnumerable<EditorMessageVisual> visuals, CancellationToken cancellationToken = default) =>
+        await db.EditorMessageVisuals.AddRangeAsync(visuals, cancellationToken);
 
     public void UpdateMessage(EditorMessage message) => db.EditorMessages.Update(message);
 

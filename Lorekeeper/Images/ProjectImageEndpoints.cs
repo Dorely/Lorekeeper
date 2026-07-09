@@ -54,6 +54,50 @@ public static class ProjectImageEndpoints
             });
 
         endpoints.MapGet(
+            "/projects/{projectId:guid}/editor-chat-visuals/{visualId:guid}/content",
+            async (
+                Guid projectId,
+                Guid visualId,
+                [FromQuery] int? maxEdge,
+                IProjectImageService images,
+                AppDbContext db,
+                CancellationToken cancellationToken) =>
+            {
+                var visual = await db.EditorMessageVisuals
+                    .AsNoTracking()
+                    .Include(item => item.Message)
+                    .ThenInclude(message => message.Conversation)
+                    .FirstOrDefaultAsync(item => item.Id == visualId && item.Message.Conversation.ProjectId == projectId, cancellationToken);
+                if (visual is null)
+                    return Results.NotFound();
+
+                if (string.Equals(visual.SourceKind, "projectImage", StringComparison.Ordinal)
+                    && visual.SourceRefId is { } imageId)
+                {
+                    var image = await images.GetDataAsync(projectId, imageId, maxEdge, cancellationToken);
+                    if (image is null)
+                        return Results.NotFound();
+
+                    return Results.File(
+                        image.Data,
+                        image.ContentType,
+                        fileDownloadName: null,
+                        lastModified: image.UpdatedAt,
+                        enableRangeProcessing: true);
+                }
+
+                if (visual.Data is not { Length: > 0 })
+                    return Results.NotFound();
+
+                return Results.File(
+                    visual.Data,
+                    visual.ContentType,
+                    fileDownloadName: null,
+                    lastModified: visual.CreatedAt,
+                    enableRangeProcessing: true);
+            });
+
+        endpoints.MapGet(
             "/projects/{projectId:guid}/image-chat-visuals/{visualId:guid}/content",
             async (
                 Guid projectId,

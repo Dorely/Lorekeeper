@@ -1,5 +1,6 @@
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Images;
 
 namespace Lorekeeper.EditorChat;
 
@@ -25,18 +26,26 @@ public sealed class EditorChatContext(
     Guid projectId,
     Guid conversationId,
     Guid? currentChapterId,
+    int providerId,
+    bool visionReady,
     Action onMutated,
     bool reviewEdits,
     bool autoPinReadEntities,
     OutlineToolStagingContext? outlineStaging,
     EditorChatChangeStagingContext? editorStaging)
 {
+    private readonly object _imageGenerationLock = new();
     private EditorContestStartRequest? _contestRequest;
+    private Guid? _currentImageGenerationJobId;
     private readonly HashSet<Guid> _directlyEditedChapterBodies = [];
+    private readonly List<EditorChatVisualAttachment> _visuals = [];
+    private readonly List<ProjectImageView> _modelOnlyImages = [];
 
     public Guid ProjectId { get; } = projectId;
     public Guid ConversationId { get; } = conversationId;
     public Guid? CurrentChapterId { get; } = currentChapterId;
+    public int ProviderId { get; } = providerId;
+    public bool VisionReady { get; } = visionReady;
     public Action OnMutated { get; } = onMutated;
     public bool ReviewEdits { get; } = reviewEdits;
     public bool AutoPinReadEntities { get; } = autoPinReadEntities;
@@ -46,6 +55,14 @@ public sealed class EditorChatContext(
     public string CurrentToolCallId { get; private set; } = string.Empty;
     public string CurrentToolName { get; private set; } = string.Empty;
     public string CurrentArgumentsJson { get; private set; } = "{}";
+    public Guid? CurrentImageGenerationJobId
+    {
+        get
+        {
+            lock (_imageGenerationLock)
+                return _currentImageGenerationJobId;
+        }
+    }
 
     public bool ShouldBypassReviewForChapterBody(Chapter chapter) =>
         _directlyEditedChapterBodies.Contains(chapter.Id)
@@ -60,8 +77,45 @@ public sealed class EditorChatContext(
         CurrentToolCallId = toolCallId;
         CurrentToolName = toolName;
         CurrentArgumentsJson = string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson;
+        lock (_imageGenerationLock)
+            _currentImageGenerationJobId = null;
         OutlineStaging?.BeginToolCall(assistantMessageId, toolCallId, toolName, argumentsJson);
         EditorStaging?.BeginToolCall(assistantMessageId, toolCallId, toolName, argumentsJson);
+    }
+
+    public void TrackImageGenerationJob(Guid jobId)
+    {
+        lock (_imageGenerationLock)
+            _currentImageGenerationJobId = jobId;
+    }
+
+    public void AddVisual(EditorChatVisualAttachment visual) => _visuals.Add(visual);
+
+    public IReadOnlyList<EditorChatVisualAttachment> DrainVisuals(string toolCallId)
+    {
+        var matched = _visuals.Where(visual => string.Equals(visual.ToolCallId, toolCallId, StringComparison.Ordinal)).ToList();
+        if (matched.Count == 0)
+            return [];
+
+        foreach (var visual in matched)
+            _visuals.Remove(visual);
+        return matched;
+    }
+
+    public void AddModelOnlyImage(ProjectImageView image)
+    {
+        if (VisionReady)
+            _modelOnlyImages.Add(image);
+    }
+
+    public IReadOnlyList<ProjectImageView> DrainModelOnlyImages()
+    {
+        if (_modelOnlyImages.Count == 0)
+            return [];
+
+        var result = _modelOnlyImages.ToList();
+        _modelOnlyImages.Clear();
+        return result;
     }
 
     public void RequestContest(EditorContestStartRequest request)

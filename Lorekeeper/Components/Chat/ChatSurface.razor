@@ -242,6 +242,10 @@
             if (toolParts.Count == 1)
             {
                 <ChatToolChipView Chip="toolParts[0]" />
+                @if (toolParts[0].Visuals.Count > 0)
+                {
+                    @RenderVisualStrip(toolParts[0].Visuals)
+                }
             }
             else
             {
@@ -329,6 +333,10 @@
                 @foreach (var chip in chips)
                 {
                     <ChatToolChipView Chip="chip" />
+                    @if (chip.Visuals.Count > 0)
+                    {
+                        @RenderVisualStrip(chip.Visuals)
+                    }
                 }
             </div>
         </details>

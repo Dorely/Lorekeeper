@@ -116,11 +116,19 @@ public sealed class ChatToolProgress
 {
     public Guid? JobId { get; set; }
 
+    public string SectionLabel { get; set; } = "progress";
+
+    public string ItemLabel { get; set; } = "items";
+
     public int Version { get; set; }
 
     public string Status { get; set; } = string.Empty;
 
     public DateTime? UpdatedAt { get; set; }
+
+    public string? LatestPreviewImageUrl { get; set; }
+
+    public string LatestPreviewAlt { get; set; } = "Progress preview";
 
     public int TotalCount { get; set; }
 

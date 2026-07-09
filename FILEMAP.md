@@ -44,10 +44,10 @@
 
 | File | Description |
 |------|-------------|
-| `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text/image parts, duration-aware tool-call chips with visual strips, progress rows, and transcript token-count helpers. |
+| `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text/image parts, duration-aware tool-call chips with visual strips, generic progress rows/previews, and transcript token-count helpers. |
 | `ChatTranscriptTokenCounter.cs` | Shared transcript token-count adapter for `ChatSurface` panels: projects domain messages into a common token-count shape, includes pending/live turns, and formats exact/estimated count labels. |
 | `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell for transcript/live rendering, grouped adjacent tool-call chips, image visual strips, composer controls, scrolling, and textarea autosize behavior. |
-| `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments/results/errors and opens Editor Revision worker transcripts from `start_revision_agents` chips. |
+| `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments/results/errors, generic progress rows/previews, and Editor Revision worker transcript links. |
 
 ### ChatTurns/
 
@@ -81,7 +81,7 @@
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter editor with collapsible chat/right panes, Edit/Read/Layout/Review modes, chapter visual-mode controls, image-library picker/context actions, inline active-chapter body review controls/scroll markers, and inline Contest Mode candidate review. Persists/reindexes body edits, remembers the selected chapter per browser/project, and refreshes editor/context surfaces after AI turns or approved changes. |
 | `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Simulated page viewer/editor for Prose, IllustratedProse, and PicturePage chapters, including four page layout modes, paginated illustrated prose spreads, anchored illustration controls, and PicturePage drag-resize/z-order/paste/drop placement. |
 | `ProjectImagePickerModal.razor` (+ `.razor.css`) | Editor image-library modal for selecting current project images and adding them either to the active chapter layout or explicit chapter context. |
-| `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: loads the transcript, disables LLM controls without a working provider, streams text/tool/contest updates, routes active-chapter body changes and Contest Mode results to inline Review mode, and keeps the universal pending-change review modal for non-editor body changes. |
+| `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: loads transcript/tool visuals, streams text/tool/image-generation/contest updates, routes active-chapter body changes and Contest Mode results to inline Review mode, and keeps pending-change review. |
 | `ContextItemDetailModal.razor` (+ `.razor.css`) | Shared editor context detail modal for recommendation and Context Feed items; loads entities, chapters, acts, ingest sources/chunks, and supports Context Feed project-guidance/entity edits. |
 | `RecommendedContextPanel.razor` (+ `.razor.css`) | Editor right-column context recommender: shows semantic/manual/graph-proximity recommendations for entities plus structural references, and adds them to the active chapter's persisted context working set. |
 | `ContextFeedPanel.razor` (+ `.razor.css`) | Editable Assistant Memory list for project guidance, current chapter, outline, facts, writing samples, selected entities, and structural references; opens `ContextItemDetailModal` and persists include/exclude choices via `IEditorContextService`. |
@@ -176,6 +176,7 @@
 | `EditorContextPreference.cs` | EF entity for per-chapter Context Feed include/exclude preferences keyed by context item kind + stable item key. |
 | `EditorConversation.cs` | EF entity — one persistent multi-turn editor chat per `Project` (unique on `ProjectId`). Owns ordered `EditorMessage`s; cascade-deleted with the project. |
 | `EditorMessage.cs` | EF entity for a single row in an `EditorConversation`: monotonic `Order`, role (`System`/`User`/`Assistant`/`Tool`), text content, assistant tool-call JSON, tool result metadata, status, optional error, and creation timestamp. |
+| `EditorMessageVisual.cs` | EF entity for Editor Chat visual attachments shown as thumbnails, including project-image references or optional stored bytes. |
 | `EditorRevisionJob.cs` | EF entity for one prose-only background revision job spawned by Editor Chat; owns per-chapter worker sessions and parent tool-call metadata. |
 | `EditorRevisionSession.cs` | EF entity for one chapter worker session: assignment, original body snapshot, provider/model, chapter-body edit payload, status, timing, and errors. |
 | `EditorRevisionMessage.cs` | EF entity for persisted worker transcript rows, including assistant tool-call manifests and read-only tool result rows. |
@@ -222,10 +223,10 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, publish profiles/assets/layouts, and chapter visual-mode fields. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
+| `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor chat visuals, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, publish profiles/assets/layouts, and chapter visual-mode fields. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish/cover-layout/revision-agent/embedding-config/chat-readiness/adaptive artifact ingest, ingest staging records/canon cleanup, ingest LLM token metadata, ingest report payload cleanup, editor chat/contest/web research cache, `AddChapterVisualModesAndImages`, `ReplacePicturePageDimensionsWithLayoutKind`, `AddImagesChatAndGenerationQueue`, and `AddProjectImageChatAttachments`). |
+| `Migrations/` | EF Core migrations (`InitialSchema`, project/chapter/outline/graph/ingest/writing/editor-context/import-export/search/research/publish/cover-layout/revision-agent/embedding-config/chat-readiness/adaptive artifact ingest, ingest staging records/canon cleanup, ingest LLM token metadata, ingest report payload cleanup, editor chat/contest/web research cache, `AddChapterVisualModesAndImages`, `ReplacePicturePageDimensionsWithLayoutKind`, `AddImagesChatAndGenerationQueue`, `AddProjectImageChatAttachments`, and `AddEditorChatMessageVisuals`). |
 
 ### Persistence/Repositories/
 
@@ -241,7 +242,7 @@
 | `IChapterRepository.cs` / `ChapterRepository.cs` | Chapter CRUD ordered by `Order`; `GetMaxOrderAsync(projectId, actId)` and `ReorderAsync(projectId, actId, ids)` are scoped to a single act bucket (pass `actId == null` for the unassigned bucket). |
 | `IActRepository.cs` / `ActRepository.cs` | Act CRUD ordered by `Order` per project; `ReorderAsync` rewrites the act ordering in one save. |
 | `IOutlineConversationRepository.cs` / `OutlineConversationRepository.cs` | Persistence for `OutlineConversation` + ordered `OutlineMessage`s: `GetByProjectIdAsync`, `LoadMessagesAsync`, `GetMaxOrderAsync`, `AddConversationAsync`, `AddMessageAsync`, `UpdateMessage`, `RemoveConversation`. |
-| `IEditorConversationRepository.cs` / `EditorConversationRepository.cs` | Persistence for project-wide `EditorConversation` + ordered `EditorMessage`s: get/create support, message loading/order lookup, add/update/remove, and save. |
+| `IEditorConversationRepository.cs` / `EditorConversationRepository.cs` | Persistence for project-wide `EditorConversation` + ordered `EditorMessage`s and editor chat visuals: get/create support, message loading/order lookup, add/update/remove, and save. |
 | `IEditorRevisionRepository.cs` / `EditorRevisionRepository.cs` | Persistence for Editor Revision jobs, per-chapter worker sessions, and ordered worker transcript/tool-result messages. |
 | `IWritingSampleRepository.cs` / `WritingSampleRepository.cs` | Project-scoped writing sample persistence: list by project (newest updated first), get/count, add/update/remove, and save. |
 | `IWritingCoachConversationRepository.cs` / `WritingCoachConversationRepository.cs` | Persistence for the resettable project-level Writing Coach conversation + ordered messages, including assistant tool-call manifests and tool result rows. |
@@ -418,7 +419,7 @@
 | `IProjectImageProvider.cs` / `CodexProjectImageProvider.cs` | Responses image provider adapted from PixelChat for Codex/OpenAI account generation and masked edits with streamed partial images. |
 | `ProjectImageGenerationOptions.cs` | Configurable image model defaults, count/reference limits, retry/timeout settings, partial image count, and agent wait timeout. |
 | `DataUrl.cs` | Shared data URL parse/format helper for mask and provider payloads. |
-| `ProjectImageEndpoints.cs` | Minimal API endpoints for scoped project image bytes, masks, and Images Chat visual content, with optional image max-edge thumbnails. |
+| `ProjectImageEndpoints.cs` | Minimal API endpoints for scoped project image bytes, masks, Images Chat visuals, and Editor Chat visual content, with optional image max-edge thumbnails. |
 
 ### ImagesChat/
 
@@ -461,12 +462,12 @@
 
 | File | Description |
 |------|-------------|
-| `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` captured by editor tools, staging helpers, and Contest Mode settings/actions. |
-| `EditorChatService.cs` | Persistent streaming editor chat: assembles the active Context Feed and automatic visual snapshots, resolves the default model, streams text/tool-call arguments, persists user/assistant/tool messages, stages Review edits, emits UI refresh events, and routes Contest Mode terminal tool calls into async candidate generation. |
+| `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, staging helpers, image visual/model-only context, and Contest Mode settings/actions. |
+| `EditorChatService.cs` | Persistent streaming editor chat: assembles Context Feed and automatic visual snapshots, streams text/tool/image-generation progress, persists chat/tool visual rows, stages Review edits, emits UI refreshes, and routes Contest Mode terminal tool calls. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific tool behavior, including paginated chapter reads, model-facing tool-result cap, and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor chat LLM tools for assembled context, impact scoping, filtered hybrid project search/source reads, chapter reads, facts, entities, project image/visual-layout operations, normal `edit_chapter`/outline mutations, revision-agent spawning, and Contest preparation. |
+| `EditorChatTools.cs` | Editor chat LLM tools for assembled context, impact scoping, project search/source/chapter reads, facts, entities, explicit project-image reads, queued image generation, visual-layout operations, `edit_chapter`/outline mutations, revision-agent spawning, and Contest preparation. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
-| `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
+| `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
 | `EditorChatTurnRunner.cs` | Background turn runner for Editor Chat: preserves active turns across tab changes while leaving explicit Stop as the cancellation path. |
 | `EditorContestModels.cs` | DTOs and helper records for Contest Mode settings, start requests, captured chat-context snapshots, model responses, mutation JSON, and streaming contest status/raw-response updates. |
 | `IEditorContestService.cs` / `EditorContestService.cs` | Contest Mode application service: persists project settings, starts terminal contest batches, runs selected models without tools, streams raw Candidate JSON, validates JSON chapter-body mutations, builds proposed bodies, and resolves inline candidate review decisions. |

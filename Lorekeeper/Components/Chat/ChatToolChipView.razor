@@ -24,10 +24,16 @@
         }
         @if (Chip.Progress is { } progress)
         {
-            <div class="chat-chip-section">workers</div>
+            <div class="chat-chip-section">@progress.SectionLabel</div>
             <div class="chat-chip-progress">
+                @if (!string.IsNullOrWhiteSpace(progress.LatestPreviewImageUrl))
+                {
+                    <div class="chat-chip-progress-preview">
+                        <img src="@progress.LatestPreviewImageUrl" alt="@progress.LatestPreviewAlt" />
+                    </div>
+                }
                 <div class="chat-chip-progress-counts">
-                    <span>@progress.CompletedCount completed of @progress.TotalCount</span>
+                    <span>@progress.CompletedCount completed of @progress.TotalCount @progress.ItemLabel</span>
                     @if (progress.RunningCount > 0)
                     {
                         <span>@progress.RunningCount running</span>
@@ -323,7 +329,8 @@
         if (progress.TotalCount <= 0)
             return string.IsNullOrWhiteSpace(progress.Status) ? "running" : progress.Status;
 
-        var parts = new List<string> { $"{progress.CompletedCount}/{progress.TotalCount} completed" };
+        var itemLabel = string.IsNullOrWhiteSpace(progress.ItemLabel) ? "items" : progress.ItemLabel;
+        var parts = new List<string> { $"{progress.CompletedCount}/{progress.TotalCount} {itemLabel} completed" };
         if (progress.RunningCount > 0)
             parts.Add($"{progress.RunningCount} running");
         if (progress.QueuedCount > 0)
@@ -338,10 +345,11 @@
 
     private static string ProgressStatusClass(string status) => status switch
     {
-        "Completed" => "chat-chip-progress-status chat-chip-progress-status-ok",
+        "Completed" or "Succeeded" => "chat-chip-progress-status chat-chip-progress-status-ok",
         "Failed" or "Invalid" => "chat-chip-progress-status chat-chip-progress-status-error",
         "Cancelled" => "chat-chip-progress-status chat-chip-progress-status-muted",
-        "Running" => "chat-chip-progress-status chat-chip-progress-status-running",
+        "Running" or "Generating" => "chat-chip-progress-status chat-chip-progress-status-running",
+        "Queued" => "chat-chip-progress-status chat-chip-progress-status-muted",
         _ => "chat-chip-progress-status",
     };
 
