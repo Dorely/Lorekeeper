@@ -30,7 +30,7 @@ public class Project
     /// When true, mutating AI tool calls are staged for user approval before they are
     /// applied to the project's durable outline state.
     /// </summary>
-    public bool AiChangeApprovalEnabled { get; set; } = true;
+    public bool AiChangeApprovalEnabled { get; set; }
 
     /// <summary>
     /// When true, editor chat prepares generation requests with read-only tools, then
