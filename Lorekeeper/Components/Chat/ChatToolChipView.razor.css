@@ -1,19 +1,28 @@
 .chat-chip {
+    min-width: 0;
+    max-width: 100%;
     margin-top: 0.4rem;
     border: 1px solid var(--bs-border-color, #dee2e6);
     border-radius: 0.4rem;
     background: rgba(255, 255, 255, 0.55);
     font-size: 0.82rem;
+    overflow-wrap: normal;
+    word-break: normal;
 }
 
 .chat-chip > summary {
+    min-width: 0;
     list-style: none;
     cursor: pointer;
     padding: 0.25rem 0.5rem;
-    display: flex;
+    display: grid;
+    grid-template-columns: 1.5rem minmax(0, 1fr);
     align-items: center;
-    gap: 0.4rem;
+    column-gap: 0.4rem;
+    row-gap: 0.08rem;
     user-select: none;
+    overflow-wrap: normal;
+    word-break: normal;
 }
 
 .chat-chip > summary::-webkit-details-marker {
@@ -21,6 +30,8 @@
 }
 
 .chat-chip-icon {
+    grid-column: 1;
+    grid-row: 1;
     width: 1.5rem;
     text-align: center;
     font-weight: 700;
@@ -42,23 +53,31 @@
 }
 
 .chat-chip-name {
+    grid-column: 2;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-family: var(--bs-font-monospace, monospace);
     font-weight: 600;
 }
 
 .chat-chip-args {
+    grid-column: 2;
+    min-width: 0;
     color: var(--bs-secondary-color, #6c757d);
     font-family: var(--bs-font-monospace, monospace);
     font-size: 0.78rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex: 1;
-    min-width: 0;
 }
 
 .chat-chip-progress-inline {
-    margin-left: auto;
+    grid-column: 2;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: var(--bs-secondary-color, #6c757d);
     font-size: 0.75rem;
     white-space: nowrap;
@@ -86,6 +105,7 @@
     max-height: 14rem;
     overflow: auto;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
     word-break: break-word;
 }
 

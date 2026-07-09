@@ -3,7 +3,7 @@
 @using Lorekeeper.EditorChat
 @inject IEditorRevisionAgentService RevisionAgents
 
-<details class="chat-chip @StateClass">
+<details class="chat-chip @StateClass" open="@ShouldOpen">
     <summary>
         <span class="chat-chip-icon">@IconText</span>
         <span class="chat-chip-name">@Chip.Name</span>
@@ -226,6 +226,8 @@
             : Chip.ArgumentsComplete
                 ? "chat-chip-running"
                 : "chat-chip-pending";
+
+    private bool ShouldOpen => Chip.Progress is not null && (!Chip.Completed || Chip.Error is not null);
 
     private string IconText => Chip.Error is not null
         ? "x"

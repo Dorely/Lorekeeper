@@ -70,6 +70,31 @@
     </div>
 </div>
 
+@if (_selectedImageVisual is { } selectedVisual)
+{
+    <div class="chat-image-modal-backdrop" @onclick="CloseImageModal">
+        <section class="chat-image-modal" role="dialog" aria-modal="true" aria-label="View image" @onclick:stopPropagation="true">
+            <header class="chat-image-modal-header">
+                <div class="chat-image-modal-meta">
+                    <h5>@selectedVisual.Title</h5>
+                    @if (!string.IsNullOrWhiteSpace(selectedVisual.Caption))
+                    {
+                        <span>@selectedVisual.Caption</span>
+                    }
+                    @if (selectedVisual.Width is int width && selectedVisual.Height is int height)
+                    {
+                        <span>@width x @height</span>
+                    }
+                </div>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseImageModal"></button>
+            </header>
+            <div class="chat-image-modal-body">
+                <img src="@selectedVisual.FullImageUrl" alt="@selectedVisual.Title" />
+            </div>
+        </section>
+    </div>
+}
+
 @code {
     [Parameter] public string Title { get; set; } = "Chat";
     [Parameter] public string? TokenText { get; set; }
@@ -107,6 +132,7 @@
     private int _seenScrollKey;
     private int _seenAutoFollowKey;
     private int _seenResetComposerKey;
+    private ChatImageVisual? _selectedImageVisual;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -166,6 +192,10 @@
 
     private async Task OnInputAsync(ChangeEventArgs args) =>
         await InputChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+
+    private void OpenImageModal(ChatImageVisual visual) => _selectedImageVisual = visual;
+
+    private void CloseImageModal() => _selectedImageVisual = null;
 
     private RenderFragment RenderMessage(ChatRenderableMessage message) => __builder =>
     {
@@ -283,7 +313,7 @@
         <div class="chat-visual-strip">
             @foreach (var visual in visuals)
             {
-                <a class="chat-visual-card" href="@visual.FullImageUrl" target="_blank" title="@visual.Title">
+                <button type="button" class="chat-visual-card" title="@visual.Title" @onclick="() => OpenImageModal(visual)">
                     <span class="chat-visual-thumb">
                         <img src="@visual.PreviewImageUrl" alt="@visual.Title" />
                     </span>
@@ -298,7 +328,7 @@
                             <span class="chat-visual-size">@width x @height</span>
                         }
                     </span>
-                </a>
+                </button>
             }
         </div>
     };
