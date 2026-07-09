@@ -92,10 +92,10 @@ public sealed class ImagesChatTools(
                 description: "Create a PNG edit mask for an existing image from percentage-based rect/ellipse/polygon shapes. Transparent pixels are the editable regions."),
 
             AIFunctionFactory.Create(
-                method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, string? label = null) =>
-                    GenerateImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, label),
+                method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, string? label = null, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
+                    GenerateImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, label, targetChapterId, targetPictureImageElementId),
                 name: "generate_image",
-                description: "Queue one or more image generations, wait for completion, save outputs to the image library, and return final image ids. Optional referenceImageIds use existing project images."),
+                description: "Queue one or more image generations, wait for completion, save outputs to the image library, and return final image ids. Optional referenceImageIds use existing project images. For PicturePage targets, pass targetChapterId and optionally targetPictureImageElementId; omit size to use the layout-native recommended size."),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, string prompt, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, string? label = null) =>
@@ -356,14 +356,27 @@ public sealed class ImagesChatTools(
         int? outputCompression,
         int count,
         Guid[]? referenceImageIds,
-        string? label)
+        string? label,
+        Guid? targetChapterId,
+        Guid? targetPictureImageElementId)
     {
         if (string.IsNullOrWhiteSpace(prompt))
             return "Error: prompt is required.";
 
+        var targetResolution = await ResolvePicturePageGenerationTargetAsync(ctx, targetChapterId, targetPictureImageElementId);
+        if (targetResolution.Error is not null)
+            return targetResolution.Error;
+
+        var promptText = targetResolution.PromptAppendix is { Length: > 0 } appendix
+            ? prompt.Trim() + appendix
+            : prompt.Trim();
+        var effectiveSize = string.IsNullOrWhiteSpace(size) && targetResolution.Target is { } target
+            ? target.RecommendedSize
+            : CleanOr(size, imageOptions.Value.DefaultSize);
+
         var job = await imageJobs.CreateGenerateJobAsync(ctx.ProjectId, new ProjectImageGenerateJobRequest(
-            prompt.Trim(),
-            CleanOr(size, imageOptions.Value.DefaultSize),
+            promptText,
+            effectiveSize,
             CleanOr(quality, imageOptions.Value.DefaultQuality),
             CleanOr(outputFormat, imageOptions.Value.DefaultOutputFormat),
             outputCompression,
@@ -372,6 +385,33 @@ public sealed class ImagesChatTools(
             (referenceImageIds ?? []).Distinct().ToList(),
             label));
         return await RunQueuedJobToolAsync(ctx, job.Id);
+    }
+
+    private async Task<ImageGenerationTargetResolution> ResolvePicturePageGenerationTargetAsync(
+        ImagesChatToolContext ctx,
+        Guid? targetChapterId,
+        Guid? targetPictureImageElementId)
+    {
+        if (targetChapterId is null || targetChapterId == Guid.Empty)
+        {
+            return targetPictureImageElementId is { } elementId && elementId != Guid.Empty
+                ? new ImageGenerationTargetResolution(null, string.Empty, "Error: targetPictureImageElementId requires targetChapterId.")
+                : new ImageGenerationTargetResolution(null, string.Empty, Error: null);
+        }
+
+        var chapter = await chapters.GetAsync(targetChapterId.Value);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return new ImageGenerationTargetResolution(null, string.Empty, $"Error: chapter {targetChapterId.Value:N} not found in this project.");
+
+        var state = await chapterVisuals.GetAsync(chapter.Id);
+        if (state is null)
+            return new ImageGenerationTargetResolution(null, string.Empty, $"Error: visual layout for chapter {chapter.Id:N} was not found.");
+
+        if (!PicturePageImageGenerationGuidance.TryResolveTarget(state, targetPictureImageElementId, out var target, out var error))
+            return new ImageGenerationTargetResolution(null, string.Empty, error);
+
+        var appendix = PicturePageImageGenerationGuidance.BuildPromptAppendix(target!, state.PageLayout.TextElements);
+        return new ImageGenerationTargetResolution(target, appendix, Error: null);
     }
 
     private async Task<string> EditImageAsync(
@@ -579,6 +619,10 @@ public sealed class ImagesChatTools(
         job.Kind,
         job.Status,
         job.Label,
+        job.Prompt,
+        job.Size,
+        job.Quality,
+        job.OutputFormat,
         job.Count,
         job.SourceImageId,
         job.MaskId,
@@ -602,4 +646,9 @@ public sealed class ImagesChatTools(
 
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max] + "...";
+
+    private sealed record ImageGenerationTargetResolution(
+        PicturePageImageGenerationTarget? Target,
+        string PromptAppendix,
+        string? Error);
 }

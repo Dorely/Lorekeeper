@@ -436,6 +436,7 @@
 |------|-------------|
 | `ChapterVisualModels.cs` | UI/service records for chapter visual state, page layout mode updates, and image placement results. |
 | `IChapterVisualService.cs` / `ChapterVisualService.cs` | Chapter visual-layout facade: mode/page-layout changes, layout normalization/saves, image cleanup, picture-page body projection, textual visual manifests, and paginated rendered snapshots for agent context. |
+| `PicturePageImageGenerationGuidance.cs` | Shared PicturePage image-generation guidance helper: layout-native target sizes, slot-size recommendations, manifest lines, and prompt appendix text for image tools. |
 
 ### Publish/
 

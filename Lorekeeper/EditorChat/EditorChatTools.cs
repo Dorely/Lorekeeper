@@ -175,11 +175,12 @@ public sealed class EditorChatTools(
                 "Use pageLayoutKind for IllustratedProse or PicturePage; valid values are SinglePortrait, SingleLandscape, DoublePortrait, and DoubleLandscape."));
 
         tools.Add(AIFunctionFactory.Create(
-            method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, Guid[]? referenceImageIds = null, bool placeInCurrentChapter = false) =>
-                GenerateProjectImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, referenceImageIds, placeInCurrentChapter),
+            method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, Guid[]? referenceImageIds = null, bool placeInCurrentChapter = false, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
+                GenerateProjectImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, referenceImageIds, placeInCurrentChapter, targetChapterId, targetPictureImageElementId),
             name: "generate_project_image",
             description:
                 "Generate an image and save it to the project image library. Optional referenceImageIds use existing project images as references. " +
+                "For PicturePage targets, pass targetChapterId and optionally targetPictureImageElementId; omit size to use the layout-native recommended size. " +
                 "Set placeInCurrentChapter=true only when the user wants the generated image inserted into the current chapter immediately; the current chapter must already be IllustratedProse or PicturePage."));
 
         tools.Add(AIFunctionFactory.Create(
@@ -893,7 +894,9 @@ public sealed class EditorChatTools(
         string? outputFormat,
         int? outputCompression,
         Guid[]? referenceImageIds,
-        bool placeInCurrentChapter)
+        bool placeInCurrentChapter,
+        Guid? targetChapterId,
+        Guid? targetPictureImageElementId)
     {
         if (string.IsNullOrWhiteSpace(prompt))
             return "Error: prompt is required.";
@@ -907,10 +910,30 @@ public sealed class EditorChatTools(
             if (chapter.VisualMode == ChapterVisualMode.Prose)
                 return "Error: placeInCurrentChapter requires the current chapter to already be IllustratedProse or PicturePage. Call set_chapter_visual_mode first.";
         }
+        if (placeInCurrentChapter
+            && targetChapterId is { } requestedTargetChapterId
+            && ctx.CurrentChapterId is { } currentChapterId
+            && requestedTargetChapterId != currentChapterId)
+        {
+            return "Error: targetChapterId must be the current chapter when placeInCurrentChapter is true.";
+        }
+
+        var effectiveTargetChapterId = targetChapterId
+            ?? (placeInCurrentChapter ? ctx.CurrentChapterId : null);
+        var targetResolution = await ResolvePicturePageGenerationTargetAsync(ctx, effectiveTargetChapterId, targetPictureImageElementId);
+        if (targetResolution.Error is not null)
+            return targetResolution.Error;
+
+        var promptText = targetResolution.PromptAppendix is { Length: > 0 } appendix
+            ? prompt.Trim() + appendix
+            : prompt.Trim();
+        var effectiveSize = string.IsNullOrWhiteSpace(size) && targetResolution.Target is { } target
+            ? target.RecommendedSize
+            : string.IsNullOrWhiteSpace(size) ? "auto" : size.Trim();
 
         var image = await projectImages.GenerateAsync(ctx.ProjectId, new ProjectImageGenerationRequest(
-            prompt.Trim(),
-            string.IsNullOrWhiteSpace(size) ? "auto" : size.Trim(),
+            promptText,
+            effectiveSize,
             string.IsNullOrWhiteSpace(quality) ? "auto" : quality.Trim(),
             string.IsNullOrWhiteSpace(outputFormat) ? "png" : outputFormat.Trim(),
             outputCompression,
@@ -942,8 +965,38 @@ public sealed class EditorChatTools(
             image.Source,
             image.Prompt,
             image.GenerationModel,
+            imageGenerationTarget = targetResolution.Target is null
+                ? null
+                : PicturePageImageGenerationGuidance.DescribeTarget(targetResolution.Target),
             placement,
         });
+    }
+
+    private async Task<ImageGenerationTargetResolution> ResolvePicturePageGenerationTargetAsync(
+        EditorChatContext ctx,
+        Guid? targetChapterId,
+        Guid? targetPictureImageElementId)
+    {
+        if (targetChapterId is null || targetChapterId == Guid.Empty)
+        {
+            return targetPictureImageElementId is { } elementId && elementId != Guid.Empty
+                ? new ImageGenerationTargetResolution(null, string.Empty, "Error: targetPictureImageElementId requires targetChapterId.")
+                : new ImageGenerationTargetResolution(null, string.Empty, Error: null);
+        }
+
+        var chapter = await chapters.GetAsync(targetChapterId.Value);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return new ImageGenerationTargetResolution(null, string.Empty, $"Error: chapter {targetChapterId.Value:N} not found in this project.");
+
+        var state = await chapterVisuals.GetAsync(chapter.Id);
+        if (state is null)
+            return new ImageGenerationTargetResolution(null, string.Empty, $"Error: visual layout for chapter {chapter.Id:N} was not found.");
+
+        if (!PicturePageImageGenerationGuidance.TryResolveTarget(state, targetPictureImageElementId, out var target, out var error))
+            return new ImageGenerationTargetResolution(null, string.Empty, error);
+
+        var appendix = PicturePageImageGenerationGuidance.BuildPromptAppendix(target!, state.PageLayout.TextElements);
+        return new ImageGenerationTargetResolution(target, appendix, Error: null);
     }
 
     private async Task<string> AddProjectImageToChapterAsync(EditorChatContext ctx, Guid chapterId, Guid imageId)
@@ -2023,6 +2076,11 @@ public sealed class EditorChatTools(
         && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
+
+    private sealed record ImageGenerationTargetResolution(
+        PicturePageImageGenerationTarget? Target,
+        string PromptAppendix,
+        string? Error);
 
     private sealed record OrderedChapter(Chapter Chapter, int GlobalOrder);
 

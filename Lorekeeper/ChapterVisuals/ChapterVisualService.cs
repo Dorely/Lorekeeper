@@ -236,10 +236,16 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
             var metrics = PageMetrics(state.PageLayoutKind);
             builder.AppendLine(
                 $"Picture page layout: {state.PageLayoutKind}; physical page {metrics.PageWidthInches:0.##} x {metrics.PageHeightInches:0.##} in; spread: {metrics.IsDouble}");
+            foreach (var guidanceLine in PicturePageImageGenerationGuidance.BuildManifestLines(state))
+                builder.AppendLine(guidanceLine);
             foreach (var text in state.PageLayout.TextElements.OrderBy(text => text.ReadingOrder))
                 builder.AppendLine($"Text box {text.ReadingOrder}: \"{text.Text}\" at {text.XPercent:0.#},{text.YPercent:0.#} size {text.WidthPercent:0.#}x{text.HeightPercent:0.#}");
             foreach (var image in state.PageLayout.Images.OrderBy(image => image.ZIndex))
-                builder.AppendLine($"Image {Name(image.ImageId, imageNames)} at {image.XPercent:0.#},{image.YPercent:0.#} size {image.WidthPercent:0.#}x{image.HeightPercent:0.#}, fit {image.Fit}, z {image.ZIndex}");
+            {
+                var slot = PicturePageImageGenerationGuidance.ForSlot(state.PageLayoutKind, image);
+                builder.AppendLine(
+                    $"Image {Name(image.ImageId, imageNames)} at {image.XPercent:0.#},{image.YPercent:0.#} size {image.WidthPercent:0.#}x{image.HeightPercent:0.#}, fit {image.Fit}, z {image.ZIndex}; target aspect {slot.AspectRatio}, recommended size {slot.RecommendedSize}");
+            }
             return builder.ToString();
         }
 
