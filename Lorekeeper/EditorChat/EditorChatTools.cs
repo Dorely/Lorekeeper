@@ -117,7 +117,7 @@ public sealed class EditorChatTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ReadEntityAsync(context, entityId),
                 name: "read_entity",
-                description: "Read one graph entity by id, including properties, structured wiki data, adjacent links, and relation context. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
+                description: "Read one graph entity by id, including properties, structured wiki data, adjacent links, relation context, and visible thumbnail chips for attached visual examples. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
@@ -127,7 +127,7 @@ public sealed class EditorChatTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityVisualExamplesAsync(context, entityId),
                 name: "list_entity_visual_examples",
-                description: "List the ordered visual examples attached to one entity. Full image bytes are supplied on the next iteration when the provider is vision-ready."),
+                description: "List the ordered visual examples attached to one entity and show them as visible thumbnail chips. Full image bytes are supplied on the next iteration when the provider is vision-ready."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int? pageNumber = null) =>
@@ -152,7 +152,7 @@ public sealed class EditorChatTools(
             AIFunctionFactory.Create(
                 method: (Guid chapterId) => ReadChapterVisualLayoutAsync(context, chapterId),
                 name: "read_chapter_visual_layout",
-                description: "Read a chapter's visual mode and layout manifest, including visible placed images, text boxes, anchors, captions, and reading order. Read-only and available in Contest preparation."),
+                description: "Read a chapter's visual mode and layout manifest, render the current composed pages as visible thumbnails, and report PicturePage text-fit diagnostics. Vision-ready providers receive the rendered pages on the next iteration. Use this after PicturePage visual mutations for final visual verification. Read-only and available in Contest preparation."),
         ]);
 
         if (mode == EditorChatToolMode.ContestPreparation)
@@ -751,7 +751,16 @@ public sealed class EditorChatTools(
     {
         var examples = await entityVisualExamples.ListForEntityAsync(ctx.ProjectId, entityId);
         foreach (var example in examples)
+        {
             ctx.AddModelOnlyImage(example.Image);
+            ctx.AddVisual(await BuildVisualAsync(
+                ctx,
+                example.Image,
+                title: example.Image.FileName,
+                caption: string.IsNullOrWhiteSpace(example.Label)
+                    ? $"Visual example for {example.EntityName}."
+                    : $"{example.EntityName}: {example.Label}."));
+        }
         return examples;
     }
 
@@ -1002,6 +1011,40 @@ public sealed class EditorChatTools(
 
         var imageNames = (await projectImages.ListAsync(ctx.ProjectId))
             .ToDictionary(image => image.Id, image => image.FileName);
+        var snapshots = await chapterVisuals.RenderSnapshotsAsync(chapterId);
+        foreach (var snapshot in snapshots)
+        {
+            var visualId = Guid.NewGuid();
+            var size = ReadSize(snapshot.Data);
+            ctx.AddVisual(new EditorChatVisualAttachment(
+                visualId,
+                $"Rendered page {snapshot.PageNumber}",
+                $"Current rendered layout for chapter '{chapter.Title}'.",
+                $"/projects/{ctx.ProjectId:N}/editor-chat-visuals/{visualId:N}/content?maxEdge=640",
+                $"/projects/{ctx.ProjectId:N}/editor-chat-visuals/{visualId:N}/content",
+                size.Width,
+                size.Height,
+                ctx.CurrentToolCallId,
+                SourceKind: "renderedChapterSnapshot",
+                SourceRefId: chapter.Id,
+                ContentType: snapshot.ContentType,
+                FileName: snapshot.FileName,
+                Data: snapshot.Data));
+            ctx.AddModelOnlyImage(visualId, snapshot.FileName, snapshot.ContentType, snapshot.Data);
+        }
+
+        var textFitDiagnostics = snapshots
+            .SelectMany(snapshot => snapshot.TextFitDiagnostics.Select(diagnostic => new
+            {
+                snapshot.PageNumber,
+                diagnostic.ElementId,
+                diagnostic.WrappedLineCount,
+                diagnostic.DrawnLineCount,
+                diagnostic.AvailableHeightPixels,
+                diagnostic.RequiredHeightPixels,
+                diagnostic.Fits,
+            }))
+            .ToList();
         return JsonSerializer.Serialize(new
         {
             chapter = new
@@ -1016,6 +1059,31 @@ public sealed class EditorChatTools(
             state.PageLayout,
             projectedBody = state.VisualMode == ChapterVisualMode.PicturePage ? chapter.Body : null,
             manifest = chapterVisuals.BuildManifest(state, imageNames),
+            renderedSnapshots = snapshots.Select(snapshot =>
+            {
+                var size = ReadSize(snapshot.Data);
+                return new
+                {
+                    snapshot.PageNumber,
+                    snapshot.FileName,
+                    snapshot.ContentType,
+                    size.Width,
+                    size.Height,
+                };
+            }),
+            textFit = new
+            {
+                applicable = state.VisualMode == ChapterVisualMode.PicturePage,
+                allTextFits = state.VisualMode == ChapterVisualMode.PicturePage && snapshots.Count > 0
+                    ? textFitDiagnostics.All(diagnostic => diagnostic.Fits)
+                    : (bool?)null,
+                elements = textFitDiagnostics,
+            },
+            delivery = snapshots.Count == 0
+                ? "no rendered snapshots were produced for this layout"
+                : ctx.VisionReady
+                    ? "rendered snapshot thumbnails are visible in chat and full image bytes will be supplied to the model on the next iteration"
+                    : "rendered snapshot thumbnails are visible in chat; the active chat provider is not vision-ready, so use the manifest and text-fit diagnostics",
         });
     }
 

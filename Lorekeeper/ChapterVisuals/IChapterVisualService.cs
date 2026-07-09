@@ -18,4 +18,15 @@ public sealed record ChapterVisualSnapshot(
     int PageNumber,
     string FileName,
     string ContentType,
-    byte[] Data);
+    byte[] Data)
+{
+    public IReadOnlyList<ChapterVisualTextFitDiagnostic> TextFitDiagnostics { get; init; } = [];
+}
+
+public sealed record ChapterVisualTextFitDiagnostic(
+    Guid ElementId,
+    int WrappedLineCount,
+    int DrawnLineCount,
+    double AvailableHeightPixels,
+    double RequiredHeightPixels,
+    bool Fits);

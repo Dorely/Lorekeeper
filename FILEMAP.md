@@ -452,7 +452,7 @@
 | File | Description |
 |------|-------------|
 | `ChapterVisualModels.cs` | UI/service records for chapter visual state, page layout mode updates, and image placement results. |
-| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Chapter visual-layout facade: mode/page-layout changes, layout normalization/saves, image cleanup, picture-page body projection, textual visual manifests, and paginated rendered snapshots for agent context. |
+| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Chapter visual-layout facade: mode/page-layout changes, layout normalization/saves, image cleanup, picture-page body projection, textual manifests, and paginated rendered snapshots with PicturePage text-fit diagnostics for agent context. |
 | `PicturePageImageGenerationGuidance.cs` | Shared PicturePage image-generation guidance helper: layout-native target sizes, slot-size recommendations, manifest lines, and prompt appendix text for image tools. |
 
 ### Publish/
@@ -478,10 +478,10 @@
 
 | File | Description |
 |------|-------------|
-| `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, staging helpers, image visual/model-only context, and Contest Mode settings/actions. |
-| `EditorChatService.cs` | Persistent streaming editor chat: assembles Context Feed and automatic visual snapshots, streams text/tool/image-generation progress, persists chat/tool visual rows, stages Review edits, emits UI refreshes, and routes Contest Mode terminal tool calls. |
+| `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, staging helpers, persisted visual chips, project-image/raw-snapshot model context, and Contest Mode settings/actions. |
+| `EditorChatService.cs` | Persistent streaming editor chat: assembles Context Feed and automatic visual snapshots, streams text/tool/image-generation progress, persists chat/tool visual rows, feeds tool-loaded project images and rendered snapshots back to vision-ready models, stages Review edits, emits UI refreshes, and routes Contest Mode terminal tool calls. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific tool behavior, including paginated chapter reads, model-facing tool-result cap, and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor chat LLM tools for assembled context, impact scoping, project search/source/chapter reads, facts, entities, explicit project-image reads, queued image generation, visual-layout operations, `edit_chapter`/outline mutations, revision-agent spawning, and Contest preparation. |
+| `EditorChatTools.cs` | Editor chat LLM tools for assembled context, impact scoping, project search/source/chapter reads, facts, entities with visible visual chips, explicit project-image reads, rendered layout/text-fit inspection, queued image generation, visual-layout operations, `edit_chapter`/outline mutations, revision-agent spawning, and Contest preparation. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
 | `EditorChatTurnRunner.cs` | Background turn runner for Editor Chat: preserves active turns across tab changes while leaving explicit Stop as the cancellation path. |

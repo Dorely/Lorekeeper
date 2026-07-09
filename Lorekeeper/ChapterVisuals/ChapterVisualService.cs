@@ -180,12 +180,11 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
             ? state.PageLayout.Images.Select(image => image.ImageId)
             : state.IllustrationLayout.Images.Select(image => image.ImageId);
         var assets = await LoadImageAssetsAsync(chapter.ProjectId, imageIds, cancellationToken);
-        if (assets.Count == 0)
-            return [];
-
         var edge = (int)Clamp(maxEdge, 320, 2400, 1400);
         if (state.VisualMode == ChapterVisualMode.PicturePage)
             return [RenderPicturePageSnapshot(state, assets, edge)];
+        if (assets.Count == 0)
+            return [];
 
         var profile = await db.PublishProfiles.AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.ProjectId == chapter.ProjectId, cancellationToken);
@@ -314,12 +313,17 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
             DrawImage(canvas, asset, PercentRect(image.XPercent, image.YPercent, image.WidthPercent, image.HeightPercent, width, height), image.Fit, image.Opacity);
         }
 
-        foreach (var text in state.PageLayout.TextElements.OrderBy(text => text.ZIndex))
-            DrawPictureTextBox(canvas, text, width, height);
+        var textFitDiagnostics = state.PageLayout.TextElements
+            .OrderBy(text => text.ZIndex)
+            .Select(text => DrawPictureTextBox(canvas, text, width, height))
+            .ToList();
         if (metrics.IsDouble)
             DrawSpreadSplit(canvas, width, height);
 
-        return new ChapterVisualSnapshot(1, $"chapter-{state.ChapterId:N}-page-1.png", SnapshotContentType, EncodePng(surface));
+        return new ChapterVisualSnapshot(1, $"chapter-{state.ChapterId:N}-page-1.png", SnapshotContentType, EncodePng(surface))
+        {
+            TextFitDiagnostics = textFitDiagnostics,
+        };
     }
 
     private static IReadOnlyList<ChapterVisualSnapshot> RenderIllustratedProseSnapshots(
@@ -642,11 +646,15 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         return new SKRect(0, top, bitmap.Width, top + height);
     }
 
-    private static void DrawPictureTextBox(SKCanvas canvas, PicturePageTextElement text, int pageWidth, int pageHeight)
+    private static ChapterVisualTextFitDiagnostic DrawPictureTextBox(
+        SKCanvas canvas,
+        PicturePageTextElement text,
+        int pageWidth,
+        int pageHeight)
     {
         var rect = PercentRect(text.XPercent, text.YPercent, text.WidthPercent, text.HeightPercent, pageWidth, pageHeight);
         if (rect.Width <= 0 || rect.Height <= 0)
-            return;
+            return new ChapterVisualTextFitDiagnostic(text.Id, 0, 0, 0, 0, Fits: false);
 
         if (text.BackgroundOpacity > 0)
         {
@@ -675,11 +683,11 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         var padding = Math.Max(4, fontSize * 0.18f);
         var textRect = new SKRect(rect.Left + padding, rect.Top + padding, rect.Right - padding, rect.Bottom - padding);
         if (textRect.Width <= 0 || textRect.Height <= 0)
-            return;
+            return new ChapterVisualTextFitDiagnostic(text.Id, 0, 0, 0, 0, Fits: false);
 
         var lines = WrapText(text.Text, textRect.Width, font, paint);
         if (lines.Count == 0)
-            return;
+            return new ChapterVisualTextFitDiagnostic(text.Id, 0, 0, textRect.Height, 0, Fits: true);
 
         var lineHeight = Math.Max(fontSize * (float)Clamp(text.LineHeight, 0.9, 2.2, 1.25), font.Metrics.Descent - font.Metrics.Ascent + font.Metrics.Leading);
         var blockHeight = lines.Count * lineHeight;
@@ -690,6 +698,7 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
             _ => textRect.Top + ((textRect.Height - blockHeight) / 2),
         };
         var baseline = startY - font.Metrics.Ascent;
+        var drawnLineCount = 0;
         var align = TextAlign(text.TextAlign);
         var x = text.TextAlign switch
         {
@@ -698,13 +707,27 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
             _ => textRect.Left + (textRect.Width / 2),
         };
 
-        foreach (var line in lines)
+        canvas.Save();
+        canvas.ClipRect(rect);
+        for (var index = 0; index < lines.Count; index++)
         {
-            if (baseline - fontSize > textRect.Bottom)
-                break;
-            canvas.DrawText(line, x, baseline, align, font, paint);
+            var lineTop = startY + (index * lineHeight);
+            var lineBottom = lineTop + lineHeight;
+            if (lineTop >= textRect.Top - 0.5f && lineBottom <= textRect.Bottom + 0.5f)
+                drawnLineCount++;
+
+            canvas.DrawText(lines[index], x, baseline, align, font, paint);
             baseline += lineHeight;
         }
+        canvas.Restore();
+
+        return new ChapterVisualTextFitDiagnostic(
+            text.Id,
+            lines.Count,
+            drawnLineCount,
+            textRect.Height,
+            blockHeight,
+            Fits: blockHeight <= textRect.Height + 0.5f);
     }
 
     private static IReadOnlyList<string> WrapText(string text, float maxWidth, SKFont font, SKPaint paint)

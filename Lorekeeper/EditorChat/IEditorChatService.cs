@@ -39,7 +39,7 @@ public sealed class EditorChatContext(
     private Guid? _currentImageGenerationJobId;
     private readonly HashSet<Guid> _directlyEditedChapterBodies = [];
     private readonly List<EditorChatVisualAttachment> _visuals = [];
-    private readonly List<ProjectImageView> _modelOnlyImages = [];
+    private readonly List<EditorChatModelImageAttachment> _modelOnlyImages = [];
 
     public Guid ProjectId { get; } = projectId;
     public Guid ConversationId { get; } = conversationId;
@@ -105,10 +105,23 @@ public sealed class EditorChatContext(
     public void AddModelOnlyImage(ProjectImageView image)
     {
         if (VisionReady)
-            _modelOnlyImages.Add(image);
+        {
+            _modelOnlyImages.Add(new EditorChatModelImageAttachment(
+                image.Id,
+                image.Id,
+                image.FileName,
+                image.ContentType,
+                Data: null));
+        }
     }
 
-    public IReadOnlyList<ProjectImageView> DrainModelOnlyImages()
+    public void AddModelOnlyImage(Guid id, string fileName, string contentType, byte[] data)
+    {
+        if (VisionReady)
+            _modelOnlyImages.Add(new EditorChatModelImageAttachment(id, ProjectImageId: null, fileName, contentType, data));
+    }
+
+    public IReadOnlyList<EditorChatModelImageAttachment> DrainModelOnlyImages()
     {
         if (_modelOnlyImages.Count == 0)
             return [];
@@ -138,3 +151,10 @@ public sealed class EditorChatContext(
         return true;
     }
 }
+
+public sealed record EditorChatModelImageAttachment(
+    Guid Id,
+    Guid? ProjectImageId,
+    string FileName,
+    string ContentType,
+    byte[]? Data);

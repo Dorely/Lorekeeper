@@ -105,8 +105,11 @@ public static class ProjectImageEndpoints
                 if (visual.Data is not { Length: > 0 })
                     return Results.NotFound();
 
+                var visualData = maxEdge is int edge && edge > 0
+                    ? ProjectImageResize.Resize(visual.Data, visual.ContentType, edge)
+                    : visual.Data;
                 return Results.File(
-                    visual.Data,
+                    visualData,
                     visual.ContentType,
                     fileDownloadName: null,
                     lastModified: visual.CreatedAt,
@@ -149,8 +152,11 @@ public static class ProjectImageEndpoints
                 if (visual.Data is not { Length: > 0 })
                     return Results.NotFound();
 
+                var visualData = maxEdge is int edge && edge > 0
+                    ? ProjectImageResize.Resize(visual.Data, visual.ContentType, edge)
+                    : visual.Data;
                 return Results.File(
-                    visual.Data,
+                    visualData,
                     visual.ContentType,
                     fileDownloadName: null,
                     lastModified: visual.CreatedAt,

@@ -445,7 +445,7 @@ public sealed class EditorChatService(
             messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantToolCallContents(manifest)));
 
             var resultContents = new List<AIContent>();
-            var modelOnlyImagesForNextRound = new List<ProjectImageView>();
+            var modelOnlyImagesForNextRound = new List<EditorChatModelImageAttachment>();
             foreach (var pendingCall in pendingCalls)
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -768,11 +768,11 @@ public sealed class EditorChatService(
 
     private async Task<ChatMessage> BuildModelOnlyImageMessageAsync(
         Guid projectId,
-        IReadOnlyList<ProjectImageView> images)
+        IReadOnlyList<EditorChatModelImageAttachment> images)
     {
         var contents = new List<AIContent>
         {
-            new TextContent("Project images returned by the previous Editor Chat tool call are attached as model-only visual context. Use these images when deciding whether further edits or layout actions are needed."),
+            new TextContent("Images returned by the previous Editor Chat tool call are attached as model-only visual context. They may be project images or freshly rendered chapter snapshots. Use them when deciding whether further edits or layout actions are needed."),
         };
 
         var seen = new HashSet<Guid>();
@@ -781,14 +781,33 @@ public sealed class EditorChatService(
             if (!seen.Add(image.Id))
                 continue;
 
-            var data = await projectImages.GetDataAsync(projectId, image.Id, cancellationToken: CancellationToken.None);
-            if (data is null)
+            byte[] data;
+            string contentType;
+            string fileName;
+            if (image.ProjectImageId is { } projectImageId)
+            {
+                var projectImage = await projectImages.GetDataAsync(projectId, projectImageId, cancellationToken: CancellationToken.None);
+                if (projectImage is null)
+                    continue;
+                data = projectImage.Data;
+                contentType = projectImage.ContentType;
+                fileName = projectImage.FileName;
+            }
+            else if (image.Data is { Length: > 0 })
+            {
+                data = image.Data;
+                contentType = image.ContentType;
+                fileName = image.FileName;
+            }
+            else
+            {
                 continue;
+            }
 
             contents.Add(new TextContent($"\nImage {image.Id:N}: {image.FileName}"));
-            contents.Add(new DataContent(data.Data, data.ContentType)
+            contents.Add(new DataContent(data, contentType)
             {
-                Name = data.FileName,
+                Name = fileName,
             });
         }
 
