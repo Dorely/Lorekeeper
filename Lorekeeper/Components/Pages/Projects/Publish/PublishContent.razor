@@ -242,7 +242,7 @@ else
                                         <option value="@PrintPicturePageSpreadMode.SidewaysWholeSpread">Whole spread rotated on one tall page</option>
                                         <option value="@PrintPicturePageSpreadMode.SplitLeaves">Split into separate pages</option>
                                     </select>
-                                    <small>Controls Double Portrait and Double Landscape Picture Pages in preview and Print/PDF.</small>
+                                    <small>Whole-spread modes fit proportionally on standard Letter pages and may include whitespace.</small>
                                 </label>
                                 <label class="publish-field">
                                     <span>EPUB double spreads</span>
@@ -572,11 +572,13 @@ else
                             <span>Plain text</span>
                             <small>@ExportButtonDetail(PublishExportFormat.PlainText, "Text only")</small>
                         </button>
-                        <button type="button" class="btn btn-outline-secondary" disabled="@(!CanPrint)" @onclick="() => OpenPrintAsync(autoprint: false)">
+                        <button type="button" class="btn btn-outline-secondary" disabled="@(!CanPrint)"
+                                @ref="_publishPreviewButtonElement" @onclick="() => OpenPrintAsync(autoprint: false)">
                             <span>Publish preview</span>
                             <small>@(_printing ? "Opening…" : "Review the finished layout")</small>
                         </button>
-                        <button type="button" class="btn btn-outline-secondary" disabled="@(!CanPrint)" @onclick="() => OpenPrintAsync(autoprint: true)">
+                        <button type="button" class="btn btn-outline-secondary" disabled="@(!CanPrint)"
+                                @ref="_printPdfButtonElement" @onclick="() => OpenPrintAsync(autoprint: true)">
                             <span>Print / PDF</span>
                             <small>@(_printing ? "Opening…" : "Browser print layout")</small>
                         </button>
@@ -722,6 +724,35 @@ else
             </section>
         </div>
     }
+
+    @if (_printDialogOpen)
+    {
+        <div class="publish-modal-backdrop" aria-hidden="true"></div>
+        <div class="publish-modal-shell publish-print-modal-shell" role="presentation" @onkeydown="HandlePrintDialogKeyDown">
+            <section class="publish-modal publish-print-modal" role="dialog" aria-modal="true"
+                     aria-labelledby="print-dialog-title" tabindex="-1" @ref="_printDialogElement">
+                <header class="publish-modal-header">
+                    <div>
+                        <span class="publish-eyebrow">Finished layout</span>
+                        <h2 id="print-dialog-title">Publish preview</h2>
+                    </div>
+                    <button type="button" class="btn-close" aria-label="Close publish preview" @onclick="ClosePrintDialogAsync"></button>
+                </header>
+
+                <div class="publish-print-modal-body" aria-busy="@(_printDialogLoading ? "true" : "false")">
+                    @if (_printDialogLoading)
+                    {
+                        <div class="publish-print-loading" role="status">
+                            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                            <span>Preparing publish preview...</span>
+                        </div>
+                    }
+                    <iframe class="publish-print-frame" src="@_printDialogUrl" title="Publish preview"
+                            @onload="PrintDialogLoaded"></iframe>
+                </div>
+            </section>
+        </div>
+    }
 }
 
 @code {
@@ -743,6 +774,8 @@ else
     private bool _coverBusy;
     private bool _outlineBusy;
     private bool _placementDialogOpen;
+    private bool _printDialogOpen;
+    private bool _printDialogLoading;
     private bool _imagesLoading;
     private bool _placementSaving;
     private bool _placementActionBusy;
@@ -756,6 +789,7 @@ else
     private string? _placementDialogError;
     private string? _imagesLoadError;
     private string? _exportError;
+    private string _printDialogUrl = string.Empty;
     private string _placementTargetKey = string.Empty;
     private string _placementCaption = string.Empty;
     private string _imageSearch = string.Empty;
@@ -763,6 +797,10 @@ else
     private PublishImagePlacementKind _placementKind = PublishImagePlacementKind.ChapterOpening;
     private PublishExportFormat? _exportingFormat;
     private ElementReference _placementDialogElement;
+    private ElementReference _printDialogElement;
+    private ElementReference _publishPreviewButtonElement;
+    private ElementReference _printPdfButtonElement;
+    private ElementReference _printDialogReturnFocusElement;
     private IJSObjectReference? _downloadModule;
     private IJSObjectReference? _autoSizer;
     private CancellationTokenSource? _profileAutosaveCts;
@@ -772,6 +810,7 @@ else
     private SaveState _profileSaveState = SaveState.Idle;
     private DateTime? _profileLastSavedAt;
     private bool _focusPlacementDialog;
+    private bool _focusPrintDialog;
 
     private bool ProfileSaveInProgress => _profileSaveState == SaveState.Saving;
     private bool HasPendingProfileSave => _profileSavedVersion != _profileDraftVersion;
@@ -938,7 +977,9 @@ else
     {
         if (Project is null) return "#";
         var baseUrl = $"/projects/{Uri.EscapeDataString(Project.Slug)}/manuscript/print";
-        return autoprint ? $"{baseUrl}?autoprint=true" : baseUrl;
+        return autoprint
+            ? $"{baseUrl}?embedded=true&autoprint=true"
+            : $"{baseUrl}?embedded=true";
     }
 
     private string ImagesUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/images";
@@ -976,6 +1017,14 @@ else
         {
             _focusPlacementDialog = false;
             try { await _placementDialogElement.FocusAsync(); }
+            catch (InvalidOperationException) { }
+            catch (JSDisconnectedException) { }
+        }
+
+        if (_focusPrintDialog)
+        {
+            _focusPrintDialog = false;
+            try { await _printDialogElement.FocusAsync(); }
             catch (InvalidOperationException) { }
             catch (JSDisconnectedException) { }
         }
@@ -1446,7 +1495,14 @@ else
             await FlushProfileSaveAsync();
             if (_profileSaveState == SaveState.SaveFailed || HasPendingProfileSave)
                 throw new InvalidOperationException("Your latest publishing settings could not be saved. Retry the save before opening the publish view.");
-            Nav.NavigateTo(PrintUrl(autoprint));
+            _printDialogUrl = PrintUrl(autoprint);
+            _printDialogLoading = true;
+            _printDialogOpen = true;
+            _focusPrintDialog = true;
+            _printDialogReturnFocusElement = autoprint ? _printPdfButtonElement : _publishPreviewButtonElement;
+            _liveMessage = autoprint
+                ? "Print preview opened. The print dialog will open when the layout is ready."
+                : "Publish preview opened.";
         }
         catch (Exception ex)
         {
@@ -1457,6 +1513,29 @@ else
         {
             _printing = false;
         }
+    }
+
+    private void PrintDialogLoaded()
+    {
+        _printDialogLoading = false;
+        _liveMessage = "Publish preview is ready.";
+    }
+
+    private async Task ClosePrintDialogAsync()
+    {
+        _printDialogOpen = false;
+        _printDialogLoading = false;
+        _printDialogUrl = string.Empty;
+        _liveMessage = "Publish preview closed.";
+        await InvokeAsync(StateHasChanged);
+        try { await _printDialogReturnFocusElement.FocusAsync(); }
+        catch (InvalidOperationException) { }
+        catch (JSDisconnectedException) { }
+    }
+
+    private async Task HandlePrintDialogKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await ClosePrintDialogAsync();
     }
 
     private string ExportButtonDetail(PublishExportFormat format, string defaultText) =>

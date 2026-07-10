@@ -193,28 +193,20 @@
     aspect-ratio: 11 / 8.5;
 }
 
-.manuscript-picture-frame--spread-double-portrait {
-    page: picture-spread-double-portrait;
-    width: min(17in, calc(100% - 2rem));
-    aspect-ratio: 17 / 11;
-}
-
-.manuscript-picture-frame--spread-double-landscape {
-    page: picture-spread-double-landscape;
-    width: min(22in, calc(100% - 2rem));
-    aspect-ratio: 22 / 8.5;
-}
-
-.manuscript-picture-frame--sideways-double-portrait {
-    page: picture-sideways-double-portrait;
+.manuscript-picture-frame--spread-letter-landscape {
+    page: picture-spread-letter-landscape;
     width: min(11in, calc(100% - 2rem));
-    aspect-ratio: 11 / 17;
+    aspect-ratio: 11 / 8.5;
 }
 
-.manuscript-picture-frame--sideways-double-landscape {
-    page: picture-sideways-double-landscape;
+.manuscript-picture-frame--sideways-letter-portrait {
+    page: picture-sideways-letter-portrait;
     width: min(8.5in, calc(100% - 2rem));
-    aspect-ratio: 8.5 / 22;
+    aspect-ratio: 8.5 / 11;
+}
+
+.manuscript-picture-frame.is-contained img {
+    object-fit: contain;
 }
 
 .manuscript-picture-frame.is-single {
@@ -292,23 +284,13 @@
     margin: 0;
 }
 
-@page picture-spread-double-portrait {
-    size: 17in 11in;
+@page picture-spread-letter-landscape {
+    size: Letter landscape;
     margin: 0;
 }
 
-@page picture-spread-double-landscape {
-    size: 22in 8.5in;
-    margin: 0;
-}
-
-@page picture-sideways-double-portrait {
-    size: 11in 17in;
-    margin: 0;
-}
-
-@page picture-sideways-double-landscape {
-    size: 8.5in 22in;
+@page picture-sideways-letter-portrait {
+    size: Letter portrait;
     margin: 0;
 }
 
@@ -401,23 +383,13 @@
         height: 8.5in;
     }
 
-    .manuscript-picture-frame--spread-double-portrait {
-        width: 17in;
-        height: 11in;
-    }
-
-    .manuscript-picture-frame--spread-double-landscape {
-        width: 22in;
+    .manuscript-picture-frame--spread-letter-landscape {
+        width: 11in;
         height: 8.5in;
     }
 
-    .manuscript-picture-frame--sideways-double-portrait {
-        width: 11in;
-        height: 17in;
-    }
-
-    .manuscript-picture-frame--sideways-double-landscape {
+    .manuscript-picture-frame--sideways-letter-portrait {
         width: 8.5in;
-        height: 22in;
+        height: 11in;
     }
 }

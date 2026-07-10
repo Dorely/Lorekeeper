@@ -99,7 +99,7 @@
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
 | `ImagesPage.razor` | Images tab at `/projects/{Slug}/images`; wraps `ProjectLayout` and hosts `Images.ImagesContent`. |
 | `PublishPage.razor` | Publish tab at `/projects/{Slug}/publish`; wraps `ProjectLayout` and hosts `Publish.PublishContent`. |
-| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Scrollable preview and Print/PDF route at `/projects/{Slug}/manuscript/print`; supports optional title sheets plus full-bleed wide, sideways, or split-leaf Picture Page spreads with named page geometry and decoded-asset readiness. |
+| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Scrollable embedded preview and Print/PDF document at `/projects/{Slug}/manuscript/print`; supports optional title sheets, Letter-contained wide/sideways spreads, split leaves, and decoded-asset print readiness. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
 
@@ -133,7 +133,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Responsive Publish workspace for autosaved metadata, cover-aware title pages, independent PDF/EPUB Picture Page spread presentation, cover/outline/placement choices, preview/print actions, and TXT/Markdown/EPUB exports. |
+| `PublishContent.razor` (+ `.razor.css`) | Responsive Publish workspace for autosaved metadata, cover-aware title pages, independent PDF/EPUB spread presentation, cover/outline/placement choices, near-fullscreen modal preview/print, and TXT/Markdown/EPUB exports. |
 
 ### Components/Pages/Projects/Outline/
 

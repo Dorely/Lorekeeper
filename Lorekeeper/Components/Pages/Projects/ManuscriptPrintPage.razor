@@ -29,8 +29,11 @@ else if (!string.IsNullOrWhiteSpace(_error))
 }
 else if (_document is not null)
 {
-    <div class="print-toolbar">
-        <a class="btn btn-sm btn-outline-secondary" href="/projects/@_document.ProjectSlug/publish">Back</a>
+    <div class="print-toolbar @(Embedded ? "is-embedded" : null)">
+        @if (!Embedded)
+        {
+            <a class="btn btn-sm btn-outline-secondary" href="/projects/@_document.ProjectSlug/publish">Back</a>
+        }
         <button type="button" class="btn btn-sm btn-primary" @onclick="PrintAsync">Print / Save PDF</button>
         <span class="print-toolbar-meta">@_document.DisplayTitle</span>
     </div>
@@ -222,6 +225,7 @@ else if (_document is not null)
 @code {
     [Parameter] public string Slug { get; set; } = string.Empty;
     [SupplyParameterFromQuery(Name = "autoprint")] public bool Autoprint { get; set; }
+    [SupplyParameterFromQuery(Name = "embedded")] public bool Embedded { get; set; }
 
     private PublishDocument? _document;
     private string? _loadedKey;
@@ -421,7 +425,7 @@ else if (_document is not null)
             PrintPicturePageSpreadMode.SidewaysWholeSpread =>
             [
                 new(
-                    $"manuscript-picture-frame manuscript-picture-frame--sideways-double-{orientation} is-single",
+                    "manuscript-picture-frame manuscript-picture-frame--sideways-letter-portrait is-single is-contained",
                     $"{chapter.Title}, full spread rotated clockwise",
                     RotateClockwise: true),
             ],
@@ -439,7 +443,7 @@ else if (_document is not null)
             _ =>
             [
                 new(
-                    $"manuscript-picture-frame manuscript-picture-frame--spread-double-{orientation} is-single",
+                    "manuscript-picture-frame manuscript-picture-frame--spread-letter-landscape is-single is-contained",
                     $"{chapter.Title}, full spread",
                     RotateClockwise: false),
             ],
