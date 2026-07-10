@@ -7,26 +7,27 @@
 }
 
 .project-workspace-header {
-    align-items: center;
+    align-items: stretch;
     background: var(--lk-surface);
     border: 1px solid var(--lk-line);
     border-radius: var(--lk-radius-md);
     box-shadow: var(--lk-shadow-sm);
     display: flex;
+    flex-direction: column;
     flex: 0 0 auto;
-    gap: 0.75rem;
+    gap: 0.15rem;
     margin-bottom: 0.55rem;
-    min-height: 3.1rem;
     overflow: hidden;
-    padding: 0.35rem 0.45rem;
+    padding: 0.35rem 0.45rem 0.3rem;
 }
 
 .project-titlebar {
     align-items: center;
     display: flex;
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     gap: 0.55rem;
-    min-width: 10rem;
+    min-width: 0;
+    width: 100%;
 }
 
 .project-back {
@@ -44,39 +45,32 @@
 
 .project-back:hover { background: var(--lk-accent-soft); color: var(--lk-accent); }
 
-.project-identity { min-width: 0; }
-.project-identity > span {
-    color: var(--lk-accent);
-    display: block;
-    font-size: 0.58rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    line-height: 1;
-    text-transform: uppercase;
+.project-identity {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .project-title {
     font-family: Georgia, "Times New Roman", serif;
-    font-size: 1rem;
+    font-size: 1.15rem;
     font-weight: 650;
-    margin: 0.1rem 0 0;
-    max-width: min(23vw, 20rem);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.2;
+    margin: 0;
+    overflow-wrap: anywhere;
+    white-space: normal;
 }
 
 .project-tabs {
     align-items: center;
     display: flex;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     gap: 0.15rem;
     list-style: none;
     margin: 0;
     min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 0.15rem;
+    padding: 0.1rem 0.15rem 0.05rem 2.55rem;
     scrollbar-width: thin;
 }
 
@@ -85,9 +79,9 @@
     border: 0;
     border-radius: var(--lk-radius-sm);
     color: var(--lk-muted);
-    font-size: 0.78rem;
+    font-size: 0.9rem;
     font-weight: 700;
-    padding: 0.45rem 0.6rem;
+    padding: 0.48rem 0.72rem;
     white-space: nowrap;
 }
 
