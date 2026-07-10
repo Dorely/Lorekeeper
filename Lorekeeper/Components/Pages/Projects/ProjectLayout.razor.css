@@ -18,3 +18,55 @@
     flex-direction: column;
     overflow: hidden;
 }
+
+.project-shell--compact .project-workspace-header {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-height: 2.5rem;
+    margin-bottom: 0.4rem;
+    overflow: hidden;
+}
+
+.project-shell--compact .project-titlebar {
+    flex: 0 1 auto;
+    min-width: 0;
+    margin-bottom: 0 !important;
+}
+
+.project-shell--compact .project-titlebar .btn {
+    flex: 0 0 auto;
+    margin-right: 0.5rem !important;
+}
+
+.project-shell--compact .project-title {
+    min-width: 0;
+    max-width: min(28vw, 24rem);
+    overflow: hidden;
+    font-size: 1.1rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-shell--compact .project-tabs {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-bottom: 0 !important;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+}
+
+.project-shell--compact .project-tabs::-webkit-scrollbar {
+    height: 0.25rem;
+}
+
+.project-shell--compact .project-tabs .nav-item {
+    flex: 0 0 auto;
+}
+
+.project-shell--compact .project-tabs .nav-link {
+    padding: 0.35rem 0.65rem;
+    white-space: nowrap;
+}

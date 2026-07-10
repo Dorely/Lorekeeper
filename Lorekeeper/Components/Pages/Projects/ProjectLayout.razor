@@ -18,21 +18,23 @@ else if (Project is null)
 }
 else
 {
-    <div class="project-shell">
-        <div class="project-titlebar d-flex align-items-center mb-2">
-            <a href="/" class="btn btn-sm btn-outline-secondary me-3">&larr; Projects</a>
-            <h4 class="mb-0">@Project.Name</h4>
-        </div>
+    <div class="@ProjectShellClass()">
+        <div class="project-workspace-header">
+            <div class="project-titlebar d-flex align-items-center mb-2">
+                <a href="/" class="btn btn-sm btn-outline-secondary me-3">&larr; Projects</a>
+                <h4 class="project-title mb-0">@Project.Name</h4>
+            </div>
 
-        <ul class="nav nav-tabs project-tabs mb-3">
-            @foreach (var t in VisibleTabs)
-            {
-                <li class="nav-item">
-                    <a class="nav-link @(string.Equals(t.Key, Tab, StringComparison.OrdinalIgnoreCase) ? "active" : "")"
-                       href="/projects/@Project.Slug/@t.Key">@t.Label</a>
-                </li>
-            }
-        </ul>
+            <ul class="nav nav-tabs project-tabs mb-3" aria-label="Project sections">
+                @foreach (var t in VisibleTabs)
+                {
+                    <li class="nav-item">
+                        <a class="nav-link @(string.Equals(t.Key, Tab, StringComparison.OrdinalIgnoreCase) ? "active" : "")"
+                           href="/projects/@Project.Slug/@t.Key">@t.Label</a>
+                    </li>
+                }
+            </ul>
+        </div>
 
         <CascadingValue Value="Project">
             <div class="project-body">
@@ -67,6 +69,11 @@ else
 
     private IEnumerable<(string Key, string Label)> VisibleTabs =>
         _researchEnabled ? Tabs : Tabs.Where(tab => tab.Key != "research");
+
+    private string ProjectShellClass() =>
+        string.Equals(Tab, "editor", StringComparison.OrdinalIgnoreCase)
+            ? "project-shell project-shell--compact"
+            : "project-shell";
 
     protected override async Task OnParametersSetAsync()
     {

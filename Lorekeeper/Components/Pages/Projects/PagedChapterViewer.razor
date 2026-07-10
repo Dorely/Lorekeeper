@@ -10,7 +10,7 @@
 @inject IProjectImageService ProjectImages
 @inject IJSRuntime JS
 
-<div class="paged-viewer" tabindex="0" @ref="_viewerRoot">
+<div class="@PagedViewerClass()" tabindex="0" @ref="_viewerRoot">
     @if (State.VisualMode == ChapterVisualMode.PicturePage)
     {
         var pageMetrics = PageMetrics(State.PageLayoutKind);
@@ -20,7 +20,7 @@
             @if (CanEditLayout)
             {
                 <div class="picture-toolbar">
-                    <div class="picture-toolbar__actions">
+                    <div class="picture-toolbar__primary">
                         <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddTextBoxAsync">Add text box</button>
                         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenImagesAsync">Images</button>
                         @if (selectedLayer is not null)
@@ -47,9 +47,10 @@
                                 </div>
                             </div>
                         }
-                        @if (selectedText is not null)
-                        {
-                            <div class="picture-text-toolbar" aria-label="Selected text box controls">
+                    </div>
+                    @if (selectedText is not null)
+                    {
+                        <div class="picture-text-toolbar" aria-label="Selected text box controls">
                                 <label class="picture-text-toolbar__field">
                                     <span>Font</span>
                                     <select class="form-select form-select-sm"
@@ -118,9 +119,8 @@
                                            @oninput="PreviewSelectedTextBackgroundOpacityAsync"
                                            @onchange="SaveSelectedTextBackgroundOpacityAsync" />
                                 </label>
-                            </div>
-                        }
-                    </div>
+                        </div>
+                    }
                 </div>
             }
             <div class="picture-stage">
@@ -255,6 +255,11 @@
     private const double FigureSpacingInches = 0.16;
     private const double DropZoneHeightInches = 0.42;
     private bool CanEditLayout => IsEditable && !IsLocked;
+
+    private string PagedViewerClass() =>
+        State.VisualMode == ChapterVisualMode.PicturePage
+            ? "paged-viewer paged-viewer--picture"
+            : "paged-viewer";
 
     private enum ProsePageItemKind
     {
@@ -1361,9 +1366,10 @@
     {
         var width = metrics.SurfaceWidthInches.ToString(CultureInfo.InvariantCulture);
         var height = metrics.SurfaceHeightInches.ToString(CultureInfo.InvariantCulture);
-        var maxWidth = metrics.IsDouble ? $"{metrics.SurfaceWidthInches.ToString(CultureInfo.InvariantCulture)}in" : $"{metrics.PageWidthInches.ToString(CultureInfo.InvariantCulture)}in";
-        var viewportMax = $"calc((100dvh - 12rem) * {width} / {height})";
-        return $"aspect-ratio:{width}/{height};max-width:min(100%, {maxWidth}, {viewportMax});";
+        var naturalWidth = $"{metrics.SurfaceWidthInches.ToString(CultureInfo.InvariantCulture)}in";
+        var heightFitWidth = (metrics.SurfaceWidthInches / metrics.SurfaceHeightInches * 100)
+            .ToString("0.###", CultureInfo.InvariantCulture);
+        return $"--picture-page-natural-width:{naturalWidth};--picture-page-height-fit-width:{heightFitWidth}cqh;aspect-ratio:{width}/{height};";
     }
 
     private static string ProsePagesClass(PageLayoutMetrics metrics) =>

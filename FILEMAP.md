@@ -64,7 +64,7 @@
 
 | File | Description |
 |------|-------------|
-| `MainLayout.razor` / `.css` | Top-level page layout with sidebar + main column. Locks the app shell to viewport height and gives `article.content` a flex/scroll context so workspace pages can create independently scrolling panes. |
+| `MainLayout.razor` / `.css` | Top-level page layout with sidebar + main column. Locks the app shell to viewport height, gives workspaces an independent flex/scroll context, and applies compact outer padding on Editor routes. |
 | `PrintLayout.razor` / `.css` | Minimal no-navigation layout used by print-oriented pages such as Publish browser PDF export. |
 | `NavMenu.razor` / `.css` | Sidebar navigation (Home, Providers, Embeddings, Search Providers). |
 | `ReconnectModal.razor` / `.cs` / `.css` | UI shown when the SignalR circuit drops. |
@@ -81,10 +81,10 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectLayout.razor` (+ `.razor.css`) | Shared shell for project workspace pages: loads project by slug, renders title + horizontal tab strip including Editor, Outline, Images, Writing Sample, Publish, Research, Ingest, Graph, and Import / Export; exposes `Project` via `CascadingValue`. |
+| `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter editor with per-project resizable/collapsible Chat and Memory columns shared across Edit/Read/Layout/Review modes, chapter visual controls, image-library actions, and inline AI/Contest review. Persists/reindexes body edits, remembers the selected chapter, and refreshes editor/context surfaces after AI turns or approved changes. |
-| `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Simulated page viewer/editor for Prose, IllustratedProse, and PicturePage chapters, including paginated spreads, anchored illustrations, and PicturePage drag-resize/layering plus shared Read/Layout text rendering and typography/alignment controls. |
+| `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Simulated page viewer/editor for Prose, IllustratedProse, and PicturePage chapters, including paginated spreads, anchored illustrations, container-fitted PicturePage layouts, and wrapping drag-resize/layer/text controls shared by Read/Layout rendering. |
 | `ProjectImagePickerModal.razor` (+ `.razor.css`) | Editor image-library modal for selecting current project images and adding them either to the active chapter layout or explicit chapter context. |
 | `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: loads transcript/tool visuals, streams text/tool/image-generation/contest updates, routes active-chapter body changes and Contest Mode results to inline Review mode, and keeps pending-change review. |
 | `ContextItemDetailModal.razor` (+ `.razor.css`) | Shared editor context detail modal for recommendation and Context Feed items; loads entities, chapters, acts, ingest sources/chunks, and supports Context Feed project-guidance/entity edits. |

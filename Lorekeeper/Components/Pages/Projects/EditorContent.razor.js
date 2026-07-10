@@ -98,7 +98,7 @@ export function attachColumnLayout(elements, projectId) {
             };
         }
 
-        const usableWidth = Math.max(0, grid.clientWidth - (1.5 * rootFontSize));
+        const usableWidth = Math.max(0, grid.clientWidth - rootFontSize);
         const fractionTotal = 1.05 + 2 + 1.1;
         return {
             chat: Math.max(17 * rootFontSize, usableWidth * 1.05 / fractionTotal),
