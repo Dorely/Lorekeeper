@@ -1,309 +1,687 @@
+@using Lorekeeper.Images
 @using Lorekeeper.Models
 @using Lorekeeper.Publish
 @implements IAsyncDisposable
 @inject IPublishService Publishing
+@inject IProjectImageService ProjectImages
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
 @if (Project is null)
 {
-    <p class="text-muted"><em>Loading...</em></p>
+    <div class="publish-loading" role="status">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Loading project…</span>
+    </div>
 }
 else if (_loading)
 {
-    <p class="text-muted"><em>Loading publish setup...</em></p>
+    <div class="publish-loading" role="status">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Preparing your publishing workspace…</span>
+    </div>
 }
 else if (_workspace is null)
 {
-    <div class="alert alert-danger">Publish setup could not be loaded.</div>
+    <div class="publish-load-error" role="alert">
+        <div>
+            <h2>We couldn’t load Publish</h2>
+            <p>@(string.IsNullOrWhiteSpace(_loadError) ? "The publishing setup is unavailable right now." : _loadError)</p>
+        </div>
+        <button type="button" class="btn btn-primary" disabled="@_loading" @onclick="RetryLoadAsync">Try again</button>
+    </div>
 }
 else
 {
-    <div class="publish-pane">
-        <section class="publish-column publish-main">
-            <div class="publish-card">
-                <div class="publish-card-title">Book Details</div>
-                @if (!string.IsNullOrWhiteSpace(_profileError))
-                {
-                    <div class="alert alert-danger py-2 small">@_profileError</div>
-                }
-
-                <div class="publish-form-grid">
-                    <label>
-                        <span>Title</span>
-                        <input class="form-control form-control-sm" @bind="_profile.TitleOverride" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
-                    </label>
-                    <label>
-                        <span>Subtitle</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Subtitle" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
-                    </label>
-                    <label>
-                        <span>Author</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Author" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
-                    </label>
-                    <label>
-                        <span>Language</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Language" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
-                    </label>
-                    <label>
-                        <span>Publisher</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Publisher" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
-                    </label>
-                    <label>
-                        <span>ISBN</span>
-                        <input class="form-control form-control-sm" @bind="_profile.Isbn" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
-                    </label>
-                </div>
-
-                <label class="publish-full">
-                    <span>Copyright</span>
-                    <input class="form-control form-control-sm" @bind="_profile.Copyright" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
-                </label>
-                <label class="publish-full">
-                    <span>Description</span>
-                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Description" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
-                </label>
-                <label class="publish-full">
-                    <span>Dedication</span>
-                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Dedication" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
-                </label>
-                <label class="publish-full">
-                    <span>Acknowledgments</span>
-                    <textarea class="form-control form-control-sm" rows="3" @bind="_profile.Acknowledgments" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
-                </label>
-                <label class="publish-full">
-                    <span>References</span>
-                    <textarea class="form-control form-control-sm" rows="4" @bind="_profile.References" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
-                </label>
-
-                <div class="publish-check-grid">
-                    <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeTableOfContents" @bind:after="ScheduleProfileAutosave" />
-                        <span class="form-check-label">Table of contents</span>
-                    </label>
-                    <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeVisibleTableOfContents" @bind:after="ScheduleProfileAutosave" />
-                        <span class="form-check-label">Visible EPUB/print TOC page</span>
-                    </label>
-                    <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeActSynopses" @bind:after="ScheduleProfileAutosave" />
-                        <span class="form-check-label">Act synopses</span>
-                    </label>
-                    <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeChapterSynopses" @bind:after="ScheduleProfileAutosave" />
-                        <span class="form-check-label">Chapter synopses</span>
-                    </label>
-                    <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeActHeadings" @bind:after="ScheduleProfileAutosave" />
-                        <span class="form-check-label">Act headings</span>
-                    </label>
-                    <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.IncludeChapterHeadings" @bind:after="ScheduleProfileAutosave" />
-                        <span class="form-check-label">Chapter headings</span>
-                    </label>
-                    <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.NumberActs" @bind:after="ScheduleProfileAutosave" />
-                        <span class="form-check-label">Number acts</span>
-                    </label>
-                    <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_profile.NumberChapters" @bind:after="ScheduleProfileAutosave" />
-                        <span class="form-check-label">Number chapters</span>
-                    </label>
-                </div>
-
-                <div class="d-flex align-items-center flex-wrap gap-2">
-                    <button type="button" class="btn btn-sm btn-primary" disabled="@ProfileSaveInProgress" @onclick="SaveProfileAsync">
-                        @(ProfileSaveInProgress ? "Saving..." : "Save now")
-                    </button>
-                    <span class="@ProfileSaveStatusClass">@ProfileSaveStatusText()</span>
-                </div>
+    <main class="publish-workspace" aria-labelledby="publish-title">
+        <header class="publish-header">
+            <div class="publish-heading">
+                <span class="publish-eyebrow">Book publishing</span>
+                <h1 id="publish-title">Prepare your manuscript</h1>
+                <p>Choose what belongs in the book, review its presentation, and export when everything is ready.</p>
             </div>
 
-            <div class="publish-card">
-                <div class="publish-card-title">Outline</div>
-                @if (!string.IsNullOrWhiteSpace(_outlineError))
+            <div class="publish-header-status" aria-live="polite" aria-atomic="true">
+                <span class="publish-status-dot @SaveStatusDotClass" aria-hidden="true"></span>
+                <span class="@SaveStatusTextClass">@SaveStatusText</span>
+                @if (_profileSaveState == SaveState.SaveFailed)
                 {
-                    <div class="alert alert-danger py-2 small">@_outlineError</div>
+                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@ProfileSaveInProgress" @onclick="RetryProfileSaveAsync">
+                        Retry save
+                    </button>
                 }
-                @foreach (var publishSection in _workspace.Sections)
-                {
-                    <div class="publish-outline-section">
-                        @if (publishSection.ActId is Guid actId)
-                        {
-                            <label class="form-check publish-outline-act">
-                                <input class="form-check-input" type="checkbox" checked="@publishSection.IsIncluded" @onchange="@(e => SetOutlineSelectionAsync(PublishOutlineTargetKind.Act, actId, e))" />
-                                <span class="form-check-label">@publishSection.Title</span>
-                            </label>
-                        }
-                        else
-                        {
-                            <div class="publish-outline-act text-muted">@publishSection.Title</div>
-                        }
+            </div>
+        </header>
 
-                        <div class="publish-outline-chapters">
-                            @foreach (var chapter in publishSection.Chapters)
-                            {
-                                <label class="form-check">
-                                    <input class="form-check-input" type="checkbox" checked="@chapter.IsIncluded" @onchange="@(e => SetOutlineSelectionAsync(PublishOutlineTargetKind.Chapter, chapter.Id, e))" />
-                                    <span class="form-check-label">@chapter.Title</span>
+        <div class="publish-layout">
+            <div class="publish-main">
+                <section class="publish-card" aria-labelledby="identity-title">
+                    <div class="publish-card-heading">
+                        <div>
+                            <span class="publish-step">01</span>
+                            <h2 id="identity-title">Book identity</h2>
+                        </div>
+                        <p>The title and author information readers see first.</p>
+                    </div>
+
+                    <div class="publish-form-grid">
+                        <label class="publish-field publish-field-wide">
+                            <span>Title</span>
+                            <input class="form-control" autocomplete="off" placeholder="@_workspace.Profile.ProjectName"
+                                   @bind="_profile.TitleOverride" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                            <small>Leave blank to use the project name.</small>
+                        </label>
+                        <label class="publish-field publish-field-wide">
+                            <span>Subtitle <em>Optional</em></span>
+                            <input class="form-control" autocomplete="off" placeholder="A subtitle for your book"
+                                   @bind="_profile.Subtitle" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                        </label>
+                        <label class="publish-field">
+                            <span>Author</span>
+                            <input class="form-control" autocomplete="name" placeholder="Author name"
+                                   @bind="_profile.Author" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                        </label>
+                        <label class="publish-field">
+                            <span>Language</span>
+                            <input class="form-control" autocomplete="off" placeholder="en" aria-describedby="language-help"
+                                   @bind="_profile.Language" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                            <small id="language-help">Use a language tag such as en or en-US.</small>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="publish-card" aria-labelledby="metadata-title">
+                    <div class="publish-card-heading">
+                        <div>
+                            <span class="publish-step">02</span>
+                            <h2 id="metadata-title">Publishing metadata</h2>
+                        </div>
+                        <p>Optional catalog and storefront information.</p>
+                    </div>
+
+                    <div class="publish-form-grid">
+                        <label class="publish-field">
+                            <span>Publisher <em>Optional</em></span>
+                            <input class="form-control" autocomplete="organization"
+                                   @bind="_profile.Publisher" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                        </label>
+                        <label class="publish-field">
+                            <span>ISBN <em>Optional</em></span>
+                            <input class="form-control" autocomplete="off" inputmode="numeric"
+                                   @bind="_profile.Isbn" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                        </label>
+                        <label class="publish-field publish-field-wide">
+                            <span>Copyright notice <em>Optional</em></span>
+                            <input class="form-control" autocomplete="off" placeholder="© 2026 Author name"
+                                   @bind="_profile.Copyright" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                        </label>
+                        <label class="publish-field publish-field-wide">
+                            <span>Description <em>Optional</em></span>
+                            <textarea class="form-control" data-autosize data-autosize-resize="vertical" rows="3"
+                                      placeholder="A short description of the book"
+                                      @bind="_profile.Description" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="publish-card" aria-labelledby="matter-title">
+                    <div class="publish-card-heading">
+                        <div>
+                            <span class="publish-step">03</span>
+                            <h2 id="matter-title">Front &amp; back matter</h2>
+                        </div>
+                        <p>Add the supporting pages that frame the manuscript.</p>
+                    </div>
+
+                    <div class="publish-stack">
+                        <label class="publish-field">
+                            <span>Dedication <em>Optional</em></span>
+                            <textarea class="form-control" data-autosize data-autosize-resize="vertical" rows="2"
+                                      @bind="_profile.Dedication" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
+                        </label>
+                        <label class="publish-field">
+                            <span>Acknowledgments <em>Optional</em></span>
+                            <textarea class="form-control" data-autosize data-autosize-resize="vertical" rows="3"
+                                      @bind="_profile.Acknowledgments" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
+                        </label>
+                        <label class="publish-field">
+                            <span>References <em>Optional</em></span>
+                            <textarea class="form-control" data-autosize data-autosize-resize="vertical" rows="3"
+                                      @bind="_profile.References" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="publish-card" aria-labelledby="formatting-title">
+                    <div class="publish-card-heading">
+                        <div>
+                            <span class="publish-step">04</span>
+                            <h2 id="formatting-title">Contents &amp; formatting</h2>
+                        </div>
+                        <p>Control navigation, headings, numbering, and synopsis pages.</p>
+                    </div>
+
+                    <div class="publish-option-groups">
+                        <fieldset class="publish-option-group">
+                            <legend>Table of contents</legend>
+                            <label class="publish-toggle">
+                                <input class="form-check-input" type="checkbox"
+                                       @bind="_profile.IncludeTableOfContents" @bind:after="ScheduleProfileAutosave" />
+                                <span>
+                                    <strong>Include navigation table of contents</strong>
+                                    <small>Add linked navigation to supported exports.</small>
+                                </span>
+                            </label>
+                            <label class="publish-toggle publish-dependent @(!_profile.IncludeTableOfContents ? "is-disabled" : null)">
+                                <input class="form-check-input" type="checkbox" disabled="@(!_profile.IncludeTableOfContents)"
+                                       @bind="_profile.IncludeVisibleTableOfContents" @bind:after="ScheduleProfileAutosave" />
+                                <span>
+                                    <strong>Show a visible contents page</strong>
+                                    <small>Render the contents as a page in EPUB and print.</small>
+                                </span>
+                            </label>
+                        </fieldset>
+
+                        <fieldset class="publish-option-group">
+                            <legend>Act presentation</legend>
+                            <label class="publish-toggle">
+                                <input class="form-check-input" type="checkbox"
+                                       @bind="_profile.IncludeActHeadings" @bind:after="ScheduleProfileAutosave" />
+                                <span><strong>Show act headings</strong></span>
+                            </label>
+                            <label class="publish-toggle publish-dependent @(!_profile.IncludeActHeadings ? "is-disabled" : null)">
+                                <input class="form-check-input" type="checkbox" disabled="@(!_profile.IncludeActHeadings)"
+                                       @bind="_profile.NumberActs" @bind:after="ScheduleProfileAutosave" />
+                                <span><strong>Number acts</strong></span>
+                            </label>
+                            <label class="publish-toggle">
+                                <input class="form-check-input" type="checkbox"
+                                       @bind="_profile.IncludeActSynopses" @bind:after="ScheduleProfileAutosave" />
+                                <span><strong>Include act synopses</strong></span>
+                            </label>
+                        </fieldset>
+
+                        <fieldset class="publish-option-group">
+                            <legend>Chapter presentation</legend>
+                            <label class="publish-toggle">
+                                <input class="form-check-input" type="checkbox"
+                                       @bind="_profile.IncludeChapterHeadings" @bind:after="ScheduleProfileAutosave" />
+                                <span><strong>Show chapter headings</strong></span>
+                            </label>
+                            <label class="publish-toggle publish-dependent @(!_profile.IncludeChapterHeadings ? "is-disabled" : null)">
+                                <input class="form-check-input" type="checkbox" disabled="@(!_profile.IncludeChapterHeadings)"
+                                       @bind="_profile.NumberChapters" @bind:after="ScheduleProfileAutosave" />
+                                <span><strong>Number chapters</strong></span>
+                            </label>
+                            <label class="publish-toggle">
+                                <input class="form-check-input" type="checkbox"
+                                       @bind="_profile.IncludeChapterSynopses" @bind:after="ScheduleProfileAutosave" />
+                                <span><strong>Include chapter synopses</strong></span>
+                            </label>
+                        </fieldset>
+                    </div>
+                </section>
+
+                <section class="publish-card" aria-labelledby="cover-title">
+                    <div class="publish-card-heading publish-card-heading-actions">
+                        <div>
+                            <span class="publish-step">05</span>
+                            <h2 id="cover-title">Cover</h2>
+                            <p>Use a Picture Page as the first page of the exported book.</p>
+                        </div>
+                        @if (SelectedCoverCandidate is not null)
+                        {
+                            <a class="btn btn-sm btn-outline-primary" href="@EditorUrl(SelectedCoverCandidate.Id)">Edit picture page</a>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(_coverError))
+                    {
+                        <div class="alert alert-danger py-2" role="alert">@_coverError</div>
+                    }
+
+                    @if (_workspace.CoverCandidates.Count == 0)
+                    {
+                        <div class="publish-empty-state">
+                            <div class="publish-empty-icon" aria-hidden="true">▧</div>
+                            <div>
+                                <h3>Create a Picture Page for your cover</h3>
+                                <p>In Outline, create a chapter, then open it in Editor and change its visual mode to Picture page. Design the complete cover there and return here to select it.</p>
+                                <div class="d-flex flex-wrap gap-2">
+                                    <a class="btn btn-sm btn-primary" href="@OutlineUrl">Open Outline</a>
+                                    <a class="btn btn-sm btn-outline-secondary" href="@EditorRootUrl">Open Editor</a>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="publish-cover-grid">
+                            <div>
+                                <label class="publish-field">
+                                    <span>Cover picture page</span>
+                                    <select class="form-select" value="@SelectedCoverValue" disabled="@_coverBusy" @onchange="SetCoverChapterAsync">
+                                        <option value="">No cover</option>
+                                        @foreach (var candidate in _workspace.CoverCandidates)
+                                        {
+                                            <option value="@candidate.Id.ToString("N")">@candidate.OutlineLabel</option>
+                                        }
+                                    </select>
+                                    <small>The chosen page is exported as the cover only and is omitted from the manuscript body.</small>
                                 </label>
-                            }
+
+                                @if (SelectedCoverCandidate is { } selectedCover)
+                                {
+                                    <div class="publish-cover-meta">
+                                        <span class="publish-badge publish-badge-picture">Picture page</span>
+                                        <span class="publish-badge">@PageLayoutLabel(selectedCover.PageLayoutKind)</span>
+                                    </div>
+                                    @if (IsNonPortraitCover(selectedCover.PageLayoutKind))
+                                    {
+                                        <div class="publish-advisory" role="status">
+                                            <strong>Check the cover shape.</strong>
+                                            <span>This @PageLayoutLabel(selectedCover.PageLayoutKind).ToLowerInvariant() layout can be used, but most book covers are single portrait pages.</span>
+                                        </div>
+                                    }
+                                }
+                            </div>
+
+                            <div class="publish-cover-preview @(SelectedCoverCandidate is null ? "is-empty" : null)">
+                                @if (SelectedCoverCandidate is { } cover)
+                                {
+                                    <img src="@cover.PreviewUrl" alt="Preview of @cover.Title" />
+                                }
+                                else
+                                {
+                                    <div>
+                                        <span aria-hidden="true">No cover</span>
+                                        <small>Select a Picture Page to preview it here.</small>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </section>
+
+                <section class="publish-card" aria-labelledby="outline-title">
+                    <div class="publish-card-heading publish-card-heading-actions">
+                        <div>
+                            <span class="publish-step">06</span>
+                            <h2 id="outline-title">Manuscript outline</h2>
+                            <p>Select chapter content and optional act divider pages independently.</p>
+                        </div>
+                        <div class="publish-bulk-actions" aria-label="Bulk outline actions">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@OutlineBusy" @onclick="() => SetAllOutlineSelectionsAsync(true)">Select all</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@OutlineBusy" @onclick="() => SetAllOutlineSelectionsAsync(false)">Clear all</button>
                         </div>
                     </div>
-                }
-            </div>
-        </section>
 
-        <section class="publish-column publish-side">
-            <div class="publish-card">
-                <div class="publish-card-title">Export</div>
-                @if (!string.IsNullOrWhiteSpace(_exportError))
-                {
-                    <div class="alert alert-danger py-2 small">@_exportError</div>
-                }
-                <div class="publish-export-row">
-                    <select class="form-select form-select-sm" @bind="_exportFormat">
-                        <option value="@PublishExportFormat.PlainText">TXT</option>
-                        <option value="@PublishExportFormat.Markdown">Markdown</option>
-                        <option value="@PublishExportFormat.Epub">EPUB</option>
-                    </select>
-                    <button type="button" class="btn btn-sm btn-primary" disabled="@_exporting" @onclick="ExportAsync">
-                        @(_exporting ? "Exporting..." : "Download")
-                    </button>
-                </div>
-                <a class="btn btn-sm btn-outline-secondary publish-print-link" href="@PrintUrl" @onclick="FlushAllSavesAsync">Print / PDF</a>
-            </div>
-
-            <div class="publish-card">
-                <div class="publish-card-title">Cover Text</div>
-                @if (!string.IsNullOrWhiteSpace(_coverLayoutError))
-                {
-                    <div class="alert alert-danger py-2 small">@_coverLayoutError</div>
-                }
-                <CoverTextEditor CoverAsset="SelectedCoverAsset"
-                                 Layout="CurrentCoverLayout"
-                                 Title="@CoverTitleText"
-                                 Subtitle="@_profile.Subtitle"
-                                 Author="@_profile.Author"
-                                 SaveStatus="@CoverLayoutSaveStatusText()"
-                                 SaveStatusClass="@CoverLayoutSaveStatusClass"
-                                 LayoutChanged="OnCoverLayoutChangedAsync" />
-            </div>
-
-            <div class="publish-card">
-                <div class="publish-card-title">Images</div>
-                @if (!string.IsNullOrWhiteSpace(_assetError))
-                {
-                    <div class="alert alert-danger py-2 small">@_assetError</div>
-                }
-
-                <a class="btn btn-sm btn-outline-primary mb-3" href="@ImagesUrl">Manage images</a>
-
-                <div class="publish-asset-list">
-                    @foreach (var asset in _workspace.Assets)
+                    @if (!string.IsNullOrWhiteSpace(_outlineError))
                     {
-                        var isCover = _workspace.Profile.SelectedCoverAssetId == asset.Id;
-                        <div class="publish-asset-row">
-                            <button type="button" class="publish-asset-preview-button" title="View image" @onclick="() => OpenAssetViewer(asset)">
-                                <img class="publish-asset-preview" src="@asset.PreviewDataUrl" alt="@AssetAlt(asset)" />
-                            </button>
-                            <div class="publish-asset-info">
-                                <strong>@asset.FileName</strong>
-                                <span>@asset.Source - @FormatBytes(asset.SizeBytes)</span>
-                            </div>
-                            <div class="publish-asset-actions">
-                                <button type="button" class="btn btn-sm @(isCover ? "btn-success" : "btn-outline-secondary")" @onclick="() => SetCoverAsync(asset.Id)">
-                                    @(isCover ? "Cover" : "Set cover")
-                                </button>
-                            </div>
+                        <div class="alert alert-danger py-2" role="alert">@_outlineError</div>
+                    }
+
+                    <div class="publish-outline-summary">
+                        <strong>@IncludedChapterCount of @SelectableChapterCount chapters included</strong>
+                        @if (SelectedCoverCandidate is not null)
+                        {
+                            <span>The cover is counted separately.</span>
+                        }
+                    </div>
+
+                    <div class="publish-outline-list">
+                        @foreach (var publishSection in _workspace.Sections)
+                        {
+                            <section class="publish-outline-section" aria-label="@publishSection.Title">
+                                <div class="publish-outline-section-header">
+                                    <div>
+                                        <span class="publish-outline-kicker">@(publishSection.IsUnassigned ? "Ungrouped chapters" : "Act")</span>
+                                        <h3>@publishSection.Title</h3>
+                                    </div>
+                                    @if (publishSection.ActId is Guid actId)
+                                    {
+                                        <label class="publish-outline-act-toggle">
+                                            <input class="form-check-input" type="checkbox" checked="@publishSection.IsIncluded"
+                                                   disabled="@OutlineBusy"
+                                                   @onchange="e => SetOutlineSelectionAsync(PublishOutlineTargetKind.Act, actId, e)" />
+                                            <span>Include act divider page</span>
+                                        </label>
+                                    }
+                                </div>
+
+                                <div class="publish-chapter-list">
+                                    @foreach (var chapter in publishSection.Chapters)
+                                    {
+                                        var isCover = IsCoverChapter(chapter.Id);
+                                        <div class="publish-chapter-row @(isCover ? "is-cover" : null)">
+                                            <div class="publish-chapter-control">
+                                                @if (isCover)
+                                                {
+                                                    <span class="publish-cover-marker" aria-hidden="true">C</span>
+                                                }
+                                                else
+                                                {
+                                                    <input class="form-check-input" type="checkbox" checked="@chapter.IsIncluded"
+                                                           aria-label="Include @chapter.Title"
+                                                           disabled="@OutlineBusy"
+                                                           @onchange="e => SetOutlineSelectionAsync(PublishOutlineTargetKind.Chapter, chapter.Id, e)" />
+                                                }
+                                            </div>
+                                            <div class="publish-chapter-info">
+                                                <strong>@chapter.Title</strong>
+                                                <div class="publish-chapter-badges">
+                                                    <span class="publish-badge @VisualModeBadgeClass(chapter.VisualMode)">@VisualModeLabel(chapter.VisualMode)</span>
+                                                    @if (chapter.VisualMode == ChapterVisualMode.PicturePage)
+                                                    {
+                                                        <span class="publish-badge">@PageLayoutLabel(chapter.PageLayoutKind)</span>
+                                                    }
+                                                    @if (isCover)
+                                                    {
+                                                        <span class="publish-badge publish-badge-cover">Cover only</span>
+                                                    }
+                                                </div>
+                                            </div>
+                                            @if (isCover)
+                                            {
+                                                <a class="btn btn-sm btn-link" href="@EditorUrl(chapter.Id)">Edit</a>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </section>
+                        }
+                    </div>
+                </section>
+
+                <section class="publish-card" aria-labelledby="images-title">
+                    <div class="publish-card-heading publish-card-heading-actions">
+                        <div>
+                            <span class="publish-step">07</span>
+                            <h2 id="images-title">Interior images</h2>
+                            <p>Place project images around included act and chapter content.</p>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-primary" disabled="@(!HasPlacementTargets || _placementActionBusy)" @onclick="OpenAddPlacementAsync">
+                            Add image placement
+                        </button>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(_placementError))
+                    {
+                        <div class="alert alert-danger py-2" role="alert">@_placementError</div>
+                    }
+
+                    @if (!HasPlacementTargets)
+                    {
+                        <div class="publish-inline-empty">
+                            Include at least one act divider or chapter to add interior images.
                         </div>
                     }
-                </div>
-            </div>
-
-            <div class="publish-card">
-                <div class="publish-card-title">Interior Images</div>
-                @if (!string.IsNullOrWhiteSpace(_placementError))
-                {
-                    <div class="alert alert-danger py-2 small">@_placementError</div>
-                }
-                @if (_workspace.Assets.Count == 0)
-                {
-                    <p class="text-muted small">Add an asset before placing images.</p>
-                }
-                else
-                {
-                    <label class="publish-full">
-                        <span>Asset</span>
-                        <select class="form-select form-select-sm" @bind="_placementAssetId">
-                            <option value="">Select asset</option>
-                            @foreach (var asset in _workspace.Assets)
-                            {
-                                <option value="@asset.Id">@asset.FileName</option>
-                            }
-                        </select>
-                    </label>
-                    <label class="publish-full">
-                        <span>Target</span>
-                        <select class="form-select form-select-sm" @bind="_placementTargetKey">
-                            <option value="">Select target</option>
-                            @foreach (var publishSection in _workspace.Sections.Where(candidate => candidate.ActId is not null))
-                            {
-                                <option value="@TargetKey(PublishOutlineTargetKind.Act, publishSection.ActId!.Value)">Act: @publishSection.Title</option>
-                            }
-                            @foreach (var chapter in _workspace.Sections.SelectMany(candidate => candidate.Chapters))
-                            {
-                                <option value="@TargetKey(PublishOutlineTargetKind.Chapter, chapter.Id)">Chapter: @chapter.Title</option>
-                            }
-                        </select>
-                    </label>
-                    <label class="publish-full">
-                        <span>Placement</span>
-                        <select class="form-select form-select-sm" @bind="_placementKind">
-                            <option value="@PublishImagePlacementKind.BeforeAct">Before act</option>
-                            <option value="@PublishImagePlacementKind.AfterAct">After act</option>
-                            <option value="@PublishImagePlacementKind.BeforeChapter">Before chapter</option>
-                            <option value="@PublishImagePlacementKind.ChapterOpening">Chapter opening</option>
-                            <option value="@PublishImagePlacementKind.ChapterEnding">Chapter ending</option>
-                            <option value="@PublishImagePlacementKind.AfterChapter">After chapter</option>
-                        </select>
-                    </label>
-                    <label class="publish-full">
-                        <span>Caption</span>
-                        <input class="form-control form-control-sm" @bind="_placementCaption" />
-                    </label>
-                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddPlacementAsync">Add placement</button>
-                }
-
-                <div class="publish-placement-list">
-                    @foreach (var placement in _workspace.Placements)
+                    else if (_placements.Count == 0)
                     {
-                        <div class="publish-placement-row">
-                            <div>
-                                <strong>@placement.PlacementKind</strong>
-                                <span>@placement.TargetKind: @placement.TargetTitle</span>
-                                <span>@placement.AssetFileName</span>
-                            </div>
-                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeletePlacementAsync(placement.Id)">Delete</button>
+                        <div class="publish-inline-empty">
+                            No publish-only images have been placed. Picture Page and illustrated chapter images are already included from the Editor.
                         </div>
                     }
-                </div>
+                    else
+                    {
+                        <ol class="publish-placement-list">
+                            @foreach (var placement in _placements)
+                            {
+                                var deleting = _deletingPlacementIds.Contains(placement.Id);
+                                <li class="publish-placement-row" @key="placement.Id">
+                                    <img src="@placement.AssetPreviewUrl" alt="" loading="lazy" />
+                                    <div class="publish-placement-info">
+                                        <strong>@placement.AssetFileName</strong>
+                                        <span>@HumanizePlacement(placement.PlacementKind) · @placement.TargetTitle</span>
+                                        @if (!PlacementIsActive(placement))
+                                        {
+                                            <span class="publish-placement-inactive">Not exported with the current cover and outline selection</span>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(placement.Caption))
+                                        {
+                                            <p>“@placement.Caption”</p>
+                                        }
+                                    </div>
+                                    <div class="publish-placement-actions">
+                                        <div class="btn-group btn-group-sm" role="group" aria-label="Reorder @placement.AssetFileName">
+                                            <button type="button" class="btn btn-outline-secondary" title="Move up"
+                                                    aria-label="Move @placement.AssetFileName up"
+                                                    disabled="@(!CanMovePlacement(placement, -1) || _placementActionBusy)"
+                                                    @onclick="() => MovePlacementAsync(placement, -1)">↑</button>
+                                            <button type="button" class="btn btn-outline-secondary" title="Move down"
+                                                    aria-label="Move @placement.AssetFileName down"
+                                                    disabled="@(!CanMovePlacement(placement, 1) || _placementActionBusy)"
+                                                    @onclick="() => MovePlacementAsync(placement, 1)">↓</button>
+                                        </div>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_placementActionBusy" @onclick="() => OpenEditPlacementAsync(placement)">Edit</button>
+                                        @if (_confirmDeletePlacementId == placement.Id)
+                                        {
+                                            <button type="button" class="btn btn-sm btn-danger" disabled="@deleting" @onclick="() => DeletePlacementAsync(placement.Id)">
+                                                @(deleting ? "Deleting…" : "Confirm")
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-link" disabled="@deleting" @onclick="CancelPlacementDelete">Cancel</button>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_placementActionBusy" @onclick="() => ConfirmPlacementDelete(placement.Id)">Delete</button>
+                                        }
+                                    </div>
+                                </li>
+                            }
+                        </ol>
+                    }
+                </section>
             </div>
-        </section>
-    </div>
 
-    @if (_selectedAsset is not null)
+            <aside class="publish-sidebar" aria-labelledby="summary-title">
+                <div class="publish-summary-card">
+                    <div class="publish-summary-heading">
+                        <span class="publish-eyebrow">Export summary</span>
+                        <h2 id="summary-title">@DisplayTitle</h2>
+                        @if (!string.IsNullOrWhiteSpace(_profile.Author))
+                        {
+                            <p>by @_profile.Author</p>
+                        }
+                    </div>
+
+                    <dl class="publish-summary-stats">
+                        <div>
+                            <dt>Manuscript</dt>
+                            <dd>@IncludedChapterCount chapter@(IncludedChapterCount == 1 ? string.Empty : "s")</dd>
+                        </div>
+                        <div>
+                            <dt>Cover</dt>
+                            <dd>@(SelectedCoverCandidate?.Title ?? "Not selected")</dd>
+                        </div>
+                        <div>
+                            <dt>Interior images</dt>
+                            <dd>@ActivePlacementCount placement@(ActivePlacementCount == 1 ? string.Empty : "s")</dd>
+                        </div>
+                    </dl>
+
+                    @if (ReadinessMessages.Count > 0)
+                    {
+                        <div class="publish-readiness">
+                            <h3>Before you export</h3>
+                            <ul>
+                                @foreach (var message in ReadinessMessages)
+                                {
+                                    <li>@message</li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="publish-ready-message">
+                            <span aria-hidden="true">✓</span>
+                            <span>Your publishing setup looks ready.</span>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(_exportError))
+                    {
+                        <div class="alert alert-danger py-2 small" role="alert">@_exportError</div>
+                    }
+
+                    <div class="publish-export-actions" aria-label="Export formats">
+                        <button type="button" class="btn btn-primary" disabled="@(!CanExport)" @onclick="() => ExportAsync(PublishExportFormat.Epub)">
+                            <span>EPUB</span>
+                            <small>@ExportButtonDetail(PublishExportFormat.Epub, "For e-readers")</small>
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" disabled="@(!CanExport)" @onclick="() => ExportAsync(PublishExportFormat.Markdown)">
+                            <span>Markdown</span>
+                            <small>@ExportButtonDetail(PublishExportFormat.Markdown, "With linked images")</small>
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" disabled="@(!CanExport)" @onclick="() => ExportAsync(PublishExportFormat.PlainText)">
+                            <span>Plain text</span>
+                            <small>@ExportButtonDetail(PublishExportFormat.PlainText, "Text only")</small>
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" disabled="@(!CanPrint)" @onclick="OpenPrintAsync">
+                            <span>Print / PDF</span>
+                            <small>@(_printing ? "Opening…" : "Browser print layout")</small>
+                        </button>
+                    </div>
+
+                    @if (!CanExport && !_exportingFormat.HasValue && !_printing)
+                    {
+                        <p class="publish-export-note">@ExportBlockedMessage</p>
+                    }
+                </div>
+            </aside>
+        </div>
+
+        <div class="visually-hidden" aria-live="polite" aria-atomic="true">@_liveMessage</div>
+    </main>
+
+    @if (_placementDialogOpen)
     {
-        <ImageViewerModal ImageUrl="@_selectedAsset.PreviewDataUrl"
-                          Title="@_selectedAsset.FileName"
-                          AltText="@AssetAlt(_selectedAsset)"
-                          Details="@AssetViewerDetails(_selectedAsset)"
-                          Closed="CloseAssetViewer">
-            <Actions>
-                <button type="button" class="btn btn-outline-secondary" @onclick="CloseAssetViewer">Close</button>
-                <button type="button" class="btn btn-primary" @onclick="() => DownloadAssetAsync(_selectedAsset)">Download</button>
-            </Actions>
-        </ImageViewerModal>
+        <div class="publish-modal-backdrop" aria-hidden="true"></div>
+        <div class="publish-modal-shell" role="presentation" @onkeydown="HandlePlacementDialogKeyDown">
+            <section class="publish-modal" role="dialog" aria-modal="true" aria-labelledby="placement-dialog-title" tabindex="-1" @ref="_placementDialogElement">
+                <header class="publish-modal-header">
+                    <div>
+                        <span class="publish-eyebrow">Interior image</span>
+                        <h2 id="placement-dialog-title">@(_editingPlacementId is null ? "Add image placement" : "Edit image placement")</h2>
+                    </div>
+                    <button type="button" class="btn-close" aria-label="Close" disabled="@_placementSaving" @onclick="ClosePlacementDialog"></button>
+                </header>
+
+                <div class="publish-modal-body">
+                    @if (!string.IsNullOrWhiteSpace(_placementDialogError))
+                    {
+                        <div class="alert alert-danger py-2" role="alert">@_placementDialogError</div>
+                    }
+
+                    <div class="publish-dialog-step">
+                        <span class="publish-dialog-step-number">1</span>
+                        <div>
+                            <label class="publish-field">
+                                <span>Choose a target</span>
+                                <select class="form-select" value="@_placementTargetKey" disabled="@_placementSaving" @onchange="PlacementTargetChanged">
+                                    <option value="">Select an included act or chapter</option>
+                                    @foreach (var target in PlacementTargets)
+                                    {
+                                        <option value="@TargetKey(target.Kind, target.Id)">@target.Label</option>
+                                    }
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+
+                    @if (HasSelectedPlacementTarget)
+                    {
+                        <div class="publish-dialog-step">
+                            <span class="publish-dialog-step-number">2</span>
+                            <div>
+                                <label class="publish-field">
+                                    <span>Choose a position</span>
+                                    <select class="form-select" @bind="_placementKind" disabled="@_placementSaving">
+                                        @foreach (var position in ValidPlacementKinds)
+                                        {
+                                            <option value="@position">@HumanizePlacement(position)</option>
+                                        }
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="publish-dialog-step">
+                            <span class="publish-dialog-step-number">3</span>
+                            <div>
+                                <div class="publish-image-picker-heading">
+                                    <label class="publish-field">
+                                        <span>Choose an image</span>
+                                        <input class="form-control" type="search" placeholder="Search project images" autocomplete="off"
+                                               @bind="_imageSearch" @bind:event="oninput" disabled="@_imagesLoading" />
+                                    </label>
+                                    <a class="btn btn-sm btn-link" href="@ImagesUrl">Manage images</a>
+                                </div>
+
+                                @if (_imagesLoading)
+                                {
+                                    <div class="publish-image-loading" role="status">
+                                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                                        <span>Loading project images…</span>
+                                    </div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(_imagesLoadError))
+                                {
+                                    <div class="publish-inline-error" role="alert">
+                                        <span>@_imagesLoadError</span>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="LoadPlacementImagesAsync">Retry</button>
+                                    </div>
+                                }
+                                else if (FilteredImages.Count == 0)
+                                {
+                                    <div class="publish-inline-empty">
+                                        @(_projectImageLibrary.Count == 0 ? "This project has no images yet." : "No images match your search.")
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="publish-image-grid" role="listbox" aria-label="Project images">
+                                        @foreach (var image in FilteredImages)
+                                        {
+                                            var selected = _placementAssetId == image.Id;
+                                            <button type="button" class="publish-image-option @(selected ? "is-selected" : null)"
+                                                    role="option" aria-selected="@selected" disabled="@_placementSaving"
+                                                    @onclick="() => SelectPlacementImage(image.Id)">
+                                                <img src="@image.PreviewUrl" alt="" loading="lazy" />
+                                                <span>@image.FileName</span>
+                                                @if (selected)
+                                                {
+                                                    <strong aria-hidden="true">✓</strong>
+                                                }
+                                            </button>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="publish-dialog-step">
+                            <span class="publish-dialog-step-number">4</span>
+                            <div>
+                                <label class="publish-field">
+                                    <span>Caption <em>Optional</em></span>
+                                    <textarea class="form-control" data-autosize data-autosize-resize="vertical" rows="2"
+                                              placeholder="A caption displayed with this image"
+                                              @bind="_placementCaption" @bind:event="oninput" disabled="@_placementSaving"></textarea>
+                                </label>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <footer class="publish-modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" disabled="@_placementSaving" @onclick="ClosePlacementDialog">Cancel</button>
+                    <button type="button" class="btn btn-primary" disabled="@(!CanSavePlacement)" @onclick="SavePlacementAsync">
+                        @(_placementSaving ? "Saving…" : _editingPlacementId is null ? "Add placement" : "Save changes")
+                    </button>
+                </footer>
+            </section>
+        </div>
     }
 }
 
@@ -311,111 +689,213 @@ else
     [CascadingParameter] public Project? Project { get; set; }
 
     private static readonly TimeSpan ProfileAutosaveDelay = TimeSpan.FromMilliseconds(900);
-    private static readonly TimeSpan CoverLayoutAutosaveDelay = TimeSpan.FromMilliseconds(500);
 
     private readonly SemaphoreSlim _profileSaveGate = new(1, 1);
-    private readonly SemaphoreSlim _coverLayoutSaveGate = new(1, 1);
+    private readonly HashSet<Guid> _deletingPlacementIds = [];
     private PublishWorkspaceView? _workspace;
+    private IReadOnlyList<PublishImagePlacementView> _placements = [];
+    private IReadOnlyList<ProjectImageView> _projectImageLibrary = [];
     private ProfileDraft _profile = new();
-    private PublishCoverLayoutView? _coverLayout;
-    private PublishAssetView? _selectedAsset;
     private Guid? _loadedProjectId;
+    private Guid? _editingPlacementId;
+    private Guid? _placementAssetId;
+    private Guid? _confirmDeletePlacementId;
     private bool _loading;
-    private bool _exporting;
+    private bool _coverBusy;
+    private bool _outlineBusy;
+    private bool _placementDialogOpen;
+    private bool _imagesLoading;
+    private bool _placementSaving;
+    private bool _placementActionBusy;
+    private bool _printing;
+    private bool _disposing;
+    private string? _loadError;
     private string? _profileError;
-    private string? _coverLayoutError;
+    private string? _coverError;
     private string? _outlineError;
-    private string? _assetError;
     private string? _placementError;
+    private string? _placementDialogError;
+    private string? _imagesLoadError;
     private string? _exportError;
-    private string _placementAssetId = string.Empty;
     private string _placementTargetKey = string.Empty;
-    private PublishImagePlacementKind _placementKind = PublishImagePlacementKind.ChapterOpening;
     private string _placementCaption = string.Empty;
-    private PublishExportFormat _exportFormat = PublishExportFormat.Epub;
+    private string _imageSearch = string.Empty;
+    private string _liveMessage = string.Empty;
+    private PublishImagePlacementKind _placementKind = PublishImagePlacementKind.ChapterOpening;
+    private PublishExportFormat? _exportingFormat;
+    private ElementReference _placementDialogElement;
     private IJSObjectReference? _downloadModule;
+    private IJSObjectReference? _autoSizer;
     private CancellationTokenSource? _profileAutosaveCts;
-    private CancellationTokenSource? _coverLayoutAutosaveCts;
     private IDisposable? _navHandlerRegistration;
     private long _profileDraftVersion;
     private long _profileSavedVersion;
-    private long _coverLayoutDraftVersion;
-    private long _coverLayoutSavedVersion;
-    private ProfileSaveState _profileSaveState = ProfileSaveState.Idle;
-    private CoverLayoutSaveState _coverLayoutSaveState = CoverLayoutSaveState.Idle;
+    private SaveState _profileSaveState = SaveState.Idle;
     private DateTime? _profileLastSavedAt;
-    private DateTime? _coverLayoutLastSavedAt;
-    private bool _disposing;
+    private bool _focusPlacementDialog;
 
-    private bool ProfileSaveInProgress => _profileSaveState == ProfileSaveState.Saving;
+    private bool ProfileSaveInProgress => _profileSaveState == SaveState.Saving;
+    private bool HasPendingProfileSave => _profileSavedVersion != _profileDraftVersion;
+    private bool OutlineBusy => _outlineBusy || _coverBusy;
+    private bool HasSelectedPlacementTarget => TryParseTargetKey(_placementTargetKey, out var kind, out var id)
+        && PlacementTargets.Any(target => target.Kind == kind && target.Id == id);
+    private bool CanSavePlacement => !_placementSaving
+        && HasSelectedPlacementTarget
+        && _placementAssetId is not null
+        && ValidPlacementKinds.Contains(_placementKind);
+    private bool HasPlacementTargets => PlacementTargets.Count > 0;
+    private bool HasBusyMutation => _coverBusy || _outlineBusy || _placementActionBusy || _placementSaving;
+    private bool CanExport => _downloadModule is not null
+        && _exportingFormat is null
+        && !_printing
+        && !HasBusyMutation
+        && _profileSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
+        && !HasPendingProfileSave;
+    private bool CanPrint => _exportingFormat is null
+        && !_printing
+        && !HasBusyMutation
+        && _profileSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
+        && !HasPendingProfileSave;
 
-    private string ProfileSaveStatusClass => _profileSaveState switch
+    private string DisplayTitle => string.IsNullOrWhiteSpace(_profile.TitleOverride)
+        ? _workspace?.Profile.ProjectName ?? Project?.Name ?? "Untitled book"
+        : _profile.TitleOverride.Trim();
+
+    private string SelectedCoverValue => _workspace?.Profile.SelectedCoverChapterId?.ToString("N") ?? string.Empty;
+
+    private PublishCoverCandidateView? SelectedCoverCandidate =>
+        _workspace?.Profile.SelectedCoverChapterId is Guid coverId
+            ? _workspace.CoverCandidates.FirstOrDefault(candidate => candidate.Id == coverId)
+            : null;
+
+    private int IncludedChapterCount => _workspace?.Sections
+        .SelectMany(section => section.Chapters)
+        .Count(chapter => chapter.IsIncluded && !IsCoverChapter(chapter.Id)) ?? 0;
+
+    private int SelectableChapterCount => _workspace?.Sections
+        .SelectMany(section => section.Chapters)
+        .Count(chapter => !IsCoverChapter(chapter.Id)) ?? 0;
+
+    private int ActivePlacementCount => _placements.Count(PlacementIsActive);
+
+    private IReadOnlyList<string> ReadinessMessages
     {
-        ProfileSaveState.Dirty => "small text-warning",
-        ProfileSaveState.Saved => "small text-success",
-        ProfileSaveState.SaveFailed => "small text-danger",
-        _ => "small text-muted",
+        get
+        {
+            var messages = new List<string>();
+            if (IncludedChapterCount == 0)
+                messages.Add("Include at least one manuscript chapter.");
+            if (SelectedCoverCandidate is null)
+                messages.Add("No cover is selected. Exports can still be created without one.");
+            if (string.IsNullOrWhiteSpace(_profile.Author))
+                messages.Add("Add an author name if this is a reader-facing edition.");
+            return messages;
+        }
+    }
+
+    private IReadOnlyList<PlacementTarget> PlacementTargets
+    {
+        get
+        {
+            if (_workspace is null) return [];
+            var targets = new List<PlacementTarget>();
+            foreach (var section in _workspace.Sections)
+            {
+                if (section.ActId is Guid actId && section.IsIncluded)
+                    targets.Add(new(PublishOutlineTargetKind.Act, actId, $"Act: {section.Title}"));
+
+                targets.AddRange(section.Chapters
+                    .Where(chapter => chapter.IsIncluded && !IsCoverChapter(chapter.Id))
+                    .Select(chapter => new PlacementTarget(PublishOutlineTargetKind.Chapter, chapter.Id, $"Chapter: {chapter.Title}")));
+            }
+            return targets;
+        }
+    }
+
+    private IReadOnlyList<PublishImagePlacementKind> ValidPlacementKinds
+    {
+        get
+        {
+            if (!TryParseTargetKey(_placementTargetKey, out var kind, out _)) return [];
+            return kind == PublishOutlineTargetKind.Act
+                ? [PublishImagePlacementKind.BeforeAct, PublishImagePlacementKind.AfterAct]
+                : [
+                    PublishImagePlacementKind.BeforeChapter,
+                    PublishImagePlacementKind.ChapterOpening,
+                    PublishImagePlacementKind.ChapterEnding,
+                    PublishImagePlacementKind.AfterChapter,
+                ];
+        }
+    }
+
+    private IReadOnlyList<ProjectImageView> FilteredImages
+    {
+        get
+        {
+            var search = _imageSearch.Trim();
+            if (search.Length == 0) return _projectImageLibrary;
+            return _projectImageLibrary.Where(image =>
+                image.FileName.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || image.AltText.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || image.Prompt.Contains(search, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+    }
+
+    private string SaveStatusText => HasBusyMutation
+        ? "Saving publishing change…"
+        : _profileSaveState switch
+    {
+        SaveState.Dirty => "Waiting to save changes…",
+        SaveState.Saving => "Saving changes…",
+        SaveState.Saved when _profileLastSavedAt is { } savedAt => $"All changes saved at {savedAt:h:mm tt}",
+        SaveState.SaveFailed => "Changes could not be saved",
+        _ => "All changes saved",
     };
 
-    private string CoverLayoutSaveStatusClass => _coverLayoutSaveState switch
+    private string SaveStatusTextClass => HasBusyMutation
+        ? "text-muted"
+        : _profileSaveState switch
     {
-        CoverLayoutSaveState.Dirty => "small text-warning",
-        CoverLayoutSaveState.Saved => "small text-success",
-        CoverLayoutSaveState.SaveFailed => "small text-danger",
-        _ => "small text-muted",
+        SaveState.Dirty => "text-warning-emphasis",
+        SaveState.SaveFailed => "text-danger",
+        _ => "text-muted",
+    };
+
+    private string SaveStatusDotClass => HasBusyMutation
+        ? "is-saving"
+        : _profileSaveState switch
+    {
+        SaveState.Dirty => "is-dirty",
+        SaveState.Saving => "is-saving",
+        SaveState.SaveFailed => "is-error",
+        _ => "is-saved",
+    };
+
+    private string ExportBlockedMessage => _profileSaveState switch
+    {
+        SaveState.Dirty or SaveState.Saving => "Exports will be available as soon as your changes are saved.",
+        SaveState.SaveFailed => "Retry the failed save before exporting, so the export never uses stale settings.",
+        _ when HasBusyMutation => "Finish the current publishing change before exporting.",
+        _ => "Export tools are getting ready.",
     };
 
     private string PrintUrl => Project is null
         ? "#"
         : $"/projects/{Uri.EscapeDataString(Project.Slug)}/manuscript/print?autoprint=true";
 
-    private string ImagesUrl => Project is null
-        ? "#"
-        : $"/projects/{Uri.EscapeDataString(Project.Slug)}/images";
-
-    private PublishCoverLayoutView? CurrentCoverLayout => _coverLayout ?? _workspace?.Profile.CoverLayout;
-
-    private PublishAssetView? SelectedCoverAsset =>
-        _workspace?.Profile.SelectedCoverAssetId is Guid coverId
-            ? _workspace.Assets.FirstOrDefault(asset => asset.Id == coverId)
-            : null;
-
-    private string CoverTitleText =>
-        string.IsNullOrWhiteSpace(_profile.TitleOverride)
-            ? _workspace?.Profile.ProjectName ?? string.Empty
-            : _profile.TitleOverride;
-
-    private string ProfileSaveStatusText() => _profileSaveState switch
-    {
-        ProfileSaveState.Dirty => "Unsaved changes",
-        ProfileSaveState.Saving => "Saving...",
-        ProfileSaveState.Saved when _profileLastSavedAt is { } savedAt => $"Saved {savedAt:HH:mm:ss}",
-        ProfileSaveState.SaveFailed when !string.IsNullOrWhiteSpace(_profileError) => $"Save failed: {_profileError}",
-        ProfileSaveState.SaveFailed => "Save failed",
-        _ => string.Empty,
-    };
-
-    private string CoverLayoutSaveStatusText() => _coverLayoutSaveState switch
-    {
-        CoverLayoutSaveState.Dirty => "Unsaved changes",
-        CoverLayoutSaveState.Saving => "Saving...",
-        CoverLayoutSaveState.Saved when _coverLayoutLastSavedAt is { } savedAt => $"Saved {savedAt:HH:mm:ss}",
-        CoverLayoutSaveState.SaveFailed when !string.IsNullOrWhiteSpace(_coverLayoutError) => $"Save failed: {_coverLayoutError}",
-        CoverLayoutSaveState.SaveFailed => "Save failed",
-        _ => string.Empty,
-    };
+    private string ImagesUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/images";
+    private string OutlineUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/outline";
+    private string EditorRootUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/editor";
+    private string EditorUrl(Guid chapterId) => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/editor/{chapterId}";
 
     protected override async Task OnParametersSetAsync()
     {
         if (Project is null || _loadedProjectId == Project.Id) return;
         if (_loadedProjectId is not null)
-        {
             await FlushProfileSaveAsync();
-            await FlushCoverLayoutSaveAsync();
-        }
 
         _loadedProjectId = Project.Id;
-        await ReloadAsync(resetProfile: true);
+        await LoadWorkspaceAsync(resetProfile: true);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -424,39 +904,53 @@ else
         {
             _navHandlerRegistration = Nav.RegisterLocationChangingHandler(OnLocationChangingAsync);
             _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownloads.js");
+            _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js");
+            await InvokeAsync(StateHasChanged);
+        }
+
+        if (_autoSizer is not null)
+        {
+            try { await _autoSizer.InvokeVoidAsync("refresh", (object?)null); }
+            catch (JSDisconnectedException) { }
+        }
+
+        if (_focusPlacementDialog)
+        {
+            _focusPlacementDialog = false;
+            try { await _placementDialogElement.FocusAsync(); }
+            catch (InvalidOperationException) { }
+            catch (JSDisconnectedException) { }
         }
     }
 
-    private async Task ReloadAsync(bool resetProfile)
+    private Task RetryLoadAsync() => LoadWorkspaceAsync(resetProfile: true);
+
+    private async Task LoadWorkspaceAsync(bool resetProfile)
     {
         if (Project is null) return;
-        if (!resetProfile)
-            await FlushCoverLayoutSaveAsync();
-
         _loading = true;
+        _loadError = null;
         try
         {
-            _workspace = await Publishing.GetWorkspaceAsync(Project.Id);
-            CancelCoverLayoutAutosave();
-            _coverLayout = _workspace.Profile.CoverLayout;
-            _coverLayoutDraftVersion = 0;
-            _coverLayoutSavedVersion = 0;
-            _coverLayoutSaveState = CoverLayoutSaveState.Idle;
-            _coverLayoutLastSavedAt = null;
-            _coverLayoutError = null;
+            var workspace = await Publishing.GetWorkspaceAsync(Project.Id);
+            _workspace = workspace;
+            _placements = OrderPlacementViews(workspace.Placements);
             if (resetProfile)
             {
                 CancelProfileAutosave();
-                _profile = ProfileDraft.From(_workspace.Profile);
+                _profile = ProfileDraft.From(workspace.Profile);
                 _profileDraftVersion = 0;
                 _profileSavedVersion = 0;
-                _profileSaveState = ProfileSaveState.Idle;
+                _profileSaveState = SaveState.Idle;
                 _profileLastSavedAt = null;
                 _profileError = null;
             }
-            PruneAssetSelections();
-            if (string.IsNullOrEmpty(_placementAssetId) && _workspace.Assets.Count > 0)
-                _placementAssetId = _workspace.Assets[0].Id.ToString();
+            PrunePlacementDraft();
+        }
+        catch (Exception ex)
+        {
+            _workspace = null;
+            _loadError = ex.Message;
         }
         finally
         {
@@ -464,20 +958,22 @@ else
         }
     }
 
-    private async Task SaveProfileAsync()
+    private async Task RefreshWorkspaceAsync()
     {
-        await FlushProfileSaveAsync();
+        if (Project is null) return;
+        var workspace = await Publishing.GetWorkspaceAsync(Project.Id);
+        _workspace = workspace;
+        _placements = OrderPlacementViews(workspace.Placements);
+        PrunePlacementDraft();
     }
 
     private void ScheduleProfileAutosave()
     {
         if (_loadedProjectId is null && Project is null) return;
-
         _profileDraftVersion++;
         _profileError = null;
-        _profileSaveState = ProfileSaveState.Dirty;
+        _profileSaveState = SaveState.Dirty;
         CancelProfileAutosave();
-
         _profileAutosaveCts = new CancellationTokenSource();
         _ = DebouncedProfileSaveAsync(_profileAutosaveCts.Token);
     }
@@ -488,11 +984,16 @@ else
         {
             await Task.Delay(ProfileAutosaveDelay, cancellationToken);
             if (_disposing) return;
-
             await InvokeAsync(SaveProfileCoreAsync);
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
+    }
+
+    private async Task RetryProfileSaveAsync()
+    {
+        _profileError = null;
+        await FlushProfileSaveAsync();
     }
 
     private async Task FlushProfileSaveAsync()
@@ -512,50 +1013,41 @@ else
             while (_profileSavedVersion != _profileDraftVersion)
             {
                 var versionToSave = _profileDraftVersion;
-                var update = _profile.ToUpdate();
                 _profileError = null;
-                _profileSaveState = ProfileSaveState.Saving;
-                await NotifyProfileSaveStateChangedAsync();
+                _profileSaveState = SaveState.Saving;
+                await NotifyStateChangedAsync();
 
-                await Publishing.SaveProfileAsync(targetProjectId, update);
+                await Publishing.SaveProfileAsync(targetProjectId, _profile.ToUpdate());
                 _profileSavedVersion = versionToSave;
                 _profileLastSavedAt = DateTime.Now;
-                _profileSaveState = _profileSavedVersion == _profileDraftVersion
-                    ? ProfileSaveState.Saved
-                    : ProfileSaveState.Dirty;
+                _profileSaveState = _profileSavedVersion == _profileDraftVersion ? SaveState.Saved : SaveState.Dirty;
+                _liveMessage = _profileSaveState == SaveState.Saved ? "Publishing settings saved." : "More publishing changes are waiting to save.";
             }
         }
         catch (Exception ex)
         {
             _profileError = ex.Message;
-            _profileSaveState = ProfileSaveState.SaveFailed;
+            _profileSaveState = SaveState.SaveFailed;
+            _liveMessage = $"Publishing settings could not be saved. {ex.Message}";
         }
         finally
         {
             _profileSaveGate.Release();
-            await NotifyProfileSaveStateChangedAsync();
+            await NotifyStateChangedAsync();
         }
     }
 
     private async ValueTask OnLocationChangingAsync(LocationChangingContext context)
     {
         await FlushProfileSaveAsync();
-        await FlushCoverLayoutSaveAsync();
-        if ((_profileSaveState == ProfileSaveState.SaveFailed && _profileSavedVersion != _profileDraftVersion)
-            || (_coverLayoutSaveState == CoverLayoutSaveState.SaveFailed && _coverLayoutSavedVersion != _coverLayoutDraftVersion))
-        {
+        if (_profileSaveState == SaveState.SaveFailed && HasPendingProfileSave)
             context.PreventNavigation();
-        }
     }
 
-    private async Task NotifyProfileSaveStateChangedAsync()
+    private async Task NotifyStateChangedAsync()
     {
         if (_disposing) return;
-
-        try
-        {
-            await InvokeAsync(StateHasChanged);
-        }
+        try { await InvokeAsync(StateHasChanged); }
         catch (ObjectDisposedException) { }
     }
 
@@ -563,259 +1055,438 @@ else
     {
         var cts = _profileAutosaveCts;
         if (cts is null) return;
-
         _profileAutosaveCts = null;
         cts.Cancel();
         cts.Dispose();
     }
 
-    private Task OnCoverLayoutChangedAsync(PublishCoverLayoutView layout)
+    private async Task SetCoverChapterAsync(ChangeEventArgs e)
     {
-        _coverLayout = layout;
-        _coverLayoutDraftVersion++;
-        _coverLayoutError = null;
-        _coverLayoutSaveState = CoverLayoutSaveState.Dirty;
-        CancelCoverLayoutAutosave();
-
-        _coverLayoutAutosaveCts = new CancellationTokenSource();
-        _ = DebouncedCoverLayoutSaveAsync(_coverLayoutAutosaveCts.Token);
-        return Task.CompletedTask;
-    }
-
-    private async Task DebouncedCoverLayoutSaveAsync(CancellationToken cancellationToken)
-    {
+        if (Project is null) return;
+        _coverBusy = true;
+        _coverError = null;
         try
         {
-            await Task.Delay(CoverLayoutAutosaveDelay, cancellationToken);
-            if (_disposing) return;
-
-            await InvokeAsync(SaveCoverLayoutCoreAsync);
-        }
-        catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) { }
-    }
-
-    private async Task FlushCoverLayoutSaveAsync()
-    {
-        CancelCoverLayoutAutosave();
-        await SaveCoverLayoutCoreAsync();
-    }
-
-    private async Task SaveCoverLayoutCoreAsync()
-    {
-        var projectId = _loadedProjectId ?? Project?.Id;
-        if (projectId is not Guid targetProjectId || _coverLayout is null) return;
-
-        await _coverLayoutSaveGate.WaitAsync();
-        try
-        {
-            while (_coverLayoutSavedVersion != _coverLayoutDraftVersion)
-            {
-                var versionToSave = _coverLayoutDraftVersion;
-                var layout = _coverLayout;
-                _coverLayoutError = null;
-                _coverLayoutSaveState = CoverLayoutSaveState.Saving;
-                await NotifyProfileSaveStateChangedAsync();
-
-                await Publishing.SaveCoverLayoutAsync(targetProjectId, layout);
-                _coverLayoutSavedVersion = versionToSave;
-                _coverLayoutLastSavedAt = DateTime.Now;
-                _coverLayoutSaveState = _coverLayoutSavedVersion == _coverLayoutDraftVersion
-                    ? CoverLayoutSaveState.Saved
-                    : CoverLayoutSaveState.Dirty;
-            }
+            Guid? chapterId = Guid.TryParseExact(e.Value?.ToString(), "N", out var parsedId) ? parsedId : null;
+            await Publishing.SetCoverChapterAsync(Project.Id, chapterId);
+            await RefreshWorkspaceAsync();
+            _liveMessage = chapterId is null ? "Cover removed." : "Cover picture page selected.";
         }
         catch (Exception ex)
         {
-            _coverLayoutError = ex.Message;
-            _coverLayoutSaveState = CoverLayoutSaveState.SaveFailed;
+            _coverError = ex.Message;
+            _liveMessage = $"Cover could not be changed. {ex.Message}";
         }
         finally
         {
-            _coverLayoutSaveGate.Release();
-            await NotifyProfileSaveStateChangedAsync();
+            _coverBusy = false;
         }
-    }
-
-    private void CancelCoverLayoutAutosave()
-    {
-        var cts = _coverLayoutAutosaveCts;
-        if (cts is null) return;
-
-        _coverLayoutAutosaveCts = null;
-        cts.Cancel();
-        cts.Dispose();
-    }
-
-    private async Task FlushAllSavesAsync()
-    {
-        await FlushProfileSaveAsync();
-        await FlushCoverLayoutSaveAsync();
     }
 
     private async Task SetOutlineSelectionAsync(PublishOutlineTargetKind kind, Guid targetId, ChangeEventArgs e)
     {
-        if (Project is null) return;
+        var included = e.Value is bool value && value;
+        await ApplyOutlineSelectionsAsync([new PublishOutlineSelectionUpdate(kind, targetId, included)]);
+    }
+
+    private async Task SetAllOutlineSelectionsAsync(bool included)
+    {
+        if (_workspace is null) return;
+        var updates = new List<PublishOutlineSelectionUpdate>();
+        foreach (var section in _workspace.Sections)
+        {
+            if (section.ActId is Guid actId)
+                updates.Add(new(PublishOutlineTargetKind.Act, actId, included));
+            updates.AddRange(section.Chapters
+                .Where(chapter => !IsCoverChapter(chapter.Id))
+                .Select(chapter => new PublishOutlineSelectionUpdate(PublishOutlineTargetKind.Chapter, chapter.Id, included)));
+        }
+        await ApplyOutlineSelectionsAsync(updates);
+    }
+
+    private async Task ApplyOutlineSelectionsAsync(IReadOnlyList<PublishOutlineSelectionUpdate> updates)
+    {
+        if (Project is null || updates.Count == 0) return;
+        _outlineBusy = true;
         _outlineError = null;
         try
         {
-            var included = e.Value is bool value && value;
-            await Publishing.SetOutlineSelectionAsync(Project.Id, kind, targetId, included);
-            await ReloadAsync(resetProfile: false);
+            await Publishing.SetOutlineSelectionsAsync(Project.Id, updates);
+            await RefreshWorkspaceAsync();
+            _liveMessage = "Manuscript selection updated.";
         }
         catch (Exception ex)
         {
             _outlineError = ex.Message;
+            _liveMessage = $"Manuscript selection could not be updated. {ex.Message}";
+        }
+        finally
+        {
+            _outlineBusy = false;
         }
     }
 
-    private async Task SetCoverAsync(Guid assetId)
+    private Task OpenAddPlacementAsync() => OpenPlacementDialogAsync(null);
+
+    private Task OpenEditPlacementAsync(PublishImagePlacementView placement) => OpenPlacementDialogAsync(placement);
+
+    private async Task OpenPlacementDialogAsync(PublishImagePlacementView? placement)
+    {
+        _placementError = null;
+        _confirmDeletePlacementId = null;
+        _editingPlacementId = placement?.Id;
+        _placementTargetKey = placement is null ? string.Empty : TargetKey(placement.TargetKind, placement.TargetId);
+        _placementKind = placement?.PlacementKind ?? PublishImagePlacementKind.ChapterOpening;
+        _placementAssetId = placement?.AssetId;
+        _placementCaption = placement?.Caption ?? string.Empty;
+        _imageSearch = string.Empty;
+        _placementDialogError = null;
+        _placementDialogOpen = true;
+        _focusPlacementDialog = true;
+        if (!HasSelectedPlacementTarget)
+            _placementTargetKey = string.Empty;
+        NormalizePlacementKind();
+        await LoadPlacementImagesAsync();
+    }
+
+    private async Task LoadPlacementImagesAsync()
     {
         if (Project is null) return;
-        _assetError = null;
+        _imagesLoading = true;
+        _imagesLoadError = null;
         try
         {
-            await Publishing.SetCoverAssetAsync(Project.Id, assetId);
-            await ReloadAsync(resetProfile: false);
+            _projectImageLibrary = await ProjectImages.ListAsync(Project.Id);
         }
         catch (Exception ex)
         {
-            _assetError = ex.Message;
+            _projectImageLibrary = [];
+            _imagesLoadError = ex.Message;
+        }
+        finally
+        {
+            _imagesLoading = false;
         }
     }
 
-    private async Task AddPlacementAsync()
+    private void PlacementTargetChanged(ChangeEventArgs e)
+    {
+        _placementTargetKey = e.Value?.ToString() ?? string.Empty;
+        NormalizePlacementKind();
+    }
+
+    private void NormalizePlacementKind()
+    {
+        var validKinds = ValidPlacementKinds;
+        if (validKinds.Count > 0 && !validKinds.Contains(_placementKind))
+            _placementKind = validKinds[0];
+    }
+
+    private void SelectPlacementImage(Guid imageId) => _placementAssetId = imageId;
+
+    private async Task SavePlacementAsync()
+    {
+        if (Project is null || _placementAssetId is not Guid assetId) return;
+        if (!TryParseTargetKey(_placementTargetKey, out var targetKind, out var targetId)) return;
+
+        _placementSaving = true;
+        _placementDialogError = null;
+        try
+        {
+            if (_editingPlacementId is Guid placementId)
+            {
+                var request = new PublishImagePlacementUpdate(assetId, targetKind, targetId, _placementKind, _placementCaption);
+                var updated = await Publishing.UpdateImagePlacementAsync(Project.Id, placementId, request);
+                _placements = OrderPlacementViews(_placements.Select(placement => placement.Id == placementId ? updated : placement));
+                _liveMessage = "Image placement updated.";
+            }
+            else
+            {
+                var request = new PublishImagePlacementCreate(assetId, targetKind, targetId, _placementKind, _placementCaption);
+                var created = await Publishing.AddImagePlacementAsync(Project.Id, request);
+                _placements = OrderPlacementViews([.. _placements, created]);
+                _liveMessage = "Image placement added.";
+            }
+            _placementError = null;
+            _placementDialogOpen = false;
+            _placementDialogError = null;
+        }
+        catch (Exception ex)
+        {
+            _placementDialogError = ex.Message;
+            _liveMessage = $"Image placement could not be saved. {ex.Message}";
+        }
+        finally
+        {
+            _placementSaving = false;
+        }
+    }
+
+    private void ClosePlacementDialog()
+    {
+        if (_placementSaving) return;
+        _placementDialogOpen = false;
+        _placementDialogError = null;
+    }
+
+    private void HandlePlacementDialogKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") ClosePlacementDialog();
+    }
+
+    private bool CanMovePlacement(PublishImagePlacementView placement, int delta)
+    {
+        var group = PlacementGroup(placement);
+        var index = group.FindIndex(candidate => candidate.Id == placement.Id);
+        var nextIndex = index + delta;
+        return index >= 0 && nextIndex >= 0 && nextIndex < group.Count;
+    }
+
+    private async Task MovePlacementAsync(PublishImagePlacementView placement, int delta)
     {
         if (Project is null) return;
+        var group = PlacementGroup(placement);
+        var index = group.FindIndex(candidate => candidate.Id == placement.Id);
+        var nextIndex = index + delta;
+        if (index < 0 || nextIndex < 0 || nextIndex >= group.Count) return;
+
+        _placementActionBusy = true;
         _placementError = null;
         try
         {
-            if (!Guid.TryParse(_placementAssetId, out var assetId))
-                throw new InvalidOperationException("Select an asset.");
-            var (targetKind, targetId) = ParseTargetKey(_placementTargetKey);
-            await Publishing.AddImagePlacementAsync(Project.Id, new PublishImagePlacementCreate(assetId, targetKind, targetId, _placementKind, _placementCaption));
-            _placementCaption = string.Empty;
-            await ReloadAsync(resetProfile: false);
+            (group[index], group[nextIndex]) = (group[nextIndex], group[index]);
+            await Publishing.ReorderImagePlacementsAsync(Project.Id, group.Select(candidate => candidate.Id).ToList());
+
+            var reorderedGroup = new Queue<PublishImagePlacementView>(group.Select((candidate, order) => candidate with { SortOrder = order }));
+            _placements = _placements
+                .Select(candidate => SamePlacementGroup(candidate, placement) ? reorderedGroup.Dequeue() : candidate)
+                .ToList();
+            _liveMessage = $"{placement.AssetFileName} moved {(delta < 0 ? "up" : "down")}.";
         }
         catch (Exception ex)
         {
             _placementError = ex.Message;
+            _liveMessage = $"Image placements could not be reordered. {ex.Message}";
+        }
+        finally
+        {
+            _placementActionBusy = false;
         }
     }
 
+    private List<PublishImagePlacementView> PlacementGroup(PublishImagePlacementView placement) =>
+        _placements.Where(candidate => SamePlacementGroup(candidate, placement)).ToList();
+
+    private static bool SamePlacementGroup(PublishImagePlacementView left, PublishImagePlacementView right) =>
+        left.TargetKind == right.TargetKind
+        && left.TargetId == right.TargetId
+        && left.PlacementKind == right.PlacementKind;
+
+    private IReadOnlyList<PublishImagePlacementView> OrderPlacementViews(IEnumerable<PublishImagePlacementView> placements) =>
+        placements
+            .OrderBy(placement => PlacementTargetOrder(placement.TargetKind, placement.TargetId))
+            .ThenBy(placement => PlacementKindOrder(placement.PlacementKind))
+            .ThenBy(placement => placement.SortOrder)
+            .ToList();
+
+    private int PlacementTargetOrder(PublishOutlineTargetKind kind, Guid targetId)
+    {
+        if (_workspace is null) return int.MaxValue;
+        var order = 0;
+        foreach (var section in _workspace.Sections)
+        {
+            if (kind == PublishOutlineTargetKind.Act && section.ActId == targetId)
+                return order;
+            order++;
+            foreach (var chapter in section.Chapters)
+            {
+                if (kind == PublishOutlineTargetKind.Chapter && chapter.Id == targetId)
+                    return order;
+                order++;
+            }
+        }
+        return int.MaxValue;
+    }
+
+    private static int PlacementKindOrder(PublishImagePlacementKind kind) => kind switch
+    {
+        PublishImagePlacementKind.BeforeAct or PublishImagePlacementKind.BeforeChapter => 0,
+        PublishImagePlacementKind.ChapterOpening => 1,
+        PublishImagePlacementKind.ChapterEnding => 2,
+        PublishImagePlacementKind.AfterAct or PublishImagePlacementKind.AfterChapter => 3,
+        _ => int.MaxValue,
+    };
+
+    private void ConfirmPlacementDelete(Guid placementId) => _confirmDeletePlacementId = placementId;
+    private void CancelPlacementDelete() => _confirmDeletePlacementId = null;
+
     private async Task DeletePlacementAsync(Guid placementId)
     {
-        if (Project is null) return;
+        if (Project is null || !_deletingPlacementIds.Add(placementId)) return;
+        _placementActionBusy = true;
         _placementError = null;
         try
         {
             await Publishing.DeleteImagePlacementAsync(Project.Id, placementId);
-            await ReloadAsync(resetProfile: false);
+            _placements = _placements.Where(placement => placement.Id != placementId).ToList();
+            _confirmDeletePlacementId = null;
+            _liveMessage = "Image placement deleted.";
         }
         catch (Exception ex)
         {
             _placementError = ex.Message;
+            _liveMessage = $"Image placement could not be deleted. {ex.Message}";
+        }
+        finally
+        {
+            _deletingPlacementIds.Remove(placementId);
+            _placementActionBusy = false;
         }
     }
 
-    private async Task ExportAsync()
+    private async Task ExportAsync(PublishExportFormat format)
     {
-        if (Project is null || _downloadModule is null) return;
-        _exporting = true;
+        if (Project is null || _downloadModule is null || !CanExport) return;
+        _exportingFormat = format;
         _exportError = null;
         try
         {
             await FlushProfileSaveAsync();
-            await FlushCoverLayoutSaveAsync();
-            var file = await Publishing.ExportAsync(Project.Id, _exportFormat);
+            if (_profileSaveState == SaveState.SaveFailed || HasPendingProfileSave)
+                throw new InvalidOperationException("Your latest publishing settings could not be saved. Retry the save before exporting.");
+
+            var file = await Publishing.ExportAsync(Project.Id, format);
             await _downloadModule.InvokeVoidAsync("downloadBytes", file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
+            _liveMessage = $"{ExportFormatLabel(format)} export downloaded.";
         }
         catch (Exception ex)
         {
             _exportError = ex.Message;
+            _liveMessage = $"Export failed. {ex.Message}";
         }
         finally
         {
-            _exporting = false;
+            _exportingFormat = null;
         }
     }
 
-    private static string TargetKey(PublishOutlineTargetKind kind, Guid id) =>
-        $"{kind}:{id:N}";
-
-    private static (PublishOutlineTargetKind Kind, Guid Id) ParseTargetKey(string value)
+    private async Task OpenPrintAsync()
     {
+        if (!CanPrint) return;
+        _printing = true;
+        _exportError = null;
+        try
+        {
+            await FlushProfileSaveAsync();
+            if (_profileSaveState == SaveState.SaveFailed || HasPendingProfileSave)
+                throw new InvalidOperationException("Your latest publishing settings could not be saved. Retry the save before opening print.");
+            Nav.NavigateTo(PrintUrl);
+        }
+        catch (Exception ex)
+        {
+            _exportError = ex.Message;
+            _liveMessage = $"Print view could not be opened. {ex.Message}";
+        }
+        finally
+        {
+            _printing = false;
+        }
+    }
+
+    private string ExportButtonDetail(PublishExportFormat format, string defaultText) =>
+        _exportingFormat == format ? "Exporting…" : defaultText;
+
+    private void PrunePlacementDraft()
+    {
+        if (_placementTargetKey.Length > 0
+            && (!TryParseTargetKey(_placementTargetKey, out var kind, out var id)
+                || !PlacementTargets.Any(target => target.Kind == kind && target.Id == id)))
+        {
+            _placementTargetKey = string.Empty;
+        }
+        NormalizePlacementKind();
+    }
+
+    private bool IsCoverChapter(Guid chapterId) => _workspace?.Profile.SelectedCoverChapterId == chapterId;
+
+    private bool PlacementIsActive(PublishImagePlacementView placement) =>
+        PlacementTargets.Any(target => target.Kind == placement.TargetKind && target.Id == placement.TargetId);
+
+    private static bool IsNonPortraitCover(ChapterPageLayoutKind kind) => kind != ChapterPageLayoutKind.SinglePortrait;
+
+    private static string TargetKey(PublishOutlineTargetKind kind, Guid id) => $"{kind}:{id:N}";
+
+    private static bool TryParseTargetKey(string value, out PublishOutlineTargetKind kind, out Guid id)
+    {
+        kind = default;
+        id = default;
         var parts = value.Split(':', 2);
-        if (parts.Length != 2
-            || !Enum.TryParse<PublishOutlineTargetKind>(parts[0], out var kind)
-            || !Guid.TryParseExact(parts[1], "N", out var id))
-        {
-            throw new InvalidOperationException("Select a target.");
-        }
-
-        return (kind, id);
+        return parts.Length == 2
+            && Enum.TryParse(parts[0], out kind)
+            && Guid.TryParseExact(parts[1], "N", out id);
     }
 
-    private static string FormatBytes(long bytes) =>
-        bytes >= 1024 * 1024
-            ? $"{bytes / 1024.0 / 1024.0:0.0} MB"
-            : $"{Math.Max(1, bytes / 1024)} KB";
-
-    private static string AssetAlt(PublishAssetView asset) =>
-        string.IsNullOrWhiteSpace(asset.AltText) ? asset.FileName : asset.AltText;
-
-    private void OpenAssetViewer(PublishAssetView asset) => _selectedAsset = asset;
-
-    private void CloseAssetViewer() => _selectedAsset = null;
-
-    private static IReadOnlyList<string> AssetViewerDetails(PublishAssetView asset) =>
-        new[]
-        {
-            asset.AltText,
-            $"{asset.Source} - {FormatBytes(asset.SizeBytes)}",
-        }.Where(value => !string.IsNullOrWhiteSpace(value)).ToList();
-
-    private async Task DownloadAssetAsync(PublishAssetView asset)
+    private static string VisualModeLabel(ChapterVisualMode mode) => mode switch
     {
-        if (_downloadModule is null) return;
-        await _downloadModule.InvokeVoidAsync("downloadBytes", asset.FileName, asset.ContentType, AssetBase64(asset));
-    }
+        ChapterVisualMode.IllustratedProse => "Illustrated prose",
+        ChapterVisualMode.PicturePage => "Picture page",
+        _ => "Prose",
+    };
 
-    private void PruneAssetSelections()
+    private static string VisualModeBadgeClass(ChapterVisualMode mode) => mode switch
     {
-        if (_workspace is null) return;
-        var assetIds = _workspace.Assets.Select(asset => asset.Id).ToHashSet();
-        if (!string.IsNullOrEmpty(_placementAssetId)
-            && (!Guid.TryParse(_placementAssetId, out var placementAssetId) || !assetIds.Contains(placementAssetId)))
-        {
-            _placementAssetId = _workspace.Assets.FirstOrDefault()?.Id.ToString() ?? string.Empty;
-        }
+        ChapterVisualMode.IllustratedProse => "publish-badge-illustrated",
+        ChapterVisualMode.PicturePage => "publish-badge-picture",
+        _ => string.Empty,
+    };
 
-        if (_selectedAsset is not null)
-            _selectedAsset = _workspace.Assets.FirstOrDefault(asset => asset.Id == _selectedAsset.Id);
-    }
-
-    private static string AssetBase64(PublishAssetView asset)
+    private static string PageLayoutLabel(ChapterPageLayoutKind kind) => kind switch
     {
-        var comma = asset.PreviewDataUrl.IndexOf(',', StringComparison.Ordinal);
-        return comma < 0 ? asset.PreviewDataUrl : asset.PreviewDataUrl[(comma + 1)..];
-    }
+        ChapterPageLayoutKind.SingleLandscape => "Single landscape",
+        ChapterPageLayoutKind.DoublePortrait => "Double portrait",
+        ChapterPageLayoutKind.DoubleLandscape => "Double landscape",
+        _ => "Single portrait",
+    };
+
+    private static string HumanizePlacement(PublishImagePlacementKind kind) => kind switch
+    {
+        PublishImagePlacementKind.BeforeAct => "Before act",
+        PublishImagePlacementKind.AfterAct => "After act",
+        PublishImagePlacementKind.BeforeChapter => "Before chapter",
+        PublishImagePlacementKind.ChapterOpening => "Chapter opening",
+        PublishImagePlacementKind.ChapterEnding => "Chapter ending",
+        PublishImagePlacementKind.AfterChapter => "After chapter",
+        _ => kind.ToString(),
+    };
+
+    private static string ExportFormatLabel(PublishExportFormat format) => format switch
+    {
+        PublishExportFormat.Epub => "EPUB",
+        PublishExportFormat.Markdown => "Markdown",
+        _ => "Plain text",
+    };
 
     public async ValueTask DisposeAsync()
     {
         _disposing = true;
         _navHandlerRegistration?.Dispose();
         try { await FlushProfileSaveAsync(); } catch { }
-        try { await FlushCoverLayoutSaveAsync(); } catch { }
 
         if (_downloadModule is not null)
         {
-            try { await _downloadModule.DisposeAsync(); } catch (JSDisconnectedException) { }
+            try { await _downloadModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+        if (_autoSizer is not null)
+        {
+            try { await _autoSizer.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
         }
     }
 
-    private enum ProfileSaveState { Idle, Dirty, Saving, Saved, SaveFailed }
-    private enum CoverLayoutSaveState { Idle, Dirty, Saving, Saved, SaveFailed }
+    private enum SaveState { Idle, Dirty, Saving, Saved, SaveFailed }
+
+    private sealed record PlacementTarget(PublishOutlineTargetKind Kind, Guid Id, string Label);
 
     private sealed class ProfileDraft
     {

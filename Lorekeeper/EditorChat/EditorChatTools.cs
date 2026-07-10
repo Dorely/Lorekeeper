@@ -8,7 +8,6 @@ using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
-using Lorekeeper.Publish;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -1539,13 +1538,13 @@ public sealed class EditorChatTools(
         var resolved = await RequireVisualModeAsync(ctx, chapterId, ChapterVisualMode.PicturePage);
         if (resolved.Error is not null) return resolved.Error;
 
-        if (!TryParseOptionalEnum(fontFamily, out PublishCoverFontFamily? parsedFontFamily, out var fontError))
+        if (!TryParseOptionalEnum(fontFamily, out PicturePageFontFamily? parsedFontFamily, out var fontError))
             return fontError!;
-        if (!TryParseOptionalEnum(textAlign, out PublishCoverTextAlign? parsedTextAlign, out var alignError))
+        if (!TryParseOptionalEnum(textAlign, out PicturePageTextAlign? parsedTextAlign, out var alignError))
             return alignError!;
         if (!TryParseOptionalEnum(verticalAlign, out ChapterTextVerticalAlign? parsedVerticalAlign, out var verticalError))
             return verticalError!;
-        if (!TryParseOptionalEnum(shadow, out PublishCoverShadow? parsedShadow, out var shadowError))
+        if (!TryParseOptionalEnum(shadow, out PicturePageTextShadow? parsedShadow, out var shadowError))
             return shadowError!;
 
         var state = resolved.State!;
@@ -1575,15 +1574,15 @@ public sealed class EditorChatTools(
             heightPercent ?? existing?.HeightPercent ?? 16,
             zIndex ?? existing?.ZIndex ?? maxZ + 1,
             readingOrder ?? existing?.ReadingOrder ?? maxReadingOrder + 1,
-            parsedFontFamily ?? existing?.FontFamily ?? PublishCoverFontFamily.Serif,
+            parsedFontFamily ?? existing?.FontFamily ?? PicturePageFontFamily.Serif,
             fontSizePercent ?? existing?.FontSizePercent ?? 4.5,
             lineHeight ?? existing?.LineHeight ?? 1.25,
             color ?? existing?.Color ?? "#111827",
             backgroundColor ?? existing?.BackgroundColor ?? "#FFFFFF",
             backgroundOpacity ?? existing?.BackgroundOpacity ?? 0,
-            parsedTextAlign ?? existing?.TextAlign ?? PublishCoverTextAlign.Center,
+            parsedTextAlign ?? existing?.TextAlign ?? PicturePageTextAlign.Center,
             parsedVerticalAlign ?? existing?.VerticalAlign ?? ChapterTextVerticalAlign.Middle,
-            parsedShadow ?? existing?.Shadow ?? PublishCoverShadow.None);
+            parsedShadow ?? existing?.Shadow ?? PicturePageTextShadow.None);
 
         var updated = await chapterVisuals.SavePageLayoutAsync(
             chapterId,

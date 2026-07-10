@@ -158,7 +158,7 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
     public byte[] Render(PublishDocument document)
     {
         var sb = new StringBuilder();
-        var cover = document.RenderedCoverAsset ?? document.CoverAsset;
+        var cover = document.CoverAsset;
         if (cover is not null)
             AppendImage(sb, cover, "Cover");
 
@@ -454,7 +454,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     private static List<EpubImageItem> BuildImageItems(PublishDocument document)
     {
         var items = new List<EpubImageItem>();
-        var cover = document.RenderedCoverAsset ?? document.CoverAsset;
+        var cover = document.CoverAsset;
         if (cover is not null)
             items.Add(new EpubImageItem("cover-image", $"images/cover.{ImageExtension(cover.ContentType)}", cover, IsCover: true));
 
@@ -509,7 +509,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
 
     private static string RenderCoverBody(PublishDocument document, string coverHref)
     {
-        var cover = document.RenderedCoverAsset ?? document.CoverAsset;
+        var cover = document.CoverAsset;
         if (cover is null) return string.Empty;
 
         var alt = string.IsNullOrWhiteSpace(cover.AltText) ? "Cover" : cover.AltText;
@@ -743,7 +743,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         sb.AppendLine("</head><body>");
         sb.AppendLine("""<nav epub:type="toc" id="toc">""");
         sb.AppendLine("<h1>Table of Contents</h1><ol>");
-        foreach (var item in xhtmlItems)
+        foreach (var item in xhtmlItems.Where(item => item.Id != "cover-page"))
             sb.Append("<li><a href=\"").Append(item.Href).Append("\">").Append(Html(item.Title)).AppendLine("</a></li>");
         sb.AppendLine("</ol></nav>");
         sb.AppendLine("</body></html>");

@@ -16,13 +16,42 @@ public sealed class ProjectImageService(
     IChapterVisualService chapterVisuals,
     IContextIndexingService contextIndexing) : IProjectImageService
 {
-    public async Task<IReadOnlyList<ProjectImageView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await db.PublishAssets
+    public async Task<IReadOnlyList<ProjectImageView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var rows = await db.PublishAssets
             .AsNoTracking()
             .Where(asset => asset.ProjectId == projectId)
             .OrderByDescending(asset => asset.CreatedAt)
-            .Select(asset => ToView(projectId, asset))
+            .Select(asset => new
+            {
+                asset.Id,
+                asset.FileName,
+                asset.ContentType,
+                asset.AltText,
+                asset.Source,
+                asset.Prompt,
+                asset.GenerationModel,
+                asset.SourceMetadataJson,
+                asset.CreatedAt,
+                asset.UpdatedAt,
+                SizeBytes = (long)asset.Data.Length,
+            })
             .ToListAsync(cancellationToken);
+
+        return rows.Select(row => new ProjectImageView(
+            row.Id,
+            row.FileName,
+            row.ContentType,
+            $"/projects/{projectId:N}/images/{row.Id:N}/content?maxEdge=640",
+            row.AltText,
+            row.Source,
+            row.Prompt,
+            row.GenerationModel,
+            row.SourceMetadataJson,
+            row.CreatedAt,
+            row.UpdatedAt,
+            row.SizeBytes)).ToList();
+    }
 
     public async Task<ProjectImageView?> GetAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default)
     {
@@ -217,9 +246,6 @@ public sealed class ProjectImageService(
         var asset = await db.PublishAssets.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken);
         if (asset is null) return;
         var entityIds = await AttachedEntityIdsAsync(projectId, imageId, cancellationToken);
-
-        foreach (var profile in await db.PublishProfiles.Where(profile => profile.ProjectId == projectId && profile.SelectedCoverAssetId == imageId).ToListAsync(cancellationToken))
-            profile.SelectedCoverAssetId = null;
 
         foreach (var placement in await db.PublishImagePlacements.Where(placement => placement.ProjectId == projectId && placement.AssetId == imageId).ToListAsync(cancellationToken))
             db.PublishImagePlacements.Remove(placement);

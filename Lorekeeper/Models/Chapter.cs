@@ -42,6 +42,8 @@ public class Chapter
 
     public ICollection<EditorContextPreference> EditorContextPreferences { get; set; } = [];
 
+    public ICollection<PublishProfile> CoverProfiles { get; set; } = [];
+
     public VectorIndexState VectorIndexState { get; set; } = VectorIndexState.UpToDate;
 
     /// <summary>Timestamp of last successful reindex; null if never indexed.</summary>

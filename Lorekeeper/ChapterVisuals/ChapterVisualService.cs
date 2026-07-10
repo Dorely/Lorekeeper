@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
-using Lorekeeper.Publish;
 using Microsoft.EntityFrameworkCore;
 using SkiaSharp;
 
@@ -45,6 +44,17 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
                 chapter.VectorIndexState = VectorIndexState.Stale;
                 chapter.VectorIndexedAt = null;
                 chapter.VectorIndexError = null;
+            }
+        }
+        else
+        {
+            var coverProfiles = await db.PublishProfiles
+                .Where(profile => profile.SelectedCoverChapterId == chapter.Id)
+                .ToListAsync(cancellationToken);
+            foreach (var profile in coverProfiles)
+            {
+                profile.SelectedCoverChapterId = null;
+                profile.UpdatedAt = DateTime.UtcNow;
             }
         }
 
@@ -169,6 +179,7 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
     public async Task<IReadOnlyList<ChapterVisualSnapshot>> RenderSnapshotsAsync(
         Guid chapterId,
         int maxEdge = 1400,
+        bool includeGuides = true,
         CancellationToken cancellationToken = default)
     {
         var chapter = await db.Chapters.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == chapterId, cancellationToken);
@@ -182,7 +193,7 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         var assets = await LoadImageAssetsAsync(chapter.ProjectId, imageIds, cancellationToken);
         var edge = (int)Clamp(maxEdge, 320, 2400, 1400);
         if (state.VisualMode == ChapterVisualMode.PicturePage)
-            return [RenderPicturePageSnapshot(state, assets, edge)];
+            return [RenderPicturePageSnapshot(state, assets, edge, includeGuides)];
         if (assets.Count == 0)
             return [];
 
@@ -296,7 +307,8 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
     private static ChapterVisualSnapshot RenderPicturePageSnapshot(
         ChapterVisualState state,
         IReadOnlyDictionary<Guid, PublishAsset> assets,
-        int maxEdge)
+        int maxEdge,
+        bool includeGuides)
     {
         var metrics = PageMetrics(state.PageLayoutKind);
         var (width, height) = ScaledPagePixels(metrics.SurfaceWidthInches, metrics.SurfaceHeightInches, maxEdge);
@@ -305,19 +317,33 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         var canvas = surface.Canvas;
         canvas.Clear(SKColors.White);
 
-        foreach (var image in state.PageLayout.Images.OrderBy(image => image.ZIndex))
+        var textFitDiagnostics = new List<ChapterVisualTextFitDiagnostic>();
+        var layers = state.PageLayout.Images
+            .Select((image, index) => new PicturePageRenderLayer(image.ZIndex, index, image, null))
+            .Concat(state.PageLayout.TextElements.Select((text, index) =>
+                new PicturePageRenderLayer(text.ZIndex, state.PageLayout.Images.Count + index, null, text)))
+            .OrderBy(layer => layer.ZIndex)
+            .ThenBy(layer => layer.StableOrder);
+        foreach (var layer in layers)
         {
-            if (!assets.TryGetValue(image.ImageId, out var asset))
+            if (layer.Image is { } image)
+            {
+                if (assets.TryGetValue(image.ImageId, out var asset))
+                {
+                    DrawImage(
+                        canvas,
+                        asset,
+                        PercentRect(image.XPercent, image.YPercent, image.WidthPercent, image.HeightPercent, width, height),
+                        image.Fit,
+                        image.Opacity);
+                }
                 continue;
+            }
 
-            DrawImage(canvas, asset, PercentRect(image.XPercent, image.YPercent, image.WidthPercent, image.HeightPercent, width, height), image.Fit, image.Opacity);
+            if (layer.Text is { } text)
+                textFitDiagnostics.Add(DrawPictureTextBox(canvas, text, width, height));
         }
-
-        var textFitDiagnostics = state.PageLayout.TextElements
-            .OrderBy(text => text.ZIndex)
-            .Select(text => DrawPictureTextBox(canvas, text, width, height))
-            .ToList();
-        if (metrics.IsDouble)
+        if (metrics.IsDouble && includeGuides)
             DrawSpreadSplit(canvas, width, height);
 
         return new ChapterVisualSnapshot(1, $"chapter-{state.ChapterId:N}-page-1.png", SnapshotContentType, EncodePng(surface))
@@ -566,7 +592,7 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         var y = pageHeight * (float)(Clamp(yPercent, 0, 100, 0) / 100);
         var width = pageWidth * (float)(Clamp(widthPercent, 1, 100, 1) / 100);
         var height = pageHeight * (float)(Clamp(heightPercent, 1, 100, 1) / 100);
-        return new SKRect(x, y, Math.Min(pageWidth, x + width), Math.Min(pageHeight, y + height));
+        return new SKRect(x, y, x + width, y + height);
     }
 
     private static void DrawImage(SKCanvas canvas, PublishAsset asset, SKRect destination, ChapterImageFit fit, double opacity)
@@ -685,11 +711,11 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         if (textRect.Width <= 0 || textRect.Height <= 0)
             return new ChapterVisualTextFitDiagnostic(text.Id, 0, 0, 0, 0, Fits: false);
 
-        var lines = WrapText(text.Text, textRect.Width, font, paint);
+        var lines = WrapPictureText(text.Text, textRect.Width, font, paint);
         if (lines.Count == 0)
             return new ChapterVisualTextFitDiagnostic(text.Id, 0, 0, textRect.Height, 0, Fits: true);
 
-        var lineHeight = Math.Max(fontSize * (float)Clamp(text.LineHeight, 0.9, 2.2, 1.25), font.Metrics.Descent - font.Metrics.Ascent + font.Metrics.Leading);
+        var lineHeight = fontSize * (float)Clamp(text.LineHeight, 0.9, 2.2, 1.25);
         var blockHeight = lines.Count * lineHeight;
         var startY = text.VerticalAlign switch
         {
@@ -702,8 +728,8 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         var align = TextAlign(text.TextAlign);
         var x = text.TextAlign switch
         {
-            PublishCoverTextAlign.Left => textRect.Left,
-            PublishCoverTextAlign.Right => textRect.Right,
+            PicturePageTextAlign.Left => textRect.Left,
+            PicturePageTextAlign.Right => textRect.Right,
             _ => textRect.Left + (textRect.Width / 2),
         };
 
@@ -716,6 +742,7 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
             if (lineTop >= textRect.Top - 0.5f && lineBottom <= textRect.Bottom + 0.5f)
                 drawnLineCount++;
 
+            DrawPictureTextShadow(canvas, lines[index], x, baseline, align, font, text.Shadow, fontSize);
             canvas.DrawText(lines[index], x, baseline, align, font, paint);
             baseline += lineHeight;
         }
@@ -787,6 +814,54 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         return lines;
     }
 
+    private static IReadOnlyList<string> WrapPictureText(string text, float maxWidth, SKFont font, SKPaint paint)
+    {
+        var lines = new List<string>();
+        var sourceLines = text
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
+
+        foreach (var sourceLine in sourceLines)
+        {
+            var runes = sourceLine.EnumerateRunes().Select(rune => rune.ToString()).ToList();
+            if (runes.Count == 0)
+            {
+                lines.Add(string.Empty);
+                continue;
+            }
+
+            var start = 0;
+            while (start < runes.Count)
+            {
+                var end = start;
+                var lastWhitespaceBreak = -1;
+                var candidate = string.Empty;
+                while (end < runes.Count)
+                {
+                    var next = candidate + runes[end];
+                    if (end > start && Measure(next, font, paint) > maxWidth)
+                        break;
+
+                    candidate = next;
+                    end++;
+                    if (char.IsWhiteSpace(runes[end - 1], 0))
+                        lastWhitespaceBreak = end;
+                }
+
+                if (end == start)
+                    end++;
+                var breakAt = end < runes.Count && lastWhitespaceBreak > start
+                    ? lastWhitespaceBreak
+                    : end;
+                lines.Add(string.Concat(runes.Skip(start).Take(breakAt - start)));
+                start = breakAt;
+            }
+        }
+
+        return lines;
+    }
+
     private static IEnumerable<string> BreakLongWord(string word, float maxWidth, SKFont font, SKPaint paint)
     {
         var segment = string.Empty;
@@ -810,20 +885,71 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
     private static float Measure(string text, SKFont font, SKPaint paint) =>
         font.MeasureText(text, paint);
 
-    private static string FontFamily(PublishCoverFontFamily fontFamily) =>
+    private static void DrawPictureTextShadow(
+        SKCanvas canvas,
+        string text,
+        float x,
+        float y,
+        SKTextAlign textAlign,
+        SKFont font,
+        PicturePageTextShadow shadow,
+        float fontSize)
+    {
+        if (shadow == PicturePageTextShadow.None)
+            return;
+
+        switch (shadow)
+        {
+            case PicturePageTextShadow.Glow:
+                DrawPictureShadowText(canvas, text, x, y, textAlign, font, fontSize * 0.08f, new SKColor(255, 255, 255, 180), 0, 0);
+                DrawPictureShadowText(canvas, text, x, y, textAlign, font, fontSize * 0.045f, new SKColor(0, 0, 0, 145), 0, fontSize * 0.025f);
+                break;
+            case PicturePageTextShadow.Strong:
+                DrawPictureShadowText(canvas, text, x, y, textAlign, font, fontSize * 0.08f, new SKColor(0, 0, 0, 185), 0, fontSize * 0.045f);
+                DrawPictureShadowText(canvas, text, x, y, textAlign, font, 0, new SKColor(0, 0, 0, 220), 0, fontSize * 0.018f);
+                break;
+            default:
+                DrawPictureShadowText(canvas, text, x, y, textAlign, font, fontSize * 0.055f, new SKColor(0, 0, 0, 155), 0, fontSize * 0.03f);
+                break;
+        }
+    }
+
+    private static void DrawPictureShadowText(
+        SKCanvas canvas,
+        string text,
+        float x,
+        float y,
+        SKTextAlign textAlign,
+        SKFont font,
+        float blur,
+        SKColor color,
+        float offsetX,
+        float offsetY)
+    {
+        using var paint = new SKPaint
+        {
+            Color = color,
+            IsAntialias = true,
+        };
+        using var maskFilter = blur > 0 ? SKMaskFilter.CreateBlur(SKBlurStyle.Normal, blur) : null;
+        paint.MaskFilter = maskFilter;
+        canvas.DrawText(text, x + offsetX, y + offsetY, textAlign, font, paint);
+    }
+
+    private static string FontFamily(PicturePageFontFamily fontFamily) =>
         fontFamily switch
         {
-            PublishCoverFontFamily.Sans => "Arial",
-            PublishCoverFontFamily.Display => "Trebuchet MS",
-            PublishCoverFontFamily.Monospace => "Consolas",
+            PicturePageFontFamily.Sans => "Arial",
+            PicturePageFontFamily.Display => "Trebuchet MS",
+            PicturePageFontFamily.Monospace => "Courier New",
             _ => "Georgia",
         };
 
-    private static SKTextAlign TextAlign(PublishCoverTextAlign textAlign) =>
+    private static SKTextAlign TextAlign(PicturePageTextAlign textAlign) =>
         textAlign switch
         {
-            PublishCoverTextAlign.Left => SKTextAlign.Left,
-            PublishCoverTextAlign.Right => SKTextAlign.Right,
+            PicturePageTextAlign.Left => SKTextAlign.Left,
+            PicturePageTextAlign.Right => SKTextAlign.Right,
             _ => SKTextAlign.Center,
         };
 
@@ -912,15 +1038,15 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
                     HeightPercent: 20,
                     ZIndex: 10,
                     ReadingOrder: 0,
-                    FontFamily: PublishCoverFontFamily.Serif,
+                    FontFamily: PicturePageFontFamily.Serif,
                     FontSizePercent: 4.5,
                     LineHeight: 1.25,
                     Color: "#111827",
                     BackgroundColor: "#FFFFFF",
                     BackgroundOpacity: 0,
-                    TextAlign: PublishCoverTextAlign.Center,
+                    TextAlign: PicturePageTextAlign.Center,
                     VerticalAlign: ChapterTextVerticalAlign.Middle,
-                    Shadow: PublishCoverShadow.None),
+                    Shadow: PicturePageTextShadow.None),
             ],
         };
     }
@@ -981,15 +1107,15 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
                 HeightPercent = Clamp(text.HeightPercent, 1, 100, 20),
                 ZIndex = text.ZIndex == 0 ? 100 + index : text.ZIndex,
                 ReadingOrder = text.ReadingOrder < 0 ? index : text.ReadingOrder,
-                FontFamily = Enum.IsDefined(text.FontFamily) ? text.FontFamily : PublishCoverFontFamily.Serif,
+                FontFamily = Enum.IsDefined(text.FontFamily) ? text.FontFamily : PicturePageFontFamily.Serif,
                 FontSizePercent = Clamp(text.FontSizePercent, 1, 18, 4.5),
                 LineHeight = Clamp(text.LineHeight, 0.9, 2.2, 1.25),
                 Color = CleanColor(text.Color, "#111827"),
                 BackgroundColor = CleanColor(text.BackgroundColor, "#FFFFFF"),
                 BackgroundOpacity = Clamp(text.BackgroundOpacity, 0, 1, 0),
-                TextAlign = Enum.IsDefined(text.TextAlign) ? text.TextAlign : PublishCoverTextAlign.Center,
+                TextAlign = Enum.IsDefined(text.TextAlign) ? text.TextAlign : PicturePageTextAlign.Center,
                 VerticalAlign = Enum.IsDefined(text.VerticalAlign) ? text.VerticalAlign : ChapterTextVerticalAlign.Middle,
-                Shadow = Enum.IsDefined(text.Shadow) ? text.Shadow : PublishCoverShadow.None,
+                Shadow = Enum.IsDefined(text.Shadow) ? text.Shadow : PicturePageTextShadow.None,
             })
             .OrderBy(text => text.ReadingOrder)
             .ToList();
@@ -1059,4 +1185,10 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
 
         return fallback;
     }
+
+    private sealed record PicturePageRenderLayer(
+        int ZIndex,
+        int StableOrder,
+        PicturePageImageElement? Image,
+        PicturePageTextElement? Text);
 }

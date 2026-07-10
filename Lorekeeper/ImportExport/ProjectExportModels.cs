@@ -18,7 +18,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 4;
+    public const int CurrentFormatVersion = 5;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -109,13 +109,12 @@ public sealed record ProjectExportPublishProfile(
     bool IncludeChapterHeadings,
     bool NumberActs,
     bool NumberChapters,
-    string CoverLayoutJson,
     double PageWidthInches,
     double PageHeightInches,
     double PageMarginInches,
     double BodyFontSizePoints,
     double BodyLineHeight,
-    Guid? SelectedCoverAssetId);
+    Guid? SelectedCoverChapterId);
 
 public sealed record ProjectExportChapter
 {

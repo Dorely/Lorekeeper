@@ -56,6 +56,7 @@ public sealed class ProjectImportJobProcessor(
     {
         public Dictionary<string, GraphNode> NodeMap { get; } = new(StringComparer.Ordinal);
         public Dictionary<Guid, Guid> ImageMap { get; } = [];
+        public Dictionary<Guid, Guid> ChapterMap { get; } = [];
         public List<Guid> CreatedActIds { get; } = [];
         public List<Guid> CreatedChapterIds { get; } = [];
         public List<Guid> ContextEntityIdsToReindex { get; } = [];
@@ -82,13 +83,21 @@ public sealed class ProjectImportJobProcessor(
             await ImportEntityTypesAsync(job, document, cancellationToken);
             await StepAsync(job, "Imported entity type definitions.", cancellationToken);
 
-            await ImportProjectImagesAndPublishSettingsAsync(job, document, state, cancellationToken);
-            await StepAsync(job, "Imported project images and publish page settings.", cancellationToken);
+            await ImportProjectImagesAsync(job, document, state, cancellationToken);
+            await StepAsync(job, "Imported project images.", cancellationToken);
 
             if (document.ExportKind == ProjectExportKind.Full)
             {
                 await AppendStructuralItemsAsync(job, document, state, cancellationToken);
-                await StepAsync(job, "Appended exported outline structure.", cancellationToken);
+                if (document.PublishProfiles.FirstOrDefault() is { } importedProfile)
+                {
+                    await ImportPublishProfileSettingsAsync(
+                        job.ProjectId,
+                        importedProfile,
+                        state.ChapterMap,
+                        cancellationToken);
+                }
+                await StepAsync(job, "Appended exported outline structure and imported publish page settings.", cancellationToken);
             }
             else
             {
@@ -297,6 +306,7 @@ public sealed class ProjectImportJobProcessor(
             await outlineGraphSync.EnsureChapterAsync(tracked, cancellationToken);
 
             job.CreatedChapterCount++;
+            state.ChapterMap[importedChapter.Id] = tracked.Id;
             state.CreatedChapterIds.Add(tracked.Id);
             var node = await nodes.FindAsync(job.ProjectId, EntityTypeService.ChapterNodeType, tracked.Id.ToString("N"), cancellationToken);
             if (node is not null)
@@ -343,7 +353,7 @@ public sealed class ProjectImportJobProcessor(
         }
     }
 
-    private async Task ImportProjectImagesAndPublishSettingsAsync(
+    private async Task ImportProjectImagesAsync(
         ProjectImportJob job,
         ProjectExportDocument document,
         ImportState state,
@@ -401,8 +411,6 @@ public sealed class ProjectImportJobProcessor(
             await AddReportAsync(job, ProjectImportReportItemKind.Structural, $"Imported {state.ImageMap.Count} project image(s)", "Images were added to the project image library.", "ProjectImage", job.ProjectId.ToString("N"), cancellationToken: cancellationToken);
         }
 
-        if (document.ExportKind == ProjectExportKind.Full && document.PublishProfiles.FirstOrDefault() is { } importedProfile)
-            await ImportPublishProfileSettingsAsync(job.ProjectId, importedProfile, state.ImageMap, cancellationToken);
     }
 
     private async Task ImportEntityVisualExamplesAsync(
@@ -450,7 +458,7 @@ public sealed class ProjectImportJobProcessor(
     private async Task ImportPublishProfileSettingsAsync(
         Guid projectId,
         ProjectExportPublishProfile importedProfile,
-        IReadOnlyDictionary<Guid, Guid> imageMap,
+        IReadOnlyDictionary<Guid, Guid> chapterMap,
         CancellationToken cancellationToken)
     {
         var profile = await db.PublishProfiles.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId, cancellationToken);
@@ -460,16 +468,22 @@ public sealed class ProjectImportJobProcessor(
             await db.PublishProfiles.AddAsync(profile, cancellationToken);
         }
 
-        profile.CoverLayoutJson = importedProfile.CoverLayoutJson;
         profile.PageWidthInches = importedProfile.PageWidthInches;
         profile.PageHeightInches = importedProfile.PageHeightInches;
         profile.PageMarginInches = importedProfile.PageMarginInches;
         profile.BodyFontSizePoints = importedProfile.BodyFontSizePoints;
         profile.BodyLineHeight = importedProfile.BodyLineHeight;
-        profile.SelectedCoverAssetId = importedProfile.SelectedCoverAssetId is Guid coverId
-            && imageMap.TryGetValue(coverId, out var localCoverId)
-                ? localCoverId
-                : profile.SelectedCoverAssetId;
+        profile.SelectedCoverChapterId = null;
+        if (importedProfile.SelectedCoverChapterId is Guid exportedCoverChapterId
+            && chapterMap.TryGetValue(exportedCoverChapterId, out var localCoverChapterId)
+            && await db.Chapters.AsNoTracking().AnyAsync(
+                chapter => chapter.Id == localCoverChapterId
+                    && chapter.ProjectId == projectId
+                    && chapter.VisualMode == ChapterVisualMode.PicturePage,
+                cancellationToken))
+        {
+            profile.SelectedCoverChapterId = localCoverChapterId;
+        }
         profile.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
     }

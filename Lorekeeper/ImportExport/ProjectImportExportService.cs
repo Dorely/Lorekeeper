@@ -293,13 +293,12 @@ public sealed class ProjectImportExportService(
             profile.IncludeChapterHeadings,
             profile.NumberActs,
             profile.NumberChapters,
-            profile.CoverLayoutJson,
             profile.PageWidthInches,
             profile.PageHeightInches,
             profile.PageMarginInches,
             profile.BodyFontSizePoints,
             profile.BodyLineHeight,
-            profile.SelectedCoverAssetId);
+            profile.SelectedCoverChapterId);
 
     private static ProjectExportChapter ProjectChapter(
         Chapter chapter,

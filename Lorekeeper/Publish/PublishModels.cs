@@ -14,7 +14,7 @@ public enum PublishExportFormat
 public sealed record PublishWorkspaceView(
     PublishProfileView Profile,
     IReadOnlyList<PublishSectionView> Sections,
-    IReadOnlyList<PublishAssetView> Assets,
+    IReadOnlyList<PublishCoverCandidateView> CoverCandidates,
     IReadOnlyList<PublishImagePlacementView> Placements);
 
 public sealed record PublishProfileView(
@@ -40,8 +40,7 @@ public sealed record PublishProfileView(
     bool IncludeChapterHeadings,
     bool NumberActs,
     bool NumberChapters,
-    Guid? SelectedCoverAssetId,
-    PublishCoverLayoutView CoverLayout);
+    Guid? SelectedCoverChapterId);
 
 public sealed record PublishProfileUpdate(
     string TitleOverride,
@@ -64,58 +63,6 @@ public sealed record PublishProfileUpdate(
     bool NumberActs,
     bool NumberChapters);
 
-public sealed record PublishCoverLayoutView(
-    IReadOnlyList<PublishCoverLayerView> Layers);
-
-public sealed record PublishCoverLayerView(
-    PublishCoverLayerKind Kind,
-    bool IsVisible,
-    double XPercent,
-    double YPercent,
-    double WidthPercent,
-    double FontSizePercent,
-    PublishCoverFontFamily FontFamily,
-    PublishCoverTextAlign TextAlign,
-    string Color,
-    double Opacity,
-    bool IsBold,
-    bool IsItalic,
-    PublishCoverShadow Shadow);
-
-[JsonConverter(typeof(JsonStringEnumConverter<PublishCoverLayerKind>))]
-public enum PublishCoverLayerKind
-{
-    Title,
-    Subtitle,
-    Author,
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter<PublishCoverFontFamily>))]
-public enum PublishCoverFontFamily
-{
-    Serif,
-    Sans,
-    Display,
-    Monospace,
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter<PublishCoverTextAlign>))]
-public enum PublishCoverTextAlign
-{
-    Left,
-    Center,
-    Right,
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter<PublishCoverShadow>))]
-public enum PublishCoverShadow
-{
-    None,
-    Soft,
-    Strong,
-    Glow,
-}
-
 public sealed record PublishSectionView(
     Guid? ActId,
     string Title,
@@ -127,46 +74,43 @@ public sealed record PublishChapterView(
     Guid Id,
     Guid? ActId,
     string Title,
-    bool IsIncluded);
+    bool IsIncluded,
+    bool IsCover,
+    ChapterVisualMode VisualMode,
+    ChapterPageLayoutKind PageLayoutKind);
 
-public sealed record PublishAssetView(
+public sealed record PublishCoverCandidateView(
     Guid Id,
-    string FileName,
-    string ContentType,
-    string PreviewDataUrl,
-    string AltText,
-    PublishAssetSource Source,
-    string Prompt,
-    string GenerationModel,
-    DateTime CreatedAt,
-    long SizeBytes);
+    string Title,
+    string OutlineLabel,
+    ChapterPageLayoutKind PageLayoutKind,
+    string PreviewUrl);
 
 public sealed record PublishImagePlacementView(
     Guid Id,
     Guid AssetId,
     string AssetFileName,
+    string AssetPreviewUrl,
     PublishOutlineTargetKind TargetKind,
     Guid TargetId,
     string TargetTitle,
     PublishImagePlacementKind PlacementKind,
-    string Caption);
+    string Caption,
+    int SortOrder);
 
-public sealed record PublishAssetUpload(
-    string FileName,
-    string ContentType,
-    byte[] Data,
-    string AltText);
-
-public sealed record PublishImageGenerationRequest(
-    string Prompt,
-    string Size,
-    string Quality,
-    string OutputFormat,
-    int? OutputCompression,
-    string AltText,
-    IReadOnlyList<Guid> ReferenceAssetIds);
+public sealed record PublishOutlineSelectionUpdate(
+    PublishOutlineTargetKind TargetKind,
+    Guid TargetId,
+    bool IsIncluded);
 
 public sealed record PublishImagePlacementCreate(
+    Guid AssetId,
+    PublishOutlineTargetKind TargetKind,
+    Guid TargetId,
+    PublishImagePlacementKind PlacementKind,
+    string Caption);
+
+public sealed record PublishImagePlacementUpdate(
     Guid AssetId,
     PublishOutlineTargetKind TargetKind,
     Guid TargetId,
@@ -180,8 +124,6 @@ public sealed record PublishDocument(
     DateTime ExportedAtUtc,
     PublishDocumentProfile Profile,
     PublishAssetDocument? CoverAsset,
-    PublishAssetDocument? RenderedCoverAsset,
-    PublishCoverLayoutView CoverLayout,
     IReadOnlyList<PublishSectionDocument> Sections,
     IReadOnlyList<PublishAssetDocument> Assets,
     IReadOnlyList<PublishImagePlacementDocument> Placements)

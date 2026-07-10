@@ -9,7 +9,11 @@ public interface IChapterVisualService
     Task<ChapterImagePlacementResult> AddImageToChapterAsync(Guid projectId, Guid chapterId, Guid imageId, CancellationToken cancellationToken = default);
     Task<ChapterVisualState> SaveIllustrationLayoutAsync(Guid chapterId, IllustratedProseLayout layout, CancellationToken cancellationToken = default);
     Task<ChapterVisualState> SavePageLayoutAsync(Guid chapterId, PicturePageLayout layout, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<ChapterVisualSnapshot>> RenderSnapshotsAsync(Guid chapterId, int maxEdge = 1400, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ChapterVisualSnapshot>> RenderSnapshotsAsync(
+        Guid chapterId,
+        int maxEdge = 1400,
+        bool includeGuides = true,
+        CancellationToken cancellationToken = default);
     Task RemoveImageReferencesAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default);
     string BuildManifest(ChapterVisualState state, IReadOnlyDictionary<Guid, string>? imageNames = null);
 }

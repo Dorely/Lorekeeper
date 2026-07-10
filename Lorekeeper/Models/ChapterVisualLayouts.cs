@@ -1,4 +1,4 @@
-using Lorekeeper.Publish;
+using System.Text.Json.Serialization;
 
 namespace Lorekeeper.Models;
 
@@ -43,12 +43,38 @@ public sealed record PicturePageTextElement(
     double HeightPercent,
     int ZIndex,
     int ReadingOrder,
-    PublishCoverFontFamily FontFamily,
+    PicturePageFontFamily FontFamily,
     double FontSizePercent,
     double LineHeight,
     string Color,
     string BackgroundColor,
     double BackgroundOpacity,
-    PublishCoverTextAlign TextAlign,
+    PicturePageTextAlign TextAlign,
     ChapterTextVerticalAlign VerticalAlign,
-    PublishCoverShadow Shadow);
+    PicturePageTextShadow Shadow);
+
+[JsonConverter(typeof(JsonStringEnumConverter<PicturePageFontFamily>))]
+public enum PicturePageFontFamily
+{
+    Serif,
+    Sans,
+    Display,
+    Monospace,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PicturePageTextAlign>))]
+public enum PicturePageTextAlign
+{
+    Left,
+    Center,
+    Right,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PicturePageTextShadow>))]
+public enum PicturePageTextShadow
+{
+    None,
+    Soft,
+    Strong,
+    Glow,
+}

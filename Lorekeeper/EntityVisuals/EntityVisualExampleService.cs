@@ -314,7 +314,6 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
     private async Task<bool> IsImageOtherwiseReferencedAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken)
     {
         if (await db.EntityVisualExamples.AnyAsync(example => example.ProjectId == projectId && example.ImageId == imageId, cancellationToken)) return true;
-        if (await db.PublishProfiles.AnyAsync(profile => profile.ProjectId == projectId && profile.SelectedCoverAssetId == imageId, cancellationToken)) return true;
         if (await db.ProjectImageMasks.AnyAsync(mask => mask.ProjectId == projectId && mask.ImageId == imageId, cancellationToken)) return true;
         var idN = imageId.ToString("N");
         var idD = imageId.ToString();

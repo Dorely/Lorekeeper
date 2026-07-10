@@ -18,8 +18,6 @@ public class PublishProfile
     public string Dedication { get; set; } = string.Empty;
     public string Acknowledgments { get; set; } = string.Empty;
     public string References { get; set; } = string.Empty;
-    public string CoverLayoutJson { get; set; } = string.Empty;
-
     public bool IncludeTableOfContents { get; set; } = true;
     public bool IncludeVisibleTableOfContents { get; set; } = true;
     public bool IncludeActSynopses { get; set; }
@@ -39,8 +37,8 @@ public class PublishProfile
 
     public double BodyLineHeight { get; set; } = 1.55;
 
-    public Guid? SelectedCoverAssetId { get; set; }
-    public PublishAsset? SelectedCoverAsset { get; set; }
+    public Guid? SelectedCoverChapterId { get; set; }
+    public Chapter? SelectedCoverChapter { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

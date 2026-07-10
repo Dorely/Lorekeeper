@@ -25,7 +25,7 @@
 | File | Description |
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors. EF Core SQLite, Electron.NET Core desktop packaging, Microsoft.Extensions.AI(.OpenAI), OpenAI 2.8, sqlite-vec, Microsoft.ML.Tokenizers, SkiaSharp, EPUB/PDF ingestion packages, and patched Microsoft.Bcl.Memory. |
-| `Program.cs` | Host setup, optional Electron desktop shell binding, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/images/chapter-visuals/publish/writing/editor-chat/contest/revision-agent services, EF migrate at startup, sqlite-vec init, graph repair, Codex OAuth and project image endpoints. |
+| `Program.cs` | Host setup, optional Electron desktop shell binding, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/images/chapter-visuals/publish/writing/editor-chat/contest/revision-agent services, EF migrate at startup, sqlite-vec init, graph repair, and project-image/publish-preview endpoints. |
 | `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*`, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
 | `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
 | `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets and app metadata for Windows, Linux, and macOS desktop artifacts. |
@@ -133,8 +133,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Full Publish tab workspace for metadata, outline selection, cover layout, shared image cover selection/viewing, publish-only image placements, exports, and Print/PDF preview. |
-| `CoverTextEditor.razor` (+ `.razor.css`, `.razor.js`) | Interactive cover text overlay editor: previews the selected cover asset, drags fixed title/subtitle/author layers, and exposes typography/placement controls. |
+| `PublishContent.razor` (+ `.razor.css`) | Responsive Publish workspace for autosaved metadata, Picture Page cover selection/preview, outline inclusion, on-demand publish-only placements, readiness, and TXT/Markdown/EPUB/Print exports. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -177,7 +176,7 @@
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF entity for a chapter (Title/Body/Synopsis/Order) under a `Project`, optionally assigned to an `Act`; stores visual mode, page layout kind, and visual layout JSON for illustrated prose/picture pages. Tracks vector-index state and exposes `VectorSourceId`. |
 | `ChapterVisualMode.cs` | Enums for chapter visual modes, page layout kinds, and reusable image/text layout choices such as image fit, alignment, anchor position, and text vertical alignment. |
-| `ChapterVisualLayouts.cs` | Serializable layout records for IllustratedProse anchored image blocks and PicturePage freeform image/text elements. |
+| `ChapterVisualLayouts.cs` | Serializable layout records and typography enums for IllustratedProse anchored image blocks and PicturePage freeform image/text elements. |
 | `EditorContextPreference.cs` | EF entity for per-chapter Context Feed include/exclude preferences keyed by context item kind + stable item key. |
 | `EditorConversation.cs` | EF entity — one persistent multi-turn editor chat per `Project` (unique on `ProjectId`). Owns ordered `EditorMessage`s; cascade-deleted with the project. |
 | `EditorMessage.cs` | EF entity for a single row in an `EditorConversation`: monotonic `Order`, role (`System`/`User`/`Assistant`/`Tool`), text content, assistant tool-call JSON, tool result metadata, status, optional error, and creation timestamp. |
@@ -210,8 +209,8 @@
 | `ProjectImportJob.cs` | EF entity for durable project import job state: uploaded JSON payload, source format metadata, status/progress counters, import counts, warnings, errors, and timestamps. |
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
-| `PublishProfile.cs` | EF entity for one saved publish profile per project: book metadata, front/back matter, output options, prose pagination settings, selected cover asset, and cover text layout JSON. |
-| `PublishAsset.cs` | EF entity for uploaded/generated/edited/cropped project images with bytes, crop lineage/coordinates, alt text, prompt/source metadata, masks, and cover/placement navigation. |
+| `PublishProfile.cs` | EF entity for one saved publish profile per project: book metadata, front/back matter, output options, prose pagination settings, and optional Picture Page cover chapter. |
+| `PublishAsset.cs` | EF entity for uploaded/generated/edited/cropped project images with bytes, crop lineage/coordinates, alt text, prompt/source metadata, masks, and placement navigation. |
 | `EntityVisualExample.cs` | Ordered labeled many-to-many link between an eligible graph entity and project image, with origin and source provenance. |
 | `SourceVisualCandidate.cs` | Cached normalized Research/Ingest image bytes and artifact/web provenance before project-library promotion. |
 | `ProjectImageConversation.cs` | EF entity for the separate project-scoped Images Chat transcript. |
@@ -233,7 +232,7 @@
 | `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor chat visuals, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, publish profiles/assets/layouts, and chapter visual-mode fields. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations through `AddProjectImageCrops`, including entity-image links, cached source visuals/web images, image-job entity targets, and crop lineage/coordinates. |
+| `Migrations/` | EF Core migrations through `ReplacePublishCoverWithPicturePage`, including entity-image links, cached source visuals/web images, image-job entity targets, crop lineage/coordinates, and the Picture Page cover relationship. |
 
 ### Persistence/Repositories/
 
@@ -415,20 +414,20 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | v4 portable export DTOs for stable graph refs, entity visuals/associations, publish settings, chapter visuals, image context, and crop lineage. |
+| `ProjectExportModels.cs` | v5 portable export DTOs for stable graph refs, entity visuals/associations, publish settings with cover chapter identity, chapter visuals, image context, and crop lineage. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job: validates export JSON, imports project images with remapped crop lineage/page settings, appends structural Full imports with visual layouts/context image inclusions, merges non-structural entities/relationships/provenance, repairs graph links, records report rows, and refreshes indexes best-effort. |
+| `ProjectImportJobProcessor.cs` | Runs one import job: validates export JSON, imports project images with remapped crop lineage/page settings, appends structural Full imports with visual layouts/context image inclusions, remaps the v5 cover chapter, merges non-structural entities/relationships/provenance, repairs graph links, records report rows, and refreshes indexes best-effort. |
 
 ### Images/
 
 | File | Description |
 |------|-------------|
 | `ProjectImageModels.cs` | Image, normalized crop, and entity-target requests/views plus persisted jobs, output state, masks, provider progress, and runtime snapshots. |
-| `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: list/read bytes, upload, deterministic local crop/reuse, legacy blocking generation, metadata, delete, thumbnail, and reference scrubbing. |
+| `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: metadata-only listing with endpoint URLs, byte reads, upload, deterministic local crop/reuse, legacy blocking generation, metadata, delete, thumbnail, and reference scrubbing. |
 | `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Persistence-facing image job service for create/list/start/complete jobs, output state/errors, saving generated assets, and validating PNG/shape masks. |
 | `IProjectImageGenerationRuntime.cs` / `ProjectImageGenerationRuntime.cs` | Singleton FIFO image generation queue with one active job per project, retries, runtime partial previews, completion waiters, and state notifications. |
 | `ProjectImageGenerationStartupWorker.cs` | Hosted startup worker that marks interrupted running image jobs failed and resumes queued project work. |
@@ -454,18 +453,17 @@
 | File | Description |
 |------|-------------|
 | `ChapterVisualModels.cs` | UI/service records for chapter visual state, page layout mode updates, and image placement results. |
-| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Chapter visual-layout facade: mode/page-layout changes, layout normalization/saves, image cleanup, picture-page body projection, textual manifests, and paginated rendered snapshots with PicturePage text-fit diagnostics for agent context. |
+| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Chapter visual-layout facade: mode/page-layout changes, cover-selection cleanup, layout normalization/saves, image cleanup, picture-page body projection, textual manifests, and guide-free or editor-style rendered snapshots with PicturePage typography/shadows. |
 | `PicturePageImageGenerationGuidance.cs` | Shared PicturePage image-generation guidance helper: layout-native target sizes, slot-size recommendations, manifest lines, and prompt appendix text for image tools. |
 
 ### Publish/
 
 | File | Description |
 |------|-------------|
-| `PublishModels.cs` | Publish UI/document/export records for profiles, cover text layouts, rendered cover assets, section/chapter selections, project images, image placements, chapter visual layouts, and resolved document projections. |
-| `IPublishService.cs` / `PublishService.cs` | Publish facade for profile and cover-layout persistence, outline selection, image placement/reference cleanup, flattened-cover document projection, and TXT/Markdown/EPUB export. |
-| `IPublishCoverRenderer.cs` / `SkiaPublishCoverRenderer.cs` | SkiaSharp-backed cover compositor that flattens selected cover art plus saved title/subtitle/author layers into a PNG for print and exports. |
-| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | Publish formatter abstraction plus TXT, Markdown, and dependency-free EPUB implementations with metadata, TOC, flattened cover images, interior placements, illustrated prose, and picture-page image/text content. |
-| `ICodexImageGenerationService.cs` / `CodexImageGenerationService.cs` | Codex OAuth image generation client for `gpt-image-2` through the Codex Responses bridge; sends optional reference image inputs, parses streamed image-generation output, and returns PNG/JPEG bytes. |
+| `PublishModels.cs` | Lightweight Publish workspace/document/export records for profiles, Picture Page cover candidates, outline selections, image placements with thumbnail URLs, and resolved document projections with one rendered cover PNG. |
+| `IPublishService.cs` / `PublishService.cs` | Publish facade for profile and Picture Page cover persistence, bulk outline selection, placement create/update/reorder/reference cleanup, cover-only document projection, and TXT/Markdown/EPUB export. |
+| `PublishEndpoints.cs` | Lightweight HTTP endpoint that validates and renders a selected Picture Page as a cached, guide-free PNG preview without transferring the project image library through Blazor. |
+| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | Publish formatter abstraction plus TXT, Markdown, and dependency-free EPUB implementations with metadata, TOC, one rendered Picture Page cover, interior placements, illustrated prose, and picture-page image/text content. |
 
 ### Graph/
 

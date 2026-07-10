@@ -701,16 +701,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
         modelBuilder.Entity<PublishProfile>(entity =>
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
-            entity.HasIndex(e => e.SelectedCoverAssetId);
+            entity.HasIndex(e => e.SelectedCoverChapterId);
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.PublishProfiles)
                 .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasOne(e => e.SelectedCoverAsset)
-                .WithMany(a => a.CoverProfiles)
-                .HasForeignKey(e => e.SelectedCoverAssetId)
+            entity.HasOne(e => e.SelectedCoverChapter)
+                .WithMany(chapter => chapter.CoverProfiles)
+                .HasForeignKey(e => e.SelectedCoverChapterId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
