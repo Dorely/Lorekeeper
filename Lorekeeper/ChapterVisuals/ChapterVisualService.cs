@@ -205,8 +205,12 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
     public async Task<IReadOnlyDictionary<Guid, ChapterPicturePageSurface>> RenderPicturePageSurfacesAsync(
         IReadOnlyCollection<Guid> chapterIds,
         int physicalPageLongEdgePixels = 2400,
+        ChapterPicturePageSurfaceRotation rotation = ChapterPicturePageSurfaceRotation.None,
         CancellationToken cancellationToken = default)
     {
+        if (!Enum.IsDefined(rotation))
+            throw new ArgumentOutOfRangeException(nameof(rotation), rotation, "The picture page surface rotation is invalid.");
+
         var requestedIds = chapterIds
             .Where(id => id != Guid.Empty)
             .Distinct()
@@ -257,16 +261,31 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
                 metrics.PageHeightInches,
                 edge);
             var leafCount = metrics.IsDouble ? 2 : 1;
-            var surfaceWidth = pageWidth * leafCount;
+            var nativeSurfaceWidth = pageWidth * leafCount;
             var projectAssets = assetsByProject.GetValueOrDefault(request.ProjectId)
                 ?? new Dictionary<Guid, PublishAsset>();
             var snapshot = RenderPicturePageSnapshot(
                 request.State,
                 projectAssets,
-                surfaceWidth,
+                nativeSurfaceWidth,
                 pageHeight,
                 includeGuides: false);
-            var fileName = $"chapter-{request.State.ChapterId:N}-picture-page.png";
+            var effectiveRotation = metrics.IsDouble
+                ? rotation
+                : ChapterPicturePageSurfaceRotation.None;
+            var data = effectiveRotation == ChapterPicturePageSurfaceRotation.Clockwise90
+                ? RotatePngClockwise90(snapshot.Data, nativeSurfaceWidth, pageHeight)
+                : snapshot.Data;
+            var surfaceWidth = effectiveRotation == ChapterPicturePageSurfaceRotation.Clockwise90
+                ? pageHeight
+                : nativeSurfaceWidth;
+            var surfaceHeight = effectiveRotation == ChapterPicturePageSurfaceRotation.Clockwise90
+                ? nativeSurfaceWidth
+                : pageHeight;
+            var rotationSuffix = effectiveRotation == ChapterPicturePageSurfaceRotation.Clockwise90
+                ? "-clockwise-90"
+                : string.Empty;
+            var fileName = $"chapter-{request.State.ChapterId:N}-picture-page{rotationSuffix}.png";
             surfaces.Add(
                 request.State.ChapterId,
                 new ChapterPicturePageSurface(
@@ -275,9 +294,12 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
                     pageWidth,
                     pageHeight,
                     leafCount,
+                    surfaceWidth,
+                    surfaceHeight,
+                    effectiveRotation,
                     fileName,
                     snapshot.ContentType,
-                    snapshot.Data,
+                    data,
                     ProjectPictureBody(request.State.PageLayout)));
         }
 
@@ -441,6 +463,20 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         {
             TextFitDiagnostics = textFitDiagnostics,
         };
+    }
+
+    private static byte[] RotatePngClockwise90(byte[] data, int sourceWidth, int sourceHeight)
+    {
+        using var source = SKBitmap.Decode(data)
+            ?? throw new InvalidOperationException("The rendered Picture Page surface could not be decoded.");
+        using var rotatedSurface = CreatePageSurface(sourceHeight, sourceWidth);
+        var canvas = rotatedSurface.Canvas;
+        canvas.Clear(SKColors.White);
+        canvas.Translate(sourceHeight, 0);
+        canvas.RotateDegrees(90);
+        canvas.DrawBitmap(source, 0, 0);
+        canvas.Flush();
+        return EncodePng(rotatedSurface);
     }
 
     private static IReadOnlyList<ChapterVisualSnapshot> RenderIllustratedProseSnapshots(

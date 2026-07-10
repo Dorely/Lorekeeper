@@ -57,6 +57,7 @@ public static class PublishEndpoints
                 Guid projectId,
                 Guid chapterId,
                 [FromQuery] int? physicalPageLongEdge,
+                [FromQuery] ChapterPicturePageSurfaceRotation? rotation,
                 HttpContext httpContext,
                 AppDbContext db,
                 IChapterVisualService chapterVisuals,
@@ -72,9 +73,13 @@ public static class PublishEndpoints
                 if (chapter is null)
                     return Results.NotFound();
 
+                var surfaceRotation = rotation ?? ChapterPicturePageSurfaceRotation.None;
+                if (!Enum.IsDefined(surfaceRotation))
+                    return Results.BadRequest("The Picture Page surface rotation is invalid.");
+
                 var edge = Math.Clamp(physicalPageLongEdge ?? 2400, 320, 2400);
                 var etag = new EntityTagHeaderValue(
-                    $"\"picture-page-{chapter.Id:N}-{chapter.UpdatedAt.Ticks:x}-{edge:x}\"");
+                    $"\"picture-page-{chapter.Id:N}-{chapter.UpdatedAt.Ticks:x}-{edge:x}-{(int)surfaceRotation:x}\"");
                 var responseHeaders = httpContext.Response.GetTypedHeaders();
                 responseHeaders.CacheControl = new CacheControlHeaderValue
                 {
@@ -87,6 +92,7 @@ public static class PublishEndpoints
                 var surfaces = await chapterVisuals.RenderPicturePageSurfacesAsync(
                     [chapterId],
                     edge,
+                    surfaceRotation,
                     cancellationToken);
                 if (!surfaces.TryGetValue(chapterId, out var surface))
                     return Results.NotFound();

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Net;
 using System.Text;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.Publish;
@@ -420,7 +421,17 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 SpineProperties: "rendition:layout-pre-paginated rendition:spread-none"));
         }
 
-        items.Add(new EpubXhtmlItem("title", "title.xhtml", document.DisplayTitle, RenderXhtmlPage(document, document.DisplayTitle, RenderTitleBody(document))));
+        if (document.Profile.IncludeTitlePage)
+            items.Add(new EpubXhtmlItem("title", "title.xhtml", document.DisplayTitle, RenderXhtmlPage(document, document.DisplayTitle, RenderTitleBody(document))));
+        if (!string.IsNullOrWhiteSpace(document.Profile.Description))
+        {
+            items.Add(new EpubXhtmlItem(
+                "description",
+                "description.xhtml",
+                "Description",
+                RenderXhtmlPage(document, "Description", RenderMatterBody("Description", document.Profile.Description)),
+                IncludeInNavigation: false));
+        }
         AddMatter(items, document, "dedication", "Dedication", document.Profile.Dedication);
         if (document.Profile.IncludeTableOfContents && document.Profile.IncludeVisibleTableOfContents)
             items.Add(new EpubXhtmlItem("toc-page", "toc.xhtml", "Table of Contents", RenderXhtmlPage(document, "Table of Contents", RenderVisibleToc(document))));
@@ -515,7 +526,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             throw new InvalidOperationException(
                 $"Picture Page chapter '{chapter.Title}' rendered {picturePage.LeafCount} leaves, but {chapter.PageLayoutKind} requires {expectedLeafCount}.");
         }
-        if (picturePage.PageWidthPixels <= 0 || picturePage.PageHeightPixels <= 0)
+        if (picturePage.PhysicalPageWidthPixels <= 0 || picturePage.PhysicalPageHeightPixels <= 0)
             throw new InvalidOperationException($"Picture Page chapter '{chapter.Title}' has invalid rendered page dimensions.");
 
         var surfaceHref = PicturePageImageHref(imageItems, chapter.Id)
@@ -529,25 +540,30 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             $"{chapterId}-before",
             [PublishImagePlacementKind.BeforeChapter, PublishImagePlacementKind.ChapterOpening]);
 
-        var viewport = new EpubViewport(picturePage.PageWidthPixels, picturePage.PageHeightPixels);
-        for (var leafIndex = 0; leafIndex < picturePage.LeafCount; leafIndex++)
+        if (picturePage.SurfaceWidthPixels <= 0 || picturePage.SurfaceHeightPixels <= 0)
+            throw new InvalidOperationException($"Picture Page chapter '{chapter.Title}' has invalid rendered surface dimensions.");
+        var expectedRotation = document.Profile.EpubPicturePageSpreadMode == EpubPicturePageSpreadMode.SidewaysPortrait
+            && picturePage.LeafCount == 2
+                ? ChapterPicturePageSurfaceRotation.Clockwise90
+                : ChapterPicturePageSurfaceRotation.None;
+        if (picturePage.Rotation != expectedRotation)
         {
-            var isFirstLeaf = leafIndex == 0;
-            var id = isFirstLeaf ? chapterId : $"{chapterId}-leaf-{leafIndex + 1}";
-            var title = isFirstLeaf ? chapter.Title : $"{chapter.Title} (continued)";
-            items.Add(new EpubXhtmlItem(
-                id,
-                $"{id}.xhtml",
-                title,
-                RenderXhtmlPage(
-                    document,
-                    title,
-                    RenderPicturePageBody(chapter, picturePage, surfaceHref, leafIndex),
-                    viewport,
-                    "fixed-layout"),
-                IncludeInNavigation: isFirstLeaf,
-                SpineProperties: PicturePageSpineProperties(picturePage.LeafCount, leafIndex)));
+            throw new InvalidOperationException(
+                $"Picture Page chapter '{chapter.Title}' rendered with {picturePage.Rotation}, but the EPUB profile requires {expectedRotation}.");
         }
+
+        var viewport = new EpubViewport(picturePage.SurfaceWidthPixels, picturePage.SurfaceHeightPixels);
+        items.Add(new EpubXhtmlItem(
+            chapterId,
+            $"{chapterId}.xhtml",
+            chapter.Title,
+            RenderXhtmlPage(
+                document,
+                chapter.Title,
+                RenderPicturePageBody(chapter, picturePage, surfaceHref),
+                viewport,
+                "fixed-layout"),
+            SpineProperties: PicturePageSpineProperties(document.Profile.EpubPicturePageSpreadMode, picturePage.LeafCount)));
 
         AddPicturePageCompanion(
             items,
@@ -606,12 +622,6 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         if (!string.IsNullOrWhiteSpace(document.Profile.Publisher))
             sb.Append("<p class=\"publisher\">").Append(Html(document.Profile.Publisher)).AppendLine("</p>");
         sb.AppendLine("</section>");
-        if (!string.IsNullOrWhiteSpace(document.Profile.Description))
-        {
-            sb.AppendLine("<section class=\"description\">");
-            AppendTextBlocks(sb, document.Profile.Description, "prose");
-            sb.AppendLine("</section>");
-        }
         return sb.ToString();
     }
 
@@ -633,29 +643,17 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     private static string RenderPicturePageBody(
         PublishChapterDocument chapter,
         PublishPicturePageDocument picturePage,
-        string surfaceHref,
-        int leafIndex)
+        string surfaceHref)
     {
-        var isSpread = picturePage.LeafCount == 2;
-        var surfaceWidth = picturePage.PageWidthPixels * picturePage.LeafCount;
-        var imageClass = isSpread
-            ? leafIndex == 0
-                ? "fixed-page-image fixed-page-image-spread fixed-page-image-left"
-                : "fixed-page-image fixed-page-image-spread fixed-page-image-right"
-            : "fixed-page-image fixed-page-image-whole";
-
         var sb = new StringBuilder();
         sb.AppendLine("<section class=\"fixed-page-surface\">");
-        sb.Append("<img class=\"").Append(imageClass).Append("\" alt=\"\" aria-hidden=\"true\" src=\"")
-            .Append(Html(surfaceHref)).Append("\" width=\"").Append(surfaceWidth)
-            .Append("\" height=\"").Append(picturePage.PageHeightPixels).AppendLine("\" />");
-        if (leafIndex == 0)
-        {
-            sb.AppendLine("<div class=\"fixed-page-accessible\">");
-            sb.Append("<h1>").Append(Html(chapter.Title)).AppendLine("</h1>");
-            AppendTextBlocks(sb, picturePage.AccessibleText, "picture-page-transcript");
-            sb.AppendLine("</div>");
-        }
+        sb.Append("<img class=\"fixed-page-image fixed-page-image-whole\" alt=\"\" aria-hidden=\"true\" src=\"")
+            .Append(Html(surfaceHref)).Append("\" width=\"").Append(picturePage.SurfaceWidthPixels)
+            .Append("\" height=\"").Append(picturePage.SurfaceHeightPixels).AppendLine("\" />");
+        sb.AppendLine("<div class=\"fixed-page-accessible\">");
+        sb.Append("<h1>").Append(Html(chapter.Title)).AppendLine("</h1>");
+        AppendTextBlocks(sb, picturePage.AccessibleText, "picture-page-transcript");
+        sb.AppendLine("</div>");
         sb.AppendLine("</section>");
         return sb.ToString();
     }
@@ -787,14 +785,14 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         sb.AppendLine("</p>");
     }
 
-    private static string PicturePageSpineProperties(int leafCount, int leafIndex)
+    private static string PicturePageSpineProperties(EpubPicturePageSpreadMode mode, int leafCount) => leafCount == 1
+        ? "rendition:layout-pre-paginated rendition:spread-none"
+        : mode switch
     {
-        if (leafCount == 1)
-            return "rendition:layout-pre-paginated rendition:spread-none";
-
-        var side = leafIndex == 0 ? "left" : "right";
-        return $"rendition:layout-pre-paginated rendition:spread-landscape rendition:page-spread-{side} page-spread-{side}";
-    }
+        EpubPicturePageSpreadMode.SidewaysPortrait =>
+            "rendition:layout-pre-paginated rendition:orientation-portrait rendition:spread-none",
+        _ => "rendition:layout-pre-paginated rendition:orientation-landscape rendition:spread-none",
+    };
 
     private static EpubViewport CoverViewport(ChapterPageLayoutKind? layoutKind)
     {
@@ -1046,8 +1044,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         }
 
         .chapter-body p,
-        .matter-page p,
-        .description p {
+        .matter-page p {
           margin: 0 0 0.9em;
         }
 
@@ -1081,18 +1078,6 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         .fixed-page-image-whole {
           left: 0;
           width: 100%;
-        }
-
-        .fixed-page-image-spread {
-          width: 200%;
-        }
-
-        .fixed-page-image-left {
-          left: 0;
-        }
-
-        .fixed-page-image-right {
-          left: -100%;
         }
 
         .fixed-page-accessible {

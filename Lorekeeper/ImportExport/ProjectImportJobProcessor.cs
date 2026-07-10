@@ -461,6 +461,13 @@ public sealed class ProjectImportJobProcessor(
         IReadOnlyDictionary<Guid, Guid> chapterMap,
         CancellationToken cancellationToken)
     {
+        if (!Enum.IsDefined(importedProfile.TitlePageMode)
+            || !Enum.IsDefined(importedProfile.PrintPicturePageSpreadMode)
+            || !Enum.IsDefined(importedProfile.EpubPicturePageSpreadMode))
+        {
+            throw new InvalidOperationException("The imported publish profile contains an unsupported page presentation mode.");
+        }
+
         var profile = await db.PublishProfiles.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId, cancellationToken);
         if (profile is null)
         {
@@ -473,6 +480,9 @@ public sealed class ProjectImportJobProcessor(
         profile.PageMarginInches = importedProfile.PageMarginInches;
         profile.BodyFontSizePoints = importedProfile.BodyFontSizePoints;
         profile.BodyLineHeight = importedProfile.BodyLineHeight;
+        profile.TitlePageMode = importedProfile.TitlePageMode;
+        profile.PrintPicturePageSpreadMode = importedProfile.PrintPicturePageSpreadMode;
+        profile.EpubPicturePageSpreadMode = importedProfile.EpubPicturePageSpreadMode;
         profile.SelectedCoverChapterId = null;
         if (importedProfile.SelectedCoverChapterId is Guid exportedCoverChapterId
             && chapterMap.TryGetValue(exportedCoverChapterId, out var localCoverChapterId)

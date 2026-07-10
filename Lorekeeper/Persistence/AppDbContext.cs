@@ -702,6 +702,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
             entity.HasIndex(e => e.SelectedCoverChapterId);
+            entity.Property(e => e.TitlePageMode).HasConversion<string>();
+            entity.Property(e => e.PrintPicturePageSpreadMode).HasConversion<string>();
+            entity.Property(e => e.EpubPicturePageSpreadMode).HasConversion<string>();
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.PublishProfiles)

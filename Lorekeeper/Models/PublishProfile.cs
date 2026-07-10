@@ -1,4 +1,29 @@
+using System.Text.Json.Serialization;
+
 namespace Lorekeeper.Models;
+
+[JsonConverter(typeof(JsonStringEnumConverter<PublishTitlePageMode>))]
+public enum PublishTitlePageMode
+{
+    Automatic = 0,
+    Include = 1,
+    Omit = 2,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PrintPicturePageSpreadMode>))]
+public enum PrintPicturePageSpreadMode
+{
+    WholeSpread = 0,
+    SidewaysWholeSpread = 1,
+    SplitLeaves = 2,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<EpubPicturePageSpreadMode>))]
+public enum EpubPicturePageSpreadMode
+{
+    RequestLandscape = 0,
+    SidewaysPortrait = 1,
+}
 
 public class PublishProfile
 {
@@ -26,6 +51,9 @@ public class PublishProfile
     public bool IncludeChapterHeadings { get; set; } = true;
     public bool NumberActs { get; set; }
     public bool NumberChapters { get; set; }
+    public PublishTitlePageMode TitlePageMode { get; set; } = PublishTitlePageMode.Automatic;
+    public PrintPicturePageSpreadMode PrintPicturePageSpreadMode { get; set; } = PrintPicturePageSpreadMode.WholeSpread;
+    public EpubPicturePageSpreadMode EpubPicturePageSpreadMode { get; set; } = EpubPicturePageSpreadMode.RequestLandscape;
 
     public double PageWidthInches { get; set; } = 8.5;
 

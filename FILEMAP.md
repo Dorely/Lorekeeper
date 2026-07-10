@@ -99,7 +99,7 @@
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
 | `ImagesPage.razor` | Images tab at `/projects/{Slug}/images`; wraps `ProjectLayout` and hosts `Images.ImagesContent`. |
 | `PublishPage.razor` | Publish tab at `/projects/{Slug}/publish`; wraps `ProjectLayout` and hosts `Publish.PublishContent`. |
-| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Scrollable preview and Print/PDF route at `/projects/{Slug}/manuscript/print`; uses named pages, decoded-asset readiness, full-bleed composited Picture Pages, and cropped facing leaves for double spreads. |
+| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Scrollable preview and Print/PDF route at `/projects/{Slug}/manuscript/print`; supports optional title sheets plus full-bleed wide, sideways, or split-leaf Picture Page spreads with named page geometry and decoded-asset readiness. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
 
@@ -133,7 +133,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Responsive Publish workspace for autosaved metadata, Picture Page cover selection, outline inclusion, publish-only placements, readiness, separate layout preview/print actions, and TXT/Markdown/EPUB exports. |
+| `PublishContent.razor` (+ `.razor.css`) | Responsive Publish workspace for autosaved metadata, cover-aware title pages, independent PDF/EPUB Picture Page spread presentation, cover/outline/placement choices, preview/print actions, and TXT/Markdown/EPUB exports. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -209,7 +209,7 @@
 | `ProjectImportJob.cs` | EF entity for durable project import job state: uploaded JSON payload, source format metadata, status/progress counters, import counts, warnings, errors, and timestamps. |
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
-| `PublishProfile.cs` | EF entity for one saved publish profile per project: book metadata, front/back matter, output options, prose pagination settings, and optional Picture Page cover chapter. |
+| `PublishProfile.cs` | EF entity and enums for one saved publish profile per project: metadata, matter, title-page behavior, independent PDF/EPUB spread modes, prose pagination, and the optional Picture Page cover. |
 | `PublishAsset.cs` | EF entity for uploaded/generated/edited/cropped project images with bytes, crop lineage/coordinates, alt text, prompt/source metadata, masks, and placement navigation. |
 | `EntityVisualExample.cs` | Ordered labeled many-to-many link between an eligible graph entity and project image, with origin and source provenance. |
 | `SourceVisualCandidate.cs` | Cached normalized Research/Ingest image bytes and artifact/web provenance before project-library promotion. |
@@ -232,7 +232,7 @@
 | `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor chat visuals, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, publish profiles/assets/layouts, and chapter visual-mode fields. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations through `ReplacePublishCoverWithPicturePage`, including entity-image links, cached source visuals/web images, image-job entity targets, crop lineage/coordinates, and the Picture Page cover relationship. |
+| `Migrations/` | EF Core migrations through `AddPublishPageOptions`, including entity-image links, visual caches/jobs/crops, the Picture Page cover relationship, and saved title/PDF/EPUB page-presentation modes. |
 
 ### Persistence/Repositories/
 
@@ -414,13 +414,13 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | v5 portable export DTOs for stable graph refs, entity visuals/associations, publish settings with cover chapter identity, chapter visuals, image context, and crop lineage. |
+| `ProjectExportModels.cs` | v6 portable export DTOs for stable graph refs, entity visuals/associations, publish title/spread settings and cover identity, chapter visuals, image context, and crop lineage. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job: validates export JSON, imports project images with remapped crop lineage/page settings, appends structural Full imports with visual layouts/context image inclusions, remaps the v5 cover chapter, merges non-structural entities/relationships/provenance, repairs graph links, records report rows, and refreshes indexes best-effort. |
+| `ProjectImportJobProcessor.cs` | Runs one import job: validates export JSON, imports images with remapped crop lineage/page settings, appends Full structure/visuals, restores v6 publish presentation and cover choices, merges non-structural graph data, records reports, and refreshes indexes best-effort. |
 
 ### Images/
 
@@ -453,17 +453,17 @@
 | File | Description |
 |------|-------------|
 | `ChapterVisualModels.cs` | UI/service records for chapter visual state, page layout mode updates, and image placement results. |
-| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Chapter visual-layout facade for layout mutations, cleanup, manifests, editor snapshots, and batched guide-free publish surfaces scaled per physical Picture Page leaf. |
+| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Chapter visual-layout facade for mutations, cleanup, manifests, editor snapshots, and batched guide-free publish surfaces with explicit leaf/output geometry and optional final clockwise rotation. |
 | `PicturePageImageGenerationGuidance.cs` | Shared PicturePage image-generation guidance helper: layout-native target sizes, slot-size recommendations, manifest lines, and prompt appendix text for image tools. |
 
 ### Publish/
 
 | File | Description |
 |------|-------------|
-| `PublishModels.cs` | Lightweight Publish workspace/document/export records for profiles, covers, outline selections, placements, and rendered Picture Page surface projections used by print and EPUB. |
-| `IPublishService.cs` / `PublishService.cs` | Publish facade for profile/cover/outline/placement persistence and exports; resolves the cover and enriches EPUB documents with batched composited Picture Page surfaces. |
-| `PublishEndpoints.cs` | Cacheable HTTP endpoints for validated guide-free cover previews and high-resolution interior Picture Page surfaces, avoiding large Blazor render payloads. |
-| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus a dependency-free mixed-layout EPUB writer with reflowable prose and fixed, accessible cover/Picture Page leaves including true spreads. |
+| `PublishModels.cs` | Publish workspace/document/export records for profile presentation modes, covers, outline selections, placements, and rendered Picture Page surfaces with physical and output geometry. |
+| `IPublishService.cs` / `PublishService.cs` | Publish facade for profile/cover/outline/placement persistence and exports; resolves cover-aware title behavior and enriches EPUBs with native or sideways composited Picture Page surfaces. |
+| `PublishEndpoints.cs` | Cacheable HTTP endpoints for validated guide-free cover previews and native or clockwise-rotated high-resolution interior Picture Page surfaces, avoiding large Blazor payloads. |
+| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus a dependency-free mixed-layout EPUB writer with reflowable prose and one accessible fixed item per cover/Picture Page, including landscape-request and sideways spread modes. |
 
 ### Graph/
 

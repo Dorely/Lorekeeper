@@ -70,6 +70,13 @@ public sealed class PublishService(
 
     public async Task SaveProfileAsync(Guid projectId, PublishProfileUpdate update, CancellationToken cancellationToken = default)
     {
+        if (!Enum.IsDefined(update.TitlePageMode))
+            throw new ArgumentOutOfRangeException(nameof(update), "The title page mode is invalid.");
+        if (!Enum.IsDefined(update.PrintPicturePageSpreadMode))
+            throw new ArgumentOutOfRangeException(nameof(update), "The Print/PDF spread mode is invalid.");
+        if (!Enum.IsDefined(update.EpubPicturePageSpreadMode))
+            throw new ArgumentOutOfRangeException(nameof(update), "The EPUB spread mode is invalid.");
+
         var project = await GetProjectAsync(projectId, cancellationToken);
         var profile = await EnsureProfileAsync(project, cancellationToken);
         profile.TitleOverride = Clean(update.TitleOverride);
@@ -91,6 +98,9 @@ public sealed class PublishService(
         profile.IncludeChapterHeadings = update.IncludeChapterHeadings;
         profile.NumberActs = update.NumberActs;
         profile.NumberChapters = update.NumberChapters;
+        profile.TitlePageMode = update.TitlePageMode;
+        profile.PrintPicturePageSpreadMode = update.PrintPicturePageSpreadMode;
+        profile.EpubPicturePageSpreadMode = update.EpubPicturePageSpreadMode;
         Touch(profile, project);
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -512,10 +522,14 @@ public sealed class PublishService(
         if (picturePageIds.Count == 0)
             return document;
 
+        var rotation = document.Profile.EpubPicturePageSpreadMode == EpubPicturePageSpreadMode.SidewaysPortrait
+            ? ChapterPicturePageSurfaceRotation.Clockwise90
+            : ChapterPicturePageSurfaceRotation.None;
         var surfaces = await chapterVisuals.RenderPicturePageSurfacesAsync(
             picturePageIds,
             physicalPageLongEdgePixels: 2400,
-            cancellationToken);
+            rotation: rotation,
+            cancellationToken: cancellationToken);
         var missingChapterIds = picturePageIds.Where(chapterId => !surfaces.ContainsKey(chapterId)).ToList();
         if (missingChapterIds.Count > 0)
             throw new InvalidOperationException("One or more Picture Pages could not be rendered for EPUB export.");
@@ -545,9 +559,12 @@ public sealed class PublishService(
                     surface.ContentType,
                     surface.Data,
                     chapter.Title),
-                surface.PageWidthPixels,
-                surface.PageHeightPixels,
+                surface.PhysicalPageWidthPixels,
+                surface.PhysicalPageHeightPixels,
                 surface.LeafCount,
+                surface.SurfaceWidthPixels,
+                surface.SurfaceHeightPixels,
+                surface.Rotation,
                 surface.AccessibleText),
         };
 
@@ -677,7 +694,8 @@ public sealed class PublishService(
         var surfaces = await chapterVisuals.RenderPicturePageSurfacesAsync(
             [chapterId],
             physicalPageLongEdgePixels: 2400,
-            cancellationToken);
+            rotation: ChapterPicturePageSurfaceRotation.None,
+            cancellationToken: cancellationToken);
         return !surfaces.TryGetValue(chapterId, out var surface)
             ? null
             : new PublishAssetDocument(
@@ -712,6 +730,9 @@ public sealed class PublishService(
             profile.IncludeChapterHeadings,
             profile.NumberActs,
             profile.NumberChapters,
+            profile.TitlePageMode,
+            profile.PrintPicturePageSpreadMode,
+            profile.EpubPicturePageSpreadMode,
             profile.SelectedCoverChapterId);
 
     private static PublishDocumentProfile ProfileDocument(PublishProfile profile) =>
@@ -734,7 +755,17 @@ public sealed class PublishService(
             profile.IncludeActHeadings,
             profile.IncludeChapterHeadings,
             profile.NumberActs,
-            profile.NumberChapters);
+            profile.NumberChapters,
+            IncludeTitlePage(profile),
+            profile.PrintPicturePageSpreadMode,
+            profile.EpubPicturePageSpreadMode);
+
+    private static bool IncludeTitlePage(PublishProfile profile) => profile.TitlePageMode switch
+    {
+        PublishTitlePageMode.Include => true,
+        PublishTitlePageMode.Omit => false,
+        _ => profile.SelectedCoverChapterId is null,
+    };
 
     private static List<PublishSectionView> SectionViews(
         IReadOnlyList<Act> acts,

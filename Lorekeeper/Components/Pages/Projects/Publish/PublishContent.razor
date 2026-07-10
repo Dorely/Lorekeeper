@@ -158,7 +158,7 @@ else
                             <span class="publish-step">04</span>
                             <h2 id="formatting-title">Contents &amp; formatting</h2>
                         </div>
-                        <p>Control navigation, headings, numbering, and synopsis pages.</p>
+                        <p>Control title pages, navigation, headings, numbering, and Picture Page spreads.</p>
                     </div>
 
                     <div class="publish-option-groups">
@@ -218,6 +218,41 @@ else
                                        @bind="_profile.IncludeChapterSynopses" @bind:after="ScheduleProfileAutosave" />
                                 <span><strong>Include chapter synopses</strong></span>
                             </label>
+                        </fieldset>
+
+                        <fieldset class="publish-option-group">
+                            <legend>Title page</legend>
+                            <label class="publish-toggle">
+                                <input class="form-check-input" type="checkbox" checked="@IncludeTitlePageEffective"
+                                       @onchange="SetTitlePageMode" />
+                                <span>
+                                    <strong>Include a separate title page</strong>
+                                    <small>@TitlePageOptionHelp</small>
+                                </span>
+                            </label>
+                        </fieldset>
+
+                        <fieldset class="publish-option-group publish-option-group-wide">
+                            <legend>Picture Page spreads</legend>
+                            <div class="publish-spread-options">
+                                <label class="publish-field">
+                                    <span>Print / PDF double spreads</span>
+                                    <select class="form-select" @bind="_profile.PrintPicturePageSpreadMode" @bind:after="ScheduleProfileAutosave">
+                                        <option value="@PrintPicturePageSpreadMode.WholeSpread">Whole spread on one wide page</option>
+                                        <option value="@PrintPicturePageSpreadMode.SidewaysWholeSpread">Whole spread rotated on one tall page</option>
+                                        <option value="@PrintPicturePageSpreadMode.SplitLeaves">Split into separate pages</option>
+                                    </select>
+                                    <small>Controls Double Portrait and Double Landscape Picture Pages in preview and Print/PDF.</small>
+                                </label>
+                                <label class="publish-field">
+                                    <span>EPUB double spreads</span>
+                                    <select class="form-select" @bind="_profile.EpubPicturePageSpreadMode" @bind:after="ScheduleProfileAutosave">
+                                        <option value="@EpubPicturePageSpreadMode.RequestLandscape">Whole spread with landscape requested</option>
+                                        <option value="@EpubPicturePageSpreadMode.SidewaysPortrait">Whole spread rotated sideways</option>
+                                    </select>
+                                    <small>Sideways portrait bakes in the rotation so readers can turn the device to view a larger spread.</small>
+                                </label>
+                            </div>
                         </fieldset>
                     </div>
                 </section>
@@ -765,6 +800,22 @@ else
         ? _workspace?.Profile.ProjectName ?? Project?.Name ?? "Untitled book"
         : _profile.TitleOverride.Trim();
 
+    private bool IncludeTitlePageEffective => _profile.TitlePageMode switch
+    {
+        PublishTitlePageMode.Include => true,
+        PublishTitlePageMode.Omit => false,
+        _ => _workspace?.Profile.SelectedCoverChapterId is null,
+    };
+
+    private string TitlePageOptionHelp => _profile.TitlePageMode switch
+    {
+        PublishTitlePageMode.Automatic when _workspace?.Profile.SelectedCoverChapterId is not null =>
+            "Automatically omitted because a cover is selected. Changing this saves an explicit choice.",
+        PublishTitlePageMode.Automatic =>
+            "Automatically included because no cover is selected. Changing this saves an explicit choice.",
+        _ => "This explicit choice is kept when the cover changes.",
+    };
+
     private string SelectedCoverValue => _workspace?.Profile.SelectedCoverChapterId?.ToString("N") ?? string.Empty;
 
     private PublishCoverCandidateView? SelectedCoverCandidate =>
@@ -983,6 +1034,14 @@ else
         CancelProfileAutosave();
         _profileAutosaveCts = new CancellationTokenSource();
         _ = DebouncedProfileSaveAsync(_profileAutosaveCts.Token);
+    }
+
+    private void SetTitlePageMode(ChangeEventArgs e)
+    {
+        _profile.TitlePageMode = e.Value is bool value && value
+            ? PublishTitlePageMode.Include
+            : PublishTitlePageMode.Omit;
+        ScheduleProfileAutosave();
     }
 
     private async Task DebouncedProfileSaveAsync(CancellationToken cancellationToken)
@@ -1516,6 +1575,9 @@ else
         public bool IncludeChapterHeadings { get; set; } = true;
         public bool NumberActs { get; set; }
         public bool NumberChapters { get; set; }
+        public PublishTitlePageMode TitlePageMode { get; set; } = PublishTitlePageMode.Automatic;
+        public PrintPicturePageSpreadMode PrintPicturePageSpreadMode { get; set; } = PrintPicturePageSpreadMode.WholeSpread;
+        public EpubPicturePageSpreadMode EpubPicturePageSpreadMode { get; set; } = EpubPicturePageSpreadMode.RequestLandscape;
 
         public static ProfileDraft From(PublishProfileView profile) => new()
         {
@@ -1538,6 +1600,9 @@ else
             IncludeChapterHeadings = profile.IncludeChapterHeadings,
             NumberActs = profile.NumberActs,
             NumberChapters = profile.NumberChapters,
+            TitlePageMode = profile.TitlePageMode,
+            PrintPicturePageSpreadMode = profile.PrintPicturePageSpreadMode,
+            EpubPicturePageSpreadMode = profile.EpubPicturePageSpreadMode,
         };
 
         public PublishProfileUpdate ToUpdate() => new(
@@ -1559,6 +1624,9 @@ else
             IncludeActHeadings,
             IncludeChapterHeadings,
             NumberActs,
-            NumberChapters);
+            NumberChapters,
+            TitlePageMode,
+            PrintPicturePageSpreadMode,
+            EpubPicturePageSpreadMode);
     }
 }

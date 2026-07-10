@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.Publish;
@@ -40,6 +41,9 @@ public sealed record PublishProfileView(
     bool IncludeChapterHeadings,
     bool NumberActs,
     bool NumberChapters,
+    PublishTitlePageMode TitlePageMode,
+    PrintPicturePageSpreadMode PrintPicturePageSpreadMode,
+    EpubPicturePageSpreadMode EpubPicturePageSpreadMode,
     Guid? SelectedCoverChapterId);
 
 public sealed record PublishProfileUpdate(
@@ -61,7 +65,10 @@ public sealed record PublishProfileUpdate(
     bool IncludeActHeadings,
     bool IncludeChapterHeadings,
     bool NumberActs,
-    bool NumberChapters);
+    bool NumberChapters,
+    PublishTitlePageMode TitlePageMode,
+    PrintPicturePageSpreadMode PrintPicturePageSpreadMode,
+    EpubPicturePageSpreadMode EpubPicturePageSpreadMode);
 
 public sealed record PublishSectionView(
     Guid? ActId,
@@ -154,7 +161,10 @@ public sealed record PublishDocumentProfile(
     bool IncludeActHeadings,
     bool IncludeChapterHeadings,
     bool NumberActs,
-    bool NumberChapters);
+    bool NumberChapters,
+    bool IncludeTitlePage,
+    PrintPicturePageSpreadMode PrintPicturePageSpreadMode,
+    EpubPicturePageSpreadMode EpubPicturePageSpreadMode);
 
 public sealed record PublishSectionDocument(
     Guid? ActId,
@@ -184,9 +194,12 @@ public sealed record PublishChapterDocument(
 
 public sealed record PublishPicturePageDocument(
     PublishAssetDocument Surface,
-    int PageWidthPixels,
-    int PageHeightPixels,
+    int PhysicalPageWidthPixels,
+    int PhysicalPageHeightPixels,
     int LeafCount,
+    int SurfaceWidthPixels,
+    int SurfaceHeightPixels,
+    ChapterPicturePageSurfaceRotation Rotation,
     string AccessibleText);
 
 public sealed record PublishAssetDocument(

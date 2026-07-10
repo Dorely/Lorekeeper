@@ -43,21 +43,24 @@ else if (_document is not null)
             </section>
         }
 
-        <header class="manuscript-title-page manuscript-sheet manuscript-sheet--normal">
-            <h1>@_document.DisplayTitle</h1>
-            @if (!string.IsNullOrWhiteSpace(_document.Profile.Subtitle))
-            {
-                <p class="manuscript-subtitle">@_document.Profile.Subtitle</p>
-            }
-            @if (!string.IsNullOrWhiteSpace(_document.Profile.Author))
-            {
-                <p class="manuscript-byline">by @_document.Profile.Author</p>
-            }
-            @if (!string.IsNullOrWhiteSpace(_document.Profile.Publisher))
-            {
-                <p class="manuscript-publisher">@_document.Profile.Publisher</p>
-            }
-        </header>
+        @if (_document.Profile.IncludeTitlePage)
+        {
+            <header class="manuscript-title-page manuscript-sheet manuscript-sheet--normal">
+                <h1>@_document.DisplayTitle</h1>
+                @if (!string.IsNullOrWhiteSpace(_document.Profile.Subtitle))
+                {
+                    <p class="manuscript-subtitle">@_document.Profile.Subtitle</p>
+                }
+                @if (!string.IsNullOrWhiteSpace(_document.Profile.Author))
+                {
+                    <p class="manuscript-byline">by @_document.Profile.Author</p>
+                }
+                @if (!string.IsNullOrWhiteSpace(_document.Profile.Publisher))
+                {
+                    <p class="manuscript-publisher">@_document.Profile.Publisher</p>
+                }
+            </header>
+        }
 
         @if (!string.IsNullOrWhiteSpace(_document.Profile.Description))
         {
@@ -145,7 +148,12 @@ else if (_document is not null)
                         {
                             @RenderFigure(placement)
                         }
-                        @RenderPicturePage(chapter)
+                        @foreach (var frame in PicturePageFrames(chapter))
+                        {
+                            <section class="@frame.CssClass">
+                                <img src="@PicturePageSurfaceUrl(chapter.Id, frame.RotateClockwise)" alt="@frame.AltText" />
+                            </section>
+                        }
                         @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding))
                         {
                             @RenderFigure(placement)
@@ -381,34 +389,61 @@ else if (_document is not null)
         builder.CloseElement();
     };
 
-    private RenderFragment RenderPicturePage(PublishChapterDocument chapter) => builder =>
+    private IReadOnlyList<PicturePageFrame> PicturePageFrames(PublishChapterDocument chapter)
     {
-        var sequence = 0;
-        var isDouble = chapter.PageLayoutKind is ChapterPageLayoutKind.DoublePortrait or ChapterPageLayoutKind.DoubleLandscape;
-        RenderPictureLeaf(builder, ref sequence, chapter, isDouble ? "left" : null);
-        if (isDouble)
-            RenderPictureLeaf(builder, ref sequence, chapter, "right");
-    };
+        if (chapter.PageLayoutKind == ChapterPageLayoutKind.SingleLandscape)
+        {
+            return
+            [
+                new(
+                    "manuscript-picture-frame manuscript-picture-frame--landscape is-single",
+                    chapter.Title,
+                    RotateClockwise: false),
+            ];
+        }
 
-    private void RenderPictureLeaf(
-        RenderTreeBuilder builder,
-        ref int sequence,
-        PublishChapterDocument chapter,
-        string? spreadSide)
-    {
-        var orientation = chapter.PageLayoutKind is ChapterPageLayoutKind.SingleLandscape or ChapterPageLayoutKind.DoubleLandscape
+        if (chapter.PageLayoutKind is not (ChapterPageLayoutKind.DoublePortrait or ChapterPageLayoutKind.DoubleLandscape))
+        {
+            return
+            [
+                new(
+                    "manuscript-picture-frame manuscript-picture-frame--portrait is-single",
+                    chapter.Title,
+                    RotateClockwise: false),
+            ];
+        }
+
+        var orientation = chapter.PageLayoutKind == ChapterPageLayoutKind.DoubleLandscape
             ? "landscape"
             : "portrait";
-        var sideClass = spreadSide is null ? "is-single" : $"is-double is-{spreadSide}";
-        var altText = spreadSide is null ? chapter.Title : $"{chapter.Title}, {spreadSide} page";
-
-        builder.OpenElement(sequence++, "section");
-        builder.AddAttribute(sequence++, "class", $"manuscript-picture-leaf manuscript-picture-leaf--{orientation} {sideClass}");
-        builder.OpenElement(sequence++, "img");
-        builder.AddAttribute(sequence++, "src", PicturePageSurfaceUrl(chapter.Id));
-        builder.AddAttribute(sequence++, "alt", altText);
-        builder.CloseElement();
-        builder.CloseElement();
+        return _document!.Profile.PrintPicturePageSpreadMode switch
+        {
+            PrintPicturePageSpreadMode.SidewaysWholeSpread =>
+            [
+                new(
+                    $"manuscript-picture-frame manuscript-picture-frame--sideways-double-{orientation} is-single",
+                    $"{chapter.Title}, full spread rotated clockwise",
+                    RotateClockwise: true),
+            ],
+            PrintPicturePageSpreadMode.SplitLeaves =>
+            [
+                new(
+                    $"manuscript-picture-frame manuscript-picture-frame--{orientation} is-double is-left",
+                    $"{chapter.Title}, left page",
+                    RotateClockwise: false),
+                new(
+                    $"manuscript-picture-frame manuscript-picture-frame--{orientation} is-double is-right",
+                    $"{chapter.Title}, right page",
+                    RotateClockwise: false),
+            ],
+            _ =>
+            [
+                new(
+                    $"manuscript-picture-frame manuscript-picture-frame--spread-double-{orientation} is-single",
+                    $"{chapter.Title}, full spread",
+                    RotateClockwise: false),
+            ],
+        };
     }
 
     private void RenderIllustrationBlocks(
@@ -484,8 +519,11 @@ else if (_document is not null)
     private static string ImageDataUrl(PublishAssetDocument asset) =>
         $"data:{asset.ContentType};base64,{Convert.ToBase64String(asset.Data)}";
 
-    private string PicturePageSurfaceUrl(Guid chapterId) =>
-        $"/projects/{_document!.ProjectId:N}/publish/picture-pages/{chapterId:N}/surface?physicalPageLongEdge=2400";
+    private string PicturePageSurfaceUrl(Guid chapterId, bool rotateClockwise)
+    {
+        var rotation = rotateClockwise ? "&rotation=Clockwise90" : string.Empty;
+        return $"/projects/{_document!.ProjectId:N}/publish/picture-pages/{chapterId:N}/surface?physicalPageLongEdge=2400{rotation}";
+    }
 
     private static string CoverPageClass(ChapterPageLayoutKind? kind) => kind switch
     {
@@ -505,5 +543,7 @@ else if (_document is not null)
     }
 
     private sealed record TocEntry(string Title, string CssClass);
+
+    private sealed record PicturePageFrame(string CssClass, string AltText, bool RotateClockwise);
 
 }

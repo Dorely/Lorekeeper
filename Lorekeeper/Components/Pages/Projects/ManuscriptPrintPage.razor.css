@@ -42,7 +42,7 @@
 
 .manuscript-sheet,
 .manuscript-cover-page,
-.manuscript-picture-leaf {
+.manuscript-picture-frame {
     box-sizing: border-box;
     flex: 0 0 auto;
     background: #ffffff;
@@ -139,14 +139,14 @@
 }
 
 .manuscript-cover-page,
-.manuscript-picture-leaf {
+.manuscript-picture-frame {
     position: relative;
     overflow: hidden;
     break-after: page;
 }
 
 .manuscript-cover-page img,
-.manuscript-picture-leaf img {
+.manuscript-picture-frame img {
     position: absolute;
     top: 0;
     left: 0;
@@ -181,36 +181,60 @@
     aspect-ratio: 22 / 8.5;
 }
 
-.manuscript-picture-leaf--portrait {
+.manuscript-picture-frame--portrait {
     page: picture-portrait;
     width: min(8.5in, calc(100% - 2rem));
     aspect-ratio: 8.5 / 11;
 }
 
-.manuscript-picture-leaf--landscape {
+.manuscript-picture-frame--landscape {
     page: picture-landscape;
     width: min(11in, calc(100% - 2rem));
     aspect-ratio: 11 / 8.5;
 }
 
-.manuscript-picture-leaf.is-single {
+.manuscript-picture-frame--spread-double-portrait {
+    page: picture-spread-double-portrait;
+    width: min(17in, calc(100% - 2rem));
+    aspect-ratio: 17 / 11;
+}
+
+.manuscript-picture-frame--spread-double-landscape {
+    page: picture-spread-double-landscape;
+    width: min(22in, calc(100% - 2rem));
+    aspect-ratio: 22 / 8.5;
+}
+
+.manuscript-picture-frame--sideways-double-portrait {
+    page: picture-sideways-double-portrait;
+    width: min(11in, calc(100% - 2rem));
+    aspect-ratio: 11 / 17;
+}
+
+.manuscript-picture-frame--sideways-double-landscape {
+    page: picture-sideways-double-landscape;
+    width: min(8.5in, calc(100% - 2rem));
+    aspect-ratio: 8.5 / 22;
+}
+
+.manuscript-picture-frame.is-single {
     break-before: page;
 }
 
-.manuscript-picture-leaf.is-double img {
+.manuscript-picture-frame.is-double img {
     width: 200%;
 }
 
-.manuscript-picture-leaf.is-left {
+.manuscript-picture-frame.is-left {
     /* Paged-media engines can honor parity here; Chromium currently degrades this to a page break. */
     break-before: left;
 }
 
-.manuscript-picture-leaf.is-right {
+.manuscript-picture-frame.is-right {
     break-before: right;
 }
 
-.manuscript-picture-leaf.is-right img {
+.manuscript-picture-frame.is-right img {
     left: -100%;
 }
 
@@ -268,6 +292,26 @@
     margin: 0;
 }
 
+@page picture-spread-double-portrait {
+    size: 17in 11in;
+    margin: 0;
+}
+
+@page picture-spread-double-landscape {
+    size: 22in 8.5in;
+    margin: 0;
+}
+
+@page picture-sideways-double-portrait {
+    size: 11in 17in;
+    margin: 0;
+}
+
+@page picture-sideways-double-landscape {
+    size: 8.5in 22in;
+    margin: 0;
+}
+
 @page cover-portrait {
     size: 8.5in 11in;
     margin: 0;
@@ -300,7 +344,7 @@
 
     .manuscript-sheet--normal,
     .manuscript-cover-page,
-    .manuscript-picture-leaf {
+    .manuscript-picture-frame {
         width: calc(100% - 1rem);
     }
 
@@ -323,7 +367,7 @@
 
     .manuscript-sheet,
     .manuscript-cover-page,
-    .manuscript-picture-leaf {
+    .manuscript-picture-frame {
         margin: 0;
         box-shadow: none;
     }
@@ -336,13 +380,13 @@
     }
 
     .manuscript-cover-page--portrait,
-    .manuscript-picture-leaf--portrait {
+    .manuscript-picture-frame--portrait {
         width: 8.5in;
         height: 11in;
     }
 
     .manuscript-cover-page--landscape,
-    .manuscript-picture-leaf--landscape {
+    .manuscript-picture-frame--landscape {
         width: 11in;
         height: 8.5in;
     }
@@ -355,5 +399,25 @@
     .manuscript-cover-page--double-landscape {
         width: 22in;
         height: 8.5in;
+    }
+
+    .manuscript-picture-frame--spread-double-portrait {
+        width: 17in;
+        height: 11in;
+    }
+
+    .manuscript-picture-frame--spread-double-landscape {
+        width: 22in;
+        height: 8.5in;
+    }
+
+    .manuscript-picture-frame--sideways-double-portrait {
+        width: 11in;
+        height: 17in;
+    }
+
+    .manuscript-picture-frame--sideways-double-landscape {
+        width: 8.5in;
+        height: 22in;
     }
 }
