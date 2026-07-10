@@ -144,7 +144,7 @@
                              data-picture-element-id="@(CanEditLayout ? image.Id.ToString("N") : null)">
                             @if (projectImage is not null)
                             {
-                                <img src="@projectImage.PreviewUrl"
+                                <img src="@PictureImageContentUrl(projectImage.Id)"
                                      alt="@(string.IsNullOrWhiteSpace(image.AltTextOverride) ? projectImage.AltText : image.AltTextOverride)"
                                      style="@($"object-fit:{FitCss(image.Fit)};opacity:{image.Opacity.ToString(CultureInfo.InvariantCulture)};")" />
                             }
@@ -1135,6 +1135,9 @@
     }
 
     private ProjectImageView? ImageById(Guid id) => Images.FirstOrDefault(image => image.Id == id);
+
+    private string PictureImageContentUrl(Guid imageId) =>
+        $"/projects/{ProjectId:N}/images/{imageId:N}/content";
 
     private static IReadOnlyList<string> SplitParagraphs(string body)
     {
