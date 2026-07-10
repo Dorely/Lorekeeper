@@ -162,3 +162,7 @@
         min-height: 22rem;
     }
 }
+
+.graph-toolbar { border-color: var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-sm); }
+.graph-toggle { color: var(--lk-muted); }
+.graph-stage-shell { border-color: #69768c; border-radius: var(--lk-radius-lg); box-shadow: 0 0.6rem 1.8rem rgb(16 18 22 / 16%); }

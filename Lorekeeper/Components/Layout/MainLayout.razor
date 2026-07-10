@@ -1,11 +1,25 @@
-﻿@inherits LayoutComponentBase
-
+@inherits LayoutComponentBase
 @inject NavigationManager Navigation
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
+<div class="app-shell">
+    <header class="app-topbar">
+        <a class="app-brand" href="/" aria-label="Lorekeeper projects">
+            <span class="app-brand-mark" aria-hidden="true">L</span>
+            <span>Lorekeeper</span>
+        </a>
+
+        @if (!IsHomeRoute())
+        {
+            <nav class="app-topbar-nav" aria-label="Global navigation">
+                <a href="/">Projects</a>
+                @if (IsSettingsRoute())
+                {
+                    <span aria-hidden="true">/</span>
+                    <span>Configuration</span>
+                }
+            </nav>
+        }
+    </header>
 
     <main>
         <article class="@ContentClass()">
@@ -15,24 +29,24 @@
 </div>
 
 <div id="blazor-error-ui" data-nosnippet>
-    An unhandled error has occurred.
+    <strong>Something went wrong.</strong>
+    <span>Reload Lorekeeper to reconnect.</span>
     <a href="." class="reload">Reload</a>
-    <span class="dismiss">🗙</span>
+    <button type="button" class="dismiss" aria-label="Dismiss">&times;</button>
 </div>
 
 @code {
-    private string ContentClass() =>
-        IsEditorRoute()
-            ? "content px-4 content--editor-workspace"
-            : "content px-4";
+    private string ContentClass() => IsProjectRoute()
+        ? "content content--workspace"
+        : "content content--page";
 
-    private bool IsEditorRoute()
+    private string CurrentPath()
     {
         var relativePath = Navigation.ToBaseRelativePath(Navigation.Uri);
-        var path = relativePath.Split(['?', '#'], 2)[0];
-        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        return segments.Length >= 3
-            && string.Equals(segments[0], "projects", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(segments[2], "editor", StringComparison.OrdinalIgnoreCase);
+        return relativePath.Split(['?', '#'], 2)[0].Trim('/');
     }
+
+    private bool IsHomeRoute() => string.IsNullOrEmpty(CurrentPath());
+    private bool IsSettingsRoute() => CurrentPath().StartsWith("settings/", StringComparison.OrdinalIgnoreCase);
+    private bool IsProjectRoute() => CurrentPath().StartsWith("projects/", StringComparison.OrdinalIgnoreCase);
 }

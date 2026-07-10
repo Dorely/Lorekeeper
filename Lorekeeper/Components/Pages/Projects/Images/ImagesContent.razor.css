@@ -274,3 +274,16 @@
         min-height: 24rem;
     }
 }
+
+.image-card,
+.image-tool-panel {
+    border-color: var(--lk-line);
+    border-radius: var(--lk-radius-lg);
+    box-shadow: var(--lk-shadow-sm);
+}
+
+.image-card { transition: border-color 140ms ease, box-shadow 140ms ease; }
+.image-card:hover { border-color: #aeb9e8; box-shadow: 0 0.5rem 1.25rem rgb(23 32 51 / 8%); }
+.image-preview-button,.image-job-preview { background: var(--lk-soft); }
+.image-tool-panel h6 { color: var(--lk-accent); letter-spacing: 0.08em; }
+.images-count { color: var(--lk-muted); }

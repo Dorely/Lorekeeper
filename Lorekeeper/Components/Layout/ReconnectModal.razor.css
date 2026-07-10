@@ -41,10 +41,20 @@
 }
 
 #components-reconnect-modal::backdrop {
-    background-color: rgba(0, 0, 0, 0.4);
+    background-color: rgb(15 23 42 / 58%);
+    backdrop-filter: blur(2px);
     animation: components-reconnect-modal-fadeInOpacity 0.5s ease-in-out;
     opacity: 1;
 }
+
+#components-reconnect-modal {
+    border: 1px solid var(--lk-line);
+    border-radius: var(--lk-radius-lg);
+    box-shadow: var(--lk-shadow-md);
+    color: var(--lk-ink);
+}
+
+#components-reconnect-modal h4 { font-family: Georgia, "Times New Roman", serif; }
 
 @keyframes components-reconnect-modal-slideUp {
     0% {

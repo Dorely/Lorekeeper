@@ -1,11 +1,11 @@
 .publish-workspace {
-    --publish-ink: #172033;
-    --publish-muted: #647086;
-    --publish-line: #dfe4ec;
-    --publish-soft: #f6f8fb;
-    --publish-accent: #425fce;
-    --publish-accent-soft: #eef1ff;
-    --publish-success: #2f7d58;
+    --publish-ink: var(--lk-ink);
+    --publish-muted: var(--lk-muted);
+    --publish-line: var(--lk-line);
+    --publish-soft: var(--lk-soft);
+    --publish-accent: var(--lk-accent);
+    --publish-accent-soft: var(--lk-accent-soft);
+    --publish-success: var(--lk-success);
     box-sizing: border-box;
     color: var(--publish-ink);
     height: 100%;

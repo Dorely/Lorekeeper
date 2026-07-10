@@ -6,125 +6,38 @@
 
 <PageTitle>Search Providers</PageTitle>
 
-<h3>Search Providers</h3>
-<p class="text-muted">Configure the web search API used by Research Mode.</p>
+<ConfigurationShell Title="Search provider" Description="Connect the web search service used by Research for discovery and source-grounded investigation.">
+    @if (!string.IsNullOrWhiteSpace(_statusMessage)){<div class="alert alert-@_statusKind alert-dismissible fade show" role="alert">@_statusMessage<button type="button" class="btn-close" aria-label="Dismiss" @onclick="ClearStatus"></button></div>}
+    <div class="search-toolbar"><div><span class="lk-section-kicker">Research integration</span><strong>@(_providers.FirstOrDefault(provider => provider.IsActive)?.DisplayName ?? _providers.FirstOrDefault(provider => provider.IsActive)?.Name ?? "No active provider")</strong><small>@(_providers.Any(provider => provider.IsActive) ? "Research search is enabled" : "Research search is unavailable")</small></div><button class="btn btn-primary" @onclick="ToggleAdd">@(_adding ? "Close form" : "Add provider")</button></div>
 
-@if (!string.IsNullOrWhiteSpace(_statusMessage))
-{
-    <div class="alert alert-@_statusKind alert-dismissible fade show mt-2" role="alert">
-        @_statusMessage
-        <button type="button" class="btn-close" @onclick="ClearStatus"></button>
-    </div>
-}
-
-@if (_loading)
-{
-    <p class="text-muted"><em>Loading search providers...</em></p>
-}
-else
-{
-    <h5>Configured Providers</h5>
-    @if (_providers.Count == 0)
+    @if (_adding)
     {
-        <div class="alert alert-info">No search providers configured yet. Add SerpApi or Brave below.</div>
+        <section class="lk-section-card search-add-card"><div class="lk-section-heading"><div><span class="lk-section-kicker">New integration</span><h2>Add a search provider</h2><p>Lorekeeper currently supports SerpApi and Brave Search.</p></div></div><div class="search-form"><label><span>Name (slug)</span><input class="form-control" placeholder="serpapi" @bind="_newProvider.Name" /></label><label><span>Display name</span><input class="form-control" placeholder="SerpApi" @bind="_newProvider.DisplayName" /></label><label><span>Provider</span><select class="form-select" @bind="_newProvider.ProviderKind">@foreach (var kind in SupportedKinds){<option value="@kind">@ProviderKindLabel(kind)</option>}</select></label><label class="field-wide"><span>API key</span><input type="password" class="form-control" @bind="_newProvider.ApiKey" autocomplete="off" /></label><label class="search-active-check"><input type="checkbox" class="form-check-input" @bind="_newProvider.IsActive" /><span>Make active immediately</span></label></div><div class="lk-toolbar search-form-actions"><button class="btn btn-outline-info" disabled="@_testingNew" @onclick="TestNewAsync">@(_testingNew ? "Testing…" : "Test connection")</button><button class="btn btn-primary" disabled="@(!CanCreate)" @onclick="CreateAsync">Save provider</button></div></section>
+    }
+
+    @if (_loading)
+    {
+        <div class="lk-empty-state"><span class="spinner-border spinner-border-sm"></span><span>Loading search providers…</span></div>
+    }
+    else if (_providers.Count == 0)
+    {
+        <div class="lk-empty-state"><h2>Research needs a search provider</h2><p>Add SerpApi or Brave Search to enable the Research workspace.</p><button class="btn btn-primary" @onclick="ToggleAdd">Add search provider</button></div>
     }
     else
     {
-        <table class="table table-striped align-middle">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Provider</th>
-                    <th>API Key</th>
-                    <th>Active</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var provider in _providers)
-                {
-                    <tr>
-                        <td>
-                            <div class="d-flex flex-column gap-1">
-                                <input class="form-control form-control-sm" @bind="provider.Name" />
-                                <input class="form-control form-control-sm" placeholder="Display name" @bind="provider.DisplayName" />
-                            </div>
-                        </td>
-                        <td>
-                            <select class="form-select form-select-sm" @bind="provider.ProviderKind">
-                                @foreach (var kind in SupportedKinds)
-                                {
-                                    <option value="@kind">@ProviderKindLabel(kind)</option>
-                                }
-                            </select>
-                        </td>
-                        <td style="min-width:16rem">
-                            <input type="password" class="form-control form-control-sm" @bind="provider.ApiKey" />
-                        </td>
-                        <td>
-                            @if (provider.IsActive)
-                            {
-                                <span class="badge bg-primary">Active</span>
-                            }
-                            else
-                            {
-                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => SetActiveAsync(provider.Id)">Set Active</button>
-                            }
-                        </td>
-                        <td>
-                            <div class="d-flex flex-wrap gap-1">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveAsync(provider)">Save</button>
-                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@(_testingProviderId is not null)" @onclick="() => TestExistingAsync(provider)">
-                                    @(_testingProviderId == provider.Id ? "Testing..." : "Test")
-                                </button>
-                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(provider)">Delete</button>
-                            </div>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+        <section class="search-provider-list" aria-label="Configured search providers">
+            @foreach (var provider in _providers)
+            {
+                <article class="search-provider-card @(provider.IsActive ? "is-active" : null)">
+                    <header><div class="search-provider-mark">@ProviderInitial(provider)</div><div><span class="lk-section-kicker">@ProviderKindLabel(provider.ProviderKind)</span><h2>@(provider.DisplayName ?? provider.Name)</h2><p>@(provider.IsActive ? "Used by Research now" : "Available connection")</p></div>@if (provider.IsActive){<span class="lk-status-pill is-success">Active</span>}</header>
+                    <div class="search-provider-fields"><label><span>Name (slug)</span><input class="form-control form-control-sm" @bind="provider.Name" /></label><label><span>Display name</span><input class="form-control form-control-sm" @bind="provider.DisplayName" /></label><label><span>Provider</span><select class="form-select form-select-sm" @bind="provider.ProviderKind">@foreach (var kind in SupportedKinds){<option value="@kind">@ProviderKindLabel(kind)</option>}</select></label><label><span>API key</span><input type="password" class="form-control form-control-sm" @bind="provider.ApiKey" autocomplete="off" /></label></div>
+                    <footer><button class="btn btn-sm btn-outline-secondary" @onclick="() => SaveAsync(provider)">Save changes</button><button class="btn btn-sm btn-outline-info" disabled="@(_testingProviderId is not null)" @onclick="() => TestExistingAsync(provider)">@(_testingProviderId == provider.Id ? "Testing…" : "Test connection")</button>@if (!provider.IsActive){<button class="btn btn-sm btn-outline-primary" @onclick="() => SetActiveAsync(provider.Id)">Make active</button>}<button class="btn btn-sm btn-outline-danger ms-auto" @onclick="() => ToggleDelete(provider.Id)">Delete</button></footer>
+                    @if (_confirmDeleteId == provider.Id){<div class="search-delete-confirm"><span><strong>Delete this provider?</strong> Research will be disabled if it is the active connection.</span><button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(provider)">Delete provider</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteId = null">Cancel</button></div>}
+                </article>
+            }
+        </section>
     }
-
-    <h5 class="mt-4">Add Provider</h5>
-    <div class="card">
-        <div class="card-body">
-            <div class="row g-2 align-items-end">
-                <div class="col-md-3">
-                    <label class="form-label form-label-sm">Name</label>
-                    <input class="form-control form-control-sm" placeholder="serpapi" @bind="_newProvider.Name" />
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label form-label-sm">Display Name</label>
-                    <input class="form-control form-control-sm" placeholder="SerpApi" @bind="_newProvider.DisplayName" />
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label form-label-sm">Provider</label>
-                    <select class="form-select form-select-sm" @bind="_newProvider.ProviderKind">
-                        @foreach (var kind in SupportedKinds)
-                        {
-                            <option value="@kind">@ProviderKindLabel(kind)</option>
-                        }
-                    </select>
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label form-label-sm">API Key</label>
-                    <input type="password" class="form-control form-control-sm" @bind="_newProvider.ApiKey" />
-                </div>
-                <div class="col-md-2 form-check ms-3">
-                    <input type="checkbox" class="form-check-input" id="newSearchActive" @bind="_newProvider.IsActive" />
-                    <label class="form-check-label" for="newSearchActive">Active</label>
-                </div>
-                <div class="col-12">
-                    <button type="button" class="btn btn-outline-info btn-sm me-2" disabled="@_testingNew" @onclick="TestNewAsync">
-                        @(_testingNew ? "Testing..." : "Test")
-                    </button>
-                    <button type="button" class="btn btn-primary btn-sm" disabled="@(!CanCreate)" @onclick="CreateAsync">Add Provider</button>
-                </div>
-            </div>
-        </div>
-    </div>
-}
+</ConfigurationShell>
 
 @code {
     private static readonly SearchProviderKind[] SupportedKinds = [SearchProviderKind.SerpApi, SearchProviderKind.Brave];
@@ -132,8 +45,10 @@ else
     private List<SearchProvider> _providers = [];
     private SearchProviderDraft _newProvider = new();
     private bool _loading = true;
+    private bool _adding;
     private bool _testingNew;
     private int? _testingProviderId;
+    private int? _confirmDeleteId;
     private string? _statusMessage;
     private string _statusKind = "success";
 
@@ -165,6 +80,7 @@ else
             await SearchProviderService.CreateAsync(BuildProvider(_newProvider));
             SetStatus($"Search provider '{_newProvider.Name}' created.", "success");
             _newProvider = new SearchProviderDraft();
+            _adding = false;
             await ReloadAsync();
         }
         catch (Exception ex)
@@ -205,6 +121,7 @@ else
     {
         await SearchProviderService.DeleteAsync(provider.Id);
         SetStatus($"Search provider '{provider.DisplayName ?? provider.Name}' deleted.", "success");
+        _confirmDeleteId = null;
         await ReloadAsync();
     }
 
@@ -255,6 +172,11 @@ else
         SearchProviderKind.Brave => "Brave Search",
         _ => kind.ToString(),
     };
+
+    private void ToggleAdd() => _adding = !_adding;
+    private void ToggleDelete(int id) => _confirmDeleteId = _confirmDeleteId == id ? null : id;
+    private static string ProviderInitial(SearchProvider provider) =>
+        (provider.DisplayName ?? provider.Name).Trim().FirstOrDefault().ToString().ToUpperInvariant();
 
     private void SetStatus(string message, string kind)
     {

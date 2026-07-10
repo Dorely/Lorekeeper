@@ -1,4 +1,4 @@
-﻿@page "/"
+@page "/"
 @using Lorekeeper.Models
 @using Lorekeeper.Projects
 @rendermode InteractiveServer
@@ -7,109 +7,156 @@
 
 <PageTitle>Projects</PageTitle>
 
-<div class="d-flex align-items-center justify-content-between mb-3">
-    <h3 class="mb-0">Projects</h3>
-    @if (!_creating)
+<div class="lk-page home-page">
+    <PageHeader Eyebrow="Narrative workspace"
+                Title="Your projects"
+                Description="Choose a story world to continue, or create a new project for your next long-form narrative.">
+        <Actions>
+            @if (!_creating)
+            {
+                <button type="button" class="btn btn-primary" @onclick="StartCreate">New project</button>
+            }
+        </Actions>
+    </PageHeader>
+
+    @if (!string.IsNullOrEmpty(_error))
     {
-        <button type="button" class="btn btn-primary" @onclick="StartCreate">+ New Project</button>
-    }
-</div>
-
-@if (!string.IsNullOrEmpty(_error))
-{
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        @_error
-        <button type="button" class="btn-close" @onclick="() => _error = null"></button>
-    </div>
-}
-
-@if (_creating)
-{
-    <div class="card mb-3">
-        <div class="card-body">
-            <h6 class="card-title">Create project</h6>
-            <div class="d-flex gap-2 align-items-end">
-                <div class="flex-grow-1">
-                    <label class="form-label form-label-sm">Name</label>
-                    <input class="form-control" @bind="_newName" @bind:event="oninput"
-                           @onkeyup="OnCreateKeyUp" placeholder="e.g. Ashes of the Horde" />
-                </div>
-                <button type="button" class="btn btn-success"
-                        disabled="@(string.IsNullOrWhiteSpace(_newName))"
-                        @onclick="CreateAsync">Create</button>
-                <button type="button" class="btn btn-outline-secondary" @onclick="CancelCreate">Cancel</button>
-            </div>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @_error
+            <button type="button" class="btn-close" aria-label="Dismiss" @onclick="() => _error = null"></button>
         </div>
-    </div>
-}
+    }
 
-@if (_projects is null)
-{
-    <p class="text-muted"><em>Loading…</em></p>
-}
-else if (_projects.Count == 0)
-{
-    <div class="alert alert-info">
-        No projects yet. Click <strong>+ New Project</strong> to start one.
-    </div>
-}
-else
-{
-    <div class="list-group">
-        @foreach (var p in _projects)
+    @if (_creating)
+    {
+        <section class="lk-section-card create-project-card" aria-labelledby="create-project-title">
+            <div class="lk-section-heading">
+                <div>
+                    <span class="lk-section-kicker">New story world</span>
+                    <h2 id="create-project-title">Create a project</h2>
+                    <p>Give the project a working title. You can rename it later without changing its address.</p>
+                </div>
+            </div>
+            <div class="create-project-form">
+                <label>
+                    <span>Project name</span>
+                    <input class="form-control" @bind="_newName" @bind:event="oninput"
+                           @onkeyup="OnCreateKeyUp" placeholder="e.g. Ashes of the Horde" autofocus />
+                </label>
+                <div class="lk-toolbar">
+                    <button type="button" class="btn btn-primary"
+                            disabled="@(string.IsNullOrWhiteSpace(_newName))" @onclick="CreateAsync">Create project</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelCreate">Cancel</button>
+                </div>
+            </div>
+        </section>
+    }
+
+    <section aria-labelledby="project-list-title">
+        <div class="home-section-heading">
+            <div>
+                <span class="lk-section-kicker">Recent work</span>
+                <h2 id="project-list-title">Projects</h2>
+            </div>
+            @if (_projects is { Count: > 0 })
+            {
+                <span>@_projects.Count project@(_projects.Count == 1 ? string.Empty : "s")</span>
+            }
+        </div>
+
+        @if (_projects is null)
         {
-            <div class="list-group-item">
-                @if (_renamingId == p.Id)
+            <div class="lk-empty-state" role="status"><span class="spinner-border spinner-border-sm"></span><span>Loading projects…</span></div>
+        }
+        else if (_projects.Count == 0)
+        {
+            <div class="lk-empty-state">
+                <span class="empty-monogram" aria-hidden="true">L</span>
+                <h2>Begin your first project</h2>
+                <p>Lorekeeper will keep the outline, manuscript, research, images, and story memory together.</p>
+                <button type="button" class="btn btn-primary" @onclick="StartCreate">Create your first project</button>
+            </div>
+        }
+        else
+        {
+            <div class="project-grid">
+                @foreach (var project in _projects)
                 {
-                    <div class="d-flex gap-2 align-items-center">
-                        <input class="form-control" @bind="_renameValue" @bind:event="oninput" />
-                        <button type="button" class="btn btn-sm btn-success"
-                                disabled="@(string.IsNullOrWhiteSpace(_renameValue))"
-                                @onclick="() => SaveRenameAsync(p)">Save</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary"
-                                @onclick="CancelRename">Cancel</button>
-                    </div>
-                }
-                else if (_confirmDeleteId == p.Id)
-                {
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <strong>Delete &ldquo;@p.Name&rdquo;?</strong>
-                            <div class="small text-muted">
-                                This permanently removes the project and cascades to all child entities,
-                                graph relationships, and vector chunks.
+                    <article class="project-card">
+                        @if (_renamingId == project.Id)
+                        {
+                            <div class="project-card-state">
+                                <span class="lk-section-kicker">Rename project</span>
+                                <input class="form-control" aria-label="Project name" @bind="_renameValue" @bind:event="oninput" />
+                                <div class="lk-toolbar">
+                                    <button type="button" class="btn btn-sm btn-primary"
+                                            disabled="@(string.IsNullOrWhiteSpace(_renameValue))" @onclick="() => SaveRenameAsync(project)">Save</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelRename">Cancel</button>
+                                </div>
                             </div>
-                        </div>
-                        <div class="d-flex gap-2">
-                            <button type="button" class="btn btn-sm btn-danger"
-                                    @onclick="() => ConfirmDeleteAsync(p)">Delete</button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary"
-                                    @onclick="() => _confirmDeleteId = null">Cancel</button>
-                        </div>
-                    </div>
-                }
-                else
-                {
-                    <div class="d-flex justify-content-between align-items-center">
-                        <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none"
-                                @onclick="() => Open(p)">
-                            <div class="fw-semibold">@p.Name</div>
-                            <div class="small text-muted">
-                                /@p.Slug &middot; updated @p.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                        }
+                        else if (_confirmDeleteId == project.Id)
+                        {
+                            <div class="project-card-state project-delete-state">
+                                <span class="lk-section-kicker">Permanent action</span>
+                                <h3>Delete “@project.Name”?</h3>
+                                <p>This removes its chapters, story graph, images, conversations, and search memory.</p>
+                                <div class="lk-toolbar">
+                                    <button type="button" class="btn btn-sm btn-danger" @onclick="() => ConfirmDeleteAsync(project)">Delete project</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteId = null">Cancel</button>
+                                </div>
                             </div>
-                        </button>
-                        <div class="d-flex gap-2">
-                            <button type="button" class="btn btn-sm btn-outline-secondary"
-                                    @onclick="() => StartRename(p)" title="Rename">Rename</button>
-                            <button type="button" class="btn btn-sm btn-outline-danger"
-                                    @onclick="() => _confirmDeleteId = p.Id" title="Delete">Delete</button>
-                        </div>
-                    </div>
+                        }
+                        else
+                        {
+                            <button type="button" class="project-open" @onclick="() => Open(project)">
+                                <span class="project-initial" aria-hidden="true">@ProjectInitial(project)</span>
+                                <span class="project-name">@project.Name</span>
+                                <span class="project-meta">/@project.Slug</span>
+                                <span class="project-updated">Updated @project.UpdatedAt.ToLocalTime().ToString("MMM d, yyyy 'at' h:mm tt")</span>
+                            </button>
+                            <div class="project-card-actions">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => StartRename(project)">Rename</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => _confirmDeleteId = project.Id">Delete</button>
+                                <button type="button" class="btn btn-sm btn-primary ms-auto" @onclick="() => Open(project)">Open</button>
+                            </div>
+                        }
+                    </article>
                 }
             </div>
         }
-    </div>
-}
+    </section>
+
+    <section class="configuration-section" aria-labelledby="configuration-title">
+        <div class="home-section-heading">
+            <div>
+                <span class="lk-section-kicker">Application setup</span>
+                <h2 id="configuration-title">Configuration</h2>
+            </div>
+            <span>Shared across every project</span>
+        </div>
+        <div class="configuration-grid">
+            <a class="configuration-card" href="/settings/providers">
+                <span class="configuration-number">01</span>
+                <strong>Providers</strong>
+                <span>Connect language and vision models, test readiness, and choose the default.</span>
+                <em>Configure providers →</em>
+            </a>
+            <a class="configuration-card" href="/settings/embeddings">
+                <span class="configuration-number">02</span>
+                <strong>Embeddings</strong>
+                <span>Select the model used for semantic memory, retrieval, and context recommendations.</span>
+                <em>Configure embeddings →</em>
+            </a>
+            <a class="configuration-card" href="/settings/search-providers">
+                <span class="configuration-number">03</span>
+                <strong>Search provider</strong>
+                <span>Connect the web search service used by Research and source discovery.</span>
+                <em>Configure search →</em>
+            </a>
+        </div>
+    </section>
+</div>
 
 @code {
     private List<Project>? _projects;
@@ -120,15 +167,8 @@ else
     private Guid? _confirmDeleteId;
     private string? _error;
 
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadAsync();
-    }
-
-    private async Task LoadAsync()
-    {
-        _projects = (await Projects.ListAsync()).ToList();
-    }
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private async Task LoadAsync() => _projects = (await Projects.ListAsync()).ToList();
 
     private void StartCreate()
     {
@@ -145,14 +185,8 @@ else
 
     private async Task OnCreateKeyUp(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_newName))
-        {
-            await CreateAsync();
-        }
-        else if (e.Key == "Escape")
-        {
-            CancelCreate();
-        }
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_newName)) await CreateAsync();
+        else if (e.Key == "Escape") CancelCreate();
     }
 
     private async Task CreateAsync()
@@ -164,16 +198,13 @@ else
             _newName = string.Empty;
             Nav.NavigateTo($"/projects/{project.Slug}/editor");
         }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
+        catch (Exception ex) { _error = ex.Message; }
     }
 
-    private void StartRename(Project p)
+    private void StartRename(Project project)
     {
-        _renamingId = p.Id;
-        _renameValue = p.Name;
+        _renamingId = project.Id;
+        _renameValue = project.Name;
     }
 
     private void CancelRename()
@@ -182,34 +213,28 @@ else
         _renameValue = string.Empty;
     }
 
-    private async Task SaveRenameAsync(Project p)
+    private async Task SaveRenameAsync(Project project)
     {
         try
         {
-            await Projects.RenameAsync(p.Id, _renameValue);
-            _renamingId = null;
-            _renameValue = string.Empty;
+            await Projects.RenameAsync(project.Id, _renameValue);
+            CancelRename();
             await LoadAsync();
         }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
+        catch (Exception ex) { _error = ex.Message; }
     }
 
-    private async Task ConfirmDeleteAsync(Project p)
+    private async Task ConfirmDeleteAsync(Project project)
     {
         try
         {
-            await Projects.DeleteAsync(p.Id);
+            await Projects.DeleteAsync(project.Id);
             _confirmDeleteId = null;
             await LoadAsync();
         }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
+        catch (Exception ex) { _error = ex.Message; }
     }
 
-    private void Open(Project p) => Nav.NavigateTo($"/projects/{p.Slug}/editor");
+    private void Open(Project project) => Nav.NavigateTo($"/projects/{project.Slug}/editor");
+    private static string ProjectInitial(Project project) => project.Name.Trim().FirstOrDefault().ToString().ToUpperInvariant();
 }

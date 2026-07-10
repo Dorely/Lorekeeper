@@ -1,0 +1,25 @@
+.search-toolbar { align-items: center; background: var(--lk-surface); border: 1px solid var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-sm); display: flex; justify-content: space-between; padding: 0.85rem 1rem; }
+.search-toolbar > div { display: grid; }
+.search-toolbar strong { font-family: Georgia, "Times New Roman", serif; font-size: 1.05rem; }
+.search-toolbar small { color: var(--lk-muted); font-size: 0.72rem; }
+.search-add-card { border-color: #cfd6fa; }
+.search-form { display: grid; gap: 0.75rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.search-form label,.search-provider-fields label { display: grid; gap: 0.3rem; }
+.search-form label > span,.search-provider-fields label > span { color: var(--lk-muted); font-size: 0.72rem; font-weight: 750; }
+.search-form .field-wide { grid-column: span 2; }
+.search-active-check { align-items: center; display: flex !important; }
+.search-form-actions { margin-top: 0.85rem; }
+.search-provider-list { display: grid; gap: 0.85rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.search-provider-card { background: var(--lk-surface); border: 1px solid var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-sm); overflow: hidden; }
+.search-provider-card.is-active { border-color: #aeb9e8; box-shadow: inset 3px 0 var(--lk-accent), var(--lk-shadow-sm); }
+.search-provider-card header { align-items: center; display: flex; gap: 0.7rem; padding: 0.9rem 1rem; }
+.search-provider-card header > div:nth-child(2) { min-width: 0; }
+.search-provider-card header .lk-status-pill { margin-left: auto; }
+.search-provider-mark { align-items: center; background: var(--lk-accent-soft); border-radius: 0.5rem; color: var(--lk-accent); display: flex; flex: 0 0 2.4rem; font-family: Georgia, "Times New Roman", serif; font-weight: 700; height: 2.4rem; justify-content: center; }
+.search-provider-card h2 { font-family: Georgia, "Times New Roman", serif; font-size: 1.05rem; margin: 0.08rem 0; }
+.search-provider-card header p { color: var(--lk-muted); font-size: 0.72rem; margin: 0; }
+.search-provider-fields { background: var(--lk-soft); border-block: 1px solid var(--lk-line); display: grid; gap: 0.65rem; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0.8rem 1rem; }
+.search-provider-card footer { align-items: center; display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.7rem 1rem; }
+.search-delete-confirm { align-items: center; background: var(--lk-danger-soft); border-top: 1px solid #efc7ca; display: flex; gap: 0.45rem; padding: 0.7rem 1rem; }
+.search-delete-confirm > span { color: #92505a; display: grid; font-size: 0.72rem; margin-right: auto; }
+.search-delete-confirm strong { color: #842029; }

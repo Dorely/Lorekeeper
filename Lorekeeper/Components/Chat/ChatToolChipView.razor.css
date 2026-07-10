@@ -73,6 +73,12 @@
     white-space: nowrap;
 }
 
+.chat-chip { background: var(--lk-surface); border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.chat-chip[open] { box-shadow: var(--lk-shadow-sm); }
+.chat-chip > summary:hover { background: var(--lk-accent-soft); }
+.chat-chip-ok .chat-chip-icon { color: var(--lk-success); }
+.chat-chip-error .chat-chip-icon { color: var(--lk-danger); }
+
 .chat-chip-progress-inline {
     grid-column: 2;
     min-width: 0;

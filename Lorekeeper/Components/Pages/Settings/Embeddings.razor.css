@@ -1,0 +1,21 @@
+.embedding-layout { align-items: start; display: grid; gap: 1rem; grid-template-columns: minmax(19rem, 0.8fr) minmax(30rem, 1.4fr); }
+.embedding-facts { display: grid; gap: 0; margin: 0; }
+.embedding-facts > div { border-top: 1px solid var(--lk-line); display: grid; gap: 0.75rem; grid-template-columns: 7rem minmax(0, 1fr); padding: 0.6rem 0; }
+.embedding-facts dt { color: var(--lk-muted); font-size: 0.74rem; font-weight: 700; }
+.embedding-facts dd { font-size: 0.78rem; margin: 0; overflow-wrap: anywhere; }
+.embedding-disabled { background: var(--lk-warning-soft); border: 1px solid #eed4a4; border-radius: var(--lk-radius-md); display: grid; gap: 0.25rem; padding: 1rem; }
+.embedding-disabled span { color: var(--lk-muted); font-size: 0.8rem; }
+.embedding-form { display: grid; gap: 0.75rem; grid-template-columns: minmax(0, 1.2fr) minmax(12rem, 0.8fr); }
+.embedding-form label { display: grid; gap: 0.3rem; }
+.embedding-form label > span { color: var(--lk-muted); font-size: 0.74rem; font-weight: 700; }
+.field-wide { grid-column: 1 / -1; }
+.embedding-note,.embedding-test-success,.embedding-warning { border-radius: var(--lk-radius-md); display: grid; gap: 0.3rem; margin-top: 0.85rem; padding: 0.75rem; }
+.embedding-note { background: var(--lk-accent-soft); color: #2f448f; font-size: 0.78rem; }
+.embedding-test-success { align-items: center; background: var(--lk-success-soft); grid-template-columns: auto auto 1fr; }
+.embedding-test-success span:last-child,.embedding-warning > span { color: var(--lk-muted); font-size: 0.75rem; }
+.embedding-warning { background: var(--lk-warning-soft); border: 1px solid #eed4a4; }
+.embedding-warning label,.embedding-danger label { align-items: center; display: flex; font-size: 0.78rem; gap: 0.45rem; margin-top: 0.35rem; }
+.embedding-actions { margin-top: 0.85rem; }
+.embedding-danger { align-items: center; display: grid; gap: 1rem; grid-template-columns: minmax(18rem, 1fr) minmax(20rem, 1.2fr) auto; }
+.embedding-danger h2 { font-family: Georgia, "Times New Roman", serif; font-size: 1.05rem; margin: 0.15rem 0; }
+.embedding-danger p { color: #92505a; font-size: 0.76rem; margin: 0; }

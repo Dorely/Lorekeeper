@@ -37,6 +37,13 @@
     margin: 0;
 }
 
+.image-modal-backdrop { background: rgb(15 23 42 / 58%); backdrop-filter: blur(2px); }
+.image-modal { border: 1px solid var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-md); }
+.image-modal-header { border-bottom: 1px solid var(--lk-line); padding-bottom: 0.65rem; }
+.image-modal-header h5 { font-family: Georgia, "Times New Roman", serif; }
+.image-modal-option { border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.image-modal-option:hover,.image-modal-option.selected { background: var(--lk-accent-soft); border-color: var(--lk-accent); }
+
 .image-modal-grid {
     min-height: 0;
     overflow: auto;

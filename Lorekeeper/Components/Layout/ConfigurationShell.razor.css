@@ -1,0 +1,3 @@
+.configuration-page { align-content: start; }
+.configuration-nav { justify-self: start; }
+.configuration-content { display: grid; gap: 1rem; min-width: 0; }

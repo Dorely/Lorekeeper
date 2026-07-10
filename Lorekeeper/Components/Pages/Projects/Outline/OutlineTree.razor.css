@@ -95,6 +95,12 @@
     flex-wrap: wrap;
 }
 
+.outline-act { border-color: var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-sm); }
+.outline-act-header { background: var(--lk-soft); border-bottom-color: var(--lk-line); }
+.outline-act-title { font-family: Georgia, "Times New Roman", serif; }
+.outline-chapter { border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.outline-chapter:focus-within { border-color: #aeb9e8; box-shadow: var(--lk-focus); }
+
 .outline-act-actions {
     grid-column: 1 / -1;
     justify-content: flex-end;

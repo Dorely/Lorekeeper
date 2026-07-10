@@ -183,3 +183,9 @@
         overflow-x: auto;
     }
 }
+
+.transfer-card,.transfer-detail { border-color: var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-sm); }
+.transfer-section-title { color: var(--lk-accent); letter-spacing: 0.07em; }
+.transfer-job-row { background: var(--lk-soft); border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.transfer-job-row.selected { background: var(--lk-accent-soft); border-color: #aeb9e8; color: var(--lk-accent); }
+.transfer-report-item { border-color: var(--lk-line); border-radius: var(--lk-radius-md); }

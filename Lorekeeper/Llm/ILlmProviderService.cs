@@ -17,7 +17,9 @@ public interface ILlmProviderService
     Task<bool> IsCodexConnectedAsync(CancellationToken cancellationToken = default);
     Task<LlmProvider> CreateAsync(LlmProvider provider, CancellationToken cancellationToken = default);
     Task<LlmProvider> UpdateAsync(LlmProvider provider, CancellationToken cancellationToken = default);
+    Task UpdateConnectionAsync(LlmConnectionUpdate update, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, CancellationToken cancellationToken = default);
+    Task DeleteConnectionAsync(int id, CancellationToken cancellationToken = default);
     Task SetDefaultAsync(int id, CancellationToken cancellationToken = default);
     Task<LlmProvider> MarkChatTestSucceededAsync(LlmProvider provider, CancellationToken cancellationToken = default);
     Task<LlmProvider> MarkChatTestFailedAsync(LlmProvider provider, string error, CancellationToken cancellationToken = default);
@@ -30,6 +32,13 @@ public interface ILlmProviderService
     /// </summary>
     Task<string?> GetEffectiveApiKeyAsync(int providerId, CancellationToken cancellationToken = default);
 }
+
+public sealed record LlmConnectionUpdate(
+    int Id,
+    string? DisplayName,
+    string EndpointUrl,
+    AuthType AuthType,
+    string? ApiKey);
 
 public sealed record ChatProviderAvailability(
     bool IsAvailable,

@@ -198,3 +198,7 @@
     font-size: 0.85rem;
     margin-top: 0.4rem;
 }
+
+.project-facts { background: var(--lk-surface); border-color: var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-sm); }
+.project-facts-header { border-bottom: 1px solid var(--lk-line); margin: -0.5rem -0.75rem 0.55rem; padding: 0.55rem 0.75rem; }
+.project-facts-toggle { font-family: Georgia, "Times New Roman", serif; font-weight: 650; }

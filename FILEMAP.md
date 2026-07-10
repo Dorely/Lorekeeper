@@ -64,16 +64,17 @@
 
 | File | Description |
 |------|-------------|
-| `MainLayout.razor` / `.css` | Top-level page layout with sidebar + main column. Locks the app shell to viewport height, gives workspaces an independent flex/scroll context, and applies compact outer padding on Editor routes. |
+| `MainLayout.razor` / `.css` | Viewport-locked application shell with the slim Lorekeeper top bar, route-aware page/workspace padding, and global error notice. |
 | `PrintLayout.razor` / `.css` | Minimal no-navigation layout used by print-oriented pages; owns the viewport scroll container while restoring unbounded overflow for printed output. |
-| `NavMenu.razor` / `.css` | Sidebar navigation (Home, Providers, Embeddings, Search Providers). |
+| `PageHeader.razor` | Reusable editorial page heading with eyebrow, title, description, and optional actions. |
+| `ConfigurationShell.razor` (+ `.razor.css`) | Shared configuration-page wrapper with page heading, Projects return action, and Providers/Embeddings/Search switcher. |
 | `ReconnectModal.razor` / `.cs` / `.css` | UI shown when the SignalR circuit drops. |
 
 ### Components/Pages/
 
 | File | Description |
 |------|-------------|
-| `Home.razor` | Project picker at `/` — lists projects, create/rename/delete-with-confirm; deletes cascade to graph + vector chunks via `IProjectService`. |
+| `Home.razor` (+ `.razor.css`) | Project-selection hub at `/` with project cards, create/rename/delete-with-confirm, and entry cards for the three application configuration areas. |
 | `Error.razor` | Error page rendered by exception handler middleware. |
 | `NotFound.razor` | 404 page wired through `UseStatusCodePagesWithReExecute`. |
 
@@ -160,9 +161,9 @@
 
 | File | Description |
 |------|-------------|
-| `Providers.razor` | LLM provider configuration UI: Codex OAuth connect/status messages, parent providers + child models, separate chat/vision readiness test status, working-only default selection, inline edit, and model tests. |
-| `Embeddings.razor` | Embedding settings UI at `/settings/embeddings`: selects or unsets one active embedding model from existing provider connections, requires test-before-save, captures dimensions, and warns before re-embedding on model changes. |
-| `SearchProviders.razor` | Search provider configuration UI for Research Mode: add/edit/delete SerpApi or Brave providers, save API keys, test connectivity, and choose the single active provider. |
+| `Providers.razor` (+ `.razor.css`) | Connection-card LLM configuration UI: Codex OAuth, grouped credential connections and nested models, connection editing/deletion, visible chat/vision readiness, working-only defaults, and expandable add flows. |
+| `Embeddings.razor` (+ `.razor.css`) | Active embedding summary and configuration workflow: test-before-save, dimensions, rebuild confirmation, and an explicit semantic-feature danger zone. |
+| `SearchProviders.razor` (+ `.razor.css`) | Card-based SerpApi/Brave configuration for Research: add/edit/test/activate providers, API keys, and confirmed deletion. |
 
 ### Models/
 
@@ -285,7 +286,7 @@
 | `EmbeddingRebuildQueue.cs` | Singleton rebuild coordinator: queues full re-embed requests, versions pending work, and cancels/awaits active rebuilds before embedding config changes. |
 | `EmbeddingRebuildWorker.cs` | Hosted worker that drains rebuild requests one at a time, runs scoped rebuilds with coordinator cancellation, and avoids parallel project floods. |
 | `EmbeddingRebuildService.cs` | Bulk rebuild service: recreates sqlite-vec dimensions, marks indexes stale, reindexes chapter bodies, ingest source fragments, and context vectors with batch delay and retry backoff. |
-| `ILlmProviderService.cs` / `LlmProviderService.cs` | CRUD over providers, credential resolution, persisted chat/vision readiness, working-default selection, and Codex connection checks. |
+| `ILlmProviderService.cs` / `LlmProviderService.cs` | Provider/model CRUD, connection-wide shared-field propagation and grouped deletion, credential resolution, persisted chat/vision readiness, working-default selection, and Codex connection checks. |
 | `CodexProvider.cs` | Shared Codex provider name/endpoints/defaults plus OAuth JWT account-id parsing for Codex chat, images, and embeddings. |
 | `ICodexAuthService.cs` / `CodexAuthService.cs` | OpenAI Codex PKCE OAuth flow (start, configured local redirect callback, refresh, revoke). Uses in-process pending state map. |
 | `ReasoningContent.cs` | `AIContent` subclass for Codex reasoning summary streaming. |
@@ -521,7 +522,7 @@
 
 | File | Description |
 |------|-------------|
-| `app.css` | App-wide CSS. |
+| `app.css` | App-wide Lorekeeper design tokens and shared editorial treatments for typography, controls, cards, status, empty states, navigation, and Bootstrap primitives. |
 | `js/autosizeTextareas.js` | Small shared JS module that attaches to `textarea[data-autosize]`, grows each textarea to its `scrollHeight`, refreshes on input/change and width changes, and prevents nested textarea scrollbars. |
 | `js/fileDownloads.js` | Browser download helper used by Import / Export and Publish to save generated graph JSON and publish export files. |
 | `favicon.png` | Site icon. |

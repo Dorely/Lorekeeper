@@ -77,6 +77,11 @@
     line-height: 1;
 }
 
+.ctx-card { border-color: var(--lk-line); border-radius: var(--lk-radius-md); box-shadow: var(--lk-shadow-sm); }
+.ctx-open:hover { background: var(--lk-accent-soft); }
+.ctx-open:focus-visible { box-shadow: var(--lk-focus); }
+.ctx-badge { background: var(--lk-accent-soft); border-color: #d7dcf6; color: var(--lk-accent); }
+
 .ctx-visuals { display: flex; align-items: center; gap: .25rem; padding: 0 .7rem .55rem; color: var(--bs-secondary-color); font-size: .7rem; }
 .ctx-visuals img { width: 2rem; height: 2rem; object-fit: cover; border-radius: .25rem; border: 1px solid var(--bs-border-color); }
 

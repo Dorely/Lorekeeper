@@ -1,0 +1,23 @@
+<div class="lk-page configuration-page">
+    <PageHeader Eyebrow="System configuration" Title="@Title" Description="@Description">
+        <Actions>
+            <a class="btn btn-sm btn-outline-secondary" href="/">&larr; Projects</a>
+        </Actions>
+    </PageHeader>
+
+    <nav class="lk-segmented configuration-nav" aria-label="Configuration sections">
+        <NavLink href="settings/providers">Providers</NavLink>
+        <NavLink href="settings/embeddings">Embeddings</NavLink>
+        <NavLink href="settings/search-providers">Search</NavLink>
+    </nav>
+
+    <div class="configuration-content">
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Description { get; set; } = string.Empty;
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

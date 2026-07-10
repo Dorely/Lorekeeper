@@ -45,6 +45,12 @@
     font-weight: 700;
 }
 
+.pending-ai-backdrop { background: rgb(15 23 42 / 58%); backdrop-filter: blur(2px); }
+.pending-ai-modal { border-color: var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-md); }
+.pending-ai-header { background: var(--lk-soft); border-bottom-color: var(--lk-line); }
+.pending-ai-header h5 { font-family: Georgia, "Times New Roman", serif; }
+.pending-ai-group,.pending-ai-change { border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+
 .pending-ai-header {
     display: flex;
     align-items: flex-start;

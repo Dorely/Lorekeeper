@@ -1,6 +1,3 @@
-/* Make the project workspace fill the article so child pages (Outline) can use
-   flex-based 100% height instead of fragile viewport math. The titlebar + tabs
-   take their natural height; the routed page body fills the remainder. */
 .project-shell {
     display: flex;
     flex-direction: column;
@@ -9,64 +6,98 @@
     overflow: hidden;
 }
 
-/* Stretch the routed-page wrapper to fill the remaining vertical space. The
-   page itself decides whether to scroll internally or let the article scroll. */
-.project-body {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.project-shell--compact .project-workspace-header {
-    display: flex;
+.project-workspace-header {
     align-items: center;
-    gap: 0.65rem;
-    min-height: 2.5rem;
-    margin-bottom: 0.4rem;
-    overflow: hidden;
-}
-
-.project-shell--compact .project-titlebar {
-    flex: 0 1 auto;
-    min-width: 0;
-    margin-bottom: 0 !important;
-}
-
-.project-shell--compact .project-titlebar .btn {
+    background: var(--lk-surface);
+    border: 1px solid var(--lk-line);
+    border-radius: var(--lk-radius-md);
+    box-shadow: var(--lk-shadow-sm);
+    display: flex;
     flex: 0 0 auto;
-    margin-right: 0.5rem !important;
+    gap: 0.75rem;
+    margin-bottom: 0.55rem;
+    min-height: 3.1rem;
+    overflow: hidden;
+    padding: 0.35rem 0.45rem;
 }
 
-.project-shell--compact .project-title {
-    min-width: 0;
-    max-width: min(28vw, 24rem);
-    overflow: hidden;
+.project-titlebar {
+    align-items: center;
+    display: flex;
+    flex: 0 1 auto;
+    gap: 0.55rem;
+    min-width: 10rem;
+}
+
+.project-back {
+    align-items: center;
+    border-radius: var(--lk-radius-sm);
+    color: var(--lk-muted);
+    display: inline-flex;
+    flex: 0 0 2rem;
     font-size: 1.1rem;
+    font-weight: 800;
+    height: 2rem;
+    justify-content: center;
+    text-decoration: none;
+}
+
+.project-back:hover { background: var(--lk-accent-soft); color: var(--lk-accent); }
+
+.project-identity { min-width: 0; }
+.project-identity > span {
+    color: var(--lk-accent);
+    display: block;
+    font-size: 0.58rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.project-title {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 1rem;
+    font-weight: 650;
+    margin: 0.1rem 0 0;
+    max-width: min(23vw, 20rem);
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.project-shell--compact .project-tabs {
+.project-tabs {
+    align-items: center;
+    display: flex;
     flex: 1 1 auto;
+    gap: 0.15rem;
+    list-style: none;
+    margin: 0;
     min-width: 0;
-    margin-bottom: 0 !important;
-    flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: hidden;
+    padding: 0.15rem;
     scrollbar-width: thin;
 }
 
-.project-shell--compact .project-tabs::-webkit-scrollbar {
-    height: 0.25rem;
-}
-
-.project-shell--compact .project-tabs .nav-item {
-    flex: 0 0 auto;
-}
-
-.project-shell--compact .project-tabs .nav-link {
-    padding: 0.35rem 0.65rem;
+.project-tabs .nav-item { flex: 0 0 auto; }
+.project-tabs .nav-link {
+    border: 0;
+    border-radius: var(--lk-radius-sm);
+    color: var(--lk-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 0.45rem 0.6rem;
     white-space: nowrap;
+}
+
+.project-tabs .nav-link:hover { background: var(--lk-soft); color: var(--lk-ink); }
+.project-tabs .nav-link.active { background: var(--lk-accent-soft); color: var(--lk-accent); }
+
+.project-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
 }

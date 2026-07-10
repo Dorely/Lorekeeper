@@ -18,14 +18,17 @@ else if (Project is null)
 }
 else
 {
-    <div class="@ProjectShellClass()">
+    <div class="project-shell">
         <div class="project-workspace-header">
-            <div class="project-titlebar d-flex align-items-center mb-2">
-                <a href="/" class="btn btn-sm btn-outline-secondary me-3">&larr; Projects</a>
-                <h4 class="project-title mb-0">@Project.Name</h4>
+            <div class="project-titlebar">
+                <a href="/" class="project-back" aria-label="Back to projects">&larr;</a>
+                <div class="project-identity">
+                    <span>Project workspace</span>
+                    <h1 class="project-title">@Project.Name</h1>
+                </div>
             </div>
 
-            <ul class="nav nav-tabs project-tabs mb-3" aria-label="Project sections">
+            <ul class="project-tabs" aria-label="Project sections">
                 @foreach (var t in VisibleTabs)
                 {
                     <li class="nav-item">
@@ -69,11 +72,6 @@ else
 
     private IEnumerable<(string Key, string Label)> VisibleTabs =>
         _researchEnabled ? Tabs : Tabs.Where(tab => tab.Key != "research");
-
-    private string ProjectShellClass() =>
-        string.Equals(Tab, "editor", StringComparison.OrdinalIgnoreCase)
-            ? "project-shell project-shell--compact"
-            : "project-shell";
 
     protected override async Task OnParametersSetAsync()
     {

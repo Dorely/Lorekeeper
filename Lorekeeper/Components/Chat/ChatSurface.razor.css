@@ -337,3 +337,30 @@
     overflow-y: hidden;
     line-height: 1.4;
 }
+
+/* Lorekeeper editorial surface */
+.chat-surface {
+    border-color: var(--lk-line);
+    border-radius: var(--lk-radius-lg);
+    box-shadow: var(--lk-shadow-sm);
+}
+
+.chat-header {
+    background: var(--lk-soft);
+    border-bottom-color: var(--lk-line);
+    padding: 0.6rem 0.75rem;
+}
+
+.chat-title {
+    color: var(--lk-ink);
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 0.95rem;
+}
+
+.chat-scroll { background: var(--lk-surface); }
+.chat-msg-user { background: var(--lk-accent); }
+.chat-msg-asst { background: var(--lk-soft); border: 1px solid var(--lk-line); }
+.chat-tool-group { border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.chat-composer { background: var(--lk-surface); border-top-color: var(--lk-line); padding: 0.65rem; }
+.chat-composer textarea { border-color: var(--lk-line-strong); border-radius: var(--lk-radius-md); }
+.chat-error { background: var(--lk-danger-soft); color: var(--lk-danger); }

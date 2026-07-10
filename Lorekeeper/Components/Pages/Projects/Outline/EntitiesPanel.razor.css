@@ -313,3 +313,9 @@
     overflow-wrap: anywhere;
 }
 .entities-item-visual { width: 2.25rem; height: 2.25rem; object-fit: cover; border-radius: .3rem; float: left; margin-right: .45rem; }
+
+.entities-section { border-color: var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-sm); }
+.entities-section-header { background: var(--lk-soft); border-bottom-color: var(--lk-line); }
+.entities-type-title { font-family: Georgia, "Times New Roman", serif; }
+.entities-item { border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.entities-item:hover { background: var(--lk-accent-soft); border-color: #aeb9e8; }

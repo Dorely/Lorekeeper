@@ -13,317 +13,164 @@
 
 <PageTitle>LLM Providers</PageTitle>
 
-<h3>LLM Providers</h3>
-<p class="text-muted">Configure LLM API endpoints. Supports any OpenAI-compatible API.</p>
-
-@if (!string.IsNullOrEmpty(_statusMessage))
-{
-    <div class="alert alert-@_statusKind alert-dismissible fade show mt-2" role="alert">
-        @_statusMessage
-        <button type="button" class="btn-close" @onclick="ClearStatus"></button>
-    </div>
-}
-
-@if (!_hasWorkingChatProvider)
-{
-    <div class="alert alert-warning mt-2">
-        No working chat provider is configured. Run a successful provider test to enable LLM features.
-    </div>
-}
-
-<div class="card mb-4 border-dark">
-    <div class="card-body">
-        <div class="d-flex align-items-center justify-content-between">
-            <div>
-                <h5 class="card-title mb-1">OpenAI Codex</h5>
-                <p class="card-text text-muted mb-0">
-                    Sign in with your OpenAI account &mdash; no API key needed.
-                </p>
-            </div>
-            <div class="text-end">
-                @if (_codexConnected)
-                {
-                    <span class="badge bg-success me-2">Connected</span>
-                    <button type="button" class="btn btn-outline-warning btn-sm" @onclick="DisconnectCodexAsync">Disconnect</button>
-                }
-                else
-                {
-                    <button type="button" class="btn btn-success" @onclick="ConnectCodexAsync">
-                        Connect with OpenAI
-                    </button>
-                }
-            </div>
+<ConfigurationShell Title="Model providers" Description="Connect language and vision models, verify their capabilities, and choose the default used across Lorekeeper.">
+    @if (!string.IsNullOrEmpty(_statusMessage))
+    {
+        <div class="alert alert-@_statusKind alert-dismissible fade show" role="alert">
+            @_statusMessage
+            <button type="button" class="btn-close" aria-label="Dismiss" @onclick="ClearStatus"></button>
         </div>
-        @if (_codexProvider is not null)
-        {
-            <div class="row g-2 align-items-end mt-3">
-                <div class="col-auto">
-                    <label class="form-label form-label-sm mb-0">Model</label>
-                    <input type="text" class="form-control form-control-sm" style="width:200px"
-                           @bind="_codexProvider.ModelId" />
-                </div>
-                <div class="col-auto">
-                    <button type="button" class="btn btn-sm btn-outline-secondary"
-                            @onclick="() => SaveCodexModelAsync()">Save</button>
-                </div>
-                <div class="col-auto">
-                    <button type="button" class="btn btn-sm btn-outline-info"
-                            disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
-                            @onclick="TestCodexModelAsync">
-                        @(_testingProviderId == _codexProvider.Id ? "Testing..." : "Test")
-                    </button>
-                </div>
-                <div class="col-auto">
-                    <button type="button" class="btn btn-sm btn-outline-info"
-                            disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
-                            @onclick="TestCodexVisionModelAsync">
-                        @(_testingVisionProviderId == _codexProvider.Id ? "Testing vision..." : "Test Vision")
-                    </button>
-                </div>
+    }
+
+    <section class="provider-overview" aria-label="Provider readiness">
+        <div><span class="lk-section-kicker">Connections</span><strong>@_parents.Count</strong><small>credential sources</small></div>
+        <div><span class="lk-section-kicker">Chat ready</span><strong>@_chatReadyStatus.Count(item => item.Value)</strong><small>verified models</small></div>
+        <div><span class="lk-section-kicker">Vision ready</span><strong>@_visionReadyStatus.Count(item => item.Value)</strong><small>image-capable models</small></div>
+        <div class="provider-overview-action">
+            <button type="button" class="btn btn-primary" @onclick="ToggleAddConnection">@(_addingConnection ? "Close form" : "Add connection")</button>
+        </div>
+    </section>
+
+    @if (!_hasWorkingChatProvider)
+    {
+        <div class="alert alert-warning"><strong>LLM features are not ready.</strong> Connect a provider and pass a Chat test to enable them.</div>
+    }
+
+    @if (_addingConnection)
+    {
+        <section class="lk-section-card provider-add-card" aria-labelledby="add-connection-title">
+            <div class="lk-section-heading">
+                <div><span class="lk-section-kicker">OpenAI-compatible API</span><h2 id="add-connection-title">Add a connection</h2><p>Enter the endpoint and initial model, test it, then save the verified connection.</p></div>
             </div>
-        }
-    </div>
-</div>
-
-<hr />
-
-<h5>Other Providers</h5>
-
-@if (_parents.Count == 0)
-{
-    <div class="alert alert-info">
-        No providers configured yet. Add one below or connect with OpenAI above.
-    </div>
-}
-else
-{
-    <table class="table table-striped">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Endpoint</th>
-                <th>Model</th>
-                <th>Auth</th>
-                <th>Chat</th>
-                <th>Vision</th>
-                <th>Default</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var p in _parents)
-            {
-                <tr>
-                    <td>@(p.DisplayName ?? p.Name)</td>
-                    <td class="text-truncate" style="max-width:200px;" title="@p.EndpointUrl">@p.EndpointUrl</td>
-                    <td>
-                        <div class="d-flex align-items-center gap-1">
-                            <input type="text" class="form-control form-control-sm" style="width:140px" @bind="p.ModelId" />
-                            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2"
-                                    @onclick="() => SaveProviderAsync(p)" title="Save model changes">Save</button>
-                                    <button type="button" class="btn btn-sm btn-outline-info py-0 px-2"
-                                    disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
-                                    @onclick="() => TestProviderAsync(p)" title="Test this model">
-                                @(_testingProviderId == p.Id ? "Testing..." : "Test")
-                            </button>
-                            <button type="button" class="btn btn-sm btn-outline-info py-0 px-2"
-                                    disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
-                                    @onclick="() => TestVisionProviderAsync(p)" title="Test image input for this model">
-                                @(_testingVisionProviderId == p.Id ? "Testing..." : "Vision")
-                            </button>
-                        </div>
-                    </td>
-                    <td>
-                        @if (p.AuthType == AuthType.OAuth)
-                        {
-                            <span class="badge bg-info">OAuth</span>
-                            @if (_oauthStatus.TryGetValue(p.Id, out var status) && status)
-                            {
-                                <span class="badge bg-success">Connected</span>
-                            }
-                            else
-                            {
-                                <span class="badge bg-warning">Disconnected</span>
-                            }
-                        }
-                        else if (p.AuthType == AuthType.ApiKey)
-                        {
-                            <span class="badge bg-secondary">API Key</span>
-                            @if (!string.IsNullOrEmpty(p.ApiKey))
-                            {
-                                <span class="badge bg-success">Set</span>
-                            }
-                        }
-                        else
-                        {
-                            <span class="badge bg-secondary">None</span>
-                        }
-                    </td>
-                    <td>@RenderChatStatus(p)</td>
-                    <td>@RenderVisionStatus(p)</td>
-                    <td>
-                        @if (p.IsDefault)
-                        {
-                            <span class="badge bg-primary">Default</span>
-                        }
-                        else
-                        {
-                            <button type="button" class="btn btn-sm btn-outline-primary"
-                                    disabled="@(!IsChatReady(p))"
-                                    title="@DefaultButtonTitle(p)"
-                                    @onclick="() => SetDefaultAsync(p.Id)">Set Default</button>
-                        }
-                    </td>
-                    <td>
-                        @if (p.AuthType == AuthType.OAuth)
-                        {
-                            if (_oauthStatus.TryGetValue(p.Id, out var connected) && connected)
-                            {
-                                <button type="button" class="btn btn-sm btn-outline-warning"
-                                        @onclick="() => RevokeOAuthAsync(p.Id)">Disconnect</button>
-                            }
-                            else
-                            {
-                                <a href="/auth/start/@p.Id" class="btn btn-sm btn-outline-success">Connect</a>
-                            }
-                        }
-                        <button type="button" class="btn btn-sm btn-outline-info"
-                                @onclick="() => ToggleAddChild(p.Id)"
-                                title="Add another model using this provider's credentials">+ Model</button>
-                        <button type="button" class="btn btn-sm btn-outline-danger"
-                                @onclick="() => DeleteProviderAsync(p)">Delete</button>
-                    </td>
-                </tr>
-                @if (_children.TryGetValue(p.Id, out var kids))
+            <div class="connection-form-grid">
+                <label><span>Name (slug)</span><input class="form-control" @bind="_newProvider.Name" placeholder="ollama-local" /></label>
+                <label><span>Display name</span><input class="form-control" @bind="_newProvider.DisplayName" placeholder="Local Ollama" /></label>
+                <label class="field-wide"><span>Endpoint URL</span><input class="form-control" @bind="_newProvider.EndpointUrl" placeholder="http://localhost:11434/v1" /></label>
+                <label><span>Initial model ID</span><input class="form-control" @bind="_newProvider.ModelId" placeholder="llama3" /></label>
+                <label><span>Authentication</span><select class="form-select" @bind="_newProvider.AuthType"><option value="@AuthType.None">None</option><option value="@AuthType.ApiKey">API key</option></select></label>
+                @if (_newProvider.AuthType == AuthType.ApiKey)
                 {
-                    @foreach (var child in kids)
+                    <label class="field-wide"><span>API key</span><input type="password" class="form-control" @bind="_newProvider.ApiKey" autocomplete="off" /></label>
+                }
+                <label class="connection-checkbox"><input type="checkbox" class="form-check-input" @bind="_newProvider.IsDefault" /><span>Make this the default after verification</span></label>
+            </div>
+            <div class="provider-form-actions">
+                <button type="button" class="btn btn-outline-info" disabled="@(_isTestingNewProvider || _testingVisionProviderId is not null)" @onclick="TestNewProviderAsync">@(_isTestingNewProvider ? "Testing chat…" : "Test chat")</button>
+                <button type="button" class="btn btn-primary" disabled="@(!CanAddNewProvider)" @onclick="CreateProviderAsync">Save connection</button>
+                <span class="form-hint">A successful Chat test is required before saving.</span>
+            </div>
+        </section>
+    }
+
+    <section class="provider-list" aria-label="Configured provider connections">
+        <article class="connection-card codex-card">
+            <header class="connection-header">
+                <div class="connection-identity">
+                    <span class="connection-mark">AI</span>
+                    <div><span class="lk-section-kicker">OpenAI account</span><h2>OpenAI Codex</h2><p>Use your OpenAI account without managing an API key.</p></div>
+                </div>
+                <div class="connection-actions">
+                    @if (_codexConnected)
                     {
-                        <tr>
-                            <td class="ps-4">&#8627; @(child.DisplayName ?? child.Name)</td>
-                            <td class="text-muted small">via @(p.DisplayName ?? p.Name)</td>
-                            <td>
-                                <div class="d-flex align-items-center gap-1">
-                                    <input type="text" class="form-control form-control-sm" style="width:140px" @bind="child.ModelId" />
-                                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2"
-                                            @onclick="() => SaveProviderAsync(child)" title="Save model changes">Save</button>
-                                    <button type="button" class="btn btn-sm btn-outline-info py-0 px-2"
-                                            disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
-                                            @onclick="() => TestProviderAsync(child)" title="Test this model">
-                                        @(_testingProviderId == child.Id ? "Testing..." : "Test")
-                                    </button>
-                                    <button type="button" class="btn btn-sm btn-outline-info py-0 px-2"
-                                            disabled="@(_testingProviderId is not null || _testingVisionProviderId is not null)"
-                                            @onclick="() => TestVisionProviderAsync(child)" title="Test image input for this model">
-                                        @(_testingVisionProviderId == child.Id ? "Testing..." : "Vision")
-                                    </button>
-                                </div>
-                            </td>
-                            <td><span class="badge bg-light text-dark">inherited</span></td>
-                            <td>@RenderChatStatus(child)</td>
-                            <td>@RenderVisionStatus(child)</td>
-                            <td>
-                                @if (child.IsDefault)
-                                {
-                                    <span class="badge bg-primary">Default</span>
-                                }
-                                else
-                                {
-                                    <button type="button" class="btn btn-sm btn-outline-primary"
-                                            disabled="@(!IsChatReady(child))"
-                                            title="@DefaultButtonTitle(child)"
-                                            @onclick="() => SetDefaultAsync(child.Id)">Set Default</button>
-                                }
-                            </td>
-                            <td>
-                                <button type="button" class="btn btn-sm btn-outline-danger"
-                                        @onclick="() => DeleteProviderAsync(child)">Delete</button>
-                            </td>
-                        </tr>
+                        <span class="lk-status-pill is-success">Connected</span>
+                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="DisconnectCodexAsync">Disconnect</button>
                     }
-                }
-                @if (_childForms.TryGetValue(p.Id, out var draft))
-                {
-                    <tr class="bg-body-secondary">
-                        <td colspan="8">
-                            <div class="d-flex align-items-end gap-2 p-2">
-                                <div>
-                                    <label class="form-label form-label-sm mb-0">Display Name</label>
-                                    <input type="text" class="form-control form-control-sm" style="width:160px"
-                                           placeholder="e.g. GPT-4o Mini" @bind="draft.DisplayName" />
-                                </div>
-                                <div>
-                                    <label class="form-label form-label-sm mb-0">Model ID</label>
-                                    <input type="text" class="form-control form-control-sm" style="width:160px"
-                                           placeholder="e.g. gpt-4o-mini" @bind="draft.ModelId" />
-                                </div>
-                                <button type="button" class="btn btn-sm btn-info"
-                                        @onclick="() => AddChildModelAsync(p, draft)">Add &amp; Test</button>
-                                <button type="button" class="btn btn-sm btn-link"
-                                        @onclick="() => _childForms.Remove(p.Id)">Cancel</button>
-                            </div>
-                        </td>
-                    </tr>
-                }
-            }
-        </tbody>
-    </table>
-}
-
-<h5 class="mt-4">Add Provider</h5>
-<div class="card">
-    <div class="card-body">
-        <div class="row g-2">
-            <div class="col-md-3">
-                <label class="form-label form-label-sm">Name (slug)</label>
-                <input type="text" class="form-control form-control-sm" @bind="_newProvider.Name"
-                       placeholder="e.g. ollama-local" />
-            </div>
-            <div class="col-md-3">
-                <label class="form-label form-label-sm">Display Name</label>
-                <input type="text" class="form-control form-control-sm" @bind="_newProvider.DisplayName"
-                       placeholder="e.g. Local Llama" />
-            </div>
-            <div class="col-md-4">
-                <label class="form-label form-label-sm">Endpoint URL</label>
-                <input type="text" class="form-control form-control-sm" @bind="_newProvider.EndpointUrl"
-                       placeholder="http://localhost:11434/v1" />
-            </div>
-            <div class="col-md-2">
-                <label class="form-label form-label-sm">Model ID</label>
-                <input type="text" class="form-control form-control-sm" @bind="_newProvider.ModelId"
-                       placeholder="llama3" />
-            </div>
-            <div class="col-md-2">
-                <label class="form-label form-label-sm">Auth</label>
-                <select class="form-select form-select-sm" @bind="_newProvider.AuthType">
-                    <option value="@AuthType.None">None</option>
-                    <option value="@AuthType.ApiKey">API Key</option>
-                </select>
-            </div>
-            @if (_newProvider.AuthType == AuthType.ApiKey)
-            {
-                <div class="col-md-4">
-                    <label class="form-label form-label-sm">API Key</label>
-                    <input type="password" class="form-control form-control-sm" @bind="_newProvider.ApiKey" />
+                    else
+                    {
+                        <span class="lk-status-pill is-warning">Not connected</span>
+                        <button type="button" class="btn btn-sm btn-primary" @onclick="ConnectCodexAsync">Connect OpenAI</button>
+                    }
                 </div>
+            </header>
+            @if (_codexProvider is not null)
+            {
+                <div class="model-list">
+                    @foreach (var model in CodexModels)
+                    {
+                        <div class="model-row">
+                            <div class="model-fields">
+                                <label><span>@(model.Id == _codexProvider.Id ? "Connection model" : "Display name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(model.Id == _codexProvider.Id)" /></label>
+                                <label><span>Model ID</span><input class="form-control form-control-sm" @bind="model.ModelId" /></label>
+                            </div>
+                            <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
+                            <div class="model-actions">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
+                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test chat")</button>
+                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestVisionProviderAsync(model)">@(_testingVisionProviderId == model.Id ? "Testing…" : "Test vision")</button>
+                                @if (!model.IsDefault){<button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>}
+                                @if (model.CredentialSourceId is not null){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
+                            </div>
+                            @if (ModelReadinessDetail(model) is { } detail){<div class="model-detail">@detail</div>}
+                            @if (_confirmDeleteModelId == model.Id){<div class="inline-confirm"><span>Delete this model configuration?</span><button class="btn btn-sm btn-danger" @onclick="() => DeleteProviderAsync(model)">Delete</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteModelId = null">Cancel</button></div>}
+                        </div>
+                    }
+                </div>
+                <div class="connection-footer"><button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ToggleAddChild(_codexProvider.Id)">Add model</button></div>
+                @RenderChildForm(_codexProvider)
             }
-            <div class="col-md-2 form-check align-self-end ms-3">
-                <input type="checkbox" class="form-check-input" id="newIsDefault" @bind="_newProvider.IsDefault" />
-                <label for="newIsDefault" class="form-check-label">Default</label>
-            </div>
-            <div class="col-12">
-                <button type="button" class="btn btn-outline-info btn-sm me-2"
-                        disabled="@(_isTestingNewProvider || _testingVisionProviderId is not null)"
-                        @onclick="TestNewProviderAsync">
-                    @(_isTestingNewProvider ? "Testing..." : "Test")
-                </button>
-                <button type="button" class="btn btn-primary btn-sm"
-                        disabled="@(!CanAddNewProvider)"
-                        @onclick="CreateProviderAsync">Add Provider</button>
-            </div>
-        </div>
-    </div>
-</div>
+        </article>
+
+        @foreach (var connection in OtherParents)
+        {
+            <article class="connection-card">
+                <header class="connection-header">
+                    <div class="connection-identity">
+                        <span class="connection-mark">@ConnectionInitial(connection)</span>
+                        <div><span class="lk-section-kicker">@AuthLabel(connection)</span><h2>@(connection.DisplayName ?? connection.Name)</h2><p title="@connection.EndpointUrl">@connection.EndpointUrl</p></div>
+                    </div>
+                    <div class="connection-actions">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => StartEditConnection(connection)">@(_editingConnectionId == connection.Id ? "Close edit" : "Edit connection")</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ToggleAddChild(connection.Id)">Add model</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleConnectionDelete(connection.Id)">Delete</button>
+                    </div>
+                </header>
+
+                @if (_editingConnectionId == connection.Id && _connectionEdit is not null)
+                {
+                    <div class="connection-edit-panel">
+                        <label><span>Display name</span><input class="form-control form-control-sm" @bind="_connectionEdit.DisplayName" /></label>
+                        <label class="field-wide"><span>Endpoint URL</span><input class="form-control form-control-sm" @bind="_connectionEdit.EndpointUrl" /></label>
+                        <label><span>Authentication</span><select class="form-select form-select-sm" @bind="_connectionEdit.AuthType"><option value="@AuthType.None">None</option><option value="@AuthType.ApiKey">API key</option></select></label>
+                        @if (_connectionEdit.AuthType == AuthType.ApiKey){<label class="field-wide"><span>API key</span><input type="password" class="form-control form-control-sm" @bind="_connectionEdit.ApiKey" autocomplete="off" /></label>}
+                        <div class="provider-form-actions field-wide"><button class="btn btn-sm btn-primary" @onclick="SaveConnectionAsync">Save connection</button><span class="form-hint">All nested models will require new readiness tests.</span></div>
+                    </div>
+                }
+
+                <div class="model-list">
+                    @foreach (var model in ModelsFor(connection))
+                    {
+                        <div class="model-row">
+                            <div class="model-fields">
+                                <label><span>@(model.Id == connection.Id ? "Primary model name" : "Model name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" /></label>
+                                <label><span>Model ID</span><input class="form-control form-control-sm" @bind="model.ModelId" /></label>
+                            </div>
+                            <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
+                            <div class="model-actions">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
+                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test chat")</button>
+                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestVisionProviderAsync(model)">@(_testingVisionProviderId == model.Id ? "Testing…" : "Test vision")</button>
+                                @if (!model.IsDefault){<button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>}
+                                @if (model.CredentialSourceId is not null){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
+                            </div>
+                            @if (ModelReadinessDetail(model) is { } detail){<div class="model-detail">@detail</div>}
+                            @if (_confirmDeleteModelId == model.Id){<div class="inline-confirm"><span>Delete this model configuration?</span><button class="btn btn-sm btn-danger" @onclick="() => DeleteProviderAsync(model)">Delete</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteModelId = null">Cancel</button></div>}
+                        </div>
+                    }
+                </div>
+                @RenderChildForm(connection)
+                @if (_confirmDeleteConnectionId == connection.Id)
+                {
+                    <div class="connection-delete-confirm"><div><strong>Delete this connection and its nested models?</strong><span>This removes @ModelsFor(connection).Count model configuration(s). This cannot be undone.</span></div><button class="btn btn-sm btn-danger" @onclick="() => DeleteConnectionAsync(connection)">Delete connection</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteConnectionId = null">Cancel</button></div>
+                }
+            </article>
+        }
+
+        @if (_codexProvider is null && !OtherParents.Any())
+        {
+            <div class="lk-empty-state"><h2>No model connections yet</h2><p>Connect OpenAI above or add an OpenAI-compatible endpoint.</p><button class="btn btn-primary" @onclick="ToggleAddConnection">Add a connection</button></div>
+        }
+    </section>
+</ConfigurationShell>
 
 @code {
     private List<LlmProvider> _parents = [];
@@ -337,13 +184,22 @@ else
 
     private readonly Dictionary<int, ChildDraft> _childForms = [];
     private NewProviderDraft _newProvider = new();
+    private ConnectionEditDraft? _connectionEdit;
     private NewProviderConnectionSnapshot? _testedNewProviderSnapshot;
+    private bool _addingConnection;
+    private int? _editingConnectionId;
+    private int? _confirmDeleteConnectionId;
+    private int? _confirmDeleteModelId;
     private bool _isTestingNewProvider;
     private int? _testingProviderId;
     private int? _testingVisionProviderId;
 
     private string? _statusMessage;
     private string _statusKind = "success";
+
+    private bool AnyTestRunning => _testingProviderId is not null || _testingVisionProviderId is not null || _isTestingNewProvider;
+    private IEnumerable<LlmProvider> OtherParents => _parents.Where(provider => !CodexProvider.IsCodex(provider));
+    private IReadOnlyList<LlmProvider> CodexModels => _codexProvider is null ? [] : ModelsFor(_codexProvider);
 
     private bool CanAddNewProvider =>
         !_isTestingNewProvider
@@ -438,6 +294,7 @@ else
             SetStatus($"Provider '{provider.Name}' created.", "success");
             _newProvider = new NewProviderDraft();
             _testedNewProviderSnapshot = null;
+            _addingConnection = false;
             await ReloadAsync();
         }
         catch (Exception ex)
@@ -562,8 +419,92 @@ else
     {
         await ProviderService.DeleteAsync(p.Id);
         SetStatus($"Provider '{p.DisplayName ?? p.Name}' deleted.", "success");
+        _confirmDeleteModelId = null;
         await ReloadAsync();
     }
+
+    private async Task DeleteConnectionAsync(LlmProvider connection)
+    {
+        try
+        {
+            await ProviderService.DeleteConnectionAsync(connection.Id);
+            SetStatus($"Connection '{connection.DisplayName ?? connection.Name}' and its models were deleted.", "success");
+            _confirmDeleteConnectionId = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Connection delete failed: {ex.Message}", "danger");
+        }
+    }
+
+    private void ToggleAddConnection()
+    {
+        _addingConnection = !_addingConnection;
+        if (!_addingConnection)
+        {
+            _newProvider = new NewProviderDraft();
+            _testedNewProviderSnapshot = null;
+        }
+    }
+
+    private void StartEditConnection(LlmProvider connection)
+    {
+        if (_editingConnectionId == connection.Id)
+        {
+            _editingConnectionId = null;
+            _connectionEdit = null;
+            return;
+        }
+
+        _editingConnectionId = connection.Id;
+        _connectionEdit = new ConnectionEditDraft
+        {
+            Id = connection.Id,
+            DisplayName = connection.DisplayName,
+            EndpointUrl = connection.EndpointUrl,
+            AuthType = connection.AuthType,
+            ApiKey = connection.ApiKey
+        };
+    }
+
+    private async Task SaveConnectionAsync()
+    {
+        if (_connectionEdit is null || string.IsNullOrWhiteSpace(_connectionEdit.EndpointUrl))
+        {
+            SetStatus("Endpoint URL is required.", "danger");
+            return;
+        }
+        if (_connectionEdit.AuthType == AuthType.ApiKey && string.IsNullOrWhiteSpace(_connectionEdit.ApiKey))
+        {
+            SetStatus("API key is required for API-key authentication.", "danger");
+            return;
+        }
+
+        try
+        {
+            await ProviderService.UpdateConnectionAsync(new LlmConnectionUpdate(
+                _connectionEdit.Id,
+                _connectionEdit.DisplayName,
+                _connectionEdit.EndpointUrl,
+                _connectionEdit.AuthType,
+                _connectionEdit.ApiKey));
+            SetStatus("Connection updated. Retest its models before using them.", "success");
+            _editingConnectionId = null;
+            _connectionEdit = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Connection update failed: {ex.Message}", "danger");
+        }
+    }
+
+    private void ToggleConnectionDelete(int id) =>
+        _confirmDeleteConnectionId = _confirmDeleteConnectionId == id ? null : id;
+
+    private void ToggleModelDelete(int id) =>
+        _confirmDeleteModelId = _confirmDeleteModelId == id ? null : id;
 
     private async Task RevokeOAuthAsync(int id)
     {
@@ -674,46 +615,91 @@ else
     {
         if (IsChatReady(provider))
         {
-            <span class="badge bg-success" title="This provider is ready for LLM chat features.">Ready</span>
+            <span class="lk-status-pill is-success" title="This model is ready for LLM chat features.">Ready</span>
             return;
         }
 
         if (provider.LastChatTestedAt is null)
         {
-            <span class="badge bg-secondary" title="Run Test successfully before using this provider for chat.">Untested</span>
+            <span class="lk-status-pill" title="Run Test Chat before using this model.">Untested</span>
             return;
         }
 
         if (provider.LastChatTestSucceeded && !provider.HasCurrentChatTestSnapshot)
         {
-            <span class="badge bg-warning text-dark" title="Provider settings changed after the last successful test.">Retest</span>
+            <span class="lk-status-pill is-warning" title="Connection or model settings changed after the last successful test.">Retest</span>
             return;
         }
 
-        <span class="badge bg-danger" title="@provider.LastChatTestError">Failed</span>
+        <span class="lk-status-pill is-danger" title="@provider.LastChatTestError">Failed</span>
     };
 
     private RenderFragment RenderVisionStatus(LlmProvider provider) => __builder =>
     {
         if (IsVisionReady(provider))
         {
-            <span class="badge bg-success" title="This provider is ready for image-reading PDF ingestion.">Ready</span>
+            <span class="lk-status-pill is-success" title="This model is ready for image-reading and PDF ingestion.">Ready</span>
             return;
         }
 
         if (provider.LastVisionTestedAt is null)
         {
-            <span class="badge bg-secondary" title="Run Test Vision before using this provider for PDF image reading.">Untested</span>
+            <span class="lk-status-pill" title="Run Test Vision before using this model for image reading.">Untested</span>
             return;
         }
 
         if (provider.LastVisionTestSucceeded && !provider.HasCurrentVisionTestSnapshot)
         {
-            <span class="badge bg-warning text-dark" title="Provider settings changed after the last successful vision test.">Retest</span>
+            <span class="lk-status-pill is-warning" title="Connection or model settings changed after the last successful vision test.">Retest</span>
             return;
         }
 
-        <span class="badge bg-danger" title="@provider.LastVisionTestError">Failed</span>
+        <span class="lk-status-pill is-danger" title="@provider.LastVisionTestError">Failed</span>
+    };
+
+    private List<LlmProvider> ModelsFor(LlmProvider connection)
+    {
+        var models = new List<LlmProvider> { connection };
+        if (_children.TryGetValue(connection.Id, out var children))
+            models.AddRange(children);
+        return models;
+    }
+
+    private RenderFragment RenderChildForm(LlmProvider parent) => __builder =>
+    {
+        if (!_childForms.TryGetValue(parent.Id, out var draft))
+            return;
+
+        <div class="child-model-form">
+            <div><span class="lk-section-kicker">Shared connection</span><strong>Add another model</strong><small>Credentials and endpoint come from @(parent.DisplayName ?? parent.Name).</small></div>
+            <label><span>Display name</span><input class="form-control form-control-sm" placeholder="GPT-5 Mini" @bind="draft.DisplayName" /></label>
+            <label><span>Model ID</span><input class="form-control form-control-sm" placeholder="gpt-5-mini" @bind="draft.ModelId" /></label>
+            <div class="lk-toolbar"><button type="button" class="btn btn-sm btn-primary" @onclick="() => AddChildModelAsync(parent, draft)">Test and add</button><button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _childForms.Remove(parent.Id)">Cancel</button></div>
+        </div>
+    };
+
+    private string? ModelReadinessDetail(LlmProvider provider)
+    {
+        if (!string.IsNullOrWhiteSpace(provider.LastChatTestError) && !IsChatReady(provider))
+            return $"Chat: {provider.LastChatTestError}";
+        if (!string.IsNullOrWhiteSpace(provider.LastVisionTestError) && !IsVisionReady(provider))
+            return $"Vision: {provider.LastVisionTestError}";
+        if (provider.LastChatTestedAt is not null || provider.LastVisionTestedAt is not null)
+        {
+            var latest = new[] { provider.LastChatTestedAt, provider.LastVisionTestedAt }.Where(value => value is not null).Max();
+            return latest is null ? null : $"Last verified {latest.Value.ToLocalTime():g}";
+        }
+        return null;
+    }
+
+    private static string ConnectionInitial(LlmProvider connection) =>
+        (connection.DisplayName ?? connection.Name).Trim().FirstOrDefault().ToString().ToUpperInvariant();
+
+    private static string AuthLabel(LlmProvider connection) => connection.AuthType switch
+    {
+        AuthType.ApiKey => "API key connection",
+        AuthType.OAuth => "OAuth connection",
+        _ => "Local / no authentication"
     };
 
     private LlmProvider? BuildNewProviderOrSetStatus()
@@ -781,5 +767,14 @@ else
     {
         public string? DisplayName { get; set; }
         public string? ModelId { get; set; }
+    }
+
+    private sealed class ConnectionEditDraft
+    {
+        public int Id { get; init; }
+        public string? DisplayName { get; set; }
+        public string EndpointUrl { get; set; } = string.Empty;
+        public AuthType AuthType { get; set; }
+        public string? ApiKey { get; set; }
     }
 }

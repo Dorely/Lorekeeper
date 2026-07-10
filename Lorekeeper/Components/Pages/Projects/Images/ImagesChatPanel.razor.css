@@ -67,6 +67,12 @@
     display: grid;
 }
 
+.images-chat-attachment-bar { background: var(--lk-soft); border-top-color: var(--lk-line); }
+.images-chat-attachment-head { color: var(--lk-accent); letter-spacing: 0.07em; }
+.images-chat-attachment-chip { background: var(--lk-surface); border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.images-chat-attachment-thumb { border-color: var(--lk-line); }
+.images-chat-attachment-thumb:focus-visible { outline-color: var(--lk-accent); }
+
 .images-chat-attachment-text small,
 .images-chat-attachment-text strong {
     min-width: 0;

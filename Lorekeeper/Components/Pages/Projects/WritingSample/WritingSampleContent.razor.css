@@ -140,3 +140,20 @@
     text-align: center;
     padding: 2rem;
 }
+
+.writing-sample-editor-panel {
+    border-color: var(--lk-line);
+    border-radius: var(--lk-radius-lg);
+    box-shadow: var(--lk-shadow-sm);
+}
+
+.writing-sample-editor-header {
+    background: var(--lk-soft);
+    border-bottom: 1px solid var(--lk-line);
+    margin: -0.75rem -0.75rem 0.65rem;
+    padding: 0.55rem 0.7rem;
+}
+
+.writing-sample-title-button { font-family: Georgia, "Times New Roman", serif; }
+.writing-sample-body-editor { border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.writing-sample-line-gutter { background: var(--lk-soft); border-right-color: var(--lk-line); }

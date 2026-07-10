@@ -92,3 +92,8 @@
     padding: 0.5rem 2rem 0.5rem 0.65rem;
     font-size: 0.8rem;
 }
+
+.recommended-item { border-color: var(--lk-line); border-radius: var(--lk-radius-md); box-shadow: var(--lk-shadow-sm); }
+.recommended-open:hover { background: var(--lk-accent-soft); }
+.recommended-open:focus-visible { box-shadow: var(--lk-focus); }
+.recommended-type,.recommended-reasons span { background: var(--lk-accent-soft); border-color: #d7dcf6; color: var(--lk-accent); }

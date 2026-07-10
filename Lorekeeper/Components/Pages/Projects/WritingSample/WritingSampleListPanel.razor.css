@@ -106,3 +106,10 @@
     color: var(--bs-secondary-color, #6c757d);
     font-size: 0.85rem;
 }
+
+.writing-sample-list { border-color: var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-sm); }
+.writing-sample-list-header { background: var(--lk-soft); border-bottom-color: var(--lk-line); }
+.writing-sample-list-title { font-family: Georgia, "Times New Roman", serif; }
+.writing-sample-row { border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.writing-sample-row:hover { background: var(--lk-accent-soft); border-color: #aeb9e8; }
+.writing-sample-row.active { background: var(--lk-accent-soft); border-color: var(--lk-accent); }

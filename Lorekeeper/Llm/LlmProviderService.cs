@@ -141,6 +141,37 @@ public class LlmProviderService(
         return provider;
     }
 
+    public async Task UpdateConnectionAsync(LlmConnectionUpdate update, CancellationToken cancellationToken = default)
+    {
+        var all = await providers.GetAllAsync(cancellationToken);
+        var connection = all.FirstOrDefault(provider => provider.Id == update.Id)
+            ?? throw new InvalidOperationException("Provider connection was not found.");
+        if (connection.CredentialSourceId is not null)
+            throw new InvalidOperationException("Only a top-level provider connection can update shared connection settings.");
+
+        var affected = all.Where(provider => provider.Id == connection.Id || provider.CredentialSourceId == connection.Id).ToList();
+        foreach (var provider in affected)
+        {
+            provider.EndpointUrl = update.EndpointUrl.Trim();
+            provider.AuthType = update.AuthType;
+            provider.ClearChatReadiness("Connection settings changed. Run Test successfully before using this model for chat.");
+            provider.ClearVisionReadiness("Connection settings changed. Run Test Vision successfully before using this model for image reading.");
+            provider.UpdatedAt = DateTime.UtcNow;
+            if (provider.Id == connection.Id)
+            {
+                provider.DisplayName = string.IsNullOrWhiteSpace(update.DisplayName) ? null : update.DisplayName.Trim();
+                provider.ApiKey = update.AuthType == AuthType.ApiKey ? update.ApiKey?.Trim() : null;
+            }
+            else
+            {
+                provider.ApiKey = null;
+            }
+            providers.Update(provider);
+        }
+
+        await providers.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task DeleteAsync(int id, CancellationToken cancellationToken = default)
     {
         var provider = await providers.GetByIdAsync(id, cancellationToken);
@@ -155,6 +186,21 @@ public class LlmProviderService(
             throw new InvalidOperationException("Run Test successfully before setting this provider as the default chat provider.");
 
         await providers.SetDefaultAsync(id, cancellationToken);
+        await providers.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteConnectionAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var all = await providers.GetAllAsync(cancellationToken);
+        var connection = all.FirstOrDefault(provider => provider.Id == id);
+        if (connection is null)
+            return;
+        if (connection.CredentialSourceId is not null)
+            throw new InvalidOperationException("Nested models must be deleted individually.");
+
+        foreach (var child in all.Where(provider => provider.CredentialSourceId == id))
+            providers.Remove(child);
+        providers.Remove(connection);
         await providers.SaveChangesAsync(cancellationToken);
     }
 

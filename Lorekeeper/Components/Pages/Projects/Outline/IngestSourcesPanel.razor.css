@@ -120,6 +120,10 @@
     padding-bottom: 0.5rem;
 }
 
+.ingest-sources-panel { border-color: var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-sm); }
+.ingest-sources-header { color: var(--lk-accent); font-family: Georgia, "Times New Roman", serif; }
+.ingest-source-section,.ingest-source-chunk { background: var(--lk-soft); border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+
 @media (max-width: 920px) {
     .ingest-source-section > summary,
     .ingest-source-chunk > summary {
