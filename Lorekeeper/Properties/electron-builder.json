@@ -3,6 +3,14 @@
   "productName": "Lorekeeper",
   "appId": "com.lorekeeper.app",
   "compression": "maximum",
+  "files": [
+    "!bin{,/**/*}",
+    "!win-unpacked{,/**/*}",
+    "!*.exe",
+    "!*.blockmap",
+    "!latest*.yml",
+    "!latest*.yaml"
+  ],
   "win": {
     "target": [
       {

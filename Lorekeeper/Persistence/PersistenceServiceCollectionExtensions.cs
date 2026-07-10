@@ -10,10 +10,14 @@ namespace Lorekeeper.Persistence;
 public static class PersistenceServiceCollectionExtensions
 {
     public static IServiceCollection AddLorekeeperPersistence(
-        this IServiceCollection services, IConfiguration configuration)
+        this IServiceCollection services,
+        IConfiguration configuration,
+        bool usePerUserDataDirectory = false)
     {
         var providerName = configuration["Persistence:Provider"] ?? "Sqlite";
-        var connectionString = SqliteConnectionSettings.BuildConnectionString(configuration);
+        var connectionString = SqliteConnectionSettings.BuildConnectionString(
+            configuration,
+            usePerUserDataDirectory);
 
         services.AddDbContext<AppDbContext>(options =>
         {

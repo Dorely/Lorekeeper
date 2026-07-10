@@ -10,7 +10,7 @@
 | File | Description |
 |------|-------------|
 | `VISION.md` | High-level project vision and success criteria. |
-| `README.md` | Project readme with web, Electron desktop, packaging, and local-data notes. |
+| `README.md` | Project readme with web/Electron development, Windows packaging and install guidance, and local-data notes. |
 | `FILEMAP.md` | This file — concise map of every source file. |
 | `Lorekeeper.sln` | Solution file containing the `Lorekeeper` project. |
 | `global.json` | Pins the .NET SDK version (`rollForward: latestFeature`). |
@@ -19,6 +19,7 @@
 | `.vscode/launch.json` | VS Code debug configurations; default F5 entry launches the Electron desktop shell, with a secondary web-hosted profile. |
 | `.vscode/tasks.json` | VS Code build task used by debug launch configurations. |
 | `.github/copilot-instructions.md` | Project guidelines for AI assistants. |
+| `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates a version, rebuilds isolated Electron staging/output, verifies artifacts, and writes SHA-256 checksums for GitHub Release uploads. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
 
@@ -26,10 +27,10 @@
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors. EF Core SQLite, Electron.NET Core desktop packaging, Microsoft.Extensions.AI(.OpenAI), OpenAI 2.8, sqlite-vec, Microsoft.ML.Tokenizers, SkiaSharp, EPUB/PDF ingestion packages, and patched Microsoft.Bcl.Memory. |
 | `Program.cs` | Host setup, optional Electron desktop shell binding, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/images/chapter-visuals/publish/writing/editor-chat/contest/revision-agent services, EF migrate at startup, sqlite-vec init, graph repair, and project-image/publish-preview endpoints. |
-| `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*`, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
+| `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*` including packaged per-user data placement, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
 | `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
-| `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets and app metadata for Windows, Linux, and macOS desktop artifacts. |
-| `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained folder publish profiles used by Electron.NET packaging (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`). |
+| `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets, app metadata, and payload exclusions for Windows, Linux, and macOS desktop artifacts. |
+| `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained publish profiles used by Electron.NET packaging (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`); Windows isolates staging from final artifacts to prevent recursive packaging. |
 
 ### Components/
 
@@ -232,7 +233,7 @@
 |------|-------------|
 | `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor chat visuals, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, publish profiles/assets/layouts, and chapter visual-mode fields. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
-| `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
+| `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
 | `Migrations/` | EF Core migrations through `AddPublishPageOptions`, including entity-image links, visual caches/jobs/crops, the Picture Page cover relationship, and saved title/PDF/EPUB page-presentation modes. |
 
 ### Persistence/Repositories/

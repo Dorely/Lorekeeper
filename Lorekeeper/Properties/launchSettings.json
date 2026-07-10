@@ -8,7 +8,8 @@
         "applicationUrl": "http://localhost:1455",
         "commandLineArgs": "--electron",
         "environmentVariables": {
-          "ASPNETCORE_ENVIRONMENT": "Development"
+          "ASPNETCORE_ENVIRONMENT": "Development",
+          "Desktop__UsePerUserDataDirectory": "false"
         }
       },
       "http": {

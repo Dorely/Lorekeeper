@@ -28,6 +28,8 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 var isElectronMode = IsElectronMode(args);
 var desktopUrl = isElectronMode ? GetDesktopUrl(builder.Configuration) : null;
+var usePerUserDataDirectory = isElectronMode
+    && builder.Configuration.GetValue("Desktop:UsePerUserDataDirectory", true);
 var maxInteractiveServerMessageSize = builder.Configuration.GetValue<long?>("Blazor:MaximumReceiveMessageSizeBytes")
     ?? 64L * 1024 * 1024;
 
@@ -46,7 +48,7 @@ if (isElectronMode)
 }
 
 // Persistence
-builder.Services.AddLorekeeperPersistence(builder.Configuration);
+builder.Services.AddLorekeeperPersistence(builder.Configuration, usePerUserDataDirectory);
 builder.Services.AddScoped<ILlmProviderRepository, LlmProviderRepository>();
 builder.Services.AddScoped<IEmbeddingConfigurationRepository, EmbeddingConfigurationRepository>();
 builder.Services.AddScoped<ISearchProviderRepository, SearchProviderRepository>();
