@@ -170,7 +170,7 @@ public sealed class EditorChatTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId, Guid imageId, string? label = null) => AttachProjectImageToEntityAsync(context, entityId, imageId, label),
                 name: "attach_project_image_to_entity",
-                description: "Attach an existing project image to a non-structural entity as an ordered visual example. Use a concise entity-specific role label such as 'default appearance', 'winter outfit', or 'exterior view'."),
+                description: "Attach an existing project image to an eligible story entity as an ordered visual example. Use a concise entity-specific role label such as 'default appearance', 'winter outfit', or 'exterior view'."),
             AIFunctionFactory.Create(
                 method: (Guid exampleId, string label, int? sortOrder = null) => UpdateEntityVisualExampleAsync(context, exampleId, label, sortOrder),
                 name: "update_entity_visual_example",
@@ -214,7 +214,7 @@ public sealed class EditorChatTools(
                 GenerateProjectImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, referenceImageIds, entityTargets, placeInCurrentChapter, targetChapterId, targetPictureImageElementId),
             name: "generate_project_image",
             description:
-                "Generate an image and save it to the project image library. Pass entityTargets [{entityId,label}] for every clearly represented entity; successful outputs are attached automatically. Optional referenceImageIds accepts multiple existing project image ids, up to the configured reference-image limit; use attached examples for recurring characters, outfits, settings, props, and style continuity. Do not attach decorative/layout-only art or guess ambiguous associations. " +
+                "Generate an image and save it to the project image library. Pass entityTargets [{entityId,label}] for every clearly represented entity; successful outputs are attached automatically. Only use eligible story entity ids grounded in the Context Feed or returned by search_entities/read_entity; omit entityTargets rather than inventing or reusing an uncertain id. Optional referenceImageIds accepts multiple existing project image ids, up to the configured reference-image limit; use attached examples for recurring characters, outfits, settings, props, and style continuity. Do not attach decorative/layout-only art or guess ambiguous associations. " +
                 "For PicturePage targets, pass targetChapterId and optionally targetPictureImageElementId; omit size to use the layout-native recommended size. " +
                 "Set placeInCurrentChapter=true only when the user wants the generated image inserted into the current chapter immediately; the current chapter must already be IllustratedProse or PicturePage."));
 
@@ -1245,17 +1245,29 @@ public sealed class EditorChatTools(
             ? target.RecommendedSize
             : string.IsNullOrWhiteSpace(size) ? "auto" : size.Trim();
 
-        var job = await imageJobs.CreateGenerateJobAsync(ctx.ProjectId, new ProjectImageGenerateJobRequest(
-            promptText,
-            effectiveSize,
-            string.IsNullOrWhiteSpace(quality) ? "auto" : quality.Trim(),
-            string.IsNullOrWhiteSpace(outputFormat) ? "png" : outputFormat.Trim(),
-            outputCompression,
-            altText?.Trim() ?? string.Empty,
-            1,
-            (referenceImageIds ?? []).Distinct().ToList(),
-            Label: "Editor chat image",
-            EntityTargets: ctx.OutlineStaging is null ? entityTargets : null));
+        var targetValidation = await entityVisualExamples.ValidateTargetsAsync(ctx.ProjectId, entityTargets);
+        if (!targetValidation.IsValid)
+            return $"Error: {targetValidation.Error} Use an entity id from the Context Feed, search_entities, or read_entity; otherwise omit entityTargets.";
+
+        ProjectImageJobView job;
+        try
+        {
+            job = await imageJobs.CreateGenerateJobAsync(ctx.ProjectId, new ProjectImageGenerateJobRequest(
+                promptText,
+                effectiveSize,
+                string.IsNullOrWhiteSpace(quality) ? "auto" : quality.Trim(),
+                string.IsNullOrWhiteSpace(outputFormat) ? "png" : outputFormat.Trim(),
+                outputCompression,
+                altText?.Trim() ?? string.Empty,
+                1,
+                (referenceImageIds ?? []).Distinct().ToList(),
+                Label: "Editor chat image",
+                EntityTargets: ctx.OutlineStaging is null ? targetValidation.Targets : null));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return $"Error: {ex.Message}";
+        }
         ctx.TrackImageGenerationJob(job.Id);
 
         await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, CancellationToken.None);
@@ -1276,20 +1288,14 @@ public sealed class EditorChatTools(
                     title: image.FileName,
                     caption: "Generated output saved to the image library."));
                 ctx.AddModelOnlyImage(image);
-                foreach (var entityTarget in (entityTargets ?? []).Where(item => item.EntityId != Guid.Empty).DistinctBy(item => item.EntityId))
+                foreach (var entityTarget in targetValidation.Targets)
                 {
-                    if (ctx.OutlineStaging is null)
-                    {
-                        await entityVisualExamples.AttachAsync(ctx.ProjectId, entityTarget.EntityId, image.Id, entityTarget.Label, EntityVisualExampleOrigin.Agent);
-                    }
-                    else
-                    {
-                        var after = new EntityVisualChange("attach", EntityId: entityTarget.EntityId, ImageId: image.Id, Label: entityTarget.Label);
-                        await ctx.OutlineStaging.StageExternalChangeAsync(
-                            $"Attach generated image to entity {entityTarget.EntityId:N}", null, after,
-                            new { status = "staged", entityTarget.EntityId, imageId = image.Id, entityTarget.Label },
-                            "EntityVisualExample", $"{entityTarget.EntityId:N}/{image.Id:N}");
-                    }
+                    if (ctx.OutlineStaging is null) continue;
+                    var after = new EntityVisualChange("attach", EntityId: entityTarget.EntityId, ImageId: image.Id, Label: entityTarget.Label);
+                    await ctx.OutlineStaging.StageExternalChangeAsync(
+                        $"Attach generated image to entity {entityTarget.EntityId:N}", null, after,
+                        new { status = "staged", entityTarget.EntityId, imageId = image.Id, entityTarget.Label },
+                        "EntityVisualExample", $"{entityTarget.EntityId:N}/{image.Id:N}");
                 }
             }
         }

@@ -514,20 +514,13 @@ public sealed class ProjectImageJobService(
         IEnumerable<EntityVisualTarget>? targets,
         CancellationToken cancellationToken)
     {
-        var normalized = (targets ?? [])
-            .Where(target => target.EntityId != Guid.Empty)
-            .Select(target => new EntityVisualTarget(target.EntityId, target.Label?.Trim() ?? string.Empty))
-            .DistinctBy(target => target.EntityId)
-            .ToList();
-        foreach (var target in normalized)
-        {
-            var key = target.EntityId.ToString("N");
-            var node = await db.GraphNodes.AsNoTracking().FirstOrDefaultAsync(
-                candidate => candidate.ProjectId == projectId && candidate.Key == key, cancellationToken);
-            if (node is null || !EntityVisualExampleService.IsEligible(node))
-                throw new InvalidOperationException($"Entity {target.EntityId} is not eligible for visual examples.");
-        }
-        return normalized;
+        var validation = await entityVisualExamples.ValidateTargetsAsync(
+            projectId,
+            (targets ?? []).ToList(),
+            cancellationToken);
+        if (!validation.IsValid)
+            throw new InvalidOperationException(validation.Error);
+        return validation.Targets;
     }
 
     private static ProjectImageMaskView ToMaskView(ProjectImageMask mask) =>

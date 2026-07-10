@@ -44,6 +44,37 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
         return examples.Select(example => ToView(projectId, example)).ToList();
     }
 
+    public async Task<EntityVisualTargetValidationResult> ValidateTargetsAsync(
+        Guid projectId,
+        IReadOnlyCollection<EntityVisualTarget>? targets,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = (targets ?? [])
+            .Where(target => target.EntityId != Guid.Empty)
+            .Select(target => new EntityVisualTarget(target.EntityId, target.Label?.Trim() ?? string.Empty))
+            .DistinctBy(target => target.EntityId)
+            .ToList();
+        var errors = new List<string>();
+        foreach (var target in normalized)
+        {
+            var key = target.EntityId.ToString("N");
+            var node = await db.GraphNodes.AsNoTracking().FirstOrDefaultAsync(
+                candidate => candidate.ProjectId == projectId && candidate.Key == key,
+                cancellationToken);
+            if (node is null)
+            {
+                errors.Add($"Entity target {target.EntityId} was not found in this project.");
+                continue;
+            }
+            if (!IsEligible(node))
+                errors.Add($"Entity target {target.EntityId} ({node.NodeType}) is not eligible for visual examples.");
+        }
+
+        return new EntityVisualTargetValidationResult(
+            normalized,
+            errors.Count == 0 ? null : string.Join(" ", errors));
+    }
+
     public async Task<EntityVisualExampleView> AttachAsync(
         Guid projectId,
         Guid entityId,
@@ -344,13 +375,13 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
 
     public static bool IsEligible(GraphNode node) =>
         Guid.TryParseExact(node.Key, "N", out _)
-        && node.NodeType is not EntityTypeService.ProjectNodeType
-        && node.NodeType is not EntityTypeService.ActNodeType
-        && node.NodeType is not EntityTypeService.ChapterNodeType
-        && node.NodeType is not EntityTypeService.ProjectFactNodeType
-        && node.NodeType is not EntityTypeService.SourceNodeType
-        && node.NodeType is not EntityTypeService.SourceChunkNodeType
-        && node.NodeType is not EntityTypeService.SourceBlockNodeType;
+        && !string.Equals(node.NodeType, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(node.NodeType, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
     private async Task NormalizeOrderAsync(long graphNodeId, CancellationToken cancellationToken)
     {

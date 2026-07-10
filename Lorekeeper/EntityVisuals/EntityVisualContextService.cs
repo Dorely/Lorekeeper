@@ -82,7 +82,7 @@ public sealed class EntityVisualContextService(
             var mappings = references.Where(item => item.ImageId == reference.ImageId).ToList();
             var mappingText = string.Join("; ", mappings.Select(item => item.EntityId is null
                 ? $"explicit project image ({item.Label})"
-                : $"{item.EntityType} {item.EntityName} ({item.Label})"));
+                : $"{item.EntityType} {item.EntityName} [entityId={item.EntityId:N}] ({item.Label})"));
             contents.Add(new TextContent($"\nMappings: {mappingText}; imageId={reference.ImageId:N}; file={reference.FileName}; alt={reference.AltText}; prompt={reference.Prompt}"));
             contents.Add(new DataContent(data.Data, data.ContentType) { Name = data.FileName });
         }

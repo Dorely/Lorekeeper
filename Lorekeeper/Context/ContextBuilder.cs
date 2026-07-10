@@ -682,6 +682,7 @@ public sealed class ContextBuilder(
         CancellationToken cancellationToken)
     {
         var sb = new StringBuilder();
+        sb.Append("Id: ").AppendLine(entity.Id.ToString("N"));
         sb.Append("Type: ").AppendLine(entity.Type);
         sb.Append("Name: ").AppendLine(entity.Name);
         AppendOptionalIndented(sb, "Summary", entity.Summary, 0);

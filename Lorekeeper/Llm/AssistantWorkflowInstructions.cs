@@ -14,6 +14,7 @@ public static class AssistantWorkflowInstructions
         - When the intended entity occupies only part of a broader scene, crop it tightly before using it as a continuity reference. Inspect the image first or use exact user-supplied percentage coordinates, describe only the cropped subject in crop alt text, and use the cropped image id rather than the scene image when isolation is the goal.
         - Crops and their source images remain ordinary independent visual examples. Cropping does not inherit associations, replace, prioritize, suppress, or detach the source; explicitly attach, reorder, or prune examples as the user requests.
         - When you generate or import a continuity-relevant image that clearly represents one or more entities, attach it to every represented entity with a concise role label.
+        - Entity target ids must come from the Context Feed or a current entity search/read result. Never invent, infer, or reuse an uncertain GUID; omit entity targets when their ids are not grounded.
         - Never attach decorative, layout-only, typographic, mask, or background art. Never guess an entity association from proximity, a weak resemblance, or ambiguous evidence.
         - Compact searches provide visual metadata/counts only. Use a full entity read before relying on visual identity.
         - If the provider cannot receive images, continue from labels, alt text, prompts, captions, and provenance without failing.

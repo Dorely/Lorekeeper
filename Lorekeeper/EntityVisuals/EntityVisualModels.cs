@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Lorekeeper.Images;
 using Lorekeeper.Models;
 
@@ -14,7 +15,18 @@ public sealed record EntityVisualExampleView(
     Guid? SourceVisualCandidateId,
     ProjectImageView Image);
 
-public sealed record EntityVisualTarget(Guid EntityId, string Label);
+public sealed record EntityVisualTarget(
+    [property: Description("Exact id of an existing project entity that is eligible for visual examples. Use an id returned by project context or an entity read/search; never invent one.")]
+    Guid EntityId,
+    [property: Description("Concise role of the represented entity in this image, such as default appearance, winter outfit, or exterior view.")]
+    string Label);
+
+public sealed record EntityVisualTargetValidationResult(
+    IReadOnlyList<EntityVisualTarget> Targets,
+    string? Error)
+{
+    public bool IsValid => Error is null;
+}
 
 public sealed record EntityVisualChange(
     string Operation,

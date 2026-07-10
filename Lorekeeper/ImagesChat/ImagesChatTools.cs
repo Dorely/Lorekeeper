@@ -90,7 +90,7 @@ public sealed class ImagesChatTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId, Guid imageId, string? label = null) => AttachEntityVisualAsync(context, entityId, imageId, label),
                 name: "attach_entity_visual_example",
-                description: "Attach an existing project image to a non-structural entity as a labeled visual example."),
+                description: "Attach an existing project image to an eligible story entity as a labeled visual example."),
 
             AIFunctionFactory.Create(
                 method: (Guid exampleId, string label, int? sortOrder = null) => UpdateEntityVisualAsync(context, exampleId, label, sortOrder),
@@ -129,7 +129,7 @@ public sealed class ImagesChatTools(
                 method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, string? label = null, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
                     GenerateImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, entityTargets, label, targetChapterId, targetPictureImageElementId),
                 name: "generate_image",
-                description: "Generate library images. Pass entityTargets [{entityId,label}] for every clearly represented entity so each output is attached automatically. Reuse existing visual examples through referenceImageIds for continuity. Do not target decorative/layout-only art or guess ambiguous associations."),
+                description: "Generate library images. Pass entityTargets [{entityId,label}] for every clearly represented entity so each output is attached automatically. Only use eligible story entity ids returned by project/entity reads; omit entityTargets rather than inventing or reusing an uncertain id. Reuse existing visual examples through referenceImageIds for continuity. Do not target decorative/layout-only art or guess ambiguous associations."),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, string prompt, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, bool inheritSourceEntityTargets = true, string? label = null) =>
@@ -501,18 +501,30 @@ public sealed class ImagesChatTools(
             ? target.RecommendedSize
             : CleanOr(size, imageOptions.Value.DefaultSize);
 
-        var job = await imageJobs.CreateGenerateJobAsync(ctx.ProjectId, new ProjectImageGenerateJobRequest(
-            promptText,
-            effectiveSize,
-            CleanOr(quality, imageOptions.Value.DefaultQuality),
-            CleanOr(outputFormat, imageOptions.Value.DefaultOutputFormat),
-            outputCompression,
-            altText?.Trim() ?? string.Empty,
-            Math.Clamp(count, 1, Math.Max(1, imageOptions.Value.MaxOutputs)),
-            (referenceImageIds ?? []).Distinct().ToList(),
-            label,
-            NormalizeTargets(entityTargets)));
-        return await RunQueuedJobToolAsync(ctx, job.Id, NormalizeTargets(entityTargets));
+        var targetValidation = await entityVisualExamples.ValidateTargetsAsync(ctx.ProjectId, entityTargets);
+        if (!targetValidation.IsValid)
+            return $"Error: {targetValidation.Error} Use an entity id returned by project/entity reads; otherwise omit entityTargets.";
+
+        ProjectImageJobView job;
+        try
+        {
+            job = await imageJobs.CreateGenerateJobAsync(ctx.ProjectId, new ProjectImageGenerateJobRequest(
+                promptText,
+                effectiveSize,
+                CleanOr(quality, imageOptions.Value.DefaultQuality),
+                CleanOr(outputFormat, imageOptions.Value.DefaultOutputFormat),
+                outputCompression,
+                altText?.Trim() ?? string.Empty,
+                Math.Clamp(count, 1, Math.Max(1, imageOptions.Value.MaxOutputs)),
+                (referenceImageIds ?? []).Distinct().ToList(),
+                label,
+                targetValidation.Targets));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+        return await RunQueuedJobToolAsync(ctx, job.Id);
     }
 
     private async Task<ImageGenerationTargetResolution> ResolvePicturePageGenerationTargetAsync(
@@ -565,6 +577,10 @@ public sealed class ImagesChatTools(
         if (string.IsNullOrWhiteSpace(prompt))
             return "Error: prompt is required.";
 
+        var targetValidation = await entityVisualExamples.ValidateTargetsAsync(ctx.ProjectId, entityTargets);
+        if (!targetValidation.IsValid)
+            return $"Error: {targetValidation.Error} Use an entity id returned by project/entity reads; otherwise omit entityTargets.";
+
         Guid? effectiveMaskId = maskId;
         if (effectiveMaskId is null && maskShapes is { Length: > 0 })
         {
@@ -576,31 +592,33 @@ public sealed class ImagesChatTools(
             effectiveMaskId = mask.Id;
         }
 
-        var job = await imageJobs.CreateEditJobAsync(ctx.ProjectId, new ProjectImageEditJobRequest(
-            sourceImageId,
-            prompt.Trim(),
-            CleanOr(size, imageOptions.Value.DefaultSize),
-            CleanOr(quality, imageOptions.Value.DefaultQuality),
-            CleanOr(outputFormat, imageOptions.Value.DefaultOutputFormat),
-            outputCompression,
-            altText?.Trim() ?? string.Empty,
-            Math.Clamp(count, 1, Math.Max(1, imageOptions.Value.MaxOutputs)),
-            MaskPngDataUrl: null,
-            ReferenceImageIds: (referenceImageIds ?? []).Distinct().ToList(),
-            Label: label,
-            ExistingMaskId: effectiveMaskId,
-            EntityTargets: NormalizeTargets(entityTargets),
-            InheritSourceEntityTargets: inheritSourceEntityTargets));
-        var targets = NormalizeTargets(entityTargets).ToList();
-        if (inheritSourceEntityTargets)
+        ProjectImageJobView job;
+        try
         {
-            targets.AddRange((await entityVisualExamples.ListForImageAsync(ctx.ProjectId, sourceImageId))
-                .Select(example => new EntityVisualTarget(example.EntityId, example.Label)));
+            job = await imageJobs.CreateEditJobAsync(ctx.ProjectId, new ProjectImageEditJobRequest(
+                sourceImageId,
+                prompt.Trim(),
+                CleanOr(size, imageOptions.Value.DefaultSize),
+                CleanOr(quality, imageOptions.Value.DefaultQuality),
+                CleanOr(outputFormat, imageOptions.Value.DefaultOutputFormat),
+                outputCompression,
+                altText?.Trim() ?? string.Empty,
+                Math.Clamp(count, 1, Math.Max(1, imageOptions.Value.MaxOutputs)),
+                MaskPngDataUrl: null,
+                ReferenceImageIds: (referenceImageIds ?? []).Distinct().ToList(),
+                Label: label,
+                ExistingMaskId: effectiveMaskId,
+                EntityTargets: targetValidation.Targets,
+                InheritSourceEntityTargets: inheritSourceEntityTargets));
         }
-        return await RunQueuedJobToolAsync(ctx, job.Id, targets.DistinctBy(target => target.EntityId).ToList());
+        catch (InvalidOperationException ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+        return await RunQueuedJobToolAsync(ctx, job.Id);
     }
 
-    private async Task<string> RunQueuedJobToolAsync(ImagesChatToolContext ctx, Guid jobId, IReadOnlyList<EntityVisualTarget>? targets = null)
+    private async Task<string> RunQueuedJobToolAsync(ImagesChatToolContext ctx, Guid jobId)
     {
         await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, CancellationToken.None);
         var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
@@ -621,8 +639,6 @@ public sealed class ImagesChatTools(
                 : "Generated output saved to the image library.";
             ctx.AddVisual(await BuildVisualAsync(ctx, image, title: image.FileName, caption: caption));
             ctx.AddModelOnlyImage(image);
-            foreach (var target in targets ?? [])
-                await entityVisualExamples.AttachAsync(ctx.ProjectId, target.EntityId, image.Id, target.Label, EntityVisualExampleOrigin.Agent);
             outputs.Add(ImagePayload(image));
         }
 

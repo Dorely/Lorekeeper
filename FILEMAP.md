@@ -375,7 +375,7 @@
 |------|-------------|
 | `EntityVisualModels.cs` | Read/request/change records for visual examples, entity targets, and source candidates. |
 | `EntityVisualContextOptions.cs` | Limits for images per entity/turn, model input edge, and source visuals per ingest chunk. |
-| `IEntityVisualExampleService.cs` / `EntityVisualExampleService.cs` | Association/candidate reads and mutations, promotion, cleanup, and entity reindexing. |
+| `IEntityVisualExampleService.cs` / `EntityVisualExampleService.cs` | Association/candidate reads and mutations, non-throwing entity-target validation, promotion, cleanup, and entity reindexing. |
 | `EntityVisualContextService.cs` | Bounded, deduplicated multimodal entity context assembly for agent turns. |
 
 ### Tokens/
