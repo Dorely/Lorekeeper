@@ -2,6 +2,7 @@ using System.Text.Json;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
+using Lorekeeper.Images;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Search;
@@ -37,6 +38,7 @@ public sealed class ResearchTools(
     IEntityService entities,
     IEntityRelationContextService entityRelations,
     IEntityVisualExampleService entityVisualExamples,
+    IProjectImageService projectImages,
     IWebPageReader pageReader,
     IWebLinkPolicy linkPolicy,
     IOptions<WebResearchOptions> webOptions)
@@ -105,9 +107,10 @@ public sealed class ResearchTools(
                 description: "Safely fetch, validate, cache, and visually inspect an image discovered on a read webpage. Use the exact image URL returned by the page read when more than one is available."),
 
             AIFunctionFactory.Create(
-                method: (Guid candidateId, EntityVisualTarget[] entityTargets) => ImportWebImageAsync(context, candidateId, entityTargets),
+                method: (Guid candidateId, EntityVisualTarget[] entityTargets, ProjectImageCropRegion? crop = null, string? cropFileName = null, string? cropAltText = null) =>
+                    ImportWebImageAsync(context, candidateId, entityTargets, crop, cropFileName, cropAltText),
                 name: "import_web_image_to_entities",
-                description: "After the user confirms storage, promote an inspected web image into the project library and attach it to every unambiguously represented entity. Never guess ambiguous associations."),
+                description: "After the user confirms storage, promote an inspected web image into the project library and attach it to every unambiguously represented entity. Pass a percentage-based crop plus subject-only cropAltText when the intended subject occupies only part of a broader scene. Never guess ambiguous associations."),
         };
 
         var allowedGraphToolNames = new HashSet<string>(StringComparer.Ordinal)
@@ -124,6 +127,7 @@ public sealed class ResearchTools(
             "attach_entity_visual_example",
             "update_entity_visual_example",
             "detach_entity_visual_example",
+            "crop_project_image",
         };
 
         var outlineContext = new OutlineCollaborationContext(
@@ -321,13 +325,25 @@ public sealed class ResearchTools(
         catch (Exception ex) { return $"Error: {ex.Message}"; }
     }
 
-    private async Task<string> ImportWebImageAsync(ResearchToolContext context, Guid candidateId, EntityVisualTarget[] entityTargets)
+    private async Task<string> ImportWebImageAsync(
+        ResearchToolContext context,
+        Guid candidateId,
+        EntityVisualTarget[] entityTargets,
+        ProjectImageCropRegion? crop,
+        string? cropFileName,
+        string? cropAltText)
     {
         var targets = entityTargets.Where(target => target.EntityId != Guid.Empty).DistinctBy(target => target.EntityId).ToList();
         if (targets.Count == 0) return "Error: at least one unambiguous entity target is required.";
         if (context.Staging is not null)
         {
-            var after = new EntityVisualChange("import", CandidateId: candidateId, Targets: targets);
+            var after = new EntityVisualChange(
+                "import",
+                CandidateId: candidateId,
+                Targets: targets,
+                Crop: crop,
+                CropFileName: cropFileName?.Trim() ?? string.Empty,
+                CropAltText: cropAltText?.Trim() ?? string.Empty);
             return await context.Staging.StageExternalChangeAsync(
                 "Import a researched image and attach it to entities", null, after,
                 new { status = "staged", candidateId, targets }, "EntityVisualExample", candidateId.ToString("N"));
@@ -335,8 +351,21 @@ public sealed class ResearchTools(
         var attached = new List<EntityVisualExampleView>();
         try
         {
+            var sourceImage = await entityVisualExamples.PromoteCandidateAsync(context.ProjectId, candidateId);
+            var referenceImage = crop is null
+                ? sourceImage
+                : await projectImages.CropAsync(context.ProjectId, sourceImage.Id, new ProjectImageCropRequest(
+                    crop,
+                    cropFileName?.Trim() ?? string.Empty,
+                    cropAltText?.Trim() ?? string.Empty));
             foreach (var target in targets)
-                attached.Add(await entityVisualExamples.PromoteAndAttachAsync(context.ProjectId, candidateId, target.EntityId, target.Label, EntityVisualExampleOrigin.Research));
+                attached.Add(await entityVisualExamples.AttachAsync(
+                    context.ProjectId,
+                    target.EntityId,
+                    referenceImage.Id,
+                    target.Label,
+                    EntityVisualExampleOrigin.Research,
+                    candidateId));
             context.OnMutated();
             return JsonSerializer.Serialize(new { status = "imported", attached = attached.Select(VisualPayload) }, JsonOptions);
         }

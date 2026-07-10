@@ -211,15 +211,18 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
         return candidates.Select(ToView).ToList();
     }
 
-    public async Task<EntityVisualExampleView> PromoteAndAttachAsync(Guid projectId, Guid candidateId, Guid entityId, string? label, EntityVisualExampleOrigin origin, CancellationToken cancellationToken = default)
+    public async Task<ProjectImageView> PromoteCandidateAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default)
     {
         var candidate = await db.SourceVisualCandidates.FirstOrDefaultAsync(item => item.ProjectId == projectId && item.Id == candidateId, cancellationToken)
             ?? throw new InvalidOperationException("Source visual candidate was not found.");
         if (candidate.Data.Length == 0) throw new InvalidOperationException("Source visual candidate has no cached image data.");
         var imageId = candidate.PromotedImageId;
-        if (imageId is null || !await db.PublishAssets.AnyAsync(asset => asset.ProjectId == projectId && asset.Id == imageId, cancellationToken))
+        var image = imageId is Guid existingImageId
+            ? await db.PublishAssets.FirstOrDefaultAsync(asset => asset.ProjectId == projectId && asset.Id == existingImageId, cancellationToken)
+            : null;
+        if (image is null)
         {
-            var asset = new PublishAsset
+            image = new PublishAsset
             {
                 ProjectId = projectId,
                 Source = PublishAssetSource.Imported,
@@ -229,15 +232,14 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
                 AltText = string.IsNullOrWhiteSpace(candidate.AltText) ? candidate.Caption : candidate.AltText,
                 SourceMetadataJson = candidate.MetadataJson,
             };
-            await db.PublishAssets.AddAsync(asset, cancellationToken);
-            candidate.PromotedImageId = asset.Id;
+            await db.PublishAssets.AddAsync(image, cancellationToken);
+            candidate.PromotedImageId = image.Id;
             candidate.Status = SourceVisualCandidateStatus.Promoted;
             candidate.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
-            imageId = asset.Id;
         }
 
-        return await AttachAsync(projectId, entityId, imageId.Value, label ?? candidate.Caption, origin, candidate.Id, cancellationToken);
+        return ProjectImageService.ToView(projectId, image);
     }
 
     public async Task<SourceVisualCandidateView> SetCandidateStatusAsync(
@@ -265,17 +267,37 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
             .Where(example => example.ProjectId == projectId && example.Origin == EntityVisualExampleOrigin.Ingest && example.SourceVisualCandidateId != null && candidateIds.Contains(example.SourceVisualCandidateId.Value))
             .ToListAsync(cancellationToken);
         var entityIds = examples.Select(example => Guid.ParseExact(example.GraphNode.Key, "N")).Distinct().ToList();
-        var promotedImageIds = candidates.Where(candidate => candidate.PromotedImageId is not null).Select(candidate => candidate.PromotedImageId!.Value).Distinct().ToList();
+        var promotedImageIds = candidates
+            .Where(candidate => candidate.PromotedImageId is not null)
+            .Select(candidate => candidate.PromotedImageId!.Value)
+            .Distinct()
+            .ToList();
+        var derivedCropImageIds = await db.PublishAssets
+            .AsNoTracking()
+            .Where(asset => asset.ProjectId == projectId
+                && asset.DerivedFromImageId != null
+                && promotedImageIds.Contains(asset.DerivedFromImageId.Value))
+            .Select(asset => asset.Id)
+            .ToListAsync(cancellationToken);
+        var candidateImageIds = examples
+            .Select(example => example.ImageId)
+            .Concat(promotedImageIds)
+            .Concat(derivedCropImageIds)
+            .Distinct()
+            .ToList();
         db.EntityVisualExamples.RemoveRange(examples);
         await db.SaveChangesAsync(cancellationToken);
 
-        foreach (var imageId in promotedImageIds)
+        var candidateAssets = await db.PublishAssets
+            .Where(asset => asset.ProjectId == projectId && candidateImageIds.Contains(asset.Id))
+            .OrderByDescending(asset => asset.DerivedFromImageId != null)
+            .ToListAsync(cancellationToken);
+        foreach (var asset in candidateAssets)
         {
-            if (!await IsImageOtherwiseReferencedAsync(projectId, imageId, cancellationToken))
+            if (!await IsImageOtherwiseReferencedAsync(projectId, asset.Id, cancellationToken))
             {
-                var asset = await db.PublishAssets.FirstOrDefaultAsync(image => image.ProjectId == projectId && image.Id == imageId, cancellationToken);
-                if (asset is not null) db.PublishAssets.Remove(asset);
-                foreach (var candidate in candidates.Where(candidate => candidate.PromotedImageId == imageId))
+                db.PublishAssets.Remove(asset);
+                foreach (var candidate in candidates.Where(candidate => candidate.PromotedImageId == asset.Id))
                 {
                     candidate.PromotedImageId = null;
                     candidate.Status = SourceVisualCandidateStatus.Inspected;

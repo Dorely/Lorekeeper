@@ -180,6 +180,11 @@ public sealed class EditorChatTools(
                 method: (Guid exampleId) => DetachProjectImageFromEntityAsync(context, exampleId),
                 name: "detach_project_image_from_entity",
                 description: "Detach one visual example association without deleting the project image."),
+            AIFunctionFactory.Create(
+                method: (Guid sourceImageId, ProjectImageCropRegion crop, string? fileName = null, string? altText = null, EntityVisualTarget[]? entityTargets = null) =>
+                    CropProjectImageAsync(context, sourceImageId, crop, fileName, altText, entityTargets),
+                name: "crop_project_image",
+                description: "Create a non-destructive project-library crop from an existing image using 0-100 percentage coordinates. Inspect the source first or use user-supplied coordinates, describe only the cropped subject in altText, and pass only explicit entityTargets. Source associations are never inherited."),
         ]);
 
         tools.Add(AIFunctionFactory.Create(
@@ -745,6 +750,76 @@ public sealed class EditorChatTools(
         await entityVisualExamples.DetachAsync(ctx.ProjectId, exampleId);
         ctx.OnMutated();
         return JsonSerializer.Serialize(new { status = "detached", exampleId });
+    }
+
+    private async Task<string> CropProjectImageAsync(
+        EditorChatContext ctx,
+        Guid sourceImageId,
+        ProjectImageCropRegion crop,
+        string? fileName,
+        string? altText,
+        EntityVisualTarget[]? entityTargets)
+    {
+        try
+        {
+            var image = await projectImages.CropAsync(ctx.ProjectId, sourceImageId, new ProjectImageCropRequest(
+                crop,
+                fileName?.Trim() ?? string.Empty,
+                altText?.Trim() ?? string.Empty));
+            var targets = (entityTargets ?? [])
+                .Where(target => target.EntityId != Guid.Empty)
+                .DistinctBy(target => target.EntityId)
+                .ToList();
+            var associations = new List<object>();
+            foreach (var target in targets)
+            {
+                if (ctx.OutlineStaging is null)
+                {
+                    var example = await entityVisualExamples.AttachAsync(
+                        ctx.ProjectId,
+                        target.EntityId,
+                        image.Id,
+                        target.Label,
+                        EntityVisualExampleOrigin.Agent);
+                    associations.Add(VisualExamplePayload(example));
+                    continue;
+                }
+
+                var after = new EntityVisualChange("attach", EntityId: target.EntityId, ImageId: image.Id, Label: target.Label?.Trim() ?? string.Empty);
+                var staged = await ctx.OutlineStaging.StageExternalChangeAsync(
+                    $"Attach cropped image to entity {target.EntityId:N}",
+                    null,
+                    after,
+                    new { status = "staged", target.EntityId, imageId = image.Id, target.Label },
+                    "EntityVisualExample",
+                    $"{target.EntityId:N}/{image.Id:N}");
+                associations.Add(JsonSerializer.Deserialize<JsonElement>(staged));
+            }
+
+            ctx.AddVisual(await BuildVisualAsync(ctx, image, image.FileName, "Cropped project image saved to the library."));
+            ctx.AddModelOnlyImage(image);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                status = "cropped",
+                sourceImageId,
+                image = new
+                {
+                    image.Id,
+                    image.FileName,
+                    image.ContentType,
+                    image.PreviewUrl,
+                    image.AltText,
+                    image.Source,
+                    image.SizeBytes,
+                },
+                associations,
+            });
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
     }
 
     private async Task<IReadOnlyList<EntityVisualExampleView>> AddEntityVisualsToModelAsync(EditorChatContext ctx, Guid entityId)

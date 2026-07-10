@@ -114,6 +114,12 @@ public sealed class ImagesChatTools(
                 description: "Render Picture Page or Illustrated Prose snapshots and inspect them with the active vision-capable chat provider."),
 
             AIFunctionFactory.Create(
+                method: (Guid sourceImageId, ProjectImageCropRegion crop, string? fileName = null, string? altText = null, EntityVisualTarget[]? entityTargets = null) =>
+                    CropProjectImageAsync(context, sourceImageId, crop, fileName, altText, entityTargets),
+                name: "crop_project_image",
+                description: "Create a non-destructive project-library crop from an existing image using 0-100 percentage coordinates. Inspect the source first or use user-supplied coordinates, describe only the cropped subject in altText, and pass only explicit entityTargets. Source associations are never inherited."),
+
+            AIFunctionFactory.Create(
                 method: (Guid imageId, string label, ProjectImageMaskShape[] shapes) =>
                     CreateShapeMaskAsync(context, imageId, label, shapes),
                 name: "create_shape_mask",
@@ -421,6 +427,49 @@ public sealed class ImagesChatTools(
             message = "Mask saved.",
             mask,
         }, JsonOptions);
+    }
+
+    private async Task<string> CropProjectImageAsync(
+        ImagesChatToolContext ctx,
+        Guid sourceImageId,
+        ProjectImageCropRegion crop,
+        string? fileName,
+        string? altText,
+        EntityVisualTarget[]? entityTargets)
+    {
+        try
+        {
+            var image = await projectImages.CropAsync(ctx.ProjectId, sourceImageId, new ProjectImageCropRequest(
+                crop,
+                fileName?.Trim() ?? string.Empty,
+                altText?.Trim() ?? string.Empty));
+            var attached = new List<object>();
+            foreach (var target in NormalizeTargets(entityTargets))
+            {
+                var example = await entityVisualExamples.AttachAsync(
+                    ctx.ProjectId,
+                    target.EntityId,
+                    image.Id,
+                    target.Label,
+                    EntityVisualExampleOrigin.Agent);
+                attached.Add(VisualPayload(example));
+            }
+
+            ctx.AddVisual(await BuildVisualAsync(ctx, image, image.FileName, "Cropped project image saved to the library."));
+            ctx.AddModelOnlyImage(image);
+            ctx.MarkMutated();
+            return JsonSerializer.Serialize(new
+            {
+                status = "cropped",
+                sourceImageId,
+                image = ImagePayload(image),
+                attached,
+            }, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
     }
 
     private async Task<string> GenerateImageAsync(

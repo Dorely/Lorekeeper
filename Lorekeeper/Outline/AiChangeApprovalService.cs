@@ -5,6 +5,7 @@ using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Images;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 
@@ -21,6 +22,7 @@ public sealed class AiChangeApprovalService(
     IEntityService entities,
     IVectorIndexWorkCoordinator indexWork,
     IEntityVisualExampleService entityVisualExamples,
+    IProjectImageService projectImages,
     ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
 {
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
@@ -459,6 +461,7 @@ public sealed class AiChangeApprovalService(
             case "attach_project_image_to_entity":
             case "attach_entity_visual_example":
             case "generate_project_image":
+            case "crop_project_image":
             {
                 var after = ReadRequired<EntityVisualChange>(afterJson);
                 await entityVisualExamples.AttachAsync(projectId, after.EntityId!.Value, after.ImageId!.Value, after.Label, EntityVisualExampleOrigin.Agent, cancellationToken: cancellationToken);
@@ -480,8 +483,22 @@ public sealed class AiChangeApprovalService(
             case "import_web_image_to_entities":
             {
                 var after = ReadRequired<EntityVisualChange>(afterJson);
+                var sourceImage = await entityVisualExamples.PromoteCandidateAsync(projectId, after.CandidateId!.Value, cancellationToken);
+                var referenceImage = after.Crop is null
+                    ? sourceImage
+                    : await projectImages.CropAsync(projectId, sourceImage.Id, new ProjectImageCropRequest(
+                        after.Crop,
+                        after.CropFileName,
+                        after.CropAltText), cancellationToken);
                 foreach (var target in after.Targets ?? [])
-                    await entityVisualExamples.PromoteAndAttachAsync(projectId, after.CandidateId!.Value, target.EntityId, target.Label, EntityVisualExampleOrigin.Research, cancellationToken);
+                    await entityVisualExamples.AttachAsync(
+                        projectId,
+                        target.EntityId,
+                        referenceImage.Id,
+                        target.Label,
+                        EntityVisualExampleOrigin.Research,
+                        after.CandidateId,
+                        cancellationToken);
                 break;
             }
             default:

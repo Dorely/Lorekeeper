@@ -24,7 +24,10 @@ public sealed record EntityVisualChange(
     Guid? CandidateId = null,
     string Label = "",
     int? SortOrder = null,
-    IReadOnlyList<EntityVisualTarget>? Targets = null);
+    IReadOnlyList<EntityVisualTarget>? Targets = null,
+    ProjectImageCropRegion? Crop = null,
+    string CropFileName = "",
+    string CropAltText = "");
 
 public sealed record SourceVisualCandidateView(
     Guid Id,

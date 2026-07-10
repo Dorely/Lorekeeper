@@ -4,6 +4,7 @@ using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SkiaSharp;
 
 namespace Lorekeeper.Images;
 
@@ -63,6 +64,88 @@ public sealed class ProjectImageService(
             ContentType = normalized.ContentType,
             Data = normalized.Data,
             AltText = Clean(upload.AltText),
+        };
+
+        await db.PublishAssets.AddAsync(asset, cancellationToken);
+        project.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToView(projectId, asset);
+    }
+
+    public async Task<ProjectImageView> CropAsync(
+        Guid projectId,
+        Guid sourceImageId,
+        ProjectImageCropRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var project = await GetProjectAsync(projectId, cancellationToken);
+        var source = await db.PublishAssets
+            .FirstOrDefaultAsync(asset => asset.ProjectId == projectId && asset.Id == sourceImageId, cancellationToken)
+            ?? throw new InvalidOperationException("Source image was not found in this project.");
+        var crop = NormalizeCrop(request.Crop);
+
+        var existing = await db.PublishAssets
+            .AsNoTracking()
+            .FirstOrDefaultAsync(asset => asset.ProjectId == projectId
+                && asset.DerivedFromImageId == sourceImageId
+                && asset.CropXPercent == crop.XPercent
+                && asset.CropYPercent == crop.YPercent
+                && asset.CropWidthPercent == crop.WidthPercent
+                && asset.CropHeightPercent == crop.HeightPercent,
+                cancellationToken);
+        if (existing is not null)
+            return ToView(projectId, existing);
+
+        using var sourceStream = new SKMemoryStream(source.Data);
+        using var sourceCodec = SKCodec.Create(sourceStream)
+            ?? throw new InvalidOperationException("Source image data could not be decoded.");
+        using var sourceBitmap = SKBitmap.Decode(source.Data)
+            ?? throw new InvalidOperationException("Source image data could not be decoded.");
+        if (sourceBitmap.Width <= 0 || sourceBitmap.Height <= 0)
+            throw new InvalidOperationException("Source image dimensions are invalid.");
+
+        var left = Math.Clamp((int)Math.Floor(crop.XPercent / 100d * sourceBitmap.Width), 0, sourceBitmap.Width - 1);
+        var top = Math.Clamp((int)Math.Floor(crop.YPercent / 100d * sourceBitmap.Height), 0, sourceBitmap.Height - 1);
+        var right = Math.Clamp((int)Math.Ceiling((crop.XPercent + crop.WidthPercent) / 100d * sourceBitmap.Width), left + 1, sourceBitmap.Width);
+        var bottom = Math.Clamp((int)Math.Ceiling((crop.YPercent + crop.HeightPercent) / 100d * sourceBitmap.Height), top + 1, sourceBitmap.Height);
+        var width = right - left;
+        var height = bottom - top;
+
+        using var croppedBitmap = new SKBitmap(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
+        using (var canvas = new SKCanvas(croppedBitmap))
+        {
+            canvas.Clear(SKColors.Transparent);
+            using var paint = new SKPaint { IsAntialias = true };
+            canvas.DrawBitmap(
+                sourceBitmap,
+                new SKRect(left, top, right, bottom),
+                new SKRect(0, 0, width, height),
+                paint);
+        }
+
+        var jpeg = sourceCodec.EncodedFormat == SKEncodedImageFormat.Jpeg;
+        using var croppedImage = SKImage.FromBitmap(croppedBitmap);
+        using var encoded = croppedImage.Encode(jpeg ? SKEncodedImageFormat.Jpeg : SKEncodedImageFormat.Png, jpeg ? 95 : 100);
+        var data = encoded?.ToArray() ?? throw new InvalidOperationException("Cropped image could not be encoded.");
+        var contentType = jpeg ? "image/jpeg" : "image/png";
+        var fileName = CropFileName(request.FileName, source.FileName, contentType);
+
+        var asset = new PublishAsset
+        {
+            ProjectId = projectId,
+            Source = PublishAssetSource.Cropped,
+            FileName = fileName,
+            ContentType = contentType,
+            Data = data,
+            AltText = Clean(request.AltText),
+            Prompt = string.Empty,
+            GenerationModel = string.Empty,
+            SourceMetadataJson = string.Empty,
+            DerivedFromImageId = source.Id,
+            CropXPercent = crop.XPercent,
+            CropYPercent = crop.YPercent,
+            CropWidthPercent = crop.WidthPercent,
+            CropHeightPercent = crop.HeightPercent,
         };
 
         await db.PublishAssets.AddAsync(asset, cancellationToken);
@@ -177,6 +260,37 @@ public sealed class ProjectImageService(
             .Select(example => example.GraphNode.Key)
             .ToListAsync(cancellationToken);
         return keys.Where(key => Guid.TryParseExact(key, "N", out _)).Select(key => Guid.ParseExact(key, "N")).ToList();
+    }
+
+    private static ProjectImageCropRegion NormalizeCrop(ProjectImageCropRegion crop)
+    {
+        var values = new[] { crop.XPercent, crop.YPercent, crop.WidthPercent, crop.HeightPercent };
+        if (values.Any(value => double.IsNaN(value) || double.IsInfinity(value)))
+            throw new InvalidOperationException("Crop coordinates must be finite numbers.");
+        if (crop.XPercent < 0 || crop.YPercent < 0 || crop.WidthPercent <= 0 || crop.HeightPercent <= 0)
+            throw new InvalidOperationException("Crop coordinates must start within the image and have positive width and height.");
+        if (crop.XPercent > 100
+            || crop.YPercent > 100
+            || crop.WidthPercent > 100 - crop.XPercent
+            || crop.HeightPercent > 100 - crop.YPercent)
+            throw new InvalidOperationException("Crop rectangle must stay within the image bounds.");
+
+        return new ProjectImageCropRegion(
+            crop.XPercent == 0 ? 0 : crop.XPercent,
+            crop.YPercent == 0 ? 0 : crop.YPercent,
+            crop.WidthPercent,
+            crop.HeightPercent);
+    }
+
+    private static string CropFileName(string? requestedFileName, string sourceFileName, string contentType)
+    {
+        var extension = contentType == "image/jpeg" ? ".jpg" : ".png";
+        var requested = Path.GetFileName(requestedFileName?.Trim());
+        if (!string.IsNullOrWhiteSpace(requested))
+            return Path.ChangeExtension(requested, extension);
+        var sourceStem = Path.GetFileNameWithoutExtension(sourceFileName);
+        if (string.IsNullOrWhiteSpace(sourceStem)) sourceStem = "image";
+        return $"{sourceStem}-crop{extension}";
     }
 
     private static string Clean(string? value) => value?.Trim() ?? string.Empty;

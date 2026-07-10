@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Images;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -17,7 +18,8 @@ public sealed class IngestAgentTools(
     IGraphNodeRepository nodes,
     IEntityTypeService entityTypes,
     IContextIndexingService contextIndexing,
-    IEntityVisualExampleService entityVisualExamples)
+    IEntityVisualExampleService entityVisualExamples,
+    IProjectImageService projectImages)
 {
     public IList<AITool> Build(IngestAgentContext context) =>
     [
@@ -52,9 +54,10 @@ public sealed class IngestAgentTools(
             description: "Append one temporary relationship marker with only endpoints and edge type. Relationship markers are promoted to simple graph edges during finalization; put all narrative detail in entity observations."),
 
         AIFunctionFactory.Create(
-            method: (Guid candidateId, Guid entityId, string? label = null) => PromoteIngestVisualAsync(context, candidateId, entityId, label),
+            method: (Guid candidateId, Guid entityId, string? label = null, ProjectImageCropRegion? crop = null, string? cropAltText = null) =>
+                PromoteIngestVisualAsync(context, candidateId, entityId, label, crop, cropAltText),
             name: "promote_ingest_visual_candidate",
-            description: "Promote a source visual candidate and attach it to a resolved entity only when the visual clearly depicts that exact entity. Never infer identity from proximity alone or attach ambiguous/decorative images."),
+            description: "Promote a source visual candidate and attach it to a resolved entity only when the visual clearly depicts that exact entity. Pass a percentage-based crop plus subject-only cropAltText when the entity occupies only part of a broader scene. Never infer identity from proximity alone or attach ambiguous/decorative images."),
 
         AIFunctionFactory.Create(
             method: (Guid candidateId, string reason) => SkipIngestVisualAsync(context, candidateId, reason),
@@ -68,7 +71,13 @@ public sealed class IngestAgentTools(
             description: "Record a concise completed chunk summary and rolling source synopsis. Call exactly once after finishing each source chunk. Keep sourceSynopsis around 1500 words and notes short/operational."),
     ];
 
-    private async Task<string> PromoteIngestVisualAsync(IngestAgentContext context, Guid candidateId, Guid entityId, string? label)
+    private async Task<string> PromoteIngestVisualAsync(
+        IngestAgentContext context,
+        Guid candidateId,
+        Guid entityId,
+        string? label,
+        ProjectImageCropRegion? crop,
+        string? cropAltText)
     {
         try
         {
@@ -77,8 +86,20 @@ public sealed class IngestAgentTools(
                 return "Error: visual candidate was not found for this ingest source.";
             if (candidate.StartChar is int start && candidate.EndChar is int end && (start < 0 || end <= start))
                 return "Error: visual candidate has invalid source bounds.";
-            var example = await entityVisualExamples.PromoteAndAttachAsync(
-                context.ProjectId, candidateId, entityId, label, EntityVisualExampleOrigin.Ingest);
+            var sourceImage = await entityVisualExamples.PromoteCandidateAsync(context.ProjectId, candidateId);
+            var referenceImage = crop is null
+                ? sourceImage
+                : await projectImages.CropAsync(context.ProjectId, sourceImage.Id, new ProjectImageCropRequest(
+                    crop,
+                    string.Empty,
+                    cropAltText?.Trim() ?? string.Empty));
+            var example = await entityVisualExamples.AttachAsync(
+                context.ProjectId,
+                entityId,
+                referenceImage.Id,
+                label,
+                EntityVisualExampleOrigin.Ingest,
+                candidateId);
             context.OnMutated();
             return JsonSerializer.Serialize(new
             {

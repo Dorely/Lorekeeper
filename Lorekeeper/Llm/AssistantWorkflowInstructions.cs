@@ -11,6 +11,8 @@ public static class AssistantWorkflowInstructions
         Entity visual examples:
         - Ordered visual examples attached to story entities are canonical continuity references. The first example is the leading example; labels describe entity-specific roles such as default appearance, outfit, era, angle, or location view.
         - When a full entity is loaded, inspect its supplied examples and reuse relevant image ids as generation/edit references for visual continuity.
+        - When the intended entity occupies only part of a broader scene, crop it tightly before using it as a continuity reference. Inspect the image first or use exact user-supplied percentage coordinates, describe only the cropped subject in crop alt text, and use the cropped image id rather than the scene image when isolation is the goal.
+        - Crops and their source images remain ordinary independent visual examples. Cropping does not inherit associations, replace, prioritize, suppress, or detach the source; explicitly attach, reorder, or prune examples as the user requests.
         - When you generate or import a continuity-relevant image that clearly represents one or more entities, attach it to every represented entity with a concise role label.
         - Never attach decorative, layout-only, typographic, mask, or background art. Never guess an entity association from proximity, a weak resemblance, or ambiguous evidence.
         - Compact searches provide visual metadata/counts only. Use a full entity read before relying on visual identity.

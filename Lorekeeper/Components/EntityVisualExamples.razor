@@ -45,6 +45,7 @@
                         <div class="entity-visual-actions">
                             <button type="button" class="btn btn-sm btn-link" disabled="@(example.SortOrder == 0 || _saving)" @onclick="() => MoveAsync(example, -1)" title="Move earlier">↑</button>
                             <button type="button" class="btn btn-sm btn-link" disabled="@(example.SortOrder >= _examples.Count - 1 || _saving)" @onclick="() => MoveAsync(example, 1)" title="Move later">↓</button>
+                            <button type="button" class="btn btn-sm btn-link" disabled="@_saving" @onclick="() => OpenCrop(example)">Crop</button>
                             <button type="button" class="btn btn-sm btn-link text-danger ms-auto" disabled="@_saving" @onclick="() => DetachAsync(example)">Detach</button>
                         </div>
                     }
@@ -80,6 +81,17 @@
     }
 </section>
 
+@if (_croppingExample is not null)
+{
+    <ImageCropModal ProjectId="@ProjectId"
+                    SourceImage="@_croppingExample.Image"
+                    InitialTargets="@CropTargets"
+                    InitialAltText="@CropAltText"
+                    AllowTargetEditing="false"
+                    Saved="OnCropSavedAsync"
+                    Closed="CloseCrop" />
+}
+
 @code {
     private const long MaxUploadBytes = 25 * 1024 * 1024;
     private readonly string _pickerId = $"entity-visual-picker-{Guid.NewGuid():N}";
@@ -92,6 +104,7 @@
     private bool _saving;
     private bool _showAdd;
     private Guid _loadedEntityId;
+    private EntityVisualExampleView? _croppingExample;
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter, EditorRequired] public Guid EntityId { get; set; }
@@ -189,6 +202,49 @@
         await EntityVisuals.DetachAsync(ProjectId, example.Id);
         return example;
     });
+
+    private void OpenCrop(EntityVisualExampleView example) => _croppingExample = example;
+
+    private void CloseCrop() => _croppingExample = null;
+
+    private IReadOnlyList<EntityVisualTarget> CropTargets => _croppingExample is null
+        ? []
+        : [new EntityVisualTarget(EntityId, _croppingExample.Label)];
+
+    private string CropAltText => _croppingExample is null
+        ? string.Empty
+        : string.IsNullOrWhiteSpace(_croppingExample.Label)
+            ? _croppingExample.EntityName
+            : $"{_croppingExample.EntityName}: {_croppingExample.Label}";
+
+    private async Task OnCropSavedAsync(ProjectImageCropSaved result)
+    {
+        if (_croppingExample is null) return;
+        _saving = true;
+        _error = string.Empty;
+        try
+        {
+            await EntityVisuals.AttachAsync(
+                ProjectId,
+                EntityId,
+                result.Image.Id,
+                _croppingExample.Label,
+                EntityVisualExampleOrigin.Manual);
+            if (_library.All(image => image.Id != result.Image.Id))
+                _library.Insert(0, result.Image);
+            _croppingExample = null;
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
 
     private async Task MutateAsync(Func<Task<EntityVisualExampleView>> action)
     {

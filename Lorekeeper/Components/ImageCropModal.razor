@@ -1,0 +1,178 @@
+@using Lorekeeper.Images
+@implements IAsyncDisposable
+@inject IProjectImageService Images
+@inject IJSRuntime JS
+
+<div class="crop-modal-backdrop" @onclick="CloseAsync">
+    <section class="crop-modal" role="dialog" aria-modal="true" aria-label="Crop image" @onclick:stopPropagation="true">
+        <header class="crop-modal-header">
+            <div>
+                <h5>Crop reference image</h5>
+                <span>@SourceImage.FileName</span>
+            </div>
+            <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
+        </header>
+        <div class="crop-modal-body">
+            <div class="crop-stage-wrap">
+                <canvas class="crop-stage" @ref="_cropCanvas"></canvas>
+            </div>
+            <aside class="crop-controls">
+                <div class="btn-group btn-group-sm" role="group" aria-label="Crop canvas tool">
+                    <button type="button" class="@CropToolClass" @onclick='() => SetToolAsync("crop")'>Crop</button>
+                    <button type="button" class="@PanToolClass" @onclick='() => SetToolAsync("pan")'>Pan</button>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ResetAsync">Reset crop</button>
+
+                <div class="crop-preview-wrap">
+                    <span>Crop preview</span>
+                    <canvas class="crop-preview" @ref="_previewCanvas"></canvas>
+                </div>
+
+                <label>
+                    <span>Filename</span>
+                    <input class="form-control form-control-sm" @bind="_fileName" @bind:event="oninput" />
+                </label>
+                <label>
+                    <span>Crop description (subject only)</span>
+                    <input class="form-control form-control-sm" @bind="_altText" @bind:event="oninput" placeholder="Describe only what remains inside the crop" />
+                </label>
+
+                @if (AllowTargetEditing)
+                {
+                    <label><span>Represented entities</span></label>
+                    <EntityVisualTargetPicker ProjectId="@ProjectId" @bind-Targets="_targets" />
+                }
+                else if (_targets.Count > 0)
+                {
+                    <div class="crop-fixed-target">
+                        <span>Entity reference</span>
+                        <strong>@(string.IsNullOrWhiteSpace(_targets[0].Label) ? "Attached entity" : _targets[0].Label)</strong>
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_error))
+                {
+                    <div class="text-danger small">@_error</div>
+                }
+
+                <button type="button" class="btn btn-sm btn-primary" disabled="@_saving" @onclick="SaveAsync">
+                    @(_saving ? "Saving crop..." : "Save crop")
+                </button>
+            </aside>
+        </div>
+    </section>
+</div>
+
+@code {
+    private ElementReference _cropCanvas;
+    private ElementReference _previewCanvas;
+    private IJSObjectReference? _module;
+    private List<EntityVisualTarget> _targets = [];
+    private Guid _loadedImageId;
+    private string _fileName = string.Empty;
+    private string _altText = string.Empty;
+    private string _tool = "crop";
+    private string _error = string.Empty;
+    private bool _needsInitialize;
+    private bool _saving;
+
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter, EditorRequired] public ProjectImageView SourceImage { get; set; } = null!;
+    [Parameter] public IReadOnlyList<EntityVisualTarget> InitialTargets { get; set; } = [];
+    [Parameter] public bool AllowTargetEditing { get; set; } = true;
+    [Parameter] public string InitialAltText { get; set; } = string.Empty;
+    [Parameter] public EventCallback<ProjectImageCropSaved> Saved { get; set; }
+    [Parameter] public EventCallback Closed { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (SourceImage.Id == _loadedImageId) return;
+        _loadedImageId = SourceImage.Id;
+        _fileName = DefaultCropFileName(SourceImage.FileName);
+        _altText = InitialAltText.Trim();
+        _targets = InitialTargets.Where(target => target.EntityId != Guid.Empty).DistinctBy(target => target.EntityId).ToList();
+        _tool = "crop";
+        _error = string.Empty;
+        _needsInitialize = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/ImageCropModal.razor.js");
+
+        if (_needsInitialize && _module is not null)
+        {
+            _needsInitialize = false;
+            await _module.InvokeVoidAsync(
+                "loadCropCanvas",
+                _cropCanvas,
+                _previewCanvas,
+                $"/projects/{ProjectId:N}/images/{SourceImage.Id:N}/content");
+        }
+    }
+
+    private async Task SetToolAsync(string tool)
+    {
+        _tool = tool;
+        if (_module is not null)
+            await _module.InvokeVoidAsync("setCropTool", _cropCanvas, tool);
+    }
+
+    private async Task ResetAsync()
+    {
+        if (_module is not null)
+            await _module.InvokeVoidAsync("resetCrop", _cropCanvas);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_module is null) return;
+        _saving = true;
+        _error = string.Empty;
+        try
+        {
+            var crop = await _module.InvokeAsync<ProjectImageCropRegion>("getCropRegion", _cropCanvas);
+            var image = await Images.CropAsync(ProjectId, SourceImage.Id, new ProjectImageCropRequest(
+                crop,
+                _fileName,
+                _altText));
+            await Saved.InvokeAsync(new ProjectImageCropSaved(image, _targets));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private Task CloseAsync() => Closed.InvokeAsync();
+
+    private string CropToolClass => $"btn btn-outline-secondary{(_tool == "crop" ? " active" : string.Empty)}";
+    private string PanToolClass => $"btn btn-outline-secondary{(_tool == "pan" ? " active" : string.Empty)}";
+
+    private static string DefaultCropFileName(string sourceFileName)
+    {
+        var stem = Path.GetFileNameWithoutExtension(sourceFileName);
+        var extension = Path.GetExtension(sourceFileName);
+        if (string.IsNullOrWhiteSpace(stem)) stem = "image";
+        if (string.IsNullOrWhiteSpace(extension)) extension = ".png";
+        return $"{stem}-crop{extension}";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is null) return;
+        try
+        {
+            await _module.InvokeVoidAsync("disposeCropCanvas", _cropCanvas);
+            await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+}

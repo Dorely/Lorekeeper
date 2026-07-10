@@ -7,6 +7,7 @@
 @inject IProjectImageJobService ImageJobs
 @inject IProjectImageGenerationRuntime ImageRuntime
 @inject IImagesChatService ImagesChat
+@inject IEntityVisualExampleService EntityVisuals
 @inject ILlmProviderService Providers
 @inject IJSRuntime JS
 
@@ -71,6 +72,7 @@ else
                             <ImageEntityAssociations ProjectId="@Project.Id" ImageId="@image.Id" />
                             <div class="image-actions">
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AttachToChatAsync(image)">Attach to Chat</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenCropModal(image)">Crop</button>
                                 <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenMaskModal(image)">Edit</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => DownloadAsync(image)">Download</button>
                                 <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(image.Id)">Delete</button>
@@ -156,6 +158,15 @@ else
     </div>
 }
 
+@if (_croppingImage is not null && Project is not null)
+{
+    <ImageCropModal ProjectId="@Project.Id"
+                    SourceImage="@_croppingImage"
+                    AllowTargetEditing="true"
+                    Saved="OnCropSavedAsync"
+                    Closed="CloseCropModal" />
+}
+
 @if (_viewImage is not null)
 {
     <div class="image-view-modal-backdrop" @onclick="CloseImageModal">
@@ -231,6 +242,7 @@ else
     private IReadOnlyList<ProjectImageJobView> _jobs = [];
     private ProjectImageGenerationRuntimeSnapshot _runtimeSnapshot = new([]);
     private ProjectImageView? _editingImage;
+    private ProjectImageView? _croppingImage;
     private List<EntityVisualTarget> _generationEntityTargets = [];
     private List<EntityVisualTarget> _editEntityTargets = [];
     private bool _inheritEditEntityTargets = true;
@@ -461,6 +473,36 @@ else
     private void OpenImageModal(ProjectImageView image) => _viewImage = image;
 
     private void CloseImageModal() => _viewImage = null;
+
+    private void OpenCropModal(ProjectImageView image) => _croppingImage = image;
+
+    private void CloseCropModal() => _croppingImage = null;
+
+    private async Task OnCropSavedAsync(ProjectImageCropSaved result)
+    {
+        if (Project is null) return;
+        try
+        {
+            foreach (var target in result.EntityTargets.Where(target => target.EntityId != Guid.Empty).DistinctBy(target => target.EntityId))
+            {
+                await EntityVisuals.AttachAsync(
+                    Project.Id,
+                    target.EntityId,
+                    result.Image.Id,
+                    target.Label,
+                    EntityVisualExampleOrigin.Manual);
+            }
+            _croppingImage = null;
+            _status = result.EntityTargets.Count == 0
+                ? "Crop saved to the image library."
+                : "Crop saved and attached to the selected entities.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
 
     private void OpenMaskModal(ProjectImageView image)
     {

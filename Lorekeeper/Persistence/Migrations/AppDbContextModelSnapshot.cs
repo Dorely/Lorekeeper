@@ -2403,6 +2403,21 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<double?>("CropHeightPercent")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("CropWidthPercent")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("CropXPercent")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("CropYPercent")
+                        .HasColumnType("REAL");
+
+                    b.Property<Guid?>("DerivedFromImageId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -2441,6 +2456,11 @@ namespace Lorekeeper.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DerivedFromImageId");
+
+                    b.HasIndex("DerivedFromImageId", "CropXPercent", "CropYPercent", "CropWidthPercent", "CropHeightPercent")
+                        .IsUnique();
 
                     b.HasIndex("ProjectId", "CreatedAt");
 
@@ -3633,11 +3653,18 @@ namespace Lorekeeper.Persistence.Migrations
 
             modelBuilder.Entity("Lorekeeper.Models.PublishAsset", b =>
                 {
+                    b.HasOne("Lorekeeper.Models.PublishAsset", "DerivedFromImage")
+                        .WithMany("DerivedImages")
+                        .HasForeignKey("DerivedFromImageId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Lorekeeper.Models.Project", "Project")
                         .WithMany("PublishAssets")
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("DerivedFromImage");
 
                     b.Navigation("Project");
                 });
@@ -3966,6 +3993,8 @@ namespace Lorekeeper.Persistence.Migrations
             modelBuilder.Entity("Lorekeeper.Models.PublishAsset", b =>
                 {
                     b.Navigation("CoverProfiles");
+
+                    b.Navigation("DerivedImages");
 
                     b.Navigation("EntityVisualExamples");
 

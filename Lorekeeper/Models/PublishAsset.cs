@@ -16,6 +16,13 @@ public class PublishAsset
     public string GenerationModel { get; set; } = string.Empty;
     public string SourceMetadataJson { get; set; } = string.Empty;
 
+    public Guid? DerivedFromImageId { get; set; }
+    public PublishAsset? DerivedFromImage { get; set; }
+    public double? CropXPercent { get; set; }
+    public double? CropYPercent { get; set; }
+    public double? CropWidthPercent { get; set; }
+    public double? CropHeightPercent { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
@@ -26,6 +33,7 @@ public class PublishAsset
     public ICollection<ProjectImageChatAttachment> ImageChatAttachments { get; set; } = [];
     public ICollection<EntityVisualExample> EntityVisualExamples { get; set; } = [];
     public ICollection<SourceVisualCandidate> SourceVisualCandidates { get; set; } = [];
+    public ICollection<PublishAsset> DerivedImages { get; set; } = [];
 }
 
 public enum PublishAssetSource
@@ -33,5 +41,6 @@ public enum PublishAssetSource
     Uploaded,
     Generated,
     Edited,
+    Cropped,
     Imported,
 }

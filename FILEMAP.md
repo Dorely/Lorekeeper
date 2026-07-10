@@ -39,7 +39,8 @@
 | `Routes.razor` | `<Router>` wiring `MainLayout` and `NotFound`. |
 | `_Imports.razor` | Shared `@using` directives for all components. |
 | `EntityKnowledgeView.razor` (+ `.razor.css`) | Shared read-only entity knowledge renderer for structured wiki data and source-backed canon markdown used by graph, outline, and context entity detail surfaces. |
-| `EntityVisualExamples.razor` (+ `.razor.css`) | Reusable ordered entity visual gallery/editor with library attach, upload, labels, ordering, full-size viewing, and detach. |
+| `EntityVisualExamples.razor` (+ `.razor.css`) | Reusable ordered entity visual gallery/editor with library attach, upload, non-destructive cropping, labels, ordering, full-size viewing, and detach. |
+| `ImageCropModal.razor` (+ `.razor.css`, `.razor.js`) | Shared freeform rectangular crop modal with zoom/pan, canvas selection and preview, crop-specific metadata, and optional entity targets. |
 | `ImageEntityAssociations.razor` (+ `.razor.css`) | Image-side attached-entity chips and association editor used by the Images workspace. |
 | `EntityVisualTargetPicker.razor` (+ `.razor.css`) | Reusable multi-entity target picker for image generation and editing. |
 
@@ -81,7 +82,7 @@
 |------|-------------|
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared shell for project workspace pages: loads project by slug, renders title + horizontal tab strip including Editor, Outline, Images, Writing Sample, Publish, Research, Ingest, Graph, and Import / Export; exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
-| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter editor with collapsible chat/right panes, Edit/Read/Layout/Review modes, chapter visual-mode controls, image-library picker/context actions, inline active-chapter body review controls/scroll markers, and inline Contest Mode candidate review. Persists/reindexes body edits, remembers the selected chapter per browser/project, and refreshes editor/context surfaces after AI turns or approved changes. |
+| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter editor with per-project resizable/collapsible Chat and Memory columns shared across Edit/Read/Layout/Review modes, chapter visual controls, image-library actions, and inline AI/Contest review. Persists/reindexes body edits, remembers the selected chapter, and refreshes editor/context surfaces after AI turns or approved changes. |
 | `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Simulated page viewer/editor for Prose, IllustratedProse, and PicturePage chapters, including four page layout modes, paginated illustrated prose spreads, anchored illustration controls, and PicturePage drag-resize/z-order/paste/drop placement. |
 | `ProjectImagePickerModal.razor` (+ `.razor.css`) | Editor image-library modal for selecting current project images and adding them either to the active chapter layout or explicit chapter context. |
 | `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: loads transcript/tool visuals, streams text/tool/image-generation/contest updates, routes active-chapter body changes and Contest Mode results to inline Review mode, and keeps pending-change review. |
@@ -124,7 +125,7 @@
 
 | File | Description |
 |------|-------------|
-| `ImagesContent.razor` (+ `.razor.css`, `.razor.js`) | Three-pane image workspace with Images Chat, queued generation/edit job cards, attach-to-chat/library actions, full-size image viewing, manual queued generation, and mask edit modal. |
+| `ImagesContent.razor` (+ `.razor.css`, `.razor.js`) | Three-pane image workspace with Images Chat, queued generation/edit job cards, attach-to-chat/entity actions, non-destructive library cropping, full-size viewing, manual queued generation, and mask edit modal. |
 | `ImagesChatPanel.razor` (+ `.razor.css`) | Images Chat adapter over `ChatSurface`: loads transcript, streams text/tool updates, manages attached image context chips, renders image visual strips, and refreshes the image grid after mutations. |
 
 ### Components/Pages/Projects/Publish/
@@ -209,7 +210,7 @@
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
 | `PublishProfile.cs` | EF entity for one saved publish profile per project: book metadata, front/back matter, output options, prose pagination settings, selected cover asset, and cover text layout JSON. |
-| `PublishAsset.cs` | EF entity for uploaded/generated/edited project images with bytes, alt text, prompt/source metadata, masks, and cover/placement navigation. |
+| `PublishAsset.cs` | EF entity for uploaded/generated/edited/cropped project images with bytes, crop lineage/coordinates, alt text, prompt/source metadata, masks, and cover/placement navigation. |
 | `EntityVisualExample.cs` | Ordered labeled many-to-many link between an eligible graph entity and project image, with origin and source provenance. |
 | `SourceVisualCandidate.cs` | Cached normalized Research/Ingest image bytes and artifact/web provenance before project-library promotion. |
 | `ProjectImageConversation.cs` | EF entity for the separate project-scoped Images Chat transcript. |
@@ -231,7 +232,7 @@
 | `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor chat visuals, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, publish profiles/assets/layouts, and chapter visual-mode fields. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings: busy timeout, WAL journal mode, and normal synchronous mode to reduce local lock contention. |
-| `Migrations/` | EF Core migrations through `AddEntityVisualExamples`, including entity-image links, cached source visuals/web images, and image-job entity targets. |
+| `Migrations/` | EF Core migrations through `AddProjectImageCrops`, including entity-image links, cached source visuals/web images, image-job entity targets, and crop lineage/coordinates. |
 
 ### Persistence/Repositories/
 
@@ -317,7 +318,7 @@
 | File | Description |
 |------|-------------|
 | `IResearchService.cs` / `ResearchService.cs` | Persistent streaming Research chat: builds project-level guidance/facts/outline context, replays text-only history to the model, streams cache-first web + graph tool calls, stages Review edits, and derives current-conversation activity. |
-| `ResearchTools.cs` | Research tools for cache-first web reads, safe webpage-image inspection/confirmed import, entity visuals, and staged graph mutations. |
+| `ResearchTools.cs` | Research tools for cache-first web reads, safe webpage-image inspection, confirmed import/crop/entity attachment, entity visuals, and staged graph mutations. |
 | `ResearchTurnUpdate.cs` | Streaming update records consumed by `ResearchChatPanel`: text/tool updates, pending AI change creation, graph mutation refreshes, assistant completion, and turn errors/cancellation. |
 | `ResearchChatTurnRunner.cs` | Background turn runner for Research chat: keeps active turns alive across component disposal and provides buffered update subscriptions. |
 | `ResearchActivityModels.cs` | Read models for Research Activity sidebar entity/source summaries and cache-only source detail modals. |
@@ -407,26 +408,26 @@
 | `IngestWikiSheet.cs` | Shared wiki/canon helper/models for ingest-managed summaries, aliases, wiki sections, source-backed `canonSource.*` markdown, canon metadata cleanup, citations, and search projection helpers. |
 | `IngestJobWorker.cs` | Hosted background worker that marks interrupted jobs/chunks stopped at startup, notifies the UI, and drains queued ingest jobs in scoped processors. |
 | `IngestJobProcessor.cs` | Runs ingest with streaming staging, bounded source/entity visuals, final synthesis, relationship promotion, retries, diagnostics, and indexing. |
-| `IngestAgentTools.cs` | Ingest tools for identity/observations/relationships, clear source-visual promotion, final canon writes, and source progress. |
+| `IngestAgentTools.cs` | Ingest tools for identity/observations/relationships, source-visual promotion with optional crop/entity attachment, final canon writes, and source progress. |
 
 ### ImportExport/
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | v3 portable export DTOs for stable graph refs, entity visuals/associations, publish settings, chapter visuals, and image context. |
+| `ProjectExportModels.cs` | v4 portable export DTOs for stable graph refs, entity visuals/associations, publish settings, chapter visuals, image context, and crop lineage. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job: validates export JSON, imports project images/page settings, appends structural Full imports with visual layouts/context image inclusions, merges non-structural entities/relationships/provenance, repairs graph links, records report rows, and refreshes indexes best-effort. |
+| `ProjectImportJobProcessor.cs` | Runs one import job: validates export JSON, imports project images with remapped crop lineage/page settings, appends structural Full imports with visual layouts/context image inclusions, merges non-structural entities/relationships/provenance, repairs graph links, records report rows, and refreshes indexes best-effort. |
 
 ### Images/
 
 | File | Description |
 |------|-------------|
-| `ProjectImageModels.cs` | Image and entity-target requests/views plus persisted jobs, output state, masks, provider progress, and runtime snapshots. |
-| `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: list/read bytes, upload, legacy blocking generation, update metadata, delete, thumbnail, and scrub image references. |
+| `ProjectImageModels.cs` | Image, normalized crop, and entity-target requests/views plus persisted jobs, output state, masks, provider progress, and runtime snapshots. |
+| `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: list/read bytes, upload, deterministic local crop/reuse, legacy blocking generation, metadata, delete, thumbnail, and reference scrubbing. |
 | `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Persistence-facing image job service for create/list/start/complete jobs, output state/errors, saving generated assets, and validating PNG/shape masks. |
 | `IProjectImageGenerationRuntime.cs` / `ProjectImageGenerationRuntime.cs` | Singleton FIFO image generation queue with one active job per project, retries, runtime partial previews, completion waiters, and state notifications. |
 | `ProjectImageGenerationStartupWorker.cs` | Hosted startup worker that marks interrupted running image jobs failed and resumes queued project work. |
@@ -442,7 +443,7 @@
 | File | Description |
 |------|-------------|
 | `IImagesChatService.cs` / `ImagesChatService.cs` | Separate project-scoped Images Chat service with project context, attached image context, tool streaming, persisted transcript/visuals, queued generation/edit tools, and model-only image context for vision-ready turns. |
-| `ImagesChatTools.cs` | Images Chat LLM tools for project search/source reads, chapters, image library reads with visual chips, visual layout manifests, rendered snapshot inspection, shape masks, queued generation/editing, and chapter image placement/context. |
+| `ImagesChatTools.cs` | Images Chat LLM tools for project search/source reads, chapters, image library reads/crops with visual chips, visual layout manifests, rendered snapshot inspection, shape masks, queued generation/editing, and chapter image placement/context. |
 | `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, current tool metadata, visible visual attachments, model-only generated images, and mutation signaling. |
 | `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
 | `ImagesChatTurnRunner.cs` | Background turn runner for Images Chat: executes scoped chat turns outside component lifetime and replays buffered live updates to reopened panels. |
@@ -481,7 +482,7 @@
 | `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, staging helpers, persisted visual chips, project-image/raw-snapshot model context, and Contest Mode settings/actions. |
 | `EditorChatService.cs` | Persistent streaming editor chat: assembles Context Feed and automatic visual snapshots, streams text/tool/image-generation progress, persists chat/tool visual rows, feeds tool-loaded project images and rendered snapshots back to vision-ready models, stages Review edits, emits UI refreshes, and routes Contest Mode terminal tool calls. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific tool behavior, including paginated chapter reads, model-facing tool-result cap, and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor chat LLM tools for assembled context, impact scoping, project search/source/chapter reads, facts, entities with visible visual chips, explicit project-image reads, rendered layout/text-fit inspection, queued image generation, visual-layout operations, `edit_chapter`/outline mutations, revision-agent spawning, and Contest preparation. |
+| `EditorChatTools.cs` | Editor chat LLM tools for assembled context, impact scoping, project search/source/chapter reads, facts, entities with visible visual chips, explicit project-image reads/crops, rendered layout/text-fit inspection, queued image generation, visual-layout operations, `edit_chapter`/outline mutations, revision-agent spawning, and Contest preparation. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
 | `EditorChatTurnRunner.cs` | Background turn runner for Editor Chat: preserves active turns across tab changes while leaving explicit Stop as the cancellation path. |
@@ -498,7 +499,7 @@
 |------|-------------|
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt`, keeps Act graph nodes/structural edges synchronized, and updates targeted act context vectors on mutations. |
 | `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Multi-turn collaborative outline chat. Streams LLM text/tool updates, persists chat history, stages mutating tool calls when project approval is enabled, blocks new turns while pending changes remain, and instructs the LLM to persist project-level truths as `ProjectFact` graph nodes. |
-| `OutlineCollaborationTools.cs` | `AIFunction` definitions exposed to the outline LLM, including filtered project source search/read tools. `list_outline` includes `projectFacts`; ProjectFact creation uses generic entity tools and is parented to the Project graph node. Entity create/update payloads include auto mention hints. |
+| `OutlineCollaborationTools.cs` | `AIFunction` definitions exposed to the outline LLM, including filtered project source reads and project-image crop/entity-attachment tools. `list_outline` includes `projectFacts`; ProjectFact creation uses generic entity tools and is parented to the Project graph node. |
 | `OutlineChatTurnRunner.cs` | Background turn runner for Outline chat: owns active turn cancellation/subscription outside the Blazor component lifetime. |
 | `IAiChangeApprovalService.cs` / `AiChangeApprovalService.cs` | Applies or rejects queued AI changes from outline/editor/research chat, including outline/entity mutations and editor chapter-body edits; enforces dependency application/rejection cascading and writes hidden correction messages to the owning transcript. |
 | `AiChangeReviewDrafts.cs` | Typed helper for persisted pending-change review drafts: reads editable text fields, updates draft payload JSON, validates draft metadata, and resolves effective after-payloads. |

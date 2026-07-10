@@ -7,6 +7,7 @@ using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Graph;
 using Lorekeeper.Ingest;
+using Lorekeeper.Images;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
@@ -63,7 +64,8 @@ public sealed class OutlineCollaborationTools(
     IEntityRelationContextService entityRelations,
     IProjectSearchService projectSearch,
     IGraphAutoLinkService autoLinks,
-    IEntityVisualExampleService entityVisualExamples)
+    IEntityVisualExampleService entityVisualExamples,
+    IProjectImageService projectImages)
 {
     private const string UnassignedSentinel = "unassigned";
     /// <summary>Canonical entity type for chapter-scoped beats.</summary>
@@ -248,6 +250,12 @@ public sealed class OutlineCollaborationTools(
                 name: "detach_entity_visual_example",
                 description: "Detach an entity visual example without deleting its image."),
 
+            AIFunctionFactory.Create(
+                method: (Guid sourceImageId, ProjectImageCropRegion crop, string? fileName = null, string? altText = null, EntityVisualTarget[]? entityTargets = null) =>
+                    CropProjectImageAsync(context, sourceImageId, crop, fileName, altText, entityTargets),
+                name: "crop_project_image",
+                description: "Create a non-destructive project-library crop from an existing image using 0-100 percentage coordinates. Inspect the source first or use user-supplied coordinates, describe only the cropped subject in altText, and pass only explicit entityTargets. Source associations are never inherited."),
+
         };
 
         return tools;
@@ -359,6 +367,78 @@ public sealed class OutlineCollaborationTools(
         await entityVisualExamples.DetachAsync(ctx.ProjectId, exampleId);
         ctx.OnMutated();
         return JsonSerializer.Serialize(new { status = "detached", exampleId });
+    }
+
+    private async Task<string> CropProjectImageAsync(
+        OutlineCollaborationContext ctx,
+        Guid sourceImageId,
+        ProjectImageCropRegion crop,
+        string? fileName,
+        string? altText,
+        EntityVisualTarget[]? entityTargets)
+    {
+        try
+        {
+            var image = await projectImages.CropAsync(ctx.ProjectId, sourceImageId, new ProjectImageCropRequest(
+                crop,
+                fileName?.Trim() ?? string.Empty,
+                altText?.Trim() ?? string.Empty));
+            var targets = (entityTargets ?? [])
+                .Where(target => target.EntityId != Guid.Empty)
+                .DistinctBy(target => target.EntityId)
+                .ToList();
+            var associations = new List<object>();
+            foreach (var target in targets)
+            {
+                if (ctx.Staging is null)
+                {
+                    var example = await entityVisualExamples.AttachAsync(
+                        ctx.ProjectId,
+                        target.EntityId,
+                        image.Id,
+                        target.Label,
+                        EntityVisualExampleOrigin.Agent);
+                    associations.Add(VisualPayload(example));
+                    continue;
+                }
+
+                var after = new EntityVisualChange("attach", EntityId: target.EntityId, ImageId: image.Id, Label: target.Label?.Trim() ?? string.Empty);
+                var staged = await ctx.Staging.StageExternalChangeAsync(
+                    $"Attach cropped image to entity {target.EntityId:N}",
+                    null,
+                    after,
+                    new { status = "staged", target.EntityId, imageId = image.Id, target.Label },
+                    "EntityVisualExample",
+                    $"{target.EntityId:N}/{image.Id:N}");
+                associations.Add(JsonSerializer.Deserialize<JsonElement>(staged));
+            }
+
+            ctx.QueueVisuals([
+                new EntityVisualContextReference(
+                    image.Id,
+                    EntityId: null,
+                    EntityType: string.Empty,
+                    EntityName: string.Empty,
+                    Label: string.IsNullOrWhiteSpace(image.AltText) ? image.FileName : image.AltText,
+                    SortOrder: 0,
+                    image.FileName,
+                    image.AltText,
+                    image.Prompt,
+                    IsExplicitImage: true),
+            ]);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                status = "cropped",
+                sourceImageId,
+                image = new { image.Id, image.FileName, image.ContentType, image.PreviewUrl, image.AltText, image.Source },
+                associations,
+            });
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
     }
 
     private async Task<IReadOnlyList<EntityVisualExampleView>> QueueEntityVisualsAsync(OutlineCollaborationContext ctx, Guid entityId)

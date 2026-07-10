@@ -349,6 +349,7 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        var importedAssets = new Dictionary<Guid, PublishAsset>();
         foreach (var importedImage in document.Images)
         {
             if (importedImage.Data.Length == 0 || !importedImage.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
@@ -359,7 +360,7 @@ public sealed class ProjectImportJobProcessor(
 
             var localId = Guid.NewGuid();
             state.ImageMap[importedImage.Id] = localId;
-            await db.PublishAssets.AddAsync(new PublishAsset
+            var asset = new PublishAsset
             {
                 Id = localId,
                 ProjectId = job.ProjectId,
@@ -371,9 +372,27 @@ public sealed class ProjectImportJobProcessor(
                 Prompt = importedImage.Prompt,
                 GenerationModel = importedImage.GenerationModel,
                 SourceMetadataJson = importedImage.SourceMetadataJson,
+                CropXPercent = importedImage.CropXPercent,
+                CropYPercent = importedImage.CropYPercent,
+                CropWidthPercent = importedImage.CropWidthPercent,
+                CropHeightPercent = importedImage.CropHeightPercent,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
-            }, cancellationToken);
+            };
+            importedAssets[importedImage.Id] = asset;
+            await db.PublishAssets.AddAsync(asset, cancellationToken);
+        }
+
+        foreach (var importedImage in document.Images)
+        {
+            if (importedImage.DerivedFromImageId is not Guid exportedSourceId
+                || !importedAssets.TryGetValue(importedImage.Id, out var localAsset)
+                || !state.ImageMap.TryGetValue(exportedSourceId, out var localSourceId))
+            {
+                continue;
+            }
+
+            localAsset.DerivedFromImageId = localSourceId;
         }
 
         if (state.ImageMap.Count > 0)

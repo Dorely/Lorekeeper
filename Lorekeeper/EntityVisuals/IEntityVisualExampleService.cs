@@ -15,7 +15,7 @@ public interface IEntityVisualExampleService
     Task<SourceVisualCandidateData?> GetCandidateDataAsync(Guid projectId, Guid candidateId, int? maxEdge = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SourceVisualCandidateView>> ListIngestCandidatesAsync(Guid projectId, Guid ingestSourceId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SourceVisualCandidateView>> ListWebCandidatesAsync(Guid projectId, Guid webCandidateId, CancellationToken cancellationToken = default);
-    Task<EntityVisualExampleView> PromoteAndAttachAsync(Guid projectId, Guid candidateId, Guid entityId, string? label, Models.EntityVisualExampleOrigin origin, CancellationToken cancellationToken = default);
+    Task<Images.ProjectImageView> PromoteCandidateAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default);
     Task<SourceVisualCandidateView> SetCandidateStatusAsync(Guid projectId, Guid candidateId, Models.SourceVisualCandidateStatus status, string? errorMessage = null, CancellationToken cancellationToken = default);
     Task RemoveIngestOwnedAsync(Guid projectId, Guid ingestSourceId, bool deleteCandidates = true, CancellationToken cancellationToken = default);
 }

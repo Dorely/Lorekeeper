@@ -45,7 +45,7 @@ else if (_current is null)
 }
 else
 {
-    <div class="@EditorGridClass()">
+    <div class="@EditorGridClass()" @ref="_editorGridRef">
         @if (EffectiveChatPaneCollapsed)
         {
             <button type="button"
@@ -77,6 +77,15 @@ else
                                   OnContestResultsReady="OpenReviewForContestResultsAsync" />
             </aside>
         }
+
+        <div class='@EditorSplitterClass("chat", EffectiveChatPaneCollapsed)'
+             @ref="_chatSplitterRef"
+             role="separator"
+             aria-orientation="vertical"
+             aria-label="Resize Editor Chat and chapter columns"
+             aria-disabled="@AriaHidden(EffectiveChatPaneCollapsed)"
+             tabindex="@(EffectiveChatPaneCollapsed ? -1 : 0)"
+             title="Drag to resize Editor Chat. Use arrow keys for precise resizing, or double-click to reset."></div>
 
         <section class="@EditorPanelClass()">
             <div class="chapter-header">
@@ -633,6 +642,15 @@ else
             </div>
         </section>
 
+        <div class='@EditorSplitterClass("memory", EffectiveRightPaneCollapsed)'
+             @ref="_memorySplitterRef"
+             role="separator"
+             aria-orientation="vertical"
+             aria-label="Resize chapter and Assistant Memory columns"
+             aria-disabled="@AriaHidden(EffectiveRightPaneCollapsed)"
+             tabindex="@(EffectiveRightPaneCollapsed ? -1 : 0)"
+             title="Drag to resize Assistant Memory. Use arrow keys for precise resizing, or double-click to reset."></div>
+
         @if (EffectiveRightPaneCollapsed)
         {
             <button type="button"
@@ -747,8 +765,13 @@ else
     private ElementReference _bodyTextarea;
     private ElementReference _gutterRef;
     private ElementReference _reviewSurfaceRef;
+    private ElementReference _editorGridRef;
+    private ElementReference _chatSplitterRef;
+    private ElementReference _memorySplitterRef;
     private IJSObjectReference? _editorModule;
     private IJSObjectReference? _editorHandle;
+    private IJSObjectReference? _columnLayoutHandle;
+    private Guid? _columnLayoutProjectId;
 
     private SaveState _saveState = SaveState.Idle;
     private DateTime? _lastSavedAt;
@@ -1029,6 +1052,12 @@ else
             return;
         }
 
+        if (_current is not null && Project is not null && _editorModule is not null
+            && (_columnLayoutHandle is null || _columnLayoutProjectId != Project.Id))
+        {
+            await AttachColumnLayoutAsync(Project.Id);
+        }
+
         if (_focusTitleNext)
         {
             _focusTitleNext = false;
@@ -1083,6 +1112,42 @@ else
         }
         catch (JSDisconnectedException) { }
         catch (OperationCanceledException) { }
+    }
+
+    private async Task AttachColumnLayoutAsync(Guid projectId)
+    {
+        await DisposeColumnLayoutAsync();
+        if (_editorModule is null) return;
+
+        try
+        {
+            _columnLayoutHandle = await _editorModule.InvokeAsync<IJSObjectReference>(
+                "attachColumnLayout",
+                new
+                {
+                    grid = _editorGridRef,
+                    chatSplitter = _chatSplitterRef,
+                    memorySplitter = _memorySplitterRef,
+                },
+                projectId.ToString("N"));
+            _columnLayoutProjectId = projectId;
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Could not initialize Editor column resizing for project {ProjectId}.", projectId);
+        }
+    }
+
+    private async ValueTask DisposeColumnLayoutAsync()
+    {
+        if (_columnLayoutHandle is null) return;
+
+        try { await _columnLayoutHandle.InvokeVoidAsync("dispose"); } catch { }
+        try { await _columnLayoutHandle.DisposeAsync(); } catch { }
+        _columnLayoutHandle = null;
+        _columnLayoutProjectId = null;
     }
 
     private async Task RestoreRememberedChapterAsync()
@@ -1231,11 +1296,6 @@ else
     private string EditorGridClass()
     {
         var classes = "editor-grid";
-        if (_mode is EditorMode.Read or EditorMode.Layout or EditorMode.Review)
-        {
-            classes += " editor-grid--focus";
-        }
-
         if (ContestReviewActive)
         {
             classes += " editor-grid--contest-review";
@@ -1253,6 +1313,9 @@ else
 
         return classes;
     }
+
+    private static string EditorSplitterClass(string pane, bool isDisabled) =>
+        $"editor-column-splitter editor-column-splitter--{pane}{(isDisabled ? " editor-column-splitter--disabled" : string.Empty)}";
 
     private string EditorPanelClass() =>
         $"panel panel-editor panel-editor--{_mode.ToString().ToLowerInvariant()}";
@@ -2896,6 +2959,7 @@ else
     {
         _navHandlerRegistration?.Dispose();
         try { await FlushAsync(); } catch { }
+        await DisposeColumnLayoutAsync();
         if (_editorHandle is not null)
         {
             try { await _editorHandle.InvokeVoidAsync("dispose"); } catch { }

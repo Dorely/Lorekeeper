@@ -717,12 +717,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
         modelBuilder.Entity<PublishAsset>(entity =>
         {
             entity.HasIndex(e => new { e.ProjectId, e.CreatedAt });
+            entity.HasIndex(e => e.DerivedFromImageId);
+            entity.HasIndex(e => new
+            {
+                e.DerivedFromImageId,
+                e.CropXPercent,
+                e.CropYPercent,
+                e.CropWidthPercent,
+                e.CropHeightPercent,
+            }).IsUnique();
             entity.Property(e => e.Source).HasConversion<string>();
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.PublishAssets)
                 .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.DerivedFromImage)
+                .WithMany(e => e.DerivedImages)
+                .HasForeignKey(e => e.DerivedFromImageId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<SourceVisualCandidate>(entity =>

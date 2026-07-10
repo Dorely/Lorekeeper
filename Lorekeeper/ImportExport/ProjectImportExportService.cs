@@ -263,6 +263,11 @@ public sealed class ProjectImportExportService(
             asset.Prompt,
             asset.GenerationModel,
             asset.SourceMetadataJson,
+            asset.DerivedFromImageId,
+            asset.CropXPercent,
+            asset.CropYPercent,
+            asset.CropWidthPercent,
+            asset.CropHeightPercent,
             asset.CreatedAt,
             asset.UpdatedAt);
 

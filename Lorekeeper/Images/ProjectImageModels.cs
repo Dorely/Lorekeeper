@@ -27,6 +27,21 @@ public sealed record ProjectImageUpdate(
     string FileName,
     string AltText);
 
+public sealed record ProjectImageCropRegion(
+    double XPercent,
+    double YPercent,
+    double WidthPercent,
+    double HeightPercent);
+
+public sealed record ProjectImageCropRequest(
+    ProjectImageCropRegion Crop,
+    string FileName,
+    string AltText);
+
+public sealed record ProjectImageCropSaved(
+    ProjectImageView Image,
+    IReadOnlyList<EntityVisualTarget> EntityTargets);
+
 public sealed record ProjectImageGenerationRequest(
     string Prompt,
     string Size,
