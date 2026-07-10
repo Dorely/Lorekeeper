@@ -9,22 +9,31 @@ public static class SqliteConnectionSettings
 
     public static string BuildConnectionString(
         IConfiguration configuration,
-        bool usePerUserDataDirectory = false)
+        bool usePerUserDataDirectory = false,
+        string? relativePathBaseDirectory = null)
     {
         var configured = configuration.GetConnectionString("DefaultConnection")
             ?? "Data Source=lorekeeper.db";
         var builder = new SqliteConnectionStringBuilder(configured);
 
-        if (usePerUserDataDirectory && IsRelativeFilePath(builder.DataSource))
+        if (IsRelativeFilePath(builder.DataSource))
         {
-            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrWhiteSpace(localAppData))
-                throw new InvalidOperationException("The per-user local application data directory is unavailable.");
+            var dataDirectory = relativePathBaseDirectory;
+            if (usePerUserDataDirectory)
+            {
+                var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (string.IsNullOrWhiteSpace(localAppData))
+                    throw new InvalidOperationException("The per-user local application data directory is unavailable.");
 
-            var dataDirectory = Path.Combine(localAppData, "Lorekeeper", "Data");
-            var databasePath = Path.GetFullPath(Path.Combine(dataDirectory, builder.DataSource));
-            Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
-            builder.DataSource = databasePath;
+                dataDirectory = Path.Combine(localAppData, "Lorekeeper", "Data");
+            }
+
+            if (!string.IsNullOrWhiteSpace(dataDirectory))
+            {
+                var databasePath = Path.GetFullPath(Path.Combine(dataDirectory, builder.DataSource));
+                Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+                builder.DataSource = databasePath;
+            }
         }
 
         if (builder.DefaultTimeout < BusyTimeoutSeconds)

@@ -26,7 +26,7 @@
 | File | Description |
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors, versioned Electron/Electron Builder pins, and app dependencies including EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI, sqlite-vec, tokenizers, SkiaSharp, and ingest packages. |
-| `Program.cs` | Host setup, hardened optional Electron renderer binding, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/images/chapter-visuals/publish/writing/editor-chat/contest/revision-agent services, startup migration/index repair, and image/publish endpoints. |
+| `Program.cs` | Host setup, hardened optional Electron renderer binding, deterministic development/installed database-path selection, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/images/chapter-visuals/publish/writing/editor-chat/contest/revision-agent services, startup migration/index repair, and image/publish endpoints. |
 | `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*` including packaged per-user data placement, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
 | `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
 | `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets, app metadata, and payload exclusions for Windows, Linux, and macOS desktop artifacts. |
@@ -233,7 +233,7 @@
 |------|-------------|
 | `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor chat visuals, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, publish profiles/assets/layouts, and chapter visual-mode fields. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
-| `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
+| `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
 | `Migrations/` | EF Core migrations through `AddPublishPageOptions`, including entity-image links, visual caches/jobs/crops, the Picture Page cover relationship, and saved title/PDF/EPUB page-presentation modes. |
 
 ### Persistence/Repositories/

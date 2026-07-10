@@ -30,7 +30,13 @@ var isElectronMode = IsElectronMode(args);
 var desktopUrl = isElectronMode ? GetDesktopUrl(builder.Configuration) : null;
 var enableDesktopDevTools = builder.Environment.IsDevelopment();
 var usePerUserDataDirectory = isElectronMode
+    && !builder.Environment.IsDevelopment()
     && builder.Configuration.GetValue("Desktop:UsePerUserDataDirectory", true);
+var databaseConnectionString = SqliteConnectionSettings.BuildConnectionString(
+    builder.Configuration,
+    usePerUserDataDirectory,
+    builder.Environment.ContentRootPath);
+builder.Configuration["ConnectionStrings:DefaultConnection"] = databaseConnectionString;
 var maxInteractiveServerMessageSize = builder.Configuration.GetValue<long?>("Blazor:MaximumReceiveMessageSizeBytes")
     ?? 64L * 1024 * 1024;
 
@@ -49,7 +55,7 @@ if (isElectronMode)
 }
 
 // Persistence
-builder.Services.AddLorekeeperPersistence(builder.Configuration, usePerUserDataDirectory);
+builder.Services.AddLorekeeperPersistence(builder.Configuration);
 builder.Services.AddScoped<ILlmProviderRepository, LlmProviderRepository>();
 builder.Services.AddScoped<IEmbeddingConfigurationRepository, EmbeddingConfigurationRepository>();
 builder.Services.AddScoped<ISearchProviderRepository, SearchProviderRepository>();
