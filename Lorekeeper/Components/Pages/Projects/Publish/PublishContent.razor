@@ -238,7 +238,7 @@ else
                                 <label class="publish-field">
                                     <span>Print / PDF double spreads</span>
                                     <select class="form-select" @bind="_profile.PrintPicturePageSpreadMode" @bind:after="ScheduleProfileAutosave">
-                                        <option value="@PrintPicturePageSpreadMode.WholeSpread">Whole spread on one wide page</option>
+                                        <option value="@PrintPicturePageSpreadMode.WholeSpread">Whole spread unrotated on one normal page</option>
                                         <option value="@PrintPicturePageSpreadMode.SidewaysWholeSpread">Whole spread rotated on one tall page</option>
                                         <option value="@PrintPicturePageSpreadMode.SplitLeaves">Split into separate pages</option>
                                     </select>

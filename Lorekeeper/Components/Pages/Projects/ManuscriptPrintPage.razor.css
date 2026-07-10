@@ -193,10 +193,10 @@
     aspect-ratio: 11 / 8.5;
 }
 
-.manuscript-picture-frame--spread-letter-landscape {
-    page: picture-spread-letter-landscape;
-    width: min(11in, calc(100% - 2rem));
-    aspect-ratio: 11 / 8.5;
+.manuscript-picture-frame--spread-letter-portrait {
+    page: picture-spread-letter-portrait;
+    width: min(8.5in, calc(100% - 2rem));
+    aspect-ratio: 8.5 / 11;
 }
 
 .manuscript-picture-frame--sideways-letter-portrait {
@@ -284,8 +284,8 @@
     margin: 0;
 }
 
-@page picture-spread-letter-landscape {
-    size: Letter landscape;
+@page picture-spread-letter-portrait {
+    size: Letter portrait;
     margin: 0;
 }
 
@@ -383,9 +383,9 @@
         height: 8.5in;
     }
 
-    .manuscript-picture-frame--spread-letter-landscape {
-        width: 11in;
-        height: 8.5in;
+    .manuscript-picture-frame--spread-letter-portrait {
+        width: 8.5in;
+        height: 11in;
     }
 
     .manuscript-picture-frame--sideways-letter-portrait {

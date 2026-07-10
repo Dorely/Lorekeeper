@@ -99,7 +99,7 @@
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
 | `ImagesPage.razor` | Images tab at `/projects/{Slug}/images`; wraps `ProjectLayout` and hosts `Images.ImagesContent`. |
 | `PublishPage.razor` | Publish tab at `/projects/{Slug}/publish`; wraps `ProjectLayout` and hosts `Publish.PublishContent`. |
-| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Scrollable embedded preview and Print/PDF document at `/projects/{Slug}/manuscript/print`; supports optional title sheets, Letter-contained wide/sideways spreads, split leaves, and decoded-asset print readiness. |
+| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Scrollable embedded preview and Print/PDF document at `/projects/{Slug}/manuscript/print`; contains unrotated or sideways spreads on portrait Letter pages, supports split leaves, and waits for decoded assets before printing. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
 
