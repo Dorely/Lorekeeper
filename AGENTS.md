@@ -43,8 +43,9 @@
 ## Build & Run
 ```bash
 dotnet build Lorekeeper.sln
-dotnet run --project Lorekeeper
-dotnet watch --project Lorekeeper
+dotnet run --project Lorekeeper --launch-profile electron
+dotnet run --project Lorekeeper --launch-profile http
+dotnet watch --project Lorekeeper --launch-profile http
 ```
 
 
@@ -56,4 +57,5 @@ dotnet watch --project Lorekeeper
 - Remove superseded code and concepts when replacing them. Do not leave deprecated pages, components, handlers, prompts, queries, or other logic in place just because the new path works; clean out obsolete implementations and reduce unnecessary complexity.
 - This is a local development project. When a requested change replaces a concept, remove the superseded implementation outright; do not add or retain compatibility shims, legacy handlers/fallbacks, deprecated tool aliases, or dual paths unless the user explicitly asks for a transition path.
 - Do not add test projects or automated tests to this repository; verify changes with `dotnet build Lorekeeper.sln` unless the user explicitly requests tests.
+- Electron is the primary/default debug target. For browser-driven UI validation, explicitly use the `http` launch profile at `http://localhost:1455`, wait until the host is ready, and do not reorder the launch profiles to make web hosting the default.
 - Never start the app without a plan to also terminate it after verifying the change. Do not leave the app running.

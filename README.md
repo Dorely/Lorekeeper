@@ -13,18 +13,19 @@ story planning, drafting, research, ingest, and publishing.
 Run the normal browser-hosted app:
 
 ```bash
-dotnet run --project Lorekeeper
+dotnet run --project Lorekeeper --launch-profile http
 ```
 
 The HTTP launch profile is pinned to `http://localhost:1455` for the Codex OAuth
-callback.
+callback. Use this explicit profile for browser-driven UI validation; the Electron
+profile intentionally remains the default development target.
 
 ## Desktop Development
 
 Run the Electron.NET desktop shell:
 
 ```bash
-dotnet run --project Lorekeeper -- --electron
+dotnet run --project Lorekeeper --launch-profile electron
 ```
 
 Desktop binding is configured in `Lorekeeper/appsettings.json` under
@@ -32,7 +33,7 @@ Desktop binding is configured in `Lorekeeper/appsettings.json` under
 
 ```powershell
 $env:Desktop__HttpPort = '1456'
-dotnet run --project Lorekeeper -- --electron
+dotnet run --project Lorekeeper --launch-profile electron
 ```
 
 Codex OAuth uses `Auth:Codex:RedirectUri`, which defaults to
