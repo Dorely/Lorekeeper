@@ -1,0 +1,42 @@
+<div class="image-viewer-backdrop" @onclick="CloseAsync">
+    <section class="image-viewer-modal"
+             role="dialog"
+             aria-modal="true"
+             aria-label="@($"View {Title}")"
+             @onclick:stopPropagation="true">
+        <header class="image-viewer-header">
+            <div class="image-viewer-meta">
+                <h5>@Title</h5>
+                @foreach (var detail in VisibleDetails)
+                {
+                    <span>@detail</span>
+                }
+            </div>
+            <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
+        </header>
+        <div class="image-viewer-body">
+            <img src="@ImageUrl" alt="@ResolvedAltText" />
+        </div>
+        @if (Actions is not null)
+        {
+            <footer class="image-viewer-actions">
+                @Actions
+            </footer>
+        }
+    </section>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string ImageUrl { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string AltText { get; set; } = string.Empty;
+    [Parameter] public IReadOnlyList<string> Details { get; set; } = [];
+    [Parameter] public RenderFragment? Actions { get; set; }
+    [Parameter] public EventCallback Closed { get; set; }
+
+    private IEnumerable<string> VisibleDetails => Details.Where(detail => !string.IsNullOrWhiteSpace(detail));
+
+    private string ResolvedAltText => string.IsNullOrWhiteSpace(AltText) ? Title : AltText;
+
+    private Task CloseAsync() => Closed.InvokeAsync();
+}

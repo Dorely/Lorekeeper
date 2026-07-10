@@ -31,13 +31,17 @@
             @foreach (var example in _examples.OrderBy(item => item.SortOrder))
             {
                 <article class="entity-visual-card" @key="example.Id">
-                    <a class="entity-visual-thumb" href="@($"/projects/{ProjectId:N}/images/{example.Image.Id:N}/content")" target="_blank" title="Open full-size image">
+                    <button type="button"
+                            class="entity-visual-thumb"
+                            title="View full-size image"
+                            aria-label="@($"View {example.Image.FileName}")"
+                            @onclick="() => OpenImage(example)">
                         <img src="@example.Image.PreviewUrl" alt="@example.Image.AltText" />
                         @if (example.SortOrder == 0)
                         {
                             <span class="entity-visual-leading">Leading</span>
                         }
-                    </a>
+                    </button>
                     @if (Editable)
                     {
                         <input class="form-control form-control-sm" value="@example.Label" aria-label="Visual example label"
@@ -81,6 +85,15 @@
     }
 </section>
 
+@if (_viewingExample is not null)
+{
+    <ImageViewerModal ImageUrl="@($"/projects/{ProjectId:N}/images/{_viewingExample.Image.Id:N}/content")"
+                      Title="@_viewingExample.Image.FileName"
+                      AltText="@_viewingExample.Image.AltText"
+                      Details="@ViewerDetails(_viewingExample)"
+                      Closed="CloseImage" />
+}
+
 @if (_croppingExample is not null)
 {
     <ImageCropModal ProjectId="@ProjectId"
@@ -104,6 +117,7 @@
     private bool _saving;
     private bool _showAdd;
     private Guid _loadedEntityId;
+    private EntityVisualExampleView? _viewingExample;
     private EntityVisualExampleView? _croppingExample;
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
@@ -202,6 +216,16 @@
         await EntityVisuals.DetachAsync(ProjectId, example.Id);
         return example;
     });
+
+    private void OpenImage(EntityVisualExampleView example) => _viewingExample = example;
+
+    private void CloseImage() => _viewingExample = null;
+
+    private static IReadOnlyList<string> ViewerDetails(EntityVisualExampleView example) =>
+        new[] { example.Label, example.Image.AltText }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     private void OpenCrop(EntityVisualExampleView example) => _croppingExample = example;
 

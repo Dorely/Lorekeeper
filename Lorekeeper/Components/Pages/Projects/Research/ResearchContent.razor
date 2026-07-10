@@ -1,5 +1,6 @@
 @using Lorekeeper.Components.Pages.Projects
 @using Lorekeeper.Context
+@using Lorekeeper.EntityVisuals
 @using Lorekeeper.Models
 @using Lorekeeper.Research
 @using Lorekeeper.Search
@@ -256,10 +257,13 @@ else
                             <div class="research-source-visuals">
                                 @foreach (var visual in _selectedSourceDetail.Visuals)
                                 {
-                                    <a href="@($"/projects/{Project!.Id:N}/source-visuals/{visual.Id:N}/content")" target="_blank" title="@visual.Caption">
+                                    <button type="button"
+                                            title="@($"View {visual.FileName}")"
+                                            aria-label="@($"View {visual.FileName}")"
+                                            @onclick="() => OpenSourceVisual(visual)">
                                         <img src="@visual.PreviewUrl" alt="@visual.AltText" />
                                         <span>@visual.Status · @visual.AttachedEntityCount attached · @(string.IsNullOrWhiteSpace(visual.Caption) ? visual.FileName : visual.Caption)</span>
-                                    </a>
+                                    </button>
                                 }
                             </div>
                         }
@@ -277,7 +281,7 @@ else
                                 @foreach (var link in _selectedSourceDetail.Links.Take(80))
                                 {
                                     <li>
-                                        <a href="@link.Url" target="_blank" rel="noreferrer">@LinkLabel(link)</a>
+                                        <a href="@link.Url" rel="noreferrer">@LinkLabel(link)</a>
                                         <span>@link.Url</span>
                                     </li>
                                 }
@@ -305,6 +309,15 @@ else
     </div>
 }
 
+@if (_viewingSourceVisual is not null)
+{
+    <ImageViewerModal ImageUrl="@($"/projects/{_viewingSourceVisual.ProjectId:N}/source-visuals/{_viewingSourceVisual.Id:N}/content")"
+                      Title="@_viewingSourceVisual.FileName"
+                      AltText="@_viewingSourceVisual.AltText"
+                      Details="@SourceVisualDetails(_viewingSourceVisual)"
+                      Closed="CloseSourceVisual" />
+}
+
 @code {
     private const int SourceTextDisplayLimit = 25_000;
 
@@ -321,6 +334,7 @@ else
     private ResearchEntityActivityItem? _selectedPendingEntity;
     private bool _pendingEntityDetailOpen;
     private ResearchSourceDetail? _selectedSourceDetail;
+    private SourceVisualCandidateView? _viewingSourceVisual;
     private bool _sourceDetailOpen;
 
     protected override async Task OnParametersSetAsync()
@@ -378,6 +392,18 @@ else
         _sourceDetailOpen = true;
     }
 
+    private void OpenSourceVisual(SourceVisualCandidateView visual) => _viewingSourceVisual = visual;
+
+    private void CloseSourceVisual() => _viewingSourceVisual = null;
+
+    private static IReadOnlyList<string> SourceVisualDetails(SourceVisualCandidateView visual) =>
+        new[]
+        {
+            visual.Caption,
+            $"{visual.Status} - {visual.AttachedEntityCount} attached",
+            visual.Locator,
+        }.Where(value => !string.IsNullOrWhiteSpace(value)).ToList();
+
     private async Task OnEntityKeyDownAsync(KeyboardEventArgs e, ResearchEntityActivityItem entity)
     {
         if (e.Key is "Enter" or " ")
@@ -404,6 +430,7 @@ else
 
     private void CloseSourceDetail()
     {
+        _viewingSourceVisual = null;
         _sourceDetailOpen = false;
         _selectedSourceDetail = null;
     }

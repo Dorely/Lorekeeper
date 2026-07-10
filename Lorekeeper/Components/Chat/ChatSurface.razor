@@ -72,27 +72,11 @@
 
 @if (_selectedImageVisual is { } selectedVisual)
 {
-    <div class="chat-image-modal-backdrop" @onclick="CloseImageModal">
-        <section class="chat-image-modal" role="dialog" aria-modal="true" aria-label="View image" @onclick:stopPropagation="true">
-            <header class="chat-image-modal-header">
-                <div class="chat-image-modal-meta">
-                    <h5>@selectedVisual.Title</h5>
-                    @if (!string.IsNullOrWhiteSpace(selectedVisual.Caption))
-                    {
-                        <span>@selectedVisual.Caption</span>
-                    }
-                    @if (selectedVisual.Width is int width && selectedVisual.Height is int height)
-                    {
-                        <span>@width x @height</span>
-                    }
-                </div>
-                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseImageModal"></button>
-            </header>
-            <div class="chat-image-modal-body">
-                <img src="@selectedVisual.FullImageUrl" alt="@selectedVisual.Title" />
-            </div>
-        </section>
-    </div>
+    <ImageViewerModal ImageUrl="@selectedVisual.FullImageUrl"
+                      Title="@selectedVisual.Title"
+                      AltText="@selectedVisual.Title"
+                      Details="@ViewerDetails(selectedVisual)"
+                      Closed="CloseImageModal" />
 }
 
 @code {
@@ -196,6 +180,16 @@
     private void OpenImageModal(ChatImageVisual visual) => _selectedImageVisual = visual;
 
     private void CloseImageModal() => _selectedImageVisual = null;
+
+    private static IReadOnlyList<string> ViewerDetails(ChatImageVisual visual)
+    {
+        var details = new List<string>();
+        if (!string.IsNullOrWhiteSpace(visual.Caption))
+            details.Add(visual.Caption);
+        if (visual.Width is int width && visual.Height is int height)
+            details.Add($"{width} x {height}");
+        return details;
+    }
 
     private RenderFragment RenderMessage(ChatRenderableMessage message) => __builder =>
     {

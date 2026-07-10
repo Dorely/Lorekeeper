@@ -43,10 +43,17 @@
     height: 2.6rem;
     display: grid;
     place-items: center;
+    padding: 0;
     border: 1px solid var(--bs-border-color, #dee2e6);
     border-radius: 0.25rem;
     overflow: hidden;
     background: var(--bs-body-bg, #fff);
+    cursor: pointer;
+}
+
+.images-chat-attachment-thumb:focus-visible {
+    outline: 2px solid var(--bs-primary, #0d6efd);
+    outline-offset: 2px;
 }
 
 .images-chat-attachment-thumb img {

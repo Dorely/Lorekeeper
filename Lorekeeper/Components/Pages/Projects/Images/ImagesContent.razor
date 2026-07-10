@@ -169,23 +169,11 @@ else
 
 @if (_viewImage is not null)
 {
-    <div class="image-view-modal-backdrop" @onclick="CloseImageModal">
-        <section class="image-view-modal" role="dialog" aria-modal="true" aria-label="View image" @onclick:stopPropagation="true">
-            <header class="image-view-modal-header">
-                <div>
-                    <h5>@_viewImage.FileName</h5>
-                    @if (!string.IsNullOrWhiteSpace(_viewImage.AltText))
-                    {
-                        <span>@_viewImage.AltText</span>
-                    }
-                </div>
-                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseImageModal"></button>
-            </header>
-            <div class="image-view-modal-body">
-                <img src="@($"/projects/{Project!.Id:N}/images/{_viewImage.Id:N}/content")" alt="@ImageAlt(_viewImage)" />
-            </div>
-        </section>
-    </div>
+    <ImageViewerModal ImageUrl="@($"/projects/{Project!.Id:N}/images/{_viewImage.Id:N}/content")"
+                      Title="@_viewImage.FileName"
+                      AltText="@ImageAlt(_viewImage)"
+                      Details="@ViewerDetails(_viewImage)"
+                      Closed="CloseImageModal" />
 }
 
 @if (_maskModalOpen && _editingImage is not null)
@@ -473,6 +461,13 @@ else
     private void OpenImageModal(ProjectImageView image) => _viewImage = image;
 
     private void CloseImageModal() => _viewImage = null;
+
+    private static IReadOnlyList<string> ViewerDetails(ProjectImageView image) =>
+        new[]
+        {
+            image.AltText,
+            $"{image.Source} - {FormatBytes(image.SizeBytes)}",
+        }.Where(value => !string.IsNullOrWhiteSpace(value)).ToList();
 
     private void OpenCropModal(ProjectImageView image) => _croppingImage = image;
 

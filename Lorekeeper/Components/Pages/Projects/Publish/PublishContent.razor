@@ -171,7 +171,7 @@ else
                         @(_exporting ? "Exporting..." : "Download")
                     </button>
                 </div>
-                <a class="btn btn-sm btn-outline-secondary publish-print-link" href="@PrintUrl" target="_blank" rel="noopener" @onclick="FlushAllSavesAsync">Print / PDF</a>
+                <a class="btn btn-sm btn-outline-secondary publish-print-link" href="@PrintUrl" @onclick="FlushAllSavesAsync">Print / PDF</a>
             </div>
 
             <div class="publish-card">
@@ -204,7 +204,7 @@ else
                     {
                         var isCover = _workspace.Profile.SelectedCoverAssetId == asset.Id;
                         <div class="publish-asset-row">
-                            <button type="button" class="publish-asset-preview-button" title="Open image" @onclick="() => OpenAssetModal(asset)">
+                            <button type="button" class="publish-asset-preview-button" title="View image" @onclick="() => OpenAssetViewer(asset)">
                                 <img class="publish-asset-preview" src="@asset.PreviewDataUrl" alt="@AssetAlt(asset)" />
                             </button>
                             <div class="publish-asset-info">
@@ -294,27 +294,16 @@ else
 
     @if (_selectedAsset is not null)
     {
-        <div class="modal-backdrop fade show" @onclick="CloseAssetModal"></div>
-        <div class="modal d-block publish-asset-modal" tabindex="-1" role="dialog" aria-modal="true" @onclick="CloseAssetModal">
-            <div class="modal-dialog modal-fullscreen" role="document" @onclick:stopPropagation="true">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <div class="publish-modal-title">
-                            <h5 class="modal-title">@_selectedAsset.FileName</h5>
-                            <span>@_selectedAsset.Source - @FormatBytes(_selectedAsset.SizeBytes)</span>
-                        </div>
-                        <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAssetModal"></button>
-                    </div>
-                    <div class="modal-body publish-asset-modal-body">
-                        <img src="@_selectedAsset.PreviewDataUrl" alt="@AssetAlt(_selectedAsset)" />
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-secondary" @onclick="CloseAssetModal">Close</button>
-                        <button type="button" class="btn btn-primary" @onclick="() => DownloadAssetAsync(_selectedAsset)">Download</button>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <ImageViewerModal ImageUrl="@_selectedAsset.PreviewDataUrl"
+                          Title="@_selectedAsset.FileName"
+                          AltText="@AssetAlt(_selectedAsset)"
+                          Details="@AssetViewerDetails(_selectedAsset)"
+                          Closed="CloseAssetViewer">
+            <Actions>
+                <button type="button" class="btn btn-outline-secondary" @onclick="CloseAssetViewer">Close</button>
+                <button type="button" class="btn btn-primary" @onclick="() => DownloadAssetAsync(_selectedAsset)">Download</button>
+            </Actions>
+        </ImageViewerModal>
     }
 }
 
@@ -775,9 +764,16 @@ else
     private static string AssetAlt(PublishAssetView asset) =>
         string.IsNullOrWhiteSpace(asset.AltText) ? asset.FileName : asset.AltText;
 
-    private void OpenAssetModal(PublishAssetView asset) => _selectedAsset = asset;
+    private void OpenAssetViewer(PublishAssetView asset) => _selectedAsset = asset;
 
-    private void CloseAssetModal() => _selectedAsset = null;
+    private void CloseAssetViewer() => _selectedAsset = null;
+
+    private static IReadOnlyList<string> AssetViewerDetails(PublishAssetView asset) =>
+        new[]
+        {
+            asset.AltText,
+            $"{asset.Source} - {FormatBytes(asset.SizeBytes)}",
+        }.Where(value => !string.IsNullOrWhiteSpace(value)).ToList();
 
     private async Task DownloadAssetAsync(PublishAssetView asset)
     {

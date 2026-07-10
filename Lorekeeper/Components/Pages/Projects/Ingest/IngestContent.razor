@@ -319,11 +319,14 @@ else
                     <div class="ingest-source-visuals">
                         @foreach (var visual in _sourceVisuals)
                         {
-                            <a href="@($"/projects/{Project!.Id:N}/source-visuals/{visual.Id:N}/content")" target="_blank" title="@visual.Locator">
+                            <button type="button"
+                                    title="@($"View {visual.FileName}")"
+                                    aria-label="@($"View {visual.FileName}")"
+                                    @onclick="() => OpenSourceVisual(visual)">
                                 <img src="@visual.PreviewUrl" alt="@visual.AltText" />
                                 <span>@visual.Status</span>
                                 <small>@visual.Locator</small>
-                            </a>
+                            </button>
                         }
                     </div>
                 }
@@ -478,6 +481,15 @@ else
     </div>
 }
 
+@if (_viewingSourceVisual is not null)
+{
+    <ImageViewerModal ImageUrl="@($"/projects/{_viewingSourceVisual.ProjectId:N}/source-visuals/{_viewingSourceVisual.Id:N}/content")"
+                      Title="@_viewingSourceVisual.FileName"
+                      AltText="@_viewingSourceVisual.AltText"
+                      Details="@SourceVisualDetails(_viewingSourceVisual)"
+                      Closed="CloseSourceVisual" />
+}
+
 @code {
     [CascadingParameter] public Project? Project { get; set; }
 
@@ -485,6 +497,7 @@ else
     private IngestJobDetailView? _selectedJob;
     private List<IngestReportItemView> _reportItems = [];
     private List<SourceVisualCandidateView> _sourceVisuals = [];
+    private SourceVisualCandidateView? _viewingSourceVisual;
     private IngestSourceChunkExcerpt? _sourceExcerpt;
     private List<LlmProvider> _providers = [];
     private HashSet<int> _visionProviderIds = [];
@@ -1002,6 +1015,7 @@ else
 
     private async Task SelectJobAsync(Guid jobId)
     {
+        _viewingSourceVisual = null;
         _selectionCts?.Cancel();
         _selectionCts?.Dispose();
         _selectionCts = new CancellationTokenSource();
@@ -1021,6 +1035,15 @@ else
         }
         catch (OperationCanceledException) { }
     }
+
+    private void OpenSourceVisual(SourceVisualCandidateView visual) => _viewingSourceVisual = visual;
+
+    private void CloseSourceVisual() => _viewingSourceVisual = null;
+
+    private static IReadOnlyList<string> SourceVisualDetails(SourceVisualCandidateView visual) =>
+        new[] { visual.Caption, visual.Status.ToString(), visual.Locator }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToList();
 
     private async Task RefreshSelectedJobAsync()
     {

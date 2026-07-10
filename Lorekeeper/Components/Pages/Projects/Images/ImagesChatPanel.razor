@@ -46,9 +46,13 @@
                     @foreach (var attachment in _attachments)
                     {
                         <span class="images-chat-attachment-chip" @key="attachment.Id">
-                            <a class="images-chat-attachment-thumb" href="@attachment.FullImageUrl" target="_blank" title="@attachment.Label">
+                            <button type="button"
+                                    class="images-chat-attachment-thumb"
+                                    title="@($"View {attachment.Label}")"
+                                    aria-label="@($"View {attachment.Label}")"
+                                    @onclick="() => OpenAttachmentViewer(attachment)">
                                 <img src="@attachment.PreviewImageUrl" alt="@attachment.Label" />
-                            </a>
+                            </button>
                             <span class="images-chat-attachment-text">
                                 <small>Image</small>
                                 <strong>@attachment.Label</strong>
@@ -72,6 +76,15 @@
     </ExtraControls>
 </ChatSurface>
 
+@if (_viewingAttachment is not null)
+{
+    <ImageViewerModal ImageUrl="@_viewingAttachment.FullImageUrl"
+                      Title="@_viewingAttachment.FileName"
+                      AltText="@_viewingAttachment.AltText"
+                      Details="@AttachmentViewerDetails(_viewingAttachment)"
+                      Closed="CloseAttachmentViewer" />
+}
+
 @code {
     private const string ConversationTokenUnitLabel = "conversation tokens";
     private const string ConversationTokenTitleLabel = "conversation token count";
@@ -87,6 +100,7 @@
     private ProjectImageConversation? _conversation;
     private List<ProjectImageMessage> _messages = [];
     private List<ProjectImageChatAttachmentView> _attachments = [];
+    private ProjectImageChatAttachmentView? _viewingAttachment;
     private List<ChatRenderableMessage> _renderable = [];
     private ChatLiveTurn? _live;
     private string _input = string.Empty;
@@ -311,8 +325,22 @@
         }
     }
 
-    private async Task LoadAttachmentsAsync() =>
+    private async Task LoadAttachmentsAsync()
+    {
         _attachments = (await ImagesChat.ListAttachmentsAsync(ProjectId)).ToList();
+        if (_viewingAttachment is not null)
+            _viewingAttachment = _attachments.FirstOrDefault(attachment => attachment.Id == _viewingAttachment.Id);
+    }
+
+    private void OpenAttachmentViewer(ProjectImageChatAttachmentView attachment) => _viewingAttachment = attachment;
+
+    private void CloseAttachmentViewer() => _viewingAttachment = null;
+
+    private static IReadOnlyList<string> AttachmentViewerDetails(ProjectImageChatAttachmentView attachment) =>
+        new[] { attachment.Label, attachment.AltText }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     private async Task RemoveAttachmentAsync(Guid attachmentId)
     {
