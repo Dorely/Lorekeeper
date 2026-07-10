@@ -331,6 +331,10 @@
     border-top: 1px solid rgba(148, 163, 184, 0.38);
 }
 
+.picture-text-toolbar--disabled {
+    opacity: 0.62;
+}
+
 .picture-text-toolbar__field {
     display: grid;
     gap: 0.12rem;
