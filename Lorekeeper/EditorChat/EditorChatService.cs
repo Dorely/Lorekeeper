@@ -442,7 +442,9 @@ public sealed class EditorChatService(
             activeAssistant.Status = EditorMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
 
-            messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantToolCallContents(manifest)));
+            messages.Add(new ChatMessage(
+                ChatRole.Assistant,
+                BuildAssistantContents(textBuilder.ToString(), manifest)));
 
             var resultContents = new List<AIContent>();
             var modelOnlyImagesForNextRound = new List<EditorChatModelImageAttachment>();
@@ -1211,8 +1213,43 @@ public sealed class EditorChatService(
         return null;
     }
 
-    private static List<AIContent> BuildAssistantToolCallContents(IReadOnlyList<PersistedToolCall> calls) =>
-        calls.Select(call => (AIContent)ToFunctionCallContent(call)).ToList();
+    private static List<AIContent> BuildAssistantContents(string text, IReadOnlyList<PersistedToolCall> calls)
+    {
+        if (calls.Count == 0)
+            return [new TextContent(text)];
+
+        if (calls.Any(call => call.TextOffset is null))
+        {
+            var fallbackContents = new List<AIContent>();
+            if (!string.IsNullOrEmpty(text))
+                fallbackContents.Add(new TextContent(text));
+            foreach (var call in calls)
+                fallbackContents.Add(ToFunctionCallContent(call));
+            return fallbackContents;
+        }
+
+        var contents = new List<AIContent>();
+        var cursor = 0;
+        foreach (var item in calls
+            .Select((call, index) => new { Call = call, Index = index })
+            .OrderBy(item => item.Call.TextOffset!.Value)
+            .ThenBy(item => item.Index))
+        {
+            var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, text.Length);
+            if (offset > cursor)
+            {
+                contents.Add(new TextContent(text[cursor..offset]));
+                cursor = offset;
+            }
+
+            contents.Add(ToFunctionCallContent(item.Call));
+        }
+
+        if (cursor < text.Length)
+            contents.Add(new TextContent(text[cursor..]));
+
+        return contents;
+    }
 
     private static FunctionCallContent ToFunctionCallContent(PersistedToolCall call)
     {
