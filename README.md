@@ -6,7 +6,7 @@ story planning, drafting, research, ingest, and publishing.
 ## Requirements
 
 - .NET 10 SDK
-- Node.js 22 or later for Electron.NET desktop builds
+- Node.js 22.12 or later for Electron.NET desktop builds
 
 ## Web Development
 
@@ -50,8 +50,9 @@ Build a clean, versioned Windows x64 release from PowerShell:
 
 Omit `-Version` to use the version in `Lorekeeper.csproj`. The script verifies
 the solution build, clears only generated Windows staging/output, creates the
-installer and portable executable, and writes `SHA256SUMS.txt`. It needs network
-access when npm or Electron dependencies are not already cached.
+installer and portable executable, audits NuGet plus the shipped npm/Electron
+runtime dependencies, and writes `SHA256SUMS.txt`. It needs network access when
+npm or Electron dependencies are not already cached.
 
 The underlying packaging command is:
 

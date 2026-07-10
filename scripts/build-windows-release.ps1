@@ -43,6 +43,15 @@ foreach ($commandName in @('dotnet', 'node', 'npm.cmd'))
     }
 }
 
+$nodeVersionText = (& node --version).Trim().TrimStart('v')
+$nodeVersion = $null
+if (-not [Version]::TryParse($nodeVersionText, [ref]$nodeVersion) -or $nodeVersion -lt [Version]'22.12.0')
+{
+    throw "Node.js 22.12 or later is required; found '$nodeVersionText'."
+}
+
+$npmCommand = (Get-Command 'npm.cmd').Source
+
 function Remove-GeneratedDirectory
 {
     param([Parameter(Mandatory)][string]$Path)
@@ -81,11 +90,100 @@ function Invoke-CheckedCommand
     }
 }
 
+function Invoke-NpmAuditJson
+{
+    param(
+        [Parameter(Mandatory)][string]$WorkingDirectory,
+        [switch]$OmitDev
+    )
+
+    $arguments = @('audit', '--json')
+    if ($OmitDev)
+    {
+        $arguments += '--omit=dev'
+    }
+
+    $stderrPath = [System.IO.Path]::GetTempFileName()
+    $hasNativeErrorPreference = Test-Path variable:PSNativeCommandUseErrorActionPreference
+    if ($hasNativeErrorPreference)
+    {
+        $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+    }
+
+    try
+    {
+        Push-Location $WorkingDirectory
+        try
+        {
+            $auditJson = (& $npmCommand @arguments 2>$stderrPath) -join [Environment]::NewLine
+            $exitCode = $LASTEXITCODE
+        }
+        finally
+        {
+            Pop-Location
+        }
+
+        $stderr = [System.IO.File]::ReadAllText($stderrPath).Trim()
+        if ($exitCode -notin @(0, 1))
+        {
+            throw "npm audit failed with exit code $exitCode. $stderr"
+        }
+        if ([string]::IsNullOrWhiteSpace($auditJson))
+        {
+            throw "npm audit returned no JSON. $stderr"
+        }
+
+        try
+        {
+            $audit = $auditJson | ConvertFrom-Json
+        }
+        catch
+        {
+            throw "npm audit returned invalid JSON. $stderr"
+        }
+
+        $auditError = $audit.PSObject.Properties['error']
+        if ($auditError)
+        {
+            $errorJson = $auditError.Value | ConvertTo-Json -Compress -Depth 5
+            throw "npm audit failed: $errorJson"
+        }
+
+        $reportVersion = $audit.PSObject.Properties['auditReportVersion']
+        $vulnerabilities = $audit.PSObject.Properties['vulnerabilities']
+        if (-not $reportVersion -or $reportVersion.Value -ne 2 -or -not $vulnerabilities)
+        {
+            throw 'npm audit did not return a version 2 vulnerability report.'
+        }
+
+        return $audit
+    }
+    finally
+    {
+        if ($hasNativeErrorPreference)
+        {
+            $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
+        }
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Push-Location $repoRoot
 try
 {
     Remove-GeneratedDirectory $stageDirectory
     Remove-GeneratedDirectory $outputDirectory
+
+    Invoke-CheckedCommand dotnet @(
+        'restore',
+        $solutionPath,
+        '--force-evaluate',
+        '-p:NuGetAudit=true',
+        '-p:NuGetAuditMode=all',
+        '-p:NuGetAuditLevel=low',
+        '-p:TreatWarningsAsErrors=true'
+    )
 
     Invoke-CheckedCommand dotnet @(
         'build',
@@ -102,6 +200,81 @@ try
         "-p:Version=$Version",
         '--no-restore'
     )
+
+    $manifest = Get-Content -Raw (Join-Path $stageDirectory 'package.json') | ConvertFrom-Json
+    $lockPath = Join-Path $stageDirectory 'package-lock.json'
+    $installedElectronManifest = Get-Content -Raw (Join-Path $stageDirectory 'node_modules\electron\package.json') | ConvertFrom-Json
+    $readLockedElectron = 'const lock=require(process.argv[1]);const entry=lock.packages?.[process.argv[2]];if(!entry?.version)process.exit(2);process.stdout.write(entry.version);'
+    $lockedElectronOutput = & node -e $readLockedElectron $lockPath 'node_modules/electron'
+    $lockedElectronExitCode = $LASTEXITCODE
+    $lockedElectronVersion = ($lockedElectronOutput -join '').Trim()
+    if ($lockedElectronExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($lockedElectronVersion))
+    {
+        throw 'Electron is missing from the release dependency lock.'
+    }
+    $manifestElectronVersion = [string]$manifest.devDependencies.electron
+    $installedElectronVersion = [string]$installedElectronManifest.version
+    if ($manifestElectronVersion -ne $lockedElectronVersion -or $lockedElectronVersion -ne $installedElectronVersion)
+    {
+        throw "Electron version mismatch: manifest=$manifestElectronVersion, lock=$lockedElectronVersion, installed=$installedElectronVersion."
+    }
+
+    $severityRank = @{
+        info = 0
+        low = 1
+        moderate = 2
+        high = 3
+        critical = 4
+    }
+
+    $productionAudit = Invoke-NpmAuditJson -WorkingDirectory $stageDirectory -OmitDev
+    $productionBlocking = @(
+        $productionAudit.vulnerabilities.PSObject.Properties |
+            ForEach-Object { [pscustomobject]@{ Name = $_.Name; Finding = $_.Value } } |
+            Where-Object { $severityRank[$_.Finding.severity] -ge $severityRank.high }
+    )
+    if ($productionBlocking.Count -gt 0)
+    {
+        $details = ($productionBlocking | ForEach-Object { "$($_.Name) ($($_.Finding.severity))" }) -join ', '
+        throw "Production npm dependency audit failed: $details."
+    }
+    Write-Host 'Production npm dependency audit: no high-severity advisories.'
+
+    $fullAudit = Invoke-NpmAuditJson -WorkingDirectory $stageDirectory
+    $electronEntry = $fullAudit.vulnerabilities.PSObject.Properties['electron']
+    $electronAdvisories = if ($electronEntry)
+    {
+        @(
+            $electronEntry.Value.via |
+                Where-Object {
+                    if ($_ -is [string])
+                    {
+                        $false
+                    }
+                    else
+                    {
+                        $name = $_.PSObject.Properties['name']
+                        $dependency = $_.PSObject.Properties['dependency']
+                        ($name -and $name.Value -eq 'electron') -or
+                            ($dependency -and $dependency.Value -eq 'electron')
+                    }
+                }
+        )
+    }
+    else
+    {
+        @()
+    }
+    $electronBlocking = @(
+        $electronAdvisories |
+            Where-Object { $severityRank[$_.severity] -ge $severityRank.moderate }
+    )
+    if ($electronBlocking.Count -gt 0)
+    {
+        $details = ($electronBlocking | ForEach-Object { "$($_.url) ($($_.severity))" }) -join ', '
+        throw "Packaged Electron runtime audit failed: $details."
+    }
+    Write-Host "Packaged Electron $installedElectronVersion audit: no moderate-or-higher advisories."
 
     $installerPath = Join-Path $outputDirectory "Lorekeeper-Setup-$Version-x64.exe"
     $portablePath = Join-Path $outputDirectory "Lorekeeper-Portable-$Version-x64.exe"

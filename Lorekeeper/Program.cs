@@ -28,6 +28,7 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 var isElectronMode = IsElectronMode(args);
 var desktopUrl = isElectronMode ? GetDesktopUrl(builder.Configuration) : null;
+var enableDesktopDevTools = builder.Environment.IsDevelopment();
 var usePerUserDataDirectory = isElectronMode
     && builder.Configuration.GetValue("Desktop:UsePerUserDataDirectory", true);
 var maxInteractiveServerMessageSize = builder.Configuration.GetValue<long?>("Blazor:MaximumReceiveMessageSizeBytes")
@@ -43,7 +44,7 @@ builder.Services.AddHttpClient();
 if (isElectronMode)
 {
     builder.Services.AddElectron();
-    builder.UseElectron(args, () => ElectronAppReady(desktopUrl!));
+    builder.UseElectron(args, () => ElectronAppReady(desktopUrl!, enableDesktopDevTools));
     builder.WebHost.UseUrls(desktopUrl!);
 }
 
@@ -267,7 +268,7 @@ app.MapPublishEndpoints();
 
 app.Run();
 
-static async Task ElectronAppReady(string desktopUrl)
+static async Task ElectronAppReady(string desktopUrl, bool enableDevTools)
 {
     var options = new BrowserWindowOptions
     {
@@ -278,7 +279,22 @@ static async Task ElectronAppReady(string desktopUrl)
         MinWidth = 1024,
         MinHeight = 700,
         Center = true,
-        IsRunningBlazor = true
+        IsRunningBlazor = true,
+        WebPreferences = new WebPreferences
+        {
+            DevTools = enableDevTools,
+            NodeIntegration = false,
+            NodeIntegrationInWorker = false,
+            NodeIntegrationInSubFrames = false,
+            ContextIsolation = true,
+            Sandbox = true,
+            WebSecurity = true,
+            AllowRunningInsecureContent = false,
+            Plugins = false,
+            ExperimentalFeatures = false,
+            WebviewTag = false,
+            EnableRemoteModule = false
+        }
     };
 
     if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
