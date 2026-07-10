@@ -359,6 +359,8 @@ public sealed class PublishService(
         var formatter = formatters.FirstOrDefault(candidate => candidate.Format == format)
             ?? throw new InvalidOperationException($"No publish formatter is registered for {format}.");
         var document = await GetDocumentAsync(projectId, cancellationToken);
+        if (format == PublishExportFormat.Epub)
+            document = await AttachRenderedPicturePagesAsync(document, cancellationToken);
 
         return new ProjectExportFile(
             FileName: ExportFileName(document, formatter.FileExtension),
@@ -478,6 +480,10 @@ public sealed class PublishService(
             .ToList();
         var cover = await RenderCoverAsync(profile.SelectedCoverChapterId, chapters, cancellationToken);
 
+        var coverPageLayoutKind = profile.SelectedCoverChapterId is Guid coverChapterId
+            ? chapters.FirstOrDefault(chapter => chapter.Id == coverChapterId)?.PageLayoutKind
+            : null;
+
         return new PublishDocument(
             project.Id,
             project.Name,
@@ -487,8 +493,63 @@ public sealed class PublishService(
             cover,
             sections,
             assets.Values.Select(AssetDocument).ToList(),
-            placementDocuments);
+            placementDocuments)
+        {
+            CoverPageLayoutKind = coverPageLayoutKind,
+        };
     }
+
+    private async Task<PublishDocument> AttachRenderedPicturePagesAsync(
+        PublishDocument document,
+        CancellationToken cancellationToken)
+    {
+        var picturePageIds = document.Sections
+            .SelectMany(section => section.Chapters)
+            .Where(chapter => chapter.VisualMode == ChapterVisualMode.PicturePage)
+            .Select(chapter => chapter.Id)
+            .Distinct()
+            .ToList();
+        if (picturePageIds.Count == 0)
+            return document;
+
+        var surfaces = await chapterVisuals.RenderPicturePageSurfacesAsync(
+            picturePageIds,
+            physicalPageLongEdgePixels: 2400,
+            cancellationToken);
+        var missingChapterIds = picturePageIds.Where(chapterId => !surfaces.ContainsKey(chapterId)).ToList();
+        if (missingChapterIds.Count > 0)
+            throw new InvalidOperationException("One or more Picture Pages could not be rendered for EPUB export.");
+
+        var sections = document.Sections
+            .Select(section => section with
+            {
+                Chapters = section.Chapters
+                    .Select(chapter => chapter.VisualMode != ChapterVisualMode.PicturePage
+                        ? chapter
+                        : AttachRenderedPicturePage(chapter, surfaces[chapter.Id]))
+                    .ToList(),
+            })
+            .ToList();
+        return document with { Sections = sections };
+    }
+
+    private static PublishChapterDocument AttachRenderedPicturePage(
+        PublishChapterDocument chapter,
+        ChapterPicturePageSurface surface) =>
+        chapter with
+        {
+            RenderedPicturePage = new PublishPicturePageDocument(
+                new PublishAssetDocument(
+                    chapter.Id,
+                    surface.FileName,
+                    surface.ContentType,
+                    surface.Data,
+                    chapter.Title),
+                surface.PageWidthPixels,
+                surface.PageHeightPixels,
+                surface.LeafCount,
+                surface.AccessibleText),
+        };
 
     private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
         await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
@@ -613,19 +674,17 @@ public sealed class PublishService(
         var chapter = chapters.FirstOrDefault(candidate => candidate.Id == chapterId);
         if (chapter is null || chapter.VisualMode != ChapterVisualMode.PicturePage) return null;
 
-        var snapshots = await chapterVisuals.RenderSnapshotsAsync(
-            chapterId,
-            2400,
-            includeGuides: false,
-            cancellationToken: cancellationToken);
-        var snapshot = snapshots.OrderBy(candidate => candidate.PageNumber).FirstOrDefault();
-        return snapshot is null
+        var surfaces = await chapterVisuals.RenderPicturePageSurfacesAsync(
+            [chapterId],
+            physicalPageLongEdgePixels: 2400,
+            cancellationToken);
+        return !surfaces.TryGetValue(chapterId, out var surface)
             ? null
             : new PublishAssetDocument(
                 chapterId,
-                snapshot.FileName,
-                snapshot.ContentType,
-                snapshot.Data,
+                surface.FileName,
+                surface.ContentType,
+                surface.Data,
                 chapter.Title);
     }
 

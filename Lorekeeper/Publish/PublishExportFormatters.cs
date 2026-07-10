@@ -410,8 +410,14 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         var items = new List<EpubXhtmlItem>();
         if (CoverImageHref(imageItems) is string coverHref)
         {
-            items.Add(new EpubXhtmlItem("cover-page", "cover.xhtml", "Cover", RenderXhtmlPage(document, "Cover",
-                RenderCoverBody(document, coverHref))));
+            var viewport = CoverViewport(document.CoverPageLayoutKind);
+            items.Add(new EpubXhtmlItem(
+                "cover-page",
+                "cover.xhtml",
+                "Cover",
+                RenderXhtmlPage(document, "Cover", RenderCoverBody(document, coverHref, viewport), viewport, "fixed-layout"),
+                IncludeInNavigation: false,
+                SpineProperties: "rendition:layout-pre-paginated rendition:spread-none"));
         }
 
         items.Add(new EpubXhtmlItem("title", "title.xhtml", document.DisplayTitle, RenderXhtmlPage(document, document.DisplayTitle, RenderTitleBody(document))));
@@ -438,6 +444,12 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             {
                 chapterIndex++;
                 var chapterId = $"chapter-{chapterIndex.ToString(CultureInfo.InvariantCulture)}";
+                if (chapter.VisualMode == ChapterVisualMode.PicturePage)
+                {
+                    AddPicturePageItems(items, document, chapterId, chapter, imageItems);
+                    continue;
+                }
+
                 items.Add(new EpubXhtmlItem(
                     chapterId,
                     $"{chapterId}.xhtml",
@@ -454,6 +466,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     private static List<EpubImageItem> BuildImageItems(PublishDocument document)
     {
         var items = new List<EpubImageItem>();
+        var picturePages = new List<(Guid ChapterId, PublishAssetDocument Surface)>();
         var cover = document.CoverAsset;
         if (cover is not null)
             items.Add(new EpubImageItem("cover-image", $"images/cover.{ImageExtension(cover.ContentType)}", cover, IsCover: true));
@@ -463,22 +476,117 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             assets[placement.Asset.Id] = placement.Asset;
         foreach (var chapter in document.Sections.SelectMany(section => section.Chapters))
         {
+            if (chapter.VisualMode == ChapterVisualMode.PicturePage)
+            {
+                if (chapter.RenderedPicturePage is { } picturePage)
+                    picturePages.Add((chapter.Id, picturePage.Surface));
+                continue;
+            }
+
             foreach (var block in chapter.IllustrationLayout.Images)
             {
                 if (document.Assets.FirstOrDefault(asset => asset.Id == block.ImageId) is { } asset)
-                    assets[asset.Id] = asset;
-            }
-
-            foreach (var image in chapter.PageLayout.Images)
-            {
-                if (document.Assets.FirstOrDefault(asset => asset.Id == image.ImageId) is { } asset)
                     assets[asset.Id] = asset;
             }
         }
 
         items.AddRange(assets.Values
             .Select(asset => new EpubImageItem($"img-{asset.Id:N}", $"images/{asset.Id:N}.{ImageExtension(asset.ContentType)}", asset, IsCover: false)));
+        items.AddRange(picturePages.Select(picturePage => new EpubImageItem(
+            PicturePageImageId(picturePage.ChapterId),
+            $"images/picture-page-{picturePage.ChapterId:N}.{ImageExtension(picturePage.Surface.ContentType)}",
+            picturePage.Surface,
+            IsCover: false)));
         return items;
+    }
+
+    private static void AddPicturePageItems(
+        List<EpubXhtmlItem> items,
+        PublishDocument document,
+        string chapterId,
+        PublishChapterDocument chapter,
+        IReadOnlyList<EpubImageItem> imageItems)
+    {
+        var picturePage = chapter.RenderedPicturePage
+            ?? throw new InvalidOperationException($"Picture Page chapter '{chapter.Title}' does not have a rendered publishing surface.");
+        var expectedLeafCount = IsDoubleLayout(chapter.PageLayoutKind) ? 2 : 1;
+        if (picturePage.LeafCount != expectedLeafCount)
+        {
+            throw new InvalidOperationException(
+                $"Picture Page chapter '{chapter.Title}' rendered {picturePage.LeafCount} leaves, but {chapter.PageLayoutKind} requires {expectedLeafCount}.");
+        }
+        if (picturePage.PageWidthPixels <= 0 || picturePage.PageHeightPixels <= 0)
+            throw new InvalidOperationException($"Picture Page chapter '{chapter.Title}' has invalid rendered page dimensions.");
+
+        var surfaceHref = PicturePageImageHref(imageItems, chapter.Id)
+            ?? throw new InvalidOperationException($"Picture Page chapter '{chapter.Title}' is missing its rendered surface asset.");
+
+        AddPicturePageCompanion(
+            items,
+            document,
+            chapter,
+            imageItems,
+            $"{chapterId}-before",
+            [PublishImagePlacementKind.BeforeChapter, PublishImagePlacementKind.ChapterOpening]);
+
+        var viewport = new EpubViewport(picturePage.PageWidthPixels, picturePage.PageHeightPixels);
+        for (var leafIndex = 0; leafIndex < picturePage.LeafCount; leafIndex++)
+        {
+            var isFirstLeaf = leafIndex == 0;
+            var id = isFirstLeaf ? chapterId : $"{chapterId}-leaf-{leafIndex + 1}";
+            var title = isFirstLeaf ? chapter.Title : $"{chapter.Title} (continued)";
+            items.Add(new EpubXhtmlItem(
+                id,
+                $"{id}.xhtml",
+                title,
+                RenderXhtmlPage(
+                    document,
+                    title,
+                    RenderPicturePageBody(chapter, picturePage, surfaceHref, leafIndex),
+                    viewport,
+                    "fixed-layout"),
+                IncludeInNavigation: isFirstLeaf,
+                SpineProperties: PicturePageSpineProperties(picturePage.LeafCount, leafIndex)));
+        }
+
+        AddPicturePageCompanion(
+            items,
+            document,
+            chapter,
+            imageItems,
+            $"{chapterId}-after",
+            [PublishImagePlacementKind.ChapterEnding, PublishImagePlacementKind.AfterChapter]);
+    }
+
+    private static void AddPicturePageCompanion(
+        List<EpubXhtmlItem> items,
+        PublishDocument document,
+        PublishChapterDocument chapter,
+        IReadOnlyList<EpubImageItem> imageItems,
+        string id,
+        IReadOnlyList<PublishImagePlacementKind> placementKinds)
+    {
+        var figures = new StringBuilder();
+        foreach (var placementKind in placementKinds)
+        {
+            AppendFigures(
+                figures,
+                document,
+                imageItems,
+                PublishOutlineTargetKind.Chapter,
+                chapter.Id,
+                placementKind);
+        }
+
+        if (figures.Length == 0) return;
+
+        var body = $"<section class=\"picture-page-companion\">{Environment.NewLine}{figures}</section>";
+        items.Add(new EpubXhtmlItem(
+            id,
+            $"{id}.xhtml",
+            chapter.Title,
+            RenderXhtmlPage(document, chapter.Title, body),
+            IncludeInNavigation: false));
     }
 
     private static void AddMatter(List<EpubXhtmlItem> items, PublishDocument document, string id, string title, string text)
@@ -507,15 +615,47 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         return sb.ToString();
     }
 
-    private static string RenderCoverBody(PublishDocument document, string coverHref)
+    private static string RenderCoverBody(PublishDocument document, string coverHref, EpubViewport viewport)
     {
         var cover = document.CoverAsset;
         if (cover is null) return string.Empty;
 
         var alt = string.IsNullOrWhiteSpace(cover.AltText) ? "Cover" : cover.AltText;
         var sb = new StringBuilder();
-        sb.AppendLine("<section class=\"cover-page\">");
-        sb.Append("<img alt=\"").Append(Html(alt)).Append("\" src=\"").Append(coverHref).AppendLine("\" />");
+        sb.AppendLine("<section class=\"fixed-page-surface\">");
+        sb.Append("<img class=\"fixed-page-image fixed-page-image-whole\" alt=\"").Append(Html(alt))
+            .Append("\" src=\"").Append(Html(coverHref)).Append("\" width=\"")
+            .Append(viewport.Width).Append("\" height=\"").Append(viewport.Height).AppendLine("\" />");
+        sb.AppendLine("</section>");
+        return sb.ToString();
+    }
+
+    private static string RenderPicturePageBody(
+        PublishChapterDocument chapter,
+        PublishPicturePageDocument picturePage,
+        string surfaceHref,
+        int leafIndex)
+    {
+        var isSpread = picturePage.LeafCount == 2;
+        var surfaceWidth = picturePage.PageWidthPixels * picturePage.LeafCount;
+        var imageClass = isSpread
+            ? leafIndex == 0
+                ? "fixed-page-image fixed-page-image-spread fixed-page-image-left"
+                : "fixed-page-image fixed-page-image-spread fixed-page-image-right"
+            : "fixed-page-image fixed-page-image-whole";
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<section class=\"fixed-page-surface\">");
+        sb.Append("<img class=\"").Append(imageClass).Append("\" alt=\"\" aria-hidden=\"true\" src=\"")
+            .Append(Html(surfaceHref)).Append("\" width=\"").Append(surfaceWidth)
+            .Append("\" height=\"").Append(picturePage.PageHeightPixels).AppendLine("\" />");
+        if (leafIndex == 0)
+        {
+            sb.AppendLine("<div class=\"fixed-page-accessible\">");
+            sb.Append("<h1>").Append(Html(chapter.Title)).AppendLine("</h1>");
+            AppendTextBlocks(sb, picturePage.AccessibleText, "picture-page-transcript");
+            sb.AppendLine("</div>");
+        }
         sb.AppendLine("</section>");
         return sb.ToString();
     }
@@ -597,17 +737,6 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
 
     private static void AppendVisualChapterBody(StringBuilder sb, PublishChapterDocument chapter, IReadOnlyList<EpubImageItem> imageItems)
     {
-        if (chapter.VisualMode == ChapterVisualMode.PicturePage)
-        {
-            sb.AppendLine("<div class=\"picture-page-body\">");
-            foreach (var text in chapter.PageLayout.TextElements.OrderBy(text => text.ReadingOrder))
-                AppendTextBlocks(sb, text.Text, "prose picture-text");
-            foreach (var image in chapter.PageLayout.Images.OrderBy(image => image.ZIndex))
-                AppendAssetFigure(sb, imageItems, image.ImageId, string.Empty);
-            sb.AppendLine("</div>");
-            return;
-        }
-
         sb.AppendLine("<div class=\"chapter-body\">");
         var paragraphs = SplitParagraphs(chapter.Body);
         var blocksByParagraph = chapter.IllustrationLayout.Images
@@ -658,20 +787,61 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         sb.AppendLine("</p>");
     }
 
-    private static string RenderXhtmlPage(PublishDocument document, string title, string body) =>
-        $"""
+    private static string PicturePageSpineProperties(int leafCount, int leafIndex)
+    {
+        if (leafCount == 1)
+            return "rendition:layout-pre-paginated rendition:spread-none";
+
+        var side = leafIndex == 0 ? "left" : "right";
+        return $"rendition:layout-pre-paginated rendition:spread-landscape rendition:page-spread-{side} page-spread-{side}";
+    }
+
+    private static EpubViewport CoverViewport(ChapterPageLayoutKind? layoutKind)
+    {
+        var (pageWidthInches, pageHeightInches, leafCount) = layoutKind switch
+        {
+            ChapterPageLayoutKind.SingleLandscape => (11d, 8.5d, 1),
+            ChapterPageLayoutKind.DoublePortrait => (8.5d, 11d, 2),
+            ChapterPageLayoutKind.DoubleLandscape => (11d, 8.5d, 2),
+            _ => (8.5d, 11d, 1),
+        };
+        const int physicalPageLongEdgePixels = 2400;
+        var scale = physicalPageLongEdgePixels / Math.Max(pageWidthInches, pageHeightInches);
+        var pageWidth = Math.Max(1, (int)Math.Round(pageWidthInches * scale));
+        var pageHeight = Math.Max(1, (int)Math.Round(pageHeightInches * scale));
+        return new EpubViewport(pageWidth * leafCount, pageHeight);
+    }
+
+    private static bool IsDoubleLayout(ChapterPageLayoutKind layoutKind) =>
+        layoutKind is ChapterPageLayoutKind.DoublePortrait or ChapterPageLayoutKind.DoubleLandscape;
+
+    private static string RenderXhtmlPage(
+        PublishDocument document,
+        string title,
+        string body,
+        EpubViewport? viewport = null,
+        string bodyClass = "")
+    {
+        var viewportMeta = viewport is null
+            ? string.Empty
+            : $"  <meta name=\"viewport\" content=\"width={viewport.Width}, height={viewport.Height}\" />{Environment.NewLine}";
+        var bodyClassAttribute = string.IsNullOrWhiteSpace(bodyClass)
+            ? string.Empty
+            : $" class=\"{Html(bodyClass)}\"";
+        return $"""
         <?xml version="1.0" encoding="utf-8"?>
         <!DOCTYPE html>
         <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{Html(Language(document))}" lang="{Html(Language(document))}">
         <head>
           <title>{Html(title)}</title>
-          <link rel="stylesheet" type="text/css" href="styles.css" />
+        {viewportMeta}  <link rel="stylesheet" type="text/css" href="styles.css" />
         </head>
-        <body>
+        <body{bodyClassAttribute}>
         {body}
         </body>
         </html>
         """;
+    }
 
     private static string RenderContainer() =>
         """
@@ -704,6 +874,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             sb.Append("    <dc:rights>").Append(Html(document.Profile.Copyright)).AppendLine("</dc:rights>");
         sb.Append("    <dc:language>").Append(Html(Language(document))).AppendLine("</dc:language>");
         sb.Append("    <meta property=\"dcterms:modified\">").Append(modified).AppendLine("</meta>");
+        sb.AppendLine("    <meta property=\"rendition:layout\">reflowable</meta>");
         if (CoverImageId(imageItems) is string coverImageId)
             sb.Append("    <meta name=\"cover\" content=\"").Append(coverImageId).AppendLine("\" />");
         sb.AppendLine("  </metadata>");
@@ -724,9 +895,14 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 .AppendLine("\" media-type=\"application/xhtml+xml\" />");
         }
         sb.AppendLine("  </manifest>");
-        sb.AppendLine("  <spine>");
+        sb.AppendLine("  <spine page-progression-direction=\"ltr\">");
         foreach (var item in xhtmlItems)
-            sb.Append("    <itemref idref=\"").Append(item.Id).AppendLine("\" />");
+        {
+            sb.Append("    <itemref idref=\"").Append(item.Id).Append('"');
+            if (!string.IsNullOrWhiteSpace(item.SpineProperties))
+                sb.Append(" properties=\"").Append(item.SpineProperties).Append('"');
+            sb.AppendLine(" />");
+        }
         sb.AppendLine("  </spine>");
         sb.AppendLine("</package>");
         return sb.ToString();
@@ -743,7 +919,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         sb.AppendLine("</head><body>");
         sb.AppendLine("""<nav epub:type="toc" id="toc">""");
         sb.AppendLine("<h1>Table of Contents</h1><ol>");
-        foreach (var item in xhtmlItems.Where(item => item.Id != "cover-page"))
+        foreach (var item in xhtmlItems.Where(item => item.IncludeInNavigation))
             sb.Append("<li><a href=\"").Append(item.Href).Append("\">").Append(Html(item.Title)).AppendLine("</a></li>");
         sb.AppendLine("</ol></nav>");
         sb.AppendLine("</body></html>");
@@ -874,6 +1050,63 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         .description p {
           margin: 0 0 0.9em;
         }
+
+        body.fixed-layout {
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          height: 100%;
+          overflow: hidden;
+        }
+
+        .fixed-page-surface {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          margin: 0;
+          padding: 0;
+          overflow: hidden;
+        }
+
+        .fixed-page-image {
+          display: block;
+          position: absolute;
+          top: 0;
+          height: 100%;
+          max-width: none;
+          max-height: none;
+          margin: 0;
+        }
+
+        .fixed-page-image-whole {
+          left: 0;
+          width: 100%;
+        }
+
+        .fixed-page-image-spread {
+          width: 200%;
+        }
+
+        .fixed-page-image-left {
+          left: 0;
+        }
+
+        .fixed-page-image-right {
+          left: -100%;
+        }
+
+        .fixed-page-accessible {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          clip-path: inset(50%);
+          white-space: normal;
+          border: 0;
+        }
         """;
 
     private static void WriteEntry(ZipArchive archive, string name, string content, CompressionLevel compressionLevel, Encoding encoding)
@@ -893,6 +1126,11 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     private static string? ImageHref(IReadOnlyList<EpubImageItem> images, Guid assetId) =>
         images.FirstOrDefault(image => !image.IsCover && image.Asset.Id == assetId)?.Href;
 
+    private static string? PicturePageImageHref(IReadOnlyList<EpubImageItem> images, Guid chapterId) =>
+        images.FirstOrDefault(image => image.Id == PicturePageImageId(chapterId))?.Href;
+
+    private static string PicturePageImageId(Guid chapterId) => $"picture-page-{chapterId:N}";
+
     private static string? CoverImageHref(IReadOnlyList<EpubImageItem> images) =>
         images.FirstOrDefault(image => image.IsCover)?.Href;
 
@@ -907,6 +1145,14 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
 
     private static string Html(string value) => WebUtility.HtmlEncode(value);
 
-    private sealed record EpubXhtmlItem(string Id, string Href, string Title, string Content);
+    private sealed record EpubXhtmlItem(
+        string Id,
+        string Href,
+        string Title,
+        string Content,
+        bool IncludeInNavigation = true,
+        string SpineProperties = "");
+
+    private sealed record EpubViewport(int Width, int Height);
     private sealed record EpubImageItem(string Id, string Href, PublishAssetDocument Asset, bool IsCover);
 }

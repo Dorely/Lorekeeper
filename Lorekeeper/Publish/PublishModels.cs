@@ -128,6 +128,8 @@ public sealed record PublishDocument(
     IReadOnlyList<PublishAssetDocument> Assets,
     IReadOnlyList<PublishImagePlacementDocument> Placements)
 {
+    public ChapterPageLayoutKind? CoverPageLayoutKind { get; init; }
+
     public string DisplayTitle => string.IsNullOrWhiteSpace(Profile.TitleOverride)
         ? ProjectName
         : Profile.TitleOverride.Trim();
@@ -175,7 +177,17 @@ public sealed record PublishChapterDocument(
     ChapterVisualMode VisualMode,
     ChapterPageLayoutKind PageLayoutKind,
     IllustratedProseLayout IllustrationLayout,
-    PicturePageLayout PageLayout);
+    PicturePageLayout PageLayout)
+{
+    public PublishPicturePageDocument? RenderedPicturePage { get; init; }
+}
+
+public sealed record PublishPicturePageDocument(
+    PublishAssetDocument Surface,
+    int PageWidthPixels,
+    int PageHeightPixels,
+    int LeafCount,
+    string AccessibleText);
 
 public sealed record PublishAssetDocument(
     Guid Id,

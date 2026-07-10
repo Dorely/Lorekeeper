@@ -12,45 +12,60 @@
     gap: 0.5rem;
     padding: 0.75rem 1rem;
     border-bottom: 1px solid #d8dee9;
-    background: #ffffff;
+    background: rgb(255 255 255 / 96%);
+    box-shadow: 0 2px 8px rgb(15 23 42 / 8%);
+    backdrop-filter: blur(8px);
 }
 
 .print-toolbar-meta {
     margin-left: auto;
+    overflow: hidden;
     color: #667085;
     font-size: 0.85rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .manuscript-print {
-    max-width: 8.5in;
-    min-height: 11in;
-    margin: 1.5rem auto;
-    padding: 0.8in;
-    background: #ffffff;
-    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+    box-sizing: border-box;
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 1.5rem 1rem 3rem;
     color: #172033;
     font-family: Georgia, "Times New Roman", serif;
     font-size: 12pt;
     line-height: 1.55;
 }
 
+.manuscript-sheet,
 .manuscript-cover-page,
-.manuscript-title-page {
-    min-height: 8.5in;
+.manuscript-picture-leaf {
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    background: #ffffff;
+    box-shadow: 0 10px 30px rgb(15 23 42 / 12%);
+}
+
+.manuscript-sheet--normal {
+    page: manuscript-page;
+    width: min(8.5in, calc(100% - 2rem));
+    min-width: 0;
+    padding: clamp(1.25rem, 5vw, 0.5in);
+    aspect-ratio: 8.5 / 11;
+    break-before: page;
+}
+
+.manuscript-title-page,
+.manuscript-act,
+.manuscript-centered-matter {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    break-after: page;
-}
-
-.manuscript-cover-page img {
-    display: block;
-    max-width: 100%;
-    max-height: 9in;
-    margin: 0 auto;
-    object-fit: contain;
 }
 
 .manuscript-title-page h1 {
@@ -65,26 +80,9 @@
 .manuscript-subtitle,
 .manuscript-byline,
 .manuscript-publisher {
+    margin: 0.2in 0 0;
     color: #475467;
     font-family: Arial, sans-serif;
-    margin: 0.2in 0 0;
-}
-
-.manuscript-act,
-.manuscript-chapter,
-.manuscript-empty,
-.manuscript-matter,
-.manuscript-toc,
-.manuscript-figure {
-    break-before: page;
-}
-
-.manuscript-act {
-    min-height: 8.5in;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    text-align: center;
 }
 
 .manuscript-act h2,
@@ -109,14 +107,6 @@
 .manuscript-matter h2,
 .manuscript-toc h2 {
     font-size: 18pt;
-}
-
-.manuscript-centered-matter {
-    min-height: 8.5in;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    text-align: center;
 }
 
 .manuscript-toc ol {
@@ -148,24 +138,104 @@
     margin-top: 0.12in;
 }
 
-.manuscript-figure {
-    margin: 0;
-    text-align: center;
+.manuscript-cover-page,
+.manuscript-picture-leaf {
+    position: relative;
+    overflow: hidden;
+    break-after: page;
 }
 
-.manuscript-figure--inline {
-    break-before: auto;
-    margin: 0.18in auto;
+.manuscript-cover-page img,
+.manuscript-picture-leaf img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    object-fit: fill;
 }
 
-.manuscript-picture-page {
+.manuscript-cover-page--portrait {
+    page: cover-portrait;
+    width: min(8.5in, calc(100% - 2rem));
+    aspect-ratio: 8.5 / 11;
+}
+
+.manuscript-cover-page--landscape {
+    page: cover-landscape;
+    width: min(11in, calc(100% - 2rem));
+    aspect-ratio: 11 / 8.5;
+}
+
+.manuscript-cover-page--double-portrait {
+    page: cover-double-portrait;
+    width: min(17in, calc(100% - 2rem));
+    aspect-ratio: 17 / 11;
+}
+
+.manuscript-cover-page--double-landscape {
+    page: cover-double-landscape;
+    width: min(22in, calc(100% - 2rem));
+    aspect-ratio: 22 / 8.5;
+}
+
+.manuscript-picture-leaf--portrait {
+    page: picture-portrait;
+    width: min(8.5in, calc(100% - 2rem));
+    aspect-ratio: 8.5 / 11;
+}
+
+.manuscript-picture-leaf--landscape {
+    page: picture-landscape;
+    width: min(11in, calc(100% - 2rem));
+    aspect-ratio: 11 / 8.5;
+}
+
+.manuscript-picture-leaf.is-single {
     break-before: page;
-    min-height: 8.5in;
+}
+
+.manuscript-picture-leaf.is-double img {
+    width: 200%;
+}
+
+.manuscript-picture-leaf.is-left {
+    /* Paged-media engines can honor parity here; Chromium currently degrades this to a page break. */
+    break-before: left;
+}
+
+.manuscript-picture-leaf.is-right {
+    break-before: right;
+}
+
+.manuscript-picture-leaf.is-right img {
+    left: -100%;
+}
+
+.manuscript-figure {
     display: flex;
+    margin: 0;
     flex-direction: column;
+    align-items: center;
     justify-content: center;
-    gap: 0.16in;
     text-align: center;
+}
+
+.manuscript-figure--inline,
+.manuscript-figure--placement-inline {
+    display: block;
+    min-height: 0;
+    margin: 0.18in auto;
+    padding: 0;
+    aspect-ratio: auto;
+    break-before: auto;
+    box-shadow: none;
+}
+
+.manuscript-figure--placement-inline {
+    break-before: page;
 }
 
 .manuscript-figure img {
@@ -177,14 +247,66 @@
 }
 
 .manuscript-figure figcaption {
+    margin-top: 0.12in;
     color: #475467;
     font-family: Arial, sans-serif;
     font-size: 10pt;
-    margin-top: 0.12in;
 }
 
-@page {
-    margin: 0.75in;
+@page manuscript-page {
+    size: Letter portrait;
+    margin: 0.5in;
+}
+
+@page picture-portrait {
+    size: 8.5in 11in;
+    margin: 0;
+}
+
+@page picture-landscape {
+    size: 11in 8.5in;
+    margin: 0;
+}
+
+@page cover-portrait {
+    size: 8.5in 11in;
+    margin: 0;
+}
+
+@page cover-landscape {
+    size: 11in 8.5in;
+    margin: 0;
+}
+
+@page cover-double-portrait {
+    size: 17in 11in;
+    margin: 0;
+}
+
+@page cover-double-landscape {
+    size: 22in 8.5in;
+    margin: 0;
+}
+
+@media (max-width: 640px) {
+    .print-toolbar-meta {
+        display: none;
+    }
+
+    .manuscript-print {
+        gap: 1rem;
+        padding-inline: 0.5rem;
+    }
+
+    .manuscript-sheet--normal,
+    .manuscript-cover-page,
+    .manuscript-picture-leaf {
+        width: calc(100% - 1rem);
+    }
+
+    .manuscript-title-page h1 {
+        font-size: clamp(22pt, 10vw, 32pt);
+    }
 }
 
 @media print {
@@ -193,16 +315,45 @@
     }
 
     .manuscript-print {
-        max-width: none;
-        min-height: auto;
-        margin: 0;
+        display: block;
         padding: 0;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+    }
+
+    .manuscript-sheet,
+    .manuscript-cover-page,
+    .manuscript-picture-leaf {
+        margin: 0;
         box-shadow: none;
     }
 
-    .manuscript-cover-page,
-    .manuscript-title-page,
-    .manuscript-act {
-        min-height: 9in;
+    .manuscript-sheet--normal {
+        width: auto;
+        min-height: 10in;
+        padding: 0;
+        aspect-ratio: auto;
+    }
+
+    .manuscript-cover-page--portrait,
+    .manuscript-picture-leaf--portrait {
+        width: 8.5in;
+        height: 11in;
+    }
+
+    .manuscript-cover-page--landscape,
+    .manuscript-picture-leaf--landscape {
+        width: 11in;
+        height: 8.5in;
+    }
+
+    .manuscript-cover-page--double-portrait {
+        width: 17in;
+        height: 11in;
+    }
+
+    .manuscript-cover-page--double-landscape {
+        width: 22in;
+        height: 8.5in;
     }
 }

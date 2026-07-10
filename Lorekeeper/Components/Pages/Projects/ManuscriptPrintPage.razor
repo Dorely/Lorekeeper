@@ -38,12 +38,12 @@ else if (_document is not null)
     <article class="manuscript-print">
         @if (_document.CoverAsset is { } cover)
         {
-            <section class="manuscript-cover-page">
+            <section class="manuscript-cover-page @CoverPageClass(_document.CoverPageLayoutKind)">
                 <img src="@ImageDataUrl(cover)" alt="@cover.AltText" />
             </section>
         }
 
-        <header class="manuscript-title-page">
+        <header class="manuscript-title-page manuscript-sheet manuscript-sheet--normal">
             <h1>@_document.DisplayTitle</h1>
             @if (!string.IsNullOrWhiteSpace(_document.Profile.Subtitle))
             {
@@ -61,7 +61,7 @@ else if (_document is not null)
 
         @if (!string.IsNullOrWhiteSpace(_document.Profile.Description))
         {
-            <section class="manuscript-matter">
+            <section class="manuscript-matter manuscript-sheet manuscript-sheet--normal">
                 <h2>Description</h2>
                 @foreach (var paragraph in SplitParagraphs(_document.Profile.Description))
                 {
@@ -72,7 +72,7 @@ else if (_document is not null)
 
         @if (!string.IsNullOrWhiteSpace(_document.Profile.Dedication))
         {
-            <section class="manuscript-matter manuscript-centered-matter">
+            <section class="manuscript-matter manuscript-centered-matter manuscript-sheet manuscript-sheet--normal">
                 @foreach (var paragraph in SplitParagraphs(_document.Profile.Dedication))
                 {
                     <p>@RenderParagraph(paragraph)</p>
@@ -82,7 +82,7 @@ else if (_document is not null)
 
         @if (_document.Profile.IncludeTableOfContents && _document.Profile.IncludeVisibleTableOfContents)
         {
-            <section class="manuscript-toc">
+            <section class="manuscript-toc manuscript-sheet manuscript-sheet--normal">
                 <h2>Table of Contents</h2>
                 <ol>
                     @foreach (var entry in TocEntries(_document))
@@ -95,7 +95,7 @@ else if (_document is not null)
 
         @if (_document.Sections.Count == 0)
         {
-            <section class="manuscript-empty">
+            <section class="manuscript-empty manuscript-sheet manuscript-sheet--normal">
                 <p>No chapters to print.</p>
             </section>
         }
@@ -110,7 +110,7 @@ else if (_document is not null)
 
                 @if (publishSection.IncludePage)
                 {
-                    <section class="manuscript-act">
+                    <section class="manuscript-act manuscript-sheet manuscript-sheet--normal">
                         @if (publishSection.IncludeHeading)
                         {
                             <h2>@publishSection.Title</h2>
@@ -139,30 +139,45 @@ else if (_document is not null)
                         @RenderFigure(placement)
                     }
 
-                    <section class="manuscript-chapter">
-                        @if (chapter.IncludeHeading)
-                        {
-                            <h2>@chapter.Title</h2>
-                        }
-                        @if (_document.Profile.IncludeChapterSynopses && !string.IsNullOrWhiteSpace(chapter.Synopsis))
-                        {
-                            <div class="manuscript-synopsis">
-                                @foreach (var paragraph in SplitParagraphs(chapter.Synopsis))
-                                {
-                                    <p>@RenderParagraph(paragraph)</p>
-                                }
-                            </div>
-                        }
+                    @if (chapter.VisualMode == ChapterVisualMode.PicturePage)
+                    {
                         @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterOpening))
                         {
                             @RenderFigure(placement)
                         }
-                        @RenderChapterBody(chapter)
+                        @RenderPicturePage(chapter)
                         @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding))
                         {
                             @RenderFigure(placement)
                         }
-                    </section>
+                    }
+                    else
+                    {
+                        <section class="manuscript-chapter manuscript-sheet manuscript-sheet--normal">
+                            @if (chapter.IncludeHeading)
+                            {
+                                <h2>@chapter.Title</h2>
+                            }
+                            @if (_document.Profile.IncludeChapterSynopses && !string.IsNullOrWhiteSpace(chapter.Synopsis))
+                            {
+                                <div class="manuscript-synopsis">
+                                    @foreach (var paragraph in SplitParagraphs(chapter.Synopsis))
+                                    {
+                                        <p>@RenderParagraph(paragraph)</p>
+                                    }
+                                </div>
+                            }
+                            @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterOpening))
+                            {
+                                @RenderFigure(placement, standalone: false)
+                            }
+                            @RenderChapterBody(chapter)
+                            @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding))
+                            {
+                                @RenderFigure(placement, standalone: false)
+                            }
+                        </section>
+                    }
 
                     @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.AfterChapter))
                     {
@@ -174,7 +189,7 @@ else if (_document is not null)
 
         @if (!string.IsNullOrWhiteSpace(_document.Profile.Acknowledgments))
         {
-            <section class="manuscript-matter">
+            <section class="manuscript-matter manuscript-sheet manuscript-sheet--normal">
                 <h2>Acknowledgments</h2>
                 @foreach (var paragraph in SplitParagraphs(_document.Profile.Acknowledgments))
                 {
@@ -185,7 +200,7 @@ else if (_document is not null)
 
         @if (!string.IsNullOrWhiteSpace(_document.Profile.References))
         {
-            <section class="manuscript-matter">
+            <section class="manuscript-matter manuscript-sheet manuscript-sheet--normal">
                 <h2>References</h2>
                 @foreach (var paragraph in SplitParagraphs(_document.Profile.References))
                 {
@@ -206,6 +221,7 @@ else if (_document is not null)
     private bool _notFound;
     private string? _error;
     private bool _printRequested;
+    private bool _printViewInitialized;
     private IJSObjectReference? _module;
 
     private string PageTitleText => _document is null
@@ -223,6 +239,7 @@ else if (_document is not null)
         _error = null;
         _document = null;
         _printRequested = false;
+        _printViewInitialized = false;
 
         try
         {
@@ -247,15 +264,23 @@ else if (_document is not null)
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_document is null || !Autoprint || _printRequested) return;
+        if (_document is null) return;
 
-        _printRequested = true;
         await EnsureModuleAsync();
-        if (_module is not null)
+        if (_module is null) return;
+
+        if (!_printViewInitialized)
         {
-            try { await _module.InvokeVoidAsync("printWhenReady"); }
+            _printViewInitialized = true;
+            try { await _module.InvokeVoidAsync("initializePrintView"); }
             catch (JSDisconnectedException) { }
         }
+
+        if (!Autoprint || _printRequested) return;
+
+        _printRequested = true;
+        try { await _module.InvokeVoidAsync("printWhenReady"); }
+        catch (JSDisconnectedException) { }
     }
 
     private async Task PrintAsync()
@@ -337,30 +362,6 @@ else if (_document is not null)
     private RenderFragment RenderChapterBody(PublishChapterDocument chapter) => builder =>
     {
         var sequence = 0;
-        if (chapter.VisualMode == ChapterVisualMode.PicturePage)
-        {
-            builder.OpenElement(sequence++, "div");
-            builder.AddAttribute(sequence++, "class", "manuscript-picture-page");
-            foreach (var text in chapter.PageLayout.TextElements.OrderBy(text => text.ReadingOrder))
-            {
-                foreach (var paragraph in SplitParagraphs(text.Text))
-                {
-                    builder.OpenElement(sequence++, "p");
-                    builder.AddContent(sequence++, RenderParagraph(paragraph));
-                    builder.CloseElement();
-                }
-            }
-
-            foreach (var image in chapter.PageLayout.Images.OrderBy(image => image.ZIndex))
-            {
-                if (FindAsset(image.ImageId) is { } asset)
-                    RenderVisualFigure(builder, ref sequence, asset, string.Empty);
-            }
-
-            builder.CloseElement();
-            return;
-        }
-
         builder.OpenElement(sequence++, "div");
         builder.AddAttribute(sequence++, "class", "manuscript-prose");
         var paragraphs = SplitParagraphs(chapter.Body);
@@ -379,6 +380,36 @@ else if (_document is not null)
 
         builder.CloseElement();
     };
+
+    private RenderFragment RenderPicturePage(PublishChapterDocument chapter) => builder =>
+    {
+        var sequence = 0;
+        var isDouble = chapter.PageLayoutKind is ChapterPageLayoutKind.DoublePortrait or ChapterPageLayoutKind.DoubleLandscape;
+        RenderPictureLeaf(builder, ref sequence, chapter, isDouble ? "left" : null);
+        if (isDouble)
+            RenderPictureLeaf(builder, ref sequence, chapter, "right");
+    };
+
+    private void RenderPictureLeaf(
+        RenderTreeBuilder builder,
+        ref int sequence,
+        PublishChapterDocument chapter,
+        string? spreadSide)
+    {
+        var orientation = chapter.PageLayoutKind is ChapterPageLayoutKind.SingleLandscape or ChapterPageLayoutKind.DoubleLandscape
+            ? "landscape"
+            : "portrait";
+        var sideClass = spreadSide is null ? "is-single" : $"is-double is-{spreadSide}";
+        var altText = spreadSide is null ? chapter.Title : $"{chapter.Title}, {spreadSide} page";
+
+        builder.OpenElement(sequence++, "section");
+        builder.AddAttribute(sequence++, "class", $"manuscript-picture-leaf manuscript-picture-leaf--{orientation} {sideClass}");
+        builder.OpenElement(sequence++, "img");
+        builder.AddAttribute(sequence++, "src", PicturePageSurfaceUrl(chapter.Id));
+        builder.AddAttribute(sequence++, "alt", altText);
+        builder.CloseElement();
+        builder.CloseElement();
+    }
 
     private void RenderIllustrationBlocks(
         RenderTreeBuilder builder,
@@ -416,11 +447,16 @@ else if (_document is not null)
         builder.CloseElement();
     }
 
-    private static RenderFragment RenderFigure(PublishImagePlacementDocument placement) => builder =>
+    private static RenderFragment RenderFigure(PublishImagePlacementDocument placement, bool standalone = true) => builder =>
     {
         var sequence = 0;
         builder.OpenElement(sequence++, "figure");
-        builder.AddAttribute(sequence++, "class", "manuscript-figure");
+        builder.AddAttribute(
+            sequence++,
+            "class",
+            standalone
+                ? "manuscript-figure manuscript-sheet manuscript-sheet--normal"
+                : "manuscript-figure manuscript-figure--placement-inline");
         builder.OpenElement(sequence++, "img");
         builder.AddAttribute(sequence++, "src", ImageDataUrl(placement.Asset));
         builder.AddAttribute(sequence++, "alt", placement.Asset.AltText);
@@ -448,10 +484,22 @@ else if (_document is not null)
     private static string ImageDataUrl(PublishAssetDocument asset) =>
         $"data:{asset.ContentType};base64,{Convert.ToBase64String(asset.Data)}";
 
+    private string PicturePageSurfaceUrl(Guid chapterId) =>
+        $"/projects/{_document!.ProjectId:N}/publish/picture-pages/{chapterId:N}/surface?physicalPageLongEdge=2400";
+
+    private static string CoverPageClass(ChapterPageLayoutKind? kind) => kind switch
+    {
+        ChapterPageLayoutKind.SingleLandscape => "manuscript-cover-page--landscape",
+        ChapterPageLayoutKind.DoublePortrait => "manuscript-cover-page--double-portrait",
+        ChapterPageLayoutKind.DoubleLandscape => "manuscript-cover-page--double-landscape",
+        _ => "manuscript-cover-page--portrait",
+    };
+
     public async ValueTask DisposeAsync()
     {
         if (_module is not null)
         {
+            try { await _module.InvokeVoidAsync("disposePrintView"); } catch (JSDisconnectedException) { }
             try { await _module.DisposeAsync(); } catch (JSDisconnectedException) { }
         }
     }

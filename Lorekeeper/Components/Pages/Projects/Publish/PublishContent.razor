@@ -537,7 +537,11 @@ else
                             <span>Plain text</span>
                             <small>@ExportButtonDetail(PublishExportFormat.PlainText, "Text only")</small>
                         </button>
-                        <button type="button" class="btn btn-outline-secondary" disabled="@(!CanPrint)" @onclick="OpenPrintAsync">
+                        <button type="button" class="btn btn-outline-secondary" disabled="@(!CanPrint)" @onclick="() => OpenPrintAsync(autoprint: false)">
+                            <span>Publish preview</span>
+                            <small>@(_printing ? "Opening…" : "Review the finished layout")</small>
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" disabled="@(!CanPrint)" @onclick="() => OpenPrintAsync(autoprint: true)">
                             <span>Print / PDF</span>
                             <small>@(_printing ? "Opening…" : "Browser print layout")</small>
                         </button>
@@ -879,9 +883,12 @@ else
         _ => "Export tools are getting ready.",
     };
 
-    private string PrintUrl => Project is null
-        ? "#"
-        : $"/projects/{Uri.EscapeDataString(Project.Slug)}/manuscript/print?autoprint=true";
+    private string PrintUrl(bool autoprint)
+    {
+        if (Project is null) return "#";
+        var baseUrl = $"/projects/{Uri.EscapeDataString(Project.Slug)}/manuscript/print";
+        return autoprint ? $"{baseUrl}?autoprint=true" : baseUrl;
+    }
 
     private string ImagesUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/images";
     private string OutlineUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/outline";
@@ -1370,7 +1377,7 @@ else
         }
     }
 
-    private async Task OpenPrintAsync()
+    private async Task OpenPrintAsync(bool autoprint)
     {
         if (!CanPrint) return;
         _printing = true;
@@ -1379,13 +1386,13 @@ else
         {
             await FlushProfileSaveAsync();
             if (_profileSaveState == SaveState.SaveFailed || HasPendingProfileSave)
-                throw new InvalidOperationException("Your latest publishing settings could not be saved. Retry the save before opening print.");
-            Nav.NavigateTo(PrintUrl);
+                throw new InvalidOperationException("Your latest publishing settings could not be saved. Retry the save before opening the publish view.");
+            Nav.NavigateTo(PrintUrl(autoprint));
         }
         catch (Exception ex)
         {
             _exportError = ex.Message;
-            _liveMessage = $"Print view could not be opened. {ex.Message}";
+            _liveMessage = $"Publish view could not be opened. {ex.Message}";
         }
         finally
         {

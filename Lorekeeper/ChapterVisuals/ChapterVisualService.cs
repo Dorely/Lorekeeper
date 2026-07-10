@@ -202,6 +202,88 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         return RenderIllustratedProseSnapshots(state, profile, assets, edge);
     }
 
+    public async Task<IReadOnlyDictionary<Guid, ChapterPicturePageSurface>> RenderPicturePageSurfacesAsync(
+        IReadOnlyCollection<Guid> chapterIds,
+        int physicalPageLongEdgePixels = 2400,
+        CancellationToken cancellationToken = default)
+    {
+        var requestedIds = chapterIds
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+        if (requestedIds.Count == 0)
+            return new Dictionary<Guid, ChapterPicturePageSurface>();
+
+        var chapters = await db.Chapters
+            .AsNoTracking()
+            .Where(chapter => requestedIds.Contains(chapter.Id)
+                && chapter.VisualMode == ChapterVisualMode.PicturePage)
+            .ToListAsync(cancellationToken);
+        if (chapters.Count == 0)
+            return new Dictionary<Guid, ChapterPicturePageSurface>();
+
+        var chapterStates = chapters
+            .Select(chapter => new PicturePageRenderRequest(chapter.ProjectId, State(chapter)))
+            .ToList();
+        var imageIds = chapterStates
+            .SelectMany(request => request.State.PageLayout.Images)
+            .Select(image => image.ImageId)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+        var projectIds = chapters
+            .Select(chapter => chapter.ProjectId)
+            .Distinct()
+            .ToList();
+        var assets = imageIds.Count == 0
+            ? []
+            : await db.PublishAssets
+                .AsNoTracking()
+                .Where(asset => projectIds.Contains(asset.ProjectId) && imageIds.Contains(asset.Id))
+                .ToListAsync(cancellationToken);
+        var assetsByProject = assets
+            .GroupBy(asset => asset.ProjectId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyDictionary<Guid, PublishAsset>)group.ToDictionary(asset => asset.Id));
+
+        var edge = (int)Clamp(physicalPageLongEdgePixels, 320, 2400, 2400);
+        var surfaces = new Dictionary<Guid, ChapterPicturePageSurface>(chapterStates.Count);
+        foreach (var request in chapterStates)
+        {
+            var metrics = PageMetrics(request.State.PageLayoutKind);
+            var (pageWidth, pageHeight) = ScaledPagePixels(
+                metrics.PageWidthInches,
+                metrics.PageHeightInches,
+                edge);
+            var leafCount = metrics.IsDouble ? 2 : 1;
+            var surfaceWidth = pageWidth * leafCount;
+            var projectAssets = assetsByProject.GetValueOrDefault(request.ProjectId)
+                ?? new Dictionary<Guid, PublishAsset>();
+            var snapshot = RenderPicturePageSnapshot(
+                request.State,
+                projectAssets,
+                surfaceWidth,
+                pageHeight,
+                includeGuides: false);
+            var fileName = $"chapter-{request.State.ChapterId:N}-picture-page.png";
+            surfaces.Add(
+                request.State.ChapterId,
+                new ChapterPicturePageSurface(
+                    request.State.ChapterId,
+                    request.State.PageLayoutKind,
+                    pageWidth,
+                    pageHeight,
+                    leafCount,
+                    fileName,
+                    snapshot.ContentType,
+                    snapshot.Data,
+                    ProjectPictureBody(request.State.PageLayout)));
+        }
+
+        return surfaces;
+    }
+
     public async Task RemoveImageReferencesAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default)
     {
         var chapters = await db.Chapters.Where(chapter => chapter.ProjectId == projectId).ToListAsync(cancellationToken);
@@ -312,7 +394,16 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
     {
         var metrics = PageMetrics(state.PageLayoutKind);
         var (width, height) = ScaledPagePixels(metrics.SurfaceWidthInches, metrics.SurfaceHeightInches, maxEdge);
+        return RenderPicturePageSnapshot(state, assets, width, height, includeGuides);
+    }
 
+    private static ChapterVisualSnapshot RenderPicturePageSnapshot(
+        ChapterVisualState state,
+        IReadOnlyDictionary<Guid, PublishAsset> assets,
+        int width,
+        int height,
+        bool includeGuides)
+    {
         using var surface = CreatePageSurface(width, height);
         var canvas = surface.Canvas;
         canvas.Clear(SKColors.White);
@@ -343,7 +434,7 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
             if (layer.Text is { } text)
                 textFitDiagnostics.Add(DrawPictureTextBox(canvas, text, width, height));
         }
-        if (metrics.IsDouble && includeGuides)
+        if (PageMetrics(state.PageLayoutKind).IsDouble && includeGuides)
             DrawSpreadSplit(canvas, width, height);
 
         return new ChapterVisualSnapshot(1, $"chapter-{state.ChapterId:N}-page-1.png", SnapshotContentType, EncodePng(surface))
@@ -1191,4 +1282,8 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         int StableOrder,
         PicturePageImageElement? Image,
         PicturePageTextElement? Text);
+
+    private sealed record PicturePageRenderRequest(
+        Guid ProjectId,
+        ChapterVisualState State);
 }

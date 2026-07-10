@@ -65,7 +65,7 @@
 | File | Description |
 |------|-------------|
 | `MainLayout.razor` / `.css` | Top-level page layout with sidebar + main column. Locks the app shell to viewport height, gives workspaces an independent flex/scroll context, and applies compact outer padding on Editor routes. |
-| `PrintLayout.razor` / `.css` | Minimal no-navigation layout used by print-oriented pages such as Publish browser PDF export. |
+| `PrintLayout.razor` / `.css` | Minimal no-navigation layout used by print-oriented pages; owns the viewport scroll container while restoring unbounded overflow for printed output. |
 | `NavMenu.razor` / `.css` | Sidebar navigation (Home, Providers, Embeddings, Search Providers). |
 | `ReconnectModal.razor` / `.cs` / `.css` | UI shown when the SignalR circuit drops. |
 
@@ -99,7 +99,7 @@
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
 | `ImagesPage.razor` | Images tab at `/projects/{Slug}/images`; wraps `ProjectLayout` and hosts `Images.ImagesContent`. |
 | `PublishPage.razor` | Publish tab at `/projects/{Slug}/publish`; wraps `ProjectLayout` and hosts `Publish.PublishContent`. |
-| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Print/PDF publish route at `/projects/{Slug}/manuscript/print`; renders the saved publish profile, flattened cover image, TOC, metadata, selected outline, publish placements, illustrated prose, and picture-page visual layouts in the no-chrome print layout. |
+| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Scrollable preview and Print/PDF route at `/projects/{Slug}/manuscript/print`; uses named pages, decoded-asset readiness, full-bleed composited Picture Pages, and cropped facing leaves for double spreads. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
 
@@ -133,7 +133,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Responsive Publish workspace for autosaved metadata, Picture Page cover selection/preview, outline inclusion, on-demand publish-only placements, readiness, and TXT/Markdown/EPUB/Print exports. |
+| `PublishContent.razor` (+ `.razor.css`) | Responsive Publish workspace for autosaved metadata, Picture Page cover selection, outline inclusion, publish-only placements, readiness, separate layout preview/print actions, and TXT/Markdown/EPUB exports. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -453,17 +453,17 @@
 | File | Description |
 |------|-------------|
 | `ChapterVisualModels.cs` | UI/service records for chapter visual state, page layout mode updates, and image placement results. |
-| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Chapter visual-layout facade: mode/page-layout changes, cover-selection cleanup, layout normalization/saves, image cleanup, picture-page body projection, textual manifests, and guide-free or editor-style rendered snapshots with PicturePage typography/shadows. |
+| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Chapter visual-layout facade for layout mutations, cleanup, manifests, editor snapshots, and batched guide-free publish surfaces scaled per physical Picture Page leaf. |
 | `PicturePageImageGenerationGuidance.cs` | Shared PicturePage image-generation guidance helper: layout-native target sizes, slot-size recommendations, manifest lines, and prompt appendix text for image tools. |
 
 ### Publish/
 
 | File | Description |
 |------|-------------|
-| `PublishModels.cs` | Lightweight Publish workspace/document/export records for profiles, Picture Page cover candidates, outline selections, image placements with thumbnail URLs, and resolved document projections with one rendered cover PNG. |
-| `IPublishService.cs` / `PublishService.cs` | Publish facade for profile and Picture Page cover persistence, bulk outline selection, placement create/update/reorder/reference cleanup, cover-only document projection, and TXT/Markdown/EPUB export. |
-| `PublishEndpoints.cs` | Lightweight HTTP endpoint that validates and renders a selected Picture Page as a cached, guide-free PNG preview without transferring the project image library through Blazor. |
-| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | Publish formatter abstraction plus TXT, Markdown, and dependency-free EPUB implementations with metadata, TOC, one rendered Picture Page cover, interior placements, illustrated prose, and picture-page image/text content. |
+| `PublishModels.cs` | Lightweight Publish workspace/document/export records for profiles, covers, outline selections, placements, and rendered Picture Page surface projections used by print and EPUB. |
+| `IPublishService.cs` / `PublishService.cs` | Publish facade for profile/cover/outline/placement persistence and exports; resolves the cover and enriches EPUB documents with batched composited Picture Page surfaces. |
+| `PublishEndpoints.cs` | Cacheable HTTP endpoints for validated guide-free cover previews and high-resolution interior Picture Page surfaces, avoiding large Blazor render payloads. |
+| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus a dependency-free mixed-layout EPUB writer with reflowable prose and fixed, accessible cover/Picture Page leaves including true spreads. |
 
 ### Graph/
 

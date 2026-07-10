@@ -1,5 +1,7 @@
 .print-layout {
+    height: 100vh;
     min-height: 100vh;
+    overflow: auto;
     background: #f5f6f8;
 }
 
@@ -26,7 +28,9 @@
 
 @media print {
     .print-layout {
+        height: auto;
         min-height: auto;
+        overflow: visible;
         background: #ffffff;
     }
 

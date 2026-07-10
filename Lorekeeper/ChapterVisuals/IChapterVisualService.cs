@@ -14,9 +14,24 @@ public interface IChapterVisualService
         int maxEdge = 1400,
         bool includeGuides = true,
         CancellationToken cancellationToken = default);
+    Task<IReadOnlyDictionary<Guid, ChapterPicturePageSurface>> RenderPicturePageSurfacesAsync(
+        IReadOnlyCollection<Guid> chapterIds,
+        int physicalPageLongEdgePixels = 2400,
+        CancellationToken cancellationToken = default);
     Task RemoveImageReferencesAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default);
     string BuildManifest(ChapterVisualState state, IReadOnlyDictionary<Guid, string>? imageNames = null);
 }
+
+public sealed record ChapterPicturePageSurface(
+    Guid ChapterId,
+    ChapterPageLayoutKind PageLayoutKind,
+    int PageWidthPixels,
+    int PageHeightPixels,
+    int LeafCount,
+    string FileName,
+    string ContentType,
+    byte[] Data,
+    string AccessibleText);
 
 public sealed record ChapterVisualSnapshot(
     int PageNumber,
