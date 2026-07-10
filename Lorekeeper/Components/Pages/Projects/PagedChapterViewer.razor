@@ -71,6 +71,26 @@
                                            value="@selectedText.FontSizePercent.ToString("0.###", CultureInfo.InvariantCulture)"
                                            @onchange="SetSelectedTextFontSizeAsync" />
                                 </label>
+                                <label class="picture-text-toolbar__field picture-text-toolbar__field--alignment">
+                                    <span>Horizontal</span>
+                                    <select class="form-select form-select-sm"
+                                            @bind:get="selectedText.TextAlign"
+                                            @bind:set="SetSelectedTextAlignAsync">
+                                        <option value="@PublishCoverTextAlign.Left">Left</option>
+                                        <option value="@PublishCoverTextAlign.Center">Center</option>
+                                        <option value="@PublishCoverTextAlign.Right">Right</option>
+                                    </select>
+                                </label>
+                                <label class="picture-text-toolbar__field picture-text-toolbar__field--alignment">
+                                    <span>Vertical</span>
+                                    <select class="form-select form-select-sm"
+                                            @bind:get="selectedText.VerticalAlign"
+                                            @bind:set="SetSelectedTextVerticalAlignAsync">
+                                        <option value="@ChapterTextVerticalAlign.Top">Top</option>
+                                        <option value="@ChapterTextVerticalAlign.Middle">Middle</option>
+                                        <option value="@ChapterTextVerticalAlign.Bottom">Bottom</option>
+                                    </select>
+                                </label>
                                 <label class="picture-text-toolbar__field picture-text-toolbar__field--color">
                                     <span>Color</span>
                                     <input class="form-control form-control-color form-control-sm"
@@ -135,14 +155,18 @@
                              @onfocusin="@(() => SelectPictureText(text.Id))"
                              data-picture-element-kind="@(CanEditLayout ? "text" : null)"
                              data-picture-element-id="@(CanEditLayout ? text.Id.ToString("N") : null)">
+                            <div class="picture-text-frame">
+                                <div class="picture-text-content"
+                                     contenteditable="@(CanEditLayout ? "true" : null)"
+                                     role="@(CanEditLayout ? "textbox" : null)"
+                                     aria-multiline="@(CanEditLayout ? "true" : null)"
+                                     aria-label="@(CanEditLayout ? "Edit picture page text" : null)"
+                                     spellcheck="@(CanEditLayout ? "false" : null)"
+                                     data-picture-text-editor="@(CanEditLayout ? "true" : null)">@text.Text</div>
+                            </div>
                             @if (CanEditLayout)
                             {
-                                <div class="picture-text-editor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="false" data-picture-text-editor="true">@text.Text</div>
                                 @RenderPictureCornerControls("text", text.Id)
-                            }
-                            else
-                            {
-                                @text.Text
                             }
                         </div>
                     }
@@ -428,6 +452,22 @@
             return;
 
         await UpdatePictureTextAsync(selectedId, fontFamily: fontFamily);
+    }
+
+    private async Task SetSelectedTextAlignAsync(PublishCoverTextAlign textAlign)
+    {
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId })
+            return;
+
+        await UpdatePictureTextAsync(selectedId, textAlign: textAlign);
+    }
+
+    private async Task SetSelectedTextVerticalAlignAsync(ChapterTextVerticalAlign verticalAlign)
+    {
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId })
+            return;
+
+        await UpdatePictureTextAsync(selectedId, verticalAlign: verticalAlign);
     }
 
     private async Task SetSelectedTextFontSizeAsync(ChangeEventArgs args)
@@ -983,7 +1023,9 @@
         double? fontSizePercent = null,
         string? color = null,
         string? backgroundColor = null,
-        double? backgroundOpacity = null) =>
+        double? backgroundOpacity = null,
+        PublishCoverTextAlign? textAlign = null,
+        ChapterTextVerticalAlign? verticalAlign = null) =>
         await SavePageAsync(State.PageLayout with
         {
             TextElements = State.PageLayout.TextElements.Select(text => text.Id == elementId
@@ -999,6 +1041,8 @@
                     Color = color ?? text.Color,
                     BackgroundColor = backgroundColor ?? text.BackgroundColor,
                     BackgroundOpacity = backgroundOpacity ?? text.BackgroundOpacity,
+                    TextAlign = textAlign ?? text.TextAlign,
+                    VerticalAlign = verticalAlign ?? text.VerticalAlign,
                 }
                 : text).ToList(),
         });
@@ -1343,7 +1387,7 @@
             _ => "center",
         };
         return ElementStyle(text.XPercent, text.YPercent, text.WidthPercent, text.HeightPercent, text.ZIndex)
-            + $"font-family:{FontFamilyCss(text.FontFamily)};font-size:{text.FontSizePercent.ToString(CultureInfo.InvariantCulture)}cqw;line-height:{text.LineHeight.ToString(CultureInfo.InvariantCulture)};color:{TextColorValue(text)};background:{CssRgba(TextBackgroundColorValue(text), TextBackgroundOpacityValue(text))};text-align:{text.TextAlign.ToString().ToLowerInvariant()};align-items:{justify};";
+            + $"font-family:{FontFamilyCss(text.FontFamily)};font-size:{text.FontSizePercent.ToString(CultureInfo.InvariantCulture)}cqw;line-height:{text.LineHeight.ToString(CultureInfo.InvariantCulture)};color:{TextColorValue(text)};background:{CssRgba(TextBackgroundColorValue(text), TextBackgroundOpacityValue(text))};text-align:{text.TextAlign.ToString().ToLowerInvariant()};--picture-text-vertical-position:{justify};";
     }
 
     private static string FontFamilyCss(PublishCoverFontFamily fontFamily) =>
