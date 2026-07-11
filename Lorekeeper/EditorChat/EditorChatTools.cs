@@ -207,6 +207,7 @@ public sealed class EditorChatTools(
             name: "set_chapter_visual_mode",
             description:
                 "Live visual-layout mutation. Set a chapter visual mode to Prose, IllustratedProse, or PicturePage. " +
+                "Use only when the user explicitly requests a visual-mode conversion; never change mode merely to complete another task. " +
                 "Use pageLayoutKind for IllustratedProse or PicturePage; valid values are SinglePortrait, SingleLandscape, DoublePortrait, and DoubleLandscape."));
 
         tools.Add(AIFunctionFactory.Create(
@@ -388,8 +389,10 @@ public sealed class EditorChatTools(
 
             sb.Append(chapter.Order + 1).Append(". ").Append(chapter.Title)
               .Append(" - id=").Append(chapter.Id)
-              .Append(" - visualMode=").Append(chapter.VisualMode)
-              .Append(" - pageLayoutKind=").Append(chapter.PageLayoutKind)
+              .Append(" - visualMode=").Append(chapter.VisualMode);
+            if (chapter.VisualMode != ChapterVisualMode.Prose)
+                sb.Append(" - pageLayoutKind=").Append(chapter.PageLayoutKind);
+            sb
               .Append(" - lines=").Append(lineCount)
               .Append(" - bodyChars=").Append(chapter.Body.Length)
               .Append(" - readChapterPages=").Append(pageCount);
@@ -976,7 +979,9 @@ public sealed class EditorChatTools(
                 chapter.Title,
                 chapter.Synopsis,
                 chapter.VisualMode,
-                chapter.PageLayoutKind,
+                pageLayoutKind = chapter.VisualMode == ChapterVisualMode.Prose
+                    ? null
+                    : chapter.PageLayoutKind.ToString(),
                 source,
             },
             request = new

@@ -59,7 +59,7 @@ public sealed class ContextBuilder(
                 Key: EditorContextKeys.CurrentChapter,
                 Kind: ContextItemKind.CurrentChapter,
                 Label: $"Current Chapter — {currentChapter.Title} (line-numbered)",
-                Body: ChapterFormatting.WithLineNumbers(currentChapter.Body),
+                Body: BuildCurrentChapterBlock(currentChapter),
                 IsEnabled: IsIncluded(preferenceMap, ContextItemKind.CurrentChapter, EditorContextKeys.CurrentChapter, defaultIncluded: true),
                 IsRemovable: true));
 
@@ -370,6 +370,26 @@ public sealed class ContextBuilder(
         return items;
     }
 
+    private static string BuildCurrentChapterBlock(Chapter chapter)
+    {
+        var body = new StringBuilder();
+        body.Append("Chapter id: ").AppendLine(chapter.Id.ToString());
+        body.Append("Title: ").AppendLine(chapter.Title);
+        body.Append("Active visual mode: ").AppendLine(chapter.VisualMode.ToString());
+        body.Append("Editing contract: ").AppendLine(chapter.VisualMode switch
+        {
+            ChapterVisualMode.Prose => "This is a prose chapter. Edit body text with edit_chapter. It has no active visual layout; do not generate Picture Page art or change its mode unless the user explicitly requests that.",
+            ChapterVisualMode.IllustratedProse => "Edit body text with edit_chapter. Images, when requested, use anchored Illustrated Prose layout tools.",
+            ChapterVisualMode.PicturePage => "Text is managed through Picture Page text boxes and visual layout tools, not edit_chapter.",
+            _ => "Respect the active visual mode before choosing editing tools.",
+        });
+        body.AppendLine("Body (line-numbered):");
+        body.Append(string.IsNullOrWhiteSpace(chapter.Body)
+            ? "(empty)"
+            : ChapterFormatting.WithLineNumbers(chapter.Body));
+        return body.ToString();
+    }
+
     private async Task<ContextItem?> BuildChapterVisualLayoutItemAsync(
         Guid projectId,
         Guid chapterId,
@@ -380,9 +400,8 @@ public sealed class ContextBuilder(
         if (state is null) return null;
 
         var hasVisuals = state.VisualMode == ChapterVisualMode.PicturePage
-            || state.IllustrationLayout.Images.Count > 0
-            || state.PageLayout.Images.Count > 0
-            || state.PageLayout.TextElements.Count > 0;
+            || state.VisualMode == ChapterVisualMode.IllustratedProse
+                && state.IllustrationLayout.Images.Count > 0;
         if (!hasVisuals) return null;
 
         var imageNames = (await images.ListAsync(projectId, cancellationToken))
@@ -504,8 +523,9 @@ public sealed class ContextBuilder(
         var body = new StringBuilder();
         body.Append("Title: ").AppendLine(chapter.Title);
         AppendOptionalIndented(body, "Synopsis", chapter.Synopsis, 0);
-        body.Append("Visual mode: ").Append(chapter.VisualMode)
-            .Append("; page layout: ").AppendLine(chapter.PageLayoutKind.ToString());
+        body.Append("Visual mode: ").AppendLine(chapter.VisualMode.ToString());
+        if (chapter.VisualMode != ChapterVisualMode.Prose)
+            body.Append("Page layout: ").AppendLine(chapter.PageLayoutKind.ToString());
         body.AppendLine("Body (line-numbered):");
         body.AppendLine(string.IsNullOrWhiteSpace(chapter.Body) ? "(empty)" : ChapterFormatting.WithLineNumbers(chapter.Body));
 
@@ -779,8 +799,10 @@ public sealed class ContextBuilder(
             var beats = await entities.ListAsync(chapter.ProjectId, EntityTypeService.EventNodeType, chapter.Id, cancellationToken);
             sb.Append("  Chapter ").Append(chapter.Order + 1).Append(": ").Append(chapter.Title);
             sb.Append(" [id: ").Append(chapter.Id).Append(']');
-            sb.Append(" [visual: ").Append(chapter.VisualMode)
-                .Append("; pageLayout: ").Append(chapter.PageLayoutKind).Append(']');
+            sb.Append(" [visual: ").Append(chapter.VisualMode);
+            if (chapter.VisualMode != ChapterVisualMode.Prose)
+                sb.Append("; pageLayout: ").Append(chapter.PageLayoutKind);
+            sb.Append(']');
             if (chapter.Id == currentChapterId)
                 sb.Append(" (current)");
             sb.AppendLine();

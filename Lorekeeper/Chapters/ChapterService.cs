@@ -1,6 +1,7 @@
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Context;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Graph;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -88,6 +89,7 @@ public class ChapterService(
         if (body is not null && body != chapter.Body)
         {
             chapter.Body = body;
+            ChapterTextLayoutSynchronizer.SynchronizeFromBody(chapter, body);
             bodyChanged = true;
             chapter.VectorIndexState = VectorIndexState.Stale;
         }

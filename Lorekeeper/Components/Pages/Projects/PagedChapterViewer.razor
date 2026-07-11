@@ -291,7 +291,7 @@
     private const double ParagraphSpacingInches = 0.14;
     private const double FigureSpacingInches = 0.16;
     private const double DropZoneHeightInches = 0.42;
-    private bool CanEditLayout => IsEditable && !IsLocked;
+    private bool CanEditLayout => IsEditable && !IsLocked && State.VisualMode != ChapterVisualMode.Prose;
 
     private string PagedViewerClass() =>
         State.VisualMode == ChapterVisualMode.PicturePage

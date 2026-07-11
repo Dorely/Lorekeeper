@@ -515,7 +515,7 @@ public sealed class OutlineCollaborationTools(
             title = c.Title,
             synopsis = c.Synopsis,
             visualMode = c.VisualMode,
-            pageLayoutKind = c.PageLayoutKind,
+            pageLayoutKind = c.VisualMode == ChapterVisualMode.Prose ? null : c.PageLayoutKind.ToString(),
             beatCount = beatCounts.TryGetValue(c.Id, out var n) ? n : 0,
         };
 
@@ -612,7 +612,8 @@ public sealed class OutlineCollaborationTools(
         {
             var state = await chapterVisuals.SetModeAsync(ch.Id, new ChapterVisualModeUpdate(visual.Mode, visual.LayoutKind));
             ch.VisualMode = state.VisualMode;
-            ch.PageLayoutKind = state.PageLayoutKind;
+            if (state.VisualMode != ChapterVisualMode.Prose)
+                ch.PageLayoutKind = state.PageLayoutKind;
         }
 
         ctx.OnMutated();
@@ -659,7 +660,8 @@ public sealed class OutlineCollaborationTools(
         {
             var state = await chapterVisuals.SetModeAsync(chapterId, new ChapterVisualModeUpdate(visual.Mode, visual.LayoutKind));
             updated.VisualMode = state.VisualMode;
-            updated.PageLayoutKind = state.PageLayoutKind;
+            if (state.VisualMode != ChapterVisualMode.Prose)
+                updated.PageLayoutKind = state.PageLayoutKind;
         }
 
         ctx.OnMutated();
@@ -680,8 +682,9 @@ public sealed class OutlineCollaborationTools(
         sb.Append("# ").AppendLine(chapter.Title);
         if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
             sb.Append("Synopsis: ").AppendLine(chapter.Synopsis.Trim());
-        sb.Append("Visual mode: ").Append(chapter.VisualMode)
-            .Append("; page layout: ").AppendLine(chapter.PageLayoutKind.ToString());
+        sb.Append("Visual mode: ").AppendLine(chapter.VisualMode.ToString());
+        if (chapter.VisualMode != ChapterVisualMode.Prose)
+            sb.Append("Page layout: ").AppendLine(chapter.PageLayoutKind.ToString());
         if (rangeLabel is not null)
             sb.Append("Range: ").AppendLine(rangeLabel);
         sb.AppendLine();
@@ -1290,7 +1293,7 @@ public sealed class OutlineCollaborationTools(
         title = chapter.Title,
         synopsis = chapter.Synopsis,
         visualMode = chapter.VisualMode,
-        pageLayoutKind = chapter.PageLayoutKind,
+        pageLayoutKind = chapter.VisualMode == ChapterVisualMode.Prose ? null : chapter.PageLayoutKind.ToString(),
     };
 
     private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>

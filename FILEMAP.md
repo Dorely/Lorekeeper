@@ -85,10 +85,10 @@
 |------|-------------|
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
-| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter editor with per-project resizable/collapsible Chat and Memory columns shared across Edit/Read/Layout/Review modes, chapter visual controls, image-library actions, and inline AI/Contest review. Persists/reindexes body edits, remembers the selected chapter, and refreshes editor/context surfaces after AI turns or approved changes. |
+| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter editor with mode-specific Edit/Read/Layout/Review controls, awaited serialized body saves, resizable Chat/Memory columns, chapter visuals, image-library actions, and inline AI/Contest review. |
 | `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Simulated page viewer/editor for Prose, IllustratedProse, and PicturePage chapters, including paginated spreads, anchored illustrations, container-fitted PicturePage layouts, and wrapping drag-resize/layer/text controls shared by Read/Layout rendering. |
 | `ProjectImagePickerModal.razor` (+ `.razor.css`) | Editor image-library modal for selecting current project images and adding them either to the active chapter layout or explicit chapter context. |
-| `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: defers and coalesces full transcript/context hydration until after the editor renders, streams text/tool/image-generation/contest updates, routes active-chapter body changes and Contest Mode results to inline Review mode, and keeps pending-change review. |
+| `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: defers/coalesces transcript hydration, reconciles editor lock state with persistent turns, streams tool/contest updates, and routes active-chapter changes into Review mode. |
 | `ContextItemDetailModal.razor` (+ `.razor.css`) | Shared editor context detail modal for recommendation and Context Feed items; loads entities, chapters, acts, ingest sources/chunks, and supports Context Feed project-guidance/entity edits. |
 | `RecommendedContextPanel.razor` (+ `.razor.css`) | Editor right-column context recommender: shows semantic/manual/graph-proximity recommendations for entities plus structural references, and adds them to the active chapter's persisted context working set. |
 | `ContextFeedPanel.razor` (+ `.razor.css`) | Editable Assistant Memory list with cancellable scoped background assembly for project guidance, current chapter, outline, facts, writing samples, selected entities, and structural references; opens `ContextItemDetailModal` and persists include/exclude choices via `IEditorContextService`. |
@@ -361,7 +361,7 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Async context assembly for Context Feed/editor chat plus project-level Research context. Builds keyed `ContextItem`s for guidance, outline, facts, current/previous chapters, visual layout manifests, project image references, writing samples, selected/auto-related entities, and structural references; `Assemble()` returns the literal system message. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Async Context Feed/editor chat assembly with explicit active chapter mode/editing contract, mode-gated visual manifests, guidance, outline, facts, references, writing samples, and selected/related entities. |
 | `IEditorContextService.cs` | Editor context facade extending `IContextBuilder`; persists per-chapter context item inclusion, including explicit project-image context keys, and exposes auto/included entity/context key sets for recommendations. |
 | `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
 | `IContextIndexingService.cs` / `ContextIndexingService.cs` | Maintains targeted direct vector rows and internal lexical search chunks for addable context items: graph entities, chapters, acts, ingest sources, and ingest source chunks; refreshes source-scoped auto mention links. |
@@ -455,7 +455,8 @@
 | File | Description |
 |------|-------------|
 | `ChapterVisualModels.cs` | UI/service records for chapter visual state, page layout mode updates, and image placement results. |
-| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Chapter visual-layout facade for mutations, cleanup, manifests, editor snapshots, and batched guide-free publish surfaces with explicit leaf/output geometry and optional final clockwise rotation. |
+| `ChapterTextLayoutSynchronizer.cs` | Shared canonical-body synchronizer for persisted Picture Page text boxes, including deterministic single-box rebuilding when prose invalidates a multi-box text layout. |
+| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Mode-gated chapter visual facade for layout mutations, body-synchronized Picture Page text, startup repair, manifests, editor snapshots, and batched guide-free publish surfaces. |
 | `PicturePageImageGenerationGuidance.cs` | Shared PicturePage image-generation guidance helper: layout-native target sizes, slot-size recommendations, manifest lines, and prompt appendix text for image tools. |
 
 ### Publish/
@@ -517,7 +518,7 @@
 
 | File | Description |
 |------|-------------|
-| `IChapterService.cs` / `ChapterService.cs` | Chapter CRUD facade. `CreateAsync(projectId, actId?, ...)` stamps a new chapter into a chosen act bucket (or Unassigned), syncs the Chapter graph node/edge, and writes chapter context vectors/search chunks. `UpdateAsync` accepts an optional `ChapterActAssignment` wrapper to MOVE the chapter between act buckets, persists body/title/synopsis changes, and updates chapter/body vectors, lexical search, and auto mentions inside the service. `ReorderAsync(projectId, actId?, ids)` reorders within a single bucket, repairs structural graph edge order, and refreshes only the affected act vector. `DeleteAsync` removes vectors/search rows AND removes the chapter's graph node + any `HasChild` entity children before EF delete (keeps `IGraphStore` consistent without depending on `IEntityService`). |
+| `IChapterService.cs` / `ChapterService.cs` | Chapter CRUD facade with act-bucket assignment/order, canonical body-to-Picture-Page text synchronization, graph projection, vectors, lexical search, auto mentions, and full delete cleanup. |
 
 ### wwwroot/
 

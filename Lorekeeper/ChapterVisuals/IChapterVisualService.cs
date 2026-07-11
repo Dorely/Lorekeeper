@@ -20,6 +20,7 @@ public interface IChapterVisualService
         ChapterPicturePageSurfaceRotation rotation = ChapterPicturePageSurfaceRotation.None,
         CancellationToken cancellationToken = default);
     Task RemoveImageReferencesAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default);
+    Task<int> RepairTextLayoutsAsync(CancellationToken cancellationToken = default);
     string BuildManifest(ChapterVisualState state, IReadOnlyDictionary<Guid, string>? imageNames = null);
 }
 

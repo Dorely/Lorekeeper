@@ -931,8 +931,18 @@ public sealed class PublishService(
             _ => int.MaxValue,
         };
 
-    private static PublishChapterDocument ChapterDocument(Chapter chapter, PublishProfile profile, int chapterNumber) =>
-        new(
+    private static PublishChapterDocument ChapterDocument(Chapter chapter, PublishProfile profile, int chapterNumber)
+    {
+        var illustrationLayout = chapter.VisualMode == ChapterVisualMode.IllustratedProse
+            ? ReadIllustrationLayout(chapter)
+            : new IllustratedProseLayout([]);
+        var pageLayout = chapter.VisualMode == ChapterVisualMode.PicturePage
+            ? ReadPageLayout(chapter)
+            : new PicturePageLayout([], []);
+        var pageLayoutKind = chapter.VisualMode == ChapterVisualMode.Prose
+            ? ChapterPageLayoutKind.SinglePortrait
+            : chapter.PageLayoutKind;
+        return new(
             chapter.Id,
             chapter.ActId,
             profile.NumberChapters ? $"Chapter {chapterNumber}: {chapter.Title}" : chapter.Title,
@@ -941,9 +951,10 @@ public sealed class PublishService(
             chapterNumber - 1,
             profile.IncludeChapterHeadings,
             chapter.VisualMode,
-            chapter.PageLayoutKind,
-            ReadIllustrationLayout(chapter),
-            ReadPageLayout(chapter));
+            pageLayoutKind,
+            illustrationLayout,
+            pageLayout);
+    }
 
     private static PublishAssetDocument AssetDocument(PublishAsset asset) =>
         new(asset.Id, asset.FileName, asset.ContentType, asset.Data, asset.AltText);

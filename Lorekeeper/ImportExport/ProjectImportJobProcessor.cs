@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
@@ -291,6 +292,10 @@ public sealed class ProjectImportJobProcessor(
             tracked.PageLayoutKind = importedChapter.PageLayoutKind;
             tracked.PageLayoutJson = RewritePageLayoutJson(importedChapter.PageLayoutJson, state.ImageMap);
             tracked.IllustrationLayoutJson = RewriteIllustrationLayoutJson(importedChapter.IllustrationLayoutJson, state.ImageMap);
+            ChapterTextLayoutSynchronizer.SynchronizeFromBody(
+                tracked,
+                tracked.Body,
+                ensureLayout: tracked.VisualMode == ChapterVisualMode.PicturePage);
             tracked.VectorIndexState = string.IsNullOrWhiteSpace(importedChapter.Body) ? VectorIndexState.UpToDate : VectorIndexState.Stale;
             tracked.VectorIndexedAt = null;
             tracked.VectorIndexError = null;

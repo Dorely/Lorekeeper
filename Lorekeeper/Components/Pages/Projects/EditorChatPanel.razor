@@ -99,6 +99,7 @@
     [Parameter] public int ReviewRefreshSignal { get; set; }
     [Parameter] public EventCallback OnAiTurnStarting { get; set; }
     [Parameter] public EventCallback OnAiTurnCompleted { get; set; }
+    [Parameter] public EventCallback OnAiTurnIdle { get; set; }
     [Parameter] public EventCallback OnAiChangesApplied { get; set; }
     [Parameter] public EventCallback OnActiveChapterBodyChangesReady { get; set; }
     [Parameter] public EventCallback OnContestResultsReady { get; set; }
@@ -309,6 +310,8 @@
                 _pendingUserText = null;
                 _live = null;
                 _running = false;
+                if (OnAiTurnIdle.HasDelegate)
+                    await OnAiTurnIdle.InvokeAsync();
             }
             UpdateConversationTokenCount();
         }
@@ -382,9 +385,14 @@
             if (!ChatTurns.TryStart(ProjectId, CurrentChapterId, text))
             {
                 _error = "Editor chat already has a running turn.";
-                await ReleaseTurnAsync();
                 if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)
+                {
                     await ListenToActiveTurnAsync(existingTurn);
+                }
+                else
+                {
+                    await ReleaseTurnAsync();
+                }
                 return;
             }
 

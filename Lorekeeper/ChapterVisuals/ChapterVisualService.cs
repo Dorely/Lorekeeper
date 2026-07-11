@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Chapters;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -8,7 +9,7 @@ using SkiaSharp;
 
 namespace Lorekeeper.ChapterVisuals;
 
-public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualService
+public sealed class ChapterVisualService(AppDbContext db, IChapterService chapters) : IChapterVisualService
 {
     private const int MaxSnapshotPages = 12;
     private const string SnapshotContentType = "image/png";
@@ -37,14 +38,6 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         {
             var layout = EnsurePictureText(chapter);
             chapter.PageLayoutJson = JsonSerializer.Serialize(layout, JsonOptions);
-            var projectedBody = ProjectPictureBody(layout);
-            if (!string.Equals(chapter.Body, projectedBody, StringComparison.Ordinal))
-            {
-                chapter.Body = projectedBody;
-                chapter.VectorIndexState = VectorIndexState.Stale;
-                chapter.VectorIndexedAt = null;
-                chapter.VectorIndexError = null;
-            }
         }
         else
         {
@@ -161,18 +154,14 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         chapter.VisualMode = ChapterVisualMode.PicturePage;
         var normalized = NormalizePageLayout(layout);
         chapter.PageLayoutJson = JsonSerializer.Serialize(normalized, JsonOptions);
-        var projectedBody = ProjectPictureBody(normalized);
-        if (!string.Equals(chapter.Body, projectedBody, StringComparison.Ordinal))
-        {
-            chapter.Body = projectedBody;
-            chapter.VectorIndexState = VectorIndexState.Stale;
-            chapter.VectorIndexedAt = null;
-            chapter.VectorIndexError = null;
-        }
+        var projectedBody = ChapterTextLayoutSynchronizer.ProjectBody(normalized);
+        var bodyChanged = !string.Equals(chapter.Body, projectedBody, StringComparison.Ordinal);
 
         chapter.UpdatedAt = DateTime.UtcNow;
         await TouchProjectAsync(chapter.ProjectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        if (bodyChanged)
+            chapter = await chapters.UpdateAsync(chapterId, body: projectedBody, cancellationToken: cancellationToken);
         return State(chapter);
     }
 
@@ -187,6 +176,8 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
             return [];
 
         var state = State(chapter);
+        if (state.VisualMode == ChapterVisualMode.Prose)
+            return [];
         var imageIds = state.VisualMode == ChapterVisualMode.PicturePage
             ? state.PageLayout.Images.Select(image => image.ImageId)
             : state.IllustrationLayout.Images.Select(image => image.ImageId);
@@ -345,6 +336,12 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
     {
         var builder = new StringBuilder();
         builder.AppendLine($"Visual mode: {state.VisualMode}");
+        if (state.VisualMode == ChapterVisualMode.Prose)
+        {
+            builder.AppendLine("No visual layout is active. Edit chapter text with edit_chapter; change visual mode explicitly before placing images.");
+            return builder.ToString();
+        }
+
         if (state.VisualMode == ChapterVisualMode.PicturePage)
         {
             var metrics = PageMetrics(state.PageLayoutKind);
@@ -371,6 +368,32 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
         }
 
         return builder.ToString();
+    }
+
+    public async Task<int> RepairTextLayoutsAsync(CancellationToken cancellationToken = default)
+    {
+        var candidates = await db.Chapters
+            .Where(chapter => chapter.VisualMode == ChapterVisualMode.PicturePage
+                || chapter.PageLayoutJson != string.Empty)
+            .ToListAsync(cancellationToken);
+        var repaired = 0;
+        foreach (var chapter in candidates)
+        {
+            if (!ChapterTextLayoutSynchronizer.SynchronizeFromBody(
+                    chapter,
+                    chapter.Body,
+                    ensureLayout: chapter.VisualMode == ChapterVisualMode.PicturePage))
+            {
+                continue;
+            }
+
+            chapter.UpdatedAt = DateTime.UtcNow;
+            repaired++;
+        }
+
+        if (repaired > 0)
+            await db.SaveChangesAsync(cancellationToken);
+        return repaired;
     }
 
     private static string Name(Guid imageId, IReadOnlyDictionary<Guid, string>? imageNames) =>
@@ -1105,14 +1128,25 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
             project.UpdatedAt = DateTime.UtcNow;
     }
 
-    private static ChapterVisualState State(Chapter chapter) =>
-        new(
+    private static ChapterVisualState State(Chapter chapter)
+    {
+        var illustrationLayout = chapter.VisualMode == ChapterVisualMode.IllustratedProse
+            ? NormalizeIllustrationLayout(ReadIllustrationLayout(chapter), chapter.Body)
+            : new IllustratedProseLayout([]);
+        var pageLayout = chapter.VisualMode == ChapterVisualMode.PicturePage
+            ? NormalizePageLayout(ReadPageLayout(chapter))
+            : new PicturePageLayout([], []);
+        var pageLayoutKind = chapter.VisualMode == ChapterVisualMode.Prose
+            ? ChapterPageLayoutKind.SinglePortrait
+            : NormalizePageLayoutKind(chapter.PageLayoutKind);
+        return new ChapterVisualState(
             chapter.Id,
             chapter.VisualMode,
-            NormalizePageLayoutKind(chapter.PageLayoutKind),
-            NormalizeIllustrationLayout(ReadIllustrationLayout(chapter), chapter.Body),
-            NormalizePageLayout(ReadPageLayout(chapter)),
+            pageLayoutKind,
+            illustrationLayout,
+            pageLayout,
             chapter.Body);
+    }
 
     private static IllustratedProseLayout ReadIllustrationLayout(Chapter chapter)
     {
@@ -1148,34 +1182,8 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
 
     private static PicturePageLayout EnsurePictureText(Chapter chapter)
     {
-        var layout = NormalizePageLayout(ReadPageLayout(chapter));
-        if (layout.TextElements.Count > 0 || string.IsNullOrWhiteSpace(chapter.Body))
-            return layout;
-
-        return layout with
-        {
-            TextElements =
-            [
-                new PicturePageTextElement(
-                    Guid.NewGuid(),
-                    chapter.Body,
-                    XPercent: 12,
-                    YPercent: 68,
-                    WidthPercent: 76,
-                    HeightPercent: 20,
-                    ZIndex: 10,
-                    ReadingOrder: 0,
-                    FontFamily: PicturePageFontFamily.Serif,
-                    FontSizePercent: 4.5,
-                    LineHeight: 1.25,
-                    Color: "#111827",
-                    BackgroundColor: "#FFFFFF",
-                    BackgroundOpacity: 0,
-                    TextAlign: PicturePageTextAlign.Center,
-                    VerticalAlign: ChapterTextVerticalAlign.Middle,
-                    Shadow: PicturePageTextShadow.None),
-            ],
-        };
+        ChapterTextLayoutSynchronizer.SynchronizeFromBody(chapter, chapter.Body, ensureLayout: true);
+        return NormalizePageLayout(ReadPageLayout(chapter));
     }
 
     private static IllustratedProseLayout NormalizeIllustrationLayout(IllustratedProseLayout? layout, string body)
@@ -1251,12 +1259,7 @@ public sealed class ChapterVisualService(AppDbContext db) : IChapterVisualServic
     }
 
     private static string ProjectPictureBody(PicturePageLayout layout) =>
-        string.Join(
-            Environment.NewLine + Environment.NewLine,
-            layout.TextElements
-                .OrderBy(text => text.ReadingOrder)
-                .Select(text => text.Text.Trim())
-                .Where(text => !string.IsNullOrWhiteSpace(text)));
+        ChapterTextLayoutSynchronizer.ProjectBody(layout);
 
     private static IReadOnlyList<string> SplitParagraphs(string body)
     {

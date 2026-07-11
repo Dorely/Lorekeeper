@@ -384,7 +384,8 @@ export function attach(elements, dotNetRef, debounceMs, initialValue) {
     }
 
     let timer = null;
-    let lastSent = el.value;
+    let lastQueued = el.value;
+    let saveChain = Promise.resolve(true);
     let mirror = null;
     let resizeObserver = null;
     let resizeListener = null;
@@ -523,19 +524,28 @@ export function attach(elements, dotNetRef, debounceMs, initialValue) {
             timer = null;
         }
         const v = el.value;
-        if (v === lastSent) return;
-        lastSent = v;
-        try {
-            dotNetRef.invokeMethodAsync("OnBodyDebounced", v);
-        } catch (_) {
-            // dotnet ref may have been disposed
-        }
+        if (v === lastQueued) return saveChain;
+
+        lastQueued = v;
+        saveChain = saveChain
+            .catch(() => false)
+            .then(async () => {
+                try {
+                    const saved = await dotNetRef.invokeMethodAsync("OnBodyDebounced", v);
+                    if (saved === false && lastQueued === v) lastQueued = null;
+                    return saved !== false;
+                } catch (_) {
+                    if (lastQueued === v) lastQueued = null;
+                    return false;
+                }
+            });
+        return saveChain;
     };
 
     const onInput = () => {
         renderGutter();
         if (timer) clearTimeout(timer);
-        timer = setTimeout(fireNow, debounceMs);
+        timer = setTimeout(() => { void fireNow(); }, debounceMs);
     };
 
     const onBlur = () => fireNow();
@@ -562,11 +572,12 @@ export function attach(elements, dotNetRef, debounceMs, initialValue) {
             // Programmatic switch — update without firing.
             if (timer) { clearTimeout(timer); timer = null; }
             el.value = v ?? "";
-            lastSent = el.value;
+            lastQueued = el.value;
+            saveChain = saveChain.then(() => true, () => true);
             renderGutter();
         },
         flush() {
-            fireNow();
+            return fireNow();
         },
         setReadOnly(readOnly) {
             el.readOnly = !!readOnly;

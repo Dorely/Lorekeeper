@@ -79,7 +79,7 @@ public sealed class OutlineToolStagingContext(
             title = chapter.Title,
             synopsis = chapter.Synopsis,
             visualMode = chapter.VisualMode,
-            pageLayoutKind = chapter.PageLayoutKind,
+            pageLayoutKind = chapter.VisualMode == ChapterVisualMode.Prose ? null : chapter.PageLayoutKind.ToString(),
             beatCount = _entities.Values.Count(entity =>
                 !entity.Deleted
                 && string.Equals(entity.Type, _eventNodeType, StringComparison.OrdinalIgnoreCase)
@@ -350,7 +350,8 @@ public sealed class OutlineToolStagingContext(
         {
             var state = await chapterVisuals.SetModeAsync(created.Id, new ChapterVisualModeUpdate(visual.Mode, visual.LayoutKind), cancellationToken);
             created.VisualMode = state.VisualMode;
-            created.PageLayoutKind = state.PageLayoutKind;
+            if (state.VisualMode != ChapterVisualMode.Prose)
+                created.PageLayoutKind = state.PageLayoutKind;
         }
 
         var chapter = new ChapterState(created.Id, created.ActId, created.Order, created.Title, created.Synopsis, created.VisualMode, created.PageLayoutKind, Deleted: false);
@@ -388,7 +389,8 @@ public sealed class OutlineToolStagingContext(
             {
                 var state = await chapterVisuals.SetModeAsync(updated.Id, new ChapterVisualModeUpdate(visual.Mode, visual.LayoutKind), cancellationToken);
                 updated.VisualMode = state.VisualMode;
-                updated.PageLayoutKind = state.PageLayoutKind;
+                if (state.VisualMode != ChapterVisualMode.Prose)
+                    updated.PageLayoutKind = state.PageLayoutKind;
             }
 
             _chapters[updated.Id] = new ChapterState(updated.Id, updated.ActId, updated.Order, updated.Title, updated.Synopsis, updated.VisualMode, updated.PageLayoutKind, Deleted: false);
@@ -1443,7 +1445,7 @@ public sealed class OutlineToolStagingContext(
         title = chapter.Title,
         synopsis = chapter.Synopsis,
         visualMode = chapter.VisualMode,
-        pageLayoutKind = chapter.PageLayoutKind,
+        pageLayoutKind = chapter.VisualMode == ChapterVisualMode.Prose ? null : chapter.PageLayoutKind.ToString(),
     };
 
     private static ChapterVisualArgResolution ResolveChapterVisualArgs(

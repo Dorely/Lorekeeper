@@ -244,6 +244,10 @@ using (var scope = app.Services.CreateScope())
 
     var projectRepository = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
     var outlineGraphSync = scope.ServiceProvider.GetRequiredService<IOutlineGraphSync>();
+    var chapterVisuals = scope.ServiceProvider.GetRequiredService<IChapterVisualService>();
+    var repairedTextLayouts = await chapterVisuals.RepairTextLayoutsAsync();
+    if (repairedTextLayouts > 0)
+        startupLogger.LogInformation("Repaired {ChapterCount} chapter Picture Page text layout(s).", repairedTextLayouts);
     foreach (var project in await projectRepository.ListAsync())
         await outlineGraphSync.RepairProjectAsync(project.Id);
 }
