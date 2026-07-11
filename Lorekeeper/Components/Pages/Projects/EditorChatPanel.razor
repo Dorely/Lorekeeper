@@ -125,6 +125,12 @@
     private Guid? _loadedChapterId;
     private int _loadedContextRefreshSignal;
     private int _loadedReviewRefreshSignal;
+    private bool _deferredWorkPending;
+    private bool _deferredFullLoadPending;
+    private bool _deferredWorkRunning;
+    private int _deferredWorkVersion;
+    private CancellationTokenSource? _deferredWorkCts;
+    private bool _disposed;
     private List<AiChangeBatch> _pendingBatches = [];
     private List<ContestBatch> _contestBatches = [];
     private List<LlmProvider> _providers = [];
@@ -154,7 +160,7 @@
         ?? "Configure and test a chat provider in Settings > Providers to enable LLM features.";
     private bool ContestCanSend => !_contestEnabled || ContestProviderIds().Any(IsWorkingProvider);
 
-    protected override async Task OnParametersSetAsync()
+    protected override void OnParametersSet()
     {
         if (ProjectId == Guid.Empty) return;
         if (_loadedProjectId == ProjectId)
@@ -166,39 +172,122 @@
                 _loadedChapterId = CurrentChapterId;
                 _loadedContextRefreshSignal = ContextRefreshSignal;
                 _loadedReviewRefreshSignal = ReviewRefreshSignal;
-                await LoadPendingChangesAsync(openIfPending: false);
-                await RefreshSystemPromptAsync();
-                UpdateConversationTokenCount();
+                QueueDeferredWork(fullLoad: false);
             }
             return;
         }
 
+        PrepareForFullLoad();
         _loadedProjectId = ProjectId;
         _loadedChapterId = CurrentChapterId;
         _loadedContextRefreshSignal = ContextRefreshSignal;
         _loadedReviewRefreshSignal = ReviewRefreshSignal;
-        await LoadAsync();
+        QueueDeferredWork(fullLoad: true);
     }
 
-    private async Task LoadAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_deferredWorkPending || _deferredWorkRunning || _disposed)
+            return;
+
+        _deferredWorkRunning = true;
+        try
+        {
+            while (_deferredWorkPending && !_disposed)
+            {
+                var fullLoad = _deferredFullLoadPending;
+                var version = _deferredWorkVersion;
+                _deferredWorkPending = false;
+                _deferredFullLoadPending = false;
+
+                _deferredWorkCts?.Dispose();
+                using var cts = new CancellationTokenSource();
+                _deferredWorkCts = cts;
+                try
+                {
+                    if (fullLoad)
+                    {
+                        await LoadAsync(cts.Token);
+                    }
+                    else
+                    {
+                        await LoadPendingChangesAsync(openIfPending: false, cancellationToken: cts.Token);
+                        await RefreshSystemPromptAsync(cts.Token);
+                        UpdateConversationTokenCount();
+                    }
+                }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
+                catch (JSDisconnectedException) { }
+                catch (Exception ex)
+                {
+                    if (version == _deferredWorkVersion)
+                    {
+                        Logger.LogError(
+                            ex,
+                            "Deferred Editor Chat load failed. ProjectId={ProjectId}, ChapterId={ChapterId}",
+                            ProjectId,
+                            CurrentChapterId);
+                        _error = "Editor Chat could not be loaded. Check server logs for details.";
+                        _loading = false;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            _deferredWorkCts = null;
+            _deferredWorkRunning = false;
+        }
+
+        if (!_disposed)
+            StateHasChanged();
+    }
+
+    private void PrepareForFullLoad()
+    {
+        _conversation = null;
+        _messages = [];
+        _renderable = [];
+        _live = null;
+        _pendingUserText = null;
+        _pendingBatches = [];
+        _contestBatches = [];
+        _providers = [];
+        _chatAvailability = null;
+        _systemPrompt = string.Empty;
+        _conversationTokens = ChatTranscriptTokenCount.Empty;
+        _running = false;
+        _loading = true;
+        _error = null;
+    }
+
+    private void QueueDeferredWork(bool fullLoad)
+    {
+        _deferredWorkPending = true;
+        _deferredFullLoadPending |= fullLoad;
+        _deferredWorkVersion++;
+        _deferredWorkCts?.Cancel();
+    }
+
+    private async Task LoadAsync(CancellationToken cancellationToken = default)
     {
         await StopListeningAsync();
         _loading = true;
         try
         {
-            _conversation = await Chat.GetOrCreateAsync(ProjectId);
-            _messages = (await Chat.LoadMessagesAsync(_conversation.Id)).ToList();
-            _approvalEnabled = await Chat.GetAiChangeApprovalEnabledAsync(ProjectId);
-            _chatAvailability = await ProviderService.GetDefaultChatProviderAvailabilityAsync();
-            _providers = await ProviderService.ListWorkingChatProvidersAsync();
-            var contestSettings = await Chat.GetContestSettingsAsync(ProjectId);
+            _conversation = await Chat.GetOrCreateAsync(ProjectId, cancellationToken);
+            _messages = (await Chat.LoadMessagesAsync(_conversation.Id, cancellationToken)).ToList();
+            _approvalEnabled = await Chat.GetAiChangeApprovalEnabledAsync(ProjectId, cancellationToken);
+            _chatAvailability = await ProviderService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
+            _providers = await ProviderService.ListWorkingChatProvidersAsync(cancellationToken);
+            var contestSettings = await Chat.GetContestSettingsAsync(ProjectId, cancellationToken);
             _contestEnabled = contestSettings.Enabled;
             _contestProviderSlot1Id = contestSettings.ProviderSlot1Id;
             _contestProviderSlot2Id = contestSettings.ProviderSlot2Id;
             _contestProviderSlot3Id = contestSettings.ProviderSlot3Id;
-            await RefreshSystemPromptAsync();
-            await LoadPendingChangesAsync(openIfPending: false);
-            await LoadContestBatchesAsync(openIfAvailable: false);
+            await RefreshSystemPromptAsync(cancellationToken);
+            await LoadPendingChangesAsync(openIfPending: false, cancellationToken: cancellationToken);
+            await LoadContestBatchesAsync(openIfAvailable: false, cancellationToken: cancellationToken);
             var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
             RebuildRenderable(activeTurn?.StartedAtUtc);
             if (activeTurn is not null)
@@ -220,7 +309,6 @@
                 _pendingUserText = null;
                 _live = null;
                 _running = false;
-                await NotifyAiTurnCompletedAsync();
             }
             UpdateConversationTokenCount();
         }
@@ -564,8 +652,8 @@
     {
         if (_running) return;
         await Chat.ResetAsync(ProjectId);
-        _loadedProjectId = null;
-        await LoadAsync();
+        PrepareForFullLoad();
+        QueueDeferredWork(fullLoad: true);
     }
 
     private async Task ReloadFromDbAsync()
@@ -578,9 +666,12 @@
         UpdateConversationTokenCount();
     }
 
-    private async Task LoadPendingChangesAsync(bool openIfPending, bool routeActiveChapterBodyToParent = false)
+    private async Task LoadPendingChangesAsync(
+        bool openIfPending,
+        bool routeActiveChapterBodyToParent = false,
+        CancellationToken cancellationToken = default)
     {
-        _pendingBatches = (await Chat.ListPendingChangesAsync(ProjectId)).ToList();
+        _pendingBatches = (await Chat.ListPendingChangesAsync(ProjectId, cancellationToken)).ToList();
         if (openIfPending && PendingChangeCount > 0)
         {
             var hasActiveChapterBodyChanges = HasActiveChapterBodyPendingChanges();
@@ -601,9 +692,11 @@
             _showPendingChanges = false;
     }
 
-    private async Task LoadContestBatchesAsync(bool openIfAvailable)
+    private async Task LoadContestBatchesAsync(
+        bool openIfAvailable,
+        CancellationToken cancellationToken = default)
     {
-        _contestBatches = (await Chat.ListCurrentContestBatchesAsync(ProjectId)).ToList();
+        _contestBatches = (await Chat.ListCurrentContestBatchesAsync(ProjectId, cancellationToken)).ToList();
         if (PendingChangeCount > 0)
             return;
         if (openIfAvailable && ContestReviewCandidateCount > 0)
@@ -822,21 +915,21 @@
             systemPrompt: _systemPrompt);
     }
 
-    private async Task RefreshSystemPromptAsync()
+    private async Task RefreshSystemPromptAsync(CancellationToken cancellationToken = default)
     {
         _systemPrompt = string.Empty;
-        var project = await Projects.GetByIdAsync(ProjectId);
+        var project = await Projects.GetByIdAsync(ProjectId, cancellationToken);
         if (project is null) return;
 
         Chapter? currentChapter = null;
         if (CurrentChapterId is { } chapterId)
         {
-            currentChapter = await Chapters.GetAsync(chapterId);
+            currentChapter = await Chapters.GetAsync(chapterId, cancellationToken);
             if (currentChapter is null || currentChapter.ProjectId != ProjectId)
                 currentChapter = null;
         }
 
-        var assembly = await ContextBuilder.BuildAsync(project, currentChapter);
+        var assembly = await ContextBuilder.BuildAsync(project, currentChapter, cancellationToken);
         _systemPrompt = assembly.Assemble(_contestEnabled ? AssistantWorkflowInstructions.EditorContestPreparation : null);
     }
 
@@ -1056,6 +1149,10 @@
 
     public ValueTask DisposeAsync()
     {
+        _disposed = true;
+        _deferredWorkCts?.Cancel();
+        _deferredWorkCts?.Dispose();
+        _deferredWorkCts = null;
         _listenCts?.Cancel();
         _listenCts?.Dispose();
         return ValueTask.CompletedTask;

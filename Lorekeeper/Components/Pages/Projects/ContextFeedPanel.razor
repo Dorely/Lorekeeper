@@ -1,8 +1,20 @@
 @using Lorekeeper.Context
+@using Lorekeeper.Chapters
 @using Lorekeeper.Models
+@using Lorekeeper.Persistence.Repositories
 @using Lorekeeper.Tokens
+@implements IDisposable
 @inject IEditorContextService EditorContext
+@inject IServiceScopeFactory ScopeFactory
 @inject ITokenCounter TokenCounter
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger py-2 small mb-2">
+        @_error
+        <button type="button" class="btn btn-link btn-sm p-0 ms-1" @onclick="StartReload">Retry</button>
+    </div>
+}
 
 @if (_assembly is null)
 {
@@ -96,23 +108,118 @@ else
     private bool _detailOpen;
     private int _contextTokenCount;
     private bool _contextTokenIsExact = true;
+    private string? _error;
+    private Guid _loadedProjectId;
+    private Guid? _loadedChapterId;
+    private CancellationTokenSource? _reloadCts;
+    private int _reloadVersion;
+    private bool _disposed;
 
-    protected override async Task OnParametersSetAsync()
+    protected override void OnParametersSet()
     {
-        await RebuildAsync();
+        var chapterId = CurrentChapter?.Id;
+        if (_loadedProjectId == Project.Id && _loadedChapterId == chapterId)
+            return;
+
+        _loadedProjectId = Project.Id;
+        _loadedChapterId = chapterId;
+        _assembly = null;
+        StartReload();
     }
 
     /// <summary>Called by the editor when the chapter body changes so the preview stays current.</summary>
     public async Task RefreshAsync()
     {
-        await RebuildAsync();
-        StateHasChanged();
+        if (_disposed) return;
+
+        var reload = BeginReload();
+        await LoadAssemblyAsync(
+            reload.Version,
+            reload.ProjectId,
+            reload.ChapterId,
+            reload.CancellationToken);
     }
 
-    private async Task RebuildAsync()
+    private void StartReload()
     {
-        _assembly = await EditorContext.BuildAsync(Project, CurrentChapter);
-        UpdateContextTokenCount();
+        if (_disposed) return;
+
+        var reload = BeginReload();
+        _ = Task.Run(() => LoadAssemblyAsync(
+            reload.Version,
+            reload.ProjectId,
+            reload.ChapterId,
+            reload.CancellationToken));
+    }
+
+    private ContextReload BeginReload()
+    {
+        _reloadCts?.Cancel();
+        _reloadCts?.Dispose();
+        _reloadCts = new CancellationTokenSource();
+        _error = null;
+
+        return new ContextReload(
+            ++_reloadVersion,
+            Project.Id,
+            CurrentChapter?.Id,
+            _reloadCts.Token);
+    }
+
+    private async Task LoadAssemblyAsync(
+        int version,
+        Guid projectId,
+        Guid? chapterId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var projects = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+            var chapters = scope.ServiceProvider.GetRequiredService<IChapterService>();
+            var context = scope.ServiceProvider.GetRequiredService<IEditorContextService>();
+
+            var project = await projects.GetByIdAsync(projectId, cancellationToken);
+            if (project is null)
+                throw new InvalidOperationException("Project was not found.");
+
+            var chapter = chapterId is { } id
+                ? await chapters.GetAsync(id, cancellationToken)
+                : null;
+            if (chapterId is not null && (chapter is null || chapter.ProjectId != projectId))
+                throw new InvalidOperationException("Chapter was not found in this project.");
+
+            var assembly = await context.BuildAsync(project, chapter, cancellationToken);
+            if (!IsCurrentReload(version, cancellationToken)) return;
+
+            await InvokeAsync(() =>
+            {
+                if (!IsCurrentReload(version, cancellationToken)) return;
+                _assembly = assembly;
+                _error = null;
+                UpdateContextTokenCount();
+                RefreshOpenDetail();
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (!IsCurrentReload(version, cancellationToken)) return;
+
+            await InvokeAsync(() =>
+            {
+                if (!IsCurrentReload(version, cancellationToken)) return;
+                _error = $"Assistant Memory could not be loaded: {ex.Message}";
+                StateHasChanged();
+            });
+        }
+    }
+
+    private void RefreshOpenDetail()
+    {
+        if (_assembly is null)
+            return;
 
         if (_detailOpen && _selectedDetail is not null)
         {
@@ -127,6 +234,9 @@ else
             }
         }
     }
+
+    private bool IsCurrentReload(int version, CancellationToken cancellationToken) =>
+        !_disposed && !cancellationToken.IsCancellationRequested && version == _reloadVersion;
 
     private void UpdateContextTokenCount()
     {
@@ -168,8 +278,7 @@ else
 
         var include = IsRemoveAction(item) ? false : !item.IsEnabled;
         await EditorContext.SetItemIncludedAsync(Project.Id, CurrentChapter.Id, item.Kind, item.Key, include);
-        await RebuildAsync();
-        await OnContextChanged.InvokeAsync();
+        await NotifyContextChangedAsync();
     }
 
     private void OpenDetail(ContextItem item)
@@ -194,10 +303,34 @@ else
 
     private async Task OnDetailSavedAsync()
     {
-        await RebuildAsync();
-        await OnContextChanged.InvokeAsync();
+        await NotifyContextChangedAsync();
+    }
+
+    private async Task NotifyContextChangedAsync()
+    {
+        if (OnContextChanged.HasDelegate)
+        {
+            await OnContextChanged.InvokeAsync();
+            return;
+        }
+
+        await RefreshAsync();
     }
 
     private static bool IsSameContextItem(ContextItem left, ContextItem right) =>
         left.Kind == right.Kind && string.Equals(left.Key, right.Key, StringComparison.Ordinal);
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _reloadCts?.Cancel();
+        _reloadCts?.Dispose();
+        _reloadCts = null;
+    }
+
+    private sealed record ContextReload(
+        int Version,
+        Guid ProjectId,
+        Guid? ChapterId,
+        CancellationToken CancellationToken);
 }

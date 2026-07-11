@@ -2781,6 +2781,7 @@ else
         {
             await Chapters.UpdateAsync(_current.Id, title: newTitle);
             _current.Title = newTitle;
+            await RefreshContextSurfacesAsync();
         }
         catch (Exception ex)
         {

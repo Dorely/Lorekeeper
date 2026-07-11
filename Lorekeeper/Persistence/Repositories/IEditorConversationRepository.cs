@@ -7,6 +7,7 @@ public interface IEditorConversationRepository
     Task<EditorConversation?> GetByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default);
 
     Task<List<EditorMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task<List<EditorMessage>> LoadTranscriptMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
     Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default);
 

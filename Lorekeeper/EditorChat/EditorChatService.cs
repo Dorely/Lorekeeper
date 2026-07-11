@@ -67,7 +67,7 @@ public sealed class EditorChatService(
     }
 
     public async Task<IReadOnlyList<EditorMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        await conversations.LoadMessagesAsync(conversationId, cancellationToken);
+        await conversations.LoadTranscriptMessagesAsync(conversationId, cancellationToken);
 
     public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
     {

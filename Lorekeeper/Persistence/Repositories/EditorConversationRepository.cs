@@ -10,10 +10,52 @@ public sealed class EditorConversationRepository(AppDbContext db) : IEditorConve
 
     public Task<List<EditorMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
         db.EditorMessages
-            .Include(message => message.Visuals)
+            .AsNoTracking()
             .Where(message => message.ConversationId == conversationId)
             .OrderBy(message => message.Order)
             .ToListAsync(cancellationToken);
+
+    public async Task<List<EditorMessage>> LoadTranscriptMessagesAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        var messages = await LoadMessagesAsync(conversationId, cancellationToken);
+        if (messages.Count == 0)
+            return messages;
+
+        var visuals = await db.EditorMessageVisuals
+            .AsNoTracking()
+            .Where(visual => visual.Message.ConversationId == conversationId)
+            .OrderBy(visual => visual.Message.Order)
+            .ThenBy(visual => visual.SortOrder)
+            .Select(visual => new EditorMessageVisual
+            {
+                Id = visual.Id,
+                MessageId = visual.MessageId,
+                SortOrder = visual.SortOrder,
+                ToolCallId = visual.ToolCallId,
+                Title = visual.Title,
+                Caption = visual.Caption,
+                SourceKind = visual.SourceKind,
+                SourceRefId = visual.SourceRefId,
+                ContentType = visual.ContentType,
+                FileName = visual.FileName,
+                Width = visual.Width,
+                Height = visual.Height,
+                CreatedAt = visual.CreatedAt,
+            })
+            .ToListAsync(cancellationToken);
+
+        var visualsByMessage = visuals
+            .GroupBy(visual => visual.MessageId)
+            .ToDictionary(group => group.Key, group => (ICollection<EditorMessageVisual>)group.ToList());
+        foreach (var message in messages)
+        {
+            message.Visuals = visualsByMessage.GetValueOrDefault(message.Id) ?? [];
+        }
+
+        return messages;
+    }
 
     public Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
         db.EditorConversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
