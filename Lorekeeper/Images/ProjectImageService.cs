@@ -53,6 +53,53 @@ public sealed class ProjectImageService(
             row.SizeBytes)).ToList();
     }
 
+    public async Task<IReadOnlyList<ProjectImageView>> ListByIdsAsync(
+        Guid projectId,
+        IReadOnlyCollection<Guid> imageIds,
+        CancellationToken cancellationToken = default)
+    {
+        var requestedIds = imageIds
+            .Where(imageId => imageId != Guid.Empty)
+            .Distinct()
+            .ToList();
+        if (requestedIds.Count == 0)
+            return [];
+
+        var rows = await db.PublishAssets
+            .AsNoTracking()
+            .Where(asset => asset.ProjectId == projectId && requestedIds.Contains(asset.Id))
+            .OrderByDescending(asset => asset.CreatedAt)
+            .Select(asset => new
+            {
+                asset.Id,
+                asset.FileName,
+                asset.ContentType,
+                asset.AltText,
+                asset.Source,
+                asset.Prompt,
+                asset.GenerationModel,
+                asset.SourceMetadataJson,
+                asset.CreatedAt,
+                asset.UpdatedAt,
+                SizeBytes = (long)asset.Data.Length,
+            })
+            .ToListAsync(cancellationToken);
+
+        return rows.Select(row => new ProjectImageView(
+            row.Id,
+            row.FileName,
+            row.ContentType,
+            $"/projects/{projectId:N}/images/{row.Id:N}/content?maxEdge=640",
+            row.AltText,
+            row.Source,
+            row.Prompt,
+            row.GenerationModel,
+            row.SourceMetadataJson,
+            row.CreatedAt,
+            row.UpdatedAt,
+            row.SizeBytes)).ToList();
+    }
+
     public async Task<ProjectImageView?> GetAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default)
     {
         var asset = await db.PublishAssets

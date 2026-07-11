@@ -3,6 +3,10 @@ namespace Lorekeeper.Images;
 public interface IProjectImageService
 {
     Task<IReadOnlyList<ProjectImageView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProjectImageView>> ListByIdsAsync(
+        Guid projectId,
+        IReadOnlyCollection<Guid> imageIds,
+        CancellationToken cancellationToken = default);
     Task<ProjectImageView?> GetAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default);
     Task<ProjectImageData?> GetDataAsync(Guid projectId, Guid imageId, int? maxEdge = null, CancellationToken cancellationToken = default);
     Task<ProjectImageView> UploadAsync(Guid projectId, ProjectImageUpload upload, CancellationToken cancellationToken = default);

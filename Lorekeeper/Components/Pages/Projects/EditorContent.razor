@@ -846,9 +846,9 @@ else
             _reviewPendingBatches = [];
             _reviewProjection = null;
             ResetInlineReviewState();
+            _projectImages = [];
             _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
             _acts = (await Acts.ListAsync(Project.Id)).ToList();
-            await LoadProjectImagesAsync();
             _loading = false;
         }
 
@@ -861,6 +861,7 @@ else
             _contestReviewBatches = [];
             _contestReviewProjection = null;
             _visualState = null;
+            _projectImages = [];
             UpdateChapterMetrics(string.Empty);
             return;
         }
@@ -909,6 +910,7 @@ else
         _saveState = SaveState.Idle;
         _saveError = null;
         await LoadVisualStateAsync();
+        await LoadChapterImagesAsync();
         _pendingRememberChapterId = targetId;
 
         await InvokeEditorVoidAsync("setValue", _current.Body);
@@ -918,17 +920,36 @@ else
         }
     }
 
-    private async Task LoadProjectImagesAsync()
+    private async Task LoadChapterImagesAsync(bool force = false)
     {
-        if (Project is null)
+        var project = Project;
+        var state = _visualState;
+        if (project is null || state is null || _mode is not (EditorMode.Read or EditorMode.Layout))
         {
             _projectImages = [];
             return;
         }
 
+        var imageIds = ReferencedImageIds(state);
+        if (imageIds.Count == 0)
+        {
+            _projectImages = [];
+            return;
+        }
+
+        if (!force && imageIds.ToHashSet().SetEquals(_projectImages.Select(image => image.Id)))
+            return;
+
+        _projectImages = [];
         try
         {
-            _projectImages = await Images.ListAsync(Project.Id);
+            var images = await Images.ListByIdsAsync(project.Id, imageIds);
+            if (Project?.Id == project.Id
+                && _visualState?.ChapterId == state.ChapterId
+                && _mode is EditorMode.Read or EditorMode.Layout)
+            {
+                _projectImages = images;
+            }
         }
         catch (Exception ex)
         {
@@ -937,9 +958,19 @@ else
         }
     }
 
+    private static IReadOnlyList<Guid> ReferencedImageIds(ChapterVisualState state) =>
+        (state.VisualMode == ChapterVisualMode.PicturePage
+            ? state.PageLayout.Images.Select(image => image.ImageId)
+            : state.VisualMode == ChapterVisualMode.IllustratedProse
+                ? state.IllustrationLayout.Images.Select(image => image.ImageId)
+                : [])
+        .Where(imageId => imageId != Guid.Empty)
+        .Distinct()
+        .ToList();
+
     private async Task OnViewerImagesChangedAsync()
     {
-        await LoadProjectImagesAsync();
+        await LoadChapterImagesAsync(force: true);
         StateHasChanged();
     }
 
@@ -1009,6 +1040,7 @@ else
             }
         }
 
+        await LoadChapterImagesAsync();
         await RefreshContextSurfacesAsync();
     }
 
@@ -1026,10 +1058,9 @@ else
         if (Project is null || _activeChapterId is not Guid chapterId) return;
         await FlushAsync();
         var result = await Visuals.AddImageToChapterAsync(Project.Id, chapterId, imageId);
-        await OnVisualStateChangedAsync(result.State);
-        await LoadProjectImagesAsync();
         if (_mode != EditorMode.Layout)
             _mode = EditorMode.Layout;
+        await OnVisualStateChangedAsync(result.State);
         await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
         StateHasChanged();
     }
@@ -1370,7 +1401,11 @@ else
         if (_mode is EditorMode.Read or EditorMode.Layout)
         {
             await LoadVisualStateAsync();
-            await LoadProjectImagesAsync();
+            await LoadChapterImagesAsync();
+        }
+        else
+        {
+            _projectImages = [];
         }
         await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
 
@@ -2916,7 +2951,7 @@ else
                 _current = fresh;
                 UpdateChapterMetrics(fresh.Body);
                 await LoadVisualStateAsync();
-                await LoadProjectImagesAsync();
+                await LoadChapterImagesAsync();
                 await InvokeEditorVoidAsync("setValue", fresh.Body);
                 await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
                 await RefreshContextSurfacesAsync();
