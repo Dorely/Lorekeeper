@@ -13,6 +13,24 @@ public class ChapterRepository(AppDbContext db) : IChapterRepository
     public Task<Chapter?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         db.Chapters.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
 
+    public async Task<Chapter?> ReloadFromStoreAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var trackedEntry = db.ChangeTracker
+            .Entries<Chapter>()
+            .FirstOrDefault(entry => entry.Entity.Id == id);
+
+        if (trackedEntry is null)
+            return await db.Chapters.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+
+        if (trackedEntry.State == EntityState.Deleted)
+            return null;
+
+        await trackedEntry.ReloadAsync(cancellationToken);
+        return trackedEntry.State is EntityState.Detached or EntityState.Deleted
+            ? null
+            : trackedEntry.Entity;
+    }
+
     public async Task<int> GetMaxOrderAsync(Guid projectId, Guid? actId, CancellationToken cancellationToken = default)
     {
         var bucket = db.Chapters.Where(c => c.ProjectId == projectId && c.ActId == actId);

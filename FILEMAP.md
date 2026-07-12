@@ -85,7 +85,8 @@
 |------|-------------|
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
-| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter editor with mode-specific Edit/Read/Layout/Review controls, awaited serialized body saves, resizable Chat/Memory columns, chapter visuals, image-library actions, and inline AI/Contest review. |
+| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter workspace with mode-specific controls, keyed body-editor documents, serialized external refresh coordination, resizable Chat/Memory columns, chapter visuals, and inline AI/Contest review. |
+| `ChapterBodyEditor.razor` (+ `.razor.css`, `.razor.js`) | Isolated keyed prose textarea that owns its DOM, wrapping-aware line gutter, serialized debounced save/flush contract, read-only state, and JavaScript lifetime. |
 | `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Simulated page viewer/editor for Prose, IllustratedProse, and PicturePage chapters, including paginated spreads, anchored illustrations, container-fitted PicturePage layouts, and wrapping drag-resize/layer/text controls shared by Read/Layout rendering. |
 | `ProjectImagePickerModal.razor` (+ `.razor.css`) | Editor image-library modal for selecting current project images and adding them either to the active chapter layout or explicit chapter context. |
 | `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: defers/coalesces transcript hydration, reconciles editor lock state with persistent turns, streams tool/contest updates, and routes active-chapter changes into Review mode. |
@@ -247,7 +248,7 @@
 | `IGraphNodeRepository.cs` / `GraphNodeRepository.cs` | Node CRUD plus project-scoped `Find(projectId, nodeType, key)`, type-agnostic `FindByKeyAsync(projectId, key)`, and `ListByTypeAsync(projectId, nodeType)` (ordered by Label/Key). |
 | `IGraphEdgeRepository.cs` / `GraphEdgeRepository.cs` | Edge CRUD plus directional adjacency query. Defines `EdgeDirection` enum. |
 | `IGraphEntityTypeRepository.cs` / `GraphEntityTypeRepository.cs` | Project-scoped CRUD for lightweight graph type registry rows. |
-| `IChapterRepository.cs` / `ChapterRepository.cs` | Chapter CRUD ordered by `Order`; `GetMaxOrderAsync(projectId, actId)` and `ReorderAsync(projectId, actId, ids)` are scoped to a single act bucket (pass `actId == null` for the unassigned bucket). |
+| `IChapterRepository.cs` / `ChapterRepository.cs` | Chapter CRUD ordered by `Order`, including authoritative tracked-entry reloads for cross-scope updates; max-order and reorder operations are scoped to one act bucket. |
 | `IActRepository.cs` / `ActRepository.cs` | Act CRUD ordered by `Order` per project; `ReorderAsync` rewrites the act ordering in one save. |
 | `IOutlineConversationRepository.cs` / `OutlineConversationRepository.cs` | Persistence for `OutlineConversation` + ordered `OutlineMessage`s: `GetByProjectIdAsync`, `LoadMessagesAsync`, `GetMaxOrderAsync`, `AddConversationAsync`, `AddMessageAsync`, `UpdateMessage`, `RemoveConversation`. |
 | `IEditorConversationRepository.cs` / `EditorConversationRepository.cs` | Persistence for project-wide Editor Chat: lean model-history messages, metadata-only UI transcript visuals (binary data stays endpoint-loaded), order lookup, add/update/remove, and save. |
@@ -518,7 +519,7 @@
 
 | File | Description |
 |------|-------------|
-| `IChapterService.cs` / `ChapterService.cs` | Chapter CRUD facade with act-bucket assignment/order, canonical body-to-Picture-Page text synchronization, graph projection, vectors, lexical search, auto mentions, and full delete cleanup. |
+| `IChapterService.cs` / `ChapterService.cs` | Chapter CRUD facade with authoritative store reloads, act-bucket assignment/order, canonical body-to-Picture-Page text synchronization, graph/search indexing, auto mentions, and full delete cleanup. |
 
 ### wwwroot/
 

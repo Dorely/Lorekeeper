@@ -1,0 +1,139 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="@RootClass()">
+    <div @ref="_gutter" class="line-gutter" aria-hidden="true"></div>
+    <textarea @ref="_textarea"
+              class="form-control chapter-body"
+              readonly="@IsReadOnly"
+              placeholder="Start writing your chapter..."></textarea>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ChapterId { get; set; }
+    [Parameter] public string InitialBody { get; set; } = string.Empty;
+    [Parameter] public bool IsVisible { get; set; } = true;
+    [Parameter] public bool IsReadOnly { get; set; }
+    [Parameter, EditorRequired] public Func<Guid, string, Task<bool>> SaveAsync { get; set; } = null!;
+
+    private ElementReference _textarea;
+    private ElementReference _gutter;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _handle;
+    private DotNetObjectReference<ChapterBodyEditor>? _selfRef;
+    private bool? _appliedReadOnly;
+    private bool _disposed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_disposed)
+            return;
+
+        if (_handle is null)
+        {
+            try
+            {
+                _module ??= await JS.InvokeAsync<IJSObjectReference>(
+                    "import", "./Components/Pages/Projects/ChapterBodyEditor.razor.js");
+                _handle = await _module.InvokeAsync<IJSObjectReference>(
+                    "attach",
+                    new { textarea = _textarea, gutter = _gutter },
+                    (_selfRef ??= DotNetObjectReference.Create(this)),
+                    1000,
+                    InitialBody);
+            }
+            catch (JSDisconnectedException) { }
+            catch (OperationCanceledException) { }
+        }
+
+        if (_handle is not null && _appliedReadOnly != IsReadOnly)
+        {
+            await ApplyReadOnlyAsync(IsReadOnly);
+            _appliedReadOnly = IsReadOnly;
+        }
+    }
+
+    [JSInvokable]
+    public async Task<bool> OnBodyDebounced(string body)
+    {
+        if (_disposed || SaveAsync is null)
+            return false;
+
+        return await SaveAsync(ChapterId, body);
+    }
+
+    public async Task<bool> FlushAsync()
+    {
+        if (_disposed)
+            return true;
+        if (_handle is null)
+            return true;
+
+        try
+        {
+            return await _handle.InvokeAsync<bool>("flush");
+        }
+        catch (JSDisconnectedException)
+        {
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (JSException)
+        {
+            return false;
+        }
+    }
+
+    public async Task ApplyReadOnlyAsync(bool readOnly)
+    {
+        if (_disposed)
+            return;
+        if (_handle is null)
+            return;
+
+        try
+        {
+            await _handle.InvokeVoidAsync("setReadOnly", readOnly);
+            _appliedReadOnly = readOnly;
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (JSException) { }
+    }
+
+    private string RootClass()
+    {
+        var classes = "chapter-edit-surface";
+        if (!IsVisible)
+            classes += " chapter-edit-surface--hidden";
+        if (IsReadOnly)
+            classes += " chapter-edit-surface--locked";
+        return classes;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        if (_handle is not null)
+        {
+            try { await _handle.InvokeAsync<bool>("waitForSaves"); } catch { }
+            try { await _handle.InvokeVoidAsync("dispose"); } catch { }
+            try { await _handle.DisposeAsync(); } catch { }
+            _handle = null;
+        }
+
+        if (_module is not null)
+        {
+            try { await _module.DisposeAsync(); } catch { }
+            _module = null;
+        }
+        _selfRef?.Dispose();
+    }
+}

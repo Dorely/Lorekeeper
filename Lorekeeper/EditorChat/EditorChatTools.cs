@@ -520,8 +520,6 @@ public sealed class EditorChatTools(
             ctx.CurrentArgumentsJson,
             assignments);
         var result = await revisionAgents.RunAsync(request);
-        if (!ctx.ReviewEdits && result.Sessions.Any(session => session.Status == EditorRevisionSessionStatus.Completed))
-            ctx.OnMutated();
         return EditorRevisionAgentService.SerializeRunResult(result);
     }
 

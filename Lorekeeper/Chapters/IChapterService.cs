@@ -14,6 +14,7 @@ public interface IChapterService
 {
     Task<IReadOnlyList<Chapter>> ListAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<Chapter?> GetAsync(Guid chapterId, CancellationToken cancellationToken = default);
+    Task<Chapter?> ReloadFromStoreAsync(Guid chapterId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Creates a chapter. Pass <paramref name="actId"/> to assign to a specific act,

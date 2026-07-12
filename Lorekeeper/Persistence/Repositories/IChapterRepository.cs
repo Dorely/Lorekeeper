@@ -6,6 +6,7 @@ public interface IChapterRepository
 {
     Task<List<Chapter>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<Chapter?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<Chapter?> ReloadFromStoreAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Highest <see cref="Chapter.Order"/> within a single act bucket. Pass <c>null</c>

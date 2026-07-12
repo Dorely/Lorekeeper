@@ -155,7 +155,7 @@ else
             try
             {
                 _editorModule ??= await JS.InvokeAsync<IJSObjectReference>(
-                    "import", "./Components/Pages/Projects/EditorContent.razor.js");
+                    "import", "./Components/Pages/Projects/ChapterBodyEditor.razor.js");
                 _editorHandle = await _editorModule.InvokeAsync<IJSObjectReference>(
                     "attach",
                     new { textarea = _bodyTextarea, gutter = _gutterRef },

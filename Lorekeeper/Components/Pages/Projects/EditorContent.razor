@@ -191,13 +191,16 @@ else
             </div>
 
             <div class="@ChapterEditorClass()">
-                <div class="@EditSurfaceClass()">
-                    <div @ref="_gutterRef" class="line-gutter" aria-hidden="true"></div>
-                    <textarea @ref="_bodyTextarea"
-                              class="@ChapterBodyClass()"
-                              readonly="@EditorReadOnly"
-                              placeholder="Start writing your chapter..."></textarea>
-                </div>
+                @if (!IsPicturePageChapter && _editorDocument is { } editorDocument)
+                {
+                    <ChapterBodyEditor @key="EditorKey(editorDocument)"
+                                       @ref="_bodyEditor"
+                                       ChapterId="@editorDocument.ChapterId"
+                                       InitialBody="@editorDocument.Body"
+                                       IsVisible="@(_mode == EditorMode.Edit)"
+                                       IsReadOnly="EditorReadOnly"
+                                       SaveAsync="SaveBodyAsync" />
+                }
 
                 @if (_mode is EditorMode.Read or EditorMode.Layout && _visualState is not null)
                 {
@@ -743,7 +746,7 @@ else
     [Parameter] public Guid? ChapterId { get; set; }
 
     private readonly SemaphoreSlim _saveGate = new(1, 1);
-    private readonly DotNetObjectReference<EditorContent> _selfRef;
+    private readonly SemaphoreSlim _chapterRefreshGate = new(1, 1);
 
     private List<Chapter> _chapters = [];
     private List<Act> _acts = [];
@@ -766,19 +769,15 @@ else
     private bool _chatPaneCollapsed;
     private bool _rightPaneCollapsed;
 
-    private ElementReference _bodyTextarea;
-    private ElementReference _gutterRef;
     private ElementReference _reviewSurfaceRef;
     private ElementReference _editorGridRef;
     private ElementReference _chatSplitterRef;
     private ElementReference _memorySplitterRef;
     private IJSObjectReference? _editorModule;
-    private IJSObjectReference? _editorHandle;
     private IJSObjectReference? _columnLayoutHandle;
     private Guid? _columnLayoutProjectId;
-    private string _pendingEditorBody = string.Empty;
-    private long _editorBodySyncVersion;
-    private long _appliedEditorBodySyncVersion;
+    private ChapterBodyEditor? _bodyEditor;
+    private EditorDocumentState? _editorDocument;
 
     private SaveState _saveState = SaveState.Idle;
     private DateTime? _lastSavedAt;
@@ -832,11 +831,6 @@ else
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public EditorContent()
-    {
-        _selfRef = DotNetObjectReference.Create(this);
-    }
-
     protected override async Task OnParametersSetAsync()
     {
         if (Project is null) return;
@@ -847,6 +841,7 @@ else
             _loading = true;
             _current = null;
             _activeChapterId = null;
+            _editorDocument = null;
             _restoreChapterAfterRender = false;
             _pendingRememberChapterId = null;
             _contestReviewBatches = [];
@@ -864,6 +859,7 @@ else
         {
             _current = null;
             _activeChapterId = null;
+            _editorDocument = null;
             _restoreChapterAfterRender = false;
             _pendingRememberChapterId = null;
             _contestReviewBatches = [];
@@ -889,6 +885,7 @@ else
 
             _current = null;
             _visualState = null;
+            _editorDocument = null;
             _restoreChapterAfterRender = true;
             return;
         }
@@ -913,8 +910,17 @@ else
                 return;
         }
 
+        var fresh = await Chapters.ReloadFromStoreAsync(targetId);
+        if (fresh is null)
+        {
+            HandleMissingChapter(targetId);
+            return;
+        }
+
         _activeChapterId = targetId;
-        _current = _chapters.First(c => c.Id == targetId);
+        _current = fresh;
+        ReplaceCachedChapter(fresh);
+        InstallEditorDocument(fresh);
         UpdateChapterMetrics(_current.Body);
         _saveState = SaveState.Idle;
         _saveError = null;
@@ -922,7 +928,6 @@ else
         await LoadChapterImagesAsync();
         _pendingRememberChapterId = targetId;
 
-        QueueEditorBodySync(_current.Body);
         if (_mode == EditorMode.Review)
         {
             await RefreshReviewChangesAsync();
@@ -991,9 +996,14 @@ else
             return;
         }
 
+        var chapterId = _current.Id;
         try
         {
-            _visualState = await Visuals.GetAsync(_current.Id);
+            var state = await Visuals.GetAsync(chapterId);
+            if (_activeChapterId != chapterId || _current?.Id != chapterId)
+                return;
+
+            _visualState = state;
             if (_visualState?.VisualMode == ChapterVisualMode.PicturePage && _mode == EditorMode.Edit)
                 _mode = EditorMode.Layout;
             else if (_visualState?.VisualMode == ChapterVisualMode.Prose && _mode == EditorMode.Layout)
@@ -1001,6 +1011,9 @@ else
         }
         catch (Exception ex)
         {
+            if (_activeChapterId != chapterId || _current?.Id != chapterId)
+                return;
+
             _layoutError = ex.Message;
             _visualState = null;
         }
@@ -1033,28 +1046,31 @@ else
 
     private async Task OnVisualStateChangedAsync(ChapterVisualState state)
     {
+        if (_activeChapterId != state.ChapterId || _current?.Id != state.ChapterId)
+            return;
+
         _visualState = state;
         if (state.VisualMode == ChapterVisualMode.PicturePage && _mode == EditorMode.Edit)
         {
             _mode = EditorMode.Layout;
-            await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
+            await ApplyEditorReadOnlyAsync(EditorReadOnly);
         }
         else if (state.VisualMode == ChapterVisualMode.Prose && _mode == EditorMode.Layout)
         {
             _mode = EditorMode.Edit;
-            await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
+            await ApplyEditorReadOnlyAsync(EditorReadOnly);
         }
         if (_current is not null && _current.Id == state.ChapterId)
         {
             _current.VisualMode = state.VisualMode;
             if (state.VisualMode != ChapterVisualMode.Prose)
                 _current.PageLayoutKind = state.PageLayoutKind;
-            if (!string.Equals(_current.Body, state.Body, StringComparison.Ordinal))
-            {
-                _current.Body = state.Body;
-                UpdateChapterMetrics(state.Body);
-                QueueEditorBodySync(state.Body);
-            }
+            _current.Body = state.Body;
+            var cached = _chapters.FirstOrDefault(chapter => chapter.Id == state.ChapterId);
+            if (cached is not null)
+                cached.Body = state.Body;
+            UpdateChapterMetrics(state.Body);
+            SynchronizeExternalEditorDocument(state.ChapterId, state.Body);
         }
 
         await LoadChapterImagesAsync();
@@ -1078,7 +1094,7 @@ else
         if (_mode != EditorMode.Layout)
             _mode = EditorMode.Layout;
         await OnVisualStateChangedAsync(result.State);
-        await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
+        await ApplyEditorReadOnlyAsync(EditorReadOnly);
         StateHasChanged();
     }
 
@@ -1112,28 +1128,6 @@ else
             try { await _titleInput.FocusAsync(); }
             catch (JSDisconnectedException) { }
             catch (OperationCanceledException) { }
-        }
-
-        if (_current is not null && _editorModule is not null && _editorHandle is null)
-        {
-            try
-            {
-                _editorHandle = await _editorModule.InvokeAsync<IJSObjectReference>(
-                    "attach",
-                    new { textarea = _bodyTextarea, gutter = _gutterRef },
-                    _selfRef, 1000, _current.Body);
-            }
-            catch (JSDisconnectedException) { }
-            catch (OperationCanceledException) { }
-        }
-
-        if (_editorHandle is not null && _appliedEditorBodySyncVersion != _editorBodySyncVersion)
-        {
-            var syncVersion = _editorBodySyncVersion;
-            var body = _pendingEditorBody;
-            await InvokeEditorVoidAsync("setValue", body);
-            if (_editorBodySyncVersion == syncVersion)
-                _appliedEditorBodySyncVersion = syncVersion;
         }
 
         if (_pendingRememberChapterId is { } chapterId)
@@ -1272,13 +1266,6 @@ else
         }
     }
 
-    [JSInvokable]
-    public async Task<bool> OnBodyDebounced(string body)
-    {
-        if (_current is null || _activeChapterId is null) return false;
-        return await SaveBodyAsync(_activeChapterId.Value, body);
-    }
-
     private async Task<bool> SaveBodyAsync(Guid chapterId, string body)
     {
         await _saveGate.WaitAsync();
@@ -1291,10 +1278,9 @@ else
             var updated = await Chapters.UpdateAsync(chapterId, body: body);
             if (_current is not null && _current.Id == chapterId)
             {
-                _current.Body = body;
-                _current.VectorIndexState = updated.VectorIndexState;
-                _current.VectorIndexError = updated.VectorIndexError;
-                _current.VectorIndexedAt = updated.VectorIndexedAt;
+                _current = updated;
+                ReplaceCachedChapter(updated);
+                RecordEditorSave(chapterId, body);
                 UpdateChapterMetrics(body);
             }
 
@@ -1329,39 +1315,18 @@ else
 
     private async Task<bool> FlushAsync()
     {
-        if (_editorHandle is null) return true;
-
-        try
-        {
-            return await _editorHandle.InvokeAsync<bool>("flush");
-        }
-        catch (JSDisconnectedException)
-        {
-            return false;
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
-        catch (JSException ex)
+        if (_bodyEditor is null) return true;
+        var flushed = await _bodyEditor.FlushAsync();
+        if (!flushed)
         {
             _saveState = SaveState.SaveFailed;
-            _saveError = ex.Message;
-            return false;
+            _saveError ??= "The chapter draft could not be saved.";
         }
+        return flushed;
     }
 
-    private async Task InvokeEditorVoidAsync(string identifier, params object?[] args)
-    {
-        if (_editorHandle is null) return;
-
-        try
-        {
-            await _editorHandle.InvokeVoidAsync(identifier, args);
-        }
-        catch (JSDisconnectedException) { }
-        catch (OperationCanceledException) { }
-    }
+    private async Task ApplyEditorReadOnlyAsync(bool readOnly) =>
+        await (_bodyEditor?.ApplyReadOnlyAsync(readOnly) ?? Task.CompletedTask);
 
     private async ValueTask OnLocationChangingAsync(LocationChangingContext ctx)
     {
@@ -1410,15 +1375,8 @@ else
         return classes;
     }
 
-    private string EditSurfaceClass() =>
-        _mode is EditorMode.Read or EditorMode.Layout or EditorMode.Review
-            ? "chapter-edit-surface chapter-edit-surface--hidden"
-            : "chapter-edit-surface";
-
-    private string ChapterBodyClass() =>
-        _mode == EditorMode.Read
-            ? "form-control chapter-body chapter-body--read"
-            : "form-control chapter-body";
+    private static EditorDocumentKey EditorKey(EditorDocumentState document) =>
+        new(document.ChapterId, document.Revision);
 
     private ChapterPageLayoutKind CurrentPageLayoutKind() =>
         _visualState?.PageLayoutKind ?? _current?.PageLayoutKind ?? ChapterPageLayoutKind.SinglePortrait;
@@ -1448,8 +1406,6 @@ else
         }
 
         _mode = mode;
-        if (_mode == EditorMode.Edit && _current is not null)
-            QueueEditorBodySync(_current.Body);
         if (_mode is EditorMode.Read or EditorMode.Layout)
         {
             await LoadVisualStateAsync();
@@ -1459,7 +1415,7 @@ else
         {
             _projectImages = [];
         }
-        await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
+        await ApplyEditorReadOnlyAsync(EditorReadOnly);
 
         if (_mode == EditorMode.Review)
         {
@@ -1803,7 +1759,7 @@ else
         if (_contestReviewProjection is null && _reviewProjection?.HasChanges != true)
         {
             _mode = IsPicturePageChapter ? EditorMode.Layout : EditorMode.Edit;
-            await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
+            await ApplyEditorReadOnlyAsync(EditorReadOnly);
         }
     }
 
@@ -1915,7 +1871,7 @@ else
             if (clearExpandedBlocks)
                 _expandedReviewBlockIds.Clear();
 
-            await ReloadCurrentChapterAfterAiAsync();
+            await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
             await RefreshReviewChangesAsync();
             _reviewRefreshSignal++;
         }
@@ -2932,7 +2888,7 @@ else
         _saveGate.Release();
 
         _chapterLocked = true;
-        await InvokeEditorVoidAsync("setReadOnly", true);
+        await ApplyEditorReadOnlyAsync(true);
         StateHasChanged();
     }
 
@@ -2944,7 +2900,7 @@ else
     {
         try
         {
-            await ReloadCurrentChapterAfterAiAsync();
+            await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
             if (_mode == EditorMode.Review)
             {
                 await RefreshReviewChangesAsync();
@@ -2961,7 +2917,7 @@ else
             _chapterLocked = false;
             try
             {
-                await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
+                await ApplyEditorReadOnlyAsync(EditorReadOnly);
             }
             catch (JSDisconnectedException) { }
             catch (OperationCanceledException) { }
@@ -2980,7 +2936,7 @@ else
             // Chat can be recreated after a completed turn (pane collapse, reconnect,
             // or parameter refresh). Reconcile from persistence even when no active
             // runtime turn remains, but do not signal the chat to reload itself again.
-            await ReloadCurrentChapterAfterAiAsync(refreshContextSurfaces: false);
+            await ReconcileCurrentChapterAsync(refreshContextSurfaces: false, flushDraft: true);
             if (_mode == EditorMode.Review)
                 await RefreshReviewChangesAsync();
         }
@@ -2993,7 +2949,7 @@ else
         finally
         {
             _chapterLocked = false;
-            await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
+            await ApplyEditorReadOnlyAsync(EditorReadOnly);
             StateHasChanged();
         }
     }
@@ -3002,7 +2958,7 @@ else
     {
         try
         {
-            await ReloadCurrentChapterAfterAiAsync();
+            await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
             if (_mode == EditorMode.Review)
             {
                 await RefreshReviewChangesAsync();
@@ -3020,32 +2976,99 @@ else
         }
     }
 
-    private async Task ReloadCurrentChapterAfterAiAsync(bool refreshContextSurfaces = true)
+    private async Task<bool> ReconcileCurrentChapterAsync(
+        bool refreshContextSurfaces,
+        bool flushDraft = false)
     {
-        if (_activeChapterId is { } cid)
+        if (flushDraft && !await FlushAsync())
+            return false;
+        if (_activeChapterId is not { } chapterId)
+            return false;
+
+        await _chapterRefreshGate.WaitAsync();
+        try
         {
-            var fresh = await Chapters.GetAsync(cid);
-            if (fresh is not null)
+            var fresh = await Chapters.ReloadFromStoreAsync(chapterId);
+            if (_activeChapterId != chapterId)
+                return false;
+            if (fresh is null)
             {
-                _current = fresh;
-                var cachedIndex = _chapters.FindIndex(chapter => chapter.Id == fresh.Id);
-                if (cachedIndex >= 0)
-                    _chapters[cachedIndex] = fresh;
-                UpdateChapterMetrics(fresh.Body);
-                await LoadVisualStateAsync();
-                await LoadChapterImagesAsync();
-                QueueEditorBodySync(fresh.Body);
-                await InvokeEditorVoidAsync("setReadOnly", EditorReadOnly);
-                if (refreshContextSurfaces)
-                    await RefreshContextSurfacesAsync();
+                HandleMissingChapter(chapterId);
+                return false;
             }
+
+            _current = fresh;
+            ReplaceCachedChapter(fresh);
+            SynchronizeExternalEditorDocument(fresh.Id, fresh.Body);
+            UpdateChapterMetrics(fresh.Body);
+
+            await LoadVisualStateAsync();
+            await LoadChapterImagesAsync();
         }
+        finally
+        {
+            _chapterRefreshGate.Release();
+        }
+
+        StateHasChanged();
+        if (refreshContextSurfaces)
+            await RefreshContextSurfacesAsync();
+        return true;
     }
 
-    private void QueueEditorBodySync(string? body)
+    private void InstallEditorDocument(Chapter chapter)
     {
-        _pendingEditorBody = body ?? string.Empty;
-        _editorBodySyncVersion++;
+        var revision = _editorDocument?.Revision ?? 0;
+        _editorDocument = new EditorDocumentState(chapter.Id, chapter.Body, revision);
+    }
+
+    private void SynchronizeExternalEditorDocument(Guid chapterId, string body)
+    {
+        if (_editorDocument is not { } document || document.ChapterId != chapterId)
+        {
+            var revision = (_editorDocument?.Revision ?? 0) + 1;
+            _editorDocument = new EditorDocumentState(chapterId, body, revision);
+            return;
+        }
+
+        if (string.Equals(document.Body, body, StringComparison.Ordinal))
+            return;
+
+        _editorDocument = document with
+        {
+            Body = body,
+            Revision = document.Revision + 1,
+        };
+    }
+
+    private void RecordEditorSave(Guid chapterId, string body)
+    {
+        if (_editorDocument is { } document && document.ChapterId == chapterId)
+            _editorDocument = document with { Body = body };
+    }
+
+    private void ReplaceCachedChapter(Chapter chapter)
+    {
+        var cachedIndex = _chapters.FindIndex(candidate => candidate.Id == chapter.Id);
+        if (cachedIndex >= 0)
+            _chapters[cachedIndex] = chapter;
+    }
+
+    private void HandleMissingChapter(Guid chapterId)
+    {
+        _chapters.RemoveAll(chapter => chapter.Id == chapterId);
+        if (_activeChapterId == chapterId)
+        {
+            _activeChapterId = null;
+            _current = null;
+            _editorDocument = null;
+            _visualState = null;
+            _projectImages = [];
+            UpdateChapterMetrics(string.Empty);
+        }
+
+        if (Project is not null && _chapters.FirstOrDefault() is { } fallback)
+            Nav.NavigateTo($"/projects/{Project.Slug}/editor/{fallback.Id}", replace: true);
     }
 
     private async Task OnContextChangedAsync() => await RefreshContextSurfacesAsync();
@@ -3084,22 +3107,21 @@ else
         _navHandlerRegistration?.Dispose();
         try { await FlushAsync(); } catch { }
         await DisposeColumnLayoutAsync();
-        if (_editorHandle is not null)
-        {
-            try { await _editorHandle.InvokeVoidAsync("dispose"); } catch { }
-            try { await _editorHandle.DisposeAsync(); } catch { }
-        }
         if (_editorModule is not null)
         {
             try { await _editorModule.DisposeAsync(); } catch { }
         }
-        _selfRef.Dispose();
         _saveGate.Dispose();
+        _chapterRefreshGate.Dispose();
     }
 
     private enum SaveState { Idle, Saving, Saved, IndexFailed, SaveFailed }
 
     private enum EditorMode { Edit, Read, Layout, Review }
+
+    private readonly record struct EditorDocumentState(Guid ChapterId, string Body, long Revision);
+
+    private readonly record struct EditorDocumentKey(Guid ChapterId, long Revision);
 
     private sealed record ReviewProjection(
         bool HasChanges,

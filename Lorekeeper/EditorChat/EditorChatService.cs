@@ -503,6 +503,8 @@ public sealed class EditorChatService(
                         {
                             lastRevisionJobId = revisionUpdate.JobId;
                             yield return revisionUpdate;
+                            if (ShouldRefreshForCompletedRevisionSession(editorContext, revisionUpdate))
+                                yield return new EditorChatMutated();
                         }
 
                         updateTask = updateEnumerator.MoveNextAsync().AsTask();
@@ -519,6 +521,8 @@ public sealed class EditorChatService(
                         {
                             lastRevisionJobId = revisionUpdate.JobId;
                             yield return revisionUpdate;
+                            if (ShouldRefreshForCompletedRevisionSession(editorContext, revisionUpdate))
+                                yield return new EditorChatMutated();
                         }
 
                         updateTask = updateEnumerator.MoveNextAsync().AsTask();
@@ -1184,6 +1188,16 @@ public sealed class EditorChatService(
 
     private static bool IsRevisionAgentsTool(string toolName) =>
         string.Equals(toolName, "start_revision_agents", StringComparison.Ordinal);
+
+    private static bool ShouldRefreshForCompletedRevisionSession(
+        EditorChatContext editorContext,
+        EditorChatRevisionJobUpdated update) =>
+        !editorContext.ReviewEdits
+        && update.Kind == EditorRevisionJobUpdateKind.SessionCompleted
+        && update.SessionId is { } sessionId
+        && update.Progress.Sessions.Any(session =>
+            session.SessionId == sessionId
+            && session.Status == EditorRevisionSessionStatus.Completed);
 
     private static bool IsImageGenerationTool(string toolName) =>
         string.Equals(toolName, "generate_project_image", StringComparison.Ordinal);
