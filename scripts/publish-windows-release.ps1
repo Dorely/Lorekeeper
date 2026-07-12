@@ -74,8 +74,9 @@ try
     }
 
     $tag = "v$Version"
-    & gh release view $tag --repo $releaseRepository *> $null
-    if ($LASTEXITCODE -eq 0)
+    & cmd.exe /d /c "gh release view $tag --repo $releaseRepository >nul 2>nul"
+    $releaseExists = $LASTEXITCODE -eq 0
+    if ($releaseExists)
     {
         throw "Release $tag already exists in $releaseRepository. Release versions are immutable; choose a newer version."
     }
