@@ -45,6 +45,21 @@ body {
     overflow: hidden;
 }
 
+:where(
+    input:not([type]),
+    input[type="text"],
+    input[type="search"],
+    input[type="email"],
+    input[type="url"],
+    input[type="tel"],
+    input[type="password"],
+    input[type="number"],
+    textarea,
+    [contenteditable="true"]
+):not(:disabled) {
+    cursor: url("/text-select-cursor.svg") 12 12, text;
+}
+
 a,
 .btn-link {
     color: var(--lk-accent);
