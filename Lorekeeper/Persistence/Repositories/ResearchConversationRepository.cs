@@ -9,7 +9,7 @@ public sealed class ResearchConversationRepository(AppDbContext db) : IResearchC
         db.ResearchConversations.FirstOrDefaultAsync(conversation => conversation.ProjectId == projectId, cancellationToken);
 
     public Task<List<ResearchMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        db.ResearchMessages.Where(message => message.ConversationId == conversationId)
+        db.ResearchMessages.AsNoTracking().Where(message => message.ConversationId == conversationId)
                            .OrderBy(message => message.Order)
                            .ToListAsync(cancellationToken);
 

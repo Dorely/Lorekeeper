@@ -7,6 +7,7 @@ public sealed class AiChangeRepository(AppDbContext db) : IAiChangeRepository
 {
     public Task<List<AiChangeBatch>> ListPendingBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         db.AiChangeBatches
+            .AsNoTracking()
             .Include(b => b.Changes.OrderBy(c => c.Order))
             .Where(b => b.ProjectId == projectId && b.Status == AiChangeBatchStatus.Pending)
             .OrderBy(b => b.CreatedAt)

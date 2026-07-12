@@ -9,7 +9,7 @@ public class WritingCoachConversationRepository(AppDbContext db) : IWritingCoach
         db.WritingCoachConversations.FirstOrDefaultAsync(conversation => conversation.ProjectId == projectId, cancellationToken);
 
     public Task<List<WritingCoachMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        db.WritingCoachMessages.Where(message => message.ConversationId == conversationId)
+        db.WritingCoachMessages.AsNoTracking().Where(message => message.ConversationId == conversationId)
                                .OrderBy(message => message.Order)
                                .ToListAsync(cancellationToken);
 

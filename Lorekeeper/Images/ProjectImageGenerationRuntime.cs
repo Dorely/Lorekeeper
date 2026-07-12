@@ -12,6 +12,8 @@ public sealed class ProjectImageGenerationRuntime(
     private readonly object _lock = new();
     private readonly Dictionary<Guid, ProjectImageGenerationJobRuntimeView> _jobs = [];
     private readonly Dictionary<Guid, TaskCompletionSource<bool>> _jobCompletions = [];
+    private readonly Dictionary<Guid, CancellationTokenSource> _jobCancellations = [];
+    private readonly Dictionary<Guid, Guid> _cancelledJobs = [];
     private readonly HashSet<Guid> _runningProjects = [];
     private readonly HashSet<Guid> _scheduledProjects = [];
 
@@ -91,10 +93,23 @@ public sealed class ProjectImageGenerationRuntime(
         {
             return false;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    }
+
+    public async Task CancelJobAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
         {
-            return false;
+            _cancelledJobs[jobId] = projectId;
+            if (_jobCancellations.TryGetValue(jobId, out var activeCancellation))
+                activeCancellation.Cancel();
         }
+        CancelRuntimeJob(projectId, jobId);
+        CompleteJobWaiter(jobId);
+        NotifyStateChanged();
+
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var jobs = scope.ServiceProvider.GetRequiredService<IProjectImageJobService>();
+        await jobs.CancelJobAsync(projectId, jobId, cancellationToken);
     }
 
     public async Task ReconcileInterruptedJobsAsync(CancellationToken cancellationToken = default)
@@ -133,11 +148,18 @@ public sealed class ProjectImageGenerationRuntime(
                 if (workItem is null)
                     break;
 
-                RegisterStartedJob(workItem);
-                await RunJobAsync(workItem);
-                MarkJobNotRunning(workItem.JobId);
-                CompleteJobWaiter(workItem.JobId);
-                NotifyStateChanged();
+                var jobCancellation = RegisterStartedJob(workItem);
+                try
+                {
+                    await RunJobAsync(workItem, jobCancellation.Token);
+                }
+                finally
+                {
+                    MarkJobNotRunning(workItem.JobId);
+                    CompleteJobWaiter(workItem.JobId);
+                    ReleaseJobCancellation(workItem.JobId, jobCancellation);
+                    NotifyStateChanged();
+                }
             }
         }
         catch (Exception ex)
@@ -149,6 +171,8 @@ public sealed class ProjectImageGenerationRuntime(
             lock (_lock)
             {
                 _runningProjects.Remove(projectId);
+                foreach (var jobId in _cancelledJobs.Where(item => item.Value == projectId).Select(item => item.Key).ToList())
+                    _cancelledJobs.Remove(jobId);
             }
 
             bool shouldRestart;
@@ -163,17 +187,20 @@ public sealed class ProjectImageGenerationRuntime(
         }
     }
 
-    private async Task RunJobAsync(ProjectImageGenerationWorkItem workItem)
+    private async Task RunJobAsync(ProjectImageGenerationWorkItem workItem, CancellationToken cancellationToken)
     {
         var parallelLimit = Math.Clamp(imageOptions.Value.MaxParallelRequests, 1, Math.Max(1, workItem.Count));
         using var throttler = new SemaphoreSlim(parallelLimit, parallelLimit);
         var tasks = Enumerable.Range(0, workItem.Count)
-            .Select(outputIndex => RunOutputAsync(workItem, outputIndex, throttler))
+            .Select(outputIndex => RunOutputAsync(workItem, outputIndex, throttler, cancellationToken))
             .ToArray();
 
         try
         {
             await Task.WhenAll(tasks);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {
@@ -188,15 +215,21 @@ public sealed class ProjectImageGenerationRuntime(
             await using var scope = scopeFactory.CreateAsyncScope();
             var jobs = scope.ServiceProvider.GetRequiredService<IProjectImageJobService>();
             await jobs.CompleteJobAsync(workItem.ProjectId, workItem.JobId, CancellationToken.None);
+            if (cancellationToken.IsCancellationRequested)
+                await jobs.CancelJobAsync(workItem.ProjectId, workItem.JobId, CancellationToken.None);
         }
     }
 
-    private async Task RunOutputAsync(ProjectImageGenerationWorkItem workItem, int outputIndex, SemaphoreSlim throttler)
+    private async Task RunOutputAsync(
+        ProjectImageGenerationWorkItem workItem,
+        int outputIndex,
+        SemaphoreSlim throttler,
+        CancellationToken cancellationToken)
     {
-        await throttler.WaitAsync(CancellationToken.None);
+        await throttler.WaitAsync(cancellationToken);
         try
         {
-            var finalError = await GenerateOutputWithRetriesAsync(workItem, outputIndex);
+            var finalError = await GenerateOutputWithRetriesAsync(workItem, outputIndex, cancellationToken);
             if (finalError is null)
                 return;
 
@@ -208,13 +241,17 @@ public sealed class ProjectImageGenerationRuntime(
         }
     }
 
-    private async Task<Exception?> GenerateOutputWithRetriesAsync(ProjectImageGenerationWorkItem workItem, int outputIndex)
+    private async Task<Exception?> GenerateOutputWithRetriesAsync(
+        ProjectImageGenerationWorkItem workItem,
+        int outputIndex,
+        CancellationToken cancellationToken)
     {
         var maxAttempts = Math.Clamp(imageOptions.Value.MaxRequestAttempts, 1, 10);
         Exception? finalError = null;
 
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 await PersistOutputStateAsync(workItem.ProjectId, workItem.JobId, new ProjectImageOutputStateView(
@@ -234,13 +271,14 @@ public sealed class ProjectImageGenerationRuntime(
                     var images = scope.ServiceProvider.GetRequiredService<IProjectImageService>();
                     var jobs = scope.ServiceProvider.GetRequiredService<IProjectImageJobService>();
                     result = workItem.Kind == ProjectImageGenerationJobKind.Edit
-                        ? await provider.EditAsync(await BuildEditRequestAsync(workItem, images, jobs), CancellationToken.None, progress)
-                        : await provider.GenerateAsync(await BuildGenerateRequestAsync(workItem, images), CancellationToken.None, progress);
+                        ? await provider.EditAsync(await BuildEditRequestAsync(workItem, images, jobs, cancellationToken), cancellationToken, progress)
+                        : await provider.GenerateAsync(await BuildGenerateRequestAsync(workItem, images, cancellationToken), cancellationToken, progress);
 
                     if (result.Images.Count == 0)
                         throw new ProjectImageProviderException("Image request completed without an image.", "missing_image");
 
-                    await jobs.SaveGeneratedOutputAsync(workItem.ProjectId, workItem.JobId, outputIndex, result, result.Images[0], CancellationToken.None);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await jobs.SaveGeneratedOutputAsync(workItem.ProjectId, workItem.JobId, outputIndex, result, result.Images[0], cancellationToken);
                 }
 
                 UpdateRuntimeOutput(workItem.JobId, outputIndex, ProjectImageOutputStatus.Succeeded, attempt, "Image saved.", partialImageDataUrl: null);
@@ -262,7 +300,7 @@ public sealed class ProjectImageGenerationRuntime(
                     ErrorKind: TryReadErrorKind(ex),
                     UpdatedAt: DateTime.UtcNow));
                 UpdateRuntimeOutput(workItem.JobId, outputIndex, ProjectImageOutputStatus.Running, attempt, message, ex.Message, TryReadErrorKind(ex));
-                await Task.Delay(ImageGenerationRetryDelay(ex, attempt), CancellationToken.None);
+                await Task.Delay(ImageGenerationRetryDelay(ex, attempt), cancellationToken);
             }
         }
 
@@ -271,12 +309,13 @@ public sealed class ProjectImageGenerationRuntime(
 
     private async Task<ProjectImageProviderGenerateRequest> BuildGenerateRequestAsync(
         ProjectImageGenerationWorkItem workItem,
-        IProjectImageService images)
+        IProjectImageService images,
+        CancellationToken cancellationToken)
     {
         var references = new List<ProjectImageProviderReference>();
         foreach (var id in workItem.ReferenceImageIds.Take(Math.Max(0, imageOptions.Value.MaxReferenceImages)))
         {
-            var data = await images.GetDataAsync(workItem.ProjectId, id, cancellationToken: CancellationToken.None);
+            var data = await images.GetDataAsync(workItem.ProjectId, id, cancellationToken: cancellationToken);
             if (data is not null)
                 references.Add(new ProjectImageProviderReference(data.FileName, data.ContentType, data.Data));
         }
@@ -296,17 +335,18 @@ public sealed class ProjectImageGenerationRuntime(
     private async Task<ProjectImageProviderEditRequest> BuildEditRequestAsync(
         ProjectImageGenerationWorkItem workItem,
         IProjectImageService images,
-        IProjectImageJobService jobs)
+        IProjectImageJobService jobs,
+        CancellationToken cancellationToken)
     {
         if (workItem.SourceImageId is not { } sourceImageId)
             throw new InvalidOperationException("Image edit job is missing a source image.");
 
-        var source = await images.GetDataAsync(workItem.ProjectId, sourceImageId, cancellationToken: CancellationToken.None)
+        var source = await images.GetDataAsync(workItem.ProjectId, sourceImageId, cancellationToken: cancellationToken)
             ?? throw new InvalidOperationException("Image edit source could not be found.");
 
         ProjectImageProviderReference? mask = null;
         if (workItem.MaskId is { } maskId
-            && await jobs.GetMaskDataAsync(workItem.ProjectId, maskId, CancellationToken.None) is { } maskData)
+            && await jobs.GetMaskDataAsync(workItem.ProjectId, maskId, cancellationToken) is { } maskData)
         {
             mask = new ProjectImageProviderReference(maskData.FileName, maskData.ContentType, maskData.Data);
         }
@@ -314,7 +354,7 @@ public sealed class ProjectImageGenerationRuntime(
         var references = new List<ProjectImageProviderReference>();
         foreach (var id in workItem.ReferenceImageIds.Take(Math.Max(0, imageOptions.Value.MaxReferenceImages)))
         {
-            var data = await images.GetDataAsync(workItem.ProjectId, id, cancellationToken: CancellationToken.None);
+            var data = await images.GetDataAsync(workItem.ProjectId, id, cancellationToken: cancellationToken);
             if (data is not null)
                 references.Add(new ProjectImageProviderReference(data.FileName, data.ContentType, data.Data));
         }
@@ -416,7 +456,7 @@ public sealed class ProjectImageGenerationRuntime(
             TaskContinuationOptions.OnlyOnFaulted);
     }
 
-    private void RegisterStartedJob(ProjectImageGenerationWorkItem workItem)
+    private CancellationTokenSource RegisterStartedJob(ProjectImageGenerationWorkItem workItem)
     {
         var outputs = Enumerable.Range(0, workItem.Count)
             .Select(index => new ProjectImageOutputRuntimeView(
@@ -434,14 +474,19 @@ public sealed class ProjectImageGenerationRuntime(
                 PartialImageDataUrl: null))
             .ToList();
         var runtimeJob = new ProjectImageGenerationJobRuntimeView(workItem.ProjectId, workItem.JobId, IsRunning: true, outputs);
+        var cancellation = new CancellationTokenSource();
         lock (_lock)
         {
             _jobs[workItem.JobId] = runtimeJob;
+            _jobCancellations[workItem.JobId] = cancellation;
+            if (_cancelledJobs.ContainsKey(workItem.JobId))
+                cancellation.Cancel();
             if (!_jobCompletions.ContainsKey(workItem.JobId))
                 _jobCompletions[workItem.JobId] = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
         NotifyStateChanged();
+        return cancellation;
     }
 
     private void UpdateRuntimeOutput(
@@ -465,6 +510,8 @@ public sealed class ProjectImageGenerationRuntime(
                 return;
 
             var previous = job.Outputs.FirstOrDefault(output => output.OutputIndex == outputIndex);
+            if (previous?.Status == ProjectImageOutputStatus.Cancelled && status != ProjectImageOutputStatus.Cancelled)
+                return;
             var outputs = job.Outputs
                 .Where(output => output.OutputIndex != outputIndex)
                 .Append(new ProjectImageOutputRuntimeView(
@@ -495,6 +542,42 @@ public sealed class ProjectImageGenerationRuntime(
             if (_jobs.TryGetValue(jobId, out var job))
                 _jobs[jobId] = job with { IsRunning = false };
         }
+    }
+
+    private void CancelRuntimeJob(Guid projectId, Guid jobId)
+    {
+        lock (_lock)
+        {
+            if (!_jobs.TryGetValue(jobId, out var job) || job.ProjectId != projectId)
+                return;
+
+            var outputs = job.Outputs
+                .Select(output => output.Status is ProjectImageOutputStatus.Succeeded
+                    or ProjectImageOutputStatus.Failed
+                    or ProjectImageOutputStatus.Cancelled
+                        ? output
+                        : output with
+                        {
+                            Status = ProjectImageOutputStatus.Cancelled,
+                            Message = "Image request cancelled.",
+                            Error = string.Empty,
+                            PartialImageDataUrl = null,
+                        })
+                .ToList();
+            _jobs[jobId] = job with { IsRunning = false, Outputs = outputs };
+        }
+    }
+
+    private void ReleaseJobCancellation(Guid jobId, CancellationTokenSource cancellation)
+    {
+        lock (_lock)
+        {
+            if (_jobCancellations.TryGetValue(jobId, out var active) && ReferenceEquals(active, cancellation))
+                _jobCancellations.Remove(jobId);
+            _cancelledJobs.Remove(jobId);
+        }
+
+        cancellation.Dispose();
     }
 
     private void CompleteJobWaiter(Guid jobId)

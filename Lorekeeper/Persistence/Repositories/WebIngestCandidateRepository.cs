@@ -7,6 +7,7 @@ public sealed class WebIngestCandidateRepository(AppDbContext db) : IWebIngestCa
 {
     public Task<List<WebIngestCandidate>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         db.WebIngestCandidates
+            .AsNoTracking()
             .Where(candidate => candidate.ProjectId == projectId)
             .OrderByDescending(candidate => candidate.UpdatedAt)
             .ThenByDescending(candidate => candidate.CreatedAt)
@@ -14,6 +15,7 @@ public sealed class WebIngestCandidateRepository(AppDbContext db) : IWebIngestCa
 
     public Task<List<WebIngestCandidate>> ListResearchByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         db.WebIngestCandidates
+            .AsNoTracking()
             .Where(candidate => candidate.ProjectId == projectId && candidate.ResearchConversationId != null)
             .OrderByDescending(candidate => candidate.UpdatedAt)
             .ThenByDescending(candidate => candidate.CreatedAt)
@@ -21,6 +23,7 @@ public sealed class WebIngestCandidateRepository(AppDbContext db) : IWebIngestCa
 
     public Task<List<WebIngestCandidate>> ListStagedByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         db.WebIngestCandidates
+            .AsNoTracking()
             .Where(candidate => candidate.ProjectId == projectId && candidate.Status == WebIngestCandidateStatus.Staged)
             .OrderByDescending(candidate => candidate.StagedAt)
             .ThenBy(candidate => candidate.Title)
@@ -28,6 +31,7 @@ public sealed class WebIngestCandidateRepository(AppDbContext db) : IWebIngestCa
 
     public Task<List<WebIngestCandidate>> ListStagedByProjectAsync(Guid projectId, Guid? researchConversationId, CancellationToken cancellationToken = default) =>
         db.WebIngestCandidates
+            .AsNoTracking()
             .Where(candidate => candidate.ProjectId == projectId
                 && candidate.ResearchConversationId == researchConversationId
                 && candidate.Status == WebIngestCandidateStatus.Staged)
@@ -39,6 +43,7 @@ public sealed class WebIngestCandidateRepository(AppDbContext db) : IWebIngestCa
         ids.Count == 0
             ? Task.FromResult(new List<WebIngestCandidate>())
             : db.WebIngestCandidates
+                .AsNoTracking()
                 .Where(candidate => ids.Contains(candidate.Id))
                 .OrderBy(candidate => candidate.CrawlDepth)
                 .ThenBy(candidate => candidate.SearchRank)

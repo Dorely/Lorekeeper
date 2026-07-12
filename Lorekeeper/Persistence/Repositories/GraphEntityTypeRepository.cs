@@ -7,6 +7,7 @@ public class GraphEntityTypeRepository(AppDbContext db) : IGraphEntityTypeReposi
 {
     public Task<List<GraphEntityType>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         db.GraphEntityTypes
+            .AsNoTracking()
             .Where(t => t.ProjectId == projectId)
             .OrderBy(t => t.SortOrder)
             .ThenBy(t => t.PluralLabel)

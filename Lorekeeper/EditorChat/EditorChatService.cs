@@ -230,7 +230,8 @@ public sealed class EditorChatService(
                 project.AiChangeApprovalEnabled,
                 autoPinReadEntities: !contestModeEnabled,
                 outlineStaging,
-                editorStaging);
+                editorStaging,
+                cancellationToken);
             aiTools = await tools.BuildAsync(editorContext, contestModeEnabled ? EditorChatToolMode.ContestPreparation : EditorChatToolMode.Normal, cancellationToken);
         }
         catch (Exception ex)

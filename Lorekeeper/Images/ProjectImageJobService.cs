@@ -177,10 +177,49 @@ public sealed class ProjectImageJobService(
             .Distinct()
             .ToListAsync(cancellationToken);
 
+    public async Task CancelJobAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
+    {
+        var job = await db.ProjectImageGenerationJobs.FirstOrDefaultAsync(
+            candidate => candidate.ProjectId == projectId && candidate.Id == jobId,
+            cancellationToken);
+        if (job is null || job.Status is ProjectImageGenerationJobStatus.Succeeded
+            or ProjectImageGenerationJobStatus.CompletedWithErrors
+            or ProjectImageGenerationJobStatus.Cancelled)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var states = NormalizeOutputStates(job.OutputStatesJson, job.Count)
+            .Select(state => state.Status is ProjectImageOutputStatus.Succeeded
+                or ProjectImageOutputStatus.Failed
+                or ProjectImageOutputStatus.Cancelled
+                    ? state
+                    : state with
+                    {
+                        Status = ProjectImageOutputStatus.Cancelled,
+                        Message = "Image request cancelled.",
+                        Error = string.Empty,
+                        UpdatedAt = now,
+                        CompletedAt = now,
+                    })
+            .ToList();
+
+        job.Status = ProjectImageGenerationJobStatus.Cancelled;
+        job.OutputStatesJson = SerializeOutputStates(states);
+        job.Error = string.Empty;
+        job.CompletedAt = now;
+        job.UpdatedAt = now;
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task MarkOutputStateAsync(Guid projectId, Guid jobId, ProjectImageOutputStateView outputState, CancellationToken cancellationToken = default)
     {
         var job = await db.ProjectImageGenerationJobs.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken);
-        if (job is null || outputState.OutputIndex < 0 || outputState.OutputIndex >= job.Count)
+        if (job is null
+            || job.Status == ProjectImageGenerationJobStatus.Cancelled
+            || outputState.OutputIndex < 0
+            || outputState.OutputIndex >= job.Count)
             return;
 
         var states = UpsertOutputState(
@@ -194,7 +233,10 @@ public sealed class ProjectImageJobService(
     public async Task MarkOutputFailedAsync(Guid projectId, Guid jobId, ProjectImageOutputErrorView outputError, CancellationToken cancellationToken = default)
     {
         var job = await db.ProjectImageGenerationJobs.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken);
-        if (job is null || outputError.OutputIndex < 0 || outputError.OutputIndex >= job.Count)
+        if (job is null
+            || job.Status == ProjectImageGenerationJobStatus.Cancelled
+            || outputError.OutputIndex < 0
+            || outputError.OutputIndex >= job.Count)
             return;
 
         var errors = DeserializeOutputErrors(job.OutputErrorsJson)
@@ -232,6 +274,8 @@ public sealed class ProjectImageJobService(
     {
         var job = await db.ProjectImageGenerationJobs.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken)
             ?? throw new InvalidOperationException("Image generation job was not found.");
+        if (job.Status == ProjectImageGenerationJobStatus.Cancelled)
+            throw new OperationCanceledException("Image generation job was cancelled before its output could be saved.");
         var project = await GetProjectAsync(projectId, cancellationToken);
         var referenceIds = DeserializeIds(job.ReferenceImageIdsJson);
         var source = job.SourceImageId is Guid sourceImageId
@@ -304,6 +348,13 @@ public sealed class ProjectImageJobService(
     {
         var job = await db.ProjectImageGenerationJobs.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken)
             ?? throw new InvalidOperationException("Image generation job was not found.");
+        if (job.Status == ProjectImageGenerationJobStatus.Cancelled)
+        {
+            job.CompletedAt ??= DateTime.UtcNow;
+            job.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+            return;
+        }
         var states = NormalizeOutputStates(job.OutputStatesJson, job.Count);
         var failed = states.Count(state => state.Status is ProjectImageOutputStatus.Failed or ProjectImageOutputStatus.Cancelled);
         var succeeded = states.Count(state => state.Status == ProjectImageOutputStatus.Succeeded);

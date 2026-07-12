@@ -61,6 +61,7 @@ else
     private bool _loading = true;
     private string? _error;
     private Guid? _loadedProjectId;
+    private readonly SemaphoreSlim _reloadGate = new(1, 1);
     /// <summary>Bumped on every successful reload so child panels (entities, beats) re-read.</summary>
     private int _refreshSignal;
 
@@ -75,11 +76,12 @@ else
     private async Task ReloadAsync()
     {
         if (Project is null) return;
-        _loading = _workingProject is null;
+        await _reloadGate.WaitAsync();
         try
         {
+            _loading = _workingProject is null;
             // Re-fetch the project so tool-driven mutations that touch project state are reflected here.
-            _workingProject = await ProjectRepo.GetByIdAsync(Project.Id) ?? Project;
+            _workingProject = await ProjectRepo.GetSnapshotByIdAsync(Project.Id) ?? Project;
             _acts = (await Acts.ListAsync(Project.Id)).ToList();
             var allChapters = (await Chapters.ListAsync(Project.Id)).ToList();
             _chaptersByAct = _acts.ToDictionary(
@@ -91,6 +93,7 @@ else
         finally
         {
             _loading = false;
+            _reloadGate.Release();
         }
     }
 

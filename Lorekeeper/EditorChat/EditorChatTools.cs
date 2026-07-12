@@ -215,7 +215,7 @@ public sealed class EditorChatTools(
                 GenerateProjectImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, referenceImageIds, entityTargets, placeInCurrentChapter, targetChapterId, targetPictureImageElementId),
             name: "generate_project_image",
             description:
-                "Generate an image and save it to the project image library. Pass entityTargets [{entityId,label}] for every clearly represented entity; successful outputs are attached automatically. Only use eligible story entity ids grounded in the Context Feed or returned by search_entities/read_entity; omit entityTargets rather than inventing or reusing an uncertain id. Optional referenceImageIds accepts multiple existing project image ids, up to the configured reference-image limit; use attached examples for recurring characters, outfits, settings, props, and style continuity. Do not attach decorative/layout-only art or guess ambiguous associations. " +
+                "Generate an image and save it to the project image library. Ordinary scenes and prospective designs must omit entityTargets. Pass entityTargets only when the user explicitly approved or requested a purpose-built reference asset; otherwise attach an approved output later. Only use grounded eligible entity ids and still-approved referenceImageIds. Never reuse a rejected or superseded design. " +
                 "For PicturePage targets, pass targetChapterId and optionally targetPictureImageElementId; omit size to use the layout-native recommended size. " +
                 "Set placeInCurrentChapter=true only when the user wants the generated image inserted into the current chapter immediately; the current chapter must already be IllustratedProse or PicturePage."));
 
@@ -1265,100 +1265,107 @@ public sealed class EditorChatTools(
                 1,
                 (referenceImageIds ?? []).Distinct().ToList(),
                 Label: "Editor chat image",
-                EntityTargets: ctx.OutlineStaging is null ? targetValidation.Targets : null));
+                EntityTargets: ctx.OutlineStaging is null ? targetValidation.Targets : null), ctx.TurnCancellationToken);
         }
         catch (InvalidOperationException ex)
         {
             return $"Error: {ex.Message}";
         }
         ctx.TrackImageGenerationJob(job.Id);
-
-        await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, CancellationToken.None);
-        var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
-        var completed = await imageRuntime.WaitForJobCompletionAsync(job.Id, timeout, CancellationToken.None);
-        job = await imageJobs.GetJobAsync(ctx.ProjectId, job.Id, CancellationToken.None)
-            ?? throw new InvalidOperationException($"Image generation job {job.Id:N} was not found after queueing.");
-
-        var outputImages = new List<ProjectImageView>();
-        foreach (var imageId in job.OutputImageIds)
+        try
         {
-            if (await projectImages.GetAsync(ctx.ProjectId, imageId, CancellationToken.None) is { } image)
+            await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, ctx.TurnCancellationToken);
+            var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
+            var completed = await imageRuntime.WaitForJobCompletionAsync(job.Id, timeout, ctx.TurnCancellationToken);
+            job = await imageJobs.GetJobAsync(ctx.ProjectId, job.Id, ctx.TurnCancellationToken)
+                ?? throw new InvalidOperationException($"Image generation job {job.Id:N} was not found after queueing.");
+
+            var outputImages = new List<ProjectImageView>();
+            foreach (var imageId in job.OutputImageIds)
             {
-                outputImages.Add(image);
-                ctx.AddVisual(await BuildVisualAsync(
-                    ctx,
-                    image,
-                    title: image.FileName,
-                    caption: "Generated output saved to the image library."));
-                ctx.AddModelOnlyImage(image);
-                foreach (var entityTarget in targetValidation.Targets)
+                if (await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken) is { } image)
                 {
-                    if (ctx.OutlineStaging is null) continue;
-                    var after = new EntityVisualChange("attach", EntityId: entityTarget.EntityId, ImageId: image.Id, Label: entityTarget.Label);
-                    await ctx.OutlineStaging.StageExternalChangeAsync(
-                        $"Attach generated image to entity {entityTarget.EntityId:N}", null, after,
-                        new { status = "staged", entityTarget.EntityId, imageId = image.Id, entityTarget.Label },
-                        "EntityVisualExample", $"{entityTarget.EntityId:N}/{image.Id:N}");
+                    outputImages.Add(image);
+                    ctx.AddVisual(await BuildVisualAsync(
+                        ctx,
+                        image,
+                        title: image.FileName,
+                        caption: "Generated output saved to the image library."));
+                    ctx.AddModelOnlyImage(image);
+                    foreach (var entityTarget in targetValidation.Targets)
+                    {
+                        if (ctx.OutlineStaging is null) continue;
+                        var after = new EntityVisualChange("attach", EntityId: entityTarget.EntityId, ImageId: image.Id, Label: entityTarget.Label);
+                        await ctx.OutlineStaging.StageExternalChangeAsync(
+                            $"Attach generated image to entity {entityTarget.EntityId:N}", null, after,
+                            new { status = "staged", entityTarget.EntityId, imageId = image.Id, entityTarget.Label },
+                            "EntityVisualExample", $"{entityTarget.EntityId:N}/{image.Id:N}");
+                    }
                 }
             }
-        }
 
-        object? placement = null;
-        if (placeInCurrentChapter && outputImages.FirstOrDefault() is { } placedImage)
-        {
-            var chapterId = ctx.CurrentChapterId!.Value;
-            var placed = await chapterVisuals.AddImageToChapterAsync(ctx.ProjectId, chapterId, placedImage.Id);
-            placement = new
+            object? placement = null;
+            if (placeInCurrentChapter && outputImages.FirstOrDefault() is { } placedImage)
             {
-                chapterId,
-                elementId = placed.ElementId,
-                placed.State.VisualMode,
-                visualLayout = await VisualStatePayloadObjectAsync(ctx, placed.State, "Image placed in chapter.", placed.ElementId),
-            };
-        }
+                var chapterId = ctx.CurrentChapterId!.Value;
+                var placed = await chapterVisuals.AddImageToChapterAsync(ctx.ProjectId, chapterId, placedImage.Id, ctx.TurnCancellationToken);
+                placement = new
+                {
+                    chapterId,
+                    elementId = placed.ElementId,
+                    placed.State.VisualMode,
+                    visualLayout = await VisualStatePayloadObjectAsync(ctx, placed.State, "Image placed in chapter.", placed.ElementId),
+                };
+            }
 
-        ctx.OnMutated();
-        return JsonSerializer.Serialize(new
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                completed,
+                job = new
+                {
+                    job.Id,
+                    job.Kind,
+                    job.Status,
+                    job.Label,
+                    job.Size,
+                    job.Quality,
+                    job.OutputFormat,
+                    job.Count,
+                    job.OutputImageIds,
+                    job.OutputStates,
+                    job.OutputErrors,
+                    job.Error,
+                    job.CreatedAt,
+                    job.StartedAt,
+                    job.CompletedAt,
+                },
+                images = outputImages.Select(image => new
+                {
+                    image.Id,
+                    image.FileName,
+                    image.ContentType,
+                    image.PreviewUrl,
+                    image.AltText,
+                    image.Source,
+                    image.Prompt,
+                    image.GenerationModel,
+                    image.CreatedAt,
+                    image.UpdatedAt,
+                    image.SizeBytes,
+                }),
+                imageGenerationTarget = targetResolution.Target is null
+                    ? null
+                    : PicturePageImageGenerationGuidance.DescribeTarget(targetResolution.Target),
+                placement,
+                note = completed ? null : "Timed out waiting for the image job. The Images tab will continue showing progress.",
+            });
+        }
+        catch (OperationCanceledException) when (ctx.TurnCancellationToken.IsCancellationRequested)
         {
-            completed,
-            job = new
-            {
-                job.Id,
-                job.Kind,
-                job.Status,
-                job.Label,
-                job.Size,
-                job.Quality,
-                job.OutputFormat,
-                job.Count,
-                job.OutputImageIds,
-                job.OutputStates,
-                job.OutputErrors,
-                job.Error,
-                job.CreatedAt,
-                job.StartedAt,
-                job.CompletedAt,
-            },
-            images = outputImages.Select(image => new
-            {
-                image.Id,
-                image.FileName,
-                image.ContentType,
-                image.PreviewUrl,
-                image.AltText,
-                image.Source,
-                image.Prompt,
-                image.GenerationModel,
-                image.CreatedAt,
-                image.UpdatedAt,
-                image.SizeBytes,
-            }),
-            imageGenerationTarget = targetResolution.Target is null
-                ? null
-                : PicturePageImageGenerationGuidance.DescribeTarget(targetResolution.Target),
-            placement,
-            note = completed ? null : "Timed out waiting for the image job. The Images tab will continue showing progress.",
-        });
+            await imageRuntime.CancelJobAsync(ctx.ProjectId, job.Id, CancellationToken.None);
+            throw;
+        }
     }
 
     private async Task<ImageGenerationTargetResolution> ResolvePicturePageGenerationTargetAsync(

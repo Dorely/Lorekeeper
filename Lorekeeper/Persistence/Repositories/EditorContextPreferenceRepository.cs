@@ -10,6 +10,7 @@ public sealed class EditorContextPreferenceRepository(AppDbContext db) : IEditor
         Guid chapterId,
         CancellationToken cancellationToken = default) =>
         db.EditorContextPreferences
+            .AsNoTracking()
             .Where(preference => preference.ProjectId == projectId && preference.ChapterId == chapterId)
             .OrderBy(preference => preference.SortOrder ?? int.MaxValue)
             .ThenBy(preference => preference.Kind)

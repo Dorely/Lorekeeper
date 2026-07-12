@@ -9,7 +9,7 @@ public class OutlineConversationRepository(AppDbContext db) : IOutlineConversati
         db.OutlineConversations.FirstOrDefaultAsync(c => c.ProjectId == projectId, cancellationToken);
 
     public Task<List<OutlineMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        db.OutlineMessages.Where(m => m.ConversationId == conversationId)
+        db.OutlineMessages.AsNoTracking().Where(m => m.ConversationId == conversationId)
                           .OrderBy(m => m.Order)
                           .ToListAsync(cancellationToken);
 

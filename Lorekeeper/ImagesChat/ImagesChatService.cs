@@ -36,10 +36,11 @@ public sealed class ImagesChatService(
         - Use project guidance, outline, facts, chapters, image metadata, and visual layout manifests before making image-prompt decisions.
         - Use rendered snapshot inspection when the user asks about the actual visible layout and the provider is vision-ready.
         - For targeted edits, use masks. User-painted masks and agent-created shape masks follow the same convention: transparent pixels are editable and opaque pixels are preserved.
-        - For reference isolation, use crop_project_image rather than a generative edit. Inspect the source first, crop tightly around the intended subject, use subject-only alt text, and pass only explicit entity targets; the source image remains unchanged and keeps its own associations.
+        - For reference isolation, use crop_project_image rather than a generative edit. Inspect the source first, crop tightly around the intended subject, use subject-only alt text, and attach only a user-approved crop; the source scene remains unchanged and must not become the entity reference.
         - Write generation prompts as compact image briefs with use case, asset type, subject, style/medium, composition/framing, lighting/mood, and constraints. Label reference images by role, preserve explicit edit invariants, and avoid text, logos, and watermarks unless the user explicitly asks for them.
-        - For picture books, recurring characters, recurring settings, series art, or any continuity-sensitive image, look for relevant existing project images first. Use multiple referenceImageIds when useful to preserve the same character design, clothes, hair, age, proportions, palette, medium, important props, and setting traits across pages. Do not use continuity references when the user clearly asks for a redesign, variant, or style break.
-        - After a successful continuity-sensitive generation, treat the saved output as a future project reference image for that character, outfit, prop, setting, or style.
+        - For picture books, recurring characters, recurring settings, series art, or any continuity-sensitive image, look for relevant approved project references first. Use multiple referenceImageIds when useful to preserve approved character design, clothes, hair, age, proportions, palette, medium, important props, and setting traits across pages. Never use a rejected/superseded design, and omit continuity references for a redesign, variant, or style break.
+        - Keep new scene images and prospective designs unattached. Treat a saved output as a future reference only after the user accepts it or explicitly asks to attach it.
+        - Image models may copy character references literally. In every prompt using character references, explicitly state the identity traits to preserve and the facial expression, pose, gesture, gaze, body language, action, framing, and other scene-specific details that must differ from the reference.
         - For PicturePage image generation, read the chapter visual layout when needed and pass targetChapterId plus targetPictureImageElementId when filling an existing image frame. Omit size only when you want the tool to use the layout-native recommended size; preserve explicit user-supplied sizes. Prompt for the page or slot shape, leave quiet negative space under text boxes, and keep important subjects away from text overlays and the center gutter on spreads.
         - Queue image generation/edit jobs with generate_image or edit_image. These tools wait for completion; after a successful job, the generated images are supplied back to your model context when the provider supports vision.
         - Do not claim an image was generated or edited unless the tool returns final saved image ids.
@@ -213,7 +214,7 @@ public sealed class ImagesChatService(
             initialAssembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples, cancellationToken);
             systemPrompt = initialAssembly.Assemble();
             chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
-            toolContext = new ImagesChatToolContext(projectId, conversation.Id, chatProvider.Id, visionReady, OnToolMutated);
+            toolContext = new ImagesChatToolContext(projectId, conversation.Id, chatProvider.Id, visionReady, OnToolMutated, cancellationToken);
             aiTools = await tools.BuildAsync(toolContext, cancellationToken);
         }
         catch (Exception ex)

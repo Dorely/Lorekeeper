@@ -6,7 +6,7 @@ namespace Lorekeeper.Persistence.Repositories;
 public class ActRepository(AppDbContext db) : IActRepository
 {
     public Task<List<Act>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.Acts.Where(a => a.ProjectId == projectId)
+        db.Acts.AsNoTracking().Where(a => a.ProjectId == projectId)
                .OrderBy(a => a.Order)
                .ToListAsync(cancellationToken);
 

@@ -32,9 +32,11 @@ public sealed class EditorChatContext(
     bool reviewEdits,
     bool autoPinReadEntities,
     OutlineToolStagingContext? outlineStaging,
-    EditorChatChangeStagingContext? editorStaging)
+    EditorChatChangeStagingContext? editorStaging,
+    CancellationToken turnCancellationToken)
 {
     private readonly object _imageGenerationLock = new();
+    private readonly HashSet<Guid> _imageGenerationJobIds = [];
     private EditorContestStartRequest? _contestRequest;
     private Guid? _currentImageGenerationJobId;
     private readonly HashSet<Guid> _directlyEditedChapterBodies = [];
@@ -51,6 +53,7 @@ public sealed class EditorChatContext(
     public bool AutoPinReadEntities { get; } = autoPinReadEntities;
     public OutlineToolStagingContext? OutlineStaging { get; } = outlineStaging;
     public EditorChatChangeStagingContext? EditorStaging { get; } = editorStaging;
+    public CancellationToken TurnCancellationToken { get; } = turnCancellationToken;
     public Guid? CurrentAssistantMessageId { get; private set; }
     public string CurrentToolCallId { get; private set; } = string.Empty;
     public string CurrentToolName { get; private set; } = string.Empty;
@@ -86,7 +89,19 @@ public sealed class EditorChatContext(
     public void TrackImageGenerationJob(Guid jobId)
     {
         lock (_imageGenerationLock)
+        {
             _currentImageGenerationJobId = jobId;
+            _imageGenerationJobIds.Add(jobId);
+        }
+    }
+
+    public IReadOnlyList<Guid> ImageGenerationJobIds
+    {
+        get
+        {
+            lock (_imageGenerationLock)
+                return _imageGenerationJobIds.ToList();
+        }
     }
 
     public void AddVisual(EditorChatVisualAttachment visual) => _visuals.Add(visual);

@@ -15,7 +15,7 @@ public class GraphEdgeRepository(AppDbContext db) : IGraphEdgeRepository
         int? maxResults,
         CancellationToken cancellationToken = default)
     {
-        IQueryable<GraphEdge> query = db.GraphEdges;
+        IQueryable<GraphEdge> query = db.GraphEdges.AsNoTracking();
 
         query = direction switch
         {
@@ -44,6 +44,7 @@ public class GraphEdgeRepository(AppDbContext db) : IGraphEdgeRepository
 
     public async Task<List<GraphEdge>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await db.GraphEdges
+            .AsNoTracking()
             .Where(e => e.FromNode.ProjectId == projectId && e.ToNode.ProjectId == projectId)
             .OrderBy(e => e.EdgeType)
             .ThenBy(e => e.SortOrder ?? int.MaxValue)

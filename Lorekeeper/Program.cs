@@ -2,6 +2,7 @@ using Lorekeeper.Auth;
 using Lorekeeper.Chapters;
 using Lorekeeper.Components;
 using Lorekeeper.Context;
+using Lorekeeper.Desktop;
 using Lorekeeper.EditorChat;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Graph;
@@ -26,6 +27,7 @@ using ElectronNET.API.Entities;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+var desktopUpdates = new DesktopUpdateService();
 var isElectronMode = IsElectronMode(args);
 var desktopUrl = isElectronMode ? GetDesktopUrl(builder.Configuration) : null;
 var enableDesktopDevTools = builder.Environment.IsDevelopment();
@@ -49,12 +51,18 @@ builder.Services.AddHttpClient();
 
 if (isElectronMode)
 {
+    builder.Services.AddSingleton<IDesktopUpdateService>(desktopUpdates);
     builder.Services.AddElectron();
     builder.UseElectron(args, () => ElectronAppReady(
         desktopUrl!,
         enableDesktopDevTools,
-        enableAutoUpdates: !builder.Environment.IsDevelopment()));
+        enableAutoUpdates: !builder.Environment.IsDevelopment(),
+        desktopUpdates));
     builder.WebHost.UseUrls(desktopUrl!);
+}
+else
+{
+    builder.Services.AddSingleton<IDesktopUpdateService>(desktopUpdates);
 }
 
 // Persistence
@@ -281,7 +289,11 @@ app.MapPublishEndpoints();
 
 app.Run();
 
-static async Task ElectronAppReady(string desktopUrl, bool enableDevTools, bool enableAutoUpdates)
+static async Task ElectronAppReady(
+    string desktopUrl,
+    bool enableDevTools,
+    bool enableAutoUpdates,
+    DesktopUpdateService desktopUpdates)
 {
     var options = new BrowserWindowOptions
     {
@@ -317,16 +329,25 @@ static async Task ElectronAppReady(string desktopUrl, bool enableDevTools, bool 
     browserWindow.OnReadyToShow += () => browserWindow.Show();
 
     if (enableAutoUpdates && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PORTABLE_EXECUTABLE_DIR")))
-        await CheckForElectronUpdatesAsync();
+        await CheckForElectronUpdatesAsync(desktopUpdates);
 }
 
-static async Task CheckForElectronUpdatesAsync()
+static async Task CheckForElectronUpdatesAsync(DesktopUpdateService desktopUpdates)
 {
     Electron.AutoUpdater.AutoDownload = true;
     Electron.AutoUpdater.AutoInstallOnAppQuit = true;
     Electron.AutoUpdater.AllowPrerelease = false;
+    desktopUpdates.Enable(() => Electron.AutoUpdater.QuitAndInstall(isSilent: true, isForceRunAfter: true));
+    Electron.AutoUpdater.OnCheckingForUpdate += desktopUpdates.MarkChecking;
+    Electron.AutoUpdater.OnUpdateAvailable += info => desktopUpdates.MarkDownloading(info.Version);
+    Electron.AutoUpdater.OnDownloadProgress += progress =>
+        desktopUpdates.MarkDownloading(desktopUpdates.Snapshot.Version, progress.Percent);
+    Electron.AutoUpdater.OnUpdateDownloaded += info => desktopUpdates.MarkReady(info.Version);
     Electron.AutoUpdater.OnError += error =>
+    {
+        desktopUpdates.MarkError(error);
         Console.Error.WriteLine($"Electron auto-update failed: {error}");
+    };
 
     try
     {
@@ -334,6 +355,7 @@ static async Task CheckForElectronUpdatesAsync()
     }
     catch (Exception exception)
     {
+        desktopUpdates.MarkError(exception.Message);
         Console.Error.WriteLine($"Electron auto-update check failed: {exception.Message}");
     }
 }

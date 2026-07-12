@@ -10,6 +10,7 @@ public sealed class ProjectImageConversationRepository(AppDbContext db) : IProje
 
     public Task<List<ProjectImageMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
         db.ProjectImageMessages
+            .AsNoTracking()
             .Include(message => message.Visuals)
             .Where(message => message.ConversationId == conversationId)
             .OrderBy(message => message.Order)

@@ -7,6 +7,7 @@ public sealed class ContestRepository(AppDbContext db) : IContestRepository
 {
     public Task<List<ContestBatch>> ListCurrentByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         db.ContestBatches
+            .AsNoTracking()
             .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
             .Where(batch => batch.ProjectId == projectId
                 && (batch.Status == ContestBatchStatus.Running || batch.Status == ContestBatchStatus.Completed))

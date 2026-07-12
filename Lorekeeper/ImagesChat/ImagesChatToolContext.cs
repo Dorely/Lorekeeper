@@ -7,15 +7,18 @@ public sealed class ImagesChatToolContext(
     Guid conversationId,
     int providerId,
     bool visionReady,
-    Action onMutated)
+    Action onMutated,
+    CancellationToken turnCancellationToken)
 {
     private readonly List<ImagesChatVisualAttachment> _visuals = [];
     private readonly List<ProjectImageView> _modelOnlyImages = [];
+    private readonly HashSet<Guid> _imageGenerationJobIds = [];
 
     public Guid ProjectId { get; } = projectId;
     public Guid ConversationId { get; } = conversationId;
     public int ProviderId { get; } = providerId;
     public bool VisionReady { get; } = visionReady;
+    public CancellationToken TurnCancellationToken { get; } = turnCancellationToken;
     public string CurrentToolCallId { get; private set; } = string.Empty;
     public string CurrentToolName { get; private set; } = string.Empty;
     public string CurrentArgumentsJson { get; private set; } = "{}";
@@ -57,4 +60,8 @@ public sealed class ImagesChatToolContext(
     }
 
     public void MarkMutated() => onMutated();
+
+    public void TrackImageGenerationJob(Guid jobId) => _imageGenerationJobIds.Add(jobId);
+
+    public IReadOnlyList<Guid> ImageGenerationJobIds => _imageGenerationJobIds.ToList();
 }

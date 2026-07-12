@@ -16,6 +16,7 @@ public class GraphNodeRepository(AppDbContext db) : IGraphNodeRepository
 
     public async Task<List<GraphNode>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await db.GraphNodes
+            .AsNoTracking()
             .Where(n => n.ProjectId == projectId)
             .OrderBy(n => n.NodeType)
             .ThenBy(n => n.Label ?? n.Key)
@@ -24,6 +25,7 @@ public class GraphNodeRepository(AppDbContext db) : IGraphNodeRepository
 
     public async Task<List<GraphNode>> ListByTypeAsync(Guid projectId, string nodeType, CancellationToken cancellationToken = default) =>
         await db.GraphNodes
+            .AsNoTracking()
             .Where(n => n.ProjectId == projectId && n.NodeType == nodeType)
             .OrderBy(n => n.Label ?? n.Key)
             .ThenBy(n => n.Key)
@@ -41,7 +43,7 @@ public class GraphNodeRepository(AppDbContext db) : IGraphNodeRepository
     {
         var idList = ids.ToList();
         if (idList.Count == 0) return [];
-        return await db.GraphNodes.Where(n => idList.Contains(n.Id)).ToListAsync(cancellationToken);
+        return await db.GraphNodes.AsNoTracking().Where(n => idList.Contains(n.Id)).ToListAsync(cancellationToken);
     }
 
     public async Task AddAsync(GraphNode node, CancellationToken cancellationToken = default) =>

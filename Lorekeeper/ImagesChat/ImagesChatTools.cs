@@ -129,13 +129,13 @@ public sealed class ImagesChatTools(
                 method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, string? label = null, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
                     GenerateImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, entityTargets, label, targetChapterId, targetPictureImageElementId),
                 name: "generate_image",
-                description: "Generate library images. Pass entityTargets [{entityId,label}] for every clearly represented entity so each output is attached automatically. Only use eligible story entity ids returned by project/entity reads; omit entityTargets rather than inventing or reusing an uncertain id. Reuse existing visual examples through referenceImageIds for continuity. Do not target decorative/layout-only art or guess ambiguous associations."),
+                description: "Generate library images. Ordinary scenes and prospective designs must omit entityTargets. Pass entityTargets only when the user explicitly approved or requested a purpose-built reference asset; otherwise attach an approved output later with attach_entity_visual_example. Use only grounded eligible entity ids and only still-approved referenceImageIds."),
 
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, string prompt, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, bool inheritSourceEntityTargets = true, string? label = null) =>
+                method: (Guid sourceImageId, string prompt, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, bool inheritSourceEntityTargets = false, string? label = null) =>
                     EditImageAsync(context, sourceImageId, prompt, maskId, maskShapes, maskLabel, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, entityTargets, inheritSourceEntityTargets, label),
                 name: "edit_image",
-                description: "Edit a project image. Outputs inherit the source image's entity targets by default; pass inheritSourceEntityTargets=false to disable, or entityTargets to add/override clearly represented entities."),
+                description: "Edit a project image. Outputs do not inherit entity targets by default. Set inheritSourceEntityTargets=true only for a still-approved purpose-built reference whose identity role remains valid; ordinary scenes, redesigns, and prospective outputs stay unattached."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, Guid imageId) => AddProjectImageToChapterAsync(context, chapterId, imageId),
@@ -518,7 +518,7 @@ public sealed class ImagesChatTools(
                 Math.Clamp(count, 1, Math.Max(1, imageOptions.Value.MaxOutputs)),
                 (referenceImageIds ?? []).Distinct().ToList(),
                 label,
-                targetValidation.Targets));
+                targetValidation.Targets), ctx.TurnCancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -588,7 +588,7 @@ public sealed class ImagesChatTools(
                 ctx.ProjectId,
                 sourceImageId,
                 new ProjectImageMaskShapeRequest(maskLabel ?? "Agent edit mask", maskShapes),
-                CancellationToken.None);
+                ctx.TurnCancellationToken);
             effectiveMaskId = mask.Id;
         }
 
@@ -609,7 +609,7 @@ public sealed class ImagesChatTools(
                 Label: label,
                 ExistingMaskId: effectiveMaskId,
                 EntityTargets: targetValidation.Targets,
-                InheritSourceEntityTargets: inheritSourceEntityTargets));
+                InheritSourceEntityTargets: inheritSourceEntityTargets), ctx.TurnCancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -620,36 +620,45 @@ public sealed class ImagesChatTools(
 
     private async Task<string> RunQueuedJobToolAsync(ImagesChatToolContext ctx, Guid jobId)
     {
-        await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, CancellationToken.None);
-        var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
-        var completed = await imageRuntime.WaitForJobCompletionAsync(jobId, timeout, CancellationToken.None);
-        var job = await imageJobs.GetJobAsync(ctx.ProjectId, jobId, CancellationToken.None);
-        if (job is null)
-            return $"Error: image job {jobId:N} was not found after queueing.";
-
-        var outputs = new List<object>();
-        foreach (var imageId in job.OutputImageIds)
+        ctx.TrackImageGenerationJob(jobId);
+        try
         {
-            var image = await projectImages.GetAsync(ctx.ProjectId, imageId);
-            if (image is null)
-                continue;
+            await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, ctx.TurnCancellationToken);
+            var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
+            var completed = await imageRuntime.WaitForJobCompletionAsync(jobId, timeout, ctx.TurnCancellationToken);
+            var job = await imageJobs.GetJobAsync(ctx.ProjectId, jobId, ctx.TurnCancellationToken);
+            if (job is null)
+                return $"Error: image job {jobId:N} was not found after queueing.";
 
-            var caption = string.Equals(ctx.CurrentToolName, "edit_image", StringComparison.Ordinal)
-                ? "Edited output saved to the image library."
-                : "Generated output saved to the image library.";
-            ctx.AddVisual(await BuildVisualAsync(ctx, image, title: image.FileName, caption: caption));
-            ctx.AddModelOnlyImage(image);
-            outputs.Add(ImagePayload(image));
+            var outputs = new List<object>();
+            foreach (var imageId in job.OutputImageIds)
+            {
+                var image = await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken);
+                if (image is null)
+                    continue;
+
+                var caption = string.Equals(ctx.CurrentToolName, "edit_image", StringComparison.Ordinal)
+                    ? "Edited output saved to the image library."
+                    : "Generated output saved to the image library.";
+                ctx.AddVisual(await BuildVisualAsync(ctx, image, title: image.FileName, caption: caption));
+                ctx.AddModelOnlyImage(image);
+                outputs.Add(ImagePayload(image));
+            }
+
+            ctx.MarkMutated();
+            return JsonSerializer.Serialize(new
+            {
+                completed,
+                job = JobPayload(job),
+                images = outputs,
+                note = completed ? null : "Timed out waiting for the image job. The Images tab will continue showing progress.",
+            }, JsonOptions);
         }
-
-        ctx.MarkMutated();
-        return JsonSerializer.Serialize(new
+        catch (OperationCanceledException) when (ctx.TurnCancellationToken.IsCancellationRequested)
         {
-            completed,
-            job = JobPayload(job),
-            images = outputs,
-            note = completed ? null : "Timed out waiting for the image job. The Images tab will continue showing progress.",
-        }, JsonOptions);
+            await imageRuntime.CancelJobAsync(ctx.ProjectId, jobId, CancellationToken.None);
+            throw;
+        }
     }
 
     private async Task<string> AddProjectImageToChapterAsync(ImagesChatToolContext ctx, Guid chapterId, Guid imageId)

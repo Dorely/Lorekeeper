@@ -11,6 +11,7 @@ public interface IProjectImageJobService
     Task<ProjectImageJobView> CreateEditJobAsync(Guid projectId, ProjectImageEditJobRequest request, CancellationToken cancellationToken = default);
     Task<ProjectImageGenerationWorkItem?> TryStartNextQueuedJobAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Guid>> ListProjectsWithQueuedJobsAsync(CancellationToken cancellationToken = default);
+    Task CancelJobAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default);
     Task MarkOutputStateAsync(Guid projectId, Guid jobId, ProjectImageOutputStateView outputState, CancellationToken cancellationToken = default);
     Task MarkOutputFailedAsync(Guid projectId, Guid jobId, ProjectImageOutputErrorView outputError, CancellationToken cancellationToken = default);
     Task<ProjectImageView> SaveGeneratedOutputAsync(Guid projectId, Guid jobId, int outputIndex, ProjectImageProviderResult result, ProjectImageProviderImage image, CancellationToken cancellationToken = default);
