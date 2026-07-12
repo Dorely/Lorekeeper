@@ -19,17 +19,18 @@
 | `.vscode/launch.json` | VS Code debug configurations; default F5 entry launches the Electron desktop shell, with a secondary web-hosted profile. |
 | `.vscode/tasks.json` | VS Code build task used by debug launch configurations. |
 | `.github/copilot-instructions.md` | Project guidelines for AI assistants. |
-| `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates tooling/version, audits NuGet plus shipped npm/Electron dependencies, rebuilds isolated staging/output, verifies artifacts, and writes GitHub Release checksums. |
+| `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates tooling/version, audits NuGet plus shipped npm/Electron dependencies, rebuilds isolated staging/output, verifies installer/updater artifacts, and writes GitHub Release checksums. |
+| `scripts/publish-windows-release.ps1` | One-command Windows publisher: requires a clean source tree, builds the requested SemVer, uploads complete updater assets to a draft `Dorely/Lorekeeper-Releases` release, then publishes it. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
 
 | File | Description |
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors, versioned Electron/Electron Builder pins, and app dependencies including EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI, sqlite-vec, tokenizers, SkiaSharp, and ingest packages. |
-| `Program.cs` | Host setup, hardened optional Electron renderer binding, deterministic development/installed database-path selection, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/images/chapter-visuals/publish/writing/editor-chat/contest/revision-agent services, startup migration/index repair, and image/publish endpoints. |
+| `Program.cs` | Host setup, hardened optional Electron renderer binding with stable installed-build update checks, deterministic development/installed database-path selection, Blazor Interactive Server hub sizing, DI for persistence/knowledge/LLM/search/token/ingest/research/import-export/images/chapter-visuals/publish/writing/editor-chat/contest/revision-agent services, startup migration/index repair, and image/publish endpoints. |
 | `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*` including packaged per-user data placement, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
 | `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
-| `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets, app metadata, and payload exclusions for Windows, Linux, and macOS desktop artifacts. |
+| `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets, app metadata, public GitHub update provider, and payload exclusions for Windows, Linux, and macOS desktop artifacts. |
 | `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained publish profiles used by Electron.NET packaging (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`); Windows isolates staging from final artifacts to prevent recursive packaging. |
 
 ### Components/

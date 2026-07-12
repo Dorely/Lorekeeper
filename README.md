@@ -65,10 +65,30 @@ The build produces a per-user NSIS installer and a portable executable in
 without administrator rights, and recipients do not need .NET or Node.js. Share
 `publish/win-x64/Lorekeeper-Setup-<version>-x64.exe` with testers.
 
-For a GitHub Release, upload the Setup executable and the generated
-`publish/win-x64/SHA256SUMS.txt`. The `/publish/` directory is intentionally
-git-ignored; release binaries should be attached to the GitHub Release rather
-than committed to the repository.
+Installed builds check the public
+[`Dorely/Lorekeeper-Releases`](https://github.com/Dorely/Lorekeeper-Releases)
+repository for stable updates. The portable executable does not auto-update.
+The release feed requires the Setup executable, its `.blockmap`, and
+`latest.yml` to be published together.
+
+To build and publish a new Windows release from a clean source worktree, install
+and authenticate [GitHub CLI](https://cli.github.com/), then run:
+
+```powershell
+gh auth login
+.\scripts\publish-windows-release.ps1 -Version 0.2.0
+```
+
+The publisher validates GitHub access and release-repository visibility, builds
+and audits the packages, creates a draft release, uploads the installer,
+portable executable, updater metadata, blockmap, and checksums, then publishes
+the completed release. Add `-Notes "..."` or `-NotesFile .\release-notes.md` for
+custom release notes. SemVer prerelease versions such as `0.2.0-beta.1` are
+published as GitHub prereleases and are not offered to stable installations.
+Published versions are immutable; fixes must use a higher version.
+
+The `/publish/` directory is intentionally git-ignored; release binaries are
+attached to the release repository rather than committed to source control.
 
 Release builds store the SQLite database under
 `%LOCALAPPDATA%\Lorekeeper\Data\`, outside both the installed application and
@@ -76,9 +96,10 @@ the portable executable's temporary extraction directory. Desktop development
 continues to use the repository-local database so existing development data is
 not moved.
 
-These local builds are not code-signed. Windows will identify the publisher as
-unknown and may show a Microsoft Defender SmartScreen warning. Code signing is
-required before distributing beyond a small group of trusted testers.
+These builds are not code-signed. Windows will identify the publisher as
+unknown and may show a Microsoft Defender SmartScreen warning on the initial
+installation. Code signing is recommended before distributing beyond a small
+group of trusted testers.
 
 Linux and macOS packages use the matching publish profiles in
 `Lorekeeper/Properties/PublishProfiles/`. Electron.NET/electron-builder may

@@ -278,7 +278,9 @@ try
 
     $installerPath = Join-Path $outputDirectory "Lorekeeper-Setup-$Version-x64.exe"
     $portablePath = Join-Path $outputDirectory "Lorekeeper-Portable-$Version-x64.exe"
-    $artifacts = @($installerPath, $portablePath)
+    $blockmapPath = "$installerPath.blockmap"
+    $updateMetadataPath = Join-Path $outputDirectory 'latest.yml'
+    $artifacts = @($installerPath, $portablePath, $blockmapPath, $updateMetadataPath)
 
     foreach ($artifact in $artifacts)
     {
@@ -318,7 +320,7 @@ try
         Write-Host ("  {0} ({1:N1} MB)" -f $item.FullName, ($item.Length / 1MB))
     }
     Write-Host "  $checksumPath"
-    Write-Host "`nUpload the Setup executable and SHA256SUMS.txt to the GitHub Release for v$Version."
+    Write-Host "`nPublish these files together so installed apps can discover and verify v$Version."
 }
 finally
 {

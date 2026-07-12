@@ -3,6 +3,13 @@
   "productName": "Lorekeeper",
   "appId": "com.lorekeeper.app",
   "compression": "maximum",
+  "publish": {
+    "provider": "github",
+    "owner": "Dorely",
+    "repo": "Lorekeeper-Releases",
+    "private": false,
+    "releaseType": "release"
+  },
   "files": [
     "!bin{,/**/*}",
     "!win-unpacked{,/**/*}",

@@ -50,7 +50,10 @@ builder.Services.AddHttpClient();
 if (isElectronMode)
 {
     builder.Services.AddElectron();
-    builder.UseElectron(args, () => ElectronAppReady(desktopUrl!, enableDesktopDevTools));
+    builder.UseElectron(args, () => ElectronAppReady(
+        desktopUrl!,
+        enableDesktopDevTools,
+        enableAutoUpdates: !builder.Environment.IsDevelopment()));
     builder.WebHost.UseUrls(desktopUrl!);
 }
 
@@ -278,7 +281,7 @@ app.MapPublishEndpoints();
 
 app.Run();
 
-static async Task ElectronAppReady(string desktopUrl, bool enableDevTools)
+static async Task ElectronAppReady(string desktopUrl, bool enableDevTools, bool enableAutoUpdates)
 {
     var options = new BrowserWindowOptions
     {
@@ -312,6 +315,27 @@ static async Task ElectronAppReady(string desktopUrl, bool enableDevTools)
 
     var browserWindow = await Electron.WindowManager.CreateWindowAsync(options, desktopUrl);
     browserWindow.OnReadyToShow += () => browserWindow.Show();
+
+    if (enableAutoUpdates && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PORTABLE_EXECUTABLE_DIR")))
+        await CheckForElectronUpdatesAsync();
+}
+
+static async Task CheckForElectronUpdatesAsync()
+{
+    Electron.AutoUpdater.AutoDownload = true;
+    Electron.AutoUpdater.AutoInstallOnAppQuit = true;
+    Electron.AutoUpdater.AllowPrerelease = false;
+    Electron.AutoUpdater.OnError += error =>
+        Console.Error.WriteLine($"Electron auto-update failed: {error}");
+
+    try
+    {
+        await Electron.AutoUpdater.CheckForUpdatesAndNotifyAsync();
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"Electron auto-update check failed: {exception.Message}");
+    }
 }
 
 static bool IsElectronMode(string[] args) =>
