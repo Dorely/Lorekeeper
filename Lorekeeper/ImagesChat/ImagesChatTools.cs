@@ -681,7 +681,7 @@ public sealed class ImagesChatTools(
         catch (OperationCanceledException) when (ctx.TurnCancellationToken.IsCancellationRequested)
         {
             await imageRuntime.CancelJobAsync(ctx.ProjectId, jobId, CancellationToken.None);
-            throw;
+            return "Cancelled.";
         }
     }
 

@@ -1406,7 +1406,7 @@ public sealed class EditorChatTools(
         catch (OperationCanceledException) when (ctx.TurnCancellationToken.IsCancellationRequested)
         {
             await imageRuntime.CancelJobAsync(ctx.ProjectId, job.Id, CancellationToken.None);
-            throw;
+            return "Cancelled.";
         }
     }
 

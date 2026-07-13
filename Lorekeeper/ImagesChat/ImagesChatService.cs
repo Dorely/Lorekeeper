@@ -625,6 +625,9 @@ public sealed class ImagesChatService(
             var invokeResult = await aiFunction.InvokeAsync(
                 ToolCallArguments.Create(pendingCall.Content.Arguments, pendingCall.ArgumentsJson),
                 cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+                return new ToolInvocationOutcome(string.Empty, Error: null, Cancelled: true);
+
             return new ToolInvocationOutcome(invokeResult?.ToString() ?? string.Empty, Error: null, Cancelled: false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
