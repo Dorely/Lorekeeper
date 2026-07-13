@@ -399,7 +399,7 @@
     margin: 0;
 }
 
-.picture-text-toolbar__field span {
+.picture-text-toolbar__field > span {
     color: #475467;
     font-size: 0.68rem;
     font-weight: 700;
@@ -439,17 +439,128 @@
 }
 
 .picture-text-toolbar__field--background-color {
-    min-width: 5.6rem;
-    width: 5.6rem;
+    min-width: 6.8rem;
+    width: 6.8rem;
 }
 
-.picture-text-toolbar__field--opacity {
-    min-width: 6.4rem;
-    width: 6.4rem;
+.picture-background-picker {
+    position: relative;
+    margin: 0;
 }
 
-.picture-text-toolbar__field--color .form-control-color,
-.picture-text-toolbar__field--background-color .form-control-color {
+.picture-background-picker[open] {
+    z-index: 2147483640;
+}
+
+.picture-background-picker__summary {
+    box-sizing: border-box;
+    min-height: calc(1.5em + 0.5rem + 2px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.45rem;
+    padding: 0.18rem 0.38rem;
+    border: 1px solid #ced4da;
+    border-radius: 0.25rem;
+    background: #fff;
+    color: #344054;
+    cursor: pointer;
+    list-style: none;
+}
+
+.picture-background-picker__summary::-webkit-details-marker {
+    display: none;
+}
+
+.picture-background-picker__summary::after {
+    content: "";
+    width: 0.42rem;
+    height: 0.42rem;
+    flex: 0 0 auto;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: translateY(-0.12rem) rotate(45deg);
+}
+
+.picture-background-picker[open] .picture-background-picker__summary::after {
+    transform: translateY(0.12rem) rotate(225deg);
+}
+
+.picture-background-picker__swatch {
+    width: 1.65rem;
+    height: 1.15rem;
+    flex: 0 0 auto;
+    overflow: hidden;
+    padding: 2px;
+    border: 1px solid rgba(15, 23, 42, 0.24);
+    border-radius: 0.2rem;
+    background-color: #fff;
+    background-image:
+        linear-gradient(45deg, #d0d5dd 25%, transparent 25%),
+        linear-gradient(-45deg, #d0d5dd 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #d0d5dd 75%),
+        linear-gradient(-45deg, transparent 75%, #d0d5dd 75%);
+    background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+    background-size: 8px 8px;
+}
+
+.picture-background-picker__swatch > span {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: 0.08rem;
+}
+
+.picture-background-picker__value {
+    min-width: 2.2rem;
+    color: #475467;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.picture-background-picker__panel {
+    position: absolute;
+    z-index: 2147483640;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    width: 13rem;
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid rgba(148, 163, 184, 0.55);
+    border-radius: 0.45rem;
+    background: #fff;
+    box-shadow: 0 0.5rem 1.4rem rgba(15, 23, 42, 0.18);
+}
+
+.picture-background-picker__field {
+    display: grid;
+    gap: 0.3rem;
+    margin: 0;
+    color: #475467;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.picture-background-picker__field-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.picture-background-picker__field-heading output {
+    font-variant-numeric: tabular-nums;
+}
+
+.picture-background-picker__field .form-control-color {
+    width: 100%;
+    min-height: 2.25rem;
+    padding: 0.15rem;
+}
+
+.picture-text-toolbar__field--color .form-control-color {
     width: 100%;
     min-height: calc(1.5em + 0.5rem + 2px);
     padding: 0.15rem;

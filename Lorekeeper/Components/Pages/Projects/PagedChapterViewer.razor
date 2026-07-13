@@ -178,27 +178,46 @@
                                            @oninput="PreviewSelectedTextColorAsync"
                                            @onchange="SaveSelectedTextColorAsync" />
                                 </label>
-                                <label class="picture-text-toolbar__field picture-text-toolbar__field--background-color">
+                                <div class="picture-text-toolbar__field picture-text-toolbar__field--background-color">
                                     <span>Background</span>
-                                    <input class="form-control form-control-color form-control-sm"
-                                           type="color"
-                                           disabled="@textControlsDisabled"
-                                           value="@(ColorInputValue(TextBackgroundColorValue(textToolbarValue), "#FFFFFF"))"
-                                           @oninput="PreviewSelectedTextBackgroundColorAsync"
-                                           @onchange="SaveSelectedTextBackgroundColorAsync" />
-                                </label>
-                                <label class="picture-text-toolbar__field picture-text-toolbar__field--opacity">
-                                    <span>Opacity</span>
-                                    <input class="form-range picture-text-toolbar__range"
-                                           type="range"
-                                           min="0"
-                                           max="1"
-                                           step="0.05"
-                                           disabled="@textControlsDisabled"
-                                           value="@(TextBackgroundOpacityValue(textToolbarValue).ToString("0.##", CultureInfo.InvariantCulture))"
-                                           @oninput="PreviewSelectedTextBackgroundOpacityAsync"
-                                           @onchange="SaveSelectedTextBackgroundOpacityAsync" />
-                                </label>
+                                    <details class="picture-background-picker"
+                                             aria-disabled="@textControlsDisabled"
+                                             inert="@(textControlsDisabled ? "inert" : null)">
+                                        <summary class="picture-background-picker__summary"
+                                                 aria-label="Choose text background color and opacity">
+                                            <span class="picture-background-picker__swatch" aria-hidden="true">
+                                                <span style="@BackgroundSwatchStyle(textToolbarValue)"></span>
+                                            </span>
+                                            <span class="picture-background-picker__value">@BackgroundOpacityPercent(textToolbarValue)</span>
+                                        </summary>
+                                        <div class="picture-background-picker__panel">
+                                            <label class="picture-background-picker__field">
+                                                <span>Color</span>
+                                                <input class="form-control form-control-color form-control-sm"
+                                                       type="color"
+                                                       disabled="@textControlsDisabled"
+                                                       value="@(ColorInputValue(TextBackgroundColorValue(textToolbarValue), "#FFFFFF"))"
+                                                       @oninput="PreviewSelectedTextBackgroundColorAsync"
+                                                       @onchange="SaveSelectedTextBackgroundColorAsync" />
+                                            </label>
+                                            <label class="picture-background-picker__field">
+                                                <span class="picture-background-picker__field-heading">
+                                                    <span>Opacity</span>
+                                                    <output>@BackgroundOpacityPercent(textToolbarValue)</output>
+                                                </span>
+                                                <input class="form-range picture-text-toolbar__range"
+                                                       type="range"
+                                                       min="0"
+                                                       max="1"
+                                                       step="0.05"
+                                                       disabled="@textControlsDisabled"
+                                                       value="@(TextBackgroundOpacityValue(textToolbarValue).ToString("0.##", CultureInfo.InvariantCulture))"
+                                                       @oninput="PreviewSelectedTextBackgroundOpacityAsync"
+                                                       @onchange="SaveSelectedTextBackgroundOpacityAsync" />
+                                            </label>
+                                        </div>
+                                    </details>
+                                </div>
                     </div>
                 </div>
             }
@@ -1727,6 +1746,12 @@
         _textBackgroundOpacityDrafts.TryGetValue(text.Id, out var draft)
             ? ClampOpacity(draft)
             : ClampOpacity(text.BackgroundOpacity);
+
+    private string BackgroundSwatchStyle(PicturePageTextElement text) =>
+        $"background:{CssRgba(TextBackgroundColorValue(text), TextBackgroundOpacityValue(text))};";
+
+    private string BackgroundOpacityPercent(PicturePageTextElement text) =>
+        $"{Math.Round(TextBackgroundOpacityValue(text) * 100, MidpointRounding.AwayFromZero):0}%";
 
     private static string CssRgba(string? color, double opacity)
     {
