@@ -1894,6 +1894,72 @@ namespace Lorekeeper.Persistence.Migrations
                     b.ToTable("Projects");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.ProjectFontFace", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<Guid>("FamilyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Italic")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SubfamilyName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Weight")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FamilyId", "Weight", "Italic")
+                        .IsUnique();
+
+                    b.ToTable("ProjectFontFaces");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ProjectFontFamily", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("ProjectFontFamilies");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageChatAttachment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3555,6 +3621,28 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Conversation");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.ProjectFontFace", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.ProjectFontFamily", "Family")
+                        .WithMany("Faces")
+                        .HasForeignKey("FamilyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Family");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ProjectFontFamily", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.Project", "Project")
+                        .WithMany("FontFamilies")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageChatAttachment", b =>
                 {
                     b.HasOne("Lorekeeper.Models.PublishAsset", "Image")
@@ -3948,6 +4036,8 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.Navigation("EntityVisualExamples");
 
+                    b.Navigation("FontFamilies");
+
                     b.Navigation("IngestJobs");
 
                     b.Navigation("IngestSources");
@@ -3983,6 +4073,11 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("WritingCoachConversations");
 
                     b.Navigation("WritingSamples");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ProjectFontFamily", b =>
+                {
+                    b.Navigation("Faces");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageConversation", b =>

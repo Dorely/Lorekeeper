@@ -27,7 +27,7 @@
 | File | Description |
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors, versioned Electron/Electron Builder pins, and app dependencies including EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI, sqlite-vec, tokenizers, SkiaSharp, and ingest packages. |
-| `Program.cs` | Host setup, hardened optional Electron renderer binding with installed-build update checks/state events/restart installation, deterministic development/installed database-path selection, Blazor Interactive Server hub sizing, DI for application services, startup migration/index repair, and image/publish endpoints. |
+| `Program.cs` | Host setup, hardened optional Electron renderer binding with installed-build update checks/state events/restart installation, deterministic development/installed database-path selection, Blazor Interactive Server hub sizing, DI for application services, startup migration/index repair, and image/font/publish endpoints. |
 | `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*` including packaged per-user data placement, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
 | `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
 | `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets, app metadata, public GitHub update provider, and payload exclusions for Windows, Linux, and macOS desktop artifacts. |
@@ -88,7 +88,8 @@
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter workspace with mode-specific controls, keyed body-editor documents, serialized external refresh coordination, resizable Chat/Memory columns, chapter visuals, and inline AI/Contest review. |
 | `ChapterBodyEditor.razor` (+ `.razor.css`, `.razor.js`) | Isolated keyed prose textarea that owns its DOM, wrapping-aware line gutter, serialized debounced save/flush contract, read-only state, and JavaScript lifetime. |
-| `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Simulated page viewer/editor for Prose, IllustratedProse, and PicturePage chapters, including paginated spreads, anchored illustrations, container-fitted PicturePage layouts, and wrapping drag-resize/layer/text controls shared by Read/Layout rendering. |
+| `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Simulated page viewer/editor for Prose, IllustratedProse, and PicturePage chapters, including paginated spreads, anchored illustrations, point-based project fonts, non-printing safety guides, diagnostics, and wrapping drag-resize/layer/text controls. |
+| `ProjectFontManagerModal.razor` | PicturePage font catalog manager for multi-file static TTF/OTF imports, available-face inspection, rights reminders, and guarded custom-family deletion. |
 | `ProjectImagePickerModal.razor` (+ `.razor.css`) | Editor image-library modal for selecting current project images and adding them either to the active chapter layout or explicit chapter context. |
 | `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: defers/coalesces transcript hydration, reconciles editor lock state with persistent turns, streams tool/contest updates, and routes active-chapter changes into Review mode. |
 | `ContextItemDetailModal.razor` (+ `.razor.css`) | Shared editor context detail modal for recommendation and Context Feed items; loads entities, chapters, acts, ingest sources/chunks, and supports Context Feed project-guidance/entity edits. |
@@ -176,11 +177,12 @@
 | `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing plus persisted chat- and vision-readiness test snapshots. |
 | `EmbeddingConfiguration.cs` | Singleton EF entity for the active embedding setup: top-level provider connection, embedding API kind, model id, dimensions, last-tested snapshot, and timestamps. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
-| `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; owns project settings and child navigation collections including conversations, image chats/attachments/jobs/masks, contests, revision jobs, writing samples, import jobs, publish profiles/assets/selections/placements, and graph rows. |
+| `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; owns project settings and child navigation collections including conversations, images, fonts, contests, revision jobs, writing samples, import jobs, publish profiles, and graph rows. |
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF entity for a chapter (Title/Body/Synopsis/Order) under a `Project`, optionally assigned to an `Act`; stores visual mode, page layout kind, and visual layout JSON for illustrated prose/picture pages. Tracks vector-index state and exposes `VectorSourceId`. |
 | `ChapterVisualMode.cs` | Enums for chapter visual modes, page layout kinds, and reusable image/text layout choices such as image fit, alignment, anchor position, and text vertical alignment. |
-| `ChapterVisualLayouts.cs` | Serializable layout records and typography enums for IllustratedProse anchored image blocks and PicturePage freeform image/text elements. |
+| `ChapterVisualLayouts.cs` | Serializable IllustratedProse/PicturePage layout records, point-based text face settings, alignment/shadow choices, and explicit image placement roles. |
+| `ProjectFontFamily.cs` / `ProjectFontFace.cs` | Project-scoped EF entities for imported font families and static face bytes, with weight/italic metadata and project cascade ownership. |
 | `EditorContextPreference.cs` | EF entity for per-chapter Context Feed include/exclude preferences keyed by context item kind + stable item key. |
 | `EditorConversation.cs` | EF entity — one persistent multi-turn editor chat per `Project` (unique on `ProjectId`). Owns ordered `EditorMessage`s; cascade-deleted with the project. |
 | `EditorMessage.cs` | EF entity for a single row in an `EditorConversation`: monotonic `Order`, role (`System`/`User`/`Assistant`/`Tool`), text content, assistant tool-call JSON, tool result metadata, status, optional error, and creation timestamp. |
@@ -233,10 +235,10 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context for projects, provider/embedding/search settings, outline/editor/writing/research chat, editor chat visuals, editor revision jobs, writing samples, graph, editor context preferences, AI change approval, ingest/import queues, webpage candidates, publish profiles/assets/layouts, and chapter visual-mode fields. JSON converter shared by graph property bags; configures relationships/indexes and retries transient SQLite lock save failures. |
+| `AppDbContext.cs` | EF Core context for projects, providers, chats, writing, graph, ingest/import, publishing, chapter visuals, and project font families/faces. Configures relationships/indexes, JSON property bags, and transient SQLite lock retries. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | EF Core migrations through `AddPublishPageOptions`, including entity-image links, visual caches/jobs/crops, the Picture Page cover relationship, and saved title/PDF/EPUB page-presentation modes. |
+| `Migrations/` | EF Core migrations through `AddProjectFontsAndPictureTypography`, including project font tables and one-leaf conversion of legacy PicturePage family/percentage typography JSON. |
 
 ### Persistence/Repositories/
 
@@ -462,10 +464,20 @@
 
 | File | Description |
 |------|-------------|
-| `ChapterVisualModels.cs` | UI/service records for chapter visual state, page layout mode updates, and image placement results. |
+| `ChapterVisualModels.cs` | UI/service records for chapter visual state, explicit PicturePage image placement requests/results, rendered text-fit details, and structured layout diagnostics. |
 | `ChapterTextLayoutSynchronizer.cs` | Shared canonical-body synchronizer for persisted Picture Page text boxes, including deterministic single-box rebuilding when prose invalidates a multi-box text layout. |
-| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Mode-gated chapter visual facade for layout mutations, body-synchronized Picture Page text, startup repair, manifests, editor snapshots, and batched guide-free publish surfaces. |
-| `PicturePageImageGenerationGuidance.cs` | Shared PicturePage image-generation guidance helper: layout-native target sizes, slot-size recommendations, manifest lines, and prompt appendix text for image tools. |
+| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Mode-gated visual facade for role-aware image placement, font-byte-consistent rendering, body-synchronized PicturePage text, manifests, diagnostic snapshots, and guide-free publish surfaces. |
+| `PicturePageImageGenerationGuidance.cs` | Shared research-based PicturePage agent rules plus physical/bleed/gutter-aware full-page and slot-local image-generation prompt geometry. |
+| `PicturePageLayoutDiagnostics.cs` | Deterministic trim/preferred/gutter, overlapping-text, and higher-image structural checks shared by editor warnings and rendered snapshots. |
+
+### Fonts/
+
+| File | Description |
+|------|-------------|
+| `IProjectFontService.cs` / `ProjectFontService.cs` | Project font catalog/import/delete/face-resolution service combining bundled OFL families with SQLite-backed custom static faces and guarded in-use deletion. |
+| `PicturePageBuiltInFonts.cs` | Pinned built-in PicturePage family/face catalog and static asset URLs, with Andika as default and missing-glyph fallback. |
+| `ProjectFontBinary.cs` | Server-side TTF/OTF extension, signature, table-directory, variable-axis, metadata, size, and Skia decode validation. |
+| `ProjectFontEndpoints.cs` | Project-scoped imported font-byte endpoint with content type, ETag, and HTTP range support. |
 
 ### Publish/
 
@@ -536,6 +548,7 @@
 | `text-select-cursor.svg` | High-contrast outlined I-beam cursor used by editable text surfaces so the pointer remains visible on light and dark backgrounds. |
 | `js/autosizeTextareas.js` | Small shared JS module that attaches to `textarea[data-autosize]`, grows each textarea to its `scrollHeight`, refreshes on input/change and width changes, and prevents nested textarea scrollbars. |
 | `js/fileDownloads.js` | Browser download helper used by Import / Export and Publish to save generated graph JSON and publish export files. |
+| `fonts/` | Offline pinned OFL PicturePage families (35 static faces), per-family licenses, and source/revision documentation. |
 | `favicon.png` | Site icon. |
 | `lib/bootstrap/` | Vendored Bootstrap distribution. |
 | `lib/vis-network/` | Vendored `vis-network` browser graph renderer assets and license files used by the Graph tab. |

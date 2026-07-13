@@ -1,0 +1,163 @@
+@using Lorekeeper.Fonts
+@inject IProjectFontService ProjectFonts
+
+@if (IsOpen)
+{
+    <div class="modal-backdrop fade show" @onclick="CloseAsync"></div>
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-label="Project font manager" @onclick="CloseAsync">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h5 class="modal-title">Picture page fonts</h5>
+                        <div class="small text-muted">Bundled fonts are available offline. Imported fonts are stored only in this project.</div>
+                    </div>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrWhiteSpace(_error))
+                    {
+                        <div class="alert alert-danger py-2">@_error</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_status))
+                    {
+                        <div class="alert alert-success py-2">@_status</div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Import static font faces</label>
+                        <InputFile OnChange="ImportAsync" multiple accept=".ttf,.otf,font/ttf,font/otf" class="form-control" disabled="@_busy" />
+                        <div class="form-text">Select multiple TTF or OTF faces, up to 10 MB each. WOFF, collections, and variable fonts are not supported.</div>
+                    </div>
+
+                    <div class="alert alert-warning py-2 small">
+                        You are responsible for confirming that imported fonts may be used and redistributed with your book.
+                    </div>
+
+                    @if (_loading)
+                    {
+                        <p class="text-muted"><em>Loading fonts...</em></p>
+                    }
+                    else
+                    {
+                        <div class="list-group">
+                            @foreach (var family in _families)
+                            {
+                                <div class="list-group-item d-flex justify-content-between align-items-start gap-3" @key="family.Key">
+                                    <div>
+                                        <div class="fw-semibold">@family.Name <span class="badge text-bg-light">@family.Category</span></div>
+                                        <div class="small text-muted">@FaceSummary(family)</div>
+                                    </div>
+                                    @if (!family.IsBuiltIn && family.ProjectFamilyId is Guid familyId)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_busy" @onclick="() => DeleteAsync(familyId)">Delete</button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" @onclick="CloseAsync">Done</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private IReadOnlyList<ProjectFontFamilyView> _families = [];
+    private bool _wasOpen;
+    private bool _loading;
+    private bool _busy;
+    private string? _error;
+    private string? _status;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsOpen && !_wasOpen)
+            await ReloadAsync();
+        _wasOpen = IsOpen;
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _families = await ProjectFonts.ListAsync(ProjectId);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ImportAsync(InputFileChangeEventArgs args)
+    {
+        _busy = true;
+        _error = null;
+        _status = null;
+        var imported = 0;
+        var failures = new List<string>();
+        foreach (var file in args.GetMultipleFiles(64))
+        {
+            try
+            {
+                await using var source = file.OpenReadStream(ProjectFontBinary.MaxBytes);
+                await using var buffer = new MemoryStream();
+                await source.CopyToAsync(buffer);
+                await ProjectFonts.ImportAsync(ProjectId, new ProjectFontUpload(file.Name, buffer.ToArray()));
+                imported++;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException)
+            {
+                failures.Add($"{file.Name}: {ex.Message}");
+            }
+        }
+
+        await ReloadAsync();
+        _busy = false;
+        _status = imported > 0 ? $"Imported {imported} font face(s)." : null;
+        _error = failures.Count > 0 ? string.Join(" ", failures) : null;
+        if (imported > 0 && OnChanged.HasDelegate)
+            await OnChanged.InvokeAsync();
+    }
+
+    private async Task DeleteAsync(Guid familyId)
+    {
+        _busy = true;
+        _error = null;
+        _status = null;
+        try
+        {
+            await ProjectFonts.DeleteFamilyAsync(ProjectId, familyId);
+            await ReloadAsync();
+            _status = "Font family deleted.";
+            if (OnChanged.HasDelegate)
+                await OnChanged.InvokeAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        if (OnClose.HasDelegate)
+            await OnClose.InvokeAsync();
+    }
+
+    private static string FaceSummary(ProjectFontFamilyView family) =>
+        string.Join(", ", family.Faces.Select(face => $"{face.Weight}{(face.Italic ? " italic" : string.Empty)}"));
+}

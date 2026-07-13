@@ -64,6 +64,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<PublishImagePlacement> PublishImagePlacements => Set<PublishImagePlacement>();
     public DbSet<EntityVisualExample> EntityVisualExamples => Set<EntityVisualExample>();
     public DbSet<SourceVisualCandidate> SourceVisualCandidates => Set<SourceVisualCandidate>();
+    public DbSet<ProjectFontFamily> ProjectFontFamilies => Set<ProjectFontFamily>();
+    public DbSet<ProjectFontFace> ProjectFontFaces => Set<ProjectFontFace>();
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
         SaveChangesWithLockRetryAsync(acceptAllChangesOnSuccess: true, cancellationToken);
@@ -740,6 +742,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
                 .WithMany(e => e.DerivedImages)
                 .HasForeignKey(e => e.DerivedFromImageId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProjectFontFamily>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Name }).IsUnique();
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.FontFamilies)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectFontFace>(entity =>
+        {
+            entity.HasIndex(e => new { e.FamilyId, e.Weight, e.Italic }).IsUnique();
+            entity.HasOne(e => e.Family)
+                .WithMany(f => f.Faces)
+                .HasForeignKey(e => e.FamilyId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<SourceVisualCandidate>(entity =>

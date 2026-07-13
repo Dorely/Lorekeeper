@@ -203,7 +203,8 @@ public sealed class EditorChatService(
             systemPrompt = assembly.Assemble((contestModeEnabled
                 ? AssistantWorkflowInstructions.EditorContestPreparation
                 : AssistantWorkflowInstructions.EditorChatFor(vectorSearchAvailable))
-                + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples);
+                + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples
+                + "\n\n" + PicturePageImageGenerationGuidance.AgentInstructions);
 
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
             visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);

@@ -6,13 +6,17 @@ public interface IChapterVisualService
 {
     Task<ChapterVisualState?> GetAsync(Guid chapterId, CancellationToken cancellationToken = default);
     Task<ChapterVisualState> SetModeAsync(Guid chapterId, ChapterVisualModeUpdate update, CancellationToken cancellationToken = default);
-    Task<ChapterImagePlacementResult> AddImageToChapterAsync(Guid projectId, Guid chapterId, Guid imageId, CancellationToken cancellationToken = default);
+    Task<ChapterImagePlacementResult> AddImageToChapterAsync(
+        Guid projectId,
+        Guid chapterId,
+        Guid imageId,
+        ChapterImagePlacementRequest? placement = null,
+        CancellationToken cancellationToken = default);
     Task<ChapterVisualState> SaveIllustrationLayoutAsync(Guid chapterId, IllustratedProseLayout layout, CancellationToken cancellationToken = default);
     Task<ChapterVisualState> SavePageLayoutAsync(Guid chapterId, PicturePageLayout layout, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ChapterVisualSnapshot>> RenderSnapshotsAsync(
         Guid chapterId,
         int maxEdge = 1400,
-        bool includeGuides = true,
         CancellationToken cancellationToken = default);
     Task<IReadOnlyDictionary<Guid, ChapterPicturePageSurface>> RenderPicturePageSurfacesAsync(
         IReadOnlyCollection<Guid> chapterIds,
@@ -21,7 +25,10 @@ public interface IChapterVisualService
         CancellationToken cancellationToken = default);
     Task RemoveImageReferencesAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default);
     Task<int> RepairTextLayoutsAsync(CancellationToken cancellationToken = default);
-    string BuildManifest(ChapterVisualState state, IReadOnlyDictionary<Guid, string>? imageNames = null);
+    string BuildManifest(
+        ChapterVisualState state,
+        IReadOnlyDictionary<Guid, string>? imageNames = null,
+        IReadOnlyDictionary<string, string>? fontNames = null);
 }
 
 public sealed record ChapterPicturePageSurface(
@@ -51,6 +58,7 @@ public sealed record ChapterVisualSnapshot(
     byte[] Data)
 {
     public IReadOnlyList<ChapterVisualTextFitDiagnostic> TextFitDiagnostics { get; init; } = [];
+    public IReadOnlyList<ChapterVisualLayoutDiagnostic> LayoutDiagnostics { get; init; } = [];
 }
 
 public sealed record ChapterVisualTextFitDiagnostic(
@@ -59,4 +67,13 @@ public sealed record ChapterVisualTextFitDiagnostic(
     int DrawnLineCount,
     double AvailableHeightPixels,
     double RequiredHeightPixels,
-    bool Fits);
+    bool Fits,
+    bool FontFaceResolved,
+    bool UsedMissingGlyphFallback);
+
+public sealed record ChapterVisualLayoutDiagnostic(
+    string Code,
+    string Severity,
+    string Message,
+    Guid? ElementId = null,
+    Guid? RelatedElementId = null);

@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Context;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Llm;
@@ -211,7 +212,7 @@ public sealed class ImagesChatService(
         {
             var project = await projects.GetByIdAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            initialAssembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples, cancellationToken);
+            initialAssembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples + "\n\n" + PicturePageImageGenerationGuidance.AgentInstructions, cancellationToken);
             systemPrompt = initialAssembly.Assemble();
             chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
             toolContext = new ImagesChatToolContext(projectId, conversation.Id, chatProvider.Id, visionReady, OnToolMutated, cancellationToken);
@@ -490,7 +491,7 @@ public sealed class ImagesChatService(
 
     private async Task<string> BuildSystemPromptAsync(Project project, CancellationToken cancellationToken)
     {
-        var assembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples, cancellationToken);
+        var assembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples + "\n\n" + PicturePageImageGenerationGuidance.AgentInstructions, cancellationToken);
         return assembly.Assemble();
     }
 

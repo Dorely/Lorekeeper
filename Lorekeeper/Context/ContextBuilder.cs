@@ -2,6 +2,7 @@ using System.Text;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Fonts;
 using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Llm;
@@ -22,7 +23,8 @@ public sealed class ContextBuilder(
     IIngestRepository ingest,
     IProjectImageService images,
     IEntityVisualExampleService entityVisualExamples,
-    IChapterVisualService chapterVisuals) : IEditorContextService
+    IChapterVisualService chapterVisuals,
+    IProjectFontService projectFonts) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         Project project,
@@ -406,12 +408,21 @@ public sealed class ContextBuilder(
 
         var imageNames = (await images.ListAsync(projectId, cancellationToken))
             .ToDictionary(image => image.Id, image => image.FileName);
+        var fontCatalog = await projectFonts.ListAsync(projectId, cancellationToken);
+        var fontNames = fontCatalog.ToDictionary(font => font.Key, font => font.Name, StringComparer.OrdinalIgnoreCase);
+        var manifest = new StringBuilder(chapterVisuals.BuildManifest(state, imageNames, fontNames));
+        manifest.AppendLine("Available PicturePage font faces:");
+        foreach (var font in fontCatalog)
+        {
+            manifest.Append("- ").Append(font.Name).Append(" (").Append(font.Key).Append("): ")
+                .AppendLine(string.Join(", ", font.Faces.Select(face => $"{face.Weight}{(face.Italic ? " italic" : string.Empty)}")));
+        }
         var key = EditorContextKeys.ChapterVisualLayout(chapterId);
         return new ContextItem(
             Key: key,
             Kind: ContextItemKind.ChapterVisualLayout,
             Label: "Current Chapter Visual Layout",
-            Body: chapterVisuals.BuildManifest(state, imageNames),
+            Body: manifest.ToString(),
             IsEnabled: IsIncluded(preferenceMap, ContextItemKind.ChapterVisualLayout, key, defaultIncluded: true),
             IsRemovable: true,
             Badge: "Visual");

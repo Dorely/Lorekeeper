@@ -5,6 +5,7 @@ using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EditorChat;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Fonts;
 using Lorekeeper.Images;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -25,6 +26,7 @@ public sealed class ImagesChatTools(
     IProjectImageJobService imageJobs,
     IProjectImageGenerationRuntime imageRuntime,
     IChapterVisualService chapterVisuals,
+    IProjectFontService projectFonts,
     IEditorContextService editorContext,
     IVisionModelClientFactory visionClient,
     IOptions<ProjectImageGenerationOptions> imageOptions,
@@ -138,9 +140,9 @@ public sealed class ImagesChatTools(
                 description: "Edit a project image. Outputs do not inherit entity targets by default. Set inheritSourceEntityTargets=true only for a still-approved purpose-built reference whose identity role remains valid; ordinary scenes, redesigns, and prospective outputs stay unattached."),
 
             AIFunctionFactory.Create(
-                method: (Guid chapterId, Guid imageId) => AddProjectImageToChapterAsync(context, chapterId, imageId),
+                method: (Guid chapterId, Guid imageId, string? picturePagePlacementRole = null, Guid? targetPictureImageElementId = null) => AddProjectImageToChapterAsync(context, chapterId, imageId, picturePagePlacementRole, targetPictureImageElementId),
                 name: "add_project_image_to_chapter",
-                description: "Place an existing project image into a chapter visual layout. Prose converts to IllustratedProse; PicturePage adds a centered freeform image."),
+                description: "Place an existing project image into a chapter visual layout. PicturePage roles are Freeform, Background, and ReplaceElement; ReplaceElement requires targetPictureImageElementId and preserves geometry/layer."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, Guid imageId) => AddProjectImageToContextAsync(context, chapterId, imageId),
@@ -339,6 +341,11 @@ public sealed class ImagesChatTools(
 
         var imageNames = (await projectImages.ListAsync(ctx.ProjectId))
             .ToDictionary(image => image.Id, image => image.FileName);
+        var fontCatalog = await projectFonts.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
+        var fontNames = fontCatalog.ToDictionary(font => font.Key, font => font.Name, StringComparer.OrdinalIgnoreCase);
+        var snapshots = await chapterVisuals.RenderSnapshotsAsync(chapterId);
+        var textFit = snapshots.SelectMany(snapshot => snapshot.TextFitDiagnostics).ToList();
+        var layoutDiagnostics = snapshots.SelectMany(snapshot => snapshot.LayoutDiagnostics).ToList();
         return JsonSerializer.Serialize(new
         {
             chapter = new { id = chapter.Id, chapter.Title, chapter.Synopsis },
@@ -346,7 +353,24 @@ public sealed class ImagesChatTools(
             state.PageLayoutKind,
             state.IllustrationLayout,
             state.PageLayout,
-            manifest = chapterVisuals.BuildManifest(state, imageNames),
+            manifest = chapterVisuals.BuildManifest(state, imageNames, fontNames),
+            fontCatalog = fontCatalog.Select(family => new
+            {
+                family.Key,
+                family.Name,
+                family.Category,
+                family.IsBuiltIn,
+                faces = family.Faces.Select(face => new { face.Weight, face.Italic, face.SubfamilyName }),
+            }),
+            textFit = new
+            {
+                allTextFits = state.VisualMode == ChapterVisualMode.PicturePage && snapshots.Count > 0
+                    ? textFit.All(diagnostic => diagnostic.Fits)
+                    : (bool?)null,
+                elements = textFit,
+            },
+            layoutDiagnostics,
+            allErrorsClear = layoutDiagnostics.All(diagnostic => diagnostic.Severity != "error"),
         }, JsonOptions);
     }
 
@@ -661,9 +685,25 @@ public sealed class ImagesChatTools(
         }
     }
 
-    private async Task<string> AddProjectImageToChapterAsync(ImagesChatToolContext ctx, Guid chapterId, Guid imageId)
+    private async Task<string> AddProjectImageToChapterAsync(
+        ImagesChatToolContext ctx,
+        Guid chapterId,
+        Guid imageId,
+        string? picturePagePlacementRole,
+        Guid? targetPictureImageElementId)
     {
-        var result = await chapterVisuals.AddImageToChapterAsync(ctx.ProjectId, chapterId, imageId);
+        if (!TryParseOptionalEnum(picturePagePlacementRole, out PicturePageImagePlacementRole? parsedRole, out var roleError))
+            return roleError!;
+        if (targetPictureImageElementId is { } targetId && targetId != Guid.Empty && parsedRole != PicturePageImagePlacementRole.ReplaceElement)
+            return "Error: targetPictureImageElementId requires picturePagePlacementRole=ReplaceElement.";
+        if (parsedRole == PicturePageImagePlacementRole.ReplaceElement
+            && (targetPictureImageElementId is null || targetPictureImageElementId == Guid.Empty))
+            return "Error: picturePagePlacementRole=ReplaceElement requires targetPictureImageElementId.";
+        var result = await chapterVisuals.AddImageToChapterAsync(
+            ctx.ProjectId,
+            chapterId,
+            imageId,
+            new ChapterImagePlacementRequest(parsedRole ?? PicturePageImagePlacementRole.Freeform, targetPictureImageElementId));
         ctx.MarkMutated();
         return JsonSerializer.Serialize(new
         {
@@ -823,6 +863,25 @@ public sealed class ImagesChatTools(
 
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max] + "...";
+
+    private static bool TryParseOptionalEnum<TEnum>(string? value, out TEnum? parsed, out string? error)
+        where TEnum : struct, Enum
+    {
+        parsed = null;
+        error = null;
+        if (string.IsNullOrWhiteSpace(value))
+            return true;
+
+        if (Enum.TryParse<TEnum>(value.Trim(), ignoreCase: true, out var candidate)
+            && Enum.IsDefined(candidate))
+        {
+            parsed = candidate;
+            return true;
+        }
+
+        error = $"Error: {typeof(TEnum).Name} must be one of: {string.Join(", ", Enum.GetNames<TEnum>())}.";
+        return false;
+    }
 
     private sealed record ImageGenerationTargetResolution(
         PicturePageImageGenerationTarget? Target,

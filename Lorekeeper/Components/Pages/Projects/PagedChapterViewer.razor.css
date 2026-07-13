@@ -283,6 +283,63 @@
     flex: 0 0 auto;
 }
 
+.picture-diagnostics {
+    position: relative;
+    font-size: 0.78rem;
+}
+
+.picture-diagnostics summary {
+    cursor: pointer;
+    color: #854d0e;
+    font-weight: 700;
+}
+
+.picture-diagnostics ul {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 0.35rem);
+    left: 0;
+    width: min(28rem, 70vw);
+    margin: 0;
+    padding: 0.65rem 0.75rem 0.65rem 1.8rem;
+    border: 1px solid rgba(148, 163, 184, 0.55);
+    border-radius: 0.45rem;
+    background: #fff;
+    box-shadow: 0 0.5rem 1.4rem rgba(15, 23, 42, 0.18);
+}
+
+.picture-safe-guide,
+.picture-gutter-guide {
+    position: absolute;
+    z-index: 2147483000;
+    pointer-events: none;
+}
+
+.picture-safe-guide {
+    border: 1px dashed;
+}
+
+.picture-safe-guide--minimum {
+    border-color: rgba(220, 38, 38, 0.8);
+}
+
+.picture-safe-guide--preferred {
+    border-color: rgba(37, 99, 235, 0.7);
+}
+
+.picture-gutter-guide {
+    top: 0;
+    bottom: 0;
+    border-inline: 1px dashed rgba(220, 38, 38, 0.8);
+    background: rgba(220, 38, 38, 0.035);
+}
+
+.picture-text-toolbar__field--check {
+    min-width: 3.4rem;
+    width: 3.4rem;
+    align-items: start;
+}
+
 .picture-layer-toolbar {
     box-sizing: border-box;
     max-width: 100%;
@@ -422,7 +479,7 @@
     }
 }
 
-.picture-page--double::after {
+.picture-page--editable.picture-page--double::after {
     content: "";
     position: absolute;
     top: 0;

@@ -43,8 +43,11 @@ public sealed record PicturePageTextElement(
     double HeightPercent,
     int ZIndex,
     int ReadingOrder,
-    PicturePageFontFamily FontFamily,
-    double FontSizePercent,
+    string FontFamilyKey,
+    int FontWeight,
+    bool Italic,
+    double FontSizePoints,
+    double LetterSpacingEm,
     double LineHeight,
     string Color,
     string BackgroundColor,
@@ -53,13 +56,18 @@ public sealed record PicturePageTextElement(
     ChapterTextVerticalAlign VerticalAlign,
     PicturePageTextShadow Shadow);
 
-[JsonConverter(typeof(JsonStringEnumConverter<PicturePageFontFamily>))]
-public enum PicturePageFontFamily
+public static class PicturePageFontKeys
 {
-    Serif,
-    Sans,
-    Display,
-    Monospace,
+    public const string Default = "builtin:andika";
+    public const string Fallback = Default;
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PicturePageImagePlacementRole>))]
+public enum PicturePageImagePlacementRole
+{
+    Freeform,
+    Background,
+    ReplaceElement,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<PicturePageTextAlign>))]

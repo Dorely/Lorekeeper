@@ -1,4 +1,5 @@
 @using Lorekeeper.ChapterVisuals
+@using Lorekeeper.Fonts
 @using Lorekeeper.Images
 @using Lorekeeper.Models
 @using Microsoft.JSInterop
@@ -7,8 +8,10 @@
 @implements IAsyncDisposable
 @inject IChapterVisualService Visuals
 @inject IProjectImageService ProjectImages
+@inject IProjectFontService ProjectFonts
 @inject IJSRuntime JS
 
+<style>@((MarkupString)FontFaceCss())</style>
 <div class="@PagedViewerClass()" tabindex="0" @ref="_viewerRoot">
     @if (State.VisualMode == ChapterVisualMode.PicturePage)
     {
@@ -24,6 +27,23 @@
                     <div class="picture-toolbar__primary">
                         <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddTextBoxAsync">Add text box</button>
                         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenImagesAsync">Images</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _fontManagerOpen = true">Fonts</button>
+                        @if (CurrentLayoutDiagnostics.Count == 0)
+                        {
+                            <span class="badge text-bg-success">Layout checks clear</span>
+                        }
+                        else
+                        {
+                            <details class="picture-diagnostics">
+                                <summary>@LayoutDiagnosticSummary()</summary>
+                                <ul>
+                                    @foreach (var diagnostic in CurrentLayoutDiagnostics)
+                                    {
+                                        <li class="@(diagnostic.Severity == "error" ? "text-danger" : "text-warning-emphasis")">@diagnostic.Message</li>
+                                    }
+                                </ul>
+                            </details>
+                        }
                         @if (selectedLayer is not null)
                         {
                             <div class="picture-layer-toolbar" aria-label="Selected element layer order">
@@ -56,24 +76,56 @@
                                     <span>Font</span>
                                     <select class="form-select form-select-sm"
                                             disabled="@textControlsDisabled"
-                                            @bind:get="textToolbarValue.FontFamily"
+                                            @bind:get="textToolbarValue.FontFamilyKey"
                                             @bind:set="SetSelectedTextFontFamilyAsync">
-                                        <option value="@PicturePageFontFamily.Serif">Serif</option>
-                                        <option value="@PicturePageFontFamily.Sans">Sans</option>
-                                        <option value="@PicturePageFontFamily.Display">Display</option>
-                                        <option value="@PicturePageFontFamily.Monospace">Mono</option>
+                                        @foreach (var group in _fontFamilies.GroupBy(font => font.Category))
+                                        {
+                                            <optgroup label="@group.Key">
+                                                @foreach (var font in group)
+                                                {
+                                                    <option value="@font.Key">@font.Name</option>
+                                                }
+                                            </optgroup>
+                                        }
                                     </select>
                                 </label>
                                 <label class="picture-text-toolbar__field picture-text-toolbar__field--size">
                                     <span>Size</span>
                                     <input class="form-control form-control-sm"
                                            type="number"
-                                           min="1"
-                                           max="18"
-                                           step="0.1"
+                                           min="8"
+                                           max="144"
+                                           step="1"
                                            disabled="@textControlsDisabled"
-                                           value="@textToolbarValue.FontSizePercent.ToString("0.###", CultureInfo.InvariantCulture)"
+                                           value="@textToolbarValue.FontSizePoints.ToString("0.###", CultureInfo.InvariantCulture)"
                                            @onchange="SetSelectedTextFontSizeAsync" />
+                                </label>
+                                <label class="picture-text-toolbar__field picture-text-toolbar__field--size">
+                                    <span>Weight</span>
+                                    <select class="form-select form-select-sm"
+                                            disabled="@textControlsDisabled"
+                                            @bind:get="textToolbarValue.FontWeight"
+                                            @bind:set="SetSelectedTextFontWeightAsync">
+                                        @foreach (var weight in AvailableWeights(textToolbarValue.FontFamilyKey))
+                                        {
+                                            <option value="@weight">@weight</option>
+                                        }
+                                    </select>
+                                </label>
+                                <label class="picture-text-toolbar__field picture-text-toolbar__field--check">
+                                    <span>Italic</span>
+                                    <input class="form-check-input" type="checkbox"
+                                           disabled="@(textControlsDisabled || !ItalicAvailable(textToolbarValue.FontFamilyKey, textToolbarValue.FontWeight))"
+                                           checked="@textToolbarValue.Italic"
+                                           @onchange="SetSelectedTextItalicAsync" />
+                                </label>
+                                <label class="picture-text-toolbar__field picture-text-toolbar__field--size">
+                                    <span>Tracking</span>
+                                    <input class="form-control form-control-sm" type="number"
+                                           min="-0.1" max="0.3" step="0.01"
+                                           disabled="@textControlsDisabled"
+                                           value="@textToolbarValue.LetterSpacingEm.ToString("0.##", CultureInfo.InvariantCulture)"
+                                           @onchange="SetSelectedTextLetterSpacingAsync" />
                                 </label>
                                 <label class="picture-text-toolbar__field picture-text-toolbar__field--alignment">
                                     <span>Horizontal</span>
@@ -144,6 +196,15 @@
             }
             <div class="picture-stage">
                 <section class="@PicturePageClass(pageMetrics)" style="@PicturePageStyle(pageMetrics)" @onclick="ClearSelectedPictureElement">
+                    @if (CanEditLayout)
+                    {
+                        <div class="picture-safe-guide picture-safe-guide--minimum" style="@SafeGuideStyle(pageMetrics, 0.375)" aria-hidden="true"></div>
+                        <div class="picture-safe-guide picture-safe-guide--preferred" style="@SafeGuideStyle(pageMetrics, 0.5)" aria-hidden="true"></div>
+                        @if (pageMetrics.IsDouble)
+                        {
+                            <div class="picture-gutter-guide" style="@GutterGuideStyle(pageMetrics, 0.375)" aria-hidden="true"></div>
+                        }
+                    }
                     @foreach (var image in State.PageLayout.Images.OrderBy(image => image.ZIndex))
                     {
                         var projectImage = ImageById(image.ImageId);
@@ -224,6 +285,11 @@
     }
 </div>
 
+<ProjectFontManagerModal ProjectId="@ProjectId"
+                         IsOpen="@_fontManagerOpen"
+                         OnClose="CloseFontManager"
+                         OnChanged="ReloadFontsAsync" />
+
 @code {
     private RenderFragment RenderProsePage(ProsePageModel page) =>
         @<section class="@ProsePageClass(page)" aria-label="@($"Page {page.PageNumber}")">
@@ -268,6 +334,11 @@
     private readonly Dictionary<Guid, double> _textBackgroundOpacityDrafts = [];
     private CancellationTokenSource? _textStyleSaveDebounce;
     private bool _disposed;
+    private bool _fontManagerOpen;
+    private Guid _fontProjectId;
+    private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = PicturePageBuiltInFonts.Families;
+    private PicturePageLayout? _diagnosticLayout;
+    private IReadOnlyList<ChapterVisualLayoutDiagnostic> _renderDiagnostics = [];
     private static readonly PicturePageTextElement _disabledTextToolbarValue = new(
         Guid.Empty,
         string.Empty,
@@ -277,14 +348,17 @@
         0,
         0,
         0,
-        PicturePageFontFamily.Serif,
-        4.5,
-        1.25,
+        PicturePageFontKeys.Default,
+        400,
+        false,
+        24,
+        0,
+        1.35,
         "#111827",
         "#FFFFFF",
         0,
-        PicturePageTextAlign.Center,
-        ChapterTextVerticalAlign.Middle,
+        PicturePageTextAlign.Left,
+        ChapterTextVerticalAlign.Top,
         PicturePageTextShadow.None);
     private const double PageMarginInches = 0.75;
     private const double BodyLineHeightInches = 12.0 / 72.0 * 1.55;
@@ -292,6 +366,21 @@
     private const double FigureSpacingInches = 0.16;
     private const double DropZoneHeightInches = 0.42;
     private bool CanEditLayout => IsEditable && !IsLocked && State.VisualMode != ChapterVisualMode.Prose;
+    private IReadOnlyList<ChapterVisualLayoutDiagnostic> CurrentLayoutDiagnostics =>
+        State.VisualMode == ChapterVisualMode.PicturePage
+            ? (ReferenceEquals(_diagnosticLayout, State.PageLayout)
+                    ? _renderDiagnostics
+                    : PicturePageLayoutDiagnostics.Evaluate(State.PageLayoutKind, State.PageLayout))
+                .Concat(State.PageLayout.TextElements
+                    .Where(text => FontFamily(text.FontFamilyKey)?.Faces.Any(face => face.Weight == text.FontWeight && face.Italic == text.Italic) != true)
+                    .Select(text => new ChapterVisualLayoutDiagnostic(
+                        "unsupported_font_face",
+                        "error",
+                        "The selected font weight/style is unavailable; choose a listed face.",
+                        text.Id)))
+                .DistinctBy(diagnostic => (diagnostic.Code, diagnostic.ElementId, diagnostic.RelatedElementId))
+                .ToList()
+            : [];
 
     private string PagedViewerClass() =>
         State.VisualMode == ChapterVisualMode.PicturePage
@@ -302,6 +391,22 @@
         disabled
             ? "picture-text-toolbar picture-text-toolbar--disabled"
             : "picture-text-toolbar";
+
+    private string LayoutDiagnosticSummary()
+    {
+        var diagnostics = CurrentLayoutDiagnostics;
+        var errors = diagnostics.Count(item => item.Severity == "error");
+        var warnings = diagnostics.Count - errors;
+        return $"{errors} error{(errors == 1 ? string.Empty : "s")}, {warnings} warning{(warnings == 1 ? string.Empty : "s")}";
+    }
+
+    private void CloseFontManager() => _fontManagerOpen = false;
+
+    private async Task ReloadFontsAsync()
+    {
+        _fontFamilies = await ProjectFonts.ListAsync(ProjectId);
+        StateHasChanged();
+    }
 
     private enum ProsePageItemKind
     {
@@ -372,14 +477,26 @@
             ? OrderedPictureLayers().FirstOrDefault(layer => layer.Kind == selected.Kind && layer.Id == selected.Id)
             : null;
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
-        if (_selectedPictureElement is not { } selected)
-            return;
+        if (ProjectId != Guid.Empty && ProjectId != _fontProjectId)
+        {
+            _fontFamilies = await ProjectFonts.ListAsync(ProjectId);
+            _fontProjectId = ProjectId;
+        }
 
-        if (!CanEditLayout
+        if (CanEditLayout
+            && State.VisualMode == ChapterVisualMode.PicturePage
+            && !ReferenceEquals(_diagnosticLayout, State.PageLayout))
+        {
+            var snapshots = await Visuals.RenderSnapshotsAsync(State.ChapterId);
+            _renderDiagnostics = snapshots.SelectMany(snapshot => snapshot.LayoutDiagnostics).ToList();
+            _diagnosticLayout = State.PageLayout;
+        }
+
+        if (_selectedPictureElement is { } selected && (!CanEditLayout
             || State.VisualMode != ChapterVisualMode.PicturePage
-            || !PictureElementExists(selected.Kind, selected.Id))
+            || !PictureElementExists(selected.Kind, selected.Id)))
         {
             _selectedPictureElement = null;
         }
@@ -493,12 +610,38 @@
             ? State.PageLayout.Images.Any(image => image.Id == elementId)
             : State.PageLayout.TextElements.Any(text => text.Id == elementId);
 
-    private async Task SetSelectedTextFontFamilyAsync(PicturePageFontFamily fontFamily)
+    private async Task SetSelectedTextFontFamilyAsync(string fontFamilyKey)
     {
         if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId })
             return;
 
-        await UpdatePictureTextAsync(selectedId, fontFamily: fontFamily);
+        var family = FontFamily(fontFamilyKey);
+        var face = family?.Faces.OrderBy(face => Math.Abs(face.Weight - 400)).ThenBy(face => face.Italic).FirstOrDefault();
+        await UpdatePictureTextAsync(
+            selectedId,
+            fontFamilyKey: family?.Key ?? PicturePageFontKeys.Default,
+            fontWeight: face?.Weight ?? 400,
+            italic: face?.Italic ?? false);
+    }
+
+    private async Task SetSelectedTextFontWeightAsync(int fontWeight)
+    {
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId } selected)
+            return;
+
+        await UpdatePictureTextAsync(
+            selectedId,
+            fontWeight: fontWeight,
+            italic: selected.Italic && ItalicAvailable(selected.FontFamilyKey, fontWeight));
+    }
+
+    private async Task SetSelectedTextItalicAsync(ChangeEventArgs args)
+    {
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId } selected)
+            return;
+
+        var italic = args.Value is true || string.Equals(args.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        await UpdatePictureTextAsync(selectedId, italic: italic && ItalicAvailable(selected.FontFamilyKey, selected.FontWeight));
     }
 
     private async Task SetSelectedTextAlignAsync(PicturePageTextAlign textAlign)
@@ -534,7 +677,19 @@
             return;
         }
 
-        await UpdatePictureTextAsync(selectedId, fontSizePercent: Clamp(fontSize, 1, 18));
+        await UpdatePictureTextAsync(selectedId, fontSizePoints: Clamp(fontSize, 8, 144));
+    }
+
+    private async Task SetSelectedTextLetterSpacingAsync(ChangeEventArgs args)
+    {
+        if (!CanEditLayout
+            || SelectedPictureText is not { Id: var selectedId }
+            || !double.TryParse(args.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var spacing))
+        {
+            return;
+        }
+
+        await UpdatePictureTextAsync(selectedId, letterSpacingEm: Clamp(spacing, -0.1, 0.3));
     }
 
     private async Task PreviewSelectedTextColorAsync(ChangeEventArgs args)
@@ -877,14 +1032,17 @@
                     16,
                     maxZ + 1,
                     maxOrder + 1,
-                    PicturePageFontFamily.Serif,
-                    4.5,
-                    1.25,
+                    PicturePageFontKeys.Default,
+                    400,
+                    false,
+                    24,
+                    0,
+                    1.35,
                     "#111827",
                     "#FFFFFF",
                     0,
-                    PicturePageTextAlign.Center,
-                    ChapterTextVerticalAlign.Middle,
+                    PicturePageTextAlign.Left,
+                    ChapterTextVerticalAlign.Top,
                     PicturePageTextShadow.None))
                 .ToList(),
         };
@@ -1074,8 +1232,11 @@
         double? y = null,
         double? width = null,
         double? height = null,
-        PicturePageFontFamily? fontFamily = null,
-        double? fontSizePercent = null,
+        string? fontFamilyKey = null,
+        int? fontWeight = null,
+        bool? italic = null,
+        double? fontSizePoints = null,
+        double? letterSpacingEm = null,
         string? color = null,
         string? backgroundColor = null,
         double? backgroundOpacity = null,
@@ -1092,8 +1253,11 @@
                     YPercent = y ?? text.YPercent,
                     WidthPercent = width ?? text.WidthPercent,
                     HeightPercent = height ?? text.HeightPercent,
-                    FontFamily = fontFamily ?? text.FontFamily,
-                    FontSizePercent = fontSizePercent ?? text.FontSizePercent,
+                    FontFamilyKey = fontFamilyKey ?? text.FontFamilyKey,
+                    FontWeight = fontWeight ?? text.FontWeight,
+                    Italic = italic ?? text.Italic,
+                    FontSizePoints = fontSizePoints ?? text.FontSizePoints,
+                    LetterSpacingEm = letterSpacingEm ?? text.LetterSpacingEm,
                     Color = color ?? text.Color,
                     BackgroundColor = backgroundColor ?? text.BackgroundColor,
                     BackgroundOpacity = backgroundOpacity ?? text.BackgroundOpacity,
@@ -1427,6 +1591,19 @@
         return $"--picture-page-natural-width:{naturalWidth};--picture-page-height-fit-width:{heightFitWidth}cqh;aspect-ratio:{width}/{height};";
     }
 
+    private static string SafeGuideStyle(PageLayoutMetrics metrics, double insetInches)
+    {
+        var x = insetInches / metrics.SurfaceWidthInches * 100;
+        var y = insetInches / metrics.SurfaceHeightInches * 100;
+        return $"left:{x.ToString("0.###", CultureInfo.InvariantCulture)}%;right:{x.ToString("0.###", CultureInfo.InvariantCulture)}%;top:{y.ToString("0.###", CultureInfo.InvariantCulture)}%;bottom:{y.ToString("0.###", CultureInfo.InvariantCulture)}%;";
+    }
+
+    private static string GutterGuideStyle(PageLayoutMetrics metrics, double insetInches)
+    {
+        var width = insetInches * 2 / metrics.SurfaceWidthInches * 100;
+        return $"left:{(50 - width / 2).ToString("0.###", CultureInfo.InvariantCulture)}%;width:{width.ToString("0.###", CultureInfo.InvariantCulture)}%;";
+    }
+
     private static string ProsePagesClass(PageLayoutMetrics metrics) =>
         metrics.IsDouble ? "prose-pages prose-pages--double" : "prose-pages prose-pages--single";
 
@@ -1441,6 +1618,8 @@
 
     private string TextElementStyle(PicturePageTextElement text)
     {
+        var metrics = PageMetrics(State.PageLayoutKind);
+        var fontSizeCqw = text.FontSizePoints / 72 / metrics.SurfaceWidthInches * 100;
         var justify = text.VerticalAlign switch
         {
             ChapterTextVerticalAlign.Top => "flex-start",
@@ -1448,22 +1627,50 @@
             _ => "center",
         };
         return ElementStyle(text.XPercent, text.YPercent, text.WidthPercent, text.HeightPercent, text.ZIndex)
-            + $"font-family:{FontFamilyCss(text.FontFamily)};font-size:{text.FontSizePercent.ToString(CultureInfo.InvariantCulture)}cqw;line-height:{text.LineHeight.ToString(CultureInfo.InvariantCulture)};color:{TextColorValue(text)};background:{CssRgba(TextBackgroundColorValue(text), TextBackgroundOpacityValue(text))};text-align:{text.TextAlign.ToString().ToLowerInvariant()};text-shadow:{TextShadowCss(text.Shadow, text.FontSizePercent)};--picture-text-vertical-position:{justify};";
+            + $"font-family:{FontFamilyCss(text.FontFamilyKey)};font-size:{fontSizeCqw.ToString(CultureInfo.InvariantCulture)}cqw;font-weight:{text.FontWeight};font-style:{(text.Italic ? "italic" : "normal")};letter-spacing:{text.LetterSpacingEm.ToString(CultureInfo.InvariantCulture)}em;line-height:{text.LineHeight.ToString(CultureInfo.InvariantCulture)};color:{TextColorValue(text)};background:{CssRgba(TextBackgroundColorValue(text), TextBackgroundOpacityValue(text))};text-align:{text.TextAlign.ToString().ToLowerInvariant()};text-shadow:{TextShadowCss(text.Shadow, fontSizeCqw)};--picture-text-vertical-position:{justify};";
     }
 
-    private static string FontFamilyCss(PicturePageFontFamily fontFamily) =>
-        fontFamily switch
-        {
-            PicturePageFontFamily.Sans => "Arial, Helvetica, sans-serif",
-            PicturePageFontFamily.Display => "\"Trebuchet MS\", \"Gill Sans\", Arial, sans-serif",
-            PicturePageFontFamily.Monospace => "\"Courier New\", monospace",
-            _ => "Georgia, \"Times New Roman\", serif",
-        };
+    private string FontFamilyCss(string fontFamilyKey) =>
+        $"\"{FontCssName(fontFamilyKey)}\", \"{FontCssName(PicturePageFontKeys.Fallback)}\", sans-serif";
 
-    private static string TextShadowCss(PicturePageTextShadow shadow, double fontSizePercent)
+    private ProjectFontFamilyView? FontFamily(string key) =>
+        _fontFamilies.FirstOrDefault(font => string.Equals(font.Key, key, StringComparison.OrdinalIgnoreCase));
+
+    private IReadOnlyList<int> AvailableWeights(string key) =>
+        FontFamily(key)?.Faces.Select(face => face.Weight).Distinct().Order().ToList() ?? [400];
+
+    private bool ItalicAvailable(string key, int weight) =>
+        FontFamily(key)?.Faces.Any(face => face.Weight == weight && face.Italic) == true;
+
+    private string FontFaceCss()
+    {
+        var css = new StringBuilder();
+        foreach (var family in _fontFamilies)
+        {
+            foreach (var face in family.Faces)
+            {
+                css.Append("@font-face{font-family:\"")
+                    .Append(FontCssName(family.Key))
+                    .Append("\";src:url('")
+                    .Append(face.ContentUrl)
+                    .Append("');font-weight:")
+                    .Append(face.Weight)
+                    .Append(";font-style:")
+                    .Append(face.Italic ? "italic" : "normal")
+                    .Append(";font-display:swap;}");
+            }
+        }
+
+        return css.ToString();
+    }
+
+    private static string FontCssName(string key) =>
+        $"lk-{key.Replace(':', '-').Replace('_', '-')}";
+
+    private static string TextShadowCss(PicturePageTextShadow shadow, double fontSizeCqw)
     {
         string Length(double ratio) =>
-            $"{(fontSizePercent * ratio).ToString("0.####", CultureInfo.InvariantCulture)}cqw";
+            $"{(fontSizeCqw * ratio).ToString("0.####", CultureInfo.InvariantCulture)}cqw";
 
         return shadow switch
         {

@@ -6,6 +6,7 @@ using Lorekeeper.Desktop;
 using Lorekeeper.EditorChat;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Graph;
+using Lorekeeper.Fonts;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.ImagesChat;
@@ -138,6 +139,7 @@ builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>(
 builder.Services.AddScoped<IChapterService, ChapterService>();
 builder.Services.AddScoped<IChapterVisualService, ChapterVisualService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
+builder.Services.AddScoped<IProjectFontService, ProjectFontService>();
 builder.Services.Configure<EntityVisualContextOptions>(builder.Configuration.GetSection(EntityVisualContextOptions.SectionName));
 builder.Services.AddScoped<IEntityVisualExampleService, EntityVisualExampleService>();
 builder.Services.AddScoped<IEntityVisualContextService, EntityVisualContextService>();
@@ -285,6 +287,7 @@ app.MapRazorComponents<Lorekeeper.Components.App>()
 
 app.MapCodexOAuth();
 app.MapProjectImages();
+app.MapProjectFonts();
 app.MapPublishEndpoints();
 
 app.Run();

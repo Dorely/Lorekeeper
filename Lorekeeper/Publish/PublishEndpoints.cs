@@ -35,7 +35,6 @@ public static class PublishEndpoints
                 var snapshots = await chapterVisuals.RenderSnapshotsAsync(
                     chapterId,
                     edge,
-                    includeGuides: false,
                     cancellationToken);
                 var preview = snapshots.FirstOrDefault();
                 if (preview is null)
