@@ -21,3 +21,12 @@ public sealed record ChapterImagePlacementRequest(
 public sealed record ChapterImagePlacementResult(
     ChapterVisualState State,
     Guid ElementId);
+
+public sealed record PicturePageTextFitResult(
+    ChapterVisualState State,
+    Guid ElementId,
+    double PreviousFontSizePoints,
+    double FontSizePoints,
+    ChapterVisualTextFitDiagnostic Diagnostic,
+    bool HitMinimum,
+    bool HitMaximum);

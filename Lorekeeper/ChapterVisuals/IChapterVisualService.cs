@@ -14,6 +14,11 @@ public interface IChapterVisualService
         CancellationToken cancellationToken = default);
     Task<ChapterVisualState> SaveIllustrationLayoutAsync(Guid chapterId, IllustratedProseLayout layout, CancellationToken cancellationToken = default);
     Task<ChapterVisualState> SavePageLayoutAsync(Guid chapterId, PicturePageLayout layout, CancellationToken cancellationToken = default);
+    Task<PicturePageTextFitResult> FitAndSavePicturePageTextAsync(
+        Guid chapterId,
+        PicturePageLayout layout,
+        Guid textElementId,
+        CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ChapterVisualSnapshot>> RenderSnapshotsAsync(
         Guid chapterId,
         int maxEdge = 1400,

@@ -89,7 +89,8 @@ public sealed class BuiltInAgentSkillRegistry : IAgentSkillRegistry
             - Break lines at natural spoken or syntactic pauses. Avoid widows, orphaned words, dense lines, excessive all-caps, and long italic passages.
             - Use no more than two font families per spread and keep body/accent choices coherent across the book.
             - Target at least 4.5:1 text contrast, or 3:1 only for genuinely large display type. Prefer a translucent solid backing panel when art cannot maintain contrast; shadows and halos are secondary aids.
-            - When the user asks text to fill its safe area, do not stop at the first size that fits. Render, inspect heightUtilizationPercent, enlarge in sensible increments until the next increase would overflow, then keep the largest passing size. Aim for roughly 85-95% vertical utilization while also inspecting width, line breaks, hierarchy, and readability in the snapshot.
+            - Where upsert_picture_page_text is available, creating a box or changing its text, width, or height automatically selects the largest fitting font size. Resize the box and let the text follow; do not manually iterate fontSizePoints to find a fit. Use a fontSizePoints-only update only for a deliberate fixed size requested by the user or required by the design. If automatic fitting reaches 8 pt and still reports overflow, enlarge the box or revise the copy instead of claiming success.
+            - When the user asks text to fill its safe area, establish the intended box geometry and let automatic fitting choose the size. Inspect heightUtilizationPercent, line breaks, hierarchy, and readability in the resulting snapshot; aim for roughly 85-95% vertical utilization when the composition allows it.
 
             ## Verification
             - After every corrective Picture Page mutation, call read_chapter_visual_layout again and inspect the newest rendered snapshot rather than the turn-start image.

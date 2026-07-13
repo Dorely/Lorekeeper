@@ -16,6 +16,9 @@ public sealed class ChapterVisualService(
     IProjectFontService fonts) : IChapterVisualService
 {
     private const int MaxSnapshotPages = 12;
+    private const int TextFitSnapshotMaxEdge = 1400;
+    private const int TextFitMinimumTenths = 80;
+    private const int TextFitMaximumTenths = 1440;
     private const string SnapshotContentType = "image/png";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -201,6 +204,97 @@ public sealed class ChapterVisualService(
         if (bodyChanged)
             chapter = await chapters.UpdateAsync(chapterId, body: projectedBody, cancellationToken: cancellationToken);
         return State(chapter);
+    }
+
+    public async Task<PicturePageTextFitResult> FitAndSavePicturePageTextAsync(
+        Guid chapterId,
+        PicturePageLayout layout,
+        Guid textElementId,
+        CancellationToken cancellationToken = default)
+    {
+        var chapter = await GetChapterAsync(chapterId, cancellationToken);
+        if (chapter.VisualMode != ChapterVisualMode.PicturePage)
+            throw new InvalidOperationException("Text fitting requires a PicturePage chapter.");
+
+        var normalized = NormalizePageLayout(layout);
+        var text = normalized.TextElements.FirstOrDefault(candidate => candidate.Id == textElementId)
+            ?? throw new InvalidOperationException("PicturePage text element was not found.");
+        var previousFontSizePoints = text.FontSizePoints;
+        var metrics = PageMetrics(chapter.PageLayoutKind);
+        var (pageWidth, pageHeight) = ScaledPagePixels(
+            metrics.SurfaceWidthInches,
+            metrics.SurfaceHeightInches,
+            TextFitSnapshotMaxEdge);
+        var fontFaces = await LoadFontFacesAsync(chapter.ProjectId, [text], cancellationToken);
+        var selectedFace = fontFaces.GetValueOrDefault(
+            new PictureFontFaceKey(text.FontFamilyKey, text.FontWeight, text.Italic));
+        var fallbackFace = fontFaces.GetValueOrDefault(
+            new PictureFontFaceKey(PicturePageFontKeys.Fallback, 400, false));
+
+        using var measurementSurface = CreatePageSurface(1, 1);
+        ChapterVisualTextFitDiagnostic Measure(int sizeTenths) =>
+            DrawPictureTextBox(
+                measurementSurface.Canvas,
+                text with { FontSizePoints = sizeTenths / 10d },
+                selectedFace,
+                fallbackFace,
+                pageWidth,
+                pageHeight,
+                metrics.SurfaceWidthInches);
+
+        var fittedSizeTenths = TextFitMinimumTenths;
+        var fittedDiagnostic = Measure(TextFitMinimumTenths);
+        if (fittedDiagnostic.Fits)
+        {
+            var maximumDiagnostic = Measure(TextFitMaximumTenths);
+            if (maximumDiagnostic.Fits)
+            {
+                fittedSizeTenths = TextFitMaximumTenths;
+                fittedDiagnostic = maximumDiagnostic;
+            }
+            else
+            {
+                var passing = TextFitMinimumTenths;
+                var failing = TextFitMaximumTenths;
+                while (passing + 1 < failing)
+                {
+                    var candidate = passing + ((failing - passing) / 2);
+                    var diagnostic = Measure(candidate);
+                    if (diagnostic.Fits)
+                    {
+                        passing = candidate;
+                        fittedDiagnostic = diagnostic;
+                    }
+                    else
+                    {
+                        failing = candidate;
+                    }
+                }
+
+                fittedSizeTenths = passing;
+                fittedDiagnostic = Measure(fittedSizeTenths);
+            }
+        }
+
+        var fittedFontSizePoints = fittedSizeTenths / 10d;
+        var fittedLayout = normalized with
+        {
+            TextElements = normalized.TextElements
+                .Select(candidate => candidate.Id == textElementId
+                    ? candidate with { FontSizePoints = fittedFontSizePoints }
+                    : candidate)
+                .ToList(),
+        };
+        var state = await SavePageLayoutAsync(chapterId, fittedLayout, cancellationToken);
+
+        return new PicturePageTextFitResult(
+            state,
+            textElementId,
+            previousFontSizePoints,
+            fittedFontSizePoints,
+            fittedDiagnostic,
+            HitMinimum: fittedSizeTenths == TextFitMinimumTenths,
+            HitMaximum: fittedSizeTenths == TextFitMaximumTenths);
     }
 
     public async Task<IReadOnlyList<ChapterVisualSnapshot>> RenderSnapshotsAsync(

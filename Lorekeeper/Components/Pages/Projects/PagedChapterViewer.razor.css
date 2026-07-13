@@ -413,6 +413,21 @@
     width: 4.8rem;
 }
 
+.picture-text-toolbar__field--font-size {
+    min-width: 8.4rem;
+    width: 8.4rem;
+}
+
+.picture-text-toolbar__size-group {
+    display: flex;
+    align-items: stretch;
+    gap: 0.25rem;
+}
+
+.picture-text-toolbar__size-group .form-control {
+    min-width: 0;
+}
+
 .picture-text-toolbar__field--alignment {
     min-width: 6.4rem;
     width: 6.4rem;

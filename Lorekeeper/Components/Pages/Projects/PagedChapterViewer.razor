@@ -89,17 +89,25 @@
                                         }
                                     </select>
                                 </label>
-                                <label class="picture-text-toolbar__field picture-text-toolbar__field--size">
+                                <div class="picture-text-toolbar__field picture-text-toolbar__field--font-size">
                                     <span>Size</span>
-                                    <input class="form-control form-control-sm"
-                                           type="number"
-                                           min="8"
-                                           max="144"
-                                           step="1"
-                                           disabled="@textControlsDisabled"
-                                           value="@textToolbarValue.FontSizePoints.ToString("0.###", CultureInfo.InvariantCulture)"
-                                           @onchange="SetSelectedTextFontSizeAsync" />
-                                </label>
+                                    <div class="picture-text-toolbar__size-group">
+                                        <input class="form-control form-control-sm"
+                                               type="number"
+                                               min="8"
+                                               max="144"
+                                               step="1"
+                                               disabled="@(textControlsDisabled || _isFittingText)"
+                                               value="@textToolbarValue.FontSizePoints.ToString("0.###", CultureInfo.InvariantCulture)"
+                                               @onchange="SetSelectedTextFontSizeAsync" />
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                title="Fit text to the current box"
+                                                aria-label="Fit selected text to its box"
+                                                disabled="@(textControlsDisabled || _isFittingText)"
+                                                @onclick="FitSelectedTextAsync">Fit</button>
+                                    </div>
+                                </div>
                                 <label class="picture-text-toolbar__field picture-text-toolbar__field--size">
                                     <span>Weight</span>
                                     <select class="form-select form-select-sm"
@@ -335,6 +343,7 @@
     private CancellationTokenSource? _textStyleSaveDebounce;
     private bool _disposed;
     private bool _fontManagerOpen;
+    private bool _isFittingText;
     private Guid _fontProjectId;
     private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = PicturePageBuiltInFonts.Families;
     private PicturePageLayout? _diagnosticLayout;
@@ -678,6 +687,26 @@
         }
 
         await UpdatePictureTextAsync(selectedId, fontSizePoints: Clamp(fontSize, 8, 144));
+    }
+
+    private async Task FitSelectedTextAsync()
+    {
+        if (!CanEditLayout || _isFittingText || SelectedPictureText is not { Id: var selectedId })
+            return;
+
+        _isFittingText = true;
+        try
+        {
+            var result = await Visuals.FitAndSavePicturePageTextAsync(
+                State.ChapterId,
+                State.PageLayout,
+                selectedId);
+            await OnChanged.InvokeAsync(result.State);
+        }
+        finally
+        {
+            _isFittingText = false;
+        }
     }
 
     private async Task SetSelectedTextLetterSpacingAsync(ChangeEventArgs args)

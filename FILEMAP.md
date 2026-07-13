@@ -88,7 +88,7 @@
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter workspace with mode-specific controls, keyed body-editor documents, serialized external refresh coordination, resizable Chat/Memory columns, chapter visuals, and inline AI/Contest review. |
 | `ChapterBodyEditor.razor` (+ `.razor.css`, `.razor.js`) | Isolated keyed prose textarea that owns its DOM, wrapping-aware line gutter, serialized debounced save/flush contract, read-only state, and JavaScript lifetime. |
-| `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Simulated page viewer/editor for Prose, IllustratedProse, and PicturePage chapters, including paginated spreads, anchored illustrations, point-based project fonts, non-printing safety guides, diagnostics, and wrapping drag-resize/layer/text controls. |
+| `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Simulated page viewer/editor for Prose, IllustratedProse, and PicturePage chapters, including paginated spreads, anchored illustrations, point-based project fonts, non-printing safety guides, diagnostics, wrapping drag-resize/layer/text controls, and explicit text-to-box fitting. |
 | `ProjectFontManagerModal.razor` | PicturePage font catalog manager for multi-file static TTF/OTF imports, available-face inspection, rights reminders, and guarded custom-family deletion. |
 | `ProjectImagePickerModal.razor` (+ `.razor.css`) | Editor image-library modal for selecting current project images and adding them either to the active chapter layout or explicit chapter context. |
 | `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: defers/coalesces transcript hydration, reconciles editor lock state with persistent turns, streams tool/contest updates, and routes active-chapter changes into Review mode. |
@@ -301,8 +301,8 @@
 | `CodexChatClient.cs` | `IChatClient` implementation for Codex Responses API (SSE parser, multimodal user content, function-calling, strict-schema enforcement, reasoning and tool-argument streaming). |
 | `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs an `IChatClient` per provider (Codex vs OpenAI-compatible), applies configured Codex/OAuth request timeout, and exposes `TestModelAsync`. |
 | `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image-reading client for vision probes and PDF page transcription; supports Codex Responses and OpenAI-compatible multimodal chat requests. |
-| `AssistantWorkflowInstructions.cs` | Core code-owned AI workflow/tool-use instructions reused across agents, including Contest preparation and entity-reference rules for agents not yet using on-demand skills. |
-| `AgentSkills.cs` | Built-in `image-generation` and `picture-page-design` registry, compact prompt catalog, `read_skill` tool, and turn-scoped required-skill activation/guards. |
+| `AssistantWorkflowInstructions.cs` | Core code-owned AI workflow/tool-use instructions reused across agents, including automatic PicturePage text-fit behavior, Contest preparation, and entity-reference rules for agents not yet using on-demand skills. |
+| `AgentSkills.cs` | Built-in `image-generation` and `picture-page-design` registry, compact prompt catalog including automatic PicturePage text-fit guidance, `read_skill` tool, and turn-scoped required-skill activation/guards. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |
 | `SeedSystemPrompt.cs` | Hardcoded default system prompt seeded into every newly-created `Project`. |
 
@@ -465,9 +465,9 @@
 
 | File | Description |
 |------|-------------|
-| `ChapterVisualModels.cs` | UI/service records for chapter visual state, explicit PicturePage image placement requests/results, rendered text-fit details, and structured layout diagnostics. |
+| `ChapterVisualModels.cs` | UI/service records for chapter visual state, explicit PicturePage image placement requests/results, automatic text-fit results, rendered fit details, and structured layout diagnostics. |
 | `ChapterTextLayoutSynchronizer.cs` | Shared canonical-body synchronizer for persisted Picture Page text boxes, including deterministic single-box rebuilding when prose invalidates a multi-box text layout. |
-| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Mode-gated visual facade for role-aware image placement, font-byte-consistent rendering, body-synchronized PicturePage text, manifests, diagnostic snapshots, and guide-free publish surfaces. |
+| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Mode-gated visual facade for role-aware image placement, font-byte-consistent rendering and largest-fitting PicturePage text, body synchronization, manifests, diagnostic snapshots, and guide-free publish surfaces. |
 | `PicturePageImageGenerationGuidance.cs` | Physical/bleed/gutter-aware PicturePage targets and model-facing full-page/slot composition constraints; workflow rules live in the page-design skill. |
 | `PicturePageLayoutDiagnostics.cs` | Deterministic trim/preferred/gutter, overlapping-text, and higher-image structural checks shared by editor warnings and rendered snapshots. |
 
@@ -505,7 +505,7 @@
 | `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, staging helpers, persisted visual chips, project-image/raw-snapshot model context, and Contest Mode settings/actions. |
 | `EditorChatService.cs` | Persistent streaming editor chat: assembles Context Feed and automatic visual snapshots, streams text/tool/image-generation progress, persists chat/tool visual rows, feeds tool-loaded project images and rendered snapshots back to vision-ready models, stages Review edits, emits UI refreshes, and routes Contest Mode terminal tool calls. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific tool behavior, including paginated chapter reads, model-facing tool-result cap, and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor chat LLM tools for skill loading/guards, project reads and impact scoping, visible image/layout inspection, queued generation, story/layout mutations, revision-agent spawning, and Contest preparation. |
+| `EditorChatTools.cs` | Editor chat LLM tools for skill loading/guards, project reads and impact scoping, visible image/layout inspection, queued generation, automatic text fitting during PicturePage copy/box mutations, revision-agent spawning, and Contest preparation. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
 | `EditorChatTurnRunner.cs` | Background turn runner for Editor Chat: preserves active turns across tab changes while leaving explicit Stop as the cancellation path. |

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
@@ -298,7 +299,7 @@ public sealed class EditorChatTools(
                 UpsertPicturePageTextAsync(context, chapterId, textElementId, text, xPercent, yPercent, widthPercent, heightPercent, zIndex, readingOrder, fontFamilyKey, fontWeight, italic, fontSizePoints, letterSpacingEm, lineHeight, color, backgroundColor, backgroundOpacity, textAlign, verticalAlign, shadow),
             name: "upsert_picture_page_text",
             description:
-                "Live visual-layout mutation for PicturePage chapters only. Requires the picture-page-design skill loaded in an earlier tool round. Create a new text box when textElementId is omitted, or update an existing text box. Typography uses fontFamilyKey, an available fontWeight/italic face, fontSizePoints, letterSpacingEm, and lineHeight; read_chapter_visual_layout returns the valid project font catalog. This is the correct way to edit PicturePage chapter text; it also updates the projected chapter body."));
+                "Live visual-layout mutation for PicturePage chapters only. Requires the picture-page-design skill loaded in an earlier tool round. Create a new text box when textElementId is omitted, or update an existing text box. Creating a box or changing its text, widthPercent, or heightPercent automatically chooses the largest 8-144 pt font size that fits, even when the same call supplies fontSizePoints; resize the box and let the text follow instead of manually trying font sizes. A fontSizePoints-only update remains available for a deliberate fixed size. Typography uses fontFamilyKey, an available fontWeight/italic face, letterSpacingEm, and lineHeight; read_chapter_visual_layout returns the valid project font catalog. This is the correct way to edit PicturePage chapter text; it also updates the projected chapter body."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid chapterId, string elementKind, Guid elementId) =>
@@ -1727,16 +1728,60 @@ public sealed class EditorChatTools(
             parsedVerticalAlign ?? existing?.VerticalAlign ?? ChapterTextVerticalAlign.Top,
             parsedShadow ?? existing?.Shadow ?? PicturePageTextShadow.None);
 
-        var updated = await chapterVisuals.SavePageLayoutAsync(
-            chapterId,
-            state.PageLayout with
+        var updatedLayout = state.PageLayout with
+        {
+            TextElements = existing is null
+                ? state.PageLayout.TextElements.Append(updatedText).ToList()
+                : state.PageLayout.TextElements
+                    .Select(candidate => candidate.Id == elementId ? updatedText : candidate)
+                    .ToList(),
+        };
+        var shouldAutoFit = !string.IsNullOrWhiteSpace(updatedText.Text)
+            && (existing is null
+                || !string.Equals(updatedText.Text, existing.Text, StringComparison.Ordinal)
+                || updatedText.WidthPercent != existing.WidthPercent
+                || updatedText.HeightPercent != existing.HeightPercent);
+
+        if (shouldAutoFit)
+        {
+            var fit = await chapterVisuals.FitAndSavePicturePageTextAsync(
+                chapterId,
+                updatedLayout,
+                elementId,
+                ctx.TurnCancellationToken);
+            ctx.OnMutated();
+            var payload = JsonNode.Parse(await VisualStatePayloadAsync(
+                ctx,
+                fit.State,
+                existing is null
+                    ? "Picture page text created and automatically fitted."
+                    : "Picture page text updated and automatically fitted.",
+                elementId))!.AsObject();
+            payload["autoFit"] = JsonSerializer.SerializeToNode(new
             {
-                TextElements = existing is null
-                    ? state.PageLayout.TextElements.Append(updatedText).ToList()
-                    : state.PageLayout.TextElements
-                        .Select(candidate => candidate.Id == elementId ? updatedText : candidate)
-                        .ToList(),
+                applied = true,
+                fit.PreviousFontSizePoints,
+                fit.FontSizePoints,
+                fit.HitMinimum,
+                fit.HitMaximum,
+                diagnostic = new
+                {
+                    fit.Diagnostic.WrappedLineCount,
+                    fit.Diagnostic.DrawnLineCount,
+                    fit.Diagnostic.AvailableHeightPixels,
+                    fit.Diagnostic.RequiredHeightPixels,
+                    heightUtilizationPercent = HeightUtilizationPercent(
+                        fit.Diagnostic.AvailableHeightPixels,
+                        fit.Diagnostic.RequiredHeightPixels),
+                    fit.Diagnostic.Fits,
+                    fit.Diagnostic.FontFaceResolved,
+                    fit.Diagnostic.UsedMissingGlyphFallback,
+                },
             });
+            return payload.ToJsonString();
+        }
+
+        var updated = await chapterVisuals.SavePageLayoutAsync(chapterId, updatedLayout, ctx.TurnCancellationToken);
 
         ctx.OnMutated();
         return await VisualStatePayloadAsync(ctx, updated, existing is null ? "Picture page text created." : "Picture page text updated.", elementId);
