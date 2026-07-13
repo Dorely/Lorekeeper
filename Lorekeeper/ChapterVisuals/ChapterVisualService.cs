@@ -90,7 +90,11 @@ public sealed class ChapterVisualService(
                 if (request.TargetPictureImageElementId is not { } targetId || targetId == Guid.Empty)
                     throw new InvalidOperationException("ReplaceElement requires a target PicturePage image element.");
                 if (layout.Images.All(image => image.Id != targetId))
-                    throw new InvalidOperationException("The target PicturePage image element was not found.");
+                {
+                    throw new InvalidOperationException(
+                        $"PicturePage image element {targetId:N} was not found in chapter {chapterId:N}. " +
+                        "Re-read the chapter visual layout and use a current image element id.");
+                }
                 elementId = targetId;
                 layout = layout with
                 {

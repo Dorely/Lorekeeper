@@ -732,11 +732,20 @@ public sealed class ImagesChatTools(
         if (parsedRole == PicturePageImagePlacementRole.ReplaceElement
             && (targetPictureImageElementId is null || targetPictureImageElementId == Guid.Empty))
             return "Error: picturePagePlacementRole=ReplaceElement requires targetPictureImageElementId.";
-        var result = await chapterVisuals.AddImageToChapterAsync(
-            ctx.ProjectId,
-            chapterId,
-            imageId,
-            new ChapterImagePlacementRequest(parsedRole ?? PicturePageImagePlacementRole.Freeform, targetPictureImageElementId));
+        ChapterImagePlacementResult result;
+        try
+        {
+            result = await chapterVisuals.AddImageToChapterAsync(
+                ctx.ProjectId,
+                chapterId,
+                imageId,
+                new ChapterImagePlacementRequest(parsedRole ?? PicturePageImagePlacementRole.Freeform, targetPictureImageElementId),
+                ctx.TurnCancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return $"Error: {ex.Message}";
+        }
         ctx.MarkMutated();
         return JsonSerializer.Serialize(new
         {

@@ -1360,21 +1360,33 @@ public sealed class EditorChatTools(
             if (placeInCurrentChapter && outputImages.FirstOrDefault() is { } placedImage)
             {
                 var chapterId = ctx.CurrentChapterId!.Value;
-                var placed = await chapterVisuals.AddImageToChapterAsync(
-                    ctx.ProjectId,
-                    chapterId,
-                    placedImage.Id,
-                    new ChapterImagePlacementRequest(
-                        parsedPlacementRole ?? PicturePageImagePlacementRole.Freeform,
-                        targetPictureImageElementId),
-                    ctx.TurnCancellationToken);
-                placement = new
+                try
                 {
-                    chapterId,
-                    elementId = placed.ElementId,
-                    placed.State.VisualMode,
-                    visualLayout = await VisualStatePayloadObjectAsync(ctx, placed.State, "Image placed in chapter.", placed.ElementId),
-                };
+                    var placed = await chapterVisuals.AddImageToChapterAsync(
+                        ctx.ProjectId,
+                        chapterId,
+                        placedImage.Id,
+                        new ChapterImagePlacementRequest(
+                            parsedPlacementRole ?? PicturePageImagePlacementRole.Freeform,
+                            targetPictureImageElementId),
+                        ctx.TurnCancellationToken);
+                    placement = new
+                    {
+                        chapterId,
+                        elementId = placed.ElementId,
+                        placed.State.VisualMode,
+                        visualLayout = await VisualStatePayloadObjectAsync(ctx, placed.State, "Image placed in chapter.", placed.ElementId),
+                    };
+                }
+                catch (InvalidOperationException ex)
+                {
+                    placement = new
+                    {
+                        chapterId,
+                        error = ex.Message,
+                        note = "The generated image remains available in the project image library.",
+                    };
+                }
             }
 
             ctx.OnMutated();
@@ -1480,11 +1492,20 @@ public sealed class EditorChatTools(
             && (targetPictureImageElementId is null || targetPictureImageElementId == Guid.Empty))
             return "Error: picturePagePlacementRole=ReplaceElement requires targetPictureImageElementId.";
 
-        var result = await chapterVisuals.AddImageToChapterAsync(
-            ctx.ProjectId,
-            chapterId,
-            imageId,
-            new ChapterImagePlacementRequest(parsedRole ?? PicturePageImagePlacementRole.Freeform, targetPictureImageElementId));
+        ChapterImagePlacementResult result;
+        try
+        {
+            result = await chapterVisuals.AddImageToChapterAsync(
+                ctx.ProjectId,
+                chapterId,
+                imageId,
+                new ChapterImagePlacementRequest(parsedRole ?? PicturePageImagePlacementRole.Freeform, targetPictureImageElementId),
+                ctx.TurnCancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return $"Error: {ex.Message}";
+        }
         ctx.OnMutated();
         return await VisualStatePayloadAsync(ctx, result.State, "Image placed in chapter.", result.ElementId);
     }
