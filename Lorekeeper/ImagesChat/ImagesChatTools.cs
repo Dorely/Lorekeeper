@@ -29,6 +29,7 @@ public sealed class ImagesChatTools(
     IProjectFontService projectFonts,
     IEditorContextService editorContext,
     IVisionModelClientFactory visionClient,
+    AgentSkillTools agentSkillTools,
     IOptions<ProjectImageGenerationOptions> imageOptions,
     IOptions<EditorChatOptions> editorOptions)
 {
@@ -41,6 +42,8 @@ public sealed class ImagesChatTools(
     {
         IList<AITool> tools =
         [
+            agentSkillTools.BuildReadSkillTool(context.Skills),
+
             AIFunctionFactory.Create(
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
                     ListSearchSourcesAsync(context, query, sourceTypes, topK),
@@ -131,18 +134,18 @@ public sealed class ImagesChatTools(
                 method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, string? label = null, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
                     GenerateImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, entityTargets, label, targetChapterId, targetPictureImageElementId),
                 name: "generate_image",
-                description: "Generate library images. Ordinary scenes and prospective designs must omit entityTargets. Pass entityTargets only when the user explicitly approved or requested a purpose-built reference asset; otherwise attach an approved output later with attach_entity_visual_example. Use only grounded eligible entity ids and only still-approved referenceImageIds."),
+                description: "Generate library images. Requires the image-generation skill loaded in an earlier tool round; PicturePage targets also require picture-page-design. Ordinary scenes and prospective designs must omit entityTargets. Pass entityTargets only when the user explicitly approved or requested a purpose-built reference asset; otherwise attach an approved output later with attach_entity_visual_example. Use only grounded eligible entity ids and only still-approved referenceImageIds."),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, string prompt, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, bool inheritSourceEntityTargets = false, string? label = null) =>
                     EditImageAsync(context, sourceImageId, prompt, maskId, maskShapes, maskLabel, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, entityTargets, inheritSourceEntityTargets, label),
                 name: "edit_image",
-                description: "Edit a project image. Outputs do not inherit entity targets by default. Set inheritSourceEntityTargets=true only for a still-approved purpose-built reference whose identity role remains valid; ordinary scenes, redesigns, and prospective outputs stay unattached."),
+                description: "Edit a project image. Requires the image-generation skill loaded in an earlier tool round. Outputs do not inherit entity targets by default. Set inheritSourceEntityTargets=true only for a still-approved purpose-built reference whose identity role remains valid; ordinary scenes, redesigns, and prospective outputs stay unattached."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, Guid imageId, string? picturePagePlacementRole = null, Guid? targetPictureImageElementId = null) => AddProjectImageToChapterAsync(context, chapterId, imageId, picturePagePlacementRole, targetPictureImageElementId),
                 name: "add_project_image_to_chapter",
-                description: "Place an existing project image into a chapter visual layout. PicturePage roles are Freeform, Background, and ReplaceElement; ReplaceElement requires targetPictureImageElementId and preserves geometry/layer."),
+                description: "Place an existing project image into a chapter visual layout. PicturePage placement requires the picture-page-design skill loaded in an earlier tool round. PicturePage roles are Freeform, Background, and ReplaceElement; ReplaceElement requires targetPictureImageElementId and preserves geometry/layer."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, Guid imageId) => AddProjectImageToContextAsync(context, chapterId, imageId),
@@ -344,7 +347,21 @@ public sealed class ImagesChatTools(
         var fontCatalog = await projectFonts.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
         var fontNames = fontCatalog.ToDictionary(font => font.Key, font => font.Name, StringComparer.OrdinalIgnoreCase);
         var snapshots = await chapterVisuals.RenderSnapshotsAsync(chapterId);
-        var textFit = snapshots.SelectMany(snapshot => snapshot.TextFitDiagnostics).ToList();
+        var textFit = snapshots
+            .SelectMany(snapshot => snapshot.TextFitDiagnostics.Select(diagnostic => new
+            {
+                snapshot.PageNumber,
+                diagnostic.ElementId,
+                diagnostic.WrappedLineCount,
+                diagnostic.DrawnLineCount,
+                diagnostic.AvailableHeightPixels,
+                diagnostic.RequiredHeightPixels,
+                heightUtilizationPercent = HeightUtilizationPercent(diagnostic.AvailableHeightPixels, diagnostic.RequiredHeightPixels),
+                diagnostic.Fits,
+                diagnostic.FontFaceResolved,
+                diagnostic.UsedMissingGlyphFallback,
+            }))
+            .ToList();
         var layoutDiagnostics = snapshots.SelectMany(snapshot => snapshot.LayoutDiagnostics).ToList();
         return JsonSerializer.Serialize(new
         {
@@ -517,6 +534,11 @@ public sealed class ImagesChatTools(
         var targetResolution = await ResolvePicturePageGenerationTargetAsync(ctx, targetChapterId, targetPictureImageElementId);
         if (targetResolution.Error is not null)
             return targetResolution.Error;
+        string[] requiredSkills = targetResolution.Target is null
+            ? [AgentSkillIds.ImageGeneration]
+            : [AgentSkillIds.ImageGeneration, AgentSkillIds.PicturePageDesign];
+        if (ctx.Skills.Require(requiredSkills) is { } skillError)
+            return skillError;
 
         var promptText = targetResolution.PromptAppendix is { Length: > 0 } appendix
             ? prompt.Trim() + appendix
@@ -596,6 +618,8 @@ public sealed class ImagesChatTools(
         bool inheritSourceEntityTargets,
         string? label)
     {
+        if (ctx.Skills.Require(AgentSkillIds.ImageGeneration) is { } skillError)
+            return skillError;
         if (sourceImageId == Guid.Empty)
             return "Error: sourceImageId is required.";
         if (string.IsNullOrWhiteSpace(prompt))
@@ -692,6 +716,15 @@ public sealed class ImagesChatTools(
         string? picturePagePlacementRole,
         Guid? targetPictureImageElementId)
     {
+        var chapter = await chapters.GetAsync(chapterId);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId} not found in this project.";
+        if (chapter.VisualMode == ChapterVisualMode.PicturePage
+            && ctx.Skills.Require(AgentSkillIds.PicturePageDesign) is { } skillError)
+        {
+            return skillError;
+        }
+
         if (!TryParseOptionalEnum(picturePagePlacementRole, out PicturePageImagePlacementRole? parsedRole, out var roleError))
             return roleError!;
         if (targetPictureImageElementId is { } targetId && targetId != Guid.Empty && parsedRole != PicturePageImagePlacementRole.ReplaceElement)
@@ -863,6 +896,11 @@ public sealed class ImagesChatTools(
 
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max] + "...";
+
+    private static double HeightUtilizationPercent(double availableHeightPixels, double requiredHeightPixels) =>
+        availableHeightPixels <= 0
+            ? 0
+            : Math.Round(requiredHeightPixels / availableHeightPixels * 100, 1, MidpointRounding.AwayFromZero);
 
     private static bool TryParseOptionalEnum<TEnum>(string? value, out TEnum? parsed, out string? error)
         where TEnum : struct, Enum

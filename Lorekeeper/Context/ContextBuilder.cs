@@ -24,7 +24,8 @@ public sealed class ContextBuilder(
     IProjectImageService images,
     IEntityVisualExampleService entityVisualExamples,
     IChapterVisualService chapterVisuals,
-    IProjectFontService projectFonts) : IEditorContextService
+    IProjectFontService projectFonts,
+    IAgentSkillRegistry agentSkills) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         Project project,
@@ -42,7 +43,7 @@ public sealed class ContextBuilder(
                 Key: EditorContextKeys.AssistantWorkflow,
                 Kind: ContextItemKind.AssistantWorkflow,
                 Label: "Assistant Workflow",
-                Body: AssistantWorkflowInstructions.EditorChat,
+                Body: AssistantWorkflowInstructions.EditorChat + "\n\n" + agentSkills.BuildCatalogInstructions(),
                 IsEnabled: true,
                 IsRemovable: false,
                 Badge: "App"),

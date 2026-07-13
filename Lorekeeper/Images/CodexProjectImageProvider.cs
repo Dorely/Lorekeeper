@@ -397,7 +397,7 @@ public sealed class CodexProjectImageProvider(
             mainlineModel,
             content,
             BaseImageTool(request.Size, request.Quality, request.OutputFormat, request.OutputCompression, imageModel),
-            "Use the image_generation tool to create one story illustration or project image from the user's prompt. Treat any supplied input images as visual continuity references for character design, clothes, hair, palette, medium, props, settings, and style unless the prompt explicitly asks for a redesign or style break.");
+            "Use the image_generation tool to create one story illustration or project image. Interpret the user's prompt as a standalone description of the desired output. Supplied input images are reference-only, not edit sources: preserve only the identity, design, setting, or style traits the prompt explicitly assigns to them. Take pose, expression, gaze, action, camera, framing, layout, background, lighting, and composition from the target brief, and do not copy those traits from a reference unless explicitly requested. Treat conversational process language such as new, redo, from scratch, different, current image, or not a recreation as nonvisual context; render the concrete target description instead.");
     }
 
     private Dictionary<string, object?> BuildEditPayload(
@@ -431,7 +431,7 @@ public sealed class CodexProjectImageProvider(
             mainlineModel,
             content,
             tool,
-            "Use the image_generation tool to edit the first supplied image. If a mask is supplied, apply it to guide the targeted edit. Treat any additional supplied input images as visual continuity references for character design, clothes, hair, palette, medium, props, settings, and style unless the prompt explicitly asks for a redesign or style break.");
+            "Use the image_generation tool to edit the first supplied image as the source canvas. Apply any mask to guide the targeted edit, make the requested changes, and preserve the source elements the prompt marks invariant. Treat additional supplied images as references only for the roles and traits explicitly assigned to them; do not replace the source composition or inherit unrelated reference details.");
     }
 
     private static Dictionary<string, object?> BasePayload(

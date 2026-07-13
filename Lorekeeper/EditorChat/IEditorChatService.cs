@@ -1,6 +1,7 @@
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Images;
+using Lorekeeper.Llm;
 
 namespace Lorekeeper.EditorChat;
 
@@ -54,6 +55,7 @@ public sealed class EditorChatContext(
     public OutlineToolStagingContext? OutlineStaging { get; } = outlineStaging;
     public EditorChatChangeStagingContext? EditorStaging { get; } = editorStaging;
     public CancellationToken TurnCancellationToken { get; } = turnCancellationToken;
+    public AgentSkillSession Skills { get; } = new();
     public Guid? CurrentAssistantMessageId { get; private set; }
     public string CurrentToolCallId { get; private set; } = string.Empty;
     public string CurrentToolName { get; private set; } = string.Empty;

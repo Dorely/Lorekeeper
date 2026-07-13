@@ -5,19 +5,6 @@ namespace Lorekeeper.ChapterVisuals;
 
 public static class PicturePageImageGenerationGuidance
 {
-    public const string AgentInstructions = """
-        PicturePage design and verification:
-        - Treat copy, text geometry, and illustration as one composition. Establish provisional text boxes before generating a full-page background so the image prompt receives exact quiet regions.
-        - Use an adaptive picture-book baseline: clear type and predictable reading flow by default, with larger/simpler treatment for early readers and more expressive display treatment for short, art-led read-aloud passages when project context supports it.
-        - Prefer one clear text landing zone. Use multiple boxes only for deliberate narrative beats, and preserve an obvious language-appropriate reading path. Default multiline prose to left/top alignment; reserve centered or display treatment for short passages.
-        - Keep text at least 0.375 inches from trim edges and from both sides of a spread gutter; prefer 0.5 inches. Keep it away from faces, hands, focal objects, important action, and highly detailed or variable backgrounds.
-        - Break lines at natural spoken or syntactic pauses. Avoid widows, orphaned words, dense lines, excessive all-caps, and long italic passages. Use no more than two font families per spread and keep body/accent choices coherent across the book.
-        - Target at least 4.5:1 text contrast. Use 3:1 only for genuinely large display type. When art cannot maintain contrast, prefer a translucent solid backing panel; use shadows or halos only as secondary aids.
-        - For a new full-page background, generate against the page target, place it with the Background role, then inspect the newest rendered snapshot. Adjust text geometry or backing panels before regenerating art; regenerate only when the composition is fundamentally incompatible or the user explicitly requests it.
-        - Freeform placement keeps the normal centered geometry. Background means 0,0,100,100 with Cover behind every other element. ReplaceElement preserves the target image element's geometry and layer.
-        - After every corrective PicturePage mutation, read the visual layout again. Do not claim success until allTextFits is true, all error-level diagnostics are cleared unless the user explicitly requests an exception, advisory warnings are reviewed, and the actual newest snapshot has been inspected for contrast, hierarchy, focal conflicts, and reading flow.
-        """;
-
     private const int SizeMultiple = 16;
     private const int MinImagePixels = 655_360;
     private const int MaxImagePixels = 8_294_400;
@@ -129,28 +116,22 @@ public static class PicturePageImageGenerationGuidance
         PicturePageImageGenerationTarget target,
         IReadOnlyList<PicturePageTextElement> textElements)
     {
-        var targetDescription = target.TargetKind == "imageSlot"
-            ? $"existing image slot {FormatGuid(target.ImageElementId)} at {FormatPercent(target.TargetXPercent)}%,{FormatPercent(target.TargetYPercent)}% size {FormatPercent(target.TargetWidthPercent)}%x{FormatPercent(target.TargetHeightPercent)}%"
-            : "the full PicturePage page/spread surface";
         var builder = new List<string>
         {
             "",
-            "PicturePage layout guidance:",
-            $"- Target: {targetDescription} in {target.PageLayoutKind}; physical target {FormatNumber(target.TargetWidthInches)} x {FormatNumber(target.TargetHeightInches)} in.",
-            $"- Generate for aspect {target.AspectRatio}; recommended image size {target.RecommendedSize}.",
-            "- Compose through the target edges for bleed-aware cropping, but do not place important subjects or details in bleed/trim loss areas.",
-            "- Preserve the listed buffered rectangles as stable, low-detail, low-variation landing zones for overlaid type.",
-            "- Keep faces, focal objects, and important action out of text-safe areas; avoid text, logos, watermarks, and border decorations unless explicitly requested.",
+            "Output composition constraints:",
+            $"- Canvas: {target.AspectRatio} aspect ratio for {(target.TargetKind == "imageSlot" ? "a placed illustration" : "full-bleed page art")}.",
+            "- Extend artwork through every canvas edge for bleed-aware cropping while keeping important subjects and details away from trim-loss areas.",
+            "- Keep faces, focal objects, and important action outside any reserved text regions listed below.",
+            "- Do not render text, logos, watermarks, or border decorations unless the target brief explicitly requests them.",
         };
 
         if (target.IsDoubleSpread)
-            builder.Add("- This is a two-page spread; exclude important details from the center gutter and at least 0.375 inches on both sides of it.");
+            builder.Add("- Two-page spread: keep important subjects and details away from the center gutter and the adjacent safety margin on both sides.");
 
         var safeAreas = DescribeTextSafeAreas(target, textElements);
         if (safeAreas.Length > 0)
-            builder.Add($"- Buffered text-safe rectangles in target-local coordinates: {safeAreas}.");
-        else if (target.TargetKind == "fullPage")
-            builder.Add("- No provisional text boxes are stored yet. Establish text geometry before treating this art as a final background composition.");
+            builder.Add($"- Reserve stable, quiet, low-detail regions for overlaid type at these canvas-local percentages: {safeAreas}.");
 
         return string.Join(Environment.NewLine, builder);
     }
@@ -165,11 +146,10 @@ public static class PicturePageImageGenerationGuidance
         {
             $"Image generation target: full page/spread aspect {page.AspectRatio}, recommended size {page.RecommendedSize}.",
             $"Physical page target: {FormatNumber(page.SurfaceWidthInches)} x {FormatNumber(page.SurfaceHeightInches)} inches; compose through edges for bleed while keeping important content out of trim loss areas.",
-            "Image prompt guidance: plan text and art together; use a structured image brief with subject, style, composition, lighting, and constraints; reserve stable quiet negative space for buffered text boxes; avoid text, logos, and watermarks unless explicitly requested.",
         };
 
         if (page.IsDoubleSpread)
-            lines.Add("Image prompt guidance: this layout is a two-page spread; avoid placing important details across the center gutter.");
+            lines.Add("Two-page spread geometry: keep important details away from the center gutter.");
 
         var safeAreas = DescribeTextSafeAreas(page, state.PageLayout.TextElements);
         if (safeAreas.Length > 0)

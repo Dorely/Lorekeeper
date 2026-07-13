@@ -36,6 +36,7 @@ public sealed class EditorChatService(
     IAiChangeApprovalService changeApproval,
     IAiChangeRepository changes,
     IServiceScopeFactory scopeFactory,
+    IAgentSkillRegistry agentSkills,
     IOptions<AgentOptions> options,
     IOptions<EditorChatOptions> editorOptions,
     ILogger<EditorChatService> logger) : IEditorChatService
@@ -200,11 +201,11 @@ public sealed class EditorChatService(
             initialEntityVisuals = assembly.Visuals;
             contestModeEnabled = project.ContestModeEnabled;
             var vectorSearchAvailable = await embeddings.IsAvailableAsync(cancellationToken);
-            systemPrompt = assembly.Assemble((contestModeEnabled
+            var assistantWorkflow = contestModeEnabled
                 ? AssistantWorkflowInstructions.EditorContestPreparation
-                : AssistantWorkflowInstructions.EditorChatFor(vectorSearchAvailable))
-                + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples
-                + "\n\n" + PicturePageImageGenerationGuidance.AgentInstructions);
+                : AssistantWorkflowInstructions.EditorChatFor(vectorSearchAvailable)
+                    + "\n\n" + agentSkills.BuildCatalogInstructions();
+            systemPrompt = assembly.Assemble(assistantWorkflow);
 
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
             visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
@@ -713,6 +714,7 @@ public sealed class EditorChatService(
                     yield return new EditorChatMutated();
             }
 
+            editorContext.Skills.ActivatePending();
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
             if (modelOnlyImagesForNextRound.Count > 0)
                 messages.Add(await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound));

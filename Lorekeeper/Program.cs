@@ -109,6 +109,8 @@ builder.Services.AddScoped<IEmbeddingService, ProviderEmbeddingService>();
 builder.Services.AddScoped<EmbeddingRebuildService>();
 builder.Services.AddScoped<ILlmProviderService, LlmProviderService>();
 builder.Services.AddScoped<ICodexAuthService, CodexAuthService>();
+builder.Services.AddSingleton<IAgentSkillRegistry, BuiltInAgentSkillRegistry>();
+builder.Services.AddSingleton<AgentSkillTools>();
 builder.Services.AddHostedService<EmbeddingRebuildWorker>();
 
 // Search providers
