@@ -105,11 +105,11 @@ public sealed class ProjectImageGenerationRuntime(
         }
         CancelRuntimeJob(projectId, jobId);
         CompleteJobWaiter(jobId);
-        NotifyStateChanged();
 
         await using var scope = scopeFactory.CreateAsyncScope();
         var jobs = scope.ServiceProvider.GetRequiredService<IProjectImageJobService>();
         await jobs.CancelJobAsync(projectId, jobId, cancellationToken);
+        NotifyStateChanged();
     }
 
     public async Task ReconcileInterruptedJobsAsync(CancellationToken cancellationToken = default)

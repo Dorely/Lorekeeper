@@ -268,10 +268,8 @@ else
                 || image.Prompt.Contains(_query, StringComparison.OrdinalIgnoreCase)).ToList();
 
     private IReadOnlyList<ProjectImageJobView> VisibleJobs =>
-        _jobs.Where(job => IsActiveJob(job.Status)
-            || JobHasProblem(job))
-            .OrderBy(job => IsActiveJob(job.Status) ? 0 : 1)
-            .ThenByDescending(job => job.CreatedAt)
+        _jobs.Where(job => IsActiveJob(job.Status))
+            .OrderByDescending(job => job.CreatedAt)
             .ToList();
 
     protected override void OnInitialized() =>
@@ -646,14 +644,6 @@ else
 
     private static bool IsActiveJob(ProjectImageGenerationJobStatus status) =>
         status is ProjectImageGenerationJobStatus.Queued or ProjectImageGenerationJobStatus.Running;
-
-    private static bool JobHasProblem(ProjectImageJobView job) =>
-        job.Status is ProjectImageGenerationJobStatus.Failed
-            or ProjectImageGenerationJobStatus.CompletedWithErrors
-            or ProjectImageGenerationJobStatus.Cancelled
-        || !string.IsNullOrWhiteSpace(job.Error)
-        || job.OutputErrors.Count > 0
-        || job.OutputStates.Any(state => state.Status is ProjectImageOutputStatus.Failed or ProjectImageOutputStatus.Cancelled);
 
     private static string JobStatusText(ProjectImageJobView job, ProjectImageGenerationJobRuntimeView? runtimeJob)
     {
