@@ -3,6 +3,7 @@ namespace Lorekeeper.Desktop;
 public enum DesktopUpdateStatus
 {
     Unsupported,
+    Idle,
     Checking,
     Downloading,
     Ready,
@@ -69,6 +70,9 @@ public sealed class DesktopUpdateService : IDesktopUpdateService
     }
 
     public void MarkChecking() => SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.Checking));
+
+    public void MarkIdle(string? version = null) =>
+        SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.Idle, Clean(version)));
 
     public void MarkDownloading(string? version, double? percent = null) =>
         SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.Downloading, Clean(version), percent));

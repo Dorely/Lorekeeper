@@ -67,7 +67,9 @@ without administrator rights, and recipients do not need .NET or Node.js. Share
 
 Installed builds check the public
 [`Dorely/Lorekeeper-Releases`](https://github.com/Dorely/Lorekeeper-Releases)
-repository for stable updates. The portable executable does not auto-update.
+repository for stable updates at startup and every 15 minutes while running.
+The interval can be changed with `Desktop:UpdateCheckIntervalMinutes`. The
+portable executable does not auto-update.
 The release feed requires the Setup executable, its `.blockmap`, and
 `latest.yml` to be published together.
 

@@ -27,8 +27,8 @@
 | File | Description |
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors, versioned Electron/Electron Builder pins, and app dependencies including EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI, sqlite-vec, tokenizers, SkiaSharp, and ingest packages. |
-| `Program.cs` | Host setup, hardened optional Electron renderer binding with installed-build update checks/state events/restart installation, deterministic development/installed database-path selection, Blazor Interactive Server hub sizing, DI for application services, startup migration/index repair, and image/font/publish endpoints. |
-| `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*` including packaged per-user data placement, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
+| `Program.cs` | Host setup, hardened optional Electron renderer binding with recurring installed-build update checks/state events/restart installation, deterministic development/installed database-path selection, Blazor Interactive Server hub sizing, DI for application services, startup migration/index repair, and image/font/publish endpoints. |
+| `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*` including packaged per-user data placement and update polling, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
 | `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
 | `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets, app metadata, public GitHub update provider, and payload exclusions for Windows, Linux, and macOS desktop artifacts. |
 | `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained publish profiles used by Electron.NET packaging (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`); Windows isolates staging from final artifacts to prevent recursive packaging. |
@@ -350,7 +350,7 @@
 
 | File | Description |
 |------|-------------|
-| `DesktopUpdateService.cs` | Singleton installed-desktop update state, downloaded version/progress notifications, and guarded silent restart-to-install command consumed by the global layout. |
+| `DesktopUpdateService.cs` | Singleton installed-desktop update state including idle/download progress/readiness notifications and the guarded silent restart-to-install command consumed by the global layout. |
 
 ### Projects/
 

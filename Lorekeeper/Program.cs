@@ -32,6 +32,11 @@ var desktopUpdates = new DesktopUpdateService();
 var isElectronMode = IsElectronMode(args);
 var desktopUrl = isElectronMode ? GetDesktopUrl(builder.Configuration) : null;
 var enableDesktopDevTools = builder.Environment.IsDevelopment();
+var desktopUpdateCheckIntervalMinutes = builder.Configuration.GetValue("Desktop:UpdateCheckIntervalMinutes", 15);
+if (desktopUpdateCheckIntervalMinutes <= 0)
+    throw new InvalidOperationException("Desktop:UpdateCheckIntervalMinutes must be greater than zero.");
+var desktopUpdateCheckInterval = TimeSpan.FromMinutes(desktopUpdateCheckIntervalMinutes);
+using var desktopUpdateMonitorCancellation = new CancellationTokenSource();
 var usePerUserDataDirectory = isElectronMode
     && !builder.Environment.IsDevelopment()
     && builder.Configuration.GetValue("Desktop:UsePerUserDataDirectory", true);
@@ -58,7 +63,9 @@ if (isElectronMode)
         desktopUrl!,
         enableDesktopDevTools,
         enableAutoUpdates: !builder.Environment.IsDevelopment(),
-        desktopUpdates));
+        desktopUpdates,
+        desktopUpdateCheckInterval,
+        desktopUpdateMonitorCancellation.Token));
     builder.WebHost.UseUrls(desktopUrl!);
 }
 else
@@ -229,6 +236,7 @@ builder.Services.AddScoped<IImagesChatService, ImagesChatService>();
 builder.Services.AddSingleton<IImagesChatTurnRunner, ImagesChatTurnRunner>();
 
 var app = builder.Build();
+app.Lifetime.ApplicationStopping.Register(desktopUpdateMonitorCancellation.Cancel);
 
 // Apply EF Core migrations + initialise sqlite-vec tables.
 using (var scope = app.Services.CreateScope())
@@ -298,7 +306,9 @@ static async Task ElectronAppReady(
     string desktopUrl,
     bool enableDevTools,
     bool enableAutoUpdates,
-    DesktopUpdateService desktopUpdates)
+    DesktopUpdateService desktopUpdates,
+    TimeSpan updateCheckInterval,
+    CancellationToken cancellationToken)
 {
     var options = new BrowserWindowOptions
     {
@@ -334,10 +344,13 @@ static async Task ElectronAppReady(
     browserWindow.OnReadyToShow += () => browserWindow.Show();
 
     if (enableAutoUpdates && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PORTABLE_EXECUTABLE_DIR")))
-        await CheckForElectronUpdatesAsync(desktopUpdates);
+    {
+        ConfigureElectronAutoUpdater(desktopUpdates);
+        _ = MonitorElectronUpdatesAsync(desktopUpdates, updateCheckInterval, cancellationToken);
+    }
 }
 
-static async Task CheckForElectronUpdatesAsync(DesktopUpdateService desktopUpdates)
+static void ConfigureElectronAutoUpdater(DesktopUpdateService desktopUpdates)
 {
     Electron.AutoUpdater.AutoDownload = true;
     Electron.AutoUpdater.AutoInstallOnAppQuit = true;
@@ -345,6 +358,7 @@ static async Task CheckForElectronUpdatesAsync(DesktopUpdateService desktopUpdat
     desktopUpdates.Enable(() => Electron.AutoUpdater.QuitAndInstall(isSilent: true, isForceRunAfter: true));
     Electron.AutoUpdater.OnCheckingForUpdate += desktopUpdates.MarkChecking;
     Electron.AutoUpdater.OnUpdateAvailable += info => desktopUpdates.MarkDownloading(info.Version);
+    Electron.AutoUpdater.OnUpdateNotAvailable += info => desktopUpdates.MarkIdle(info.Version);
     Electron.AutoUpdater.OnDownloadProgress += progress =>
         desktopUpdates.MarkDownloading(desktopUpdates.Snapshot.Version, progress.Percent);
     Electron.AutoUpdater.OnUpdateDownloaded += info => desktopUpdates.MarkReady(info.Version);
@@ -353,7 +367,40 @@ static async Task CheckForElectronUpdatesAsync(DesktopUpdateService desktopUpdat
         desktopUpdates.MarkError(error);
         Console.Error.WriteLine($"Electron auto-update failed: {error}");
     };
+}
 
+static async Task MonitorElectronUpdatesAsync(
+    DesktopUpdateService desktopUpdates,
+    TimeSpan updateCheckInterval,
+    CancellationToken cancellationToken)
+{
+    if (cancellationToken.IsCancellationRequested) return;
+
+    await CheckForElectronUpdatesAsync(desktopUpdates);
+
+    using var timer = new PeriodicTimer(updateCheckInterval);
+    try
+    {
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            if (desktopUpdates.Snapshot.Status is DesktopUpdateStatus.Downloading
+                or DesktopUpdateStatus.Ready
+                or DesktopUpdateStatus.Restarting)
+            {
+                continue;
+            }
+
+            await CheckForElectronUpdatesAsync(desktopUpdates);
+        }
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+        // Normal application shutdown.
+    }
+}
+
+static async Task CheckForElectronUpdatesAsync(DesktopUpdateService desktopUpdates)
+{
     try
     {
         await Electron.AutoUpdater.CheckForUpdatesAndNotifyAsync();
