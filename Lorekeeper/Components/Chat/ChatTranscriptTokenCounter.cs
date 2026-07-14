@@ -1,4 +1,5 @@
 using System.Text;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.Tokens;
 
 namespace Lorekeeper.Components.Chat;
@@ -25,6 +26,20 @@ public readonly record struct ChatTranscriptTokenCount(int TokenCount, bool IsEx
 
 public static class ChatTranscriptTokenCounter
 {
+    public static IEnumerable<ChatTranscriptTokenMessage> ModelReplayMessages<TMessage>(
+        IEnumerable<TMessage> messages,
+        Func<TMessage, string> role,
+        Func<TMessage, string> content)
+    {
+        foreach (var message in messages)
+        {
+            var projectedRole = role(message);
+            var projectedContent = content(message);
+            if (ChatModelHistory.IsReplayedText(projectedRole, projectedContent))
+                yield return new ChatTranscriptTokenMessage(projectedRole, projectedContent);
+        }
+    }
+
     public static ChatTranscriptTokenCount Count<TMessage>(
         ITokenCounter tokenCounter,
         IEnumerable<TMessage> messages,

@@ -64,7 +64,6 @@ public sealed class OutlineCollaborationTools(
     IChapterVisualService chapterVisuals,
     IEntityRelationContextService entityRelations,
     IProjectSearchService projectSearch,
-    IGraphAutoLinkService autoLinks,
     IEntityVisualExampleService entityVisualExamples,
     IProjectImageService projectImages)
 {
@@ -211,30 +210,30 @@ public sealed class OutlineCollaborationTools(
                 method: (string type, string name, string? propertiesJson = null, string? parentId = null, int? order = null) =>
                     CreateEntityAsync(context, type, name, propertiesJson, parentId, order),
                 name: "create_entity",
-                description: "Create a new graph entity. type is the entity category ('Character', 'Location', 'Event' for beats, 'ProjectFact' for rare project-level guidance, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. Use ProjectFact only for premise, genre, tone, theme, scope, global rules, or other guidance with no better structural home; do not use it for rework notes, act/chapter plans, character roles, beats, relationships, or location details. For ProjectFact include key/value properties; it will be parented to the Project automatically. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). If an entity with the same name/key already exists, returns status='existing_match' and the existing id instead of creating a duplicate. Returns the created or staged entity payload."),
+                description: "Create a new graph entity. type is the entity category ('Character', 'Location', 'Event' for beats, 'ProjectFact' for rare project-level guidance, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. Use ProjectFact only for premise, genre, tone, theme, scope, global rules, or other guidance with no better structural home; do not use it for rework notes, act/chapter plans, character roles, beats, relationships, or location details. For ProjectFact include key/value properties; it will be parented to the Project automatically. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). If an entity with the same name/key already exists, returns status='existing_match' and its compact identity instead of creating a duplicate. Returns compact identity/current properties; use read_entity for full knowledge and relationships."),
 
             AIFunctionFactory.Create(
                 method: (string entityId, string? name = null, string? propertiesToSetJson = null, string? propertiesToRemoveJson = null) =>
                     UpdateEntityAsync(context, entityId, name, propertiesToSetJson, propertiesToRemoveJson),
                 name: "update_entity",
-                description: "Update an entity's name and/or properties. Pass null for fields to leave unchanged. propertiesToSetJson is a JSON object string of keys to merge into the existing bag (e.g. '{\"role\":\"protagonist\"}'). propertiesToRemoveJson is a JSON array string of keys to delete (e.g. '[\"role\"]'). Returns the updated or staged entity payload."),
+                description: "Update an entity's name and/or properties. Pass null for fields to leave unchanged. propertiesToSetJson is a JSON object string of keys to merge into the existing bag (e.g. '{\"role\":\"protagonist\"}'). propertiesToRemoveJson is a JSON array string of keys to delete (e.g. '[\"role\"]'). Returns compact identity/current properties; use read_entity for full knowledge and relationships."),
 
             AIFunctionFactory.Create(
                 method: (string entityId) => DeleteEntityAsync(context, entityId),
                 name: "delete_entity",
-                description: "Delete an entity and any edges connected to it. Returns a deleted status plus the deleted entity snapshot."),
+                description: "Delete an entity and any edges connected to it. Returns a deleted status plus compact deleted identity."),
 
             AIFunctionFactory.Create(
                 method: (string type, string parentId, string orderedIdsJson) =>
                     ReorderEntitiesAsync(context, type, parentId, orderedIdsJson),
                 name: "reorder_entities",
-                description: "Replace the ordering of a parent's children of a given type. orderedIdsJson is a JSON array string of entity ids (e.g. '[\"<guid1>\", \"<guid2>\"]') and must contain exactly the parent's current children of that type. Used primarily to reorder beats within a chapter. Returns ordered child payloads."),
+                description: "Replace the ordering of a parent's children of a given type. orderedIdsJson is a JSON array string of entity ids (e.g. '[\"<guid1>\", \"<guid2>\"]') and must contain exactly the parent's current children of that type. Used primarily to reorder beats within a chapter. Returns compact ordered child identities."),
 
             AIFunctionFactory.Create(
                 method: (string fromId, string toId, string edgeType, string? propertiesJson = null) =>
                     LinkEntitiesAsync(context, fromId, toId, edgeType, propertiesJson),
                 name: "link_entities",
-                description: "Create a typed edge between two entities. propertiesJson is an optional JSON object string of edge metadata. Conventional edge types: 'AppearsIn' (Character -> Event/Chapter), 'LocatedAt' (Event -> Location), 'KnownTo' (Character -> Character). Other types are allowed; use camel-case verbs. Returns link details plus updated source and target payloads."),
+                description: "Create a typed edge between two entities. propertiesJson is an optional JSON object string of edge metadata. Conventional edge types: 'AppearsIn' (Character -> Event/Chapter), 'LocatedAt' (Event -> Location), 'KnownTo' (Character -> Character). Other types are allowed; use camel-case verbs. Returns link details plus compact source and target identities; use read_entity/list_entity_links for full context."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, Guid imageId, string? label = null) => AttachEntityVisualAsync(context, entityId, imageId, label),
@@ -538,7 +537,7 @@ public sealed class OutlineCollaborationTools(
         var facts = await projectFacts.ListAsync(ctx.ProjectId);
         var factPayloads = new List<object>();
         foreach (var fact in facts)
-            factPayloads.Add(await ProjectFactPayloadAsync(ctx.ProjectId, fact));
+            factPayloads.Add(ProjectFactPayload(fact));
 
         object ProjectChapter(Chapter c) => new
         {
@@ -912,7 +911,7 @@ public sealed class OutlineCollaborationTools(
         {
             var created = await entities.CreateAsync(ctx.ProjectId, trimmedType, name.Trim(), properties, parent, order);
             ctx.OnMutated();
-            return JsonSerializer.Serialize(await EntityPayloadAsync(ctx.ProjectId, created));
+            return JsonSerializer.Serialize(EntityMutationPayload(created));
         }
         catch (Exception ex)
         {
@@ -920,31 +919,21 @@ public sealed class OutlineCollaborationTools(
         }
     }
 
-    private async Task<object> ProjectFactPayloadAsync(Guid projectId, ProjectFact fact)
+    private static object ProjectFactPayload(ProjectFact fact) => new
     {
-        var linkedEntities = new List<object>();
-        foreach (var link in fact.LinkedEntities)
+        id = fact.Id,
+        key = fact.Key,
+        name = fact.Name,
+        value = fact.Value,
+        linkedEntities = fact.LinkedEntities.Select(link => new
         {
-            linkedEntities.Add(new
-            {
-                edgeType = link.EdgeType,
-                direction = link.Direction.ToString(),
-                entityId = link.EntityId,
-                name = link.EntityName,
-                type = link.EntityType,
-                relationContext = await entityRelations.BuildForEntityAsync(projectId, link.EntityId, EntityRelationOptions),
-            });
-        }
-
-        return new
-        {
-            id = fact.Id,
-            key = fact.Key,
-            name = fact.Name,
-            value = fact.Value,
-            linkedEntities,
-        };
-    }
+            edgeType = link.EdgeType,
+            direction = link.Direction.ToString(),
+            entityId = link.EntityId,
+            name = link.EntityName,
+            type = link.EntityType,
+        }),
+    };
 
     private async Task<StoryEntity?> FindDuplicateForCreateAsync(
         OutlineCollaborationContext ctx,
@@ -968,33 +957,22 @@ public sealed class OutlineCollaborationTools(
         return candidates.FirstOrDefault(candidate => NormalizeForComparison(candidate.Name) == requestedName);
     }
 
-    private async Task<string> DuplicateEntityResultAsync(Guid projectId, string requestedType, StoryEntity duplicate) =>
-        JsonSerializer.Serialize(new
+    private Task<string> DuplicateEntityResultAsync(Guid projectId, string requestedType, StoryEntity duplicate) =>
+        Task.FromResult(JsonSerializer.Serialize(new
         {
             status = "existing_match",
             message = $"No new {requestedType} was created because an existing {duplicate.Type} with the same name or key already exists. Use update_entity or link_entities for the existing entity, or create a more distinctly named entity if this is a separate story subject.",
-            existing = await EntityPayloadAsync(projectId, duplicate),
-        });
+            existing = EntityMutationPayload(duplicate),
+        }));
 
-    private async Task<object> EntityPayloadAsync(Guid projectId, StoryEntity entity)
-    {
-        var relationContext = await entityRelations.BuildForEntityAsync(projectId, entity.Id, EntityRelationOptions);
-        return new
-        {
-            id = entity.Id,
-            type = entity.Type,
-            name = entity.Name,
-            order = entity.Order,
-            parentId = entity.ParentId,
-            properties = entity.Properties,
-            summary = entity.Summary,
-            aliases = entity.Aliases,
-            wikiSections = entity.WikiSections,
-            canonSources = entity.CanonSources,
-            autoMentionLinks = await autoLinks.ListEntityAutoMentionLinksAsync(projectId, entity.Id),
-            relationContext,
-        };
-    }
+    private static object EntityMutationPayload(StoryEntity entity) =>
+        OutlineMutationPayloads.Entity(
+            entity.Id,
+            entity.Type,
+            entity.Name,
+            entity.Order,
+            entity.ParentId,
+            entity.Properties);
 
     private static string? ReadProperty(IReadOnlyDictionary<string, string?>? properties, string key) =>
         properties is not null && properties.TryGetValue(key, out var value) ? value : null;
@@ -1023,7 +1001,7 @@ public sealed class OutlineCollaborationTools(
         {
             var updated = await entities.UpdateAsync(ctx.ProjectId, id, name?.Trim(), propertiesToSet, propertiesToRemove);
             ctx.OnMutated();
-            return JsonSerializer.Serialize(await EntityPayloadAsync(ctx.ProjectId, updated));
+            return JsonSerializer.Serialize(EntityMutationPayload(updated));
         }
         catch (Exception ex)
         {
@@ -1043,7 +1021,7 @@ public sealed class OutlineCollaborationTools(
             if (existing is null)
                 return $"Error: entity {id} not found in this project.";
 
-            var deleted = await EntityPayloadAsync(ctx.ProjectId, existing);
+            var deleted = EntityMutationPayload(existing);
             await entities.DeleteAsync(ctx.ProjectId, id);
             ctx.OnMutated();
             return JsonSerializer.Serialize(new
@@ -1091,7 +1069,7 @@ public sealed class OutlineCollaborationTools(
             {
                 var entity = await entities.GetAsync(ctx.ProjectId, id);
                 if (entity is not null)
-                    orderedEntities.Add(await EntityPayloadAsync(ctx.ProjectId, entity));
+                    orderedEntities.Add(EntityMutationPayload(entity));
             }
             ctx.OnMutated();
             return JsonSerializer.Serialize(new
@@ -1144,8 +1122,8 @@ public sealed class OutlineCollaborationTools(
                     edgeType = trimmedEdgeType,
                     properties = properties ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase),
                 },
-                from = fromEntity is null ? null : await EntityPayloadAsync(ctx.ProjectId, fromEntity),
-                to = toEntity is null ? null : await EntityPayloadAsync(ctx.ProjectId, toEntity),
+                from = fromEntity is null ? null : OutlineMutationPayloads.Endpoint(fromEntity.Id, fromEntity.Type, fromEntity.Name),
+                to = toEntity is null ? null : OutlineMutationPayloads.Endpoint(toEntity.Id, toEntity.Type, toEntity.Name),
             });
         }
         catch (Exception ex)
@@ -1284,11 +1262,15 @@ public sealed class OutlineCollaborationTools(
         preview = new
         {
             summaryText = TruncatePropertyValue(entity.Summary),
-            aliases = entity.Aliases.Take(8).ToArray(),
-            wikiSections = CompactWikiSections(entity.WikiSections),
-            canonSources = CompactCanonSources(entity.CanonSources),
+            aliases = entity.Aliases.Take(4).ToArray(),
             properties = CompactProperties(entity.Properties),
-            visualExamples = (visuals ?? []).Select(example => new { example.Image.Id, example.Label, example.SortOrder, example.Image.AltText, example.Image.Prompt }),
+            visualExamples = (visuals ?? []).Take(4).Select(example => new
+            {
+                example.Image.Id,
+                example.Label,
+                example.SortOrder,
+                altText = TruncatePropertyValue(example.Image.AltText),
+            }),
         },
         detailReadTool = "read_entity",
         detailReadArguments = new { entityId = entity.Id, pageNumber = 1 },
@@ -1324,35 +1306,13 @@ public sealed class OutlineCollaborationTools(
         pageLayoutKind = chapter.VisualMode == ChapterVisualMode.Prose ? null : chapter.PageLayoutKind.ToString(),
     };
 
-    private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>
-        sources
-            .Take(4)
-            .Select(source => new
-            {
-                source.SourceTitle,
-                source.SourceKind,
-                markdown = TruncatePropertyValue(source.Markdown),
-            })
-            .ToArray();
-
-    private static object[] CompactWikiSections(IReadOnlyList<IngestWikiSection> sections) =>
-        sections
-            .Take(4)
-            .Select(section => new
-            {
-                section.Id,
-                section.Title,
-                body = TruncatePropertyValue(section.Body),
-            })
-            .ToArray();
-
     private static Dictionary<string, string?> CompactProperties(IReadOnlyDictionary<string, string?> properties)
     {
         var compact = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var property in properties
             .Where(property => !string.Equals(property.Key, "order", StringComparison.OrdinalIgnoreCase))
             .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase)
-            .Take(8))
+            .Take(4))
         {
             compact[property.Key] = TruncatePropertyValue(property.Value);
         }

@@ -52,7 +52,7 @@
 | File | Description |
 |------|-------------|
 | `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text/image parts, duration-aware tool-call chips with visual strips, generic progress rows/previews, and transcript token-count helpers. |
-| `ChatTranscriptTokenCounter.cs` | Shared transcript token-count adapter for `ChatSurface` panels: projects domain messages into a common token-count shape, includes pending/live turns, and formats exact/estimated count labels. |
+| `ChatTranscriptTokenCounter.cs` | Shared model-input token adapter for every `ChatSurface`: applies the common text-only replay policy, includes pending/live turns, and formats exact/estimated labels. |
 | `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell for transcript/live rendering, grouped adjacent tool-call chips, image visual strips with shared full-size viewing, composer controls, scrolling, and textarea autosize behavior. |
 | `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments/results/errors, generic progress rows/previews, and Editor Revision worker transcript links. |
 
@@ -60,7 +60,11 @@
 
 | File | Description |
 |------|-------------|
-| `ChatTurnRuntime.cs` | Shared singleton-friendly active-turn runtime for chat surfaces: one running turn per project, buffered subscriber replay, and explicit cancellation separate from component disposal. |
+| `ChatTurnRuntime.cs` | App-wide active-turn coordinator keyed by project and chat surface, with buffered subscriber replay and explicit cancellation separate from component disposal. |
+| `ChatTurnEngine.cs` | Shared user-facing chat protocol engine for context preflight, streaming text/tool parsing, default tool invocation, assistant tool envelopes, and common message persistence operations. |
+| `ChatModelHistory.cs` | Canonical cross-turn replay policy: retains non-empty system/user/assistant text while excluding persisted tool calls, tool results, and model-only attachments. |
+| `ChatContextPreflight.cs` | Counts each assembled provider round against the configured context budget and returns an actionable local failure before an oversized request is sent. |
+| `IChatMessageStore.cs` | Common message persistence boundary implemented by the five existing feature-specific transcript repositories. |
 
 ### Components/Layout/
 
@@ -324,7 +328,7 @@
 
 | File | Description |
 |------|-------------|
-| `IResearchService.cs` / `ResearchService.cs` | Persistent streaming Research chat: builds project context, replays text history, streams cache-first web + graph tools, stages Review edits, and derives activity from direct or paginated entity envelopes. |
+| `IResearchService.cs` / `ResearchService.cs` | Research adapter over the shared chat engine: builds project context, supplies cache-first web/graph tools, stages Review edits, and derives activity from compact or paginated entity envelopes. |
 | `ResearchTools.cs` | Research tools for explicitly paginated entity/link and web-page reads, labeled compact web discoveries, safe image inspection, confirmed import/crop/entity attachment, and staged graph mutations. |
 | `ResearchTurnUpdate.cs` | Streaming update records consumed by `ResearchChatPanel`: text/tool updates, pending AI change creation, graph mutation refreshes, assistant completion, and turn errors/cancellation. |
 | `ResearchChatTurnRunner.cs` | Background turn runner for Research chat: keeps active turns alive across component disposal and provides buffered update subscriptions. |
@@ -363,7 +367,7 @@
 | File | Description |
 |------|-------------|
 | `IWritingSampleService.cs` / `WritingSampleService.cs` | UI-facing facade for project-scoped writing samples: create/list/get/update/delete, title validation, sample body persistence, and project `UpdatedAt` touches. |
-| `IWritingCoachService.cs` / `WritingCoachService.cs` | Resettable project-level Writing Coach chat service. Mirrors the Outline chat streaming/tool-call loop with a coach prompt and read-only tool set; streams tool arguments and persists assistant tool calls plus tool-result rows. |
+| `IWritingCoachService.cs` / `WritingCoachService.cs` | Resettable Writing Coach adapter over the shared chat engine with coach-specific guidance, current-draft context, and a read-only tool set. |
 | `WritingCoachTools.cs` | Read-only Writing Coach tool builder. Exposes `read_current_section` for the latest editor draft and `list_project_facts` for graph-backed ProjectFact context. |
 | `WritingCoachTurnUpdate.cs` | Streaming update records consumed by the Writing Coach panel: text deltas, tool-call start/argument/completion updates, assistant completion, and turn errors/cancellation. |
 | `WritingCoachTurnRunner.cs` | Background turn runner for Writing Coach: owns per-project active turns, fresh scoped service execution, buffered UI subscription, and Stop-only cancellation. |
@@ -456,7 +460,7 @@
 
 | File | Description |
 |------|-------------|
-| `IImagesChatService.cs` / `ImagesChatService.cs` | Separate project-scoped Images Chat service with always-on image/layout workflow guidance, pre-history automatic visual context, attached current-turn images, tool streaming, persisted transcript/visuals, and queued generation/edit tools. |
+| `IImagesChatService.cs` / `ImagesChatService.cs` | Images adapter over the shared chat engine with image/layout guidance, automatic and attached visual context, persisted transcript visuals, and queued generation/edit tools. |
 | `ImagesChatTools.cs` | Images Chat LLM tools for paginated entity/link and source reads, compact counted search discovery, project/image reads, visual inspection/crops/masks, generation/editing with requested/actual raster metadata, and explicit chapter geometry/placement context. |
 | `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, cancellation and owned image jobs, current tool metadata, visible/model-only images, and mutation signaling. |
 | `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
@@ -504,7 +508,7 @@
 | File | Description |
 |------|-------------|
 | `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, staging helpers, persisted/model-visible visuals, and pending PicturePage render-verification state. |
-| `EditorChatService.cs` | Persistent streaming editor chat: assembles exact always-on Context Feed guidance and pre-history visual snapshots, passes complete tool envelopes without raw slicing, enforces post-mutation visual verification, stages Review edits, and routes Contest Mode. |
+| `EditorChatService.cs` | Editor adapter over the shared chat engine: assembles Context Feed/visual context, enforces post-mutation render verification, stages Review edits, and adds Contest, revision-worker, and image-job progress hooks. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific paginated chapter reads and prose-only revision worker concurrency/iteration limits. |
 | `EditorChatTools.cs` | Editor tools for paginated entity/link/source reads, counted compact discovery, project impact scoping, library-first generation with requested/actual raster metadata, visual inspection, explicit PicturePage canvas/placement/inventories, revision agents, and Contest preparation. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
@@ -522,12 +526,13 @@
 | File | Description |
 |------|-------------|
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt`, keeps Act graph nodes/structural edges synchronized, and updates targeted act context vectors on mutations. |
-| `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Multi-turn collaborative outline chat. Streams LLM text/tool updates, persists chat history, stages mutating tool calls when project approval is enabled, blocks new turns while pending changes remain, and instructs the LLM to persist project-level truths as `ProjectFact` graph nodes. |
-| `OutlineCollaborationTools.cs` | Outline `AIFunction`s including paginated entity/link/source reads, counted compact discovery, outline/entity mutations, and project-image crop/entity attachment. |
+| `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Multi-turn collaborative outline adapter over the shared chat engine; supplies the outline prompt/tools, persists its existing transcript schema, stages approval-mode changes, and emits outline refresh events. |
+| `OutlineCollaborationTools.cs` | Outline `AIFunction`s including paginated entity/link/source reads, counted compact discovery, compact mutation acknowledgements, and project-image crop/entity attachment. |
+| `OutlineMutationPayloads.cs` | Shared compact entity/endpoint envelopes used by direct and staged outline mutation tools without serializing full knowledge or relationship traversals. |
 | `OutlineChatTurnRunner.cs` | Background turn runner for Outline chat: owns active turn cancellation/subscription outside the Blazor component lifetime. |
 | `IAiChangeApprovalService.cs` / `AiChangeApprovalService.cs` | Applies or rejects queued AI changes from outline/editor/research chat, including outline/entity mutations and editor chapter-body edits; enforces dependency application/rejection cascading and writes hidden correction messages to the owning transcript. |
 | `AiChangeReviewDrafts.cs` | Typed helper for persisted pending-change review drafts: reads editable text fields, updates draft payload JSON, validates draft metadata, and resolves effective after-payloads. |
-| `OutlineToolStagingContext.cs` | Approval-mode working snapshot that overlays staged edits/reorders/links and exposes the same paginated entity/link plus explicit compact-discovery envelopes as persisted state. |
+| `OutlineToolStagingContext.cs` | Approval-mode working snapshot that overlays staged edits/reorders/links and mirrors direct-tool compact mutation and paginated read envelopes. |
 | `OutlineChangePayloads.cs` | JSON payload records shared by staging and approval application for acts, chapters, entities, links, and reorders. |
 | `AiChangeReviewDiffBuilder.cs` | Builds single-change and grouped review diff models from pending AI changes, including fuzzy line alignment and intraline highlights for the pending-change modal. |
 | `IEntityService.cs` / `EntityService.cs` | Single contract for every story-graph entity (Characters, Locations, Events/beats, ...). Entities persist as `GraphNode`s via `IGraphStore`; create/update/delete, parent moves, and relationship mutations refresh affected context/search indexes and auto mentions. `ListLinksAsync` returns manual links before low-priority read-only auto links. |

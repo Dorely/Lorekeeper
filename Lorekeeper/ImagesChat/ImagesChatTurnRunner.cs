@@ -11,23 +11,25 @@ public interface IImagesChatTurnRunner
     void Cancel(Guid projectId);
 }
 
-public sealed class ImagesChatTurnRunner(IServiceScopeFactory scopeFactory) : IImagesChatTurnRunner
+public sealed class ImagesChatTurnRunner(
+    IServiceScopeFactory scopeFactory,
+    ChatTurnRuntime runtime) : IImagesChatTurnRunner
 {
-    private readonly ChatTurnRuntime<ImagesChatTurnUpdate> _runtime = new();
+    private static ChatTurnKey Key(Guid projectId) => new(projectId, ChatTurnSurface.Images);
 
     public bool TryStart(Guid projectId, string userText) =>
-        _runtime.TryStart(
-            projectId,
+        runtime.TryStart(
+            Key(projectId),
             userText,
             cancellationToken => RunAsync(projectId, userText, cancellationToken),
             static (ex, cancelled) => new ImagesChatTurnError(cancelled ? "Cancelled." : ex.Message, cancelled),
             static update => update is ImagesChatAssistantMessageCompleted or ImagesChatTurnError);
 
-    public ChatTurnSnapshot? GetActiveTurn(Guid projectId) => _runtime.GetActiveTurn(projectId);
+    public ChatTurnSnapshot? GetActiveTurn(Guid projectId) => runtime.GetActiveTurn(Key(projectId));
 
-    public IChatTurnSubscription<ImagesChatTurnUpdate>? Subscribe(Guid projectId) => _runtime.Subscribe(projectId);
+    public IChatTurnSubscription<ImagesChatTurnUpdate>? Subscribe(Guid projectId) => runtime.Subscribe<ImagesChatTurnUpdate>(Key(projectId));
 
-    public void Cancel(Guid projectId) => _runtime.Cancel(projectId);
+    public void Cancel(Guid projectId) => runtime.Cancel(Key(projectId));
 
     private async IAsyncEnumerable<ImagesChatTurnUpdate> RunAsync(
         Guid projectId,

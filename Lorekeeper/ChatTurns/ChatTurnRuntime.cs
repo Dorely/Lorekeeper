@@ -2,7 +2,23 @@ using System.Threading.Channels;
 
 namespace Lorekeeper.ChatTurns;
 
-public sealed record ChatTurnSnapshot(Guid TurnId, Guid ProjectId, DateTime StartedAtUtc, string UserText);
+public enum ChatTurnSurface
+{
+    Outline,
+    Editor,
+    Research,
+    Images,
+    WritingCoach,
+}
+
+public readonly record struct ChatTurnKey(Guid ProjectId, ChatTurnSurface Surface);
+
+public sealed record ChatTurnSnapshot(
+    Guid TurnId,
+    Guid ProjectId,
+    ChatTurnSurface Surface,
+    DateTime StartedAtUtc,
+    string UserText);
 
 public interface IChatTurnSubscription<TUpdate> : IAsyncDisposable
 {
@@ -12,34 +28,38 @@ public interface IChatTurnSubscription<TUpdate> : IAsyncDisposable
     IAsyncEnumerable<TUpdate> ReadAllAsync(CancellationToken cancellationToken);
 }
 
-public sealed class ChatTurnRuntime<TUpdate>
+/// <summary>
+/// App-wide active-turn coordinator. A project may run one turn per chat surface concurrently;
+/// reopening a panel receives the buffered updates for that exact project/surface key.
+/// </summary>
+public sealed class ChatTurnRuntime
 {
     private readonly object _lock = new();
-    private readonly Dictionary<Guid, ActiveTurn> _activeTurns = [];
+    private readonly Dictionary<ChatTurnKey, IActiveTurn> _activeTurns = [];
 
-    public ChatTurnSnapshot? GetActiveTurn(Guid projectId)
+    public ChatTurnSnapshot? GetActiveTurn(ChatTurnKey key)
     {
         lock (_lock)
         {
-            return _activeTurns.TryGetValue(projectId, out var turn) ? turn.Snapshot : null;
+            return _activeTurns.TryGetValue(key, out var turn) ? turn.Snapshot : null;
         }
     }
 
-    public bool TryStart(
-        Guid projectId,
+    public bool TryStart<TUpdate>(
+        ChatTurnKey key,
         string userText,
         Func<CancellationToken, IAsyncEnumerable<TUpdate>> run,
         Func<Exception, bool, TUpdate> errorUpdateFactory,
         Func<TUpdate, bool> isTerminalUpdate)
     {
-        ActiveTurn turn;
+        ActiveTurn<TUpdate> turn;
         lock (_lock)
         {
-            if (_activeTurns.ContainsKey(projectId))
+            if (_activeTurns.ContainsKey(key))
                 return false;
 
-            turn = new ActiveTurn(projectId, userText, RemoveSubscription);
-            _activeTurns[projectId] = turn;
+            turn = new ActiveTurn<TUpdate>(key, userText, RemoveSubscription);
+            _activeTurns[key] = turn;
         }
 
         _ = Task.Run(
@@ -48,27 +68,29 @@ public sealed class ChatTurnRuntime<TUpdate>
         return true;
     }
 
-    public IChatTurnSubscription<TUpdate>? Subscribe(Guid projectId)
+    public IChatTurnSubscription<TUpdate>? Subscribe<TUpdate>(ChatTurnKey key)
     {
         lock (_lock)
         {
-            return _activeTurns.TryGetValue(projectId, out var turn)
-                ? turn.Subscribe()
-                : null;
+            if (!_activeTurns.TryGetValue(key, out var untyped))
+                return null;
+            if (untyped is not ActiveTurn<TUpdate> turn)
+                throw new InvalidOperationException($"Active chat turn {key} has update type {untyped.UpdateType.Name}, not {typeof(TUpdate).Name}.");
+            return turn.Subscribe();
         }
     }
 
-    public void Cancel(Guid projectId)
+    public void Cancel(ChatTurnKey key)
     {
         lock (_lock)
         {
-            if (_activeTurns.TryGetValue(projectId, out var turn))
+            if (_activeTurns.TryGetValue(key, out var turn))
                 turn.Cancel();
         }
     }
 
-    private async Task RunTurnAsync(
-        ActiveTurn turn,
+    private async Task RunTurnAsync<TUpdate>(
+        ActiveTurn<TUpdate> turn,
         Func<CancellationToken, IAsyncEnumerable<TUpdate>> run,
         Func<Exception, bool, TUpdate> errorUpdateFactory,
         Func<TUpdate, bool> isTerminalUpdate)
@@ -107,41 +129,57 @@ public sealed class ChatTurnRuntime<TUpdate>
             turn.Complete();
             lock (_lock)
             {
-                if (_activeTurns.TryGetValue(turn.ProjectId, out var active) && ReferenceEquals(active, turn))
-                    _activeTurns.Remove(turn.ProjectId);
+                if (_activeTurns.TryGetValue(turn.Key, out var active) && ReferenceEquals(active, turn))
+                    _activeTurns.Remove(turn.Key);
             }
-
             turn.Dispose();
         }
     }
 
-    private void RemoveSubscription(Guid projectId, Guid turnId, Guid subscriptionId)
+    private void RemoveSubscription(ChatTurnKey key, Guid turnId, Guid subscriptionId)
     {
         lock (_lock)
         {
-            if (_activeTurns.TryGetValue(projectId, out var turn) && turn.TurnId == turnId)
-                turn.RemoveSubscription(subscriptionId);
+            if (_activeTurns.TryGetValue(key, out var active)
+                && active.TurnId == turnId)
+            {
+                active.RemoveSubscription(subscriptionId);
+            }
         }
     }
 
-    private sealed class ActiveTurn(Guid projectId, string userText, Action<Guid, Guid, Guid> removeSubscription)
+    private interface IActiveTurn
+    {
+        ChatTurnKey Key { get; }
+        Guid TurnId { get; }
+        Type UpdateType { get; }
+        ChatTurnSnapshot Snapshot { get; }
+        void Cancel();
+        void RemoveSubscription(Guid subscriptionId);
+    }
+
+    private sealed class ActiveTurn<TUpdate>(
+        ChatTurnKey key,
+        string userText,
+        Action<ChatTurnKey, Guid, Guid> removeSubscription) : IActiveTurn
     {
         private readonly object _turnLock = new();
         private readonly CancellationTokenSource _cts = new();
         private readonly List<TUpdate> _buffer = [];
-        private readonly Dictionary<Guid, Subscription> _subscriptions = [];
+        private readonly Dictionary<Guid, Subscription<TUpdate>> _subscriptions = [];
         private bool _completed;
 
+        public ChatTurnKey Key { get; } = key;
         public Guid TurnId { get; } = Guid.NewGuid();
-        public Guid ProjectId { get; } = projectId;
+        public Type UpdateType => typeof(TUpdate);
         public DateTime StartedAtUtc { get; } = DateTime.UtcNow;
         public CancellationToken CancellationToken => _cts.Token;
         public bool IsCancellationRequested => _cts.IsCancellationRequested;
-        public ChatTurnSnapshot Snapshot => new(TurnId, ProjectId, StartedAtUtc, userText);
+        public ChatTurnSnapshot Snapshot => new(TurnId, Key.ProjectId, Key.Surface, StartedAtUtc, userText);
 
         public IChatTurnSubscription<TUpdate> Subscribe()
         {
-            var subscription = new Subscription(ProjectId, TurnId, StartedAtUtc, userText, removeSubscription);
+            var subscription = new Subscription<TUpdate>(Key, TurnId, StartedAtUtc, userText, removeSubscription);
             lock (_turnLock)
             {
                 foreach (var update in _buffer)
@@ -152,7 +190,6 @@ public sealed class ChatTurnRuntime<TUpdate>
                 else
                     _subscriptions[subscription.Id] = subscription;
             }
-
             return subscription;
         }
 
@@ -162,7 +199,6 @@ public sealed class ChatTurnRuntime<TUpdate>
             {
                 if (_completed)
                     return;
-
                 _buffer.Add(update);
                 foreach (var subscription in _subscriptions.Values)
                     subscription.TryWrite(update);
@@ -175,7 +211,6 @@ public sealed class ChatTurnRuntime<TUpdate>
             {
                 if (_completed)
                     return;
-
                 _completed = true;
                 foreach (var subscription in _subscriptions.Values)
                     subscription.Complete();
@@ -186,35 +221,28 @@ public sealed class ChatTurnRuntime<TUpdate>
         public void RemoveSubscription(Guid subscriptionId)
         {
             lock (_turnLock)
-            {
                 _subscriptions.Remove(subscriptionId);
-            }
         }
 
         public void Cancel() => _cts.Cancel();
-
         public void Dispose() => _cts.Dispose();
     }
 
-    private sealed class Subscription : IChatTurnSubscription<TUpdate>
+    private sealed class Subscription<TUpdate> : IChatTurnSubscription<TUpdate>
     {
-        private readonly Guid _projectId;
-        private readonly Action<Guid, Guid, Guid> _remove;
+        private readonly ChatTurnKey _key;
+        private readonly Action<ChatTurnKey, Guid, Guid> _remove;
         private readonly Channel<TUpdate> _channel = Channel.CreateUnbounded<TUpdate>(
-            new UnboundedChannelOptions
-            {
-                SingleReader = true,
-                SingleWriter = false,
-            });
+            new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
         public Subscription(
-            Guid projectId,
+            ChatTurnKey key,
             Guid turnId,
             DateTime startedAtUtc,
             string userText,
-            Action<Guid, Guid, Guid> remove)
+            Action<ChatTurnKey, Guid, Guid> remove)
         {
-            _projectId = projectId;
+            _key = key;
             _remove = remove;
             TurnId = turnId;
             StartedAtUtc = startedAtUtc;
@@ -225,17 +253,14 @@ public sealed class ChatTurnRuntime<TUpdate>
         public Guid TurnId { get; }
         public DateTime StartedAtUtc { get; }
         public string UserText { get; }
-
         public IAsyncEnumerable<TUpdate> ReadAllAsync(CancellationToken cancellationToken) =>
             _channel.Reader.ReadAllAsync(cancellationToken);
-
         public void TryWrite(TUpdate update) => _channel.Writer.TryWrite(update);
-
         public void Complete() => _channel.Writer.TryComplete();
 
         public ValueTask DisposeAsync()
         {
-            _remove(_projectId, TurnId, Id);
+            _remove(_key, TurnId, Id);
             _channel.Writer.TryComplete();
             return ValueTask.CompletedTask;
         }

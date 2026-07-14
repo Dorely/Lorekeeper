@@ -67,8 +67,8 @@
                        OnChanged="HandlePendingChangesChangedAsync" />
 
 @code {
-    private const string ConversationTokenUnitLabel = "conversation tokens";
-    private const string ConversationTokenTitleLabel = "conversation token count";
+    private const string ConversationTokenUnitLabel = "chat tokens";
+    private const string ConversationTokenTitleLabel = "model input token count";
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public EventCallback OnActivityChanged { get; set; }
@@ -397,38 +397,15 @@
     {
         _conversationTokens = ChatTranscriptTokenCounter.Count(
             TokenCounter,
-            ModelReplayTokenMessages(),
+            ChatTranscriptTokenCounter.ModelReplayMessages(
+                _messages,
+                message => message.Role.ToString(),
+                message => message.Content),
             message => message,
             _live,
             _pendingUserText,
             _systemPrompt);
     }
-
-    private static ChatTranscriptTokenMessage ToTokenMessage(ResearchMessage message) => new(
-        message.Role.ToString(),
-        message.Content,
-        message.ToolCallsJson,
-        message.ToolCallId,
-        message.ToolName,
-        message.ErrorMessage);
-
-    private IEnumerable<ChatTranscriptTokenMessage> ModelReplayTokenMessages()
-    {
-        foreach (var message in _messages)
-        {
-            var tokenMessage = ToModelReplayTokenMessage(message);
-            if (tokenMessage is not null)
-                yield return tokenMessage;
-        }
-    }
-
-    private static ChatTranscriptTokenMessage? ToModelReplayTokenMessage(ResearchMessage message) => message.Role switch
-    {
-        ResearchMessageRole.System when !string.IsNullOrWhiteSpace(message.Content) => new(message.Role.ToString(), message.Content),
-        ResearchMessageRole.User => new(message.Role.ToString(), message.Content),
-        ResearchMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new(message.Role.ToString(), message.Content),
-        _ => null,
-    };
 
     private static List<ChatMessagePart> BuildMessageParts(ResearchMessage message, IReadOnlyDictionary<string, ResearchMessage> byCallId)
     {

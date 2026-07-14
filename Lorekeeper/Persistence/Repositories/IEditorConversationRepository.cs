@@ -1,8 +1,9 @@
 using Lorekeeper.Models;
+using Lorekeeper.ChatTurns;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public interface IEditorConversationRepository
+public interface IEditorConversationRepository : IChatMessageStore<EditorMessage>
 {
     Task<EditorConversation?> GetByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default);
 
@@ -14,9 +15,6 @@ public interface IEditorConversationRepository
     Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
     Task AddConversationAsync(EditorConversation conversation, CancellationToken cancellationToken = default);
-    Task AddMessageAsync(EditorMessage message, CancellationToken cancellationToken = default);
     Task AddMessageVisualsAsync(IEnumerable<EditorMessageVisual> visuals, CancellationToken cancellationToken = default);
-    void UpdateMessage(EditorMessage message);
     void RemoveConversation(EditorConversation conversation);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

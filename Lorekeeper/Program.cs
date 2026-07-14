@@ -8,6 +8,7 @@ using Lorekeeper.EntityVisuals;
 using Lorekeeper.Graph;
 using Lorekeeper.Fonts;
 using Lorekeeper.ChapterVisuals;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.Images;
 using Lorekeeper.ImagesChat;
 using Lorekeeper.ImportExport;
@@ -136,6 +137,9 @@ builder.Services.AddSingleton<TiktokenTokenCounter>();
 builder.Services.AddSingleton<CharEstimateTokenCounter>();
 builder.Services.AddSingleton<ITokenCounter, CompositeTokenCounter>();
 builder.Services.AddSingleton<ITokenBudgetPlanner, TokenBudgetPlanner>();
+builder.Services.AddSingleton<ChatContextPreflight>();
+builder.Services.AddSingleton<ChatTurnEngine>();
+builder.Services.AddSingleton<ChatTurnRuntime>();
 
 // Projects
 builder.Services.AddScoped<IProjectService, ProjectService>();

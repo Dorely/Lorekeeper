@@ -45,8 +45,8 @@
 </ChatSurface>
 
 @code {
-    private const string ConversationTokenUnitLabel = "conversation tokens";
-    private const string ConversationTokenTitleLabel = "conversation token count";
+    private const string ConversationTokenUnitLabel = "chat tokens";
+    private const string ConversationTokenTitleLabel = "model input token count";
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public string? CurrentSampleTitle { get; set; }
@@ -332,20 +332,15 @@
     {
         _conversationTokens = ChatTranscriptTokenCounter.Count(
             TokenCounter,
-            _messages,
-            ToTokenMessage,
+            ChatTranscriptTokenCounter.ModelReplayMessages(
+                _messages,
+                message => message.Role.ToString(),
+                message => message.Content),
+            message => message,
             _live,
             _pendingUserText,
             WritingCoachService.CoachSystemPrompt);
     }
-
-    private static ChatTranscriptTokenMessage ToTokenMessage(WritingCoachMessage message) => new(
-        message.Role.ToString(),
-        message.Content,
-        message.ToolCallsJson,
-        message.ToolCallId,
-        message.ToolName,
-        message.ErrorMessage);
 
     private static List<ChatMessagePart> BuildMessageParts(WritingCoachMessage message, IReadOnlyDictionary<string, WritingCoachMessage> byCallId)
     {

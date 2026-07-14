@@ -11,23 +11,25 @@ public interface IWritingCoachTurnRunner
     void Cancel(Guid projectId);
 }
 
-public sealed class WritingCoachTurnRunner(IServiceScopeFactory scopeFactory) : IWritingCoachTurnRunner
+public sealed class WritingCoachTurnRunner(
+    IServiceScopeFactory scopeFactory,
+    ChatTurnRuntime runtime) : IWritingCoachTurnRunner
 {
-    private readonly ChatTurnRuntime<WritingCoachTurnUpdate> _runtime = new();
+    private static ChatTurnKey Key(Guid projectId) => new(projectId, ChatTurnSurface.WritingCoach);
 
     public bool TryStart(Guid projectId, string userText, string? currentSampleTitle, string? currentSampleBody) =>
-        _runtime.TryStart(
-            projectId,
+        runtime.TryStart(
+            Key(projectId),
             userText,
             cancellationToken => RunAsync(projectId, userText, currentSampleTitle, currentSampleBody, cancellationToken),
             static (ex, cancelled) => new WritingCoachTurnError(cancelled ? "Cancelled." : ex.Message, cancelled),
             static update => update is WritingCoachAssistantMessageCompleted or WritingCoachTurnError);
 
-    public ChatTurnSnapshot? GetActiveTurn(Guid projectId) => _runtime.GetActiveTurn(projectId);
+    public ChatTurnSnapshot? GetActiveTurn(Guid projectId) => runtime.GetActiveTurn(Key(projectId));
 
-    public IChatTurnSubscription<WritingCoachTurnUpdate>? Subscribe(Guid projectId) => _runtime.Subscribe(projectId);
+    public IChatTurnSubscription<WritingCoachTurnUpdate>? Subscribe(Guid projectId) => runtime.Subscribe<WritingCoachTurnUpdate>(Key(projectId));
 
-    public void Cancel(Guid projectId) => _runtime.Cancel(projectId);
+    public void Cancel(Guid projectId) => runtime.Cancel(Key(projectId));
 
     private async IAsyncEnumerable<WritingCoachTurnUpdate> RunAsync(
         Guid projectId,

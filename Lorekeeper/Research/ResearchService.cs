@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
@@ -27,6 +28,7 @@ public sealed class ResearchService(
     IEntityService entities,
     ResearchTools tools,
     IEntityVisualContextService entityVisualContext,
+    ChatTurnEngine turnEngine,
     IOptions<AgentOptions> options,
     ILogger<ResearchService> logger) : IResearchService
 {
@@ -235,16 +237,16 @@ public sealed class ResearchService(
         var chatProvider = providerAvailability.Provider!;
 
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
-        await conversations.AddMessageAsync(new ResearchMessage
+        var userMessage = new ResearchMessage
         {
             ConversationId = conversation.Id,
             Order = nextOrder++,
             Role = ResearchMessageRole.User,
             Content = userText.Trim(),
             Status = ResearchMessageStatus.Completed,
-        }, cancellationToken);
+        };
         conversation.UpdatedAt = DateTime.UtcNow;
-        await conversations.SaveChangesAsync(cancellationToken);
+        await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
@@ -300,7 +302,10 @@ public sealed class ResearchService(
                 "Visual examples from the initial project context. Use them only for factual identity and continuity grounding.", cancellationToken);
             if (initialVisuals is not null) messages.Add(initialVisuals);
         }
-        messages.AddRange(BuildModelHistory(history));
+        messages.AddRange(ChatModelHistory.Build(
+            history,
+            message => message.Role.ToString(),
+            message => message.Content));
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -313,138 +318,49 @@ public sealed class ResearchService(
                 Content = string.Empty,
                 Status = ResearchMessageStatus.Pending,
             };
-            await conversations.AddMessageAsync(activeAssistant, cancellationToken);
-            await conversations.SaveChangesAsync(cancellationToken);
+            await turnEngine.AddMessageAsync(conversations, activeAssistant, cancellationToken);
 
-            var textBuilder = new StringBuilder();
-            var pendingCalls = new List<PendingToolCall>();
-            var toolCallTracker = new StreamingToolCallTracker();
-            var streamFailed = false;
-            string? streamError = null;
-            var cancelled = false;
-
-            var enumerator = chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken)
-                                 .GetAsyncEnumerator(cancellationToken);
-            try
+            ChatRoundCompleted? completedRound = null;
+            await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
             {
-                while (true)
+                switch (update)
                 {
-                    bool hasNext;
-                    try
-                    {
-                        hasNext = await enumerator.MoveNextAsync();
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        cancelled = true;
+                    case ChatRoundTextDelta text:
+                        yield return new ResearchTextDelta(text.Text);
                         break;
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Research streaming round failed");
-                        streamFailed = true;
-                        streamError = ex.Message;
+                    case ChatRoundToolCallStarted started:
+                        yield return new ResearchToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                         break;
-                    }
-
-                    if (!hasNext) break;
-
-                    var updatesToYield = new List<ResearchTurnUpdate>();
-                    try
-                    {
-                        var contents = enumerator.Current?.Contents;
-                        if (contents is null) continue;
-
-                        foreach (var content in contents)
-                        {
-                            if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
-                            {
-                                textBuilder.Append(textContent.Text);
-                                updatesToYield.Add(new ResearchTextDelta(textContent.Text));
-                            }
-                            else
-                            {
-                                foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
-                                {
-                                    switch (toolUpdate)
-                                    {
-                                        case StreamingToolCallStartedUpdate started:
-                                            updatesToYield.Add(new ResearchToolCallStarted(
-                                                started.CallId,
-                                                started.ToolName,
-                                                started.ArgumentsJson,
-                                                started.ArgumentsComplete));
-                                            break;
-                                        case StreamingToolCallArgumentsDeltaUpdate delta:
-                                            updatesToYield.Add(new ResearchToolCallArgumentsDelta(
-                                                delta.CallId,
-                                                delta.ArgumentsDelta,
-                                                delta.ArgumentsComplete));
-                                            break;
-                                        case StreamingToolCallReadyUpdate ready:
-                                            pendingCalls.Add(new PendingToolCall(
-                                                ready.Content,
-                                                ready.CallId,
-                                                ready.ToolName,
-                                                ready.ArgumentsJson,
-                                                ready.TextOffset));
-                                            break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Research streaming update processing failed");
-                        streamFailed = true;
-                        streamError = ex.Message;
+                    case ChatRoundToolCallArgumentsDelta delta:
+                        yield return new ResearchToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
                         break;
-                    }
-
-                    foreach (var update in updatesToYield)
-                        yield return update;
-                }
-            }
-            finally
-            {
-                try
-                {
-                    await enumerator.DisposeAsync();
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    cancelled = true;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Research streaming enumerator disposal failed");
-                    streamFailed = true;
-                    streamError ??= ex.Message;
+                    case ChatRoundCompleted completed:
+                        completedRound = completed;
+                        break;
+                    case ChatRoundFailed failed:
+                        activeAssistant.Content = failed.Text;
+                        activeAssistant.Status = failed.Cancelled
+                            ? ResearchMessageStatus.Cancelled
+                            : ResearchMessageStatus.Failed;
+                        activeAssistant.ErrorMessage = failed.Cancelled ? "Cancelled by user." : failed.Message;
+                        await SafePersistAsync(activeAssistant);
+                        yield return new ResearchTurnError(failed.Message, failed.Cancelled);
+                        yield break;
                 }
             }
 
             DrainMutated();
-
-            if (cancelled)
+            if (completedRound is null)
             {
-                activeAssistant.Content = textBuilder.ToString();
-                activeAssistant.Status = ResearchMessageStatus.Cancelled;
-                activeAssistant.ErrorMessage = "Cancelled by user.";
-                await SafePersistAsync(activeAssistant);
-                yield return new ResearchTurnError("Cancelled.", Cancelled: true);
-                yield break;
-            }
-
-            if (streamFailed)
-            {
-                activeAssistant.Content = textBuilder.ToString();
                 activeAssistant.Status = ResearchMessageStatus.Failed;
-                activeAssistant.ErrorMessage = streamError;
+                activeAssistant.ErrorMessage = "Research streaming ended without a completed round.";
                 await SafePersistAsync(activeAssistant);
-                yield return new ResearchTurnError(streamError ?? "Research streaming failed.", Cancelled: false);
+                yield return new ResearchTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                 yield break;
             }
+
+            var textBuilder = new StringBuilder(completedRound.Text);
+            var pendingCalls = completedRound.ToolCalls;
 
             if (pendingCalls.Count == 0)
             {
@@ -458,7 +374,7 @@ public sealed class ResearchService(
             }
 
             var manifest = pendingCalls
-                .Select(pendingCall => new PersistedToolCall(
+                .Select(pendingCall => new ChatToolCallManifest(
                     pendingCall.CallId,
                     pendingCall.Name,
                     pendingCall.ArgumentsJson,
@@ -468,7 +384,7 @@ public sealed class ResearchService(
             activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
             activeAssistant.Status = ResearchMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
-            messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantContents(textBuilder.ToString(), manifest)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), manifest)));
 
             var resultContents = new List<AIContent>();
             foreach (var pendingCall in pendingCalls)
@@ -480,36 +396,18 @@ public sealed class ResearchService(
                 }
 
                 var sw = Stopwatch.StartNew();
-                string? toolResult = null;
-                string? toolError = null;
-                var toolCancelled = false;
-                try
-                {
-                    staging?.BeginToolCall(activeAssistant.Id, pendingCall.CallId, pendingCall.Name, pendingCall.ArgumentsJson);
-                    var aiFn = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name)
-                        ?? throw new InvalidOperationException($"Unknown tool '{pendingCall.Name}'.");
-                    var invokeResult = await aiFn.InvokeAsync(
-                        ToolCallArguments.Create(pendingCall.Content.Arguments, pendingCall.ArgumentsJson),
-                        cancellationToken);
-                    toolResult = invokeResult?.ToString() ?? string.Empty;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    toolCancelled = true;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Research tool '{Tool}' failed", pendingCall.Name);
-                    toolError = ex.Message;
-                    toolResult = $"Error: {ex.Message}";
-                }
+                staging?.BeginToolCall(activeAssistant.Id, pendingCall.CallId, pendingCall.Name, pendingCall.ArgumentsJson);
+                var toolOutcome = await turnEngine.InvokeToolAsync(aiTools, pendingCall, cancellationToken);
                 sw.Stop();
 
-                if (toolCancelled)
+                if (toolOutcome.Cancelled)
                 {
                     yield return new ResearchTurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
+
+                var toolResult = toolOutcome.Result;
+                var toolError = toolOutcome.Error;
 
                 var toolMessage = new ResearchMessage
                 {
@@ -522,8 +420,7 @@ public sealed class ResearchService(
                     Status = toolError is null ? ResearchMessageStatus.Completed : ResearchMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await conversations.AddMessageAsync(toolMessage, CancellationToken.None);
-                await conversations.SaveChangesAsync(CancellationToken.None);
+                await turnEngine.AddMessageAsync(conversations, toolMessage, CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
                 if (staging is not null)
@@ -573,16 +470,16 @@ public sealed class ResearchService(
             if (iteration == maxIterations - 1)
             {
                 yield return new ResearchTurnError(
-                    $"Research tool-call loop hit cap of {maxIterations} iterations without producing a final response.",
+                    ChatTurnEngine.ToolLoopLimitError(maxIterations),
                     Cancelled: false);
                 yield break;
             }
         }
     }
 
-    private static Dictionary<string, PersistedToolCall> BuildToolCallLookup(IEnumerable<ResearchMessage> history)
+    private static Dictionary<string, ChatToolCallManifest> BuildToolCallLookup(IEnumerable<ResearchMessage> history)
     {
-        var result = new Dictionary<string, PersistedToolCall>(StringComparer.Ordinal);
+        var result = new Dictionary<string, ChatToolCallManifest>(StringComparer.Ordinal);
         foreach (var message in history.Where(message => message.Role == ResearchMessageRole.Assistant))
         {
             foreach (var call in ReadPersistedToolCalls(message.ToolCallsJson))
@@ -595,7 +492,7 @@ public sealed class ResearchService(
     private static void AddToolEntityTouches(
         IDictionary<Guid, EntityTouch> touches,
         ResearchMessage message,
-        IReadOnlyDictionary<string, PersistedToolCall> toolCalls)
+        IReadOnlyDictionary<string, ChatToolCallManifest> toolCalls)
     {
         var toolName = message.ToolName ?? string.Empty;
         if (!IsEntityActivityTool(toolName)) return;
@@ -1002,10 +899,10 @@ public sealed class ResearchService(
             : first.Length <= 220 ? first : first[..220].TrimEnd() + "...";
     }
 
-    private static List<PersistedToolCall> ReadPersistedToolCalls(string toolCallsJson)
+    private static List<ChatToolCallManifest> ReadPersistedToolCalls(string toolCallsJson)
     {
         if (string.IsNullOrWhiteSpace(toolCallsJson) || toolCallsJson == "[]") return [];
-        try { return JsonSerializer.Deserialize<List<PersistedToolCall>>(toolCallsJson) ?? []; }
+        try { return JsonSerializer.Deserialize<List<ChatToolCallManifest>>(toolCallsJson) ?? []; }
         catch { return []; }
     }
 
@@ -1014,24 +911,6 @@ public sealed class ResearchService(
 
     private static string FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
-
-    private static IEnumerable<ChatMessage> BuildModelHistory(IEnumerable<ResearchMessage> history)
-    {
-        foreach (var message in history)
-        {
-            var chatMessage = ToModelHistoryMessage(message);
-            if (chatMessage is not null)
-                yield return chatMessage;
-        }
-    }
-
-    private static ChatMessage? ToModelHistoryMessage(ResearchMessage message) => message.Role switch
-    {
-        ResearchMessageRole.System when !string.IsNullOrWhiteSpace(message.Content) => new ChatMessage(ChatRole.System, message.Content),
-        ResearchMessageRole.User => new ChatMessage(ChatRole.User, message.Content),
-        ResearchMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new ChatMessage(ChatRole.Assistant, message.Content),
-        _ => null,
-    };
 
     private async Task<string> BuildSystemPromptAsync(Project project, CancellationToken cancellationToken)
     {
@@ -1051,52 +930,6 @@ public sealed class ResearchService(
         var value = _mutatedSinceYield;
         _mutatedSinceYield = false;
         return value;
-    }
-
-    private static List<AIContent> BuildTextOnlyAssistantContents(string text)
-    {
-        var contents = new List<AIContent>();
-        if (!string.IsNullOrEmpty(text)) contents.Add(new TextContent(text));
-        if (contents.Count == 0) contents.Add(new TextContent(string.Empty));
-        return contents;
-    }
-
-    private static List<AIContent> BuildAssistantContents(string text, IReadOnlyList<PersistedToolCall> calls)
-    {
-        if (calls.Count == 0) return BuildTextOnlyAssistantContents(text);
-        if (calls.Any(call => call.TextOffset is null))
-        {
-            var fallbackContents = BuildTextOnlyAssistantContents(text);
-            foreach (var call in calls)
-                fallbackContents.Add(ToFunctionCallContent(call));
-            return fallbackContents;
-        }
-
-        var contents = new List<AIContent>();
-        var cursor = 0;
-        foreach (var item in calls.Select((call, index) => new { Call = call, Index = index })
-                                  .OrderBy(item => item.Call.TextOffset!.Value)
-                                  .ThenBy(item => item.Index))
-        {
-            var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, text.Length);
-            if (offset > cursor)
-            {
-                contents.Add(new TextContent(text[cursor..offset]));
-                cursor = offset;
-            }
-            contents.Add(ToFunctionCallContent(item.Call));
-        }
-
-        if (cursor < text.Length)
-            contents.Add(new TextContent(text[cursor..]));
-        if (contents.Count == 0) contents.Add(new TextContent(string.Empty));
-        return contents;
-    }
-
-    private static FunctionCallContent ToFunctionCallContent(PersistedToolCall call)
-    {
-        var args = ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson);
-        return new FunctionCallContent(call.CallId, call.Name, args);
     }
 
     private async Task PersistFailedAssistantAsync(Guid conversationId, int order, string error)
@@ -1123,8 +956,7 @@ public sealed class ResearchService(
     {
         try
         {
-            conversations.UpdateMessage(message);
-            await conversations.SaveChangesAsync(CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(conversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -1147,12 +979,4 @@ public sealed class ResearchService(
         public Dictionary<string, string?>? Properties { get; set; }
     }
 
-    private sealed record PendingToolCall(
-        FunctionCallContent Content,
-        string CallId,
-        string Name,
-        string ArgumentsJson,
-        int TextOffset);
-
-    private sealed record PersistedToolCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
 }

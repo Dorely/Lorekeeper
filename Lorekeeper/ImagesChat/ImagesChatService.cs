@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.Context;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.EntityVisuals;
@@ -26,6 +27,7 @@ public sealed class ImagesChatService(
     IProjectImageService projectImages,
     IEntityVisualContextService entityVisualContext,
     ImagesChatTools tools,
+    ChatTurnEngine turnEngine,
     IOptions<AgentOptions> options,
     ILogger<ImagesChatService> logger) : IImagesChatService
 {
@@ -193,9 +195,8 @@ public sealed class ImagesChatService(
             Content = userText.Trim(),
             Status = ProjectImageMessageStatus.Completed,
         };
-        await conversations.AddMessageAsync(userMessage, cancellationToken);
         conversation.UpdatedAt = DateTime.UtcNow;
-        await conversations.SaveChangesAsync(cancellationToken);
+        await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
         if (turnAttachments.Count > 0)
             await PersistVisualsAsync(userMessage.Id, toolCallId: null, BuildAttachmentVisuals(turnAttachments));
 
@@ -255,7 +256,9 @@ public sealed class ImagesChatService(
                 continue;
             }
 
-            var modelMessage = ToModelHistoryMessage(persistedMessage);
+            var modelMessage = ChatModelHistory.Project(
+                persistedMessage.Role.ToString(),
+                persistedMessage.Content);
             if (modelMessage is not null)
                 messages.Add(modelMessage);
         }
@@ -271,138 +274,49 @@ public sealed class ImagesChatService(
                 Content = string.Empty,
                 Status = ProjectImageMessageStatus.Pending,
             };
-            await conversations.AddMessageAsync(activeAssistant, cancellationToken);
-            await conversations.SaveChangesAsync(cancellationToken);
+            await turnEngine.AddMessageAsync(conversations, activeAssistant, cancellationToken);
 
-            var textBuilder = new StringBuilder();
-            var pendingCalls = new List<PendingToolCall>();
-            var toolCallTracker = new StreamingToolCallTracker();
-            var streamFailed = false;
-            string? streamError = null;
-            var cancelled = false;
-
-            var enumerator = chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken)
-                                 .GetAsyncEnumerator(cancellationToken);
-            try
+            ChatRoundCompleted? completedRound = null;
+            await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
             {
-                while (true)
+                switch (update)
                 {
-                    bool hasNext;
-                    try
-                    {
-                        hasNext = await enumerator.MoveNextAsync();
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        cancelled = true;
+                    case ChatRoundTextDelta text:
+                        yield return new ImagesChatTextDelta(text.Text);
                         break;
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Images chat streaming round failed");
-                        streamFailed = true;
-                        streamError = ex.Message;
+                    case ChatRoundToolCallStarted started:
+                        yield return new ImagesChatToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                         break;
-                    }
-
-                    if (!hasNext) break;
-
-                    var updatesToYield = new List<ImagesChatTurnUpdate>();
-                    try
-                    {
-                        var contents = enumerator.Current?.Contents;
-                        if (contents is null) continue;
-
-                        foreach (var content in contents)
-                        {
-                            if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
-                            {
-                                textBuilder.Append(textContent.Text);
-                                updatesToYield.Add(new ImagesChatTextDelta(textContent.Text));
-                            }
-                            else
-                            {
-                                foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
-                                {
-                                    switch (toolUpdate)
-                                    {
-                                        case StreamingToolCallStartedUpdate started:
-                                            updatesToYield.Add(new ImagesChatToolCallStarted(
-                                                started.CallId,
-                                                started.ToolName,
-                                                started.ArgumentsJson,
-                                                started.ArgumentsComplete));
-                                            break;
-                                        case StreamingToolCallArgumentsDeltaUpdate delta:
-                                            updatesToYield.Add(new ImagesChatToolCallArgumentsDelta(
-                                                delta.CallId,
-                                                delta.ArgumentsDelta,
-                                                delta.ArgumentsComplete));
-                                            break;
-                                        case StreamingToolCallReadyUpdate ready:
-                                            pendingCalls.Add(new PendingToolCall(
-                                                ready.Content,
-                                                ready.CallId,
-                                                ready.ToolName,
-                                                ready.ArgumentsJson,
-                                                ready.TextOffset));
-                                            break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Images chat streaming update processing failed");
-                        streamFailed = true;
-                        streamError = ex.Message;
+                    case ChatRoundToolCallArgumentsDelta delta:
+                        yield return new ImagesChatToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
                         break;
-                    }
-
-                    foreach (var updateToYield in updatesToYield)
-                        yield return updateToYield;
-                }
-            }
-            finally
-            {
-                try
-                {
-                    await enumerator.DisposeAsync();
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    cancelled = true;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Images chat streaming enumerator disposal failed");
-                    streamFailed = true;
-                    streamError ??= ex.Message;
+                    case ChatRoundCompleted completed:
+                        completedRound = completed;
+                        break;
+                    case ChatRoundFailed failed:
+                        activeAssistant.Content = failed.Text;
+                        activeAssistant.Status = failed.Cancelled
+                            ? ProjectImageMessageStatus.Cancelled
+                            : ProjectImageMessageStatus.Failed;
+                        activeAssistant.ErrorMessage = failed.Cancelled ? "Cancelled by user." : failed.Message;
+                        await SafePersistAsync(activeAssistant);
+                        yield return new ImagesChatTurnError(failed.Message, failed.Cancelled);
+                        yield break;
                 }
             }
 
             DrainMutated();
-
-            if (cancelled)
+            if (completedRound is null)
             {
-                activeAssistant.Content = textBuilder.ToString();
-                activeAssistant.Status = ProjectImageMessageStatus.Cancelled;
-                activeAssistant.ErrorMessage = "Cancelled by user.";
-                await SafePersistAsync(activeAssistant);
-                yield return new ImagesChatTurnError("Cancelled.", Cancelled: true);
-                yield break;
-            }
-
-            if (streamFailed)
-            {
-                activeAssistant.Content = textBuilder.ToString();
                 activeAssistant.Status = ProjectImageMessageStatus.Failed;
-                activeAssistant.ErrorMessage = streamError;
+                activeAssistant.ErrorMessage = "Images chat streaming ended without a completed round.";
                 await SafePersistAsync(activeAssistant);
-                yield return new ImagesChatTurnError(streamError ?? "LLM streaming failed.", Cancelled: false);
+                yield return new ImagesChatTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                 yield break;
             }
+
+            var textBuilder = new StringBuilder(completedRound.Text);
+            var pendingCalls = completedRound.ToolCalls;
 
             if (pendingCalls.Count == 0)
             {
@@ -416,7 +330,7 @@ public sealed class ImagesChatService(
             }
 
             var manifest = pendingCalls
-                .Select(pendingCall => new PersistedToolCall(
+                .Select(pendingCall => new ChatToolCallManifest(
                     pendingCall.CallId,
                     pendingCall.Name,
                     pendingCall.ArgumentsJson,
@@ -427,7 +341,9 @@ public sealed class ImagesChatService(
             activeAssistant.Status = ProjectImageMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
 
-            messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantToolCallContents(manifest)));
+            messages.Add(new ChatMessage(
+                ChatRole.Assistant,
+                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), manifest)));
 
             var resultContents = new List<AIContent>();
             var modelOnlyImagesForNextRound = new List<ProjectImageView>();
@@ -441,10 +357,7 @@ public sealed class ImagesChatService(
 
                 toolContext.BeginToolCall(pendingCall.CallId, pendingCall.Name, pendingCall.ArgumentsJson);
                 var stopwatch = Stopwatch.StartNew();
-                var aiFunction = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name);
-                var toolOutcome = aiFunction is null
-                    ? new ToolInvocationOutcome($"Error: Unknown tool '{pendingCall.Name}'.", $"Unknown tool '{pendingCall.Name}'.", Cancelled: false)
-                    : await InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
+                var toolOutcome = await turnEngine.InvokeToolAsync(aiTools, pendingCall, cancellationToken);
                 stopwatch.Stop();
 
                 if (toolOutcome.Cancelled)
@@ -467,8 +380,7 @@ public sealed class ImagesChatService(
                     Status = toolError is null ? ProjectImageMessageStatus.Completed : ProjectImageMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await conversations.AddMessageAsync(toolMessage, CancellationToken.None);
-                await conversations.SaveChangesAsync(CancellationToken.None);
+                await turnEngine.AddMessageAsync(conversations, toolMessage, CancellationToken.None);
                 await PersistVisualsAsync(toolMessage.Id, pendingCall.CallId, visuals);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
@@ -494,7 +406,7 @@ public sealed class ImagesChatService(
 
             if (iteration == maxIterations - 1)
             {
-                yield return new ImagesChatTurnError($"Tool-call loop hit cap of {maxIterations} iterations without producing a final response.", Cancelled: false);
+                yield return new ImagesChatTurnError(ChatTurnEngine.ToolLoopLimitError(maxIterations), Cancelled: false);
                 yield break;
             }
         }
@@ -628,38 +540,11 @@ public sealed class ImagesChatService(
         return new ChatMessage(ChatRole.User, contents);
     }
 
-    private async Task<ToolInvocationOutcome> InvokeToolAsync(
-        AIFunction aiFunction,
-        PendingToolCall pendingCall,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var invokeResult = await aiFunction.InvokeAsync(
-                ToolCallArguments.Create(pendingCall.Content.Arguments, pendingCall.ArgumentsJson),
-                cancellationToken);
-            if (cancellationToken.IsCancellationRequested)
-                return new ToolInvocationOutcome(string.Empty, Error: null, Cancelled: true);
-
-            return new ToolInvocationOutcome(invokeResult?.ToString() ?? string.Empty, Error: null, Cancelled: false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            return new ToolInvocationOutcome(string.Empty, Error: null, Cancelled: true);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Images chat tool '{Tool}' failed", pendingCall.Name);
-            return new ToolInvocationOutcome($"Error: {ex.Message}", ex.Message, Cancelled: false);
-        }
-    }
-
     private async Task SafePersistAsync(ProjectImageMessage message)
     {
         try
         {
-            conversations.UpdateMessage(message);
-            await conversations.SaveChangesAsync(CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(conversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -667,31 +552,4 @@ public sealed class ImagesChatService(
         }
     }
 
-    private static ChatMessage? ToModelHistoryMessage(ProjectImageMessage message) => message.Role switch
-    {
-        ProjectImageMessageRole.System when !string.IsNullOrWhiteSpace(message.Content) => new ChatMessage(ChatRole.System, message.Content),
-        ProjectImageMessageRole.User => new ChatMessage(ChatRole.User, message.Content),
-        ProjectImageMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new ChatMessage(ChatRole.Assistant, message.Content),
-        _ => null,
-    };
-
-    private static List<AIContent> BuildAssistantToolCallContents(IReadOnlyList<PersistedToolCall> calls) =>
-        calls.Select(call => (AIContent)ToFunctionCallContent(call)).ToList();
-
-    private static FunctionCallContent ToFunctionCallContent(PersistedToolCall call)
-    {
-        var args = ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson);
-        return new FunctionCallContent(call.CallId, call.Name, args);
-    }
-
-    private sealed record PendingToolCall(
-        FunctionCallContent Content,
-        string CallId,
-        string Name,
-        string ArgumentsJson,
-        int TextOffset);
-
-    private sealed record ToolInvocationOutcome(string Result, string? Error, bool Cancelled);
-
-    private sealed record PersistedToolCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
 }

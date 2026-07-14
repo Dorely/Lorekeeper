@@ -624,7 +624,7 @@ public sealed class OutlineToolStagingContext(
         MarkDirectlyCreated(Resource("Entity", entity.Id));
         onDirectMutationApplied?.Invoke();
 
-        var result = Serialize(await EntityPayloadAsync(entity, cancellationToken));
+        var result = Serialize(EntityMutationPayload(entity));
         return result;
     }
 
@@ -649,7 +649,7 @@ public sealed class OutlineToolStagingContext(
                 updated.CanonSources,
                 Deleted: false);
             onDirectMutationApplied?.Invoke();
-            return Serialize(await EntityPayloadAsync(_entities[updated.Id], cancellationToken));
+            return Serialize(EntityMutationPayload(_entities[updated.Id]));
         }
 
         var before = entity.ToChange();
@@ -666,7 +666,7 @@ public sealed class OutlineToolStagingContext(
         }
 
         var after = entity.ToChange();
-        var result = Serialize(await EntityPayloadAsync(entity, cancellationToken));
+        var result = Serialize(EntityMutationPayload(entity));
         await StageChangeAsync(
             summary: $"Update {entity.Type} '{entity.Name}'",
             before: before,
@@ -687,7 +687,7 @@ public sealed class OutlineToolStagingContext(
 
         if (IsDirectlyCreated(Resource("Entity", entityId)))
         {
-            var directlyDeleted = await EntityPayloadAsync(entity, cancellationToken);
+            var directlyDeleted = EntityMutationPayload(entity);
             await entities.DeleteAsync(ProjectId, entityId, cancellationToken);
             entity.Deleted = true;
             onDirectMutationApplied?.Invoke();
@@ -699,7 +699,7 @@ public sealed class OutlineToolStagingContext(
         }
 
         var before = entity.ToChange();
-        var deleted = await EntityPayloadAsync(entity, cancellationToken);
+        var deleted = EntityMutationPayload(entity);
         entity.Deleted = true;
         var result = Serialize(new
         {
@@ -742,7 +742,7 @@ public sealed class OutlineToolStagingContext(
         var after = new OutlineEntityReorderChange(trimmedType, parentId, orderedIds.ToList());
         var orderedEntities = new List<object>();
         foreach (var orderedId in orderedIds)
-            orderedEntities.Add(await EntityPayloadAsync(_entities[orderedId], cancellationToken));
+            orderedEntities.Add(EntityMutationPayload(_entities[orderedId]));
         var result = Serialize(new
         {
             status = "reordered",
@@ -796,8 +796,8 @@ public sealed class OutlineToolStagingContext(
                 edgeType = link.EdgeType,
                 properties = link.Properties,
             },
-            from = await EndpointPayloadAsync(fromId, cancellationToken),
-            to = await EndpointPayloadAsync(toId, cancellationToken),
+            from = EndpointMutationPayload(fromId),
+            to = EndpointMutationPayload(toId),
         });
         await StageChangeAsync(
             summary: $"Link {fromId} to {toId} as {edgeType.Trim()}",
@@ -1006,51 +1006,30 @@ public sealed class OutlineToolStagingContext(
         return candidates.FirstOrDefault(entity => NormalizeForComparison(entity.Name) == requestedName);
     }
 
-    private async Task<string> DuplicateEntityResultAsync(string requestedType, EntityState duplicate, CancellationToken cancellationToken) =>
-        Serialize(new
+    private Task<string> DuplicateEntityResultAsync(string requestedType, EntityState duplicate, CancellationToken cancellationToken) =>
+        Task.FromResult(Serialize(new
         {
             status = "existing_match",
             message = $"No new {requestedType} was created because an existing {duplicate.Type} with the same name or key already exists. Use update_entity or link_entities for the existing entity, or create a more distinctly named entity if this is a separate story subject.",
-            existing = await EntityPayloadAsync(duplicate, cancellationToken),
-        });
+            existing = EntityMutationPayload(duplicate),
+        }));
 
-    private async Task<object> EntityPayloadAsync(EntityState entity, CancellationToken cancellationToken)
-    {
-        var relationContext = await BuildRelationContextAsync(entity.Id, EntityRelationOptions, cancellationToken);
-        var links = await ListEntityLinksCoreAsync(entity.Id, cancellationToken);
-        return new
-        {
-            id = entity.Id,
-            type = entity.Type,
-            name = entity.Name,
-            order = entity.Order,
-            parentId = entity.ParentId,
-            properties = entity.Properties,
-            summary = entity.Summary,
-            aliases = entity.Aliases,
-            wikiSections = entity.WikiSections,
-            canonSources = entity.CanonSources,
-            autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload),
-            relationContext,
-        };
-    }
+    private static object EntityMutationPayload(EntityState entity) =>
+        OutlineMutationPayloads.Entity(
+            entity.Id,
+            entity.Type,
+            entity.Name,
+            entity.Order,
+            entity.ParentId,
+            entity.Properties);
 
-    private async Task<object> EndpointPayloadAsync(Guid entityId, CancellationToken cancellationToken)
+    private object EndpointMutationPayload(Guid entityId)
     {
         if (TryGetEntity(entityId, out var entity))
-            return await EntityPayloadAsync(entity, cancellationToken);
+            return OutlineMutationPayloads.Endpoint(entity.Id, entity.Type, entity.Name);
 
         if (TryGetEndpoint(entityId, out var endpoint))
-        {
-            var relationContext = await BuildRelationContextAsync(entityId, EntityRelationOptions, cancellationToken);
-            return new
-            {
-                id = endpoint.Id,
-                type = endpoint.Type,
-                name = endpoint.Name,
-                relationContext,
-            };
-        }
+            return OutlineMutationPayloads.Endpoint(endpoint.Id, endpoint.Type, endpoint.Name);
 
         return new
         {
@@ -1449,36 +1428,12 @@ public sealed class OutlineToolStagingContext(
         preview = new
         {
             summaryText = TruncatePropertyValue(entity.Summary),
-            aliases = entity.Aliases.Take(8).ToArray(),
-            wikiSections = CompactWikiSections(entity.WikiSections),
-            canonSources = CompactCanonSources(entity.CanonSources),
+            aliases = entity.Aliases.Take(4).ToArray(),
             properties = CompactProperties(entity.Properties),
         },
         detailReadTool = "read_entity",
         detailReadArguments = new { entityId = entity.Id, pageNumber = 1 },
     };
-
-    private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>
-        sources
-            .Take(4)
-            .Select(source => new
-            {
-                source.SourceTitle,
-                source.SourceKind,
-                markdown = TruncatePropertyValue(source.Markdown),
-            })
-            .ToArray();
-
-    private static object[] CompactWikiSections(IReadOnlyList<IngestWikiSection> sections) =>
-        sections
-            .Take(4)
-            .Select(section => new
-            {
-                section.Id,
-                section.Title,
-                body = TruncatePropertyValue(section.Body),
-            })
-            .ToArray();
 
     private static Dictionary<string, string?> CompactProperties(IReadOnlyDictionary<string, string?> properties)
     {
@@ -1486,7 +1441,7 @@ public sealed class OutlineToolStagingContext(
         foreach (var property in properties
             .Where(property => !string.Equals(property.Key, "order", StringComparison.OrdinalIgnoreCase))
             .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase)
-            .Take(8))
+            .Take(4))
         {
             compact[property.Key] = TruncatePropertyValue(property.Value);
         }

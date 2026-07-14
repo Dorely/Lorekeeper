@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
@@ -35,6 +36,7 @@ public sealed class EditorChatService(
     IAiChangeApprovalService changeApproval,
     IAiChangeRepository changes,
     IServiceScopeFactory scopeFactory,
+    ChatTurnEngine turnEngine,
     IOptions<AgentOptions> options,
     ILogger<EditorChatService> logger) : IEditorChatService
 {
@@ -169,9 +171,8 @@ public sealed class EditorChatService(
             Content = userText.Trim(),
             Status = EditorMessageStatus.Completed,
         };
-        await conversations.AddMessageAsync(userMessage, cancellationToken);
         conversation.UpdatedAt = DateTime.UtcNow;
-        await conversations.SaveChangesAsync(cancellationToken);
+        await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
@@ -257,7 +258,10 @@ public sealed class EditorChatService(
             messages.Add(entityVisualMessage);
         }
         await AddAutomaticVisualSnapshotsAsync(messages, currentChapter, providerAvailability.Provider, cancellationToken);
-        messages.AddRange(BuildModelHistory(history));
+        messages.AddRange(ChatModelHistory.Build(
+            history,
+            message => message.Role.ToString(),
+            message => message.Content));
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -270,131 +274,49 @@ public sealed class EditorChatService(
                 Content = string.Empty,
                 Status = EditorMessageStatus.Pending,
             };
-            await conversations.AddMessageAsync(activeAssistant, cancellationToken);
-            await conversations.SaveChangesAsync(cancellationToken);
+            await turnEngine.AddMessageAsync(conversations, activeAssistant, cancellationToken);
 
-            var textBuilder = new StringBuilder();
-            var pendingCalls = new List<PendingToolCall>();
-            var toolCallTracker = new StreamingToolCallTracker();
-            var streamFailed = false;
-            string? streamError = null;
-            var cancelled = false;
-
-            var enumerator = chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken)
-                                 .GetAsyncEnumerator(cancellationToken);
-            try
+            ChatRoundCompleted? completedRound = null;
+            await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
             {
-                while (true)
+                switch (update)
                 {
-                    bool hasNext;
-                    try
-                    {
-                        hasNext = await enumerator.MoveNextAsync();
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        cancelled = true;
+                    case ChatRoundTextDelta text:
+                        yield return new EditorChatTextDelta(text.Text);
                         break;
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Editor chat streaming round failed");
-                        streamFailed = true;
-                        streamError = ex.Message;
+                    case ChatRoundToolCallStarted started:
+                        yield return new EditorChatToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                         break;
-                    }
-
-                    if (!hasNext) break;
-
-                    var updatesToYield = new List<EditorChatTurnUpdate>();
-                    try
-                    {
-                        var contents = enumerator.Current?.Contents;
-                        if (contents is null) continue;
-
-                        foreach (var content in contents)
-                        {
-                            if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
-                            {
-                                textBuilder.Append(textContent.Text);
-                                updatesToYield.Add(new EditorChatTextDelta(textContent.Text));
-                            }
-                            else
-                            {
-                                foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
-                                {
-                                    switch (toolUpdate)
-                                    {
-                                        case StreamingToolCallStartedUpdate started:
-                                            updatesToYield.Add(new EditorChatToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete));
-                                            break;
-                                        case StreamingToolCallArgumentsDeltaUpdate delta:
-                                            updatesToYield.Add(new EditorChatToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete));
-                                            break;
-                                        case StreamingToolCallReadyUpdate ready:
-                                            pendingCalls.Add(new PendingToolCall(
-                                                ready.Content,
-                                                ready.CallId,
-                                                ready.ToolName,
-                                                ready.ArgumentsJson,
-                                                ready.TextOffset));
-                                            break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Editor chat streaming update processing failed");
-                        streamFailed = true;
-                        streamError = ex.Message;
+                    case ChatRoundToolCallArgumentsDelta delta:
+                        yield return new EditorChatToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
                         break;
-                    }
-
-                    foreach (var updateToYield in updatesToYield)
-                        yield return updateToYield;
-                }
-            }
-            finally
-            {
-                try
-                {
-                    await enumerator.DisposeAsync();
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    cancelled = true;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Editor chat streaming enumerator disposal failed");
-                    streamFailed = true;
-                    streamError ??= ex.Message;
+                    case ChatRoundCompleted completed:
+                        completedRound = completed;
+                        break;
+                    case ChatRoundFailed failed:
+                        activeAssistant.Content = failed.Text;
+                        activeAssistant.Status = failed.Cancelled
+                            ? EditorMessageStatus.Cancelled
+                            : EditorMessageStatus.Failed;
+                        activeAssistant.ErrorMessage = failed.Cancelled ? "Cancelled by user." : failed.Message;
+                        await SafePersistAsync(activeAssistant);
+                        yield return new EditorChatTurnError(failed.Message, failed.Cancelled);
+                        yield break;
                 }
             }
 
             DrainMutated();
-
-            if (cancelled)
+            if (completedRound is null)
             {
-                activeAssistant.Content = textBuilder.ToString();
-                activeAssistant.Status = EditorMessageStatus.Cancelled;
-                activeAssistant.ErrorMessage = "Cancelled by user.";
-                await SafePersistAsync(activeAssistant);
-                yield return new EditorChatTurnError("Cancelled.", Cancelled: true);
-                yield break;
-            }
-
-            if (streamFailed)
-            {
-                activeAssistant.Content = textBuilder.ToString();
                 activeAssistant.Status = EditorMessageStatus.Failed;
-                activeAssistant.ErrorMessage = streamError;
+                activeAssistant.ErrorMessage = "Editor chat streaming ended without a completed round.";
                 await SafePersistAsync(activeAssistant);
-                yield return new EditorChatTurnError(streamError ?? "LLM streaming failed.", Cancelled: false);
+                yield return new EditorChatTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                 yield break;
             }
+
+            var textBuilder = new StringBuilder(completedRound.Text);
+            var pendingCalls = completedRound.ToolCalls.ToList();
 
             if (pendingCalls.Count == 0)
             {
@@ -448,7 +370,7 @@ public sealed class EditorChatService(
             }
 
             var manifest = pendingCalls
-                .Select(pendingCall => new PersistedToolCall(
+                .Select(pendingCall => new ChatToolCallManifest(
                     pendingCall.CallId,
                     pendingCall.Name,
                     pendingCall.ArgumentsJson,
@@ -461,7 +383,7 @@ public sealed class EditorChatService(
 
             messages.Add(new ChatMessage(
                 ChatRole.Assistant,
-                BuildAssistantContents(textBuilder.ToString(), manifest)));
+                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), manifest)));
 
             var resultContents = new List<AIContent>();
             var modelOnlyImagesForNextRound = new List<EditorChatModelImageAttachment>();
@@ -477,12 +399,12 @@ public sealed class EditorChatService(
 
                 var stopwatch = Stopwatch.StartNew();
                 var aiFunction = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name);
-                ToolInvocationOutcome toolOutcome;
+                ChatToolInvocationOutcome toolOutcome;
                 if (aiFunction is null)
                 {
                     var message = $"Unknown tool '{pendingCall.Name}'.";
                     logger.LogWarning("Editor chat tool '{Tool}' failed: {Message}", pendingCall.Name, message);
-                    toolOutcome = new ToolInvocationOutcome($"Error: {message}", message, Cancelled: false);
+                    toolOutcome = new ChatToolInvocationOutcome($"Error: {message}", message, Cancelled: false);
                 }
                 else if (IsRevisionAgentsTool(pendingCall.Name))
                 {
@@ -490,7 +412,7 @@ public sealed class EditorChatService(
                     await using var subscription = revisionJobNotifier.Subscribe(projectId);
                     await using var updateEnumerator = subscription.ReadAllAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
                     var updateTask = updateEnumerator.MoveNextAsync().AsTask();
-                    var invokeTask = InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
+                    var invokeTask = turnEngine.InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
 
                     while (!invokeTask.IsCompleted)
                     {
@@ -566,7 +488,7 @@ public sealed class EditorChatService(
                 else if (IsImageGenerationTool(pendingCall.Name))
                 {
                     string? lastProgressKey = null;
-                    var invokeTask = InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
+                    var invokeTask = turnEngine.InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
 
                     while (!invokeTask.IsCompleted)
                     {
@@ -619,7 +541,7 @@ public sealed class EditorChatService(
                 }
                 else
                 {
-                    toolOutcome = await InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
+                    toolOutcome = await turnEngine.InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
                 }
                 stopwatch.Stop();
 
@@ -643,8 +565,7 @@ public sealed class EditorChatService(
                     Status = toolError is null ? EditorMessageStatus.Completed : EditorMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await conversations.AddMessageAsync(toolMessage, CancellationToken.None);
-                await conversations.SaveChangesAsync(CancellationToken.None);
+                await turnEngine.AddMessageAsync(conversations, toolMessage, CancellationToken.None);
                 await PersistVisualsAsync(toolMessage.Id, pendingCall.CallId, visuals);
 
                 resultContents.Add(new FunctionResultContent(
@@ -734,7 +655,7 @@ public sealed class EditorChatService(
 
             if (iteration == maxIterations - 1)
             {
-                yield return new EditorChatTurnError($"Tool-call loop hit cap of {maxIterations} iterations without producing a final response.", Cancelled: false);
+                yield return new EditorChatTurnError(ChatTurnEngine.ToolLoopLimitError(maxIterations), Cancelled: false);
                 yield break;
             }
         }
@@ -753,8 +674,7 @@ public sealed class EditorChatService(
     {
         try
         {
-            conversations.UpdateMessage(message);
-            await conversations.SaveChangesAsync(CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(conversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -836,24 +756,6 @@ public sealed class EditorChatService(
 
         return new ChatMessage(ChatRole.User, contents);
     }
-
-    private static IEnumerable<ChatMessage> BuildModelHistory(IEnumerable<EditorMessage> history)
-    {
-        foreach (var message in history)
-        {
-            var chatMessage = ToModelHistoryMessage(message);
-            if (chatMessage is not null)
-                yield return chatMessage;
-        }
-    }
-
-    private static ChatMessage? ToModelHistoryMessage(EditorMessage message) => message.Role switch
-    {
-        EditorMessageRole.System when !string.IsNullOrWhiteSpace(message.Content) => new ChatMessage(ChatRole.System, message.Content),
-        EditorMessageRole.User => new ChatMessage(ChatRole.User, message.Content),
-        EditorMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new ChatMessage(ChatRole.Assistant, message.Content),
-        _ => null,
-    };
 
     private async Task AddAutomaticVisualSnapshotsAsync(
         List<ChatMessage> messages,
@@ -959,32 +861,6 @@ public sealed class EditorChatService(
         }
 
         return sb.ToString().Trim();
-    }
-
-    private async Task<ToolInvocationOutcome> InvokeToolAsync(
-        AIFunction aiFunction,
-        PendingToolCall pendingCall,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var invokeResult = await aiFunction.InvokeAsync(
-                ToolCallArguments.Create(pendingCall.Content.Arguments, pendingCall.ArgumentsJson),
-                cancellationToken);
-            if (cancellationToken.IsCancellationRequested)
-                return new ToolInvocationOutcome(string.Empty, Error: null, Cancelled: true);
-
-            return new ToolInvocationOutcome(invokeResult?.ToString() ?? string.Empty, Error: null, Cancelled: false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            return new ToolInvocationOutcome(string.Empty, Error: null, Cancelled: true);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Editor chat tool '{Tool}' failed", pendingCall.Name);
-            return new ToolInvocationOutcome($"Error: {ex.Message}", ex.Message, Cancelled: false);
-        }
     }
 
     private async Task<EditorChatRevisionJobUpdated?> TryBuildRevisionJobUpdateAsync(
@@ -1229,58 +1105,4 @@ public sealed class EditorChatService(
         return null;
     }
 
-    private static List<AIContent> BuildAssistantContents(string text, IReadOnlyList<PersistedToolCall> calls)
-    {
-        if (calls.Count == 0)
-            return [new TextContent(text)];
-
-        if (calls.Any(call => call.TextOffset is null))
-        {
-            var fallbackContents = new List<AIContent>();
-            if (!string.IsNullOrEmpty(text))
-                fallbackContents.Add(new TextContent(text));
-            foreach (var call in calls)
-                fallbackContents.Add(ToFunctionCallContent(call));
-            return fallbackContents;
-        }
-
-        var contents = new List<AIContent>();
-        var cursor = 0;
-        foreach (var item in calls
-            .Select((call, index) => new { Call = call, Index = index })
-            .OrderBy(item => item.Call.TextOffset!.Value)
-            .ThenBy(item => item.Index))
-        {
-            var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, text.Length);
-            if (offset > cursor)
-            {
-                contents.Add(new TextContent(text[cursor..offset]));
-                cursor = offset;
-            }
-
-            contents.Add(ToFunctionCallContent(item.Call));
-        }
-
-        if (cursor < text.Length)
-            contents.Add(new TextContent(text[cursor..]));
-
-        return contents;
-    }
-
-    private static FunctionCallContent ToFunctionCallContent(PersistedToolCall call)
-    {
-        var args = ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson);
-        return new FunctionCallContent(call.CallId, call.Name, args);
-    }
-
-    private sealed record PendingToolCall(
-        FunctionCallContent Content,
-        string CallId,
-        string Name,
-        string ArgumentsJson,
-        int TextOffset);
-
-    private sealed record ToolInvocationOutcome(string Result, string? Error, bool Cancelled);
-
-    private sealed record PersistedToolCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
 }

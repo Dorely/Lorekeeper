@@ -236,7 +236,7 @@
                     {
                         var projectImage = ImageById(image.ImageId);
                         <div class="@PictureImageElementClass(image)"
-                             style="@ElementStyle(image.XPercent, image.YPercent, image.WidthPercent, image.HeightPercent, image.ZIndex)"
+                             style="@PictureElementStyle(image.XPercent, image.YPercent, image.WidthPercent, image.HeightPercent, image.ZIndex)"
                              @onclick="@(() => SelectPictureImage(image.Id))"
                              @onclick:stopPropagation="true"
                              data-picture-element-kind="@(CanEditLayout ? "image" : null)"
@@ -1402,6 +1402,16 @@
     private static string ElementStyle(double x, double y, double width, double height, int zIndex) =>
         $"left:{x.ToString(CultureInfo.InvariantCulture)}%;top:{y.ToString(CultureInfo.InvariantCulture)}%;width:{width.ToString(CultureInfo.InvariantCulture)}%;height:{height.ToString(CultureInfo.InvariantCulture)}%;z-index:{zIndex};";
 
+    private string PictureElementStyle(double x, double y, double width, double height, int zIndex) =>
+        ElementStyle(x, y, width, height, PictureCssZIndex(zIndex));
+
+    private int PictureCssZIndex(int zIndex) =>
+        State.PageLayout.Images.Select(image => image.ZIndex)
+            .Concat(State.PageLayout.TextElements.Select(text => text.ZIndex))
+            .Where(layerZIndex => layerZIndex < zIndex)
+            .Distinct()
+            .Count() + 1;
+
     private string PictureImageElementClass(PicturePageImageElement image)
     {
         var classes = CanEditLayout
@@ -1674,7 +1684,7 @@
             ChapterTextVerticalAlign.Bottom => "flex-end",
             _ => "center",
         };
-        return ElementStyle(text.XPercent, text.YPercent, text.WidthPercent, text.HeightPercent, text.ZIndex)
+        return PictureElementStyle(text.XPercent, text.YPercent, text.WidthPercent, text.HeightPercent, text.ZIndex)
             + $"font-family:{FontFamilyCss(text.FontFamilyKey)};font-size:{fontSizeCqw.ToString(CultureInfo.InvariantCulture)}cqw;font-weight:{text.FontWeight};font-style:{(text.Italic ? "italic" : "normal")};letter-spacing:{text.LetterSpacingEm.ToString(CultureInfo.InvariantCulture)}em;line-height:{text.LineHeight.ToString(CultureInfo.InvariantCulture)};color:{TextColorValue(text)};background:{CssRgba(TextBackgroundColorValue(text), TextBackgroundOpacityValue(text))};text-align:{text.TextAlign.ToString().ToLowerInvariant()};text-shadow:{TextShadowCss(text.Shadow, fontSizeCqw)};--picture-text-vertical-position:{justify};";
     }
 

@@ -1,8 +1,9 @@
 using Lorekeeper.Models;
+using Lorekeeper.ChatTurns;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public interface IOutlineConversationRepository
+public interface IOutlineConversationRepository : IChatMessageStore<OutlineMessage>
 {
     /// <summary>Returns the project's conversation row, or null if it has not been created yet.</summary>
     Task<OutlineConversation?> GetByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default);
@@ -17,11 +18,5 @@ public interface IOutlineConversationRepository
 
     Task AddConversationAsync(OutlineConversation conversation, CancellationToken cancellationToken = default);
 
-    Task AddMessageAsync(OutlineMessage message, CancellationToken cancellationToken = default);
-
-    void UpdateMessage(OutlineMessage message);
-
     void RemoveConversation(OutlineConversation conversation);
-
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.Llm;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Models;
@@ -19,6 +20,7 @@ public sealed class OutlineCollaborationService(
     OutlineCollaborationTools tools,
     IEntityVisualContextService entityVisualContext,
     IAiChangeApprovalService changeApproval,
+    ChatTurnEngine turnEngine,
     IOptions<AgentOptions> options,
     ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
 {
@@ -77,6 +79,8 @@ When to use tools:
     you enough information to do so usefully.
 
 {{AssistantWorkflowInstructions.OutlineChat}}
+
+{{AssistantWorkflowInstructions.NonReplayedToolHistory}}
 
 {{AssistantWorkflowInstructions.EntityVisualExamples}}
 
@@ -217,9 +221,8 @@ they commit to a direction, act on it without a second confirmation.
             Content = userText.Trim(),
             Status = OutlineMessageStatus.Completed,
         };
-        await conversations.AddMessageAsync(userMsg, cancellationToken);
         conversation.UpdatedAt = DateTime.UtcNow;
-        await conversations.SaveChangesAsync(cancellationToken);
+        await turnEngine.AddMessageAsync(conversations, userMsg, cancellationToken);
 
         // Resolve the chat client + tools up front so any wiring failure surfaces before we start streaming.
         IChatClient chat = null!;
@@ -261,7 +264,10 @@ they commit to a direction, act on it without a second confirmation.
         // Build the running message list from persisted history (already includes the user msg above).
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, CollaborationSystemPrompt) };
-        messages.AddRange(history.Select(ToChatMessage));
+        messages.AddRange(ChatModelHistory.Build(
+            history,
+            message => message.Role.ToString(),
+            message => message.Content));
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         OutlineMessage? activeAssistant = null;
@@ -277,133 +283,49 @@ they commit to a direction, act on it without a second confirmation.
                 Content = string.Empty,
                 Status = OutlineMessageStatus.Pending,
             };
-            await conversations.AddMessageAsync(activeAssistant, cancellationToken);
-            await conversations.SaveChangesAsync(cancellationToken);
+            await turnEngine.AddMessageAsync(conversations, activeAssistant, cancellationToken);
 
-            var textBuilder = new StringBuilder();
-            var pendingCalls = new List<PendingToolCall>();
-            var toolCallTracker = new StreamingToolCallTracker();
-            var streamFailed = false;
-            string? streamError = null;
-            var cancelled = false;
-
-            // Stream one round. We swallow exceptions inside the iterator so we can yield clean
-            // events; the caller sees Error/cancellation as a final yielded update.
-            var enumerator = chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken)
-                                 .GetAsyncEnumerator(cancellationToken);
-            try
+            ChatRoundCompleted? completedRound = null;
+            await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
             {
-                while (true)
+                switch (update)
                 {
-                    bool hasNext;
-                    try
-                    {
-                        hasNext = await enumerator.MoveNextAsync();
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        cancelled = true;
+                    case ChatRoundTextDelta text:
+                        yield return new TextDelta(text.Text);
                         break;
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Outline streaming round failed");
-                        streamFailed = true;
-                        streamError = ex.Message;
+                    case ChatRoundToolCallStarted started:
+                        yield return new ToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                         break;
-                    }
-                    if (!hasNext) break;
-
-                    var updatesToYield = new List<OutlineTurnUpdate>();
-                    try
-                    {
-                        var contents = enumerator.Current?.Contents;
-                        if (contents is null) continue;
-
-                        foreach (var content in contents)
-                        {
-                            if (content is TextContent tc && !string.IsNullOrEmpty(tc.Text))
-                            {
-                                textBuilder.Append(tc.Text);
-                                updatesToYield.Add(new TextDelta(tc.Text));
-                            }
-                            else
-                            {
-                                foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
-                                {
-                                    switch (toolUpdate)
-                                    {
-                                        case StreamingToolCallStartedUpdate started:
-                                            updatesToYield.Add(new ToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete));
-                                            break;
-                                        case StreamingToolCallArgumentsDeltaUpdate delta:
-                                            updatesToYield.Add(new ToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete));
-                                            break;
-                                        case StreamingToolCallReadyUpdate ready:
-                                            pendingCalls.Add(new PendingToolCall(
-                                                ready.Content,
-                                                ready.CallId,
-                                                ready.ToolName,
-                                                ready.ArgumentsJson,
-                                                ready.TextOffset));
-                                            break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Outline streaming update processing failed");
-                        streamFailed = true;
-                        streamError = ex.Message;
+                    case ChatRoundToolCallArgumentsDelta delta:
+                        yield return new ToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
                         break;
-                    }
-
-                    foreach (var updateToYield in updatesToYield)
-                        yield return updateToYield;
-                }
-            }
-            finally
-            {
-                try
-                {
-                    await enumerator.DisposeAsync();
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    cancelled = true;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Outline streaming enumerator disposal failed");
-                    streamFailed = true;
-                    streamError ??= ex.Message;
+                    case ChatRoundCompleted completed:
+                        completedRound = completed;
+                        break;
+                    case ChatRoundFailed failed:
+                        activeAssistant.Content = failed.Text;
+                        activeAssistant.Status = failed.Cancelled
+                            ? OutlineMessageStatus.Cancelled
+                            : OutlineMessageStatus.Failed;
+                        activeAssistant.ErrorMessage = failed.Cancelled ? "Cancelled by user." : failed.Message;
+                        await SafePersistAsync(activeAssistant);
+                        yield return new TurnError(failed.Message, failed.Cancelled);
+                        yield break;
                 }
             }
 
-            // Drain any in-flight mutation flags from text streaming (none expected, but cheap).
             DrainMutated();
-
-            if (cancelled)
+            if (completedRound is null)
             {
-                activeAssistant.Content = textBuilder.ToString();
-                activeAssistant.Status = OutlineMessageStatus.Cancelled;
-                activeAssistant.ErrorMessage = "Cancelled by user.";
-                await SafePersistAsync(activeAssistant);
-                yield return new TurnError("Cancelled.", Cancelled: true);
-                yield break;
-            }
-
-            if (streamFailed)
-            {
-                activeAssistant.Content = textBuilder.ToString();
                 activeAssistant.Status = OutlineMessageStatus.Failed;
-                activeAssistant.ErrorMessage = streamError;
+                activeAssistant.ErrorMessage = "Outline streaming ended without a completed round.";
                 await SafePersistAsync(activeAssistant);
-                yield return new TurnError(streamError ?? "LLM streaming failed.", Cancelled: false);
+                yield return new TurnError(activeAssistant.ErrorMessage, Cancelled: false);
                 yield break;
             }
+
+            var textBuilder = new StringBuilder(completedRound.Text);
+            var pendingCalls = completedRound.ToolCalls;
 
             // No tool calls -> final turn.
             if (pendingCalls.Count == 0)
@@ -419,7 +341,7 @@ they commit to a direction, act on it without a second confirmation.
 
             // Tool round: persist this assistant row with text + tool-call manifest, then invoke each.
             var manifest = pendingCalls
-                .Select(pendingCall => new PersistedToolCall(
+                .Select(pendingCall => new ChatToolCallManifest(
                     pendingCall.CallId,
                     pendingCall.Name,
                     pendingCall.ArgumentsJson,
@@ -432,7 +354,7 @@ they commit to a direction, act on it without a second confirmation.
 
             // Append to in-memory message list as a single assistant message with tool calls,
             // matching what the model emitted (text + FunctionCallContent[]).
-            messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantContents(textBuilder.ToString(), manifest)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), manifest)));
 
             var resultContents = new List<AIContent>();
             foreach (var pendingCall in pendingCalls)
@@ -443,38 +365,19 @@ they commit to a direction, act on it without a second confirmation.
                     yield break;
                 }
 
-                var functionCall = pendingCall.Content;
                 staging?.BeginToolCall(activeAssistant.Id, pendingCall.CallId, pendingCall.Name, pendingCall.ArgumentsJson);
 
                 var sw = Stopwatch.StartNew();
-                string? toolResult = null;
-                string? toolError = null;
-                var toolCancelled = false;
-                try
-                {
-                    var aiFn = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name)
-                        ?? throw new InvalidOperationException($"Unknown tool '{pendingCall.Name}'.");
-                    var invokeResult = await aiFn.InvokeAsync(
-                        ToolCallArguments.Create(functionCall.Arguments, pendingCall.ArgumentsJson),
-                        cancellationToken);
-                    toolResult = invokeResult?.ToString() ?? string.Empty;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    toolCancelled = true;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Outline tool '{Tool}' failed", pendingCall.Name);
-                    toolError = ex.Message;
-                    toolResult = $"Error: {ex.Message}";
-                }
+                var toolOutcome = await turnEngine.InvokeToolAsync(aiTools, pendingCall, cancellationToken);
                 sw.Stop();
-                if (toolCancelled)
+                if (toolOutcome.Cancelled)
                 {
                     yield return new TurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
+
+                var toolResult = toolOutcome.Result;
+                var toolError = toolOutcome.Error;
 
                 // Persist a Tool row.
                 var toolMsg = new OutlineMessage
@@ -488,8 +391,7 @@ they commit to a direction, act on it without a second confirmation.
                     Status = toolError is null ? OutlineMessageStatus.Completed : OutlineMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await conversations.AddMessageAsync(toolMsg, CancellationToken.None);
-                await conversations.SaveChangesAsync(CancellationToken.None);
+                await turnEngine.AddMessageAsync(conversations, toolMsg, CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
                 if (staging is not null)
@@ -525,7 +427,7 @@ they commit to a direction, act on it without a second confirmation.
 
             if (iteration == maxIterations - 1)
             {
-                yield return new TurnError($"Tool-call loop hit cap of {maxIterations} iterations without producing a final response.", Cancelled: false);
+                yield return new TurnError(ChatTurnEngine.ToolLoopLimitError(maxIterations), Cancelled: false);
                 yield break;
             }
         }
@@ -546,8 +448,7 @@ they commit to a direction, act on it without a second confirmation.
     {
         try
         {
-            conversations.UpdateMessage(message);
-            await conversations.SaveChangesAsync(CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(conversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -557,95 +458,4 @@ they commit to a direction, act on it without a second confirmation.
 
     // -- history → ChatMessage replay --
 
-    private static ChatMessage ToChatMessage(OutlineMessage m) => m.Role switch
-    {
-        OutlineMessageRole.System => new ChatMessage(ChatRole.System, m.Content),
-        OutlineMessageRole.User => new ChatMessage(ChatRole.User, m.Content),
-        OutlineMessageRole.Assistant => BuildAssistantReplay(m),
-        OutlineMessageRole.Tool => new ChatMessage(ChatRole.Tool, [new FunctionResultContent(m.ToolCallId ?? string.Empty, m.Content)]),
-        _ => new ChatMessage(ChatRole.User, m.Content),
-    };
-
-    private static ChatMessage BuildAssistantReplay(OutlineMessage m)
-    {
-        var calls = ReadPersistedToolCalls(m.ToolCallsJson);
-        var contents = calls.Count == 0
-            ? BuildTextOnlyAssistantContents(m.Content)
-            : BuildAssistantContents(m.Content, calls);
-
-        return new ChatMessage(ChatRole.Assistant, contents);
-    }
-
-    private static List<AIContent> BuildTextOnlyAssistantContents(string text)
-    {
-        var contents = new List<AIContent>();
-        if (!string.IsNullOrEmpty(text)) contents.Add(new TextContent(text));
-        if (contents.Count == 0) contents.Add(new TextContent(string.Empty));
-        return contents;
-    }
-
-    private static List<AIContent> BuildAssistantContents(string text, IReadOnlyList<PersistedToolCall> calls)
-    {
-        if (calls.Count == 0) return BuildTextOnlyAssistantContents(text);
-
-        if (calls.Any(call => call.TextOffset is null))
-        {
-            var fallbackContents = BuildTextOnlyAssistantContents(text);
-            foreach (var call in calls)
-                fallbackContents.Add(ToFunctionCallContent(call));
-            return fallbackContents;
-        }
-
-        var contents = new List<AIContent>();
-        var cursor = 0;
-        foreach (var item in calls
-            .Select((call, index) => new { Call = call, Index = index })
-            .OrderBy(item => item.Call.TextOffset!.Value)
-            .ThenBy(item => item.Index))
-        {
-            var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, text.Length);
-            if (offset > cursor)
-            {
-                contents.Add(new TextContent(text[cursor..offset]));
-                cursor = offset;
-            }
-            contents.Add(ToFunctionCallContent(item.Call));
-        }
-
-        if (cursor < text.Length)
-            contents.Add(new TextContent(text[cursor..]));
-
-        if (contents.Count == 0) contents.Add(new TextContent(string.Empty));
-        return contents;
-    }
-
-    private static List<PersistedToolCall> ReadPersistedToolCalls(string toolCallsJson)
-    {
-        if (string.IsNullOrWhiteSpace(toolCallsJson) || toolCallsJson == "[]") return [];
-
-        try
-        {
-            return JsonSerializer.Deserialize<List<PersistedToolCall>>(toolCallsJson) ?? [];
-        }
-        catch
-        {
-            return [];
-        }
-    }
-
-    private static FunctionCallContent ToFunctionCallContent(PersistedToolCall call)
-    {
-        var args = ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson);
-        return new FunctionCallContent(call.CallId, call.Name, args);
-    }
-
-    private sealed record PendingToolCall(
-        FunctionCallContent Content,
-        string CallId,
-        string Name,
-        string ArgumentsJson,
-        int TextOffset);
-
-    /// <summary>JSON shape stored in <see cref="OutlineMessage.ToolCallsJson"/>.</summary>
-    private sealed record PersistedToolCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
 }

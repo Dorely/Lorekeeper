@@ -86,8 +86,8 @@
 }
 
 @code {
-    private const string ConversationTokenUnitLabel = "conversation tokens";
-    private const string ConversationTokenTitleLabel = "conversation token count";
+    private const string ConversationTokenUnitLabel = "chat tokens";
+    private const string ConversationTokenTitleLabel = "model input token count";
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public EventCallback OnImagesChanged { get; set; }
@@ -413,30 +413,15 @@
     {
         _conversationTokens = ChatTranscriptTokenCounter.Count(
             TokenCounter,
-            ModelReplayTokenMessages(),
+            ChatTranscriptTokenCounter.ModelReplayMessages(
+                _messages,
+                message => message.Role.ToString(),
+                message => message.Content),
             message => message,
             _live,
             _pendingUserText,
             _systemPrompt);
     }
-
-    private IEnumerable<ChatTranscriptTokenMessage> ModelReplayTokenMessages()
-    {
-        foreach (var message in _messages)
-        {
-            var tokenMessage = ToModelReplayTokenMessage(message);
-            if (tokenMessage is not null)
-                yield return tokenMessage;
-        }
-    }
-
-    private static ChatTranscriptTokenMessage? ToModelReplayTokenMessage(ProjectImageMessage message) => message.Role switch
-    {
-        ProjectImageMessageRole.System when !string.IsNullOrWhiteSpace(message.Content) => new(message.Role.ToString(), message.Content),
-        ProjectImageMessageRole.User => new(message.Role.ToString(), message.Content),
-        ProjectImageMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new(message.Role.ToString(), message.Content),
-        _ => null,
-    };
 
     private List<ChatMessagePart> BuildMessageParts(ProjectImageMessage message, IReadOnlyDictionary<string, ProjectImageMessage> byCallId)
     {

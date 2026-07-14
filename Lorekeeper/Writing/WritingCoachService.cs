@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
@@ -16,10 +17,11 @@ public sealed class WritingCoachService(
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     WritingCoachTools tools,
+    ChatTurnEngine turnEngine,
     IOptions<AgentOptions> options,
     ILogger<WritingCoachService> logger) : IWritingCoachService
 {
-    public const string CoachSystemPrompt = """
+    public static readonly string CoachSystemPrompt = """
         You are a Writing Coach for a long-form fiction project. Your job is to help
         the writer produce writing samples in their own style and words so future AI
         drafting can better imitate their voice.
@@ -41,7 +43,7 @@ public sealed class WritingCoachService(
         - Keep replies concise and practical. Prefer one next step over a broad lecture.
         - Pay attention to sentence rhythm, diction, point of view, imagery, pacing,
           and emotional texture. Help the writer make those choices intentional.
-        """;
+        """ + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory;
 
     private const string InitialAssistantGreeting =
         "Let's shape a writing sample in your own voice. What kind of scene, moment, or mood do you want to practice first?";
@@ -110,9 +112,8 @@ public sealed class WritingCoachService(
             Content = userText.Trim(),
             Status = WritingCoachMessageStatus.Completed,
         };
-        await conversations.AddMessageAsync(userMessage, cancellationToken);
         conversation.UpdatedAt = DateTime.UtcNow;
-        await conversations.SaveChangesAsync(cancellationToken);
+        await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
@@ -145,7 +146,10 @@ public sealed class WritingCoachService(
 
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, CoachSystemPrompt) };
-        messages.AddRange(history.Select(ToChatMessage));
+        messages.AddRange(ChatModelHistory.Build(
+            history,
+            message => message.Role.ToString(),
+            message => message.Content));
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -158,129 +162,48 @@ public sealed class WritingCoachService(
                 Content = string.Empty,
                 Status = WritingCoachMessageStatus.Pending,
             };
-            await conversations.AddMessageAsync(activeAssistant, cancellationToken);
-            await conversations.SaveChangesAsync(cancellationToken);
+            await turnEngine.AddMessageAsync(conversations, activeAssistant, cancellationToken);
 
-            var textBuilder = new StringBuilder();
-            var pendingCalls = new List<PendingToolCall>();
-            var toolCallTracker = new StreamingToolCallTracker();
-            var streamFailed = false;
-            string? streamError = null;
-            var cancelled = false;
-
-            var enumerator = chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken)
-                                 .GetAsyncEnumerator(cancellationToken);
-            try
+            ChatRoundCompleted? completedRound = null;
+            await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
             {
-                while (true)
+                switch (update)
                 {
-                    bool hasNext;
-                    try
-                    {
-                        hasNext = await enumerator.MoveNextAsync();
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        cancelled = true;
+                    case ChatRoundTextDelta text:
+                        yield return new WritingCoachTextDelta(text.Text);
                         break;
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Writing Coach streaming round failed");
-                        streamFailed = true;
-                        streamError = ex.Message;
+                    case ChatRoundToolCallStarted started:
+                        yield return new WritingCoachToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                         break;
-                    }
-
-                    if (!hasNext) break;
-
-                    var updatesToYield = new List<WritingCoachTurnUpdate>();
-                    try
-                    {
-                        var contents = enumerator.Current?.Contents;
-                        if (contents is null) continue;
-
-                        foreach (var content in contents)
-                        {
-                            if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
-                            {
-                                textBuilder.Append(textContent.Text);
-                                updatesToYield.Add(new WritingCoachTextDelta(textContent.Text));
-                            }
-                            else
-                            {
-                                foreach (var toolUpdate in toolCallTracker.Process(content, textBuilder.Length))
-                                {
-                                    switch (toolUpdate)
-                                    {
-                                        case StreamingToolCallStartedUpdate started:
-                                            updatesToYield.Add(new WritingCoachToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete));
-                                            break;
-                                        case StreamingToolCallArgumentsDeltaUpdate delta:
-                                            updatesToYield.Add(new WritingCoachToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete));
-                                            break;
-                                        case StreamingToolCallReadyUpdate ready:
-                                            pendingCalls.Add(new PendingToolCall(
-                                                ready.Content,
-                                                ready.CallId,
-                                                ready.ToolName,
-                                                ready.ArgumentsJson,
-                                                ready.TextOffset));
-                                            break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Writing Coach streaming update processing failed");
-                        streamFailed = true;
-                        streamError = ex.Message;
+                    case ChatRoundToolCallArgumentsDelta delta:
+                        yield return new WritingCoachToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
                         break;
-                    }
-
-                    foreach (var updateToYield in updatesToYield)
-                        yield return updateToYield;
-                }
-            }
-            finally
-            {
-                try
-                {
-                    await enumerator.DisposeAsync();
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    cancelled = true;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Writing Coach streaming enumerator disposal failed");
-                    streamFailed = true;
-                    streamError ??= ex.Message;
+                    case ChatRoundCompleted completed:
+                        completedRound = completed;
+                        break;
+                    case ChatRoundFailed failed:
+                        activeAssistant.Content = failed.Text;
+                        activeAssistant.Status = failed.Cancelled
+                            ? WritingCoachMessageStatus.Cancelled
+                            : WritingCoachMessageStatus.Failed;
+                        activeAssistant.ErrorMessage = failed.Cancelled ? "Cancelled by user." : failed.Message;
+                        await SafePersistAsync(activeAssistant);
+                        yield return new WritingCoachTurnError(failed.Message, failed.Cancelled);
+                        yield break;
                 }
             }
 
-            if (cancelled)
+            if (completedRound is null)
             {
-                activeAssistant.Content = textBuilder.ToString();
-                activeAssistant.Status = WritingCoachMessageStatus.Cancelled;
-                activeAssistant.ErrorMessage = "Cancelled by user.";
-                await SafePersistAsync(activeAssistant);
-                yield return new WritingCoachTurnError("Cancelled.", Cancelled: true);
-                yield break;
-            }
-
-            if (streamFailed)
-            {
-                activeAssistant.Content = textBuilder.ToString();
                 activeAssistant.Status = WritingCoachMessageStatus.Failed;
-                activeAssistant.ErrorMessage = streamError;
+                activeAssistant.ErrorMessage = "Writing Coach streaming ended without a completed round.";
                 await SafePersistAsync(activeAssistant);
-                yield return new WritingCoachTurnError(streamError ?? "Writing Coach streaming failed.", Cancelled: false);
+                yield return new WritingCoachTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                 yield break;
             }
+
+            var textBuilder = new StringBuilder(completedRound.Text);
+            var pendingCalls = completedRound.ToolCalls;
 
             if (pendingCalls.Count == 0)
             {
@@ -294,7 +217,7 @@ public sealed class WritingCoachService(
             }
 
             var manifest = pendingCalls
-                .Select(pendingCall => new PersistedToolCall(
+                .Select(pendingCall => new ChatToolCallManifest(
                     pendingCall.CallId,
                     pendingCall.Name,
                     pendingCall.ArgumentsJson,
@@ -305,7 +228,7 @@ public sealed class WritingCoachService(
             activeAssistant.Status = WritingCoachMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
 
-            messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantContents(textBuilder.ToString(), manifest)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), manifest)));
 
             var resultContents = new List<AIContent>();
             foreach (var pendingCall in pendingCalls)
@@ -317,35 +240,17 @@ public sealed class WritingCoachService(
                 }
 
                 var sw = Stopwatch.StartNew();
-                string? toolResult = null;
-                string? toolError = null;
-                var toolCancelled = false;
-                try
-                {
-                    var aiFn = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name)
-                        ?? throw new InvalidOperationException($"Unknown tool '{pendingCall.Name}'.");
-                    var invokeResult = await aiFn.InvokeAsync(
-                        ToolCallArguments.Create(pendingCall.Content.Arguments, pendingCall.ArgumentsJson),
-                        cancellationToken);
-                    toolResult = invokeResult?.ToString() ?? string.Empty;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    toolCancelled = true;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Writing Coach tool '{Tool}' failed", pendingCall.Name);
-                    toolError = ex.Message;
-                    toolResult = $"Error: {ex.Message}";
-                }
+                var toolOutcome = await turnEngine.InvokeToolAsync(aiTools, pendingCall, cancellationToken);
                 sw.Stop();
 
-                if (toolCancelled)
+                if (toolOutcome.Cancelled)
                 {
                     yield return new WritingCoachTurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
+
+                var toolResult = toolOutcome.Result;
+                var toolError = toolOutcome.Error;
 
                 var toolMessage = new WritingCoachMessage
                 {
@@ -358,8 +263,7 @@ public sealed class WritingCoachService(
                     Status = toolError is null ? WritingCoachMessageStatus.Completed : WritingCoachMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await conversations.AddMessageAsync(toolMessage, CancellationToken.None);
-                await conversations.SaveChangesAsync(CancellationToken.None);
+                await turnEngine.AddMessageAsync(conversations, toolMessage, CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
                 yield return new WritingCoachToolCallCompleted(
@@ -375,93 +279,11 @@ public sealed class WritingCoachService(
             if (iteration == maxIterations - 1)
             {
                 yield return new WritingCoachTurnError(
-                    $"Writing Coach tool-call loop hit cap of {maxIterations} iterations without producing a final response.",
+                    ChatTurnEngine.ToolLoopLimitError(maxIterations),
                     Cancelled: false);
                 yield break;
             }
         }
-    }
-
-    private static ChatMessage ToChatMessage(WritingCoachMessage message) => message.Role switch
-    {
-        WritingCoachMessageRole.System => new ChatMessage(ChatRole.System, message.Content),
-        WritingCoachMessageRole.User => new ChatMessage(ChatRole.User, message.Content),
-        WritingCoachMessageRole.Assistant => BuildAssistantReplay(message),
-        WritingCoachMessageRole.Tool => new ChatMessage(ChatRole.Tool, [new FunctionResultContent(message.ToolCallId ?? string.Empty, message.Content)]),
-        _ => new ChatMessage(ChatRole.User, message.Content),
-    };
-
-    private static ChatMessage BuildAssistantReplay(WritingCoachMessage message)
-    {
-        var calls = ReadPersistedToolCalls(message.ToolCallsJson);
-        var contents = calls.Count == 0
-            ? BuildTextOnlyAssistantContents(message.Content)
-            : BuildAssistantContents(message.Content, calls);
-
-        return new ChatMessage(ChatRole.Assistant, contents);
-    }
-
-    private static List<AIContent> BuildTextOnlyAssistantContents(string text)
-    {
-        var contents = new List<AIContent>();
-        if (!string.IsNullOrEmpty(text)) contents.Add(new TextContent(text));
-        if (contents.Count == 0) contents.Add(new TextContent(string.Empty));
-        return contents;
-    }
-
-    private static List<AIContent> BuildAssistantContents(string text, IReadOnlyList<PersistedToolCall> calls)
-    {
-        if (calls.Count == 0) return BuildTextOnlyAssistantContents(text);
-
-        if (calls.Any(call => call.TextOffset is null))
-        {
-            var fallbackContents = BuildTextOnlyAssistantContents(text);
-            foreach (var call in calls)
-                fallbackContents.Add(ToFunctionCallContent(call));
-            return fallbackContents;
-        }
-
-        var contents = new List<AIContent>();
-        var cursor = 0;
-        foreach (var item in calls
-            .Select((call, index) => new { Call = call, Index = index })
-            .OrderBy(item => item.Call.TextOffset!.Value)
-            .ThenBy(item => item.Index))
-        {
-            var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, text.Length);
-            if (offset > cursor)
-            {
-                contents.Add(new TextContent(text[cursor..offset]));
-                cursor = offset;
-            }
-            contents.Add(ToFunctionCallContent(item.Call));
-        }
-
-        if (cursor < text.Length)
-            contents.Add(new TextContent(text[cursor..]));
-
-        if (contents.Count == 0) contents.Add(new TextContent(string.Empty));
-        return contents;
-    }
-
-    private static List<PersistedToolCall> ReadPersistedToolCalls(string toolCallsJson)
-    {
-        if (string.IsNullOrWhiteSpace(toolCallsJson) || toolCallsJson == "[]") return [];
-
-        try
-        {
-            return JsonSerializer.Deserialize<List<PersistedToolCall>>(toolCallsJson) ?? [];
-        }
-        catch
-        {
-            return [];
-        }
-    }
-
-    private static FunctionCallContent ToFunctionCallContent(PersistedToolCall call)
-    {
-        var args = ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson);
-        return new FunctionCallContent(call.CallId, call.Name, args);
     }
 
     private async Task PersistFailedAssistantAsync(Guid conversationId, int order, string error)
@@ -489,8 +311,7 @@ public sealed class WritingCoachService(
     {
         try
         {
-            conversations.UpdateMessage(message);
-            await conversations.SaveChangesAsync(CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(conversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -498,12 +319,4 @@ public sealed class WritingCoachService(
         }
     }
 
-    private sealed record PendingToolCall(
-        FunctionCallContent Content,
-        string CallId,
-        string Name,
-        string ArgumentsJson,
-        int TextOffset);
-
-    private sealed record PersistedToolCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
 }

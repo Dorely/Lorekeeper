@@ -916,7 +916,10 @@
     {
         _conversationTokens = ChatTranscriptTokenCounter.Count(
             TokenCounter,
-            ModelReplayTokenMessages(),
+            ChatTranscriptTokenCounter.ModelReplayMessages(
+                _messages,
+                message => message.Role.ToString(),
+                message => message.Content),
             message => message,
             _live,
             _pendingUserText,
@@ -940,24 +943,6 @@
         var assembly = await ContextBuilder.BuildAsync(project, currentChapter, cancellationToken);
         _systemPrompt = assembly.Assemble();
     }
-
-    private IEnumerable<ChatTranscriptTokenMessage> ModelReplayTokenMessages()
-    {
-        foreach (var message in _messages)
-        {
-            var tokenMessage = ToModelReplayTokenMessage(message);
-            if (tokenMessage is not null)
-                yield return tokenMessage;
-        }
-    }
-
-    private static ChatTranscriptTokenMessage? ToModelReplayTokenMessage(EditorMessage message) => message.Role switch
-    {
-        EditorMessageRole.System when !string.IsNullOrWhiteSpace(message.Content) => new(message.Role.ToString(), message.Content),
-        EditorMessageRole.User => new(message.Role.ToString(), message.Content),
-        EditorMessageRole.Assistant when !string.IsNullOrWhiteSpace(message.Content) => new(message.Role.ToString(), message.Content),
-        _ => null,
-    };
 
     private static ChatToolProgress ToChatToolProgress(EditorRevisionJobProgress progress) => new()
     {
