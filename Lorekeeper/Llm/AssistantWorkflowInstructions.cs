@@ -26,9 +26,22 @@ public static class AssistantWorkflowInstructions
         """;
 
     public static string EditorChatFor(bool vectorSearchAvailable) =>
-        vectorSearchAvailable
+        (vectorSearchAvailable
             ? EditorChat
-            : EditorChatWithoutVectorSearch;
+            : EditorChatWithoutVectorSearch)
+        + "\n\n" + EditorPicturePageRules;
+
+    private const string EditorPicturePageRules = """
+        Picture Page design rules:
+        - Before redesigning a PicturePage chapter, call read_chapter_visual_layout and inventory the existing image and text element ids. Preserve unrelated elements, and explicitly replace or remove only the elements the redesign supersedes.
+        - Decide the spread's composition yourself: one full-spread image, several smaller illustrations, or replacements of selected existing elements. For each illustration, decide whether the intended frame is square, portrait, landscape, or custom.
+        - Image generation is library-first. Choose the raster size explicitly, generate, and visually inspect every output before placing it. Never place an image whose orientation, crop, focal subjects, or content is wrong for the planned frame.
+        - Standard generation sizes are 1024x1024, 1024x1536, and 1536x1024. Custom sizes require both edges divisible by 16, an aspect ratio from 1:3 through 3:1, 655,360-8,294,400 total pixels, and a maximum edge of 3840. Match raster aspect to the intended frame; placement determines physical page size.
+        - Background is a full-canvas placement. ReplaceElement requires the exact current image element id and preserves its geometry. Freeform requires explicit geometry and fit, allowing several separately generated images on one spread.
+        - Omitting textElementId from upsert_picture_page_text intentionally adds another box. Reworking existing text must pass that box's current id so it is updated instead of duplicated.
+        - Treat "redo", "rework", and equivalent page requests as action requests. Do not leave the layout unchanged and call it good.
+        - After the final Picture Page mutation, read_chapter_visual_layout must successfully render the latest state before completing the turn. A corrective mutation makes verification pending again. Inspect orientation, crop, focal subjects, text readability, gutter safety, image/text element counts, layout diagnostics, and textFit.allTextFits.
+        """;
 
     public const string EditorChat = """
         You are operating inside Lorekeeper with tool access to the current project.

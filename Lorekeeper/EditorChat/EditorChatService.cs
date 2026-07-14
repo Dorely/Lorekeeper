@@ -205,6 +205,13 @@ public sealed class EditorChatService(
                 ? AssistantWorkflowInstructions.EditorContestPreparation
                 : AssistantWorkflowInstructions.EditorChatFor(vectorSearchAvailable)
                     + "\n\n" + agentSkills.BuildCatalogInstructions();
+            if (!contestModeEnabled && currentChapter?.VisualMode == ChapterVisualMode.PicturePage)
+            {
+                var picturePageSkill = agentSkills.Find(AgentSkillIds.PicturePageDesign)
+                    ?? throw new InvalidOperationException($"Built-in skill '{AgentSkillIds.PicturePageDesign}' was not found.");
+                assistantWorkflow +=
+                    $"\n\nAutomatically active skill for the current PicturePage chapter:\n\n{picturePageSkill.Instructions}";
+            }
             systemPrompt = assembly.Assemble(assistantWorkflow);
 
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
@@ -234,6 +241,8 @@ public sealed class EditorChatService(
                 outlineStaging,
                 editorStaging,
                 cancellationToken);
+            if (!contestModeEnabled && currentChapter?.VisualMode == ChapterVisualMode.PicturePage)
+                editorContext.Skills.Activate(AgentSkillIds.PicturePageDesign);
             aiTools = await tools.BuildAsync(editorContext, contestModeEnabled ? EditorChatToolMode.ContestPreparation : EditorChatToolMode.Normal, cancellationToken);
         }
         catch (Exception ex)
@@ -409,6 +418,28 @@ public sealed class EditorChatService(
                 activeAssistant.Content = textBuilder.ToString();
                 activeAssistant.Status = EditorMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
+
+                var unverifiedPicturePages = editorContext.PicturePageChaptersAwaitingVerification;
+                if (unverifiedPicturePages.Count > 0)
+                {
+                    messages.Add(new ChatMessage(ChatRole.Assistant, activeAssistant.Content));
+                    messages.Add(new ChatMessage(
+                        ChatRole.System,
+                        "The previous response attempted to finish while Picture Page verification is still pending for chapter id(s): "
+                        + string.Join(", ", unverifiedPicturePages.Select(id => id.ToString("N")))
+                        + ". Before giving a final response, call read_chapter_visual_layout for every listed chapter after its latest mutation and inspect the newest render, element inventory, layout diagnostics, and textFit.allTextFits. If you make a correction, render again afterward."));
+
+                    if (iteration == maxIterations - 1)
+                    {
+                        yield return new EditorChatTurnError(
+                            $"Tool-call loop hit cap of {maxIterations} iterations with Picture Page verification still pending.",
+                            Cancelled: false);
+                        yield break;
+                    }
+
+                    continue;
+                }
+
                 conversation.UpdatedAt = DateTime.UtcNow;
                 await conversations.SaveChangesAsync(CancellationToken.None);
                 yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);

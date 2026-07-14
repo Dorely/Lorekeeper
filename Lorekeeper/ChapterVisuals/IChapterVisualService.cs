@@ -33,7 +33,8 @@ public interface IChapterVisualService
     string BuildManifest(
         ChapterVisualState state,
         IReadOnlyDictionary<Guid, string>? imageNames = null,
-        IReadOnlyDictionary<string, string>? fontNames = null);
+        IReadOnlyDictionary<string, string>? fontNames = null,
+        bool includePicturePageGenerationGuidance = true);
 }
 
 public sealed record ChapterPicturePageSurface(

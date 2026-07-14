@@ -411,7 +411,11 @@ public sealed class ContextBuilder(
             .ToDictionary(image => image.Id, image => image.FileName);
         var fontCatalog = await projectFonts.ListAsync(projectId, cancellationToken);
         var fontNames = fontCatalog.ToDictionary(font => font.Key, font => font.Name, StringComparer.OrdinalIgnoreCase);
-        var manifest = new StringBuilder(chapterVisuals.BuildManifest(state, imageNames, fontNames));
+        var manifest = new StringBuilder(chapterVisuals.BuildManifest(
+            state,
+            imageNames,
+            fontNames,
+            includePicturePageGenerationGuidance: false));
         manifest.AppendLine("Available PicturePage font faces:");
         foreach (var font in fontCatalog)
         {

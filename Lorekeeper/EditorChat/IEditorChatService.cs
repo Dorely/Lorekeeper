@@ -41,6 +41,7 @@ public sealed class EditorChatContext(
     private EditorContestStartRequest? _contestRequest;
     private Guid? _currentImageGenerationJobId;
     private readonly HashSet<Guid> _directlyEditedChapterBodies = [];
+    private readonly HashSet<Guid> _picturePageChaptersAwaitingVerification = [];
     private readonly List<EditorChatVisualAttachment> _visuals = [];
     private readonly List<EditorChatModelImageAttachment> _modelOnlyImages = [];
 
@@ -75,6 +76,15 @@ public sealed class EditorChatContext(
 
     public void MarkChapterBodyDirectlyEdited(Guid chapterId) =>
         _directlyEditedChapterBodies.Add(chapterId);
+
+    public void MarkPicturePageMutation(Guid chapterId) =>
+        _picturePageChaptersAwaitingVerification.Add(chapterId);
+
+    public void MarkPicturePageVerified(Guid chapterId) =>
+        _picturePageChaptersAwaitingVerification.Remove(chapterId);
+
+    public IReadOnlyList<Guid> PicturePageChaptersAwaitingVerification =>
+        _picturePageChaptersAwaitingVerification.Order().ToList();
 
     public void BeginToolCall(Guid assistantMessageId, string toolCallId, string toolName, string argumentsJson)
     {

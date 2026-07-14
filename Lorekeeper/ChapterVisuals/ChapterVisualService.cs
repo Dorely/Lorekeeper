@@ -113,7 +113,7 @@ public sealed class ChapterVisualService(
                     .ToList();
                 var zIndex = request.PicturePageRole == PicturePageImagePlacementRole.Background
                     ? zIndexes.DefaultIfEmpty(0).Min() - 1
-                    : zIndexes.DefaultIfEmpty(0).Max() + 1;
+                    : request.ZIndex ?? zIndexes.DefaultIfEmpty(0).Max() + 1;
                 elementId = Guid.NewGuid();
                 var background = request.PicturePageRole == PicturePageImagePlacementRole.Background;
                 layout = layout with
@@ -122,11 +122,11 @@ public sealed class ChapterVisualService(
                         .Append(new PicturePageImageElement(
                             elementId,
                             imageId,
-                            XPercent: background ? 0 : 20,
-                            YPercent: background ? 0 : 20,
-                            WidthPercent: background ? 100 : 60,
-                            HeightPercent: background ? 100 : 45,
-                            Fit: background ? ChapterImageFit.Cover : ChapterImageFit.Contain,
+                            XPercent: background ? 0 : request.XPercent ?? 20,
+                            YPercent: background ? 0 : request.YPercent ?? 20,
+                            WidthPercent: background ? 100 : request.WidthPercent ?? 60,
+                            HeightPercent: background ? 100 : request.HeightPercent ?? 45,
+                            Fit: background ? ChapterImageFit.Cover : request.Fit ?? ChapterImageFit.Contain,
                             Opacity: 1,
                             ZIndex: zIndex,
                             AltTextOverride: string.Empty))
@@ -473,7 +473,8 @@ public sealed class ChapterVisualService(
     public string BuildManifest(
         ChapterVisualState state,
         IReadOnlyDictionary<Guid, string>? imageNames = null,
-        IReadOnlyDictionary<string, string>? fontNames = null)
+        IReadOnlyDictionary<string, string>? fontNames = null,
+        bool includePicturePageGenerationGuidance = true)
     {
         var builder = new StringBuilder();
         builder.AppendLine($"Visual mode: {state.VisualMode}");
@@ -488,8 +489,11 @@ public sealed class ChapterVisualService(
             var metrics = PageMetrics(state.PageLayoutKind);
             builder.AppendLine(
                 $"Picture page layout: {state.PageLayoutKind}; physical page {metrics.PageWidthInches:0.##} x {metrics.PageHeightInches:0.##} in; spread: {metrics.IsDouble}");
-            foreach (var guidanceLine in PicturePageImageGenerationGuidance.BuildManifestLines(state))
-                builder.AppendLine(guidanceLine);
+            if (includePicturePageGenerationGuidance)
+            {
+                foreach (var guidanceLine in PicturePageImageGenerationGuidance.BuildManifestLines(state))
+                    builder.AppendLine(guidanceLine);
+            }
             foreach (var text in state.PageLayout.TextElements.OrderBy(text => text.ReadingOrder))
             {
                 var fontName = fontNames?.GetValueOrDefault(text.FontFamilyKey) ?? text.FontFamilyKey;
@@ -498,9 +502,14 @@ public sealed class ChapterVisualService(
             }
             foreach (var image in state.PageLayout.Images.OrderBy(image => image.ZIndex))
             {
-                var slot = PicturePageImageGenerationGuidance.ForSlot(state.PageLayoutKind, image);
-                builder.AppendLine(
-                    $"Image {Name(image.ImageId, imageNames)} at {image.XPercent:0.#},{image.YPercent:0.#} size {image.WidthPercent:0.#}x{image.HeightPercent:0.#}, fit {image.Fit}, z {image.ZIndex}; target aspect {slot.AspectRatio}, recommended size {slot.RecommendedSize}");
+                var placement =
+                    $"Image {Name(image.ImageId, imageNames)} at {image.XPercent:0.#},{image.YPercent:0.#} size {image.WidthPercent:0.#}x{image.HeightPercent:0.#}, fit {image.Fit}, z {image.ZIndex}";
+                if (includePicturePageGenerationGuidance)
+                {
+                    var slot = PicturePageImageGenerationGuidance.ForSlot(state.PageLayoutKind, image);
+                    placement += $"; target aspect {slot.AspectRatio}, recommended size {slot.RecommendedSize}";
+                }
+                builder.AppendLine(placement);
             }
             return builder.ToString();
         }

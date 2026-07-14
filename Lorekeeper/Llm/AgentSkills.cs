@@ -70,19 +70,25 @@ public sealed class BuiltInAgentSkillRegistry : IAgentSkillRegistry
         new(
             AgentSkillIds.PicturePageDesign,
             "Design and verify Picture Page composition, typography, image placement, safe areas, reading flow, and rendered fit.",
-            "Load before changing a Picture Page mode, text box, image element, placement, or full-page illustration target.",
+            "Automatically active for the current PicturePage chapter; otherwise load before changing Picture Page mode, text, imagery, or placement.",
             """
             # Picture Page design and typesetting
 
-            Apply this skill before mutating Picture Page structure, typography, placement, or page-targeted art.
+            Apply this skill before mutating Picture Page structure, typography, placement, or generating art intended for a Picture Page.
 
             ## Composition
-            - Treat copy, text geometry, and illustration as one composition. Establish provisional text boxes before generating a full-page background so the image request receives concrete quiet regions.
+            - Before redesigning a spread, call read_chapter_visual_layout and inventory every current image element id and text element id. Work from that current render and manifest, not from memory or a turn-start thumbnail.
+            - Treat copy, text geometry, and illustration as one composition. Decide how many illustrations the spread needs before generating: one full-spread image, several independently placed illustrations, or a replacement for a specific existing element. Do not assume that one page-sized image is the right composition.
+            - For every planned illustration, decide whether its intended frame is square, portrait, landscape, or custom. Choose a raster aspect that matches that intended frame; decide its physical size and location later during placement.
+            - Standard generation sizes are 1024x1024 for square, 1024x1536 for portrait, and 1536x1024 for landscape. Custom sizes must use edges divisible by 16, an aspect ratio from 1:3 through 3:1, 655,360 through 8,294,400 total pixels, and a maximum edge of 3840.
+            - Generate each illustration into the image library first. Inspect every generated image before placing it, checking its orientation, crop, focal subjects, and suitability for the intended frame. A visually wrong generation must not be placed merely because the tool succeeded.
+            - Preserve unrelated spread elements. Replace or remove only the exact superseded image and text element ids; never append a replacement while silently leaving the old element behind.
+            - Treat requests such as "redo this page" or "rework this spread" as instructions to perform a redesign. Read the current layout, make the needed mutations, and verify the result rather than assessing the unchanged page as acceptable.
             - Prefer one clear text landing zone. Use multiple boxes only for deliberate narrative beats, and preserve an obvious language-appropriate reading path.
             - Default multiline prose to left/top alignment. Reserve centered or display treatment for short passages that support it.
             - Keep text at least 0.375 inches from trim edges and from both sides of a spread gutter; prefer 0.5 inches. Keep it away from faces, hands, focal objects, important action, and highly detailed backgrounds.
-            - For a new full-page background, generate against the page target, place it as Background, and inspect the newest rendered snapshot. Adjust text geometry or backing panels before regenerating art unless the composition is fundamentally incompatible or the user requests new art.
-            - Freeform placement keeps normal centered geometry. Background fills 0,0,100,100 with Cover behind other elements. ReplaceElement preserves the target image element's geometry and layer.
+            - Background fills 0,0,100,100 with Cover behind other elements. ReplaceElement requires an exact current image element id and preserves its geometry and layer. Freeform requires explicit xPercent, yPercent, widthPercent, heightPercent, fit, and optionally zIndex so several images can form one deliberate spread.
+            - When updating existing text, pass its current textElementId. Omitting textElementId intentionally creates an additional box; never omit it for a rework of existing copy.
 
             ## Typography
             - Use an adaptive picture-book baseline: clear type and predictable reading flow by default, larger and simpler treatment for early readers, and expressive display treatment only for short art-led passages.
@@ -93,8 +99,8 @@ public sealed class BuiltInAgentSkillRegistry : IAgentSkillRegistry
             - When the user asks text to fill its safe area, establish the intended box geometry and let automatic fitting choose the size. Inspect heightUtilizationPercent, line breaks, hierarchy, and readability in the resulting snapshot; aim for roughly 85-95% vertical utilization when the composition allows it.
 
             ## Verification
-            - After every corrective Picture Page mutation, call read_chapter_visual_layout again and inspect the newest rendered snapshot rather than the turn-start image.
-            - Do not claim success until textFit.allTextFits is true, all error-level layout diagnostics are clear unless the user explicitly accepts an exception, advisory warnings have been reviewed, and the snapshot has been checked for contrast, hierarchy, focal conflicts, gutter safety, and reading flow.
+            - After the final Picture Page mutation, call read_chapter_visual_layout and inspect the newest rendered snapshot. Every corrective mutation makes that verification stale and requires another read.
+            - Do not claim success until the newest render has been checked for image orientation, cropping, focal subjects, text readability, contrast, hierarchy, gutter safety, reading flow, and the intended image/text element counts. Confirm textFit.allTextFits is true, all error-level layout diagnostics are clear unless the user explicitly accepts an exception, and advisory warnings have been reviewed.
             - Structural mutation results confirm storage only; they do not prove that the page looks correct.
             """),
     ];
@@ -127,6 +133,8 @@ public sealed class AgentSkillSession
     private readonly HashSet<string> _pending = new(StringComparer.OrdinalIgnoreCase);
 
     public void LoadForNextRound(string skillId) => _pending.Add(skillId);
+
+    public void Activate(string skillId) => _active.Add(skillId);
 
     public void ActivatePending()
     {

@@ -16,7 +16,13 @@ public sealed record ChapterVisualModeUpdate(
 
 public sealed record ChapterImagePlacementRequest(
     PicturePageImagePlacementRole PicturePageRole = PicturePageImagePlacementRole.Freeform,
-    Guid? TargetPictureImageElementId = null);
+    Guid? TargetPictureImageElementId = null,
+    double? XPercent = null,
+    double? YPercent = null,
+    double? WidthPercent = null,
+    double? HeightPercent = null,
+    ChapterImageFit? Fit = null,
+    int? ZIndex = null);
 
 public sealed record ChapterImagePlacementResult(
     ChapterVisualState State,
