@@ -38,7 +38,6 @@ public sealed class EditorChatService(
     IServiceScopeFactory scopeFactory,
     IAgentSkillRegistry agentSkills,
     IOptions<AgentOptions> options,
-    IOptions<EditorChatOptions> editorOptions,
     ILogger<EditorChatService> logger) : IEditorChatService
 {
     private const string _initialAssistantGreeting =
@@ -666,7 +665,7 @@ public sealed class EditorChatService(
 
                 resultContents.Add(new FunctionResultContent(
                     pendingCall.CallId,
-                    BuildToolResultForModel(pendingCall.Name, toolResult ?? string.Empty, EffectiveMaxToolResultCharsForModel())));
+                    toolResult ?? string.Empty));
                 var modelImages = editorContext.DrainModelOnlyImages();
                 if (modelImages.Count > 0)
                     modelOnlyImagesForNextRound.AddRange(modelImages);
@@ -977,24 +976,6 @@ public sealed class EditorChatService(
         }
 
         return sb.ToString().Trim();
-    }
-
-    private int EffectiveMaxToolResultCharsForModel() => Math.Max(1000, editorOptions.Value.MaxToolResultCharsForModel);
-
-    private static string BuildToolResultForModel(string toolName, string result, int maxToolResultCharsForModel)
-    {
-        if (string.Equals(toolName, "start_revision_agents", StringComparison.Ordinal))
-            return result;
-
-        if (result.Length <= maxToolResultCharsForModel)
-            return result;
-
-        var message = string.Equals(toolName, "read_chapter", StringComparison.Ordinal)
-            ? "[Tool result exceeded the model-facing limit after pagination. Request a specific page from the returned pagination metadata.]"
-            : "[Tool result truncated before returning it to the model.]";
-
-        return result[..maxToolResultCharsForModel]
-            + "\n\n" + message;
     }
 
     private async Task<ToolInvocationOutcome> InvokeToolAsync(

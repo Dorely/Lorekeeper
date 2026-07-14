@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.EntityVisuals;
@@ -717,92 +719,60 @@ public sealed class ContextBuilder(
         IReadOnlyList<EntityVisualExampleView> visualExamples,
         CancellationToken cancellationToken)
     {
-        var sb = new StringBuilder();
-        sb.Append("Id: ").AppendLine(entity.Id.ToString("N"));
-        sb.Append("Type: ").AppendLine(entity.Type);
-        sb.Append("Name: ").AppendLine(entity.Name);
-        AppendOptionalIndented(sb, "Summary", entity.Summary, 0);
-
-        if (entity.Properties.Count > 0)
-        {
-            sb.AppendLine("Properties:");
-            foreach (var property in entity.Properties.OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase))
-                sb.Append("- ").Append(property.Key).Append(": ").AppendLine(property.Value ?? string.Empty);
-        }
-
-        if (entity.Aliases.Count > 0)
-        {
-            sb.AppendLine("Aliases:");
-            sb.Append("- ").AppendLine(string.Join(", ", entity.Aliases));
-        }
-
-        if (entity.WikiSections.Count > 0)
-        {
-            sb.AppendLine("Wiki sheet:");
-            foreach (var section in entity.WikiSections.Take(8))
-            {
-                sb.Append("- ").Append(section.Title).Append(": ").AppendLine(section.Body);
-                foreach (var citation in section.Citations.Take(2))
-                {
-                    sb.Append("  Source: ").Append(citation.SourceTitle).Append(" chunk ").Append(citation.SourceChunkIndex + 1).AppendLine();
-                }
-            }
-        }
-
-        if (entity.CanonSources.Count > 0)
-        {
-            sb.AppendLine("Canon sources:");
-            foreach (var source in entity.CanonSources.Take(6))
-            {
-                sb.Append("# ").Append(source.SourceTitle).AppendLine();
-                sb.AppendLine(source.Markdown);
-            }
-        }
-
-        if (visualExamples.Count > 0)
-        {
-            sb.AppendLine("Visual examples:");
-            foreach (var example in visualExamples.OrderBy(example => example.SortOrder))
-            {
-                sb.Append("- ").Append(example.Label)
-                  .Append(" [imageId: ").Append(example.Image.Id.ToString("N"))
-                  .Append("; file: ").Append(example.Image.FileName).AppendLine("]");
-                AppendOptionalIndented(sb, "Alt text", example.Image.AltText, 2);
-                AppendOptionalIndented(sb, "Generation prompt", example.Image.Prompt, 2);
-            }
-        }
-
         var links = await entities.ListLinksAsync(projectId, entity.Id, cancellationToken);
-        var visibleLinks = links
-            .Where(link => IsContextEntityType(link.OtherEntityType) || string.Equals(link.OtherEntityType, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        if (visibleLinks.Count > 0)
+        var detail = JsonSerializer.SerializeToNode(new
         {
-            var manualLinks = visibleLinks.Where(link => !link.IsAutoLink).ToList();
-            var autoLinks = visibleLinks.Where(link => link.IsAutoLink).ToList();
-            if (manualLinks.Count > 0)
+            properties = entity.Properties.OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase),
+            summary = entity.Summary,
+            aliases = entity.Aliases,
+            wikiSections = entity.WikiSections,
+            canonSources = entity.CanonSources,
+            visualExamples = visualExamples.OrderBy(example => example.SortOrder).Select(example => new
             {
-                sb.AppendLine("Links:");
-                foreach (var link in manualLinks)
-                    AppendLinkLine(sb, link);
-            }
-            if (autoLinks.Count > 0)
-            {
-                sb.AppendLine("Auto mention links (weak discovery hints):");
-                foreach (var link in autoLinks.Take(12))
-                    AppendLinkLine(sb, link);
-            }
-        }
-
-        return sb.ToString().TrimEnd();
+                example.Id,
+                example.EntityId,
+                example.Label,
+                example.SortOrder,
+                example.Origin,
+                image = new
+                {
+                    example.Image.Id,
+                    example.Image.FileName,
+                    example.Image.AltText,
+                    example.Image.Prompt,
+                },
+            }),
+            manualLinks = links.Where(link => !link.IsAutoLink).Select(ContextLinkPayload),
+            autoMentionLinks = links.Where(link => link.IsAutoLink).Select(ContextLinkPayload),
+        });
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(
+                entity.Id,
+                entity.Type,
+                entity.Name,
+                entity.Order,
+                entity.ParentId,
+                ("contextFeed", JsonValue.Create(true))),
+            detail,
+            "read_entity",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber: 1);
     }
 
-    private static void AppendLinkLine(StringBuilder sb, EntityLink link)
+    private static object ContextLinkPayload(EntityLink link) => new
     {
-        var direction = link.Direction == EntityLinkDirection.Outgoing ? "->" : "<-";
-        sb.Append("- ").Append(direction).Append(' ').Append(link.EdgeType).Append(' ')
-          .Append(link.OtherEntityName).Append(" (").Append(link.OtherEntityType).AppendLine(")");
-    }
+        link.EdgeId,
+        link.EdgeType,
+        direction = link.Direction.ToString(),
+        link.OtherEntityId,
+        link.OtherEntityName,
+        link.OtherEntityType,
+        link.SortOrder,
+        link.Properties,
+        link.Summary,
+        link.RelationshipCitations,
+        link.IsAutoLink,
+    };
 
     private async Task AppendChaptersAsync(
         StringBuilder sb,

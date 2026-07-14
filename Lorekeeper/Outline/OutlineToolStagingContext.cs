@@ -1,7 +1,9 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Context;
 using Lorekeeper.Chapters;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
@@ -19,6 +21,7 @@ public sealed class OutlineToolStagingContext(
     IChapterVisualService chapterVisuals,
     IEntityService entities,
     IEntityTypeService entityTypes,
+    IEntityVisualExampleService entityVisualExamples,
     Action? onDirectMutationApplied = null)
 {
     private const string _eventNodeType = "Event";
@@ -160,10 +163,12 @@ public sealed class OutlineToolStagingContext(
             .OrderByDescending(match => match.Score)
             .ThenBy(match => match.Entity.Type, StringComparer.OrdinalIgnoreCase)
             .ThenBy(match => match.Entity.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var selected = matches
             .Take(topK)
             .Select(match => CompactEntitySearchPayload(match.Entity, match.Score));
 
-        return Serialize(matches);
+        return AgentPayloadPaginator.SerializeCompactDiscovery(query.Trim(), topK, matches.Count, selected, "read_entity");
     }
 
     public async Task<string> StageExternalChangeAsync(
@@ -193,6 +198,7 @@ public sealed class OutlineToolStagingContext(
         Guid entityId,
         bool addedToContextFeed,
         EntityRelationContextOptions? relationOptions = null,
+        int? pageNumber = null,
         CancellationToken cancellationToken = default)
     {
         await EnsureLoadedAsync(cancellationToken);
@@ -200,21 +206,32 @@ public sealed class OutlineToolStagingContext(
             return $"Error: entity {entityId} not found in this project.";
 
         var links = await ListEntityLinksCoreAsync(entityId, cancellationToken);
-        var relationContext = await BuildRelationContextAsync(entityId, relationOptions ?? EntityRelationOptions, cancellationToken);
+        var resolvedRelationOptions = relationOptions ?? EntityRelationOptions;
+        var relationContext = await BuildRelationContextAsync(entityId, resolvedRelationOptions, cancellationToken);
+        var visualExamples = await entityVisualExamples.ListForEntityAsync(ProjectId, entityId, cancellationToken);
 
-        return Serialize(new
+        var detail = JsonSerializer.SerializeToNode(new
         {
-            id = entity.Id,
-            type = entity.Type,
-            name = entity.Name,
-            order = entity.Order,
-            parentId = entity.ParentId,
-            addedToContextFeed,
             properties = entity.Properties,
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
+            visualExamples = visualExamples.Select(example => new
+            {
+                example.Id,
+                example.EntityId,
+                example.Label,
+                example.SortOrder,
+                example.Origin,
+                image = new
+                {
+                    example.Image.Id,
+                    example.Image.FileName,
+                    example.Image.AltText,
+                    example.Image.Prompt,
+                },
+            }),
             links = links.Select(link => new
             {
                 link.EdgeId,
@@ -226,18 +243,56 @@ public sealed class OutlineToolStagingContext(
                 link.SortOrder,
                 link.Properties,
             }),
-            relationContext,
+            relationContextPreview = RelationContextPreview(entity.Id, resolvedRelationOptions, relationContext),
         });
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(
+                entity.Id,
+                entity.Type,
+                entity.Name,
+                entity.Order,
+                entity.ParentId,
+                ("addedToContextFeed", JsonValue.Create(addedToContextFeed)),
+                ("state", JsonValue.Create("staged"))),
+            detail,
+            "read_entity",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber);
     }
 
-    public async Task<string> ListEntityLinksAsync(Guid entityId, CancellationToken cancellationToken = default)
+    private static object RelationContextPreview(Guid entityId, EntityRelationContextOptions options, object relationContext) => new
+    {
+        isComplete = false,
+        note = "This traversal is a bounded orientation preview. All adjacent links are included separately; use list_entity_links and read_entity to continue traversal.",
+        bounds = new { options.Depth, options.MaxDirectLinks, options.MaxTraversalPaths, options.MaxLinksPerNode },
+        detailReadTool = "list_entity_links",
+        detailReadArguments = new { entityId, pageNumber = 1 },
+        value = relationContext,
+    };
+
+    public async Task<string> ListEntityLinksAsync(
+        Guid entityId,
+        int? pageNumber = null,
+        CancellationToken cancellationToken = default)
     {
         await EnsureLoadedAsync(cancellationToken);
         if (!CanResolveEntityOrChapter(entityId))
             return $"Error: entity {entityId} not found in this project.";
 
         var links = await ListEntityLinksCoreAsync(entityId, cancellationToken);
-        return Serialize(links.Select(LinkPayload));
+        var endpoint = ResolveEndpoint(entityId, fallbackType: "Entity", fallbackName: entityId.ToString("N"));
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(
+                endpoint.Id,
+                endpoint.Type,
+                endpoint.Name,
+                null,
+                null,
+                ("state", JsonValue.Create("staged"))),
+            JsonSerializer.SerializeToNode(new { links = links.Select(LinkPayload) }),
+            "list_entity_links",
+            new JsonObject { ["entityId"] = entityId },
+            pageNumber);
     }
 
     public async Task<string> CreateActAsync(string title, string? synopsis, CancellationToken cancellationToken = default)
@@ -1382,11 +1437,25 @@ public sealed class OutlineToolStagingContext(
         order = entity.Order,
         parentId = entity.ParentId,
         matchScore = score,
-        summary = TruncatePropertyValue(entity.Summary),
-        aliases = entity.Aliases.Take(8).ToArray(),
-        wikiSections = CompactWikiSections(entity.WikiSections),
-        canonSources = CompactCanonSources(entity.CanonSources),
-        properties = CompactProperties(entity.Properties),
+        previewIsComplete = false,
+        previewCounts = new
+        {
+            summaryCharacters = entity.Summary?.Length ?? 0,
+            aliases = entity.Aliases.Count,
+            wikiSections = entity.WikiSections.Count,
+            canonSources = entity.CanonSources.Count,
+            properties = entity.Properties.Count,
+        },
+        preview = new
+        {
+            summaryText = TruncatePropertyValue(entity.Summary),
+            aliases = entity.Aliases.Take(8).ToArray(),
+            wikiSections = CompactWikiSections(entity.WikiSections),
+            canonSources = CompactCanonSources(entity.CanonSources),
+            properties = CompactProperties(entity.Properties),
+        },
+        detailReadTool = "read_entity",
+        detailReadArguments = new { entityId = entity.Id, pageNumber = 1 },
     };
 
     private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>

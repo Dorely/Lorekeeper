@@ -6,8 +6,6 @@ public sealed class EditorChatOptions
 
     public int ReadChapterPageMaxChars { get; set; } = 6000;
 
-    public int MaxToolResultCharsForModel { get; set; } = 12000;
-
     public EditorRevisionAgentOptions RevisionAgents { get; set; } = new();
 }
 

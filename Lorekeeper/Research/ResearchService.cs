@@ -33,6 +33,10 @@ public sealed class ResearchService(
     public const string ResearchWorkflowInstructions = """
         You are Lorekeeper's Research Mode: a factual research agent for a long-form writing project.
 
+        Context integrity:
+        - Entity/link reads use explicit JSON-path pagination with full identities and GUIDs repeated on every page. Follow nextPageArguments until the needed records are complete; assemble labeled oversized text-field segments in order.
+        - Search and list results are explicitly compact discovery payloads. Honor total/returned counts and isComplete, then use exact detailReadArguments for complete reads. Copy identifiers exactly; never shorten, reconstruct, or fuzzily correct a GUID.
+
         Your job is to research user-provided topics and report source-backed findings. You are not a writing coach, story advisor, scene planner, or prose-framing assistant.
 
         How to work:
@@ -762,7 +766,48 @@ public sealed class ResearchService(
         name = ReadString(element, "name");
         if (TryGetPropertyObject(element, "properties", out var propertyElement))
             properties = ReadProperties(propertyElement);
+        else
+            properties = ReadPaginatedEntityProperties(element);
         return true;
+    }
+
+    private static Dictionary<string, string?> ReadPaginatedEntityProperties(JsonElement element)
+    {
+        var properties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        if (!TryGetPropertyIgnoreCase(element, "content", out var content)
+            || content.ValueKind != JsonValueKind.Array)
+        {
+            return properties;
+        }
+
+        foreach (var entry in content.EnumerateArray())
+        {
+            var path = ReadString(entry, "path");
+            if (!TryGetPropertyIgnoreCase(entry, "value", out var value)) continue;
+            if (string.Equals(path, "$[\"properties\"]", StringComparison.Ordinal)
+                && value.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var property in ReadProperties(value))
+                    properties[property.Key] = property.Value;
+                continue;
+            }
+
+            const string propertyPathPrefix = "$[\"properties\"][";
+            if (!path.StartsWith(propertyPathPrefix, StringComparison.Ordinal) || !path.EndsWith(']')) continue;
+            var encodedKey = path[propertyPathPrefix.Length..^1];
+            string? key;
+            try { key = JsonSerializer.Deserialize<string>(encodedKey); }
+            catch (JsonException) { continue; }
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            properties[key] = value.ValueKind switch
+            {
+                JsonValueKind.Null => null,
+                JsonValueKind.String => value.GetString(),
+                _ => value.GetRawText(),
+            };
+        }
+
+        return properties;
     }
 
     private static void UpsertEntityTouch(

@@ -55,6 +55,12 @@ public sealed record ProjectSearchRequest(
     Guid? ContainerSourceId = null,
     bool LexicalOnly = false);
 
+public sealed record ProjectSearchResponse(
+    IReadOnlyList<ProjectSearchResult> Results,
+    int TotalMatches,
+    bool TotalMatchesIsExact,
+    int RequestedLimit);
+
 public sealed record ProjectSearchResult(
     string SourceType,
     Guid? SourceId,
@@ -78,6 +84,12 @@ public sealed record ProjectSearchSource(
     string Title,
     string Subtitle,
     string Preview);
+
+public sealed record ProjectSearchSourceResponse(
+    IReadOnlyList<ProjectSearchSource> Sources,
+    int TotalMatches,
+    bool TotalMatchesIsExact,
+    int RequestedLimit);
 
 public sealed record ProjectSourceReadResult(
     string SourceType,

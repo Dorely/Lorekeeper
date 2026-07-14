@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
@@ -30,6 +31,7 @@ public sealed class EditorRevisionAgentProcessor(
     IEntityService entities,
     IEntityTypeService entityTypes,
     IEntityRelationContextService entityRelations,
+    IEntityVisualExampleService entityVisualExamples,
     IOptions<EditorChatOptions> options,
     IEditorRevisionJobNotifier notifier,
     ILogger<EditorRevisionAgentProcessor> logger)
@@ -118,7 +120,7 @@ public sealed class EditorRevisionAgentProcessor(
             {
                 messages.Add(visualMessage);
             }
-            var tools = await BuildToolsAsync(job.ProjectId, session.ChapterId, edit, cancellationToken);
+            var tools = await BuildToolsAsync(job.ProjectId, job.ConversationId, session.ChapterId, edit, cancellationToken);
             var chatOptions = new ChatOptions
             {
                 Tools = tools,
@@ -281,7 +283,12 @@ public sealed class EditorRevisionAgentProcessor(
             kind,
             DateTime.UtcNow));
 
-    private async Task<IList<AITool>> BuildToolsAsync(Guid projectId, Guid assignedChapterId, CapturedChapterEdit edit, CancellationToken cancellationToken)
+    private async Task<IList<AITool>> BuildToolsAsync(
+        Guid projectId,
+        Guid parentConversationId,
+        Guid assignedChapterId,
+        CapturedChapterEdit edit,
+        CancellationToken cancellationToken)
     {
         var tools = new List<AITool>
         {
@@ -289,7 +296,7 @@ public sealed class EditorRevisionAgentProcessor(
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
                     ListSearchSourcesAsync(projectId, query, sourceTypes, topK),
                 name: "list_search_sources",
-                description: "Resolve searchable project source ids by title/name/type. Use this before a source-filtered search when the user names a source but you need its id."),
+                description: "Return compact source discovery with complete IDs, total/returned counts, completeness, and exact read_project_source arguments."),
 
             AIFunctionFactory.Create(
                 method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
@@ -307,7 +314,7 @@ public sealed class EditorRevisionAgentProcessor(
                     bool lexicalOnly = false) =>
                     SearchProjectAsync(projectId, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
                 name: "search_project",
-                description: "Hybrid keyword + semantic search over indexed project text. Use sourceTypes/sourceIds/containerSourceId to manually restrict search to a specific source, chunk, chapter, act, or entity. Set lexicalOnly=true for exact names/phrases or source-scoped lookup."),
+                description: "Hybrid keyword + semantic compact discovery with full IDs, total/returned counts, labeled previews, and exact read_project_source arguments. Use filters and lexicalOnly for source-scoped exact lookup."),
 
             AIFunctionFactory.Create(
                 method: () => ListChaptersAsync(projectId),
@@ -328,17 +335,22 @@ public sealed class EditorRevisionAgentProcessor(
                 method: (string query, int topK = 10, string? type = null, string? parentId = null) =>
                     SearchEntitiesAsync(projectId, query, topK, type, parentId),
                 name: "search_entities",
-                description: "Search story graph entities by name, type, property text, aliases, and wiki text."),
+                description: "Compact entity discovery with full IDs, total/returned counts, completeness, labeled previews, and exact read_entity arguments."),
 
             AIFunctionFactory.Create(
-                method: (Guid entityId) => ReadEntityAsync(projectId, entityId),
+                method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(projectId, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one graph entity with properties, links, and relation context."),
+                description: "Read one explicitly paginated graph entity with properties, links, and relation context. Full identity fields and GUIDs repeat on every page; follow nextPageArguments."),
 
             AIFunctionFactory.Create(
-                method: (Guid entityId) => ListEntityLinksAsync(projectId, entityId),
+                method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(projectId, entityId, pageNumber),
                 name: "list_entity_links",
-                description: "List graph links adjacent to an entity."),
+                description: "List explicitly paginated graph links adjacent to an entity. Full identity fields repeat on every page; follow nextPageArguments."),
+
+            AIFunctionFactory.Create(
+                method: (int? pageNumber = null) => ReadParentEditorHistoryAsync(parentConversationId, pageNumber),
+                name: "read_parent_editor_history",
+                description: "Read the explicitly paginated parent Editor conversation. Every page reports complete message IDs, roles, order, tool names, character counts, and history-window completeness; follow nextPageArguments."),
 
             AIFunctionFactory.Create(
                 method: (
@@ -378,40 +390,67 @@ public sealed class EditorRevisionAgentProcessor(
         sb.AppendLine(session.Instructions);
         sb.AppendLine();
         sb.AppendLine("# Parent Editor Chat Context");
-        foreach (var message in history
-            .Where(message => message.Role is EditorMessageRole.User or EditorMessageRole.Assistant or EditorMessageRole.Tool)
-            .OrderBy(message => message.Order)
-            .TakeLast(24))
-        {
-            sb.Append("## ").Append(message.Role);
-            if (!string.IsNullOrWhiteSpace(message.ToolName))
-                sb.Append(" - ").Append(message.ToolName);
-            sb.AppendLine();
-            if (!string.IsNullOrWhiteSpace(message.Content))
-                sb.AppendLine(TruncateForPrompt(message.Content.Trim(), 8000));
-            if (!string.IsNullOrWhiteSpace(message.ToolCallsJson) && message.ToolCallsJson != "[]")
-            {
-                sb.AppendLine("Tool calls:");
-                sb.AppendLine(TruncateForPrompt(message.ToolCallsJson, 8000));
-            }
-            if (!string.IsNullOrWhiteSpace(message.ErrorMessage))
-            {
-                sb.AppendLine("Error:");
-                sb.AppendLine(message.ErrorMessage);
-            }
-            sb.AppendLine();
-        }
+        sb.AppendLine(BuildParentEditorHistoryPage(job.ConversationId, history, pageNumber: 1));
+        sb.AppendLine("Use read_parent_editor_history with the returned nextPageArguments when the first page is not the complete history window.");
+        sb.AppendLine();
 
         sb.AppendLine("# Output Requirement");
         sb.AppendLine("Call edit_assigned_chapter exactly once when ready. The coordinator will review the completed/staged change and decide whether any follow-up action is needed.");
         return sb.ToString().TrimEnd();
     }
 
+    private async Task<string> ReadParentEditorHistoryAsync(Guid conversationId, int? pageNumber)
+    {
+        var history = await conversations.LoadMessagesAsync(conversationId);
+        return BuildParentEditorHistoryPage(conversationId, history, pageNumber);
+    }
+
+    private static string BuildParentEditorHistoryPage(
+        Guid conversationId,
+        IReadOnlyList<EditorMessage> history,
+        int? pageNumber)
+    {
+        var messages = history
+            .Where(message => message.Role is EditorMessageRole.User or EditorMessageRole.Assistant or EditorMessageRole.Tool)
+            .OrderBy(message => message.Order)
+            .Select(message => new
+            {
+                message.Id,
+                message.Order,
+                role = message.Role.ToString(),
+                message.ToolCallId,
+                message.ToolName,
+                status = message.Status.ToString(),
+                contentCharacterCount = message.Content.Length,
+                toolCallsCharacterCount = message.ToolCallsJson.Length,
+                errorCharacterCount = message.ErrorMessage?.Length ?? 0,
+                message.Content,
+                message.ToolCallsJson,
+                message.ErrorMessage,
+                message.CreatedAt,
+            })
+            .ToList();
+        var identity = new JsonObject
+        {
+            ["conversationId"] = conversationId,
+            ["messageCount"] = messages.Count,
+            ["historyWindowIsComplete"] = true,
+            ["historyWindowStartOrder"] = messages.Count == 0 ? null : messages[0].Order,
+            ["historyWindowEndOrder"] = messages.Count == 0 ? null : messages[^1].Order,
+        };
+        return AgentPayloadPaginator.SerializePage(
+            identity,
+            JsonSerializer.SerializeToNode(new { messages }),
+            "read_parent_editor_history",
+            new JsonObject(),
+            pageNumber);
+    }
+
     private async Task<string> ListSearchSourcesAsync(Guid projectId, string? query, string[]? sourceTypes, int topK)
     {
         topK = Math.Clamp(topK, 1, 30);
         var sources = await projectSearch.ListSourcesAsync(projectId, query, sourceTypes, topK);
-        return JsonSerializer.Serialize(sources, JsonOptions);
+        return ProjectSearchAgentPayload.SerializeSources(sources);
     }
 
     private async Task<string> ReadProjectSourceAsync(Guid projectId, string sourceType, Guid sourceId, int? pageNumber)
@@ -444,9 +483,7 @@ public sealed class EditorRevisionAgentProcessor(
             containerSourceId,
             lexicalOnly));
 
-        return results.Count == 0
-            ? "No matches."
-            : JsonSerializer.Serialize(results.Select(SearchResultPayload), JsonOptions);
+        return ProjectSearchAgentPayload.SerializeResults(query.Trim(), results);
     }
 
     private async Task<string> ListChaptersAsync(Guid projectId)
@@ -573,7 +610,7 @@ public sealed class EditorRevisionAgentProcessor(
                 .Where(match => match.Score > 0));
         }
 
-        return JsonSerializer.Serialize(matches
+        var selected = matches
             .OrderByDescending(match => match.Score)
             .ThenBy(match => match.Entity.Type, StringComparer.OrdinalIgnoreCase)
             .ThenBy(match => match.Entity.Name, StringComparer.OrdinalIgnoreCase)
@@ -586,15 +623,31 @@ public sealed class EditorRevisionAgentProcessor(
                 order = match.Entity.Order,
                 parentId = match.Entity.ParentId,
                 matchScore = match.Score,
-                summary = TruncatePropertyValue(match.Entity.Summary),
-                aliases = match.Entity.Aliases.Take(8).ToArray(),
-                wikiSections = CompactWikiSections(match.Entity.WikiSections),
-                canonSources = CompactCanonSources(match.Entity.CanonSources),
-                properties = match.Entity.Properties,
-            }));
+                previewIsComplete = false,
+                previewCounts = new
+                {
+                    summaryCharacters = match.Entity.Summary?.Length ?? 0,
+                    aliases = match.Entity.Aliases.Count,
+                    wikiSections = match.Entity.WikiSections.Count,
+                    canonSources = match.Entity.CanonSources.Count,
+                    properties = match.Entity.Properties.Count,
+                },
+                preview = new
+                {
+                    summaryText = TruncatePropertyValue(match.Entity.Summary),
+                    aliases = match.Entity.Aliases.Take(8).ToArray(),
+                    wikiSections = CompactWikiSections(match.Entity.WikiSections),
+                    canonSources = CompactCanonSources(match.Entity.CanonSources),
+                    properties = match.Entity.Properties,
+                },
+                detailReadTool = "read_entity",
+                detailReadArguments = new { entityId = match.Entity.Id, pageNumber = 1 },
+            })
+            .Cast<object>();
+        return AgentPayloadPaginator.SerializeCompactDiscovery(query.Trim(), topK, matches.Count, selected, "read_entity");
     }
 
-    private async Task<string> ReadEntityAsync(Guid projectId, Guid entityId)
+    private async Task<string> ReadEntityAsync(Guid projectId, Guid entityId, int? pageNumber)
     {
         var entity = await entities.GetAsync(projectId, entityId);
         if (entity is null)
@@ -604,29 +657,63 @@ public sealed class EditorRevisionAgentProcessor(
         var manualLinks = links.Where(link => !link.IsAutoLink).Select(LinkPayload).ToList();
         var autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload).ToList();
         var relationContext = await entityRelations.BuildForEntityAsync(projectId, entityId, EntityRelationOptions);
-        return JsonSerializer.Serialize(new
+        var visualExamples = await entityVisualExamples.ListForEntityAsync(projectId, entityId);
+        var detail = JsonSerializer.SerializeToNode(new
         {
-            id = entity.Id,
-            type = entity.Type,
-            name = entity.Name,
-            order = entity.Order,
-            parentId = entity.ParentId,
             properties = entity.Properties,
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
-            links = manualLinks.Concat(autoMentionLinks),
+            visualExamples = visualExamples.Select(example => new
+            {
+                example.Id,
+                example.EntityId,
+                example.Label,
+                example.SortOrder,
+                example.Origin,
+                image = new
+                {
+                    example.Image.Id,
+                    example.Image.FileName,
+                    example.Image.AltText,
+                    example.Image.Prompt,
+                },
+            }),
             manualLinks,
             autoMentionLinks,
-            relationContext,
+            relationContextPreview = RelationContextPreview(entity.Id, EntityRelationOptions, relationContext),
         });
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(entity.Id, entity.Type, entity.Name, entity.Order, entity.ParentId),
+            detail,
+            "read_entity",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber);
     }
 
-    private async Task<string> ListEntityLinksAsync(Guid projectId, Guid entityId)
+    private static object RelationContextPreview(Guid entityId, EntityRelationContextOptions options, object relationContext) => new
     {
+        isComplete = false,
+        note = "This traversal is a bounded orientation preview. All adjacent links are included separately; use list_entity_links and read_entity to continue traversal.",
+        bounds = new { options.Depth, options.MaxDirectLinks, options.MaxTraversalPaths, options.MaxLinksPerNode },
+        detailReadTool = "list_entity_links",
+        detailReadArguments = new { entityId, pageNumber = 1 },
+        value = relationContext,
+    };
+
+    private async Task<string> ListEntityLinksAsync(Guid projectId, Guid entityId, int? pageNumber)
+    {
+        var entity = await entities.GetAsync(projectId, entityId);
+        if (entity is null)
+            return $"Error: entity {entityId} not found in this project.";
         var links = await entities.ListLinksAsync(projectId, entityId);
-        return JsonSerializer.Serialize(links.Select(LinkPayload));
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(entity.Id, entity.Type, entity.Name, entity.Order, entity.ParentId),
+            JsonSerializer.SerializeToNode(new { links = links.Select(LinkPayload) }),
+            "list_entity_links",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber);
     }
 
     private Task<string> EditAssignedChapterAsync(
@@ -1026,24 +1113,6 @@ public sealed class EditorRevisionAgentProcessor(
         return parsed.Count == 0 ? null : parsed;
     }
 
-    private static object SearchResultPayload(ProjectSearchResult result) => new
-    {
-        result.SourceType,
-        result.SourceId,
-        result.ContainerSourceId,
-        result.Title,
-        result.Snippet,
-        result.Metadata,
-        result.ChunkIndex,
-        result.LexicalRank,
-        result.LexicalPosition,
-        result.VectorDistance,
-        result.VectorPosition,
-        result.Score,
-        result.Reasons,
-        content = TruncateForPrompt(result.Content, 1_800),
-    };
-
     private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>
         sources
             .Take(4)
@@ -1086,9 +1155,6 @@ public sealed class EditorRevisionAgentProcessor(
 
     private static string NormalizeMutationKind(string? mutationKind) =>
         (mutationKind ?? string.Empty).Trim().ToLowerInvariant().Replace('-', '_');
-
-    private static string TruncateForPrompt(string value, int maxChars) =>
-        value.Length <= maxChars ? value : value[..maxChars] + "\n[truncated]";
 
     private sealed record PendingToolCall(
         FunctionCallContent Content,

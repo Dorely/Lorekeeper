@@ -70,7 +70,7 @@ public sealed class EditorChatTools(
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
                     ListSearchSourcesAsync(context, query, sourceTypes, topK),
                 name: "list_search_sources",
-                description: "Resolve searchable project source ids by title/name/type. Use this before a source-filtered search when the user names a source but you need its id."),
+                description: "Return compact source discovery with complete IDs, total/returned counts, completeness, and exact read_project_source arguments."),
 
             AIFunctionFactory.Create(
                 method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
@@ -88,7 +88,7 @@ public sealed class EditorChatTools(
                     bool lexicalOnly = false) =>
                     SearchProjectAsync(context, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
                 name: "search_project",
-                description: "Hybrid keyword + semantic search over indexed project text. Use sourceTypes/sourceIds/containerSourceId to manually restrict search to a specific source, chunk, chapter, act, or entity. Set lexicalOnly=true for exact names/phrases or when the user asks to look in a specific source text."),
+                description: "Hybrid keyword + semantic compact discovery with full IDs, total/returned counts, labeled previews, and exact read_project_source arguments. Use filters and lexicalOnly for source-scoped exact lookup."),
 
             AIFunctionFactory.Create(
                 method: () => ListChaptersAsync(context),
@@ -116,17 +116,17 @@ public sealed class EditorChatTools(
                 method: (string query, int topK = 10, string? type = null, string? parentId = null) =>
                     SearchEntitiesAsync(context, query, topK, type, parentId),
                 name: "search_entities",
-                description: "Search story graph entities by name, type, property text, aliases, and wiki text. Use optional type or parentId to narrow results. When Review edits is enabled, returns the latest staged entity state from this turn."),
+                description: "Compact entity discovery with full IDs, total/returned counts, completeness, labeled previews, and exact read_entity arguments. Review mode includes staged state."),
 
             AIFunctionFactory.Create(
-                method: (Guid entityId) => ReadEntityAsync(context, entityId),
+                method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one graph entity by id, including properties, structured wiki data, adjacent links, relation context, and visible thumbnail chips for attached visual examples. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
+                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, adjacent links, relation context, and visible thumbnail chips for attached visual examples. Full identity fields and GUIDs are repeated on every page. Omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
 
             AIFunctionFactory.Create(
-                method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
+                method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),
                 name: "list_entity_links",
-                description: "List all graph links adjacent to an entity, including structural HasChild links and semantic story relationships. When Review edits is enabled, includes staged entity and link changes from this turn."),
+                description: "List explicitly paginated graph links adjacent to an entity, including structural HasChild links and semantic story relationships. Full entity identity is repeated on every page; follow nextPageArguments until pagination.isComplete or hasNextPage is false. When Review edits is enabled, includes staged entity and link changes from this turn."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityVisualExamplesAsync(context, entityId),
@@ -343,7 +343,7 @@ public sealed class EditorChatTools(
     {
         topK = Math.Clamp(topK, 1, 30);
         var sources = await projectSearch.ListSourcesAsync(ctx.ProjectId, query, sourceTypes, topK);
-        return JsonSerializer.Serialize(sources);
+        return ProjectSearchAgentPayload.SerializeSources(sources);
     }
 
     private async Task<string> ReadProjectSourceAsync(
@@ -381,9 +381,7 @@ public sealed class EditorChatTools(
             containerSourceId,
             lexicalOnly));
 
-        return results.Count == 0
-            ? "No matches."
-            : JsonSerializer.Serialize(results.Select(SearchResultPayload));
+        return ProjectSearchAgentPayload.SerializeResults(query.Trim(), results);
     }
 
     private async Task<string> ListChaptersAsync(EditorChatContext ctx)
@@ -609,7 +607,7 @@ public sealed class EditorChatTools(
         var payload = selected.Select(match => CompactEntitySearchPayload(
             match.Entity, match.Score, visuals.GetValueOrDefault(match.Entity.Id, [])));
 
-        return JsonSerializer.Serialize(payload);
+        return AgentPayloadPaginator.SerializeCompactDiscovery(query.Trim(), topK, matches.Count, payload, "read_entity");
     }
 
     private async Task<IReadOnlyList<string>> SearchableTypeNamesAsync(Guid projectId, string? type)
@@ -624,7 +622,7 @@ public sealed class EditorChatTools(
             .ToList();
     }
 
-    private async Task<string> ReadEntityAsync(EditorChatContext ctx, Guid entityId)
+    private async Task<string> ReadEntityAsync(EditorChatContext ctx, Guid entityId, int? pageNumber)
     {
         if (ctx.ReviewEdits && ctx.OutlineStaging is not null)
         {
@@ -646,7 +644,7 @@ public sealed class EditorChatTools(
             }
 
             await AddEntityVisualsToModelAsync(ctx, entityId);
-            return await ctx.OutlineStaging.ReadEntityAsync(entityId, stagedAddedToContextFeed, _detailEntityRelationOptions);
+            return await ctx.OutlineStaging.ReadEntityAsync(entityId, stagedAddedToContextFeed, _detailEntityRelationOptions, pageNumber);
         }
 
         var entity = await entities.GetAsync(ctx.ProjectId, entityId);
@@ -671,25 +669,31 @@ public sealed class EditorChatTools(
         var autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload).ToList();
         var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, _detailEntityRelationOptions);
         var visualExamples = await AddEntityVisualsToModelAsync(ctx, entityId);
-        return JsonSerializer.Serialize(new
+        var identity = AgentPayloadPaginator.EntityIdentity(
+            entity.Id,
+            entity.Type,
+            entity.Name,
+            entity.Order,
+            entity.ParentId,
+            ("addedToContextFeed", JsonValue.Create(addedToContextFeed)));
+        var detail = JsonSerializer.SerializeToNode(new
         {
-            id = entity.Id,
-            type = entity.Type,
-            name = entity.Name,
-            order = entity.Order,
-            parentId = entity.ParentId,
-            addedToContextFeed,
             properties = entity.Properties,
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
             visualExamples = visualExamples.Select(VisualExamplePayload),
-            links = manualLinks.Concat(autoMentionLinks),
             manualLinks,
             autoMentionLinks,
-            relationContext,
+            relationContextPreview = RelationContextPreview(entity.Id, _detailEntityRelationOptions, relationContext),
         });
+        return AgentPayloadPaginator.SerializePage(
+            identity,
+            detail,
+            "read_entity",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber);
     }
 
     private async Task<string> ListEntityVisualExamplesAsync(EditorChatContext ctx, Guid entityId)
@@ -891,14 +895,32 @@ public sealed class EditorChatTools(
         };
     }
 
-    private async Task<string> ListEntityLinksAsync(EditorChatContext ctx, Guid entityId)
+    private async Task<string> ListEntityLinksAsync(EditorChatContext ctx, Guid entityId, int? pageNumber)
     {
         if (ctx.ReviewEdits && ctx.OutlineStaging is not null)
-            return await ctx.OutlineStaging.ListEntityLinksAsync(entityId);
+            return await ctx.OutlineStaging.ListEntityLinksAsync(entityId, pageNumber);
 
+        var entity = await entities.GetAsync(ctx.ProjectId, entityId);
+        if (entity is null)
+            return $"Error: entity {entityId} not found in this project.";
         var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
-        return JsonSerializer.Serialize(links.Select(LinkPayload));
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(entity.Id, entity.Type, entity.Name, entity.Order, entity.ParentId),
+            JsonSerializer.SerializeToNode(new { links = links.Select(LinkPayload) }),
+            "list_entity_links",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber);
     }
+
+    private static object RelationContextPreview(Guid entityId, EntityRelationContextOptions options, object relationContext) => new
+    {
+        isComplete = false,
+        note = "This traversal is a bounded orientation preview. All adjacent links are included separately; use list_entity_links and read_entity to continue traversal.",
+        bounds = new { options.Depth, options.MaxDirectLinks, options.MaxTraversalPaths, options.MaxLinksPerNode },
+        detailReadTool = "list_entity_links",
+        detailReadArguments = new { entityId, pageNumber = 1 },
+        value = relationContext,
+    };
 
     private async Task<string> ReadChapterAsync(
         EditorChatContext ctx,
@@ -2358,7 +2380,7 @@ public sealed class EditorChatTools(
                 Math.Min(50, Math.Max(12, candidates.Count)),
                 [ProjectSearchSourceTypes.Chapter, ProjectSearchSourceTypes.ContextChapter]));
 
-            foreach (var result in results)
+            foreach (var result in results.Results)
             {
                 if (result.SourceId is not Guid chapterId
                     || !candidates.TryGetValue(chapterId, out var candidate))
@@ -2571,13 +2593,27 @@ public sealed class EditorChatTools(
         order = entity.Order,
         parentId = entity.ParentId,
         matchScore = score,
-        summary = TruncatePropertyValue(entity.Summary),
-        aliases = entity.Aliases.Take(8).ToArray(),
-        wikiSections = CompactWikiSections(entity.WikiSections),
-        canonSources = CompactCanonSources(entity.CanonSources),
-        properties = CompactProperties(entity.Properties),
-        visualCount = visuals?.Count ?? 0,
-        visualExamples = (visuals ?? []).Select(example => new { example.Image.Id, example.Label, example.SortOrder, example.Image.AltText, example.Image.Prompt }),
+        previewIsComplete = false,
+        previewCounts = new
+        {
+            summaryCharacters = entity.Summary?.Length ?? 0,
+            aliases = entity.Aliases.Count,
+            wikiSections = entity.WikiSections.Count,
+            canonSources = entity.CanonSources.Count,
+            properties = entity.Properties.Count,
+            visuals = visuals?.Count ?? 0,
+        },
+        preview = new
+        {
+            summaryText = TruncatePropertyValue(entity.Summary),
+            aliases = entity.Aliases.Take(8).ToArray(),
+            wikiSections = CompactWikiSections(entity.WikiSections),
+            canonSources = CompactCanonSources(entity.CanonSources),
+            properties = CompactProperties(entity.Properties),
+            visualExamples = (visuals ?? []).Select(example => new { example.Image.Id, example.Label, example.SortOrder, example.Image.AltText, example.Image.Prompt }),
+        },
+        detailReadTool = "read_entity",
+        detailReadArguments = new { entityId = entity.Id, pageNumber = 1 },
     };
 
     private static IReadOnlyList<Guid>? ParseSourceIds(string[]? sourceIds, out string? error)
@@ -2598,24 +2634,6 @@ public sealed class EditorChatTools(
 
         return parsed.Count == 0 ? null : parsed;
     }
-
-    private static object SearchResultPayload(ProjectSearchResult result) => new
-    {
-        result.SourceType,
-        result.SourceId,
-        result.ContainerSourceId,
-        result.Title,
-        result.Snippet,
-        result.Metadata,
-        result.ChunkIndex,
-        result.LexicalRank,
-        result.LexicalPosition,
-        result.VectorDistance,
-        result.VectorPosition,
-        result.Score,
-        result.Reasons,
-        content = Truncate(result.Content, 1_800),
-    };
 
     private static object LinkPayload(EntityLink link) => new
     {

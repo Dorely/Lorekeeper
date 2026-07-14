@@ -301,7 +301,7 @@
 | `CodexChatClient.cs` | `IChatClient` implementation for Codex Responses API (SSE parser, multimodal user content, function-calling, strict-schema enforcement, reasoning and tool-argument streaming). |
 | `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs an `IChatClient` per provider (Codex vs OpenAI-compatible), applies configured Codex/OAuth request timeout, and exposes `TestModelAsync`. |
 | `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image-reading client for vision probes and PDF page transcription; supports Codex Responses and OpenAI-compatible multimodal chat requests. |
-| `AssistantWorkflowInstructions.cs` | Core code-owned AI workflow/tool-use instructions reused across agents, including always-on agent-led PicturePage composition/verification rules, Contest preparation, and entity-reference rules for agents not yet using on-demand skills. |
+| `AssistantWorkflowInstructions.cs` | Core code-owned AI workflow/tool-use instructions reused across agents, including exact-ID and pagination handling, always-on agent-led PicturePage composition/verification rules, Contest preparation, and entity-reference rules. |
 | `AgentSkills.cs` | Built-in `image-generation` and `picture-page-design` registry, detailed library-first PicturePage composition/typesetting guidance, `read_skill` tool, and turn-scoped required-skill activation/guards. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |
 | `SeedSystemPrompt.cs` | Hardcoded default system prompt seeded into every newly-created `Project`. |
@@ -316,16 +316,17 @@
 | `ISearchProviderService.cs` / `SearchProviderService.cs` | Application service for search-provider CRUD, active-provider readiness, provider tests, and active-provider search execution. |
 | `SerpApiWebSearchClient.cs` | SerpApi Google-search client; maps `organic_results` into normalized `WebSearchResult`s. |
 | `BraveWebSearchClient.cs` | Brave Search API client; maps `web.results` into normalized `WebSearchResult`s. |
-| `ProjectSearchModels.cs` | Internal project-search source-type constants plus request/result/source/read/index chunk records for filtered lexical/hybrid retrieval. |
+| `ProjectSearchModels.cs` | Internal project-search source-type constants plus request/result envelopes with total/completeness metadata and source/read/index chunk records. |
+| `ProjectSearchAgentPayload.cs` | Shared model-facing compact discovery envelopes for project searches/source lists, with labeled previews, complete IDs, counts, and exact paginated detail-read arguments. |
 | `IProjectSearchIndex.cs` / `SqliteFtsProjectSearchIndex.cs` | FTS5-backed lexical/BM25 index for chapters, acts, entities, ingest sources, and source chunks, including source/container filters and snippets. |
-| `IProjectSearchService.cs` / `ProjectSearchService.cs` | App/tool facade for internal project search: lists candidate sources, reads paginated source text, and fuses FTS5 keyword hits with sqlite-vec semantic hits via Reciprocal Rank Fusion. |
+| `IProjectSearchService.cs` / `ProjectSearchService.cs` | App/tool facade for internal project search: returns counted candidate/search envelopes, reads paginated source text, and fuses FTS5 keyword hits with sqlite-vec semantic hits via Reciprocal Rank Fusion. |
 
 ### Research/
 
 | File | Description |
 |------|-------------|
-| `IResearchService.cs` / `ResearchService.cs` | Persistent streaming Research chat: builds project-level guidance/facts/outline context, replays text-only history to the model, streams cache-first web + graph tool calls, stages Review edits, and derives current-conversation activity. |
-| `ResearchTools.cs` | Research tools for cache-first web reads, safe webpage-image inspection, confirmed import/crop/entity attachment, entity visuals, and staged graph mutations. |
+| `IResearchService.cs` / `ResearchService.cs` | Persistent streaming Research chat: builds project context, replays text history, streams cache-first web + graph tools, stages Review edits, and derives activity from direct or paginated entity envelopes. |
+| `ResearchTools.cs` | Research tools for explicitly paginated entity/link and web-page reads, labeled compact web discoveries, safe image inspection, confirmed import/crop/entity attachment, and staged graph mutations. |
 | `ResearchTurnUpdate.cs` | Streaming update records consumed by `ResearchChatPanel`: text/tool updates, pending AI change creation, graph mutation refreshes, assistant completion, and turn errors/cancellation. |
 | `ResearchChatTurnRunner.cs` | Background turn runner for Research chat: keeps active turns alive across component disposal and provides buffered update subscriptions. |
 | `ResearchActivityModels.cs` | Read models for Research Activity sidebar entity/source summaries and cache-only source detail modals. |
@@ -372,7 +373,8 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Async Context Feed/editor chat assembly with the compact skill catalog, active chapter mode/editing contract, agent-led visual manifests without automatic image targets, guidance, outline, facts, references, writing samples, and selected/related entities. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Async Context Feed/editor chat assembly with full-GUID chapter/layout context and shared paginated selected-entity representations instead of silent record limits. |
+| `AgentPayloadPaginator.cs` | Shared soft-target model payload paginator; repeats identity fields, packs logical JSON records, and segments only individually oversized text fields with explicit continuation metadata. |
 | `IEditorContextService.cs` | Editor context facade extending `IContextBuilder`; persists per-chapter context item inclusion, including explicit project-image context keys, and exposes auto/included entity/context key sets for recommendations. |
 | `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
 | `IContextIndexingService.cs` / `ContextIndexingService.cs` | Maintains targeted direct vector rows and internal lexical search chunks for addable context items: graph entities, chapters, acts, ingest sources, and ingest source chunks; refreshes source-scoped auto mention links. |
@@ -456,7 +458,7 @@
 | File | Description |
 |------|-------------|
 | `IImagesChatService.cs` / `ImagesChatService.cs` | Separate project-scoped Images Chat service with project context, attached image context, tool streaming, persisted transcript/visuals, queued generation/edit tools, and model-only image context for vision-ready turns. |
-| `ImagesChatTools.cs` | Images Chat LLM tools for skill loading, project/image reads, visual inspection/crops/masks, skill-guarded queued generation/editing, and chapter image placement/context. |
+| `ImagesChatTools.cs` | Images Chat LLM tools for paginated entity/link and source reads, compact counted search discovery, project/image reads, visual inspection/crops/masks, generation/editing, and chapter placement/context. |
 | `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, cancellation and owned image jobs, current tool metadata, visible/model-only images, and mutation signaling. |
 | `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
 | `ImagesChatTurnRunner.cs` | Background turn runner for Images Chat: executes scoped chat turns outside component lifetime and replays buffered live updates to reopened panels. |
@@ -503,9 +505,9 @@
 | File | Description |
 |------|-------------|
 | `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, staging helpers, persisted/model-visible visuals, and pending PicturePage render-verification state. |
-| `EditorChatService.cs` | Persistent streaming editor chat: assembles Context Feed and automatic visual snapshots, preloads the active PicturePage skill, streams/persists tool progress and visuals, enforces post-mutation PicturePage rendering before completion, stages Review edits, and routes Contest Mode terminal calls. |
-| `EditorChatOptions.cs` | Configuration for editor-chat-specific tool behavior, including paginated chapter reads, model-facing tool-result cap, and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor chat LLM tools for skill guards, project reads and impact scoping, library-only queued generation, visible image/layout inspection, explicit multi-image PicturePage placement, mutation inventories, automatic text fitting, revision-agent spawning, and Contest preparation. |
+| `EditorChatService.cs` | Persistent streaming editor chat: assembles Context Feed and visual snapshots, preloads PicturePage skills, passes complete tool envelopes without raw slicing, enforces post-mutation visual verification, stages Review edits, and routes Contest Mode. |
+| `EditorChatOptions.cs` | Configuration for editor-chat-specific paginated chapter reads and prose-only revision worker concurrency/iteration limits. |
+| `EditorChatTools.cs` | Editor tools for paginated entity/link/source reads, counted compact discovery, project impact scoping, library-first generation, visual inspection, explicit PicturePage placement, mutation inventories, revision agents, and Contest preparation. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
 | `EditorChatTurnRunner.cs` | Background turn runner for Editor Chat: preserves active turns across tab changes while leaving explicit Stop as the cancellation path. |
@@ -513,7 +515,7 @@
 | `IEditorContestService.cs` / `EditorContestService.cs` | Contest Mode application service: persists project settings, starts terminal contest batches, runs selected models without tools, streams raw Candidate JSON, validates JSON chapter-body mutations, builds proposed bodies, and resolves inline candidate review decisions. |
 | `EditorRevisionAgentModels.cs` | DTOs for prose-only revision assignments, run results, job/session details, and transcript projections used by tools and UI. |
 | `IEditorRevisionAgentService.cs` / `EditorRevisionAgentService.cs` | Same-turn revision-agent orchestrator: validates chapter assignments, persists jobs/sessions, runs bounded-parallel workers, and returns completed/staged chapter-body edits to the coordinator. |
-| `EditorRevisionAgentProcessor.cs` | Per-session worker runner with read-only grounding tools, filtered hybrid project search/source reads, and terminal assigned-chapter body editing; persists worker transcript/tool history. |
+| `EditorRevisionAgentProcessor.cs` | Per-session worker with paginated parent-history/entity/link grounding, counted compact discovery, filtered source reads, and terminal assigned-chapter body editing; persists its transcript/tool history. |
 | `IEditorRevisionJobNotifier.cs` | In-process pub/sub for revision job/session progress updates, matching other local background workflow notifiers. |
 
 ### Outline/
@@ -522,11 +524,11 @@
 |------|-------------|
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt`, keeps Act graph nodes/structural edges synchronized, and updates targeted act context vectors on mutations. |
 | `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Multi-turn collaborative outline chat. Streams LLM text/tool updates, persists chat history, stages mutating tool calls when project approval is enabled, blocks new turns while pending changes remain, and instructs the LLM to persist project-level truths as `ProjectFact` graph nodes. |
-| `OutlineCollaborationTools.cs` | `AIFunction` definitions exposed to the outline LLM, including filtered project source reads and project-image crop/entity-attachment tools. `list_outline` includes `projectFacts`; ProjectFact creation uses generic entity tools and is parented to the Project graph node. |
+| `OutlineCollaborationTools.cs` | Outline `AIFunction`s including paginated entity/link/source reads, counted compact discovery, outline/entity mutations, and project-image crop/entity attachment. |
 | `OutlineChatTurnRunner.cs` | Background turn runner for Outline chat: owns active turn cancellation/subscription outside the Blazor component lifetime. |
 | `IAiChangeApprovalService.cs` / `AiChangeApprovalService.cs` | Applies or rejects queued AI changes from outline/editor/research chat, including outline/entity mutations and editor chapter-body edits; enforces dependency application/rejection cascading and writes hidden correction messages to the owning transcript. |
 | `AiChangeReviewDrafts.cs` | Typed helper for persisted pending-change review drafts: reads editable text fields, updates draft payload JSON, validates draft metadata, and resolves effective after-payloads. |
-| `OutlineToolStagingContext.cs` | Per-turn working snapshot for approval mode: applies new acts/chapters/entities directly, overlays staged existing-data edits/reorders/links, keeps auto links low-priority in read payloads, and persists `AiChange` rows with dependency metadata. |
+| `OutlineToolStagingContext.cs` | Approval-mode working snapshot that overlays staged edits/reorders/links and exposes the same paginated entity/link plus explicit compact-discovery envelopes as persisted state. |
 | `OutlineChangePayloads.cs` | JSON payload records shared by staging and approval application for acts, chapters, entities, links, and reorders. |
 | `AiChangeReviewDiffBuilder.cs` | Builds single-change and grouped review diff models from pending AI changes, including fuzzy line alignment and intraline highlights for the pending-change modal. |
 | `IEntityService.cs` / `EntityService.cs` | Single contract for every story-graph entity (Characters, Locations, Events/beats, ...). Entities persist as `GraphNode`s via `IGraphStore`; create/update/delete, parent moves, and relationship mutations refresh affected context/search indexes and auto mentions. `ListLinksAsync` returns manual links before low-priority read-only auto links. |

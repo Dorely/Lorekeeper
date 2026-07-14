@@ -2,11 +2,11 @@ namespace Lorekeeper.Search;
 
 public interface IProjectSearchService
 {
-    Task<IReadOnlyList<ProjectSearchResult>> SearchAsync(
+    Task<ProjectSearchResponse> SearchAsync(
         ProjectSearchRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<ProjectSearchSource>> ListSourcesAsync(
+    Task<ProjectSearchSourceResponse> ListSourcesAsync(
         Guid projectId,
         string? query = null,
         IReadOnlyCollection<string>? sourceTypes = null,

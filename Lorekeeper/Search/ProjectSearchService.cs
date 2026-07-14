@@ -24,14 +24,14 @@ public sealed class ProjectSearchService(
     private const int RrfK = 60;
     private const int ReadPageMaxChars = 12_000;
 
-    public async Task<IReadOnlyList<ProjectSearchResult>> SearchAsync(
+    public async Task<ProjectSearchResponse> SearchAsync(
         ProjectSearchRequest request,
         CancellationToken cancellationToken = default)
     {
         if (request.ProjectId == Guid.Empty)
             throw new ArgumentException("Project id is required.", nameof(request));
         if (string.IsNullOrWhiteSpace(request.Query))
-            return [];
+            return new ProjectSearchResponse([], 0, true, Math.Clamp(request.TopK, 1, 50));
 
         var topK = Math.Clamp(request.TopK, 1, 50);
         var sourceTypes = NormalizeSourceTypes(request.SourceTypes);
@@ -110,16 +110,16 @@ public sealed class ProjectSearchService(
             }
         }
 
-        return merged.Values
+        var ordered = merged.Values
             .OrderByDescending(result => result.Score)
             .ThenBy(result => result.LexicalPosition ?? int.MaxValue)
             .ThenBy(result => result.VectorDistance ?? double.MaxValue)
             .Select(result => result.ToResult())
-            .Take(topK)
             .ToList();
+        return new ProjectSearchResponse(ordered.Take(topK).ToList(), ordered.Count, false, topK);
     }
 
-    public async Task<IReadOnlyList<ProjectSearchSource>> ListSourcesAsync(
+    public async Task<ProjectSearchSourceResponse> ListSourcesAsync(
         Guid projectId,
         string? query = null,
         IReadOnlyCollection<string>? sourceTypes = null,
@@ -217,11 +217,11 @@ public sealed class ProjectSearchService(
             }
         }
 
-        return results
+        var ordered = results
             .OrderBy(source => SourceTypeSort(source.SourceType))
             .ThenBy(source => source.Title, StringComparer.OrdinalIgnoreCase)
-            .Take(limit)
             .ToList();
+        return new ProjectSearchSourceResponse(ordered.Take(limit).ToList(), ordered.Count, true, limit);
     }
 
     public async Task<ProjectSourceReadResult?> ReadSourceAsync(

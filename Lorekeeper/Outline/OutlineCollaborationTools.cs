@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
@@ -84,7 +85,7 @@ public sealed class OutlineCollaborationTools(
         Guid conversationId,
         AiChangeConversationKind conversationKind = AiChangeConversationKind.Outline,
         Action? onDirectMutationApplied = null) =>
-        new(projectId, conversationId, conversationKind, changes, projectRepository, acts, chapters, chapterVisuals, entities, entityTypes, onDirectMutationApplied);
+        new(projectId, conversationId, conversationKind, changes, projectRepository, acts, chapters, chapterVisuals, entities, entityTypes, entityVisualExamples, onDirectMutationApplied);
 
     public async Task<IList<AITool>> BuildAsync(
         OutlineCollaborationContext context,
@@ -96,7 +97,7 @@ public sealed class OutlineCollaborationTools(
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
                     ListSearchSourcesAsync(context, query, sourceTypes, topK),
                 name: "list_search_sources",
-                description: "Resolve searchable project source ids by title/name/type. Use this before a source-filtered search when the user names a source but you need its id."),
+                description: "Return compact source discovery with complete IDs, total/returned counts, completeness, and exact read_project_source arguments."),
 
             AIFunctionFactory.Create(
                 method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
@@ -114,7 +115,7 @@ public sealed class OutlineCollaborationTools(
                     bool lexicalOnly = false) =>
                     SearchProjectAsync(context, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
                 name: "search_project",
-                description: "Hybrid keyword + semantic search over indexed project text. Use sourceTypes/sourceIds/containerSourceId to manually restrict search to a specific source, chunk, chapter, act, or entity. Set lexicalOnly=true for exact names/phrases or when the user asks to look in a specific source text."),
+                description: "Hybrid keyword + semantic compact discovery with full IDs, total/returned counts, labeled previews, and exact read_project_source arguments. Use filters and lexicalOnly for source-scoped exact lookup."),
 
             AIFunctionFactory.Create(
                 method: () => ListOutlineAsync(context),
@@ -189,17 +190,17 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: (string query, int topK = 10, string? type = null, string? parentId = null) => SearchEntitiesAsync(context, query, topK, type, parentId),
                 name: "search_entities",
-                description: "Bounded search for graph entities by name, type, property text, aliases, and wiki text. Use type or parentId to narrow results when known. When Review edits is enabled, returns staged state. Returns compact matches; call read_entity or list_entity_links for details."),
+                description: "Compact entity discovery with full IDs, total/returned counts, completeness, labeled previews, and exact read_entity arguments. Review mode includes staged state."),
 
             AIFunctionFactory.Create(
-                method: (Guid entityId) => ReadEntityAsync(context, entityId),
+                method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one full entity with properties, knowledge, relationships, and ordered visual examples. Vision-ready providers receive its image bytes on the next model round."),
+                description: "Read one explicitly paginated entity with properties, knowledge, relationships, and ordered visual examples. Full identity fields and GUIDs are repeated on every page; omit pageNumber for page 1 and follow nextPageArguments. Vision-ready providers receive its image bytes on the next model round."),
 
             AIFunctionFactory.Create(
-                method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
+                method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),
                 name: "list_entity_links",
-                description: "List all graph links adjacent to an entity."),
+                description: "List explicitly paginated graph links adjacent to an entity. Full identity fields are repeated on every page; follow nextPageArguments until complete."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityVisualExamplesAsync(context, entityId),
@@ -269,7 +270,7 @@ public sealed class OutlineCollaborationTools(
     {
         topK = Math.Clamp(topK, 1, 30);
         var sources = await projectSearch.ListSourcesAsync(ctx.ProjectId, query, sourceTypes, topK);
-        return JsonSerializer.Serialize(sources);
+        return ProjectSearchAgentPayload.SerializeSources(sources);
     }
 
     private async Task<string> ReadProjectSourceAsync(
@@ -286,25 +287,59 @@ public sealed class OutlineCollaborationTools(
         return JsonSerializer.Serialize(result);
     }
 
-    private async Task<string> ReadEntityAsync(OutlineCollaborationContext ctx, Guid entityId)
+    private async Task<string> ReadEntityAsync(OutlineCollaborationContext ctx, Guid entityId, int? pageNumber)
     {
         if (ctx.Staging is not null)
         {
             await QueueEntityVisualsAsync(ctx, entityId);
-            return await ctx.Staging.ReadEntityAsync(entityId, addedToContextFeed: false, EntityRelationOptions);
+            return await ctx.Staging.ReadEntityAsync(entityId, addedToContextFeed: false, EntityRelationOptions, pageNumber);
         }
         var entity = await entities.GetAsync(ctx.ProjectId, entityId);
         if (entity is null) return $"Error: entity {entityId} not found in this project.";
-        var payload = await EntityPayloadAsync(ctx.ProjectId, entity);
+        var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
+        var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entity.Id, EntityRelationOptions);
         var visuals = await QueueEntityVisualsAsync(ctx, entityId);
-        return JsonSerializer.Serialize(new { entity = payload, visualExamples = visuals.Select(VisualPayload) });
+        var detail = JsonSerializer.SerializeToNode(new
+        {
+            properties = entity.Properties,
+            summary = entity.Summary,
+            aliases = entity.Aliases,
+            wikiSections = entity.WikiSections,
+            canonSources = entity.CanonSources,
+            links,
+            relationContextPreview = RelationContextPreview(entity.Id, EntityRelationOptions, relationContext),
+            visualExamples = visuals.Select(VisualPayload),
+        });
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(entity.Id, entity.Type, entity.Name, entity.Order, entity.ParentId),
+            detail,
+            "read_entity",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber);
     }
 
-    private async Task<string> ListEntityLinksAsync(OutlineCollaborationContext ctx, Guid entityId)
+    private static object RelationContextPreview(Guid entityId, EntityRelationContextOptions options, object relationContext) => new
     {
-        if (ctx.Staging is not null) return await ctx.Staging.ListEntityLinksAsync(entityId);
-        if (await entities.GetAsync(ctx.ProjectId, entityId) is null) return $"Error: entity {entityId} not found in this project.";
-        return JsonSerializer.Serialize(await entities.ListLinksAsync(ctx.ProjectId, entityId));
+        isComplete = false,
+        note = "This traversal is a bounded orientation preview. All adjacent links are included separately; use list_entity_links and read_entity to continue traversal.",
+        bounds = new { options.Depth, options.MaxDirectLinks, options.MaxTraversalPaths, options.MaxLinksPerNode },
+        detailReadTool = "list_entity_links",
+        detailReadArguments = new { entityId, pageNumber = 1 },
+        value = relationContext,
+    };
+
+    private async Task<string> ListEntityLinksAsync(OutlineCollaborationContext ctx, Guid entityId, int? pageNumber)
+    {
+        if (ctx.Staging is not null) return await ctx.Staging.ListEntityLinksAsync(entityId, pageNumber);
+        var entity = await entities.GetAsync(ctx.ProjectId, entityId);
+        if (entity is null) return $"Error: entity {entityId} not found in this project.";
+        var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(entity.Id, entity.Type, entity.Name, entity.Order, entity.ParentId),
+            JsonSerializer.SerializeToNode(new { links }),
+            "list_entity_links",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber);
     }
 
     private async Task<string> ListEntityVisualExamplesAsync(OutlineCollaborationContext ctx, Guid entityId)
@@ -478,9 +513,7 @@ public sealed class OutlineCollaborationTools(
             containerSourceId,
             lexicalOnly));
 
-        return results.Count == 0
-            ? "No matches."
-            : JsonSerializer.Serialize(results.Select(SearchResultPayload));
+        return ProjectSearchAgentPayload.SerializeResults(query.Trim(), results);
     }
 
     // ---- list ------------------------------------------------------------
@@ -811,7 +844,7 @@ public sealed class OutlineCollaborationTools(
         var payload = selected.Select(match => CompactEntitySearchPayload(
             match.Entity, match.Score, visuals.GetValueOrDefault(match.Entity.Id, [])));
 
-        return JsonSerializer.Serialize(payload);
+        return AgentPayloadPaginator.SerializeCompactDiscovery(query.Trim(), topK, matches.Count, payload, "read_entity");
     }
 
     private async Task<IReadOnlyList<string>> SearchableTypeNamesAsync(Guid projectId, string? type)
@@ -1239,13 +1272,27 @@ public sealed class OutlineCollaborationTools(
         order = entity.Order,
         parentId = entity.ParentId,
         matchScore = score,
-        summary = TruncatePropertyValue(entity.Summary),
-        aliases = entity.Aliases.Take(8).ToArray(),
-        wikiSections = CompactWikiSections(entity.WikiSections),
-        canonSources = CompactCanonSources(entity.CanonSources),
-        properties = CompactProperties(entity.Properties),
-        visualCount = visuals?.Count ?? 0,
-        visualExamples = (visuals ?? []).Select(example => new { example.Image.Id, example.Label, example.SortOrder, example.Image.AltText, example.Image.Prompt }),
+        previewIsComplete = false,
+        previewCounts = new
+        {
+            summaryCharacters = entity.Summary?.Length ?? 0,
+            aliases = entity.Aliases.Count,
+            wikiSections = entity.WikiSections.Count,
+            canonSources = entity.CanonSources.Count,
+            properties = entity.Properties.Count,
+            visuals = visuals?.Count ?? 0,
+        },
+        preview = new
+        {
+            summaryText = TruncatePropertyValue(entity.Summary),
+            aliases = entity.Aliases.Take(8).ToArray(),
+            wikiSections = CompactWikiSections(entity.WikiSections),
+            canonSources = CompactCanonSources(entity.CanonSources),
+            properties = CompactProperties(entity.Properties),
+            visualExamples = (visuals ?? []).Select(example => new { example.Image.Id, example.Label, example.SortOrder, example.Image.AltText, example.Image.Prompt }),
+        },
+        detailReadTool = "read_entity",
+        detailReadArguments = new { entityId = entity.Id, pageNumber = 1 },
     };
 
     private static IReadOnlyList<Guid>? ParseSourceIds(string[]? sourceIds, out string? error)
@@ -1266,24 +1313,6 @@ public sealed class OutlineCollaborationTools(
 
         return parsed.Count == 0 ? null : parsed;
     }
-
-    private static object SearchResultPayload(ProjectSearchResult result) => new
-    {
-        result.SourceType,
-        result.SourceId,
-        result.ContainerSourceId,
-        result.Title,
-        result.Snippet,
-        result.Metadata,
-        result.ChunkIndex,
-        result.LexicalRank,
-        result.LexicalPosition,
-        result.VectorDistance,
-        result.VectorPosition,
-        result.Score,
-        result.Reasons,
-        content = TruncateForSearchPayload(result.Content, 1_800),
-    };
 
     private static object ChapterPayload(Chapter chapter) => new
     {
@@ -1334,9 +1363,6 @@ public sealed class OutlineCollaborationTools(
 
     private static string? TruncatePropertyValue(string? value) =>
         string.IsNullOrEmpty(value) || value.Length <= 240 ? value : value[..240] + "...";
-
-    private static string TruncateForSearchPayload(string value, int maxChars) =>
-        string.IsNullOrEmpty(value) || value.Length <= maxChars ? value : value[..maxChars] + "...";
 
     private static bool IsSearchableEntityType(string type) =>
         !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)

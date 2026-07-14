@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
@@ -48,7 +49,7 @@ public sealed class ImagesChatTools(
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
                     ListSearchSourcesAsync(context, query, sourceTypes, topK),
                 name: "list_search_sources",
-                description: "Resolve searchable project source ids by title/name/type before a source-filtered search."),
+                description: "Return compact source discovery with complete IDs, total/returned counts, completeness, and exact read_project_source arguments."),
 
             AIFunctionFactory.Create(
                 method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
@@ -60,7 +61,7 @@ public sealed class ImagesChatTools(
                 method: (string query, int topK = 8, string[]? sourceTypes = null, string[]? sourceIds = null, Guid? containerSourceId = null, bool lexicalOnly = false) =>
                     SearchProjectAsync(context, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
                 name: "search_project",
-                description: "Hybrid keyword + semantic search over indexed project text. Use source filters when narrowing to chapters, context, acts, entities, or ingest sources."),
+                description: "Hybrid keyword + semantic compact discovery with full IDs, total/returned counts, labeled previews, and exact read_project_source arguments. Use source filters to narrow scope."),
 
             AIFunctionFactory.Create(
                 method: () => ListChaptersAsync(context),
@@ -83,9 +84,14 @@ public sealed class ImagesChatTools(
                 description: "Read one project image's metadata and URLs. Use inspect_rendered_chapter_snapshots for visual layout inspection."),
 
             AIFunctionFactory.Create(
-                method: (Guid entityId) => ReadEntityAsync(context, entityId),
+                method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read a full entity and its ordered visual examples. Vision-ready providers receive the image bytes on the next round."),
+                description: "Read an explicitly paginated entity and its ordered visual examples. Full identity fields and GUIDs repeat on every page; omit pageNumber for page 1 and follow nextPageArguments. Vision-ready providers receive the image bytes on the next round."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),
+                name: "list_entity_links",
+                description: "List explicitly paginated graph links adjacent to an entity. Full identity fields and GUIDs repeat on every page; follow nextPageArguments until complete."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityVisualsAsync(context, entityId),
@@ -160,7 +166,7 @@ public sealed class ImagesChatTools(
     {
         topK = Math.Clamp(topK, 1, 30);
         var sources = await projectSearch.ListSourcesAsync(ctx.ProjectId, query, sourceTypes, topK);
-        return JsonSerializer.Serialize(sources, JsonOptions);
+        return ProjectSearchAgentPayload.SerializeSources(sources);
     }
 
     private async Task<string> ReadProjectSourceAsync(ImagesChatToolContext ctx, string sourceType, Guid sourceId, int? pageNumber)
@@ -172,16 +178,60 @@ public sealed class ImagesChatTools(
         return JsonSerializer.Serialize(result, JsonOptions);
     }
 
-    private async Task<string> ReadEntityAsync(ImagesChatToolContext ctx, Guid entityId)
+    private async Task<string> ReadEntityAsync(ImagesChatToolContext ctx, Guid entityId, int? pageNumber)
     {
         var entity = await entities.GetAsync(ctx.ProjectId, entityId);
         if (entity is null) return $"Error: entity {entityId} not found in this project.";
+        var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
         var visuals = await QueueEntityVisualsAsync(ctx, entityId);
-        return JsonSerializer.Serialize(new { entity, visualExamples = visuals.Select(VisualPayload) }, JsonOptions);
+        var detail = JsonSerializer.SerializeToNode(new
+        {
+            properties = entity.Properties,
+            summary = entity.Summary,
+            aliases = entity.Aliases,
+            wikiSections = entity.WikiSections,
+            canonSources = entity.CanonSources,
+            entity.IsIngestCreated,
+            entity.CanonSourceCount,
+            links = links.Select(link => new
+            {
+                link.EdgeId,
+                link.EdgeType,
+                direction = link.Direction.ToString(),
+                link.OtherEntityId,
+                link.OtherEntityName,
+                link.OtherEntityType,
+                link.SortOrder,
+                link.Properties,
+                link.Summary,
+                link.RelationshipCitations,
+                link.IsAutoLink,
+            }),
+            visualExamples = visuals.Select(VisualPayload),
+        }, JsonOptions);
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(entity.Id, entity.Type, entity.Name, entity.Order, entity.ParentId),
+            detail,
+            "read_entity",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber);
     }
 
     private async Task<string> ListEntityVisualsAsync(ImagesChatToolContext ctx, Guid entityId) =>
         JsonSerializer.Serialize((await QueueEntityVisualsAsync(ctx, entityId)).Select(VisualPayload), JsonOptions);
+
+    private async Task<string> ListEntityLinksAsync(ImagesChatToolContext ctx, Guid entityId, int? pageNumber)
+    {
+        var entity = await entities.GetAsync(ctx.ProjectId, entityId);
+        if (entity is null) return $"Error: entity {entityId} not found in this project.";
+        var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(entity.Id, entity.Type, entity.Name, entity.Order, entity.ParentId),
+            JsonSerializer.SerializeToNode(new { links }, JsonOptions),
+            "list_entity_links",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber);
+    }
 
     private async Task<string> AttachEntityVisualAsync(ImagesChatToolContext ctx, Guid entityId, Guid imageId, string? label)
     {
@@ -242,9 +292,7 @@ public sealed class ImagesChatTools(
             containerSourceId,
             lexicalOnly));
 
-        return results.Count == 0
-            ? "No matches."
-            : JsonSerializer.Serialize(results.Select(SearchResultPayload), JsonOptions);
+        return ProjectSearchAgentPayload.SerializeResults(query.Trim(), results);
     }
 
     private async Task<string> ListChaptersAsync(ImagesChatToolContext ctx)
@@ -824,24 +872,6 @@ public sealed class ImagesChatTools(
 
         return parsed.Count == 0 ? null : parsed;
     }
-
-    private static object SearchResultPayload(ProjectSearchResult result) => new
-    {
-        result.SourceType,
-        result.SourceId,
-        result.ContainerSourceId,
-        result.Title,
-        result.Snippet,
-        result.Metadata,
-        result.ChunkIndex,
-        result.LexicalRank,
-        result.LexicalPosition,
-        result.VectorDistance,
-        result.VectorPosition,
-        result.Score,
-        result.Reasons,
-        content = Truncate(result.Content, 1_800),
-    };
 
     private static IReadOnlyList<EntityVisualTarget> NormalizeTargets(IEnumerable<EntityVisualTarget>? targets) =>
         (targets ?? []).Where(target => target.EntityId != Guid.Empty)

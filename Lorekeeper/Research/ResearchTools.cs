@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
@@ -92,14 +93,14 @@ public sealed class ResearchTools(
                     "Use this sparingly when a promising source exposes relevant wiki/article/reference links."),
 
             AIFunctionFactory.Create(
-                method: (Guid entityId) => ReadEntityAsync(context, entityId),
+                method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one graph entity by id, including properties, structured wiki data, adjacent links, and relation context. When Review edits is enabled, returns the latest staged entity and link state from this turn."),
+                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, adjacent links, and relation context. Full identity fields and GUIDs repeat on every page; omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn."),
 
             AIFunctionFactory.Create(
-                method: (Guid entityId) => ListEntityLinksAsync(context, entityId),
+                method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),
                 name: "list_entity_links",
-                description: "List all graph links adjacent to an entity, including structural HasChild links and semantic story relationships. When Review edits is enabled, includes staged entity and link changes from this turn."),
+                description: "List explicitly paginated graph links adjacent to an entity, including structural HasChild links and semantic story relationships. Full identity fields repeat on every page; follow nextPageArguments until complete. When Review edits is enabled, includes staged entity and link changes from this turn."),
 
             AIFunctionFactory.Create(
                 method: (Guid pageId, string? imageUrl = null) => InspectWebImageAsync(context, pageId, imageUrl),
@@ -165,6 +166,13 @@ public sealed class ResearchTools(
         {
             provider = response.ProviderName,
             response.Query,
+            resultKind = "compactDiscovery",
+            requestedLimit = count,
+            totalMatches = (int?)null,
+            totalMatchesKnown = false,
+            returnedCount = resultPayloads.Count,
+            isComplete = false,
+            note = "Search-provider results are discovery previews. Use read_search_result with a returned full page id for complete paginated page text.",
             results = resultPayloads,
         }, JsonOptions);
     }
@@ -220,7 +228,13 @@ public sealed class ResearchTools(
                 success = read.Candidate.Status != WebIngestCandidateStatus.Failed,
                 fromCache = read.FromCache,
                 diagnostics = read.Candidate.Diagnostics,
-                links = read.Links.Take(20).Select(childLink => new { childLink.Url, childLink.Text }),
+                links = new
+                {
+                    totalCount = read.Links.Count,
+                    returnedCount = Math.Min(read.Links.Count, 20),
+                    isComplete = read.Links.Count <= 20,
+                    items = read.Links.Take(20).Select(childLink => new { childLink.Url, childLink.Text }),
+                },
             });
         }
 
@@ -248,12 +262,12 @@ public sealed class ResearchTools(
         }
     }
 
-    private async Task<string> ReadEntityAsync(ResearchToolContext context, Guid entityId)
+    private async Task<string> ReadEntityAsync(ResearchToolContext context, Guid entityId, int? pageNumber)
     {
         if (context.Staging is not null)
         {
             await QueueEntityVisualsAsync(context, entityId);
-            return await context.Staging.ReadEntityAsync(entityId, addedToContextFeed: false, EntityRelationOptions);
+            return await context.Staging.ReadEntityAsync(entityId, addedToContextFeed: false, EntityRelationOptions, pageNumber);
         }
 
         var entity = await entities.GetAsync(context.ProjectId, entityId);
@@ -265,25 +279,35 @@ public sealed class ResearchTools(
         var autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload).ToList();
         var relationContext = await entityRelations.BuildForEntityAsync(context.ProjectId, entityId, EntityRelationOptions);
         var visualExamples = await QueueEntityVisualsAsync(context, entityId);
-        return JsonSerializer.Serialize(new
+        var detail = JsonSerializer.SerializeToNode(new
         {
-            id = entity.Id,
-            type = entity.Type,
-            name = entity.Name,
-            order = entity.Order,
-            parentId = entity.ParentId,
             properties = entity.Properties,
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
             visualExamples = visualExamples.Select(VisualPayload),
-            links = manualLinks.Concat(autoMentionLinks),
             manualLinks,
             autoMentionLinks,
-            relationContext,
+            relationContextPreview = RelationContextPreview(entity.Id, EntityRelationOptions, relationContext),
         }, JsonOptions);
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(entity.Id, entity.Type, entity.Name, entity.Order, entity.ParentId),
+            detail,
+            "read_entity",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber);
     }
+
+    private static object RelationContextPreview(Guid entityId, EntityRelationContextOptions options, object relationContext) => new
+    {
+        isComplete = false,
+        note = "This traversal is a bounded orientation preview. All adjacent links are included separately; use list_entity_links and read_entity to continue traversal.",
+        bounds = new { options.Depth, options.MaxDirectLinks, options.MaxTraversalPaths, options.MaxLinksPerNode },
+        detailReadTool = "list_entity_links",
+        detailReadArguments = new { entityId, pageNumber = 1 },
+        value = relationContext,
+    };
 
     private async Task<string> InspectWebImageAsync(ResearchToolContext context, Guid pageId, string? imageUrl)
     {
@@ -394,17 +418,22 @@ public sealed class ResearchTools(
         return contentType == "image/png" ? "research-image.png" : contentType == "image/webp" ? "research-image.webp" : "research-image.jpg";
     }
 
-    private async Task<string> ListEntityLinksAsync(ResearchToolContext context, Guid entityId)
+    private async Task<string> ListEntityLinksAsync(ResearchToolContext context, Guid entityId, int? pageNumber)
     {
         if (context.Staging is not null)
-            return await context.Staging.ListEntityLinksAsync(entityId);
+            return await context.Staging.ListEntityLinksAsync(entityId, pageNumber);
 
         var entity = await entities.GetAsync(context.ProjectId, entityId);
         if (entity is null)
             return $"Error: entity {entityId} not found in this project.";
 
         var links = await entities.ListLinksAsync(context.ProjectId, entityId);
-        return JsonSerializer.Serialize(links.Select(LinkPayload), JsonOptions);
+        return AgentPayloadPaginator.SerializePage(
+            AgentPayloadPaginator.EntityIdentity(entity.Id, entity.Type, entity.Name, entity.Order, entity.ParentId),
+            JsonSerializer.SerializeToNode(new { links = links.Select(LinkPayload) }, JsonOptions),
+            "list_entity_links",
+            new JsonObject { ["entityId"] = entity.Id },
+            pageNumber);
     }
 
     private static object LinkPayload(EntityLink link) => new
@@ -464,8 +493,22 @@ public sealed class ResearchTools(
                 ? PageArguments(read.Candidate, toolKind, requestedPageNumber + 1)
                 : null,
             text = pageText,
-            links = read.Links.Take(Math.Max(0, webOptions.Value.MaxLinksReturnedToModel)).Select(link => new { link.Url, link.Text }),
-            images = read.Images.Take(30).Select(image => new { image.Url, image.AltText, image.Caption }),
+            links = new
+            {
+                totalCount = read.Links.Count,
+                returnedCount = Math.Min(read.Links.Count, Math.Max(0, webOptions.Value.MaxLinksReturnedToModel)),
+                isComplete = read.Links.Count <= Math.Max(0, webOptions.Value.MaxLinksReturnedToModel),
+                note = "This is an explicitly compact discovery list; use follow_page_links for selected returned URLs.",
+                items = read.Links.Take(Math.Max(0, webOptions.Value.MaxLinksReturnedToModel)).Select(link => new { link.Url, link.Text }),
+            },
+            images = new
+            {
+                totalCount = read.Images.Count,
+                returnedCount = Math.Min(read.Images.Count, 30),
+                isComplete = read.Images.Count <= 30,
+                note = "This is an explicitly compact image-candidate discovery list.",
+                items = read.Images.Take(30).Select(image => new { image.Url, image.AltText, image.Caption }),
+            },
         }, JsonOptions);
     }
 
@@ -491,8 +534,8 @@ public sealed class ResearchTools(
         candidate.DisplayUrl,
         candidate.SearchQuery,
         candidate.SearchRank,
-        candidate.Snippet,
-        candidate.Excerpt,
+        snippetPreview = candidate.Snippet,
+        excerptPreview = candidate.Excerpt,
         candidate.ContentHash,
         candidate.Diagnostics,
     };
