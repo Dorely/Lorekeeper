@@ -54,7 +54,19 @@ public sealed record PicturePageTextElement(
     double BackgroundOpacity,
     PicturePageTextAlign TextAlign,
     ChapterTextVerticalAlign VerticalAlign,
-    PicturePageTextShadow Shadow);
+    PicturePageTextShadow Shadow,
+    PicturePageTextRole Role = PicturePageTextRole.Body);
+
+[JsonConverter(typeof(JsonStringEnumConverter<PicturePageTextRole>))]
+public enum PicturePageTextRole
+{
+    Body,
+    Title,
+    Heading,
+    Caption,
+    Display,
+    Credit,
+}
 
 public static class PicturePageFontKeys
 {

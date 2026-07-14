@@ -15,6 +15,14 @@ public class ProjectImageGenerationJob
 
     public string Prompt { get; set; } = string.Empty;
 
+    public string BriefJson { get; set; } = "{}";
+
+    public string ReferenceManifestJson { get; set; } = "[]";
+
+    public string TargetGeometryJson { get; set; } = "{}";
+
+    public string ProviderRevisedPromptsJson { get; set; } = "[]";
+
     public string Size { get; set; } = "auto";
 
     public string Quality { get; set; } = "auto";

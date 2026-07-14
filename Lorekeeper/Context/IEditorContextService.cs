@@ -31,8 +31,11 @@ public interface IEditorContextService : IContextBuilder
 
 public static class EditorContextKeys
 {
-    public const string SystemPrompt = "system-prompt";
+    public const string SystemInstructions = "system-instructions";
     public const string AssistantWorkflow = "assistant-workflow";
+    public const string DynamicGuidance = "dynamic-guidance";
+    public const string ProjectGuidance = "project-guidance";
+    public const string BookBrief = "book-brief";
     public const string CurrentChapter = "current-chapter";
     public const string ProjectOutline = "project-outline";
     public const string ProjectFacts = "project-facts";

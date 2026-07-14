@@ -10,6 +10,7 @@
 @inject IActService Acts
 @inject IIngestRepository Ingest
 @inject IProjectService Projects
+@inject IBookBriefService BookBriefs
 
 @if (IsOpen && CurrentKind is not null)
 {
@@ -31,6 +32,17 @@
                             @foreach (var reason in DetailReasons())
                             {
                                 <span>@reason</span>
+                            }
+                        </div>
+                    }
+                    @if (FeedItem is not null)
+                    {
+                        <div class="context-detail-reasons">
+                            <span>Origin: @FeedItem.Origin</span>
+                            <span>Estimated tokens: @FeedItem.EstimatedTokens.ToString("N0")</span>
+                            @if (FeedItem.IsProtected)
+                            {
+                                <span>Protected from automatic pruning</span>
                             }
                         </div>
                     }
@@ -71,8 +83,11 @@
                             case ContextItemKind.IngestSourceChunkReference:
                                 @RenderSourceChunkDetail()
                                 break;
-                            case ContextItemKind.SystemPrompt:
-                                @RenderSystemPromptDetail()
+                            case ContextItemKind.ProjectGuidance:
+                                @RenderProjectGuidanceDetail()
+                                break;
+                            case ContextItemKind.BookBrief:
+                                @RenderBookBriefDetail()
                                 break;
                             default:
                                 @RenderContextBodyDetail()
@@ -81,11 +96,18 @@
                     }
                 </div>
                 <div class="modal-footer">
-                    @if (CanSaveSystemPrompt)
+                    @if (CanSaveProjectGuidance)
                     {
                         <button type="button" class="btn btn-link" disabled="@_saving" @onclick="CloseAsync">Close</button>
-                        <button type="button" class="btn btn-primary" disabled="@(_saving || string.IsNullOrWhiteSpace(_promptDraft))" @onclick="SaveSystemPromptAsync">
+                        <button type="button" class="btn btn-primary" disabled="@_saving" @onclick="SaveProjectGuidanceAsync">
                             @(_saving ? "Saving..." : "Save guidance")
+                        </button>
+                    }
+                    else if (CanSaveBookBrief)
+                    {
+                        <button type="button" class="btn btn-link" disabled="@_saving" @onclick="CloseAsync">Close</button>
+                        <button type="button" class="btn btn-primary" disabled="@_saving" @onclick="SaveBookBriefAsync">
+                            @(_saving ? "Saving..." : "Save brief")
                         </button>
                     }
                     else if (CanSaveEntity)
@@ -111,7 +133,8 @@
     [Parameter] public ContextItem? FeedItem { get; set; }
     [Parameter] public ContextRecommendation? Recommendation { get; set; }
     [Parameter] public bool IsOpen { get; set; }
-    [Parameter] public bool AllowSystemPromptEdit { get; set; }
+    [Parameter] public bool AllowProjectGuidanceEdit { get; set; }
+    [Parameter] public bool AllowBookBriefEdit { get; set; }
     [Parameter] public bool AllowEntityEdit { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnSaved { get; set; }
@@ -127,6 +150,7 @@
     private IngestSourceChunk? _sourceChunk;
     private IngestSource? _chunkSource;
     private IngestSourceChunkExcerpt? _sourceChunkExcerpt;
+    private BookBrief? _bookBrief;
 
     private string _promptDraft = string.Empty;
     private bool _promptDirty;
@@ -147,8 +171,11 @@
         ? _entity.Name
         : FeedItem?.Label ?? Recommendation?.Name ?? "Context item";
 
-    private bool CanSaveSystemPrompt =>
-        IsOpen && AllowSystemPromptEdit && CurrentKind == ContextItemKind.SystemPrompt;
+    private bool CanSaveProjectGuidance =>
+        IsOpen && AllowProjectGuidanceEdit && CurrentKind == ContextItemKind.ProjectGuidance;
+
+    private bool CanSaveBookBrief =>
+        IsOpen && AllowBookBriefEdit && CurrentKind == ContextItemKind.BookBrief && _bookBrief is not null;
 
     private bool CanSaveEntity =>
         IsOpen && AllowEntityEdit && CurrentKind == ContextItemKind.Entity && _entity is not null;
@@ -162,12 +189,12 @@
             return;
         }
 
-        if (CurrentKind == ContextItemKind.SystemPrompt && !_promptDirty)
+        if (CurrentKind == ContextItemKind.ProjectGuidance && !_promptDirty)
         {
-            _promptDraft = FeedItem?.Body ?? Project?.SystemPrompt ?? string.Empty;
+            _promptDraft = Project?.ProjectGuidance ?? string.Empty;
         }
 
-        var signature = $"{ProjectId:N}|{CurrentKind}|{CurrentKey}|{AllowEntityEdit}|{AllowSystemPromptEdit}";
+        var signature = $"{ProjectId:N}|{CurrentKind}|{CurrentKey}|{AllowEntityEdit}|{AllowProjectGuidanceEdit}|{AllowBookBriefEdit}";
         if (!string.Equals(signature, _loadedSignature, StringComparison.Ordinal))
         {
             _loadedSignature = signature;
@@ -177,7 +204,7 @@
 
     private async Task LoadDetailAsync()
     {
-        ResetLoadedState(keepPromptDraft: CurrentKind == ContextItemKind.SystemPrompt);
+        ResetLoadedState(keepPromptDraft: CurrentKind == ContextItemKind.ProjectGuidance);
         _loading = true;
         _loadError = null;
         _actionError = null;
@@ -200,6 +227,9 @@
                     break;
                 case ContextItemKind.IngestSourceChunkReference:
                     await LoadSourceChunkAsync();
+                    break;
+                case ContextItemKind.BookBrief:
+                    _bookBrief = await BookBriefs.GetOrCreateAsync(ProjectId);
                     break;
             }
         }
@@ -337,6 +367,7 @@
         _sourceChunk = null;
         _chunkSource = null;
         _sourceChunkExcerpt = null;
+        _bookBrief = null;
         _editEntityName = string.Empty;
         _editProps = [];
         _editOriginalProps = new Dictionary<string, string?>();
@@ -632,14 +663,117 @@
         }
     </div>;
 
-    private RenderFragment RenderSystemPromptDetail() => @<div class="context-detail-stack">
-        @if (CanSaveSystemPrompt)
+    private RenderFragment RenderProjectGuidanceDetail() => @<div class="context-detail-stack">
+        @if (CanSaveProjectGuidance)
         {
+            <p class="text-muted small">Optional author direction appended to Lorekeeper's code-owned professional system instructions. Clearing this does not remove the editor's role or standards.</p>
             <textarea class="form-control context-detail-edit-textarea" rows="16" value="@_promptDraft" @oninput="OnPromptInput"></textarea>
         }
         else
         {
             @RenderContextBodyDetail()
+        }
+    </div>;
+
+    private RenderFragment RenderBookBriefDetail() => @<div class="context-detail-stack">
+        @if (_bookBrief is null)
+        {
+            <p class="text-muted small mb-0"><em>The Book Brief could not be loaded.</em></p>
+        }
+        else if (!CanSaveBookBrief)
+        {
+            @RenderContextBodyDetail()
+        }
+        else
+        {
+            <p class="text-muted small">The Book Brief is the canonical high-level creative target. Outline Chat maintains it conversationally as decisions become clear; you can also edit it here. Blank optional fields do not block writing.</p>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Book kind</label>
+                    <select class="form-select" @bind="_bookBrief.BookKind">
+                        @foreach (var kind in Enum.GetValues<BookKind>())
+                        {
+                            <option value="@kind">@kind</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Genre</label>
+                    <input class="form-control" @bind="_bookBrief.Genre" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Target audience</label>
+                    <input class="form-control" @bind="_bookBrief.TargetAudience" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Premise</label>
+                    <textarea class="form-control" rows="3" @bind="_bookBrief.Premise"></textarea>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Purpose</label>
+                    <textarea class="form-control" rows="3" @bind="_bookBrief.Purpose"></textarea>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Primary themes</label>
+                    <textarea class="form-control" rows="3" @bind="_bookBrief.PrimaryThemes"></textarea>
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Non-negotiable creative constraints</label>
+                    <textarea class="form-control" rows="3" @bind="_bookBrief.CreativeConstraints"></textarea>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Minimum reader age</label>
+                    <input type="number" min="0" max="120" class="form-control" @bind="_bookBrief.MinimumReaderAge" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Maximum reader age</label>
+                    <input type="number" min="0" max="120" class="form-control" @bind="_bookBrief.MaximumReaderAge" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Target word count</label>
+                    <input type="number" min="1" class="form-control" @bind="_bookBrief.TargetWordCount" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Read-aloud priority</label>
+                    <select class="form-select" value="@NullableBooleanValue(_bookBrief.ReadAloudPriority)" @onchange="OnReadAloudPriorityChanged">
+                        <option value="">Unspecified</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Reading-level guidance</label>
+                    <input class="form-control" @bind="_bookBrief.ReadingLevelGuidance" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Language / locale</label>
+                    <input class="form-control" @bind="_bookBrief.LanguageLocale" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Point of view</label>
+                    <input class="form-control" @bind="_bookBrief.PointOfView" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Tense</label>
+                    <input class="form-control" @bind="_bookBrief.Tense" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Voice / tone</label>
+                    <input class="form-control" @bind="_bookBrief.VoiceAndTone" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">House style</label>
+                    <textarea class="form-control" rows="3" @bind="_bookBrief.HouseStyle"></textarea>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Accessibility goals</label>
+                    <textarea class="form-control" rows="3" @bind="_bookBrief.AccessibilityGoals"></textarea>
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Visual direction</label>
+                    <textarea class="form-control" rows="3" @bind="_bookBrief.VisualDirection"></textarea>
+                </div>
+            </div>
         }
     </div>;
 
@@ -768,23 +902,18 @@
         _actionError = null;
     }
 
-    private async Task SaveSystemPromptAsync()
+    private async Task SaveProjectGuidanceAsync()
     {
-        if (!CanSaveSystemPrompt) return;
-        if (string.IsNullOrWhiteSpace(_promptDraft))
-        {
-            _actionError = "System prompt cannot be empty.";
-            return;
-        }
+        if (!CanSaveProjectGuidance) return;
 
         _saving = true;
         _actionError = null;
         try
         {
-            var updated = await Projects.UpdateSystemPromptAsync(ProjectId, _promptDraft);
+            var updated = await Projects.UpdateProjectGuidanceAsync(ProjectId, _promptDraft);
             if (Project is not null)
             {
-                Project.SystemPrompt = updated.SystemPrompt;
+                Project.ProjectGuidance = updated.ProjectGuidance;
             }
 
             _promptDirty = false;
@@ -798,6 +927,63 @@
         {
             _saving = false;
         }
+    }
+
+    private async Task SaveBookBriefAsync()
+    {
+        if (!CanSaveBookBrief || _bookBrief is null) return;
+
+        _saving = true;
+        _actionError = null;
+        try
+        {
+            var clearFields = new List<string>();
+            if (_bookBrief.MinimumReaderAge is null) clearFields.Add(nameof(BookBrief.MinimumReaderAge));
+            if (_bookBrief.MaximumReaderAge is null) clearFields.Add(nameof(BookBrief.MaximumReaderAge));
+            if (_bookBrief.TargetWordCount is null) clearFields.Add(nameof(BookBrief.TargetWordCount));
+            if (_bookBrief.ReadAloudPriority is null) clearFields.Add(nameof(BookBrief.ReadAloudPriority));
+
+            _bookBrief = await BookBriefs.UpdateAsync(ProjectId, new BookBriefPatch
+            {
+                BookKind = _bookBrief.BookKind,
+                Premise = _bookBrief.Premise,
+                Genre = _bookBrief.Genre,
+                PrimaryThemes = _bookBrief.PrimaryThemes,
+                Purpose = _bookBrief.Purpose,
+                CreativeConstraints = _bookBrief.CreativeConstraints,
+                TargetAudience = _bookBrief.TargetAudience,
+                MinimumReaderAge = _bookBrief.MinimumReaderAge,
+                MaximumReaderAge = _bookBrief.MaximumReaderAge,
+                ReadingLevelGuidance = _bookBrief.ReadingLevelGuidance,
+                TargetWordCount = _bookBrief.TargetWordCount,
+                PointOfView = _bookBrief.PointOfView,
+                Tense = _bookBrief.Tense,
+                VoiceAndTone = _bookBrief.VoiceAndTone,
+                LanguageLocale = _bookBrief.LanguageLocale,
+                HouseStyle = _bookBrief.HouseStyle,
+                ReadAloudPriority = _bookBrief.ReadAloudPriority,
+                AccessibilityGoals = _bookBrief.AccessibilityGoals,
+                VisualDirection = _bookBrief.VisualDirection,
+                ClearFields = clearFields,
+            });
+            if (Project is not null)
+                Project.BookBrief = _bookBrief;
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void OnReadAloudPriorityChanged(ChangeEventArgs args)
+    {
+        if (_bookBrief is null) return;
+        _bookBrief.ReadAloudPriority = bool.TryParse(args.Value?.ToString(), out var value) ? value : null;
     }
 
     private async Task SaveEntityAsync()
@@ -878,6 +1064,13 @@
     private static string FormatDate(DateTime? value) => value is null ? "-" : value.Value.ToLocalTime().ToString("g");
 
     private static string BlankFallback(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();
+
+    private static string NullableBooleanValue(bool? value) => value switch
+    {
+        true => "true",
+        false => "false",
+        null => string.Empty,
+    };
 
     private static bool IsTruncated(string? value, int maxChars) => value?.Length > maxChars;
 

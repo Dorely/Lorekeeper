@@ -1,20 +1,47 @@
-using Lorekeeper.Models;
+using System.Text.Json;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Llm;
+using Lorekeeper.Models;
 
 namespace Lorekeeper.Context;
 
+public enum ContextBuildPurpose
+{
+    Editor,
+    EditorRevision,
+    Images,
+    Research,
+}
+
+public sealed record ContextBuildRequest(
+    Project Project,
+    Chapter? ActiveChapter = null,
+    string UserMessage = "",
+    ContextBuildPurpose Purpose = ContextBuildPurpose.Editor,
+    string? OperatingRules = null,
+    int? AvailableContextTokens = null);
+
 /// <summary>
-/// Builds the user-visible Context Feed and the assembled system prompt sent to the LLM.
-/// Every enabled item's body is concatenated into the system prompt — the Context Feed
-/// IS the preview, no separate "assembled prompt" view exists.
+/// Builds the visible Context Feed and the literal system-role message. The request is
+/// turn-aware so automatic context can be selected against the user's current intent.
 /// </summary>
 public interface IContextBuilder
 {
-    /// <summary>Build the assembly for the given project + (optional) currently-open chapter.</summary>
-    Task<ContextAssembly> BuildAsync(Project project, Chapter? currentChapter, CancellationToken cancellationToken = default);
+    Task<ContextAssembly> BuildAsync(
+        ContextBuildRequest request,
+        CancellationToken cancellationToken = default);
+}
 
-    /// <summary>Build a project-level assembly for chat modes that are not tied to one chapter.</summary>
-    Task<ContextAssembly> BuildProjectAsync(Project project, string assistantWorkflow, CancellationToken cancellationToken = default);
+public enum ContextItemOrigin
+{
+    Application,
+    User,
+    DirectLink,
+    PreviousChapter,
+    LexicalRetrieval,
+    VectorRetrieval,
+    GraphRetrieval,
+    WritingSample,
 }
 
 /// <summary>One renderable item in the Context Feed.</summary>
@@ -27,12 +54,19 @@ public sealed record ContextItem(
     bool IsRemovable,
     string? Badge = null,
     string? Reason = null,
-    IReadOnlyList<EntityVisualContextReference>? Visuals = null);
+    IReadOnlyList<EntityVisualContextReference>? Visuals = null,
+    ContextItemOrigin Origin = ContextItemOrigin.Application,
+    bool IsTransient = false,
+    bool IsProtected = false,
+    int EstimatedTokens = 0);
 
 public enum ContextItemKind
 {
-    SystemPrompt,
+    SystemInstructions,
     AssistantWorkflow,
+    DynamicGuidance,
+    ProjectGuidance,
+    BookBrief,
     CurrentChapter,
     ProjectOutline,
     ProjectFacts,
@@ -46,31 +80,81 @@ public enum ContextItemKind
     ChapterVisualLayout,
 }
 
-public sealed record ContextAssembly(IReadOnlyList<ContextItem> Items)
+public sealed record ContextTraceEntry(
+    string Key,
+    string Label,
+    ContextItemOrigin Origin,
+    bool Included,
+    bool Protected,
+    bool Transient,
+    int EstimatedTokens,
+    string Reason,
+    string Excerpt);
+
+public sealed record ContextAssembly(
+    IReadOnlyList<ContextItem> Items,
+    IReadOnlyList<ContextTraceEntry>? OmittedItems = null)
 {
     public IReadOnlyList<EntityVisualContextReference> Visuals => Items
         .Where(item => item.IsEnabled)
         .SelectMany(item => item.Visuals ?? [])
         .ToList();
 
-    /// <summary>
-    /// Concatenates every enabled item's body, in display order, separated by labeled
-    /// section headers. The result is the literal system message sent to the LLM.
-    /// </summary>
-    public string Assemble(string? assistantWorkflowOverride = null)
+    public IReadOnlyList<ContextTraceEntry> Trace =>
+        Items.Select(item => new ContextTraceEntry(
+                item.Key,
+                item.Label,
+                item.Origin,
+                item.IsEnabled,
+                item.IsProtected,
+                item.IsTransient,
+                item.EstimatedTokens,
+                item.Reason ?? string.Empty,
+                Excerpt(item.Body)))
+            .Concat(OmittedItems ?? [])
+            .ToList();
+
+    /// <summary>The literal single system message sent to the provider.</summary>
+    public string Assemble()
     {
-        var sb = new System.Text.StringBuilder();
-        var first = true;
-        foreach (var item in Items)
+        var builder = new System.Text.StringBuilder();
+        foreach (var item in Items.Where(item => item.IsEnabled))
         {
-            if (!item.IsEnabled) continue;
-            if (!first) sb.Append("\n\n");
-            first = false;
-            sb.Append("## ").Append(item.Label).Append('\n');
-            sb.Append(assistantWorkflowOverride is not null && item.Kind == ContextItemKind.AssistantWorkflow
-                ? assistantWorkflowOverride
-                : item.Body);
+            if (builder.Length > 0)
+                builder.Append("\n\n");
+            builder.Append("## ").Append(item.Label).Append('\n').Append(item.Body);
         }
-        return sb.ToString();
+        return builder.ToString();
+    }
+
+    public string SnapshotJson()
+    {
+        const int maximumTraceEntries = 96;
+        var trace = Trace;
+        var selectedKeys = trace
+            .Where(item => item.Transient)
+            .Concat(trace.Where(item => !item.Transient))
+            .Take(maximumTraceEntries)
+            .Select(item => (item.Key, item.Origin, item.Included))
+            .ToHashSet();
+        var bounded = trace
+            .Where(item => selectedKeys.Contains((item.Key, item.Origin, item.Included)))
+            .Take(maximumTraceEntries)
+            .ToList();
+        return JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            createdAtUtc = DateTime.UtcNow,
+            totalTraceEntries = trace.Count,
+            truncatedTraceEntries = Math.Max(0, trace.Count - bounded.Count),
+            included = bounded.Where(item => item.Included),
+            omitted = bounded.Where(item => !item.Included),
+        });
+    }
+
+    private static string Excerpt(string body)
+    {
+        const int limit = 1_200;
+        return body.Length <= limit ? body : body[..limit] + "...";
     }
 }

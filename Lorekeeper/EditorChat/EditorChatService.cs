@@ -195,10 +195,14 @@ public sealed class EditorChatService(
                     throw new InvalidOperationException($"Chapter {chapterId} not found in this project.");
             }
 
-            var assembly = await contextBuilder.BuildAsync(project, currentChapter, cancellationToken);
+            var assembly = await contextBuilder.BuildAsync(
+                new ContextBuildRequest(project, currentChapter, userText, ContextBuildPurpose.Editor),
+                cancellationToken);
             initialEntityVisuals = assembly.Visuals;
             contestModeEnabled = project.ContestModeEnabled;
             systemPrompt = assembly.Assemble();
+            userMessage.ContextSnapshotJson = assembly.SnapshotJson();
+            await turnEngine.UpdateMessageAsync(conversations, userMessage, cancellationToken);
 
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
             visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
@@ -325,14 +329,15 @@ public sealed class EditorChatService(
                 await SafePersistAsync(activeAssistant);
 
                 var unverifiedPicturePages = editorContext.PicturePageChaptersAwaitingVerification;
-                if (unverifiedPicturePages.Count > 0)
-                {
-                    messages.Add(new ChatMessage(ChatRole.Assistant, activeAssistant.Content));
-                    messages.Add(new ChatMessage(
-                        ChatRole.System,
-                        "The previous response attempted to finish while Picture Page verification is still pending for chapter id(s): "
-                        + string.Join(", ", unverifiedPicturePages.Select(id => id.ToString("N")))
-                        + ". Before giving a final response, call read_chapter_visual_layout for every listed chapter after its latest mutation and inspect the newest render, element inventory, layout diagnostics, and textFit.allTextFits. If you make a correction, render again afterward."));
+                    if (unverifiedPicturePages.Count > 0)
+                    {
+                        messages.Add(new ChatMessage(ChatRole.Assistant, activeAssistant.Content));
+                        messages[0] = new ChatMessage(
+                            ChatRole.System,
+                            systemPrompt
+                            + "\n\n## Required final-render preflight\nThe previous response attempted to finish while Picture Page verification is still pending for chapter id(s): "
+                            + string.Join(", ", unverifiedPicturePages.Select(id => id.ToString("N")))
+                            + ". Before giving a final response, call read_chapter_visual_layout for every listed chapter after its latest mutation and inspect the newest render, element inventory, layout diagnostics, and textFit.allTextFits. If you make a correction, render again afterward.");
 
                     if (iteration == maxIterations - 1)
                     {
@@ -763,7 +768,7 @@ public sealed class EditorChatService(
         LlmProvider? provider,
         CancellationToken cancellationToken)
     {
-        if (currentChapter is null || provider is null || !CodexProvider.IsCodex(provider))
+        if (currentChapter is null || provider is null)
             return;
         if (!await providerService.IsVisionProviderWorkingAsync(provider.Id, cancellationToken))
             return;
@@ -785,7 +790,9 @@ public sealed class EditorChatService(
         var contents = new List<AIContent>
         {
             new TextContent(
-                "Automatic visual context for the current chapter follows. These are rendered paginated snapshots of the chapter layout, provided with the text visual manifest already included in system context."),
+                currentChapter.VisualMode == ChapterVisualMode.PicturePage
+                    ? "Automatic visual context for the current chapter follows. These are rendered fixed-layout snapshots, provided with the text visual manifest already included in system context."
+                    : "Automatic visual context for the current chapter follows. These rendered prose pages are composition previews; pagination is advisory because reflowable EPUB reading systems repaginate for each device and reader setting."),
         };
         foreach (var snapshot in snapshots)
         {

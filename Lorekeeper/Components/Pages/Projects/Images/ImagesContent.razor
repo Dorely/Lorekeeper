@@ -6,6 +6,7 @@
 @inject IProjectImageService Images
 @inject IProjectImageJobService ImageJobs
 @inject IProjectImageGenerationRuntime ImageRuntime
+@inject IImagePromptComposer ImagePrompts
 @inject IImagesChatService ImagesChat
 @inject IEntityVisualExampleService EntityVisuals
 @inject ILlmProviderService Providers
@@ -376,9 +377,19 @@ else
         _status = null;
         try
         {
+            var compiled = await ImagePrompts.CompileGenerationAsync(
+                Project.Id,
+                new ImageGenerationBrief
+                {
+                    IntendedUse = "Standalone project-library image requested through the manual Images panel.",
+                    Scene = _imagePrompt,
+                    AllowRenderedText = false,
+                },
+                references: null,
+                target: new ImageGenerationTarget { Size = _imageSize });
             await ImageJobs.CreateGenerateJobAsync(Project.Id, new ProjectImageGenerateJobRequest(
-                _imagePrompt,
-                _imageSize,
+                compiled.Prompt,
+                compiled.Size,
                 _imageQuality,
                 _imageFormat,
                 _imageFormat == "jpeg" ? _imageCompression : null,
@@ -386,7 +397,10 @@ else
                 1,
                 [],
                 Label: "Manual generation",
-                EntityTargets: _generationEntityTargets));
+                EntityTargets: _generationEntityTargets,
+                BriefJson: compiled.BriefJson,
+                ReferenceManifestJson: compiled.ReferenceManifestJson,
+                TargetGeometryJson: compiled.TargetGeometryJson));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
             _status = "Image job queued.";
             await ReloadAsync();
@@ -554,10 +568,22 @@ else
             }
 
             var maskDataUrl = await _maskModule.InvokeAsync<string>("exportMaskPng", _maskCanvas);
+            var compiled = await ImagePrompts.CompileEditAsync(
+                Project.Id,
+                _editingImage.Id,
+                new ImageEditBrief
+                {
+                    IntendedUse = "Localized project-library edit requested through the manual mask editor.",
+                    Change = _maskPrompt,
+                    Preserve = "Preserve every unmasked pixel and all unmentioned identity, composition, crop, style, palette, lighting, and background details.",
+                    AllowRenderedText = false,
+                },
+                references: null,
+                target: new ImageGenerationTarget { Size = _imageSize });
             await ImageJobs.CreateEditJobAsync(Project.Id, new ProjectImageEditJobRequest(
                 _editingImage.Id,
-                _maskPrompt,
-                _imageSize,
+                compiled.Prompt,
+                compiled.Size,
                 _imageQuality,
                 _imageFormat,
                 _imageFormat == "jpeg" ? _imageCompression : null,
@@ -567,7 +593,10 @@ else
                 [],
                 Label: $"Edit {_editingImage.FileName}",
                 EntityTargets: _editEntityTargets,
-                InheritSourceEntityTargets: _inheritEditEntityTargets));
+                InheritSourceEntityTargets: _inheritEditEntityTargets,
+                BriefJson: compiled.BriefJson,
+                ReferenceManifestJson: compiled.ReferenceManifestJson,
+                TargetGeometryJson: compiled.TargetGeometryJson));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
             _maskModalOpen = false;
             _status = "Edit job queued.";
@@ -608,6 +637,25 @@ else
                     <span>@JobStatusText(job, runtimeJob)</span>
                 </div>
                 <p class="small mb-0">@Truncate(job.Prompt, 160)</p>
+                <details class="small mt-2">
+                    <summary>Generation brief and provider details</summary>
+                    <div class="mt-2"><strong>Compiled prompt</strong></div>
+                    <pre class="context-detail-text"><code>@job.Prompt</code></pre>
+                    <div><strong>Structured brief</strong></div>
+                    <pre class="context-detail-text"><code>@job.BriefJson</code></pre>
+                    <div><strong>Reference manifest</strong></div>
+                    <pre class="context-detail-text"><code>@job.ReferenceManifestJson</code></pre>
+                    <div><strong>Target geometry</strong></div>
+                    <pre class="context-detail-text"><code>@job.TargetGeometryJson</code></pre>
+                    @if (job.ProviderRevisedPrompts.Count > 0)
+                    {
+                        <div><strong>Provider revised prompt@(job.ProviderRevisedPrompts.Count == 1 ? string.Empty : "s")</strong></div>
+                        @foreach (var revisedPrompt in job.ProviderRevisedPrompts)
+                        {
+                            <pre class="context-detail-text"><code>@revisedPrompt</code></pre>
+                        }
+                    }
+                </details>
                 @if (!string.IsNullOrWhiteSpace(job.Error))
                 {
                     <p class="small text-danger mb-0">@job.Error</p>

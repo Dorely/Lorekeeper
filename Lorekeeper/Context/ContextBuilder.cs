@@ -11,6 +11,9 @@ using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Projects;
+using Lorekeeper.Search;
+using Lorekeeper.Tokens;
 using Lorekeeper.Writing;
 
 namespace Lorekeeper.Context;
@@ -27,42 +30,58 @@ public sealed class ContextBuilder(
     IEntityVisualExampleService entityVisualExamples,
     IChapterVisualService chapterVisuals,
     IProjectFontService projectFonts,
-    IEmbeddingService embeddings) : IEditorContextService
+    IEmbeddingService embeddings,
+    IBookBriefService bookBriefs,
+    ISystemPromptComposer systemPrompts,
+    IProjectSearchService projectSearch,
+    ITokenCounter tokenCounter,
+    ITokenBudgetPlanner tokenBudgets) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
-        Project project,
-        Chapter? currentChapter,
+        ContextBuildRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        var project = request.Project;
+        var currentChapter = request.ActiveChapter;
         var preferenceMap = currentChapter is null
             ? new Dictionary<string, EditorContextPreference>(StringComparer.Ordinal)
             : (await preferences.ListForChapterAsync(project.Id, currentChapter.Id, cancellationToken))
                 .ToDictionary(preference => PreferenceKey(preference.Kind, preference.Key), StringComparer.Ordinal);
 
-        var assistantWorkflow = project.ContestModeEnabled
-            ? AssistantWorkflowInstructions.EditorContestPreparationWorkflow
-            : AssistantWorkflowInstructions.EditorChatFor(await embeddings.IsAvailableAsync(cancellationToken));
+        var assistantWorkflow = request.OperatingRules
+            ?? await ResolveOperatingRulesAsync(request.Purpose, project, cancellationToken);
+        var brief = await bookBriefs.GetOrCreateAsync(project.Id, cancellationToken);
+        var composition = systemPrompts.Compose(new(
+            project,
+            brief,
+            RoleFor(request.Purpose),
+            assistantWorkflow,
+            currentChapter));
+        var items = composition.Sections.Select(ToContextItem).ToList();
 
-        var items = new List<ContextItem>
+        if (request.Purpose is ContextBuildPurpose.Images or ContextBuildPurpose.Research)
         {
-            new(
-                Key: EditorContextKeys.AssistantWorkflow,
-                Kind: ContextItemKind.AssistantWorkflow,
-                Label: "Assistant Workflow",
-                Body: assistantWorkflow,
+            items.Add(new ContextItem(
+                Key: EditorContextKeys.ProjectOutline,
+                Kind: ContextItemKind.ProjectOutline,
+                Label: "Outline Structure and Synopses",
+                Body: await BuildOutlineBlockAsync(project.Id, Guid.Empty, cancellationToken),
                 IsEnabled: true,
                 IsRemovable: false,
-                Badge: "App"),
-            new(
-                Key: EditorContextKeys.SystemPrompt,
-                Kind: ContextItemKind.SystemPrompt,
-                Label: "Project Guidance",
-                Body: project.SystemPrompt,
+                IsProtected: true));
+            items.Add(new ContextItem(
+                Key: EditorContextKeys.ProjectFacts,
+                Kind: ContextItemKind.ProjectFacts,
+                Label: "Project Facts",
+                Body: await BuildProjectFactsBlockAsync(project.Id, cancellationToken),
                 IsEnabled: true,
-                IsRemovable: false),
-        };
+                IsRemovable: false,
+                IsProtected: true));
+        }
 
-        if (currentChapter is not null)
+        if (currentChapter is not null
+            && request.Purpose is ContextBuildPurpose.Editor or ContextBuildPurpose.EditorRevision)
         {
             items.Add(new ContextItem(
                 Key: EditorContextKeys.CurrentChapter,
@@ -70,11 +89,12 @@ public sealed class ContextBuilder(
                 Label: $"Current Chapter — {currentChapter.Title} (line-numbered)",
                 Body: BuildCurrentChapterBlock(currentChapter),
                 IsEnabled: IsIncluded(preferenceMap, ContextItemKind.CurrentChapter, EditorContextKeys.CurrentChapter, defaultIncluded: true),
-                IsRemovable: true));
+                IsRemovable: true,
+                IsProtected: true));
 
             var visualItem = await BuildChapterVisualLayoutItemAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken);
             if (visualItem is not null)
-                items.Add(visualItem);
+                items.Add(visualItem with { IsProtected = true });
 
             var structuralReferenceKeysToSkip = new HashSet<string>(StringComparer.Ordinal);
             var previousChapterItem = await BuildPreviousChapterReferenceItemAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken);
@@ -100,7 +120,9 @@ public sealed class ContextBuilder(
                 IsEnabled: IsIncluded(preferenceMap, ContextItemKind.ProjectFacts, EditorContextKeys.ProjectFacts, defaultIncluded: true),
                 IsRemovable: true));
 
-            foreach (var sample in await writingSamples.ListAsync(project.Id, cancellationToken))
+            var projectWritingSamples = await writingSamples.ListAsync(project.Id, cancellationToken);
+            var relevantWritingSampleIds = RelevantWritingSampleIds(projectWritingSamples, request.UserMessage);
+            foreach (var sample in projectWritingSamples)
             {
                 var key = EditorContextKeys.WritingSample(sample.Id);
                 items.Add(new ContextItem(
@@ -108,14 +130,27 @@ public sealed class ContextBuilder(
                     Kind: ContextItemKind.WritingSample,
                     Label: $"Writing Sample — {sample.Title}",
                     Body: BuildWritingSampleBlock(sample),
-                    IsEnabled: IsIncluded(preferenceMap, ContextItemKind.WritingSample, key, defaultIncluded: true),
+                    IsEnabled: IsIncluded(
+                        preferenceMap,
+                        ContextItemKind.WritingSample,
+                        key,
+                        defaultIncluded: relevantWritingSampleIds.Contains(sample.Id)),
                     IsRemovable: true,
-                    Badge: "Style"));
+                    Badge: "Style",
+                    Reason: relevantWritingSampleIds.Contains(sample.Id)
+                        ? "Writing style matched to this turn"
+                        : "Available writing sample",
+                    Origin: ContextItemOrigin.WritingSample,
+                    IsProtected: IsExplicitlyIncluded(preferenceMap, ContextItemKind.WritingSample, key)));
             }
 
             foreach (var item in await ListStructuralReferenceItemsAsync(project.Id, currentChapter.Id, preferenceMap, structuralReferenceKeysToSkip, cancellationToken))
             {
-                items.Add(item);
+                items.Add(item with
+                {
+                    Origin = ContextItemOrigin.DirectLink,
+                    IsProtected = true,
+                });
             }
 
             var contextEntities = await ListContextEntitiesAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken);
@@ -133,52 +168,94 @@ public sealed class ContextBuilder(
                     IsRemovable: true,
                     Badge: entity.Type,
                     Reason: entity.ParentId == currentChapter.Id ? "Chapter beat" : "Related to current chapter context",
-                    Visuals: examples.Select(EntityVisualContextService.ToReference).ToList()));
+                    Visuals: examples.Select(EntityVisualContextService.ToReference).ToList(),
+                    Origin: ContextItemOrigin.DirectLink,
+                    IsProtected: entity.ParentId == currentChapter.Id
+                        || IsExplicitlyIncluded(preferenceMap, ContextItemKind.Entity, key)));
             }
+
+            items.AddRange(await BuildTurnRetrievalItemsAsync(
+                project.Id,
+                currentChapter.Id,
+                request.UserMessage,
+                preferenceMap,
+                items,
+                cancellationToken));
         }
 
-        return new ContextAssembly(items);
+        var estimatedItems = items.Select(AddTokenEstimate).ToList();
+        return ApplyContextBudget(
+            estimatedItems,
+            request.AvailableContextTokens,
+            currentChapter,
+            request.UserMessage);
     }
 
-    public async Task<ContextAssembly> BuildProjectAsync(
+    private async Task<string> ResolveOperatingRulesAsync(
+        ContextBuildPurpose purpose,
         Project project,
-        string assistantWorkflow,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
-        var items = new List<ContextItem>
+        return purpose switch
         {
-            new(
-                Key: EditorContextKeys.SystemPrompt,
-                Kind: ContextItemKind.SystemPrompt,
-                Label: "Project Guidance",
-                Body: project.SystemPrompt,
-                IsEnabled: true,
-                IsRemovable: false),
-            new(
-                Key: EditorContextKeys.ProjectOutline,
-                Kind: ContextItemKind.ProjectOutline,
-                Label: "Outline Structure and Synopses",
-                Body: await BuildOutlineBlockAsync(project.Id, Guid.Empty, cancellationToken),
-                IsEnabled: true,
-                IsRemovable: false),
-            new(
-                Key: EditorContextKeys.ProjectFacts,
-                Kind: ContextItemKind.ProjectFacts,
-                Label: "Project Facts",
-                Body: await BuildProjectFactsBlockAsync(project.Id, cancellationToken),
-                IsEnabled: true,
-                IsRemovable: false),
-            new(
-                Key: EditorContextKeys.AssistantWorkflow,
-                Kind: ContextItemKind.AssistantWorkflow,
-                Label: "Assistant Workflow",
-                Body: assistantWorkflow,
-                IsEnabled: true,
-                IsRemovable: false),
+            ContextBuildPurpose.Editor when project.ContestModeEnabled =>
+                AssistantWorkflowInstructions.EditorContestPreparationWorkflow,
+            ContextBuildPurpose.Editor =>
+                AssistantWorkflowInstructions.EditorChatFor(await embeddings.IsAvailableAsync(cancellationToken)),
+            ContextBuildPurpose.EditorRevision => AssistantWorkflowInstructions.EditorRevisionWorker,
+            ContextBuildPurpose.Images => AssistantWorkflowInstructions.VisualCreationWorkflow,
+            ContextBuildPurpose.Research =>
+                "Use the supplied research tools to gather, attribute, compare, and synthesize evidence. Distinguish sourced facts from editorial inference and never fabricate a source.",
+            _ => throw new ArgumentOutOfRangeException(nameof(purpose)),
+        };
+    }
+
+    private static SystemPromptAgentRole RoleFor(ContextBuildPurpose purpose) => purpose switch
+    {
+        ContextBuildPurpose.Editor => SystemPromptAgentRole.Editor,
+        ContextBuildPurpose.EditorRevision => SystemPromptAgentRole.RevisionWorker,
+        ContextBuildPurpose.Images => SystemPromptAgentRole.Images,
+        ContextBuildPurpose.Research => SystemPromptAgentRole.Research,
+        _ => throw new ArgumentOutOfRangeException(nameof(purpose)),
+    };
+
+    private static ContextItem ToContextItem(SystemPromptSection section)
+    {
+        var kind = section.Kind switch
+        {
+            SystemPromptSectionKind.ProfessionalIdentity => ContextItemKind.SystemInstructions,
+            SystemPromptSectionKind.OperatingRules => ContextItemKind.AssistantWorkflow,
+            SystemPromptSectionKind.DynamicGuidance => ContextItemKind.DynamicGuidance,
+            SystemPromptSectionKind.ProjectGuidance => ContextItemKind.ProjectGuidance,
+            SystemPromptSectionKind.BookBrief => ContextItemKind.BookBrief,
+            _ => throw new ArgumentOutOfRangeException(nameof(section)),
+        };
+        var key = section.Kind switch
+        {
+            SystemPromptSectionKind.ProfessionalIdentity => EditorContextKeys.SystemInstructions,
+            SystemPromptSectionKind.OperatingRules => EditorContextKeys.AssistantWorkflow,
+            SystemPromptSectionKind.DynamicGuidance => EditorContextKeys.DynamicGuidance,
+            SystemPromptSectionKind.ProjectGuidance => EditorContextKeys.ProjectGuidance,
+            SystemPromptSectionKind.BookBrief => EditorContextKeys.BookBrief,
+            _ => section.Key,
         };
 
-        return new ContextAssembly(items);
+        return new ContextItem(
+            Key: key,
+            Kind: kind,
+            Label: section.Label,
+            Body: section.Body,
+            IsEnabled: true,
+            IsRemovable: false,
+            Badge: section.IsUserOwned ? "Author" : "App",
+            Origin: section.IsUserOwned ? ContextItemOrigin.User : ContextItemOrigin.Application,
+            IsProtected: true);
     }
+
+    private ContextItem AddTokenEstimate(ContextItem item) =>
+        item.EstimatedTokens > 0
+            ? item
+            : item with { EstimatedTokens = Math.Max(1, tokenCounter.Count(item.Body).TokenCount) };
 
     public async Task SetItemIncludedAsync(
         Guid projectId,
@@ -500,6 +577,8 @@ public sealed class ContextBuilder(
             {
                 Label = $"Previous Chapter - {previousChapter.Title}",
                 Reason = "Previous chapter",
+                Origin = ContextItemOrigin.PreviousChapter,
+                IsProtected = true,
             };
     }
 
@@ -822,6 +901,352 @@ public sealed class ContextBuilder(
         if (string.IsNullOrWhiteSpace(value)) return;
         sb.Append(' ', spaces).Append(label).Append(": ").AppendLine(value.Trim());
     }
+
+    private async Task<IReadOnlyList<ContextItem>> BuildTurnRetrievalItemsAsync(
+        Guid projectId,
+        Guid currentChapterId,
+        string userMessage,
+        IReadOnlyDictionary<string, EditorContextPreference> preferenceMap,
+        IReadOnlyCollection<ContextItem> existingItems,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return [];
+
+        ProjectSearchResponse response;
+        try
+        {
+            response = await projectSearch.SearchAsync(
+                new ProjectSearchRequest(projectId, userMessage.Trim(), TopK: 24),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Context search is opportunistic. Direct graph, outline, and lexical feed
+            // construction above remain usable when a search index is unavailable.
+            return [];
+        }
+
+        var existingKeys = existingItems.Select(item => item.Key).ToHashSet(StringComparer.Ordinal);
+        var results = new List<ContextItem>();
+        foreach (var result in response.Results)
+        {
+            if (results.Count >= 8 || result.SourceId is not { } sourceId)
+                break;
+            if (!TryMapTurnResult(result.SourceType, sourceId, out var kind, out var key))
+                continue;
+            if (kind == ContextItemKind.ChapterReference && sourceId == currentChapterId)
+                continue;
+            if (existingKeys.Contains(key) || IsExplicitlyExcluded(preferenceMap, kind, key))
+                continue;
+
+            var reasons = result.Reasons.Count == 0
+                ? "project search"
+                : string.Join(" + ", result.Reasons);
+            var origin = result.Reasons.Contains("semantic", StringComparer.OrdinalIgnoreCase)
+                && !result.Reasons.Contains("keyword", StringComparer.OrdinalIgnoreCase)
+                    ? ContextItemOrigin.VectorRetrieval
+                    : ContextItemOrigin.LexicalRetrieval;
+            var exactExcerpt = string.IsNullOrWhiteSpace(result.Content)
+                ? result.Snippet
+                : result.Content;
+            var body = $$"""
+                Source type: {{result.SourceType}}
+                Source id: {{sourceId}}
+                Retrieval reason: {{reasons}}
+
+                Exact retrieved excerpt:
+                {{exactExcerpt}}
+                """;
+
+            results.Add(new ContextItem(
+                Key: key,
+                Kind: kind,
+                Label: $"This turn — {result.Title}",
+                Body: body,
+                IsEnabled: true,
+                IsRemovable: true,
+                Badge: "This turn",
+                Reason: $"Matched this request through {reasons}",
+                Origin: origin,
+                IsTransient: true,
+                IsProtected: IsExplicitlyIncluded(preferenceMap, kind, key)));
+            existingKeys.Add(key);
+        }
+
+        return results;
+    }
+
+    private static bool TryMapTurnResult(
+        string sourceType,
+        Guid sourceId,
+        out ContextItemKind kind,
+        out string key)
+    {
+        var normalized = ProjectSearchSourceTypes.Normalize(sourceType);
+        switch (normalized)
+        {
+            case ProjectSearchSourceTypes.Entity:
+                kind = ContextItemKind.Entity;
+                key = EditorContextKeys.Entity(sourceId);
+                return true;
+            case ProjectSearchSourceTypes.Chapter:
+            case ProjectSearchSourceTypes.ContextChapter:
+                kind = ContextItemKind.ChapterReference;
+                key = EditorContextKeys.ChapterReference(sourceId);
+                return true;
+            case ProjectSearchSourceTypes.Act:
+                kind = ContextItemKind.ActReference;
+                key = EditorContextKeys.ActReference(sourceId);
+                return true;
+            case ProjectSearchSourceTypes.IngestSource:
+            case ProjectSearchSourceTypes.RawIngestSource:
+                kind = ContextItemKind.IngestSourceReference;
+                key = EditorContextKeys.IngestSourceReference(sourceId);
+                return true;
+            case ProjectSearchSourceTypes.IngestSourceChunk:
+                kind = ContextItemKind.IngestSourceChunkReference;
+                key = EditorContextKeys.IngestSourceChunkReference(sourceId);
+                return true;
+            default:
+                kind = default;
+                key = string.Empty;
+                return false;
+        }
+    }
+
+    private static HashSet<Guid> RelevantWritingSampleIds(
+        IReadOnlyList<WritingSample> samples,
+        string userMessage)
+    {
+        if (samples.Count == 0 || string.IsNullOrWhiteSpace(userMessage))
+            return [];
+
+        var terms = userMessage
+            .Split([' ', '\t', '\r', '\n', ',', '.', ';', ':', '!', '?'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(term => term.Length >= 3)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var explicitlyStyleFocused = terms.Any(term => term.Equals("style", StringComparison.OrdinalIgnoreCase)
+            || term.Equals("voice", StringComparison.OrdinalIgnoreCase)
+            || term.Equals("tone", StringComparison.OrdinalIgnoreCase));
+
+        var ranked = samples
+            .Select(sample => new
+            {
+                sample.Id,
+                Score = terms.Sum(term =>
+                    (sample.Title.Contains(term, StringComparison.OrdinalIgnoreCase) ? 8 : 0)
+                    + (sample.Body.Contains(term, StringComparison.OrdinalIgnoreCase) ? 1 : 0)),
+                sample.UpdatedAt,
+            })
+            .Where(item => item.Score > 0 || explicitlyStyleFocused)
+            .OrderByDescending(item => item.Score)
+            .ThenByDescending(item => item.UpdatedAt)
+            .Take(explicitlyStyleFocused ? 2 : 3)
+            .Select(item => item.Id)
+            .ToHashSet();
+        return ranked;
+    }
+
+    private ContextAssembly ApplyContextBudget(
+        List<ContextItem> items,
+        int? availableContextTokens,
+        Chapter? currentChapter,
+        string userMessage)
+    {
+        var plan = tokenBudgets.Plan();
+        var budget = availableContextTokens ?? Math.Max(
+            1,
+            plan.ContextWindowTokens
+                - plan.JobMemoryReserveTokens
+                - plan.ToolSchemaReserveTokens
+                - plan.ResponseReserveTokens
+                - plan.SafetyMarginTokens);
+        var protectedTokens = items
+            .Where(item => item.IsEnabled && item.IsProtected)
+            .Sum(item => item.EstimatedTokens);
+        if (protectedTokens > budget && currentChapter is not null)
+        {
+            var currentIndex = items.FindIndex(item =>
+                item.IsEnabled
+                && item.IsProtected
+                && item.Kind == ContextItemKind.CurrentChapter
+                && string.Equals(item.Key, EditorContextKeys.CurrentChapter, StringComparison.Ordinal));
+            if (currentIndex >= 0)
+            {
+                var current = items[currentIndex];
+                var nonCurrentProtectedTokens = protectedTokens - current.EstimatedTokens;
+                var currentBudget = budget - nonCurrentProtectedTokens;
+                if (currentBudget > 0
+                    && BuildSectionedCurrentChapterBlock(currentChapter, userMessage, currentBudget) is { } sectionedBody)
+                {
+                    var sectioned = current with
+                    {
+                        Body = sectionedBody,
+                        Reason = "Active chapter sections selected to fit this turn. Call read_chapter before changing any omitted range.",
+                        EstimatedTokens = Math.Max(1, tokenCounter.Count(sectionedBody).TokenCount),
+                    };
+                    items[currentIndex] = sectioned;
+                    protectedTokens = nonCurrentProtectedTokens + sectioned.EstimatedTokens;
+                }
+            }
+        }
+        if (protectedTokens > budget)
+        {
+            throw new InvalidOperationException(
+                $"Protected editor context needs about {protectedTokens:N0} tokens, above the {budget:N0}-token context budget. "
+                + "Lorekeeper will never replace the full previous chapter with an excerpt. Increase the configured context window, shorten protected material, or explicitly remove another protected selection before sending.");
+        }
+
+        var total = items.Where(item => item.IsEnabled).Sum(item => item.EstimatedTokens);
+        if (total <= budget)
+            return new ContextAssembly(items);
+
+        var candidates = items
+            .Select((item, index) => new { Item = item, Index = index })
+            .Where(value => value.Item.IsEnabled && !value.Item.IsProtected)
+            .OrderBy(value => PrunePriority(value.Item))
+            .ThenByDescending(value => value.Index)
+            .ToList();
+        foreach (var candidate in candidates)
+        {
+            if (total <= budget)
+                break;
+            items[candidate.Index] = candidate.Item with
+            {
+                IsEnabled = false,
+                Reason = $"Omitted automatically to fit the {budget:N0}-token turn budget. {candidate.Item.Reason}".Trim(),
+            };
+            total -= candidate.Item.EstimatedTokens;
+        }
+
+        if (total > budget)
+        {
+            throw new InvalidOperationException(
+                $"The protected context fits, but the assembled system prompt still needs about {total:N0} tokens for a {budget:N0}-token budget. Disable optional Context Feed items or increase the configured context window.");
+        }
+
+        return new ContextAssembly(items);
+    }
+
+    private string? BuildSectionedCurrentChapterBlock(
+        Chapter chapter,
+        string userMessage,
+        int tokenBudget)
+    {
+        var lines = ChapterFormatting.SplitLines(chapter.Body);
+        if (lines.Count == 0)
+            return BuildCurrentChapterBlock(chapter);
+
+        var anchors = new HashSet<int> { 0, lines.Count - 1 };
+        var terms = userMessage
+            .Split([' ', '\t', '\r', '\n', ',', '.', ';', ':', '!', '?', '(', ')', '[', ']', '"'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(term => term.Length >= 4)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+        for (var index = 0; index < lines.Count && anchors.Count < 8; index++)
+        {
+            if (terms.Any(term => lines[index].Contains(term, StringComparison.OrdinalIgnoreCase)))
+                anchors.Add(index);
+        }
+        if (anchors.Count == 2 && lines.Count > 2)
+            anchors.Add(lines.Count / 2);
+
+        var radius = Math.Min(80, Math.Max(0, tokenBudget / Math.Max(24, anchors.Count * 24)));
+        while (true)
+        {
+            var ranges = MergeLineRanges(anchors
+                .Order()
+                .Select(anchor => new LineRange(
+                    Math.Max(0, anchor - radius),
+                    Math.Min(lines.Count - 1, anchor + radius)))
+                .ToList());
+            var body = BuildSectionedBody(chapter, lines, ranges);
+            if (tokenCounter.Count(body).TokenCount <= tokenBudget)
+                return body;
+            if (radius == 0)
+                return null;
+            radius = radius == 1 ? 0 : radius / 2;
+        }
+    }
+
+    private static string BuildSectionedBody(
+        Chapter chapter,
+        IReadOnlyList<string> lines,
+        IReadOnlyList<LineRange> ranges)
+    {
+        var width = Math.Max(4, lines.Count.ToString().Length);
+        var body = new StringBuilder();
+        body.Append("Chapter id: ").AppendLine(chapter.Id.ToString());
+        body.Append("Title: ").AppendLine(chapter.Title);
+        body.Append("Active visual mode: ").AppendLine(chapter.VisualMode.ToString());
+        body.AppendLine("ACTIVE CHAPTER PREFLIGHT: The complete chapter cannot fit beside the other protected context for this turn.");
+        body.AppendLine("Only the marked, line-numbered sections below are present. Before changing any omitted line, call read_chapter to read the necessary range. Do not infer omitted wording.");
+
+        var priorEnd = -1;
+        foreach (var range in ranges)
+        {
+            if (range.Start > priorEnd + 1)
+                body.Append("[OMITTED LINES ").Append(priorEnd + 2).Append('-').Append(range.Start).AppendLine("]");
+            body.Append("[INCLUDED LINES ").Append(range.Start + 1).Append('-').Append(range.End + 1).AppendLine("]");
+            for (var index = range.Start; index <= range.End; index++)
+            {
+                body.Append((index + 1).ToString().PadLeft(width, '0'))
+                    .Append(": ")
+                    .AppendLine(lines[index]);
+            }
+            priorEnd = range.End;
+        }
+        if (priorEnd < lines.Count - 1)
+            body.Append("[OMITTED LINES ").Append(priorEnd + 2).Append('-').Append(lines.Count).AppendLine("]");
+        return body.ToString().TrimEnd();
+    }
+
+    private static IReadOnlyList<LineRange> MergeLineRanges(IReadOnlyList<LineRange> ranges)
+    {
+        var merged = new List<LineRange>();
+        foreach (var range in ranges)
+        {
+            if (merged.Count == 0 || range.Start > merged[^1].End + 1)
+            {
+                merged.Add(range);
+                continue;
+            }
+            merged[^1] = merged[^1] with { End = Math.Max(merged[^1].End, range.End) };
+        }
+        return merged;
+    }
+
+    private sealed record LineRange(int Start, int End);
+
+    private static int PrunePriority(ContextItem item) => item switch
+    {
+        { IsTransient: true } => 0,
+        { Kind: ContextItemKind.WritingSample } => 1,
+        { Kind: ContextItemKind.ProjectFacts } => 2,
+        { Kind: ContextItemKind.ProjectOutline } => 3,
+        _ => 4,
+    };
+
+    private static bool IsExplicitlyIncluded(
+        IReadOnlyDictionary<string, EditorContextPreference> preferenceMap,
+        ContextItemKind kind,
+        string key) =>
+        preferenceMap.TryGetValue(PreferenceKey(kind.ToString(), key), out var preference)
+        && preference.IsIncluded;
+
+    private static bool IsExplicitlyExcluded(
+        IReadOnlyDictionary<string, EditorContextPreference> preferenceMap,
+        ContextItemKind kind,
+        string key) =>
+        preferenceMap.TryGetValue(PreferenceKey(kind.ToString(), key), out var preference)
+        && !preference.IsIncluded;
 
     private static bool IsIncluded(
         IReadOnlyDictionary<string, EditorContextPreference> preferenceMap,

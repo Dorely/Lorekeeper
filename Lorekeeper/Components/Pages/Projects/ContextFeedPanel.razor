@@ -26,6 +26,20 @@ else
         Combined context tokens: @TokenPrefix(_contextTokenIsExact)@_contextTokenCount.ToString("N0")
     </div>
 
+    <div class="ctx-card">
+        <div class="ctx-card-head">
+            <div class="ctx-open"
+                 role="button"
+                 tabindex="0"
+                 aria-label="Open assembled system prompt preview"
+                 @onclick="OpenAssembledPrompt"
+                 @onkeydown="OnAssembledPromptKeyDown">
+                <span class="ctx-label">Assembled system prompt preview</span>
+                <span class="ctx-badge">Read only</span>
+            </div>
+        </div>
+    </div>
+
     @foreach (var item in _assembly.Items)
     {
         var canChange = CanChangeContextItem(item);
@@ -42,6 +56,11 @@ else
                     {
                         <span class="ctx-badge">@item.Badge</span>
                     }
+                    @if (item.IsTransient)
+                    {
+                        <span class="ctx-badge">@item.Origin</span>
+                    }
+                    <span class="ctx-badge">~@item.EstimatedTokens.ToString("N0") tokens</span>
                 </div>
                 @if (canChange)
                 {
@@ -93,7 +112,8 @@ else
                         Project="Project"
                         FeedItem="_selectedDetail"
                         IsOpen="_detailOpen"
-                        AllowSystemPromptEdit="true"
+                        AllowProjectGuidanceEdit="true"
+                        AllowBookBriefEdit="true"
                         AllowEntityEdit="true"
                         OnClose="CloseDetail"
                         OnSaved="OnDetailSavedAsync" />
@@ -152,6 +172,25 @@ else
             reload.CancellationToken));
     }
 
+    private void OpenAssembledPrompt()
+    {
+        if (_assembly is null) return;
+        OpenDetail(new ContextItem(
+            "assembled-system-prompt-preview",
+            ContextItemKind.SystemInstructions,
+            "Assembled system prompt preview",
+            _assembly.Assemble(),
+            IsEnabled: true,
+            IsRemovable: false,
+            Badge: "Read only"));
+    }
+
+    private void OnAssembledPromptKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key is "Enter" or " ")
+            OpenAssembledPrompt();
+    }
+
     private ContextReload BeginReload()
     {
         _reloadCts?.Cancel();
@@ -189,7 +228,9 @@ else
             if (chapterId is not null && (chapter is null || chapter.ProjectId != projectId))
                 throw new InvalidOperationException("Chapter was not found in this project.");
 
-            var assembly = await context.BuildAsync(project, chapter, cancellationToken);
+            var assembly = await context.BuildAsync(
+                new ContextBuildRequest(project, chapter),
+                cancellationToken);
             if (!IsCurrentReload(version, cancellationToken)) return;
 
             await InvokeAsync(() =>

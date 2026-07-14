@@ -8,6 +8,7 @@
 @implements IAsyncDisposable
 @inject IProjectService Projects
 @inject IPublishService Publishing
+@inject IPageGeometryService PageGeometry
 @inject IJSRuntime JS
 
 <PageTitle>@PageTitleText</PageTitle>
@@ -29,6 +30,7 @@ else if (!string.IsNullOrWhiteSpace(_error))
 }
 else if (_document is not null)
 {
+    <style>@((MarkupString)PrintGeometryCss(_document.Profile))</style>
     <div class="print-toolbar @(Embedded ? "is-embedded" : null)">
         @if (!Embedded)
         {
@@ -425,7 +427,7 @@ else if (_document is not null)
             PrintPicturePageSpreadMode.SidewaysWholeSpread =>
             [
                 new(
-                    "manuscript-picture-frame manuscript-picture-frame--sideways-letter-portrait is-single is-contained",
+                    "manuscript-picture-frame manuscript-picture-frame--sideways-portrait is-single is-contained",
                     $"{chapter.Title}, full spread rotated clockwise",
                     RotateClockwise: true),
             ],
@@ -443,7 +445,7 @@ else if (_document is not null)
             _ =>
             [
                 new(
-                    "manuscript-picture-frame manuscript-picture-frame--spread-letter-portrait is-single is-contained",
+                    "manuscript-picture-frame manuscript-picture-frame--spread-portrait is-single is-contained",
                     $"{chapter.Title}, full spread",
                     RotateClockwise: false),
             ],
@@ -536,6 +538,60 @@ else if (_document is not null)
         ChapterPageLayoutKind.DoubleLandscape => "manuscript-cover-page--double-landscape",
         _ => "manuscript-cover-page--portrait",
     };
+
+    private string PrintGeometryCss(PublishDocumentProfile profile)
+    {
+        var portrait = Geometry(profile, ChapterPageLayoutKind.SinglePortrait);
+        var landscape = Geometry(profile, ChapterPageLayoutKind.SingleLandscape);
+        var doublePortrait = Geometry(profile, ChapterPageLayoutKind.DoublePortrait);
+        var doubleLandscape = Geometry(profile, ChapterPageLayoutKind.DoubleLandscape);
+        static string Number(double value) => value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+        return $$"""
+            .manuscript-print {
+              --normal-page-width: {{Number(portrait.PageWidthInches)}}in;
+              --normal-page-height: {{Number(portrait.PageHeightInches)}}in;
+              --page-margin: {{Number(portrait.PageMarginInches)}}in;
+              --body-font-size: {{Number(portrait.BodyFontSizePoints)}}pt;
+              --body-line-height: {{Number(portrait.BodyLineHeight)}};
+              --portrait-page-width: {{Number(portrait.PageWidthInches)}}in;
+              --portrait-page-height: {{Number(portrait.PageHeightInches)}}in;
+              --portrait-width-number: {{Number(portrait.PageWidthInches)}};
+              --portrait-height-number: {{Number(portrait.PageHeightInches)}};
+              --landscape-page-width: {{Number(landscape.PageWidthInches)}}in;
+              --landscape-page-height: {{Number(landscape.PageHeightInches)}}in;
+              --landscape-width-number: {{Number(landscape.PageWidthInches)}};
+              --landscape-height-number: {{Number(landscape.PageHeightInches)}};
+              --double-portrait-width: {{Number(doublePortrait.SurfaceWidthInches)}}in;
+              --double-portrait-height: {{Number(doublePortrait.SurfaceHeightInches)}}in;
+              --double-portrait-width-number: {{Number(doublePortrait.SurfaceWidthInches)}};
+              --double-portrait-height-number: {{Number(doublePortrait.SurfaceHeightInches)}};
+              --double-landscape-width: {{Number(doubleLandscape.SurfaceWidthInches)}}in;
+              --double-landscape-height: {{Number(doubleLandscape.SurfaceHeightInches)}}in;
+              --double-landscape-width-number: {{Number(doubleLandscape.SurfaceWidthInches)}};
+              --double-landscape-height-number: {{Number(doubleLandscape.SurfaceHeightInches)}};
+            }
+
+            @page manuscript-page { size: {{Number(portrait.PageWidthInches)}}in {{Number(portrait.PageHeightInches)}}in; margin: {{Number(portrait.PageMarginInches)}}in; }
+            @page picture-portrait { size: {{Number(portrait.PageWidthInches)}}in {{Number(portrait.PageHeightInches)}}in; margin: 0; }
+            @page picture-landscape { size: {{Number(landscape.PageWidthInches)}}in {{Number(landscape.PageHeightInches)}}in; margin: 0; }
+            @page picture-spread-portrait { size: {{Number(portrait.PageWidthInches)}}in {{Number(portrait.PageHeightInches)}}in; margin: 0; }
+            @page picture-sideways-portrait { size: {{Number(portrait.PageWidthInches)}}in {{Number(portrait.PageHeightInches)}}in; margin: 0; }
+            @page cover-portrait { size: {{Number(portrait.PageWidthInches)}}in {{Number(portrait.PageHeightInches)}}in; margin: 0; }
+            @page cover-landscape { size: {{Number(landscape.PageWidthInches)}}in {{Number(landscape.PageHeightInches)}}in; margin: 0; }
+            @page cover-double-portrait { size: {{Number(doublePortrait.SurfaceWidthInches)}}in {{Number(doublePortrait.SurfaceHeightInches)}}in; margin: 0; }
+            @page cover-double-landscape { size: {{Number(doubleLandscape.SurfaceWidthInches)}}in {{Number(doubleLandscape.SurfaceHeightInches)}}in; margin: 0; }
+            """;
+    }
+
+    private BookPageGeometry Geometry(PublishDocumentProfile profile, ChapterPageLayoutKind layoutKind) =>
+        PageGeometry.Calculate(
+            profile.PageWidthInches,
+            profile.PageHeightInches,
+            profile.PageMarginInches,
+            profile.BodyFontSizePoints,
+            profile.BodyLineHeight,
+            layoutKind);
 
     public async ValueTask DisposeAsync()
     {

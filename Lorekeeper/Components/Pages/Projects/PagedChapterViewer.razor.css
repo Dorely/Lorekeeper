@@ -73,13 +73,13 @@
     box-sizing: border-box;
     width: min(100%, var(--page-width, 8.5in));
     height: var(--page-height, 11in);
-    padding: 0.75in;
+    padding: var(--page-margin, 0.75in);
     background: #fff;
     box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
     color: #172033;
     font-family: Georgia, "Times New Roman", serif;
-    font-size: 12pt;
-    line-height: 1.55;
+    font-size: var(--body-font-size, 12pt);
+    line-height: var(--body-line-height, 1.55);
     overflow: hidden;
 }
 

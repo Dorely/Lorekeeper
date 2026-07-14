@@ -1,5 +1,6 @@
 using System.Globalization;
 using Lorekeeper.Models;
+using Lorekeeper.Publish;
 
 namespace Lorekeeper.ChapterVisuals;
 
@@ -12,41 +13,38 @@ public static class PicturePageImageGenerationGuidance
     private const double MaxImageAspectRatio = 3.0;
     private const double TextArtBufferInches = 0.125;
 
-    public static PicturePageImageGenerationTarget ForPage(ChapterPageLayoutKind kind)
+    public static PicturePageImageGenerationTarget ForPage(BookPageGeometry geometry)
     {
-        var normalized = NormalizePageLayoutKind(kind);
-        (double PageWidth, double PageHeight, bool IsDouble, double SurfaceWidth, double SurfaceHeight, int WidthPixels, int HeightPixels) metrics = normalized switch
-        {
-            ChapterPageLayoutKind.SingleLandscape => (11d, 8.5d, false, 11d, 8.5d, 1760, 1360),
-            ChapterPageLayoutKind.DoublePortrait => (8.5d, 11d, true, 17d, 11d, 2720, 1760),
-            ChapterPageLayoutKind.DoubleLandscape => (11d, 8.5d, true, 22d, 8.5d, 3520, 1360),
-            _ => (8.5d, 11d, false, 8.5d, 11d, 1360, 1760),
-        };
+        ArgumentNullException.ThrowIfNull(geometry);
+        var recommended = RecommendedImageSize(
+            geometry.RecommendedRasterWidthPixels,
+            geometry.RecommendedRasterHeightPixels,
+            geometry.SurfaceAspectRatio);
 
         return new PicturePageImageGenerationTarget(
             TargetKind: "fullPage",
             ImageElementId: null,
-            PageLayoutKind: normalized,
-            PageWidthInches: metrics.PageWidth,
-            PageHeightInches: metrics.PageHeight,
-            IsDoubleSpread: metrics.IsDouble,
-            SurfaceWidthInches: metrics.SurfaceWidth,
-            SurfaceHeightInches: metrics.SurfaceHeight,
+            PageLayoutKind: geometry.LayoutKind,
+            PageWidthInches: geometry.PageWidthInches,
+            PageHeightInches: geometry.PageHeightInches,
+            IsDoubleSpread: geometry.IsDouble,
+            SurfaceWidthInches: geometry.SurfaceWidthInches,
+            SurfaceHeightInches: geometry.SurfaceHeightInches,
             TargetXPercent: null,
             TargetYPercent: null,
             TargetWidthPercent: null,
             TargetHeightPercent: null,
-            TargetWidthInches: metrics.SurfaceWidth,
-            TargetHeightInches: metrics.SurfaceHeight,
-            AspectRatio: AspectRatioLabel(metrics.SurfaceWidth, metrics.SurfaceHeight),
-            RecommendedSize: $"{metrics.WidthPixels}x{metrics.HeightPixels}",
-            RecommendedWidthPixels: metrics.WidthPixels,
-            RecommendedHeightPixels: metrics.HeightPixels);
+            TargetWidthInches: geometry.SurfaceWidthInches,
+            TargetHeightInches: geometry.SurfaceHeightInches,
+            AspectRatio: AspectRatioLabel(geometry.SurfaceWidthInches, geometry.SurfaceHeightInches),
+            RecommendedSize: $"{recommended.Width}x{recommended.Height}",
+            RecommendedWidthPixels: recommended.Width,
+            RecommendedHeightPixels: recommended.Height);
     }
 
-    public static PicturePageCanvasGeometry CanvasGeometry(ChapterPageLayoutKind kind)
+    public static PicturePageCanvasGeometry CanvasGeometry(BookPageGeometry geometry)
     {
-        var page = ForPage(kind);
+        var page = ForPage(geometry);
         return new PicturePageCanvasGeometry(
             page.PageLayoutKind,
             page.PageWidthInches,
@@ -60,10 +58,10 @@ public static class PicturePageImageGenerationGuidance
     }
 
     public static PicturePageImageGenerationTarget ForSlot(
-        ChapterPageLayoutKind kind,
+        BookPageGeometry geometry,
         PicturePageImageElement image)
     {
-        var page = ForPage(kind);
+        var page = ForPage(geometry);
         var xPercent = Clamp(image.XPercent, 0, 100, 0);
         var yPercent = Clamp(image.YPercent, 0, 100, 0);
         var widthPercent = Clamp(image.WidthPercent, 1, 100, 1);
@@ -98,6 +96,7 @@ public static class PicturePageImageGenerationGuidance
 
     public static bool TryResolveTarget(
         ChapterVisualState state,
+        BookPageGeometry geometry,
         Guid? imageElementId,
         out PicturePageImageGenerationTarget? target,
         out string? error)
@@ -112,7 +111,7 @@ public static class PicturePageImageGenerationGuidance
 
         if (imageElementId is not { } elementId || elementId == Guid.Empty)
         {
-            target = ForPage(state.PageLayoutKind);
+            target = ForPage(geometry);
             return true;
         }
 
@@ -123,7 +122,7 @@ public static class PicturePageImageGenerationGuidance
             return false;
         }
 
-        target = ForSlot(state.PageLayoutKind, image);
+        target = ForSlot(geometry, image);
         return true;
     }
 
@@ -151,12 +150,12 @@ public static class PicturePageImageGenerationGuidance
         return string.Join(Environment.NewLine, builder);
     }
 
-    public static IReadOnlyList<string> BuildManifestLines(ChapterVisualState state)
+    public static IReadOnlyList<string> BuildManifestLines(ChapterVisualState state, BookPageGeometry geometry)
     {
         if (state.VisualMode != ChapterVisualMode.PicturePage)
             return [];
 
-        var page = ForPage(state.PageLayoutKind);
+        var page = ForPage(geometry);
         var lines = new List<string>
         {
             $"Canvas geometry: {FormatNumber(page.SurfaceWidthInches)} x {FormatNumber(page.SurfaceHeightInches)} inches, {page.AspectRatio} aspect, {(page.SurfaceWidthInches >= page.SurfaceHeightInches ? "landscape" : "portrait")} orientation.",
@@ -238,9 +237,6 @@ public static class PicturePageImageGenerationGuidance
             .ToList();
         return string.Join("; ", areas);
     }
-
-    private static ChapterPageLayoutKind NormalizePageLayoutKind(ChapterPageLayoutKind kind) =>
-        Enum.IsDefined(kind) ? kind : ChapterPageLayoutKind.SinglePortrait;
 
     private static string AspectRatioLabel(double width, double height)
     {

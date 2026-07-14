@@ -82,9 +82,11 @@ public sealed class EditorRevisionAgentProcessor(
             await revisions.SaveChangesAsync(cancellationToken);
             NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
 
-            var contextAssembly = await contextBuilder.BuildAsync(project, chapter, cancellationToken);
-            var systemPrompt = contextAssembly.Assemble(AssistantWorkflowInstructions.EditorRevisionWorker);
             var userPrompt = await BuildWorkerUserPromptAsync(job, session, cancellationToken);
+            var contextAssembly = await contextBuilder.BuildAsync(
+                new ContextBuildRequest(project, chapter, userPrompt, ContextBuildPurpose.EditorRevision),
+                cancellationToken);
+            var systemPrompt = contextAssembly.Assemble();
             var nextOrder = await revisions.GetMaxMessageOrderAsync(session.Id, cancellationToken) + 1;
             await revisions.AddMessageAsync(new EditorRevisionMessage
             {

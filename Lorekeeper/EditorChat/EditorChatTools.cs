@@ -11,6 +11,7 @@ using Lorekeeper.Ingest;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Publish;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -33,7 +34,9 @@ public sealed class EditorChatTools(
     IEntityVisualExampleService entityVisualExamples,
     IProjectImageJobService imageJobs,
     IProjectImageGenerationRuntime imageRuntime,
+    IImagePromptComposer imagePrompts,
     IChapterVisualService chapterVisuals,
+    IPageGeometryService pageGeometry,
     IProjectFontService projectFonts,
     IOptions<EditorChatOptions> editorOptions,
     IOptions<ProjectImageGenerationOptions> imageOptions)
@@ -215,11 +218,24 @@ public sealed class EditorChatTools(
                 "Use pageLayoutKind for IllustratedProse or PicturePage; valid values are SinglePortrait, SingleLandscape, DoublePortrait, and DoubleLandscape."));
 
         tools.Add(AIFunctionFactory.Create(
-            method: (string prompt, string size, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null) =>
-                GenerateProjectImageAsync(context, prompt, size, altText, quality, outputFormat, outputCompression, referenceImageIds, entityTargets),
+            method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, EntityVisualTarget[]? entityTargets = null) =>
+                GenerateProjectImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression, entityTargets),
             name: "generate_project_image",
             description:
-                $"Generate one image into the project image library without placing or replacing anything in a chapter. Choose size explicitly for this image's intended frame: standard 1024x1024, 1024x1536, or 1536x1024; custom sizes use edges divisible by 16, aspect ratio 1:3 through 3:1, 655,360-8,294,400 total pixels, and maximum edge 3840. The raster aspect should match the intended frame; physical page size is decided later with add_project_image_to_chapter. Inspect the returned visible image before placing it. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} referenceImageIds. Ordinary scenes and prospective designs must omit entityTargets. Pass entityTargets only when the user explicitly approved or requested a purpose-built reference asset; otherwise attach an approved output later. Only use grounded eligible entity ids and still-approved referenceImageIds. Never reuse a rejected or superseded design."));
+                $"Generate one library image from a structured brief without placing it. intendedUse and scene are required. references explicitly declare role, traitsToPreserve, and traitsThatMustChange; array order is provider input order. target may identify a chapter/PicturePage element or explicit aspectRatio/size; conflicting geometry is rejected. Rendered text is disabled unless brief.allowRenderedText=true. Inspect the returned image before placing it. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed. Prospective designs remain unattached until approved; never reuse rejected or superseded designs."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid imageId, string label, ProjectImageMaskShape[] shapes) =>
+                CreateShapeMaskAsync(context, imageId, label, shapes),
+            name: "create_shape_mask",
+            description: "Create a reusable PNG edit mask for an existing project image from percentage-based rect, ellipse, or polygon shapes. Transparent pixels are editable regions."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, EntityVisualTarget[]? entityTargets = null, bool inheritSourceEntityTargets = false) =>
+                EditProjectImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, target, altText, quality, outputFormat, outputCompression, entityTargets, inheritSourceEntityTargets),
+            name: "edit_image",
+            description:
+                $"Edit one project image. brief.change and brief.preserve are required so the request states exactly what changes and what remains invariant. The source is provider input image 1; additional references begin at input image 2. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed. Outputs remain unattached unless explicitly approved."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid chapterId, Guid imageId, string? picturePagePlacementRole = null, Guid? targetPictureImageElementId = null, double? xPercent = null, double? yPercent = null, double? widthPercent = null, double? heightPercent = null, string? fit = null, int? zIndex = null) =>
@@ -290,11 +306,12 @@ public sealed class EditorChatTools(
                 double? backgroundOpacity = null,
                 string? textAlign = null,
                 string? verticalAlign = null,
-                string? shadow = null) =>
-                UpsertPicturePageTextAsync(context, chapterId, textElementId, text, xPercent, yPercent, widthPercent, heightPercent, zIndex, readingOrder, fontFamilyKey, fontWeight, italic, fontSizePoints, letterSpacingEm, lineHeight, color, backgroundColor, backgroundOpacity, textAlign, verticalAlign, shadow),
+                string? shadow = null,
+                string? role = null) =>
+                UpsertPicturePageTextAsync(context, chapterId, textElementId, text, xPercent, yPercent, widthPercent, heightPercent, zIndex, readingOrder, fontFamilyKey, fontWeight, italic, fontSizePoints, letterSpacingEm, lineHeight, color, backgroundColor, backgroundOpacity, textAlign, verticalAlign, shadow, role),
             name: "upsert_picture_page_text",
             description:
-                "Live visual-layout mutation for PicturePage chapters only. Omitting textElementId intentionally creates an additional text box. Reworking existing text must pass that box's exact current textElementId so it is updated rather than duplicated. Creating a box or changing its text, widthPercent, or heightPercent automatically chooses the largest 8-144 pt font size that fits, even when the same call supplies fontSizePoints; resize the box and let the text follow instead of manually trying font sizes. A fontSizePoints-only update remains available for a deliberate fixed size. Typography uses fontFamilyKey, an available fontWeight/italic face, letterSpacingEm, and lineHeight; read_chapter_visual_layout returns the valid project font catalog. This is the correct way to edit PicturePage chapter text; it also updates the projected chapter body."));
+                "Live visual-layout mutation for PicturePage chapters only. Omitting textElementId intentionally creates an additional text box. Reworking existing text must pass that box's exact current textElementId so it is updated rather than duplicated. Set role to Body, Title, Heading, Caption, Display, or Credit so typography and diagnostics can apply the right standard. Creating a box or changing its text, widthPercent, or heightPercent automatically chooses the largest 8-144 pt font size that fits, even when the same call supplies fontSizePoints; resize the box and let the text follow instead of manually trying font sizes. A fontSizePoints-only update remains available for a deliberate fixed size. Typography uses fontFamilyKey, an available fontWeight/italic face, letterSpacingEm, and lineHeight; read_chapter_visual_layout returns the valid project font catalog. This is the correct way to edit PicturePage chapter text; it also updates the projected chapter body."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid chapterId, string elementKind, Guid elementId) =>
@@ -322,7 +339,11 @@ public sealed class EditorChatTools(
                 "Before calling this, make any broader canon, outline, entity, beat, relationship, fact, or synopsis updates yourself."));
 
         var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var outlineTool in await outlineTools.BuildAsync(new OutlineCollaborationContext(context.ProjectId, context.OnMutated, context.OutlineStaging), cancellationToken))
+        foreach (var outlineTool in await outlineTools.BuildAsync(new OutlineCollaborationContext(
+            context.ProjectId,
+            context.OnMutated,
+            context.OutlineStaging,
+            bookBriefUpdatePolicy: BookBriefUpdatePolicy.ExplicitUserRequestOnly), cancellationToken))
         {
             if (outlineTool is AIFunction function && existingNames.Add(function.Name))
                 tools.Add(outlineTool);
@@ -1118,6 +1139,7 @@ public sealed class EditorChatTools(
             .ToDictionary(image => image.Id, image => image.FileName);
         var fontCatalog = await projectFonts.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
         var fontNames = fontCatalog.ToDictionary(font => font.Key, font => font.Name, StringComparer.OrdinalIgnoreCase);
+        var geometry = await pageGeometry.GetAsync(ctx.ProjectId, state.PageLayoutKind, ctx.TurnCancellationToken);
         var snapshots = await chapterVisuals.RenderSnapshotsAsync(chapterId);
         foreach (var snapshot in snapshots)
         {
@@ -1152,7 +1174,6 @@ public sealed class EditorChatTools(
                 heightUtilizationPercent = HeightUtilizationPercent(diagnostic.AvailableHeightPixels, diagnostic.RequiredHeightPixels),
                 diagnostic.Fits,
                 diagnostic.FontFaceResolved,
-                diagnostic.UsedMissingGlyphFallback,
             }))
             .ToList();
         var layoutDiagnostics = snapshots.SelectMany(snapshot => snapshot.LayoutDiagnostics).ToList();
@@ -1169,10 +1190,10 @@ public sealed class EditorChatTools(
             },
             state.VisualMode,
             state.PageLayoutKind,
-            canvas = PicturePageCanvasPayload(state),
+            canvas = PicturePageCanvasPayload(state, geometry),
             state.IllustrationLayout,
             state.PageLayout,
-            inventory = PicturePageInventoryPayload(state),
+            inventory = PicturePageInventoryPayload(state, geometry),
             projectedBody = state.VisualMode == ChapterVisualMode.PicturePage ? chapter.Body : null,
             manifest = chapterVisuals.BuildManifest(
                 state,
@@ -1258,21 +1279,29 @@ public sealed class EditorChatTools(
 
     private async Task<string> GenerateProjectImageAsync(
         EditorChatContext ctx,
-        string prompt,
-        string size,
+        ImageGenerationBrief brief,
+        ImageReferenceUse[]? references,
+        ImageGenerationTarget? target,
         string? altText,
         string? quality,
         string? outputFormat,
         int? outputCompression,
-        Guid[]? referenceImageIds,
         EntityVisualTarget[]? entityTargets)
     {
-        if (string.IsNullOrWhiteSpace(prompt))
-            return "Error: prompt is required.";
-        if (string.IsNullOrWhiteSpace(size))
-            return "Error: size is required. Choose a standard or custom raster size for the intended image frame before generating.";
-        var promptText = prompt.Trim();
-        var effectiveSize = size.Trim();
+        CompiledImagePrompt compiled;
+        try
+        {
+            compiled = await imagePrompts.CompileGenerationAsync(
+                ctx.ProjectId,
+                brief,
+                references,
+                target,
+                ctx.TurnCancellationToken);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return $"Error: {ex.Message}";
+        }
 
         var targetValidation = await entityVisualExamples.ValidateTargetsAsync(ctx.ProjectId, entityTargets);
         if (!targetValidation.IsValid)
@@ -1282,16 +1311,19 @@ public sealed class EditorChatTools(
         try
         {
             job = await imageJobs.CreateGenerateJobAsync(ctx.ProjectId, new ProjectImageGenerateJobRequest(
-                promptText,
-                effectiveSize,
+                compiled.Prompt,
+                compiled.Size,
                 string.IsNullOrWhiteSpace(quality) ? "auto" : quality.Trim(),
                 string.IsNullOrWhiteSpace(outputFormat) ? "png" : outputFormat.Trim(),
                 outputCompression,
                 altText?.Trim() ?? string.Empty,
                 1,
-                (referenceImageIds ?? []).Distinct().ToList(),
+                compiled.ReferenceImageIds,
                 Label: "Editor chat image",
-                EntityTargets: ctx.OutlineStaging is null ? targetValidation.Targets : null), ctx.TurnCancellationToken);
+                EntityTargets: ctx.OutlineStaging is null ? targetValidation.Targets : null,
+                BriefJson: compiled.BriefJson,
+                ReferenceManifestJson: compiled.ReferenceManifestJson,
+                TargetGeometryJson: compiled.TargetGeometryJson), ctx.TurnCancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -1328,7 +1360,7 @@ public sealed class EditorChatTools(
                         image.Source,
                         image.Prompt,
                         image.GenerationModel,
-                        requestedSize = effectiveSize,
+                        requestedSize = compiled.Size,
                         actualRaster = RasterMetadata(visual.Width, visual.Height),
                         image.CreatedAt,
                         image.UpdatedAt,
@@ -1356,6 +1388,11 @@ public sealed class EditorChatTools(
                     job.Kind,
                     job.Status,
                     job.Label,
+                    job.Prompt,
+                    job.BriefJson,
+                    job.ReferenceManifestJson,
+                    job.TargetGeometryJson,
+                    job.ProviderRevisedPrompts,
                     job.Size,
                     job.Quality,
                     job.OutputFormat,
@@ -1372,6 +1409,202 @@ public sealed class EditorChatTools(
                 note = completed
                     ? "Generated image saved to the library only. Inspect the visible output before deciding whether and where to place it."
                     : "Timed out waiting for the image job. The Images tab will continue showing progress; no chapter placement was attempted.",
+            });
+        }
+        catch (OperationCanceledException) when (ctx.TurnCancellationToken.IsCancellationRequested)
+        {
+            await imageRuntime.CancelJobAsync(ctx.ProjectId, job.Id, CancellationToken.None);
+            return "Cancelled.";
+        }
+    }
+
+    private async Task<string> CreateShapeMaskAsync(
+        EditorChatContext ctx,
+        Guid imageId,
+        string label,
+        ProjectImageMaskShape[] shapes)
+    {
+        try
+        {
+            var mask = await imageJobs.CreateMaskFromShapesAsync(
+                ctx.ProjectId,
+                imageId,
+                new ProjectImageMaskShapeRequest(label, shapes),
+                ctx.TurnCancellationToken);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(mask);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<string> EditProjectImageAsync(
+        EditorChatContext ctx,
+        Guid sourceImageId,
+        ImageEditBrief brief,
+        Guid? maskId,
+        ProjectImageMaskShape[]? maskShapes,
+        string? maskLabel,
+        ImageReferenceUse[]? references,
+        ImageGenerationTarget? target,
+        string? altText,
+        string? quality,
+        string? outputFormat,
+        int? outputCompression,
+        EntityVisualTarget[]? entityTargets,
+        bool inheritSourceEntityTargets)
+    {
+        CompiledImagePrompt compiled;
+        try
+        {
+            compiled = await imagePrompts.CompileEditAsync(
+                ctx.ProjectId,
+                sourceImageId,
+                brief,
+                references,
+                target,
+                ctx.TurnCancellationToken);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return $"Error: {ex.Message}";
+        }
+
+        var targetValidation = await entityVisualExamples.ValidateTargetsAsync(ctx.ProjectId, entityTargets);
+        if (!targetValidation.IsValid)
+            return $"Error: {targetValidation.Error} Use a grounded entity id or omit entityTargets.";
+
+        var stagedTargets = targetValidation.Targets.ToList();
+        if (ctx.OutlineStaging is not null && inheritSourceEntityTargets)
+        {
+            stagedTargets.AddRange((await entityVisualExamples.ListForImageAsync(
+                    ctx.ProjectId,
+                    sourceImageId,
+                    ctx.TurnCancellationToken))
+                .Select(example => new EntityVisualTarget(example.EntityId, example.Label)));
+        }
+
+        Guid? effectiveMaskId = maskId;
+        if (effectiveMaskId is null && maskShapes is { Length: > 0 })
+        {
+            try
+            {
+                var mask = await imageJobs.CreateMaskFromShapesAsync(
+                    ctx.ProjectId,
+                    sourceImageId,
+                    new ProjectImageMaskShapeRequest(maskLabel ?? "Editor image edit mask", maskShapes),
+                    ctx.TurnCancellationToken);
+                effectiveMaskId = mask.Id;
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                return $"Error: {ex.Message}";
+            }
+        }
+
+        ProjectImageJobView job;
+        try
+        {
+            job = await imageJobs.CreateEditJobAsync(ctx.ProjectId, new ProjectImageEditJobRequest(
+                sourceImageId,
+                compiled.Prompt,
+                compiled.Size,
+                string.IsNullOrWhiteSpace(quality) ? "auto" : quality.Trim(),
+                string.IsNullOrWhiteSpace(outputFormat) ? "png" : outputFormat.Trim(),
+                outputCompression,
+                altText?.Trim() ?? string.Empty,
+                1,
+                MaskPngDataUrl: null,
+                ReferenceImageIds: compiled.ReferenceImageIds,
+                Label: "Editor chat image edit",
+                ExistingMaskId: effectiveMaskId,
+                EntityTargets: ctx.OutlineStaging is null ? targetValidation.Targets : null,
+                InheritSourceEntityTargets: ctx.OutlineStaging is null && inheritSourceEntityTargets,
+                BriefJson: compiled.BriefJson,
+                ReferenceManifestJson: compiled.ReferenceManifestJson,
+                TargetGeometryJson: compiled.TargetGeometryJson), ctx.TurnCancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+
+        ctx.TrackImageGenerationJob(job.Id);
+        try
+        {
+            await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, ctx.TurnCancellationToken);
+            var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
+            var completed = await imageRuntime.WaitForJobCompletionAsync(job.Id, timeout, ctx.TurnCancellationToken);
+            job = await imageJobs.GetJobAsync(ctx.ProjectId, job.Id, ctx.TurnCancellationToken)
+                ?? throw new InvalidOperationException($"Image edit job {job.Id:N} was not found after queueing.");
+
+            var outputImages = new List<object>();
+            foreach (var imageId in job.OutputImageIds)
+            {
+                if (await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken) is not { } image)
+                    continue;
+                var visual = await BuildVisualAsync(
+                    ctx,
+                    image,
+                    title: image.FileName,
+                    caption: "Edited output saved to the image library.");
+                ctx.AddVisual(visual);
+                ctx.AddModelOnlyImage(image);
+                outputImages.Add(new
+                {
+                    image.Id,
+                    image.FileName,
+                    image.ContentType,
+                    image.PreviewUrl,
+                    image.AltText,
+                    image.Source,
+                    image.Prompt,
+                    image.GenerationModel,
+                    requestedSize = compiled.Size,
+                    actualRaster = RasterMetadata(visual.Width, visual.Height),
+                    image.CreatedAt,
+                    image.UpdatedAt,
+                    image.SizeBytes,
+                });
+
+                if (ctx.OutlineStaging is null) continue;
+                foreach (var entityTarget in stagedTargets.DistinctBy(item => item.EntityId))
+                {
+                    var after = new EntityVisualChange("attach", EntityId: entityTarget.EntityId, ImageId: image.Id, Label: entityTarget.Label);
+                    await ctx.OutlineStaging.StageExternalChangeAsync(
+                        $"Attach edited image to entity {entityTarget.EntityId:N}", null, after,
+                        new { status = "staged", entityTarget.EntityId, imageId = image.Id, entityTarget.Label },
+                        "EntityVisualExample", $"{entityTarget.EntityId:N}/{image.Id:N}");
+                }
+            }
+
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                completed,
+                job = new
+                {
+                    job.Id,
+                    job.Kind,
+                    job.Status,
+                    job.Label,
+                    job.Prompt,
+                    job.Size,
+                    job.BriefJson,
+                    job.ReferenceManifestJson,
+                    job.TargetGeometryJson,
+                    job.ProviderRevisedPrompts,
+                    job.OutputImageIds,
+                    job.OutputStates,
+                    job.OutputErrors,
+                    job.Error,
+                },
+                images = outputImages,
+                note = completed
+                    ? "Edited output saved to the library. Inspect it before replacing any placed image."
+                    : "Timed out waiting for the edit; the Images tab will continue showing progress.",
             });
         }
         catch (OperationCanceledException) when (ctx.TurnCancellationToken.IsCancellationRequested)
@@ -1614,7 +1847,8 @@ public sealed class EditorChatTools(
         double? backgroundOpacity,
         string? textAlign,
         string? verticalAlign,
-        string? shadow)
+        string? shadow,
+        string? role)
     {
         var resolved = await RequireVisualModeAsync(ctx, chapterId, ChapterVisualMode.PicturePage);
         if (resolved.Error is not null) return resolved.Error;
@@ -1625,6 +1859,8 @@ public sealed class EditorChatTools(
             return verticalError!;
         if (!TryParseOptionalEnum(shadow, out PicturePageTextShadow? parsedShadow, out var shadowError))
             return shadowError!;
+        if (!TryParseOptionalEnum(role, out PicturePageTextRole? parsedRole, out var roleError))
+            return roleError!;
         if (textElementId == Guid.Empty)
             return "Error: textElementId cannot be empty. Omit it only when intentionally adding another text box; pass the exact current id when reworking existing text.";
 
@@ -1683,7 +1919,8 @@ public sealed class EditorChatTools(
             backgroundOpacity ?? existing?.BackgroundOpacity ?? 0,
             parsedTextAlign ?? existing?.TextAlign ?? PicturePageTextAlign.Left,
             parsedVerticalAlign ?? existing?.VerticalAlign ?? ChapterTextVerticalAlign.Top,
-            parsedShadow ?? existing?.Shadow ?? PicturePageTextShadow.None);
+            parsedShadow ?? existing?.Shadow ?? PicturePageTextShadow.None,
+            parsedRole ?? existing?.Role ?? PicturePageTextRole.Body);
 
         var updatedLayout = state.PageLayout with
         {
@@ -1734,7 +1971,6 @@ public sealed class EditorChatTools(
                         fit.Diagnostic.RequiredHeightPixels),
                     fit.Diagnostic.Fits,
                     fit.Diagnostic.FontFaceResolved,
-                    fit.Diagnostic.UsedMissingGlyphFallback,
                 },
             });
             return payload.ToJsonString();
@@ -1867,6 +2103,7 @@ public sealed class EditorChatTools(
         var chapter = state.VisualMode == ChapterVisualMode.PicturePage
             ? await chapters.GetAsync(state.ChapterId)
             : null;
+        var geometry = await pageGeometry.GetAsync(ctx.ProjectId, state.PageLayoutKind, ctx.TurnCancellationToken);
 
         return new
         {
@@ -1874,7 +2111,7 @@ public sealed class EditorChatTools(
             chapterId = state.ChapterId,
             operation,
             affectedElementId,
-            inventory = PicturePageInventoryPayload(state),
+            inventory = PicturePageInventoryPayload(state, geometry),
             verification = state.VisualMode == ChapterVisualMode.PicturePage
                 ? new
                 {
@@ -1885,7 +2122,7 @@ public sealed class EditorChatTools(
                 : null,
             state.VisualMode,
             state.PageLayoutKind,
-            canvas = PicturePageCanvasPayload(state),
+            canvas = PicturePageCanvasPayload(state, geometry),
             state.IllustrationLayout,
             state.PageLayout,
             projectedBody = state.VisualMode == ChapterVisualMode.PicturePage ? chapter?.Body ?? string.Empty : null,
@@ -1907,12 +2144,12 @@ public sealed class EditorChatTools(
         faces = family.Faces.Select(face => new { face.Weight, face.Italic, face.SubfamilyName }),
     };
 
-    private static object? PicturePageCanvasPayload(ChapterVisualState state)
+    private static object? PicturePageCanvasPayload(ChapterVisualState state, BookPageGeometry bookGeometry)
     {
         if (state.VisualMode != ChapterVisualMode.PicturePage)
             return null;
 
-        var geometry = PicturePageImageGenerationGuidance.CanvasGeometry(state.PageLayoutKind);
+        var geometry = PicturePageImageGenerationGuidance.CanvasGeometry(bookGeometry);
         return new
         {
             layoutKind = geometry.LayoutKind,
@@ -1930,13 +2167,13 @@ public sealed class EditorChatTools(
         };
     }
 
-    private static object PicturePageInventoryPayload(ChapterVisualState state) => new
+    private static object PicturePageInventoryPayload(ChapterVisualState state, BookPageGeometry geometry) => new
     {
         imageElementIds = state.PageLayout.Images.Select(image => image.Id),
         textElementIds = state.PageLayout.TextElements.Select(textElement => textElement.Id),
         images = state.PageLayout.Images.Select(image =>
         {
-            var frame = PicturePageImageGenerationGuidance.ForSlot(state.PageLayoutKind, image);
+            var frame = PicturePageImageGenerationGuidance.ForSlot(geometry, image);
             return new
             {
                 imageElementId = image.Id,
@@ -1960,6 +2197,7 @@ public sealed class EditorChatTools(
             textElement.WidthPercent,
             textElement.HeightPercent,
             textElement.ZIndex,
+            textElement.Role,
         }),
     };
 

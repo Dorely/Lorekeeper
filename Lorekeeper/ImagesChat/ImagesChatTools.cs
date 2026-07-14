@@ -11,6 +11,7 @@ using Lorekeeper.Images;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Publish;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -26,7 +27,9 @@ public sealed class ImagesChatTools(
     IEntityService entities,
     IProjectImageJobService imageJobs,
     IProjectImageGenerationRuntime imageRuntime,
+    IImagePromptComposer imagePrompts,
     IChapterVisualService chapterVisuals,
+    IPageGeometryService pageGeometry,
     IProjectFontService projectFonts,
     IEditorContextService editorContext,
     IVisionModelClientFactory visionClient,
@@ -134,16 +137,16 @@ public sealed class ImagesChatTools(
                 description: "Create a PNG edit mask for an existing image from percentage-based rect/ellipse/polygon shapes. Transparent pixels are the editable regions."),
 
             AIFunctionFactory.Create(
-                method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, string? label = null, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
-                    GenerateImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, entityTargets, label, targetChapterId, targetPictureImageElementId),
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, EntityVisualTarget[]? entityTargets = null, string? label = null) =>
+                    GenerateImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression, count, entityTargets, label),
                 name: "generate_image",
-                description: $"Generate library images. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} referenceImageIds. Ordinary scenes and prospective designs must omit entityTargets. Pass entityTargets only when the user explicitly approved or requested a purpose-built reference asset; otherwise attach an approved output later with attach_entity_visual_example. Use only grounded eligible entity ids and only still-approved referenceImageIds."),
+                description: $"Generate library images from a structured brief. intendedUse and scene are required. references declare each image's role, traitsToPreserve, and traitsThatMustChange; their array order becomes actual provider input order. target may identify a chapter/PicturePage element or an explicit aspectRatio/size, and conflicting geometry is rejected. Rendered text is disabled unless brief.allowRenderedText=true. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references. Ordinary scenes and prospective designs must omit entityTargets; attach an approved output later."),
 
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, string prompt, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, bool inheritSourceEntityTargets = false, string? label = null) =>
-                    EditImageAsync(context, sourceImageId, prompt, maskId, maskShapes, maskLabel, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, entityTargets, inheritSourceEntityTargets, label),
+                method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, EntityVisualTarget[]? entityTargets = null, bool inheritSourceEntityTargets = false, string? label = null) =>
+                    EditImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, target, altText, quality, outputFormat, outputCompression, count, entityTargets, inheritSourceEntityTargets, label),
                 name: "edit_image",
-                description: $"Edit a project image. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} referenceImageIds in addition to the source image. Outputs do not inherit entity targets by default. Set inheritSourceEntityTargets=true only for a still-approved purpose-built reference whose identity role remains valid; ordinary scenes, redesigns, and prospective outputs stay unattached."),
+                description: $"Edit a project image from a structured brief. change and preserve are both required so the edit states exactly what changes and what remains invariant. references are labeled from provider input image 2 because the source is input image 1. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references. Outputs do not inherit entity targets by default; use inheritSourceEntityTargets only for a still-approved purpose-built reference whose identity role remains valid."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, Guid imageId, string? picturePagePlacementRole = null, Guid? targetPictureImageElementId = null) => AddProjectImageToChapterAsync(context, chapterId, imageId, picturePagePlacementRole, targetPictureImageElementId),
@@ -391,6 +394,7 @@ public sealed class ImagesChatTools(
             .ToDictionary(image => image.Id, image => image.FileName);
         var fontCatalog = await projectFonts.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
         var fontNames = fontCatalog.ToDictionary(font => font.Key, font => font.Name, StringComparer.OrdinalIgnoreCase);
+        var geometry = await pageGeometry.GetAsync(ctx.ProjectId, state.PageLayoutKind, ctx.TurnCancellationToken);
         var snapshots = await chapterVisuals.RenderSnapshotsAsync(chapterId);
         var textFit = snapshots
             .SelectMany(snapshot => snapshot.TextFitDiagnostics.Select(diagnostic => new
@@ -404,7 +408,6 @@ public sealed class ImagesChatTools(
                 heightUtilizationPercent = HeightUtilizationPercent(diagnostic.AvailableHeightPixels, diagnostic.RequiredHeightPixels),
                 diagnostic.Fits,
                 diagnostic.FontFaceResolved,
-                diagnostic.UsedMissingGlyphFallback,
             }))
             .ToList();
         var layoutDiagnostics = snapshots.SelectMany(snapshot => snapshot.LayoutDiagnostics).ToList();
@@ -413,10 +416,10 @@ public sealed class ImagesChatTools(
             chapter = new { id = chapter.Id, chapter.Title, chapter.Synopsis },
             state.VisualMode,
             state.PageLayoutKind,
-            canvas = PicturePageCanvasPayload(state),
+            canvas = PicturePageCanvasPayload(state, geometry),
             state.IllustrationLayout,
             state.PageLayout,
-            inventory = PicturePageInventoryPayload(state),
+            inventory = PicturePageInventoryPayload(state, geometry),
             manifest = chapterVisuals.BuildManifest(
                 state,
                 imageNames,
@@ -566,31 +569,31 @@ public sealed class ImagesChatTools(
 
     private async Task<string> GenerateImageAsync(
         ImagesChatToolContext ctx,
-        string prompt,
+        ImageGenerationBrief brief,
+        ImageReferenceUse[]? references,
+        ImageGenerationTarget? target,
         string? altText,
-        string? size,
         string? quality,
         string? outputFormat,
         int? outputCompression,
         int count,
-        Guid[]? referenceImageIds,
         EntityVisualTarget[]? entityTargets,
-        string? label,
-        Guid? targetChapterId,
-        Guid? targetPictureImageElementId)
+        string? label)
     {
-        if (string.IsNullOrWhiteSpace(prompt))
-            return "Error: prompt is required.";
-
-        var targetResolution = await ResolvePicturePageGenerationTargetAsync(ctx, targetChapterId, targetPictureImageElementId);
-        if (targetResolution.Error is not null)
-            return targetResolution.Error;
-        var promptText = targetResolution.PromptAppendix is { Length: > 0 } appendix
-            ? prompt.Trim() + appendix
-            : prompt.Trim();
-        var effectiveSize = string.IsNullOrWhiteSpace(size) && targetResolution.Target is { } target
-            ? target.RecommendedSize
-            : CleanOr(size, imageOptions.Value.DefaultSize);
+        CompiledImagePrompt compiled;
+        try
+        {
+            compiled = await imagePrompts.CompileGenerationAsync(
+                ctx.ProjectId,
+                brief,
+                references,
+                target,
+                ctx.TurnCancellationToken);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return $"Error: {ex.Message}";
+        }
 
         var targetValidation = await entityVisualExamples.ValidateTargetsAsync(ctx.ProjectId, entityTargets);
         if (!targetValidation.IsValid)
@@ -600,16 +603,19 @@ public sealed class ImagesChatTools(
         try
         {
             job = await imageJobs.CreateGenerateJobAsync(ctx.ProjectId, new ProjectImageGenerateJobRequest(
-                promptText,
-                effectiveSize,
+                compiled.Prompt,
+                compiled.Size,
                 CleanOr(quality, imageOptions.Value.DefaultQuality),
                 CleanOr(outputFormat, imageOptions.Value.DefaultOutputFormat),
                 outputCompression,
                 altText?.Trim() ?? string.Empty,
                 Math.Clamp(count, 1, Math.Max(1, imageOptions.Value.MaxOutputs)),
-                (referenceImageIds ?? []).Distinct().ToList(),
+                compiled.ReferenceImageIds,
                 label,
-                targetValidation.Targets), ctx.TurnCancellationToken);
+                targetValidation.Targets,
+                compiled.BriefJson,
+                compiled.ReferenceManifestJson,
+                compiled.TargetGeometryJson), ctx.TurnCancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -618,55 +624,41 @@ public sealed class ImagesChatTools(
         return await RunQueuedJobToolAsync(ctx, job.Id);
     }
 
-    private async Task<ImageGenerationTargetResolution> ResolvePicturePageGenerationTargetAsync(
-        ImagesChatToolContext ctx,
-        Guid? targetChapterId,
-        Guid? targetPictureImageElementId)
-    {
-        if (targetChapterId is null || targetChapterId == Guid.Empty)
-        {
-            return targetPictureImageElementId is { } elementId && elementId != Guid.Empty
-                ? new ImageGenerationTargetResolution(null, string.Empty, "Error: targetPictureImageElementId requires targetChapterId.")
-                : new ImageGenerationTargetResolution(null, string.Empty, Error: null);
-        }
-
-        var chapter = await chapters.GetAsync(targetChapterId.Value);
-        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
-            return new ImageGenerationTargetResolution(null, string.Empty, $"Error: chapter {targetChapterId.Value:N} not found in this project.");
-
-        var state = await chapterVisuals.GetAsync(chapter.Id);
-        if (state is null)
-            return new ImageGenerationTargetResolution(null, string.Empty, $"Error: visual layout for chapter {chapter.Id:N} was not found.");
-
-        if (!PicturePageImageGenerationGuidance.TryResolveTarget(state, targetPictureImageElementId, out var target, out var error))
-            return new ImageGenerationTargetResolution(null, string.Empty, error);
-
-        var appendix = PicturePageImageGenerationGuidance.BuildPromptAppendix(target!, state.PageLayout.TextElements);
-        return new ImageGenerationTargetResolution(target, appendix, Error: null);
-    }
-
     private async Task<string> EditImageAsync(
         ImagesChatToolContext ctx,
         Guid sourceImageId,
-        string prompt,
+        ImageEditBrief brief,
         Guid? maskId,
         ProjectImageMaskShape[]? maskShapes,
         string? maskLabel,
+        ImageReferenceUse[]? references,
+        ImageGenerationTarget? target,
         string? altText,
-        string? size,
         string? quality,
         string? outputFormat,
         int? outputCompression,
         int count,
-        Guid[]? referenceImageIds,
         EntityVisualTarget[]? entityTargets,
         bool inheritSourceEntityTargets,
         string? label)
     {
         if (sourceImageId == Guid.Empty)
             return "Error: sourceImageId is required.";
-        if (string.IsNullOrWhiteSpace(prompt))
-            return "Error: prompt is required.";
+        CompiledImagePrompt compiled;
+        try
+        {
+            compiled = await imagePrompts.CompileEditAsync(
+                ctx.ProjectId,
+                sourceImageId,
+                brief,
+                references,
+                target,
+                ctx.TurnCancellationToken);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return $"Error: {ex.Message}";
+        }
 
         var targetValidation = await entityVisualExamples.ValidateTargetsAsync(ctx.ProjectId, entityTargets);
         if (!targetValidation.IsValid)
@@ -688,19 +680,22 @@ public sealed class ImagesChatTools(
         {
             job = await imageJobs.CreateEditJobAsync(ctx.ProjectId, new ProjectImageEditJobRequest(
                 sourceImageId,
-                prompt.Trim(),
-                CleanOr(size, imageOptions.Value.DefaultSize),
+                compiled.Prompt,
+                compiled.Size,
                 CleanOr(quality, imageOptions.Value.DefaultQuality),
                 CleanOr(outputFormat, imageOptions.Value.DefaultOutputFormat),
                 outputCompression,
                 altText?.Trim() ?? string.Empty,
                 Math.Clamp(count, 1, Math.Max(1, imageOptions.Value.MaxOutputs)),
                 MaskPngDataUrl: null,
-                ReferenceImageIds: (referenceImageIds ?? []).Distinct().ToList(),
+                ReferenceImageIds: compiled.ReferenceImageIds,
                 Label: label,
                 ExistingMaskId: effectiveMaskId,
                 EntityTargets: targetValidation.Targets,
-                InheritSourceEntityTargets: inheritSourceEntityTargets), ctx.TurnCancellationToken);
+                InheritSourceEntityTargets: inheritSourceEntityTargets,
+                BriefJson: compiled.BriefJson,
+                ReferenceManifestJson: compiled.ReferenceManifestJson,
+                TargetGeometryJson: compiled.TargetGeometryJson), ctx.TurnCancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -918,6 +913,10 @@ public sealed class ImagesChatTools(
         job.Status,
         job.Label,
         job.Prompt,
+        job.BriefJson,
+        job.ReferenceManifestJson,
+        job.TargetGeometryJson,
+        job.ProviderRevisedPrompts,
         job.Size,
         job.Quality,
         job.OutputFormat,
@@ -971,12 +970,12 @@ public sealed class ImagesChatTools(
         return $"{width / divisor}:{height / divisor}";
     }
 
-    private static object? PicturePageCanvasPayload(ChapterVisualState state)
+    private static object? PicturePageCanvasPayload(ChapterVisualState state, BookPageGeometry bookGeometry)
     {
         if (state.VisualMode != ChapterVisualMode.PicturePage)
             return null;
 
-        var geometry = PicturePageImageGenerationGuidance.CanvasGeometry(state.PageLayoutKind);
+        var geometry = PicturePageImageGenerationGuidance.CanvasGeometry(bookGeometry);
         return new
         {
             layoutKind = geometry.LayoutKind,
@@ -994,13 +993,13 @@ public sealed class ImagesChatTools(
         };
     }
 
-    private static object PicturePageInventoryPayload(ChapterVisualState state) => new
+    private static object PicturePageInventoryPayload(ChapterVisualState state, BookPageGeometry geometry) => new
     {
         imageElementIds = state.PageLayout.Images.Select(image => image.Id),
         textElementIds = state.PageLayout.TextElements.Select(textElement => textElement.Id),
         images = state.PageLayout.Images.Select(image =>
         {
-            var frame = PicturePageImageGenerationGuidance.ForSlot(state.PageLayoutKind, image);
+            var frame = PicturePageImageGenerationGuidance.ForSlot(geometry, image);
             return new
             {
                 imageElementId = image.Id,
@@ -1024,6 +1023,7 @@ public sealed class ImagesChatTools(
             textElement.WidthPercent,
             textElement.HeightPercent,
             textElement.ZIndex,
+            textElement.Role,
         }),
     };
 
@@ -1054,8 +1054,4 @@ public sealed class ImagesChatTools(
         return false;
     }
 
-    private sealed record ImageGenerationTargetResolution(
-        PicturePageImageGenerationTarget? Target,
-        string PromptAppendix,
-        string? Error);
 }

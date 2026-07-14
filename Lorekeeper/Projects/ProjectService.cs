@@ -1,6 +1,5 @@
 using System.Text;
 using Lorekeeper.Knowledge;
-using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
@@ -12,7 +11,8 @@ public class ProjectService(
     IProjectRepository repo,
     IVectorStore vectors,
     IProjectSearchIndex projectSearch,
-    IOutlineGraphSync outlineGraphSync) : IProjectService
+    IOutlineGraphSync outlineGraphSync,
+    IBookBriefService bookBriefs) : IProjectService
 {
     public async Task<IReadOnlyList<Project>> ListAsync(CancellationToken cancellationToken = default) =>
         await repo.ListAsync(cancellationToken);
@@ -31,10 +31,11 @@ public class ProjectService(
         {
             Name = trimmed,
             Slug = slug,
-            SystemPrompt = SeedSystemPrompt.Default,
+            ProjectGuidance = string.Empty,
         };
         await repo.AddAsync(project, cancellationToken);
         await repo.SaveChangesAsync(cancellationToken);
+        project.BookBrief = await bookBriefs.GetOrCreateAsync(project.Id, cancellationToken);
         await outlineGraphSync.EnsureProjectAsync(project, cancellationToken);
         return project;
     }
@@ -56,15 +57,12 @@ public class ProjectService(
         return project;
     }
 
-    public async Task<Project> UpdateSystemPromptAsync(Guid id, string systemPrompt, CancellationToken cancellationToken = default)
+    public async Task<Project> UpdateProjectGuidanceAsync(Guid id, string projectGuidance, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(systemPrompt))
-            throw new ArgumentException("System prompt cannot be empty.", nameof(systemPrompt));
-
         var project = await repo.GetByIdAsync(id, cancellationToken)
             ?? throw new InvalidOperationException($"Project {id} not found.");
 
-        project.SystemPrompt = systemPrompt;
+        project.ProjectGuidance = (projectGuidance ?? string.Empty).Trim();
         project.UpdatedAt = DateTime.UtcNow;
         repo.Update(project);
         await repo.SaveChangesAsync(cancellationToken);

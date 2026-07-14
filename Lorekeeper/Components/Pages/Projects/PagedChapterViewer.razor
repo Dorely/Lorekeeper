@@ -2,6 +2,8 @@
 @using Lorekeeper.Fonts
 @using Lorekeeper.Images
 @using Lorekeeper.Models
+@using Lorekeeper.Publish
+@using Lorekeeper.Projects
 @using Microsoft.JSInterop
 @using System.Globalization
 @using System.Text
@@ -9,13 +11,15 @@
 @inject IChapterVisualService Visuals
 @inject IProjectImageService ProjectImages
 @inject IProjectFontService ProjectFonts
+@inject IPageGeometryService PageGeometry
+@inject IBookBriefService BookBriefs
 @inject IJSRuntime JS
 
 <style>@((MarkupString)FontFaceCss())</style>
 <div class="@PagedViewerClass()" tabindex="0" @ref="_viewerRoot">
     @if (State.VisualMode == ChapterVisualMode.PicturePage)
     {
-        var pageMetrics = PageMetrics(State.PageLayoutKind);
+        var pageMetrics = _pageGeometry;
         var selectedText = SelectedPictureText;
         var textToolbarValue = selectedText ?? _disabledTextToolbarValue;
         var textControlsDisabled = selectedText is null;
@@ -37,10 +41,20 @@
                             <details class="picture-diagnostics">
                                 <summary>@LayoutDiagnosticSummary()</summary>
                                 <ul>
-                                    @foreach (var diagnostic in CurrentLayoutDiagnostics)
-                                    {
-                                        <li class="@(diagnostic.Severity == "error" ? "text-danger" : "text-warning-emphasis")">@diagnostic.Message</li>
-                                    }
+                                     @foreach (var diagnostic in CurrentLayoutDiagnostics)
+                                     {
+                                         <li class="@(diagnostic.Severity == "error" ? "text-danger" : "text-warning-emphasis")">
+                                             <strong>@diagnostic.Code:</strong> @diagnostic.Message
+                                             @if (!string.IsNullOrWhiteSpace(diagnostic.MeasuredValue) || !string.IsNullOrWhiteSpace(diagnostic.Threshold))
+                                             {
+                                                 <span> Measured: @(diagnostic.MeasuredValue ?? "n/a"); threshold: @(diagnostic.Threshold ?? "n/a").</span>
+                                             }
+                                             @if (!string.IsNullOrWhiteSpace(diagnostic.SuggestedCorrection))
+                                             {
+                                                 <span> Suggested correction: @diagnostic.SuggestedCorrection</span>
+                                             }
+                                         </li>
+                                     }
                                 </ul>
                             </details>
                         }
@@ -71,7 +85,19 @@
                     </div>
                     <div class="@PictureTextToolbarClass(textControlsDisabled)"
                          aria-label="Selected text box controls"
-                         aria-disabled="@textControlsDisabled">
+                                 aria-disabled="@textControlsDisabled">
+                                <label class="picture-text-toolbar__field">
+                                    <span>Role</span>
+                                    <select class="form-select form-select-sm"
+                                            disabled="@textControlsDisabled"
+                                            @bind:get="textToolbarValue.Role"
+                                            @bind:set="SetSelectedTextRoleAsync">
+                                        @foreach (var role in Enum.GetValues<PicturePageTextRole>())
+                                        {
+                                            <option value="@role">@role</option>
+                                        }
+                                    </select>
+                                </label>
                                 <label class="picture-text-toolbar__field">
                                     <span>Font</span>
                                     <select class="form-select form-select-sm"
@@ -284,7 +310,7 @@
     else
     {
         var paragraphs = SplitParagraphs(State.Body);
-        var pageMetrics = PageMetrics(State.PageLayoutKind);
+        var pageMetrics = _pageGeometry;
         var pages = BuildProsePages(paragraphs, pageMetrics);
         var spreads = BuildProseSpreads(pages, pageMetrics.IsDouble);
         <div class="@(CanEditLayout ? "prose-layout prose-layout--editable" : "prose-layout")">
@@ -364,6 +390,17 @@
     private bool _fontManagerOpen;
     private bool _isFittingText;
     private Guid _fontProjectId;
+    private Guid _geometryProjectId;
+    private ChapterPageLayoutKind _geometryLayoutKind;
+    private bool _hasPageGeometry;
+    private BookBrief? _bookBrief;
+    private BookPageGeometry _pageGeometry = PageGeometryService.CalculateValues(
+        null,
+        null,
+        null,
+        null,
+        null,
+        ChapterPageLayoutKind.SinglePortrait);
     private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = PicturePageBuiltInFonts.Families;
     private PicturePageLayout? _diagnosticLayout;
     private IReadOnlyList<ChapterVisualLayoutDiagnostic> _renderDiagnostics = [];
@@ -388,8 +425,6 @@
         PicturePageTextAlign.Left,
         ChapterTextVerticalAlign.Top,
         PicturePageTextShadow.None);
-    private const double PageMarginInches = 0.75;
-    private const double BodyLineHeightInches = 12.0 / 72.0 * 1.55;
     private const double ParagraphSpacingInches = 0.14;
     private const double FigureSpacingInches = 0.16;
     private const double DropZoneHeightInches = 0.42;
@@ -398,14 +433,18 @@
         State.VisualMode == ChapterVisualMode.PicturePage
             ? (ReferenceEquals(_diagnosticLayout, State.PageLayout)
                     ? _renderDiagnostics
-                    : PicturePageLayoutDiagnostics.Evaluate(State.PageLayoutKind, State.PageLayout))
+                    : PicturePageLayoutDiagnostics.Evaluate(_pageGeometry, State.PageLayout, _bookBrief))
                 .Concat(State.PageLayout.TextElements
                     .Where(text => FontFamily(text.FontFamilyKey)?.Faces.Any(face => face.Weight == text.FontWeight && face.Italic == text.Italic) != true)
-                    .Select(text => new ChapterVisualLayoutDiagnostic(
-                        "unsupported_font_face",
-                        "error",
-                        "The selected font weight/style is unavailable; choose a listed face.",
-                        text.Id)))
+                     .Select(text => new ChapterVisualLayoutDiagnostic(
+                         "unsupported_font_face",
+                         "error",
+                         "The selected font weight/style is unavailable; choose a listed face.",
+                         text.Id,
+                         null,
+                         "requested face unresolved",
+                         "an installed exact family/weight/style face",
+                         "Choose an available face or add the required font file to the project.")))
                 .DistinctBy(diagnostic => (diagnostic.Code, diagnostic.ElementId, diagnostic.RelatedElementId))
                 .ToList()
             : [];
@@ -488,13 +527,6 @@
         public double UsedHeightInches { get; set; }
     }
 
-    private readonly record struct PageLayoutMetrics(
-        double PageWidthInches,
-        double PageHeightInches,
-        bool IsDouble,
-        double SurfaceWidthInches,
-        double SurfaceHeightInches);
-
     private PicturePageTextElement? SelectedPictureText =>
         _selectedPictureElement is { Kind: PictureElementKind.Text, Id: var selectedId }
             ? State.PageLayout.TextElements.FirstOrDefault(text => text.Id == selectedId)
@@ -510,7 +542,19 @@
         if (ProjectId != Guid.Empty && ProjectId != _fontProjectId)
         {
             _fontFamilies = await ProjectFonts.ListAsync(ProjectId);
+            _bookBrief = await BookBriefs.GetOrCreateAsync(ProjectId);
             _fontProjectId = ProjectId;
+        }
+
+        if (ProjectId != Guid.Empty
+            && (!_hasPageGeometry
+                || ProjectId != _geometryProjectId
+                || State.PageLayoutKind != _geometryLayoutKind))
+        {
+            _pageGeometry = await PageGeometry.GetAsync(ProjectId, State.PageLayoutKind);
+            _geometryProjectId = ProjectId;
+            _geometryLayoutKind = State.PageLayoutKind;
+            _hasPageGeometry = true;
         }
 
         if (CanEditLayout
@@ -650,6 +694,14 @@
             fontFamilyKey: family?.Key ?? PicturePageFontKeys.Default,
             fontWeight: face?.Weight ?? 400,
             italic: face?.Italic ?? false);
+    }
+
+    private async Task SetSelectedTextRoleAsync(PicturePageTextRole role)
+    {
+        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId } || !Enum.IsDefined(role))
+            return;
+
+        await UpdatePictureTextAsync(selectedId, role: role);
     }
 
     private async Task SetSelectedTextFontWeightAsync(int fontWeight)
@@ -1290,7 +1342,8 @@
         double? backgroundOpacity = null,
         PicturePageTextAlign? textAlign = null,
         ChapterTextVerticalAlign? verticalAlign = null,
-        PicturePageTextShadow? shadow = null) =>
+        PicturePageTextShadow? shadow = null,
+        PicturePageTextRole? role = null) =>
         await SavePageAsync(State.PageLayout with
         {
             TextElements = State.PageLayout.TextElements.Select(text => text.Id == elementId
@@ -1312,6 +1365,7 @@
                     TextAlign = textAlign ?? text.TextAlign,
                     VerticalAlign = verticalAlign ?? text.VerticalAlign,
                     Shadow = shadow ?? text.Shadow,
+                    Role = role ?? text.Role,
                 }
                 : text).ToList(),
         });
@@ -1437,13 +1491,15 @@
         && selectedKind == kind
         && selectedId == id;
 
-    private IReadOnlyList<ProsePageModel> BuildProsePages(IReadOnlyList<string> paragraphs, PageLayoutMetrics metrics)
+    private IReadOnlyList<ProsePageModel> BuildProsePages(IReadOnlyList<string> paragraphs, BookPageGeometry metrics)
     {
         var builders = new List<ProsePageBuilder>();
         var current = NewPage();
-        var pageCapacity = Math.Max(1, metrics.PageHeightInches - (PageMarginInches * 2) - 0.25);
-        var contentWidth = Math.Max(1, metrics.PageWidthInches - (PageMarginInches * 2));
-        var charsPerLine = Math.Max(28, (int)Math.Floor(contentWidth * 9.2));
+        var pageCapacity = Math.Max(1, metrics.PageHeightInches - (metrics.PageMarginInches * 2) - 0.25);
+        var contentWidth = Math.Max(1, metrics.PageWidthInches - (metrics.PageMarginInches * 2));
+        var averageCharacterWidthInches = metrics.BodyFontSizePoints * 0.52 / 72;
+        var charsPerLine = Math.Max(20, (int)Math.Floor(contentWidth / Math.Max(0.01, averageCharacterWidthInches)));
+        var bodyLineHeightInches = metrics.BodyFontSizePoints / 72 * metrics.BodyLineHeight;
 
         if (paragraphs.Count == 0)
             return [new ProsePageModel(1, IsBlank: false, [])];
@@ -1515,26 +1571,26 @@
             while (!string.IsNullOrWhiteSpace(remaining))
             {
                 var available = pageCapacity - current.UsedHeightInches;
-                var minimumTextHeight = BodyLineHeightInches + ParagraphSpacingInches;
+                var minimumTextHeight = bodyLineHeightInches + ParagraphSpacingInches;
                 if (current.Items.Count > 0 && available < minimumTextHeight)
                 {
                     current = NewPage();
                     available = pageCapacity;
                 }
 
-                var wholeHeight = EstimateParagraphHeight(remaining, charsPerLine);
+                var wholeHeight = EstimateParagraphHeight(remaining, charsPerLine, bodyLineHeightInches);
                 if (wholeHeight <= available || current.Items.Count == 0 && wholeHeight <= pageCapacity)
                 {
                     AddItem(new ProsePageItem(ProsePageItemKind.Paragraph, paragraphIndex, ChapterImageAnchorPosition.AfterParagraph, remaining, null), wholeHeight);
                     break;
                 }
 
-                var maxLines = Math.Max(1, (int)Math.Floor((available - ParagraphSpacingInches) / BodyLineHeightInches));
+                var maxLines = Math.Max(1, (int)Math.Floor((available - ParagraphSpacingInches) / bodyLineHeightInches));
                 var maxChars = Math.Max(1, maxLines * charsPerLine);
                 var segment = TakeTextSegment(remaining, maxChars);
                 AddItem(
                     new ProsePageItem(ProsePageItemKind.Paragraph, paragraphIndex, ChapterImageAnchorPosition.AfterParagraph, segment, null),
-                    EstimateParagraphHeight(segment, charsPerLine));
+                    EstimateParagraphHeight(segment, charsPerLine, bodyLineHeightInches));
                 remaining = remaining[segment.Length..].TrimStart();
             }
         }
@@ -1562,14 +1618,14 @@
         return spreads;
     }
 
-    private static double EstimateParagraphHeight(string text, int charsPerLine)
+    private static double EstimateParagraphHeight(string text, int charsPerLine, double lineHeightInches)
     {
         var normalized = NormalizeTextForMeasurement(text);
         if (normalized.Length == 0)
             return 0;
 
         var lines = Math.Max(1, (int)Math.Ceiling(normalized.Length / (double)Math.Max(1, charsPerLine)));
-        return (lines * BodyLineHeightInches) + ParagraphSpacingInches;
+        return (lines * lineHeightInches) + ParagraphSpacingInches;
     }
 
     private double EstimateIllustrationHeight(
@@ -1580,9 +1636,10 @@
     {
         var figureWidth = contentWidthInches * (Clamp(block.WidthPercent, 10, 100) / 100);
         var imageHeight = Math.Min(Math.Min(6, pageHeightInches * 0.55), Math.Max(1.2, figureWidth * 0.72));
+        var captionLineHeight = _pageGeometry.BodyFontSizePoints / 72 * _pageGeometry.BodyLineHeight;
         var captionHeight = string.IsNullOrWhiteSpace(block.Caption)
             ? 0
-            : EstimateParagraphHeight(block.Caption, Math.Max(16, (int)Math.Round(charsPerLine * block.WidthPercent / 100))) * 0.75;
+            : EstimateParagraphHeight(block.Caption, Math.Max(16, (int)Math.Round(charsPerLine * block.WidthPercent / 100)), captionLineHeight) * 0.75;
         var controlsHeight = CanEditLayout ? 0.48 : 0;
         return imageHeight + captionHeight + FigureSpacingInches + controlsHeight;
     }
@@ -1621,17 +1678,7 @@
         return builder.ToString().Trim();
     }
 
-    private static PageLayoutMetrics PageMetrics(ChapterPageLayoutKind kind)
-    {
-        var normalized = Enum.IsDefined(kind) ? kind : ChapterPageLayoutKind.SinglePortrait;
-        var isLandscape = normalized is ChapterPageLayoutKind.SingleLandscape or ChapterPageLayoutKind.DoubleLandscape;
-        var isDouble = normalized is ChapterPageLayoutKind.DoublePortrait or ChapterPageLayoutKind.DoubleLandscape;
-        var pageWidth = isLandscape ? 11 : 8.5;
-        var pageHeight = isLandscape ? 8.5 : 11;
-        return new PageLayoutMetrics(pageWidth, pageHeight, isDouble, isDouble ? pageWidth * 2 : pageWidth, pageHeight);
-    }
-
-    private string PicturePageClass(PageLayoutMetrics metrics)
+    private string PicturePageClass(BookPageGeometry metrics)
     {
         var classes = CanEditLayout ? "picture-page picture-page--editable" : "picture-page";
         if (metrics.IsDouble)
@@ -1639,7 +1686,7 @@
         return classes;
     }
 
-    private static string PicturePageStyle(PageLayoutMetrics metrics)
+    private static string PicturePageStyle(BookPageGeometry metrics)
     {
         var width = metrics.SurfaceWidthInches.ToString(CultureInfo.InvariantCulture);
         var height = metrics.SurfaceHeightInches.ToString(CultureInfo.InvariantCulture);
@@ -1649,34 +1696,34 @@
         return $"--picture-page-natural-width:{naturalWidth};--picture-page-height-fit-width:{heightFitWidth}cqh;aspect-ratio:{width}/{height};";
     }
 
-    private static string SafeGuideStyle(PageLayoutMetrics metrics, double insetInches)
+    private static string SafeGuideStyle(BookPageGeometry metrics, double insetInches)
     {
         var x = insetInches / metrics.SurfaceWidthInches * 100;
         var y = insetInches / metrics.SurfaceHeightInches * 100;
         return $"left:{x.ToString("0.###", CultureInfo.InvariantCulture)}%;right:{x.ToString("0.###", CultureInfo.InvariantCulture)}%;top:{y.ToString("0.###", CultureInfo.InvariantCulture)}%;bottom:{y.ToString("0.###", CultureInfo.InvariantCulture)}%;";
     }
 
-    private static string GutterGuideStyle(PageLayoutMetrics metrics, double insetInches)
+    private static string GutterGuideStyle(BookPageGeometry metrics, double insetInches)
     {
         var width = insetInches * 2 / metrics.SurfaceWidthInches * 100;
         return $"left:{(50 - width / 2).ToString("0.###", CultureInfo.InvariantCulture)}%;width:{width.ToString("0.###", CultureInfo.InvariantCulture)}%;";
     }
 
-    private static string ProsePagesClass(PageLayoutMetrics metrics) =>
+    private static string ProsePagesClass(BookPageGeometry metrics) =>
         metrics.IsDouble ? "prose-pages prose-pages--double" : "prose-pages prose-pages--single";
 
-    private static string ProseSpreadClass(PageLayoutMetrics metrics) =>
+    private static string ProseSpreadClass(BookPageGeometry metrics) =>
         metrics.IsDouble ? "prose-spread prose-spread--double" : "prose-spread prose-spread--single";
 
     private static string ProsePageClass(ProsePageModel page) =>
         page.IsBlank ? "sim-page prose-page prose-page--blank" : "sim-page prose-page";
 
-    private static string ProsePageStyle(PageLayoutMetrics metrics) =>
-        $"--page-width:{metrics.PageWidthInches.ToString(CultureInfo.InvariantCulture)}in;--page-height:{metrics.PageHeightInches.ToString(CultureInfo.InvariantCulture)}in;";
+    private static string ProsePageStyle(BookPageGeometry metrics) =>
+        $"--page-width:{metrics.PageWidthInches.ToString(CultureInfo.InvariantCulture)}in;--page-height:{metrics.PageHeightInches.ToString(CultureInfo.InvariantCulture)}in;--page-margin:{metrics.PageMarginInches.ToString(CultureInfo.InvariantCulture)}in;--body-font-size:{metrics.BodyFontSizePoints.ToString(CultureInfo.InvariantCulture)}pt;--body-line-height:{metrics.BodyLineHeight.ToString(CultureInfo.InvariantCulture)};";
 
     private string TextElementStyle(PicturePageTextElement text)
     {
-        var metrics = PageMetrics(State.PageLayoutKind);
+        var metrics = _pageGeometry;
         var fontSizeCqw = text.FontSizePoints / 72 / metrics.SurfaceWidthInches * 100;
         var justify = text.VerticalAlign switch
         {

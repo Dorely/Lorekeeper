@@ -5,6 +5,7 @@ using Lorekeeper.Chapters;
 using Lorekeeper.Fonts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.Publish;
 using Microsoft.EntityFrameworkCore;
 using SkiaSharp;
 
@@ -13,7 +14,8 @@ namespace Lorekeeper.ChapterVisuals;
 public sealed class ChapterVisualService(
     AppDbContext db,
     IChapterService chapters,
-    IProjectFontService fonts) : IChapterVisualService
+    IProjectFontService fonts,
+    IPageGeometryService pageGeometry) : IChapterVisualService
 {
     private const int MaxSnapshotPages = 12;
     private const int TextFitSnapshotMaxEdge = 1400;
@@ -220,7 +222,7 @@ public sealed class ChapterVisualService(
         var text = normalized.TextElements.FirstOrDefault(candidate => candidate.Id == textElementId)
             ?? throw new InvalidOperationException("PicturePage text element was not found.");
         var previousFontSizePoints = text.FontSizePoints;
-        var metrics = PageMetrics(chapter.PageLayoutKind);
+        var metrics = await pageGeometry.GetAsync(chapter.ProjectId, chapter.PageLayoutKind, cancellationToken);
         var (pageWidth, pageHeight) = ScaledPagePixels(
             metrics.SurfaceWidthInches,
             metrics.SurfaceHeightInches,
@@ -240,7 +242,7 @@ public sealed class ChapterVisualService(
                 fallbackFace,
                 pageWidth,
                 pageHeight,
-                metrics.SurfaceWidthInches);
+            metrics.SurfaceWidthInches);
 
         var fittedSizeTenths = TextFitMinimumTenths;
         var fittedDiagnostic = Measure(TextFitMinimumTenths);
@@ -307,24 +309,22 @@ public sealed class ChapterVisualService(
             return [];
 
         var state = State(chapter);
-        if (state.VisualMode == ChapterVisualMode.Prose)
-            return [];
         var imageIds = state.VisualMode == ChapterVisualMode.PicturePage
             ? state.PageLayout.Images.Select(image => image.ImageId)
             : state.IllustrationLayout.Images.Select(image => image.ImageId);
         var assets = await LoadImageAssetsAsync(chapter.ProjectId, imageIds, cancellationToken);
         var edge = (int)Clamp(maxEdge, 320, 2400, 1400);
+        var profile = await db.PublishProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.ProjectId == chapter.ProjectId, cancellationToken);
+        var geometry = pageGeometry.Calculate(profile, state.PageLayoutKind);
         if (state.VisualMode == ChapterVisualMode.PicturePage)
         {
             var fontFaces = await LoadFontFacesAsync(chapter.ProjectId, state.PageLayout.TextElements, cancellationToken);
-            return [RenderPicturePageSnapshot(state, assets, fontFaces, edge)];
+            var brief = await db.BookBriefs.AsNoTracking()
+                .FirstOrDefaultAsync(candidate => candidate.ProjectId == chapter.ProjectId, cancellationToken);
+            return [RenderPicturePageSnapshot(state, assets, fontFaces, edge, geometry, brief)];
         }
-        if (assets.Count == 0)
-            return [];
-
-        var profile = await db.PublishProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(candidate => candidate.ProjectId == chapter.ProjectId, cancellationToken);
-        return RenderIllustratedProseSnapshots(state, profile, assets, edge);
+        return RenderIllustratedProseSnapshots(state, geometry, assets, edge);
     }
 
     public async Task<IReadOnlyDictionary<Guid, ChapterPicturePageSurface>> RenderPicturePageSurfacesAsync(
@@ -380,7 +380,7 @@ public sealed class ChapterVisualService(
         var surfaces = new Dictionary<Guid, ChapterPicturePageSurface>(chapterStates.Count);
         foreach (var request in chapterStates)
         {
-            var metrics = PageMetrics(request.State.PageLayoutKind);
+            var metrics = await pageGeometry.GetAsync(request.ProjectId, request.State.PageLayoutKind, cancellationToken);
             var (pageWidth, pageHeight) = ScaledPagePixels(
                 metrics.PageWidthInches,
                 metrics.PageHeightInches,
@@ -398,7 +398,8 @@ public sealed class ChapterVisualService(
                 projectAssets,
                 fontFaces,
                 nativeSurfaceWidth,
-                pageHeight);
+                pageHeight,
+                metrics);
             var effectiveRotation = metrics.IsDouble
                 ? rotation
                 : ChapterPicturePageSurfaceRotation.None;
@@ -487,23 +488,24 @@ public sealed class ChapterVisualService(
 
         if (state.VisualMode == ChapterVisualMode.PicturePage)
         {
-            var geometry = PicturePageImageGenerationGuidance.CanvasGeometry(state.PageLayoutKind);
+            var bookGeometry = GeometryForState(state);
+            var geometry = PicturePageImageGenerationGuidance.CanvasGeometry(bookGeometry);
             builder.AppendLine(
                 $"Picture page layout: {geometry.LayoutKind}; leaf {geometry.LeafWidthInches:0.##} x {geometry.LeafHeightInches:0.##} in; canvas {geometry.CanvasWidthInches:0.##} x {geometry.CanvasHeightInches:0.##} in; canvas orientation {geometry.Orientation}; canvas aspect {geometry.AspectRatio}; spread: {geometry.IsSpread}; gutter center x: {(geometry.GutterCenterXPercent is { } gutter ? $"{gutter:0.#}%" : "none")}");
             if (includePicturePageGenerationGuidance)
             {
-                foreach (var guidanceLine in PicturePageImageGenerationGuidance.BuildManifestLines(state))
+                foreach (var guidanceLine in PicturePageImageGenerationGuidance.BuildManifestLines(state, bookGeometry))
                     builder.AppendLine(guidanceLine);
             }
             foreach (var text in state.PageLayout.TextElements.OrderBy(text => text.ReadingOrder))
             {
                 var fontName = fontNames?.GetValueOrDefault(text.FontFamilyKey) ?? text.FontFamilyKey;
                 builder.AppendLine(
-                    $"Text element {text.Id:D}; reading order {text.ReadingOrder}: \"{text.Text}\" at {text.XPercent:0.#},{text.YPercent:0.#} size {text.WidthPercent:0.#}x{text.HeightPercent:0.#}; font {fontName} ({text.FontFamilyKey}) {text.FontWeight}{(text.Italic ? " italic" : string.Empty)}, {text.FontSizePoints:0.#} pt, line height {text.LineHeight:0.##}, tracking {text.LetterSpacingEm:0.###} em, {text.TextAlign}/{text.VerticalAlign}");
+                    $"Text element {text.Id:D}; role {text.Role}; reading order {text.ReadingOrder}: \"{text.Text}\" at {text.XPercent:0.#},{text.YPercent:0.#} size {text.WidthPercent:0.#}x{text.HeightPercent:0.#}; font {fontName} ({text.FontFamilyKey}) {text.FontWeight}{(text.Italic ? " italic" : string.Empty)}, {text.FontSizePoints:0.#} pt, line height {text.LineHeight:0.##}, tracking {text.LetterSpacingEm:0.###} em, {text.TextAlign}/{text.VerticalAlign}");
             }
             foreach (var image in state.PageLayout.Images.OrderBy(image => image.ZIndex))
             {
-                var frame = PicturePageImageGenerationGuidance.ForSlot(state.PageLayoutKind, image);
+                var frame = PicturePageImageGenerationGuidance.ForSlot(bookGeometry, image);
                 var placement =
                     $"Image element {image.Id:D}; library image {Name(image.ImageId, imageNames)}; frame at {image.XPercent:0.#},{image.YPercent:0.#} size {image.WidthPercent:0.#}x{image.HeightPercent:0.#}; frame aspect {frame.AspectRatio}; fit {image.Fit}; z {image.ZIndex}";
                 builder.AppendLine(placement);
@@ -519,6 +521,19 @@ public sealed class ChapterVisualService(
         }
 
         return builder.ToString();
+    }
+
+    private BookPageGeometry GeometryForState(ChapterVisualState state)
+    {
+        var projectId = db.Chapters
+            .AsNoTracking()
+            .Where(chapter => chapter.Id == state.ChapterId)
+            .Select(chapter => chapter.ProjectId)
+            .FirstOrDefault();
+        var profile = projectId == Guid.Empty
+            ? null
+            : db.PublishProfiles.AsNoTracking().FirstOrDefault(candidate => candidate.ProjectId == projectId);
+        return pageGeometry.Calculate(profile, state.PageLayoutKind);
     }
 
     public async Task<int> RepairTextLayoutsAsync(CancellationToken cancellationToken = default)
@@ -553,21 +568,6 @@ public sealed class ChapterVisualService(
     private static ChapterPageLayoutKind NormalizePageLayoutKind(ChapterPageLayoutKind kind) =>
         Enum.IsDefined(kind) ? kind : ChapterPageLayoutKind.SinglePortrait;
 
-    private static (
-        double PageWidthInches,
-        double PageHeightInches,
-        bool IsDouble,
-        double SurfaceWidthInches,
-        double SurfaceHeightInches) PageMetrics(ChapterPageLayoutKind kind)
-    {
-        var normalized = NormalizePageLayoutKind(kind);
-        var isLandscape = normalized is ChapterPageLayoutKind.SingleLandscape or ChapterPageLayoutKind.DoubleLandscape;
-        var isDouble = normalized is ChapterPageLayoutKind.DoublePortrait or ChapterPageLayoutKind.DoubleLandscape;
-        var pageWidth = isLandscape ? 11 : 8.5;
-        var pageHeight = isLandscape ? 8.5 : 11;
-        return (pageWidth, pageHeight, isDouble, isDouble ? pageWidth * 2 : pageWidth, pageHeight);
-    }
-
     private async Task<IReadOnlyDictionary<Guid, PublishAsset>> LoadImageAssetsAsync(
         Guid projectId,
         IEnumerable<Guid> imageIds,
@@ -586,11 +586,12 @@ public sealed class ChapterVisualService(
         ChapterVisualState state,
         IReadOnlyDictionary<Guid, PublishAsset> assets,
         IReadOnlyDictionary<PictureFontFaceKey, LoadedPictureFontFace> fontFaces,
-        int maxEdge)
+        int maxEdge,
+        BookPageGeometry geometry,
+        BookBrief? brief = null)
     {
-        var metrics = PageMetrics(state.PageLayoutKind);
-        var (width, height) = ScaledPagePixels(metrics.SurfaceWidthInches, metrics.SurfaceHeightInches, maxEdge);
-        return RenderPicturePageSnapshot(state, assets, fontFaces, width, height);
+        var (width, height) = ScaledPagePixels(geometry.SurfaceWidthInches, geometry.SurfaceHeightInches, maxEdge);
+        return RenderPicturePageSnapshot(state, assets, fontFaces, width, height, geometry, brief);
     }
 
     private static ChapterVisualSnapshot RenderPicturePageSnapshot(
@@ -598,15 +599,16 @@ public sealed class ChapterVisualService(
         IReadOnlyDictionary<Guid, PublishAsset> assets,
         IReadOnlyDictionary<PictureFontFaceKey, LoadedPictureFontFace> fontFaces,
         int width,
-        int height)
+        int height,
+        BookPageGeometry geometry,
+        BookBrief? brief = null)
     {
         using var surface = CreatePageSurface(width, height);
         var canvas = surface.Canvas;
         canvas.Clear(SKColors.White);
 
         var textFitDiagnostics = new List<ChapterVisualTextFitDiagnostic>();
-        var layoutDiagnostics = PicturePageLayoutDiagnostics.Evaluate(state.PageLayoutKind, state.PageLayout);
-        var metrics = PageMetrics(state.PageLayoutKind);
+        var layoutDiagnostics = PicturePageLayoutDiagnostics.Evaluate(geometry, state.PageLayout, brief).ToList();
         var layers = state.PageLayout.Images
             .Select((image, index) => new PicturePageRenderLayer(image.ZIndex, index, image, null))
             .Concat(state.PageLayout.TextElements.Select((text, index) =>
@@ -631,6 +633,9 @@ public sealed class ChapterVisualService(
 
             if (layer.Text is { } text)
             {
+                if (RenderedContrastDiagnostic(surface, text, width, height) is { } contrastDiagnostic)
+                    layoutDiagnostics.Add(contrastDiagnostic);
+
                 var key = new PictureFontFaceKey(text.FontFamilyKey, text.FontWeight, text.Italic);
                 fontFaces.TryGetValue(key, out var face);
                 textFitDiagnostics.Add(DrawPictureTextBox(
@@ -640,7 +645,7 @@ public sealed class ChapterVisualService(
                     fontFaces.GetValueOrDefault(new PictureFontFaceKey(PicturePageFontKeys.Fallback, 400, false)),
                     width,
                     height,
-                    metrics.SurfaceWidthInches));
+                    geometry.SurfaceWidthInches));
             }
         }
         return new ChapterVisualSnapshot(1, $"chapter-{state.ChapterId:N}-page-1.png", SnapshotContentType, EncodePng(surface))
@@ -652,21 +657,99 @@ public sealed class ChapterVisualService(
                         "text_overflow",
                         "error",
                         $"Text needs {diagnostic.RequiredHeightPixels:0.#} px but only {diagnostic.AvailableHeightPixels:0.#} px is available.",
-                        diagnostic.ElementId)))
+                        diagnostic.ElementId,
+                        null,
+                        $"{diagnostic.RequiredHeightPixels:0.#} px required",
+                        $"<= {diagnostic.AvailableHeightPixels:0.#} px available",
+                        "Enlarge the box, reduce or reflow the copy, or deliberately reduce type while preserving readability.")))
                 .Concat(textFitDiagnostics.Where(diagnostic => !diagnostic.FontFaceResolved).Select(diagnostic =>
                     new ChapterVisualLayoutDiagnostic(
                         "unsupported_font_face",
                         "error",
                         "The selected font family, weight, or italic face is unavailable; the fallback face was rendered.",
-                        diagnostic.ElementId)))
-                .Concat(textFitDiagnostics.Where(diagnostic => diagnostic.UsedMissingGlyphFallback).Select(diagnostic =>
-                    new ChapterVisualLayoutDiagnostic(
-                        "missing_glyph_fallback",
-                        "warning",
-                        "The selected font lacks one or more characters; Andika fallback glyphs were rendered.",
-                        diagnostic.ElementId)))
+                        diagnostic.ElementId,
+                        null,
+                        "requested face unresolved",
+                        "an installed exact family/weight/style face",
+                        "Choose an available face or add the required font file to the project.")))
                 .ToList(),
         };
+    }
+
+    private static ChapterVisualLayoutDiagnostic? RenderedContrastDiagnostic(
+        SKSurface surface,
+        PicturePageTextElement text,
+        int pageWidth,
+        int pageHeight)
+    {
+        var rect = PercentRect(text.XPercent, text.YPercent, text.WidthPercent, text.HeightPercent, pageWidth, pageHeight);
+        if (rect.Width <= 1 || rect.Height <= 1 || string.IsNullOrWhiteSpace(text.Text))
+            return null;
+
+        surface.Canvas.Flush();
+        using var image = surface.Snapshot();
+        using var bitmap = SKBitmap.FromImage(image);
+        var foreground = TextColor(text.Color, 1);
+        var backing = TextColor(text.BackgroundColor, text.BackgroundOpacity);
+        var minimumRatio = double.MaxValue;
+
+        const int samplesPerAxis = 5;
+        for (var row = 0; row < samplesPerAxis; row++)
+        {
+            for (var column = 0; column < samplesPerAxis; column++)
+            {
+                var x = Math.Clamp((int)Math.Round(rect.Left + ((column + 0.5) / samplesPerAxis * rect.Width)), 0, pageWidth - 1);
+                var y = Math.Clamp((int)Math.Round(rect.Top + ((row + 0.5) / samplesPerAxis * rect.Height)), 0, pageHeight - 1);
+                var background = bitmap.GetPixel(x, y);
+                if (backing.Alpha > 0)
+                    background = Composite(backing, background);
+                minimumRatio = Math.Min(minimumRatio, ContrastRatio(foreground, background));
+            }
+        }
+
+        var isLarge = text.FontSizePoints >= 18
+            || text.FontSizePoints >= 14 && text.FontWeight >= 700;
+        var threshold = isLarge ? 3d : 4.5d;
+        if (minimumRatio >= threshold)
+            return null;
+
+        return new ChapterVisualLayoutDiagnostic(
+            "insufficient_text_contrast",
+            "error",
+            "Rendered text contrast is below the accessibility threshold in at least one sampled part of the text box.",
+            text.Id,
+            null,
+            $"{minimumRatio:0.00}:1 minimum sampled",
+            $">= {threshold:0.0}:1 ({(isLarge ? "large" : "normal")} text)",
+            "Change the text color, add or strengthen a quiet opaque backing, or move the text to a more uniform area.");
+    }
+
+    private static SKColor Composite(SKColor foreground, SKColor background)
+    {
+        var alpha = foreground.Alpha / 255d;
+        byte Channel(byte front, byte back) => (byte)Math.Round((front * alpha) + (back * (1 - alpha)));
+        return new SKColor(
+            Channel(foreground.Red, background.Red),
+            Channel(foreground.Green, background.Green),
+            Channel(foreground.Blue, background.Blue));
+    }
+
+    private static double ContrastRatio(SKColor first, SKColor second)
+    {
+        static double Luminance(SKColor color)
+        {
+            static double Linear(byte channel)
+            {
+                var value = channel / 255d;
+                return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+            }
+
+            return (0.2126 * Linear(color.Red)) + (0.7152 * Linear(color.Green)) + (0.0722 * Linear(color.Blue));
+        }
+
+        var lighter = Math.Max(Luminance(first), Luminance(second));
+        var darker = Math.Min(Luminance(first), Luminance(second));
+        return (lighter + 0.05) / (darker + 0.05);
     }
 
     private static byte[] RotatePngClockwise90(byte[] data, int sourceWidth, int sourceHeight)
@@ -685,16 +768,15 @@ public sealed class ChapterVisualService(
 
     private static IReadOnlyList<ChapterVisualSnapshot> RenderIllustratedProseSnapshots(
         ChapterVisualState state,
-        PublishProfile? profile,
+        BookPageGeometry geometry,
         IReadOnlyDictionary<Guid, PublishAsset> assets,
         int maxEdge)
     {
-        var metrics = PageMetrics(state.PageLayoutKind);
-        var pageWidthInches = metrics.PageWidthInches;
-        var pageHeightInches = metrics.PageHeightInches;
-        var pageMarginInches = Clamp(profile?.PageMarginInches ?? 0.75, 0.2, Math.Min(pageWidthInches, pageHeightInches) / 3, 0.75);
-        var fontSizePoints = Clamp(profile?.BodyFontSizePoints ?? 12, 7, 24, 12);
-        var lineHeightRatio = Clamp(profile?.BodyLineHeight ?? 1.55, 1, 2.4, 1.55);
+        var pageWidthInches = geometry.PageWidthInches;
+        var pageHeightInches = geometry.PageHeightInches;
+        var pageMarginInches = geometry.PageMarginInches;
+        var fontSizePoints = geometry.BodyFontSizePoints;
+        var lineHeightRatio = geometry.BodyLineHeight;
         var (width, height) = ScaledPagePixels(pageWidthInches, pageHeightInches, maxEdge);
         var pixelsPerInch = width / pageWidthInches;
         var margin = (float)(pageMarginInches * pixelsPerInch);
@@ -703,6 +785,7 @@ public sealed class ChapterVisualService(
         var paragraphSpacing = (float)Math.Max(6, 0.14 * pixelsPerInch);
         var figureSpacing = (float)Math.Max(8, 0.16 * pixelsPerInch);
         var snapshots = new List<ChapterVisualSnapshot>();
+        var proseDiagnostics = new List<ChapterVisualLayoutDiagnostic>();
         SKSurface? surface = null;
         SKCanvas? canvas = null;
         var pageNumber = 0;
@@ -733,6 +816,36 @@ public sealed class ChapterVisualService(
             IsAntialias = true,
         };
 
+        var estimatedCharactersPerLine = Math.Max(
+            1,
+            (int)Math.Round((contentWidth / Math.Max(1, font.Size)) / 0.52));
+        if (estimatedCharactersPerLine is < 45 or > 90)
+        {
+            proseDiagnostics.Add(new(
+                "general_prose_line_length",
+                "warning",
+                "The estimated prose line length is outside the general-reading range; pagination remains advisory for reflowable EPUB.",
+                null,
+                null,
+                $"about {estimatedCharactersPerLine} characters",
+                "45-90 characters",
+                estimatedCharactersPerLine < 45
+                    ? "Reduce the page margin or body size, or intentionally retain the narrow measure for this format."
+                    : "Increase the margin or body size to make line tracking easier."));
+        }
+        if (fontSizePoints < PicturePageLayoutDiagnostics.MinimumBodyFontPoints)
+        {
+            proseDiagnostics.Add(new(
+                "undersized_body_copy",
+                "warning",
+                "The publish profile body size is unusually small for sustained prose.",
+                null,
+                null,
+                $"{fontSizePoints:0.#} pt",
+                $">= {PicturePageLayoutDiagnostics.MinimumBodyFontPoints:0.#} pt",
+                "Increase the Publish body-font size unless the smaller setting is a deliberate production choice."));
+        }
+
         var paragraphs = SplitParagraphs(state.Body);
         if (paragraphs.Count == 0)
             paragraphs = [string.Empty];
@@ -752,6 +865,15 @@ public sealed class ChapterVisualService(
         }
 
         FinishPage();
+        if (snapshots.Count > 0 && proseDiagnostics.Count > 0)
+        {
+            snapshots[0] = snapshots[0] with
+            {
+                LayoutDiagnostics = proseDiagnostics
+                    .DistinctBy(diagnostic => (diagnostic.Code, diagnostic.MeasuredValue))
+                    .ToList(),
+            };
+        }
         return snapshots;
 
         IEnumerable<IllustratedProseImageBlock> BlocksAt(int paragraphIndex, ChapterImageAnchorPosition position) =>
@@ -807,6 +929,31 @@ public sealed class ChapterVisualService(
 
             var lineHeight = Math.Max(font.Size * (float)lineHeightRatio, font.Metrics.Descent - font.Metrics.Ascent + font.Metrics.Leading);
             var requiredHeight = (lines.Count * lineHeight) + paragraphSpacing;
+            var availablePageHeight = contentBottom - margin;
+            if (requiredHeight > availablePageHeight)
+            {
+                proseDiagnostics.Add(new(
+                    "prose_paragraph_overflow",
+                    "error",
+                    "A prose paragraph is taller than the available page body and cannot paginate as one block.",
+                    null,
+                    null,
+                    $"{requiredHeight:0.#} px required",
+                    $"<= {availablePageHeight:0.#} px available",
+                    "Break the paragraph at a logical point, reduce body size, or increase the usable page area."));
+            }
+            if (lines.Count > 1 && lines[^1].Length is > 0 and < 15 && lines[^2].Length >= 30)
+            {
+                proseDiagnostics.Add(new(
+                    "short_final_line",
+                    "warning",
+                    "A paragraph ends with a conspicuously short final line in this advisory pagination.",
+                    null,
+                    null,
+                    $"{lines[^1].Length} characters",
+                    "avoid markedly short final lines when practical",
+                    "Adjust the measure, body size, or copy while preserving intentional rhythm."));
+            }
             EnsureSpace(requiredHeight);
             if (canvas is null)
                 return;
@@ -994,7 +1141,7 @@ public sealed class ChapterVisualService(
     {
         var rect = PercentRect(text.XPercent, text.YPercent, text.WidthPercent, text.HeightPercent, pageWidth, pageHeight);
         if (rect.Width <= 0 || rect.Height <= 0)
-            return new ChapterVisualTextFitDiagnostic(text.Id, 0, 0, 0, 0, Fits: false, selectedFace?.ExactMatch == true, false);
+            return new ChapterVisualTextFitDiagnostic(text.Id, 0, 0, 0, 0, Fits: false, selectedFace?.ExactMatch == true);
 
         if (text.BackgroundOpacity > 0)
         {
@@ -1015,9 +1162,9 @@ public sealed class ChapterVisualService(
             Hinting = SKFontHinting.Normal,
             Subpixel = true,
         };
-        var usedMissingGlyphFallback = selectedFont.GetGlyphs(text.Text).Any(glyph => glyph == 0);
-        using var fallbackTypeface = usedMissingGlyphFallback ? Typeface(fallbackFace) : null;
-        using var font = usedMissingGlyphFallback
+        var needsFallbackTypeface = selectedFont.GetGlyphs(text.Text).Any(glyph => glyph == 0);
+        using var fallbackTypeface = needsFallbackTypeface ? Typeface(fallbackFace) : null;
+        using var font = needsFallbackTypeface
             ? new SKFont(fallbackTypeface ?? SKTypeface.Default, fontSize)
             {
                 Edging = SKFontEdging.Antialias,
@@ -1039,12 +1186,12 @@ public sealed class ChapterVisualService(
         var padding = Math.Max(4, fontSize * 0.18f);
         var textRect = new SKRect(rect.Left + padding, rect.Top + padding, rect.Right - padding, rect.Bottom - padding);
         if (textRect.Width <= 0 || textRect.Height <= 0)
-            return new ChapterVisualTextFitDiagnostic(text.Id, 0, 0, 0, 0, Fits: false, selectedFace?.ExactMatch == true, usedMissingGlyphFallback);
+            return new ChapterVisualTextFitDiagnostic(text.Id, 0, 0, 0, 0, Fits: false, selectedFace?.ExactMatch == true);
 
         var letterSpacing = fontSize * (float)Clamp(text.LetterSpacingEm, -0.1, 0.3, 0);
         var lines = WrapPictureText(text.Text, textRect.Width, font, paint, letterSpacing);
         if (lines.Count == 0)
-            return new ChapterVisualTextFitDiagnostic(text.Id, 0, 0, textRect.Height, 0, Fits: true, selectedFace?.ExactMatch == true, usedMissingGlyphFallback);
+            return new ChapterVisualTextFitDiagnostic(text.Id, 0, 0, textRect.Height, 0, Fits: true, selectedFace?.ExactMatch == true);
 
         var lineHeight = fontSize * (float)Clamp(text.LineHeight, 0.9, 2.2, 1.35);
         var blockHeight = lines.Count * lineHeight;
@@ -1086,8 +1233,7 @@ public sealed class ChapterVisualService(
             textRect.Height,
             blockHeight,
             Fits: blockHeight <= textRect.Height + 0.5f,
-            FontFaceResolved: selectedFace?.ExactMatch == true,
-            UsedMissingGlyphFallback: usedMissingGlyphFallback);
+            FontFaceResolved: selectedFace?.ExactMatch == true);
     }
 
     private static IReadOnlyList<string> WrapText(string text, float maxWidth, SKFont font, SKPaint paint)
@@ -1517,6 +1663,7 @@ public sealed class ChapterVisualService(
                 TextAlign = Enum.IsDefined(text.TextAlign) ? text.TextAlign : PicturePageTextAlign.Left,
                 VerticalAlign = Enum.IsDefined(text.VerticalAlign) ? text.VerticalAlign : ChapterTextVerticalAlign.Top,
                 Shadow = Enum.IsDefined(text.Shadow) ? text.Shadow : PicturePageTextShadow.None,
+                Role = Enum.IsDefined(text.Role) ? text.Role : PicturePageTextRole.Body,
             })
             .OrderBy(text => text.ReadingOrder)
             .ToList();

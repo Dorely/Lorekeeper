@@ -258,11 +258,14 @@ public sealed class ResearchService(
         try
         {
             chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
-            initialAssembly = await contextBuilder.BuildProjectAsync(
-                project,
-                ResearchWorkflowInstructions
-                + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
-                + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples,
+            initialAssembly = await contextBuilder.BuildAsync(
+                new ContextBuildRequest(
+                    project,
+                    UserMessage: userText,
+                    Purpose: ContextBuildPurpose.Research,
+                    OperatingRules: ResearchWorkflowInstructions
+                        + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
+                        + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples),
                 cancellationToken);
             systemPrompt = initialAssembly.Assemble();
             if (project.AiChangeApprovalEnabled)
@@ -914,11 +917,13 @@ public sealed class ResearchService(
 
     private async Task<string> BuildSystemPromptAsync(Project project, CancellationToken cancellationToken)
     {
-        var assembly = await contextBuilder.BuildProjectAsync(
-            project,
-            ResearchWorkflowInstructions
-            + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
-            + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples,
+        var assembly = await contextBuilder.BuildAsync(
+            new ContextBuildRequest(
+                project,
+                Purpose: ContextBuildPurpose.Research,
+                OperatingRules: ResearchWorkflowInstructions
+                    + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
+                    + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples),
             cancellationToken);
         return assembly.Assemble();
     }

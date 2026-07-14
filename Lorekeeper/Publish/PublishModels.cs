@@ -44,6 +44,11 @@ public sealed record PublishProfileView(
     PublishTitlePageMode TitlePageMode,
     PrintPicturePageSpreadMode PrintPicturePageSpreadMode,
     EpubPicturePageSpreadMode EpubPicturePageSpreadMode,
+    double PageWidthInches,
+    double PageHeightInches,
+    double PageMarginInches,
+    double BodyFontSizePoints,
+    double BodyLineHeight,
     Guid? SelectedCoverChapterId);
 
 public sealed record PublishProfileUpdate(
@@ -68,7 +73,12 @@ public sealed record PublishProfileUpdate(
     bool NumberChapters,
     PublishTitlePageMode TitlePageMode,
     PrintPicturePageSpreadMode PrintPicturePageSpreadMode,
-    EpubPicturePageSpreadMode EpubPicturePageSpreadMode);
+    EpubPicturePageSpreadMode EpubPicturePageSpreadMode,
+    double PageWidthInches,
+    double PageHeightInches,
+    double PageMarginInches,
+    double BodyFontSizePoints,
+    double BodyLineHeight);
 
 public sealed record PublishSectionView(
     Guid? ActId,
@@ -164,7 +174,12 @@ public sealed record PublishDocumentProfile(
     bool NumberChapters,
     bool IncludeTitlePage,
     PrintPicturePageSpreadMode PrintPicturePageSpreadMode,
-    EpubPicturePageSpreadMode EpubPicturePageSpreadMode);
+    EpubPicturePageSpreadMode EpubPicturePageSpreadMode,
+    double PageWidthInches,
+    double PageHeightInches,
+    double PageMarginInches,
+    double BodyFontSizePoints,
+    double BodyLineHeight);
 
 public sealed record PublishSectionDocument(
     Guid? ActId,

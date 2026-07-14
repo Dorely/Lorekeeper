@@ -19,6 +19,9 @@ public class EditorMessage
 
     public string? ToolName { get; set; }
 
+    /// <summary>Bounded provenance trace for the automatic context used on this user turn.</summary>
+    public string? ContextSnapshotJson { get; set; }
+
     public EditorMessageStatus Status { get; set; } = EditorMessageStatus.Completed;
 
     public string? ErrorMessage { get; set; }

@@ -19,6 +19,7 @@ public interface IOutlineCollaborationService
     /// Loads the persisted message log for a conversation, ordered ascending.
     /// </summary>
     Task<IReadOnlyList<OutlineMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default);
 
     Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default);

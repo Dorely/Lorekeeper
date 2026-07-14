@@ -116,6 +116,7 @@ builder.Services.AddScoped<IEmbeddingConfigurationService, EmbeddingConfiguratio
 builder.Services.AddScoped<IEmbeddingService, ProviderEmbeddingService>();
 builder.Services.AddScoped<EmbeddingRebuildService>();
 builder.Services.AddScoped<ILlmProviderService, LlmProviderService>();
+builder.Services.AddScoped<ISystemPromptComposer, SystemPromptComposer>();
 builder.Services.AddScoped<ICodexAuthService, CodexAuthService>();
 builder.Services.AddHostedService<EmbeddingRebuildWorker>();
 
@@ -143,6 +144,7 @@ builder.Services.AddSingleton<ChatTurnRuntime>();
 
 // Projects
 builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddScoped<IBookBriefService, BookBriefService>();
 builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
 builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>();
 
@@ -157,6 +159,7 @@ builder.Services.AddScoped<IEntityVisualContextService, EntityVisualContextServi
 builder.Services.Configure<ProjectImageGenerationOptions>(builder.Configuration.GetSection(ProjectImageGenerationOptions.SectionName));
 builder.Services.AddScoped<IProjectImageProvider, CodexProjectImageProvider>();
 builder.Services.AddScoped<IProjectImageJobService, ProjectImageJobService>();
+builder.Services.AddScoped<IImagePromptComposer, ImagePromptComposer>();
 builder.Services.AddSingleton<IProjectImageGenerationRuntime, ProjectImageGenerationRuntime>();
 builder.Services.AddHostedService<ProjectImageGenerationStartupWorker>();
 
@@ -217,6 +220,7 @@ builder.Services.AddScoped<IPublishExportFormatter, PlainTextPublishFormatter>()
 builder.Services.AddScoped<IPublishExportFormatter, MarkdownPublishFormatter>();
 builder.Services.AddScoped<IPublishExportFormatter, EpubPublishFormatter>();
 builder.Services.AddScoped<IPublishService, PublishService>();
+builder.Services.AddScoped<IPageGeometryService, PageGeometryService>();
 
 // Context + editor chat
 builder.Services.AddScoped<ContextBuilder>();

@@ -94,6 +94,7 @@
     private Guid? _loadedProjectId;
     private List<AiChangeBatch> _pendingBatches = [];
     private string? _pendingUserText;
+    private string _systemPrompt = string.Empty;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private ChatProviderAvailability? _chatAvailability;
 
@@ -117,6 +118,7 @@
         try
         {
             _conversation = await Collab.GetOrCreateAsync(ProjectId);
+            _systemPrompt = await Collab.GetSystemPromptAsync(ProjectId);
             _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
             _messages = (await Collab.LoadMessagesAsync(_conversation.Id)).ToList();
             _approvalEnabled = await Collab.GetAiChangeApprovalEnabledAsync(ProjectId);
@@ -413,7 +415,7 @@
             message => message,
             _live,
             _pendingUserText,
-            OutlineCollaborationService.CollaborationSystemPrompt);
+            _systemPrompt);
     }
 
     private static List<ChatMessagePart> BuildMessageParts(OutlineMessage message, IReadOnlyDictionary<string, OutlineMessage> byCallId)

@@ -18,13 +18,14 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 6;
+    public const int CurrentFormatVersion = 7;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
     public ProjectExportKind ExportKind { get; init; }
     public DateTime ExportedAtUtc { get; init; } = DateTime.UtcNow;
     public required ProjectExportProject Project { get; init; }
+    public ProjectExportBookBrief? BookBrief { get; init; }
     public List<ProjectExportEntityType> EntityTypes { get; init; } = [];
     public List<ProjectExportImage> Images { get; init; } = [];
     public List<ProjectExportEntityVisualExample> EntityVisualExamples { get; init; } = [];
@@ -40,9 +41,39 @@ public sealed record ProjectExportProject(
     Guid Id,
     string Name,
     string Slug,
-    string SystemPrompt,
+    string ProjectGuidance,
     bool IncludeCurrentChapterInContext,
-    bool AiChangeApprovalEnabled);
+    bool AiChangeApprovalEnabled)
+{
+    [JsonPropertyName("systemPrompt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacySystemPrompt { get; init; }
+
+    [JsonIgnore]
+    public string EffectiveProjectGuidance =>
+        !string.IsNullOrWhiteSpace(ProjectGuidance) ? ProjectGuidance : LegacySystemPrompt ?? string.Empty;
+}
+
+public sealed record ProjectExportBookBrief(
+    BookKind BookKind,
+    string Premise,
+    string Genre,
+    string PrimaryThemes,
+    string Purpose,
+    string CreativeConstraints,
+    string TargetAudience,
+    int? MinimumReaderAge,
+    int? MaximumReaderAge,
+    string ReadingLevelGuidance,
+    int? TargetWordCount,
+    string PointOfView,
+    string Tense,
+    string VoiceAndTone,
+    string LanguageLocale,
+    string HouseStyle,
+    bool? ReadAloudPriority,
+    string AccessibilityGoals,
+    string VisualDirection);
 
 public sealed record ProjectExportEntityType(
     string Type,

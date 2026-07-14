@@ -99,9 +99,33 @@ public sealed class ProjectImportExportService(
                 project.Id,
                 project.Name,
                 project.Slug,
-                project.SystemPrompt,
+                project.ProjectGuidance,
                 project.IncludeCurrentChapterInContext,
                 project.AiChangeApprovalEnabled),
+            BookBrief = await db.BookBriefs
+                .AsNoTracking()
+                .Where(brief => brief.ProjectId == projectId)
+                .Select(brief => new ProjectExportBookBrief(
+                    brief.BookKind,
+                    brief.Premise,
+                    brief.Genre,
+                    brief.PrimaryThemes,
+                    brief.Purpose,
+                    brief.CreativeConstraints,
+                    brief.TargetAudience,
+                    brief.MinimumReaderAge,
+                    brief.MaximumReaderAge,
+                    brief.ReadingLevelGuidance,
+                    brief.TargetWordCount,
+                    brief.PointOfView,
+                    brief.Tense,
+                    brief.VoiceAndTone,
+                    brief.LanguageLocale,
+                    brief.HouseStyle,
+                    brief.ReadAloudPriority,
+                    brief.AccessibilityGoals,
+                    brief.VisualDirection))
+                .SingleOrDefaultAsync(cancellationToken),
             EntityTypes = (await entityTypes.ListByProjectAsync(projectId, cancellationToken))
                 .Where(type => ShouldExportType(kind, type))
                 .Select(ProjectEntityType)

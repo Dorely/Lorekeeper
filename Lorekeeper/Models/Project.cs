@@ -15,10 +15,12 @@ public class Project
     public required string Slug { get; set; }
 
     /// <summary>
-    /// Project-owned system prompt shown and edited in the Context Feed. Seeded from
-    /// <see cref="Llm.SeedSystemPrompt.Default"/> at create time. Never empty/whitespace.
+    /// Optional user-authored direction appended to Lorekeeper's code-owned system
+    /// instructions. This is never treated as the system role by itself.
     /// </summary>
-    public string SystemPrompt { get; set; } = string.Empty;
+    public string ProjectGuidance { get; set; } = string.Empty;
+
+    public BookBrief? BookBrief { get; set; }
 
     /// <summary>
     /// When true, the currently-open chapter is included in the assembled system prompt

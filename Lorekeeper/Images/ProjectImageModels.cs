@@ -70,7 +70,10 @@ public sealed record ProjectImageGenerateJobRequest(
     int Count,
     IReadOnlyList<Guid> ReferenceImageIds,
     string? Label = null,
-    IReadOnlyList<EntityVisualTarget>? EntityTargets = null);
+    IReadOnlyList<EntityVisualTarget>? EntityTargets = null,
+    string? BriefJson = null,
+    string? ReferenceManifestJson = null,
+    string? TargetGeometryJson = null);
 
 public sealed record ProjectImageEditJobRequest(
     Guid SourceImageId,
@@ -86,7 +89,10 @@ public sealed record ProjectImageEditJobRequest(
     string? Label = null,
     Guid? ExistingMaskId = null,
     IReadOnlyList<EntityVisualTarget>? EntityTargets = null,
-    bool InheritSourceEntityTargets = true);
+    bool InheritSourceEntityTargets = true,
+    string? BriefJson = null,
+    string? ReferenceManifestJson = null,
+    string? TargetGeometryJson = null);
 
 public sealed record ProjectImageJobView(
     Guid Id,
@@ -115,7 +121,11 @@ public sealed record ProjectImageJobView(
     DateTime? StartedAt,
     DateTime? CompletedAt,
     IReadOnlyList<EntityVisualTarget> EntityTargets,
-    bool InheritSourceEntityTargets);
+    bool InheritSourceEntityTargets,
+    string BriefJson,
+    string ReferenceManifestJson,
+    string TargetGeometryJson,
+    IReadOnlyList<string> ProviderRevisedPrompts);
 
 public sealed record ProjectImageOutputStateView(
     int OutputIndex,

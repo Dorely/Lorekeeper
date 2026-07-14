@@ -9,8 +9,8 @@ public interface IProjectService
     Task<Project> CreateAsync(string name, CancellationToken cancellationToken = default);
     Task<Project> RenameAsync(Guid id, string newName, CancellationToken cancellationToken = default);
 
-    /// <summary>Replace the project's system prompt. Empty/whitespace is rejected.</summary>
-    Task<Project> UpdateSystemPromptAsync(Guid id, string systemPrompt, CancellationToken cancellationToken = default);
+    /// <summary>Replace the optional user-authored Project Guidance. Blank clears it.</summary>
+    Task<Project> UpdateProjectGuidanceAsync(Guid id, string projectGuidance, CancellationToken cancellationToken = default);
 
     /// <summary>Toggle whether the currently-open chapter is included in the assembled context.</summary>
     Task<Project> SetIncludeCurrentChapterAsync(Guid id, bool include, CancellationToken cancellationToken = default);

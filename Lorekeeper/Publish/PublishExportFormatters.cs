@@ -376,7 +376,7 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
 
 }
 
-public sealed class EpubPublishFormatter : IPublishExportFormatter
+public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IPublishExportFormatter
 {
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
@@ -393,7 +393,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         {
             WriteEntry(archive, "mimetype", ContentType, CompressionLevel.NoCompression, Encoding.ASCII);
             WriteEntry(archive, "META-INF/container.xml", RenderContainer(), CompressionLevel.SmallestSize, Utf8NoBom);
-            WriteEntry(archive, "OEBPS/styles.css", RenderStylesheet(), CompressionLevel.SmallestSize, Utf8NoBom);
+            WriteEntry(archive, "OEBPS/styles.css", RenderStylesheet(document.Profile), CompressionLevel.SmallestSize, Utf8NoBom);
             WriteEntry(archive, "OEBPS/package.opf", RenderPackage(document, xhtmlItems, imageItems), CompressionLevel.SmallestSize, Utf8NoBom);
             WriteEntry(archive, "OEBPS/nav.xhtml", RenderNavigation(document, xhtmlItems), CompressionLevel.SmallestSize, Utf8NoBom);
 
@@ -406,12 +406,12 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         return stream.ToArray();
     }
 
-    private static List<EpubXhtmlItem> BuildXhtmlItems(PublishDocument document, IReadOnlyList<EpubImageItem> imageItems)
+    private List<EpubXhtmlItem> BuildXhtmlItems(PublishDocument document, IReadOnlyList<EpubImageItem> imageItems)
     {
         var items = new List<EpubXhtmlItem>();
         if (CoverImageHref(imageItems) is string coverHref)
         {
-            var viewport = CoverViewport(document.CoverPageLayoutKind);
+            var viewport = CoverViewport(PageGeometry(document.Profile, document.CoverPageLayoutKind));
             items.Add(new EpubXhtmlItem(
                 "cover-page",
                 "cover.xhtml",
@@ -794,20 +794,22 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         _ => "rendition:layout-pre-paginated rendition:orientation-landscape rendition:spread-none",
     };
 
-    private static EpubViewport CoverViewport(ChapterPageLayoutKind? layoutKind)
+    private BookPageGeometry PageGeometry(PublishDocumentProfile profile, ChapterPageLayoutKind? layoutKind) =>
+        pageGeometry.Calculate(
+            profile.PageWidthInches,
+            profile.PageHeightInches,
+            profile.PageMarginInches,
+            profile.BodyFontSizePoints,
+            profile.BodyLineHeight,
+            layoutKind ?? ChapterPageLayoutKind.SinglePortrait);
+
+    private static EpubViewport CoverViewport(BookPageGeometry geometry)
     {
-        var (pageWidthInches, pageHeightInches, leafCount) = layoutKind switch
-        {
-            ChapterPageLayoutKind.SingleLandscape => (11d, 8.5d, 1),
-            ChapterPageLayoutKind.DoublePortrait => (8.5d, 11d, 2),
-            ChapterPageLayoutKind.DoubleLandscape => (11d, 8.5d, 2),
-            _ => (8.5d, 11d, 1),
-        };
         const int physicalPageLongEdgePixels = 2400;
-        var scale = physicalPageLongEdgePixels / Math.Max(pageWidthInches, pageHeightInches);
-        var pageWidth = Math.Max(1, (int)Math.Round(pageWidthInches * scale));
-        var pageHeight = Math.Max(1, (int)Math.Round(pageHeightInches * scale));
-        return new EpubViewport(pageWidth * leafCount, pageHeight);
+        var scale = physicalPageLongEdgePixels / Math.Max(geometry.PageWidthInches, geometry.PageHeightInches);
+        var pageWidth = Math.Max(1, (int)Math.Round(geometry.PageWidthInches * scale));
+        var pageHeight = Math.Max(1, (int)Math.Round(geometry.PageHeightInches * scale));
+        return new EpubViewport(pageWidth * (geometry.IsDouble ? 2 : 1), pageHeight);
     }
 
     private static bool IsDoubleLayout(ChapterPageLayoutKind layoutKind) =>
@@ -987,13 +989,21 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         }
     }
 
-    private static string RenderStylesheet() =>
-        """
+    private static string RenderStylesheet(PublishDocumentProfile profile)
+    {
+        var fontSize = profile.BodyFontSizePoints.ToString("0.###", CultureInfo.InvariantCulture);
+        var lineHeight = profile.BodyLineHeight.ToString("0.###", CultureInfo.InvariantCulture);
+        var marginPercent = Math.Clamp(
+            profile.PageMarginInches / Math.Max(0.001, profile.PageWidthInches) * 100,
+            0,
+            20).ToString("0.###", CultureInfo.InvariantCulture);
+        return $$"""
         body {
           color: #172033;
           font-family: Georgia, "Times New Roman", serif;
-          line-height: 1.55;
-          margin: 5%;
+          font-size: {{fontSize}}pt;
+          line-height: {{lineHeight}};
+          margin: {{marginPercent}}%;
         }
 
         h1 {
@@ -1093,6 +1103,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
           border: 0;
         }
         """;
+    }
 
     private static void WriteEntry(ZipArchive archive, string name, string content, CompressionLevel compressionLevel, Encoding encoding)
     {

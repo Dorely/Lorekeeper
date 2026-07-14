@@ -7,6 +7,7 @@ using Lorekeeper.Llm;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Projects;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
@@ -20,21 +21,18 @@ public sealed class OutlineCollaborationService(
     OutlineCollaborationTools tools,
     IEntityVisualContextService entityVisualContext,
     IAiChangeApprovalService changeApproval,
+    IBookBriefService bookBriefs,
+    ISystemPromptComposer systemPrompts,
     ChatTurnEngine turnEngine,
     IOptions<AgentOptions> options,
     ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
 {
     /// <summary>
-    /// System prompt that frames the assistant as a writing collaborator. Hardcoded by design:
-    /// it is independent of the user's project-level <c>SystemPrompt</c> (which targets the
-    /// chapter editor chat). Kept terse to leave room in the context window for the
-    /// growing conversation history.
+    /// Code-owned operating rules composed with the professional charter, Project Guidance,
+    /// and Book Brief into the actual system-role message for every turn.
     /// </summary>
-    public static readonly string CollaborationSystemPrompt = $$"""
-You are a story-outline collaborator. Your job is to help the user discover
-and shape their story's structure through a back-and-forth conversation.
-
-How to work:
+    public static readonly string CollaborationOperatingRules = $$"""
+Outline collaboration rules:
 - You are a partner, not an oracle. Ask questions, propose options, and
     surface trade-offs. Do not dump a full outline up front.
 - Do not write the outline as prose in chat. The outline lives in the
@@ -55,13 +53,23 @@ When to use tools:
     entities: once you have enough information to infer the user's intent,
     make the change with the appropriate tool. Ask only when the target or
     desired outcome is genuinely ambiguous.
-- Use ProjectFact sparingly. Project facts are for durable project-level
-    guidance that has no better home in acts, chapters, beats, entities, or
-    links: premise, genre, tone, scope, theme, narration rules, setting-wide
-    constraints, continuity rules, or other global assumptions. Use
-    properties {"key":"outline.premise","value":"..."} with the
-    outline.* namespace for outline-level facts. Update existing facts
-    instead of creating duplicates when list_outline shows a matching key.
+- The Book Brief is the canonical home for book kind, premise, genre, themes,
+    purpose, audience, reader ages/level, target length, POV, tense, voice/tone,
+    language/locale, house style, read-aloud priority, accessibility goals,
+    visual direction, and non-negotiable creative constraints. Use
+    update_book_brief whenever the user commits to one of these directions.
+    Book Brief updates apply directly even when Review edits is enabled.
+- Treat missing premise, book kind, audience, purpose, genre, and relevant
+    narrative choices as early outlining priorities. Ask one or two focused
+    questions at a time. Do not block a concrete outline request because
+    optional fields remain unspecified. Revisit the brief when outline changes
+    alter audience, format, premise, POV, tone, length, or visual strategy.
+- Do not create new outline.* ProjectFacts for fields owned by the Book Brief.
+    Existing overlapping facts remain evidence until you write a clearly
+    equivalent brief field, then remove the redundant fact. Keep ambiguous or
+    genuinely canonical world/continuity constraints as facts.
+- Use ProjectFact sparingly for durable canon or global constraints with no
+    better home in the Book Brief, acts, chapters, beats, entities, or links.
 - Do not create ProjectFacts for normal outline content: act/chapter plans,
     scene beats, character roles, relationship changes, location details, or
     rework notes. Store those in the relevant act/chapter synopsis, beat,
@@ -95,11 +103,12 @@ Entity conventions:
         role, description.
     * 'Location' — project-scoped places. Conventional properties:
         description.
-    * 'ProjectFact' — rare project-level guidance with no better structural
-        home, such as premise, genre, tone, theme, scope, or global rules.
-        Conventional properties: key, value. Omit parentId; the tool
-        attaches ProjectFact nodes to the Project automatically. Do not use
-        ProjectFact for rework notes or ordinary act/chapter/entity details.
+    * 'ProjectFact' — rare canonical or global constraint with no better
+        home. Book kind, premise, genre, themes, purpose, audience, length,
+        POV, tense, voice/tone, language, house style, read-aloud priority,
+        accessibility, visual direction, and creative constraints belong in
+        the Book Brief instead. Conventional fact properties: key, value.
+        Omit parentId; the tool attaches it to the Project automatically.
     * 'Event' — chapter-scoped beats. REQUIRES parentId=<chapter id>.
         Conventional properties: summary.
 - Use link_entities to create relationships between entities.
@@ -145,6 +154,18 @@ they commit to a direction, act on it without a second confirmation.
 
     public async Task<IReadOnlyList<OutlineMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
         await conversations.LoadMessagesAsync(conversationId, cancellationToken);
+
+    public async Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+        var brief = await bookBriefs.GetOrCreateAsync(projectId, cancellationToken);
+        return systemPrompts.Compose(new(
+            project,
+            brief,
+            SystemPromptAgentRole.Outline,
+            CollaborationOperatingRules)).Prompt;
+    }
 
     public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -229,11 +250,18 @@ they commit to a direction, act on it without a second confirmation.
         IList<AITool> aiTools = null!;
         OutlineToolStagingContext? staging = null;
         OutlineCollaborationContext? toolContext = null;
+        var systemPrompt = string.Empty;
         string? setupError = null;
         try
         {
             var project = await projects.GetByIdAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
+            var brief = await bookBriefs.GetOrCreateAsync(projectId, cancellationToken);
+            systemPrompt = systemPrompts.Compose(new(
+                project,
+                brief,
+                SystemPromptAgentRole.Outline,
+                CollaborationOperatingRules)).Prompt;
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
 
             if (project.AiChangeApprovalEnabled)
@@ -263,7 +291,7 @@ they commit to a direction, act on it without a second confirmation.
 
         // Build the running message list from persisted history (already includes the user msg above).
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
-        var messages = new List<ChatMessage> { new(ChatRole.System, CollaborationSystemPrompt) };
+        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         messages.AddRange(ChatModelHistory.Build(
             history,
             message => message.Role.ToString(),

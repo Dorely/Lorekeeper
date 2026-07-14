@@ -11,10 +11,18 @@ using Lorekeeper.Ingest;
 using Lorekeeper.Images;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Projects;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.Outline;
+
+public enum BookBriefUpdatePolicy
+{
+    OutlineMaintainer,
+    ExplicitUserRequestOnly,
+    Disallowed,
+}
 
 /// <summary>
 /// Per-turn context captured by every Outline collaboration tool. <see cref="OnMutated"/>
@@ -26,13 +34,15 @@ public sealed class OutlineCollaborationContext(
     Action onMutated,
     OutlineToolStagingContext? staging = null,
     bool visionReady = false,
-    Action<IEnumerable<EntityVisualContextReference>>? onVisualsQueued = null)
+    Action<IEnumerable<EntityVisualContextReference>>? onVisualsQueued = null,
+    BookBriefUpdatePolicy bookBriefUpdatePolicy = BookBriefUpdatePolicy.OutlineMaintainer)
 {
     private readonly List<EntityVisualContextReference> _pendingVisuals = [];
     public Guid ProjectId { get; } = projectId;
     public Action OnMutated { get; } = onMutated;
     public OutlineToolStagingContext? Staging { get; } = staging;
     public bool VisionReady { get; } = visionReady;
+    public BookBriefUpdatePolicy BookBriefUpdatePolicy { get; } = bookBriefUpdatePolicy;
     public void QueueVisuals(IEnumerable<EntityVisualContextReference> visuals)
     {
         var list = visuals.ToList();
@@ -65,7 +75,8 @@ public sealed class OutlineCollaborationTools(
     IEntityRelationContextService entityRelations,
     IProjectSearchService projectSearch,
     IEntityVisualExampleService entityVisualExamples,
-    IProjectImageService projectImages)
+    IProjectImageService projectImages,
+    IBookBriefService bookBriefs)
 {
     private const string UnassignedSentinel = "unassigned";
     /// <summary>Canonical entity type for chapter-scoped beats.</summary>
@@ -120,6 +131,12 @@ public sealed class OutlineCollaborationTools(
                 method: () => ListOutlineAsync(context),
                 name: "list_outline",
                 description: "Read the outline as structured JSON with ids, ordering, projectFacts, chapter beat counts, and staged changes when Review edits is enabled. The outline text is already in the editor Context Feed; use this for mutations, staged-state verification, or missing/insufficient feed context."),
+
+            AIFunctionFactory.Create(
+                method: (BookBriefPatch patch, bool explicitUserRequest = false) =>
+                    UpdateBookBriefAsync(context, patch, explicitUserRequest),
+                name: "update_book_brief",
+                description: "Directly apply a partial Book Brief patch and return the complete updated brief. Null properties mean unchanged; clearFields explicitly removes values. Outline Chat should maintain this whenever the user commits to high-level direction. In Editor Chat set explicitUserRequest=true only when the user explicitly asked to change the Book Brief. This bypasses Review edits by design."),
 
             AIFunctionFactory.Create(
                 method: (string title, string synopsis) => CreateActAsync(context, title, synopsis),
@@ -210,7 +227,7 @@ public sealed class OutlineCollaborationTools(
                 method: (string type, string name, string? propertiesJson = null, string? parentId = null, int? order = null) =>
                     CreateEntityAsync(context, type, name, propertiesJson, parentId, order),
                 name: "create_entity",
-                description: "Create a new graph entity. type is the entity category ('Character', 'Location', 'Event' for beats, 'ProjectFact' for rare project-level guidance, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. Use ProjectFact only for premise, genre, tone, theme, scope, global rules, or other guidance with no better structural home; do not use it for rework notes, act/chapter plans, character roles, beats, relationships, or location details. For ProjectFact include key/value properties; it will be parented to the Project automatically. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). If an entity with the same name/key already exists, returns status='existing_match' and its compact identity instead of creating a duplicate. Returns compact identity/current properties; use read_entity for full knowledge and relationships."),
+                description: "Create a new graph entity. type is the entity category ('Character', 'Location', 'Event' for beats, 'ProjectFact' for rare canonical/global constraints, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. Never use ProjectFact for Book Brief fields, rework notes, act/chapter plans, character roles, beats, relationships, or location details. For a justified ProjectFact include key/value properties; it will be parented to the Project automatically. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). If an entity with the same name/key already exists, returns status='existing_match' and its compact identity instead of creating a duplicate. Returns compact identity/current properties; use read_entity for full knowledge and relationships."),
 
             AIFunctionFactory.Create(
                 method: (string entityId, string? name = null, string? propertiesToSetJson = null, string? propertiesToRemoveJson = null) =>
@@ -260,6 +277,103 @@ public sealed class OutlineCollaborationTools(
 
         return tools;
     }
+
+    private async Task<string> UpdateBookBriefAsync(
+        OutlineCollaborationContext context,
+        BookBriefPatch patch,
+        bool explicitUserRequest)
+    {
+        if (context.BookBriefUpdatePolicy == BookBriefUpdatePolicy.Disallowed)
+            return "Error: this chat is not authorized to change the Book Brief.";
+        if (context.BookBriefUpdatePolicy == BookBriefUpdatePolicy.ExplicitUserRequestOnly && !explicitUserRequest)
+            return "Error: Editor Chat may change the Book Brief only after an explicit user request; pass explicitUserRequest=true only when that condition is satisfied.";
+
+        try
+        {
+            var updated = await bookBriefs.UpdateAsync(context.ProjectId, patch);
+            var removedLegacyFacts = context.BookBriefUpdatePolicy == BookBriefUpdatePolicy.OutlineMaintainer
+                ? await RemoveEquivalentLegacyBriefFactsAsync(context.ProjectId, patch, updated)
+                : [];
+            context.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                status = "updated",
+                reviewEditsBypassed = true,
+                removedEquivalentLegacyFacts = removedLegacyFacts,
+                brief = BookBriefPayload(updated),
+            });
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<IReadOnlyList<string>> RemoveEquivalentLegacyBriefFactsAsync(
+        Guid projectId,
+        BookBriefPatch patch,
+        BookBrief updated)
+    {
+        var cleared = (patch.ClearFields ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var writtenValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        void Add(string field, object? patchValue, object? updatedValue, params string[] aliases)
+        {
+            if (patchValue is null || cleared.Contains(field) || updatedValue is null)
+                return;
+            var value = updatedValue.ToString();
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+            foreach (var alias in aliases)
+                writtenValues[alias] = value;
+        }
+
+        Add(nameof(BookBrief.BookKind), patch.BookKind, updated.BookKind, "bookkind");
+        Add(nameof(BookBrief.Premise), patch.Premise, updated.Premise, "premise");
+        Add(nameof(BookBrief.Genre), patch.Genre, updated.Genre, "genre");
+        Add(nameof(BookBrief.PrimaryThemes), patch.PrimaryThemes, updated.PrimaryThemes, "primarythemes", "themes", "theme");
+        Add(nameof(BookBrief.Purpose), patch.Purpose, updated.Purpose, "purpose");
+        Add(nameof(BookBrief.CreativeConstraints), patch.CreativeConstraints, updated.CreativeConstraints, "creativeconstraints", "constraints");
+        Add(nameof(BookBrief.TargetAudience), patch.TargetAudience, updated.TargetAudience, "targetaudience", "audience");
+        Add(nameof(BookBrief.MinimumReaderAge), patch.MinimumReaderAge, updated.MinimumReaderAge, "minimumreaderage", "minreaderage");
+        Add(nameof(BookBrief.MaximumReaderAge), patch.MaximumReaderAge, updated.MaximumReaderAge, "maximumreaderage", "maxreaderage");
+        Add(nameof(BookBrief.ReadingLevelGuidance), patch.ReadingLevelGuidance, updated.ReadingLevelGuidance, "readinglevelguidance", "readinglevel");
+        Add(nameof(BookBrief.TargetWordCount), patch.TargetWordCount, updated.TargetWordCount, "targetwordcount", "wordcount");
+        Add(nameof(BookBrief.PointOfView), patch.PointOfView, updated.PointOfView, "pointofview", "pov");
+        Add(nameof(BookBrief.Tense), patch.Tense, updated.Tense, "tense");
+        Add(nameof(BookBrief.VoiceAndTone), patch.VoiceAndTone, updated.VoiceAndTone, "voiceandtone", "voice", "tone");
+        Add(nameof(BookBrief.LanguageLocale), patch.LanguageLocale, updated.LanguageLocale, "languagelocale", "language", "locale");
+        Add(nameof(BookBrief.HouseStyle), patch.HouseStyle, updated.HouseStyle, "housestyle");
+        Add(nameof(BookBrief.ReadAloudPriority), patch.ReadAloudPriority, updated.ReadAloudPriority, "readaloudpriority", "readaloud");
+        Add(nameof(BookBrief.AccessibilityGoals), patch.AccessibilityGoals, updated.AccessibilityGoals, "accessibilitygoals", "accessibility");
+        Add(nameof(BookBrief.VisualDirection), patch.VisualDirection, updated.VisualDirection, "visualdirection", "visualstrategy");
+        if (writtenValues.Count == 0)
+            return [];
+
+        var removed = new List<string>();
+        foreach (var fact in await projectFacts.ListAsync(projectId))
+        {
+            if (!fact.Key.StartsWith("outline.", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var suffix = NormalizeLegacyFactName(fact.Key[8..]);
+            if (!writtenValues.TryGetValue(suffix, out var writtenValue)
+                || !EquivalentBriefValue(fact.Value, writtenValue))
+            {
+                continue;
+            }
+            await projectFacts.DeleteAsync(projectId, fact.Id);
+            removed.Add(fact.Key);
+        }
+        return removed;
+    }
+
+    private static string NormalizeLegacyFactName(string value) =>
+        new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static bool EquivalentBriefValue(string left, string right) =>
+        string.Equals(
+            NormalizeLegacyFactName(left.Trim()),
+            NormalizeLegacyFactName(right.Trim()),
+            StringComparison.Ordinal);
 
     private async Task<string> ListSearchSourcesAsync(
         OutlineCollaborationContext ctx,
@@ -1304,6 +1418,32 @@ public sealed class OutlineCollaborationTools(
         synopsis = chapter.Synopsis,
         visualMode = chapter.VisualMode,
         pageLayoutKind = chapter.VisualMode == ChapterVisualMode.Prose ? null : chapter.PageLayoutKind.ToString(),
+    };
+
+    private static object BookBriefPayload(BookBrief brief) => new
+    {
+        brief.Id,
+        brief.ProjectId,
+        brief.BookKind,
+        brief.Premise,
+        brief.Genre,
+        brief.PrimaryThemes,
+        brief.Purpose,
+        brief.CreativeConstraints,
+        brief.TargetAudience,
+        brief.MinimumReaderAge,
+        brief.MaximumReaderAge,
+        brief.ReadingLevelGuidance,
+        brief.TargetWordCount,
+        brief.PointOfView,
+        brief.Tense,
+        brief.VoiceAndTone,
+        brief.LanguageLocale,
+        brief.HouseStyle,
+        brief.ReadAloudPriority,
+        brief.AccessibilityGoals,
+        brief.VisualDirection,
+        brief.UpdatedAt,
     };
 
     private static Dictionary<string, string?> CompactProperties(IReadOnlyDictionary<string, string?> properties)

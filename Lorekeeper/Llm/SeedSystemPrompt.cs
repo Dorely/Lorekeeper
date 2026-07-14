@@ -1,8 +1,9 @@
 namespace Lorekeeper.Llm;
 
 /// <summary>
-/// Default system-prompt seed text given to every newly-created <see cref="Models.Project"/>.
-/// After creation the prompt is owned by the project and edited via the Context Feed.
+/// Historical seed retained only so migrations can identify an untouched legacy value.
+/// Runtime system instructions are code-owned by <see cref="SystemPromptComposer"/>;
+/// new projects begin with blank user-authored Project Guidance.
 /// </summary>
 public static class SeedSystemPrompt
 {

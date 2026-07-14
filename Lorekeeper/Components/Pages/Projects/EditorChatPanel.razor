@@ -940,7 +940,9 @@
                 currentChapter = null;
         }
 
-        var assembly = await ContextBuilder.BuildAsync(project, currentChapter, cancellationToken);
+        var assembly = await ContextBuilder.BuildAsync(
+            new ContextBuildRequest(project, currentChapter),
+            cancellationToken);
         _systemPrompt = assembly.Assemble();
     }
 

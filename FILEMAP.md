@@ -21,6 +21,10 @@
 | `.github/copilot-instructions.md` | Project guidelines for AI assistants. |
 | `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates tooling/version, audits NuGet plus shipped npm/Electron dependencies, rebuilds isolated staging/output, verifies installer/updater artifacts, and writes GitHub Release checksums. |
 | `scripts/publish-windows-release.ps1` | One-command Windows publisher: requires a clean source tree, builds the requested SemVer, uploads complete updater assets to a draft `Dorely/Lorekeeper-Releases` release, then publishes it. |
+| `docs/research/README.md` | Index and maintenance policy for Lorekeeper's sourced editorial, image-prompting, and composition research briefs. |
+| `docs/research/image-generation-prompting.md` | Sourced `gpt-image-2` prompting/API brief with structured reference/edit/page-target guidance and runtime contract mappings. |
+| `docs/research/story-writing-and-editorial-practice.md` | Sourced professional editing, narrative craft, picture-book practice, and system-prompt requirement brief. |
+| `docs/research/page-composition-and-typesetting.md` | Sourced page/spread, typography, accessibility, diagnostic threshold, and shared-geometry brief. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
 
@@ -92,13 +96,13 @@
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter workspace with mode-specific controls, keyed body-editor documents, serialized external refresh coordination, resizable Chat/Memory columns, chapter visuals, and inline AI/Contest review. |
 | `ChapterBodyEditor.razor` (+ `.razor.css`, `.razor.js`) | Isolated keyed prose textarea that owns its DOM, wrapping-aware line gutter, serialized debounced save/flush contract, read-only state, and JavaScript lifetime. |
-| `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Simulated page viewer/editor for Prose, IllustratedProse, and PicturePage chapters, including paginated spreads, anchored illustrations, point-based project fonts, non-printing safety guides, diagnostics, wrapping drag-resize/layer/text controls, explicit text-to-box fitting, and combined background color/opacity picking. |
+| `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Publish-profile-aware viewer/editor for Prose, IllustratedProse, and PicturePage chapters with advisory prose pagination, semantic text roles, anchored images, safety guides, enriched diagnostics, and drag/resize/layer/type controls. |
 | `ProjectFontManagerModal.razor` | PicturePage font catalog manager for multi-file static TTF/OTF imports, available-face inspection, rights reminders, and guarded custom-family deletion. |
 | `ProjectImagePickerModal.razor` (+ `.razor.css`) | Editor image-library modal for selecting current project images and adding them either to the active chapter layout or explicit chapter context. |
 | `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: defers/coalesces transcript hydration, reconciles editor lock state with persistent turns, streams tool/contest updates, and routes active-chapter changes into Review mode. |
-| `ContextItemDetailModal.razor` (+ `.razor.css`) | Shared editor context detail modal for recommendation and Context Feed items; loads entities, chapters, acts, ingest sources/chunks, and supports Context Feed project-guidance/entity edits. |
+| `ContextItemDetailModal.razor` (+ `.razor.css`) | Shared context detail modal for project material plus editable Project Guidance and structured Book Brief fields; preserves the distinction between user direction and the assembled code-owned system prompt. |
 | `RecommendedContextPanel.razor` (+ `.razor.css`) | Editor right-column context recommender: shows semantic/manual/graph-proximity recommendations for entities plus structural references, and adds them to the active chapter's persisted context working set. |
-| `ContextFeedPanel.razor` (+ `.razor.css`) | Editable Assistant Memory list with cancellable scoped background assembly for project guidance, current chapter, outline, facts, writing samples, selected entities, and structural references; opens `ContextItemDetailModal` and persists include/exclude choices via `IEditorContextService`. |
+| `ContextFeedPanel.razor` (+ `.razor.css`) | Assistant Memory list with Project Guidance, Book Brief, protected chapter context, persisted include/exclude choices, and a read-only preview of the one assembled system-role prompt. |
 | `GraphPage.razor` | Graph tab at `/projects/{Slug}/graph`; wraps the project shell and hosts the interactive graph workspace. |
 | `GraphContent.razor` (+ `.razor.css`, `.razor.js`) | Obsidian-inspired full-project graph workspace: loads graph snapshots, filters/searches nodes, hides source provenance and auto mention links by default, bridges to `vis-network`, and coordinates graph refreshes. |
 | `GraphDetailsPanel.razor` (+ `.razor.css`) | Selected-node read-only graph overview side panel with node metadata, properties, knowledge/canon details, adjacent relationships honoring the auto-link toggle, node navigation, and edit entrypoints. |
@@ -108,7 +112,7 @@
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
 | `ImagesPage.razor` | Images tab at `/projects/{Slug}/images`; wraps `ProjectLayout` and hosts `Images.ImagesContent`. |
 | `PublishPage.razor` | Publish tab at `/projects/{Slug}/publish`; wraps `ProjectLayout` and hosts `Publish.PublishContent`. |
-| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Scrollable embedded preview and Print/PDF document at `/projects/{Slug}/manuscript/print`; contains unrotated or sideways spreads on portrait Letter pages, supports split leaves, and waits for decoded assets before printing. |
+| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Scrollable embedded preview and Print/PDF document at `/projects/{Slug}/manuscript/print`; derives sheet/spread dimensions and body type from Publish Profile geometry, supports whole/split/sideways spreads, and waits for decoded assets before printing. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
 
@@ -142,7 +146,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Responsive Publish workspace for autosaved metadata, cover-aware title pages, independent PDF/EPUB spread presentation, cover/outline/placement choices, near-fullscreen modal preview/print, and TXT/Markdown/EPUB exports. |
+| `PublishContent.razor` (+ `.razor.css`) | Responsive Publish workspace for autosaved metadata and shared page/body geometry, cover-aware title pages, PDF/EPUB spread presentation, outline/placement choices, preview/print, and exports. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -181,15 +185,16 @@
 | `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing plus persisted chat- and vision-readiness test snapshots. |
 | `EmbeddingConfiguration.cs` | Singleton EF entity for the active embedding setup: top-level provider connection, embedding API kind, model id, dimensions, last-tested snapshot, and timestamps. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
-| `Project.cs` | EF entity scoping all narrative data. Stable `Slug` for URLs; owns project settings and child navigation collections including conversations, images, fonts, contests, revision jobs, writing samples, import jobs, publish profiles, and graph rows. |
+| `Project.cs` | EF project root with optional user-owned `ProjectGuidance`, stable slug/settings, one `BookBrief`, and navigation to conversations, images, fonts, jobs, publishing, and graph rows. |
+| `BookBrief.cs` | Canonical high-level authorial-direction model, `BookKind` enum, and partial-patch contract whose null values are unchanged and `ClearFields` explicitly removes values. |
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF entity for a chapter (Title/Body/Synopsis/Order) under a `Project`, optionally assigned to an `Act`; stores visual mode, page layout kind, and visual layout JSON for illustrated prose/picture pages. Tracks vector-index state and exposes `VectorSourceId`. |
 | `ChapterVisualMode.cs` | Enums for chapter visual modes, page layout kinds, and reusable image/text layout choices such as image fit, alignment, anchor position, and text vertical alignment. |
-| `ChapterVisualLayouts.cs` | Serializable IllustratedProse/PicturePage layout records, point-based text face settings, alignment/shadow choices, and explicit image placement roles. |
+| `ChapterVisualLayouts.cs` | Serializable IllustratedProse/PicturePage layouts with explicit text roles, point-based type settings, alignment/shadow choices, and image placement roles. |
 | `ProjectFontFamily.cs` / `ProjectFontFace.cs` | Project-scoped EF entities for imported font families and static face bytes, with weight/italic metadata and project cascade ownership. |
 | `EditorContextPreference.cs` | EF entity for per-chapter Context Feed include/exclude preferences keyed by context item kind + stable item key. |
 | `EditorConversation.cs` | EF entity — one persistent multi-turn editor chat per `Project` (unique on `ProjectId`). Owns ordered `EditorMessage`s; cascade-deleted with the project. |
-| `EditorMessage.cs` | EF entity for a single row in an `EditorConversation`: monotonic `Order`, role (`System`/`User`/`Assistant`/`Tool`), text content, assistant tool-call JSON, tool result metadata, status, optional error, and creation timestamp. |
+| `EditorMessage.cs` | EF Editor transcript row with role/content/tool metadata plus the bounded included/omitted context-provenance snapshot stored on outgoing user turns. |
 | `EditorMessageVisual.cs` | EF entity for Editor Chat visual attachments shown as thumbnails, including project-image references or optional stored bytes. |
 | `EditorRevisionJob.cs` | EF entity for one prose-only background revision job spawned by Editor Chat; owns per-chapter worker sessions and parent tool-call metadata. |
 | `EditorRevisionSession.cs` | EF entity for one chapter worker session: assignment, original body snapshot, provider/model, chapter-body edit payload, status, timing, and errors. |
@@ -227,7 +232,7 @@
 | `ProjectImageChatAttachment.cs` | EF entity for project image assets explicitly attached as visible Images Chat context chips. |
 | `ProjectImageMessage.cs` | EF entity for Images Chat messages with assistant tool-call manifests, tool result metadata, status, and errors. |
 | `ProjectImageMessageVisual.cs` | EF entity for Images Chat visual attachments, including project-image references or optional stored bytes. |
-| `ProjectImageGenerationJob.cs` | EF entity for queued/running/final image jobs with references, entity visual targets/inheritance, outputs, progress, and diagnostics. |
+| `ProjectImageGenerationJob.cs` | EF image job with structured brief, compiled prompt, ordered reference manifest, target geometry, provider revised prompts/IDs, outputs, progress, and diagnostics. |
 | `ProjectImageMask.cs` | EF entity for validated PNG masks tied to source project images, using transparent pixels as editable regions. |
 | `PublishOutlineSelection.cs` | EF entity for per-project act/chapter publish inclusion flags; act selection controls the act page while chapters remain independently selectable. |
 | `PublishImagePlacement.cs` | EF entity for cover-independent interior image placements before/after acts or chapters and chapter openings/endings, with captions and ordering. |
@@ -242,7 +247,7 @@
 | `AppDbContext.cs` | EF Core context for projects, providers, chats, writing, graph, ingest/import, publishing, chapter visuals, and project font families/faces. Configures relationships/indexes, JSON property bags, and transient SQLite lock retries. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | EF Core migrations through `AddProjectFontsAndPictureTypography`, including project font tables and one-leaf conversion of legacy PicturePage family/percentage typography JSON. |
+| `Migrations/` | EF Core migrations including Project Guidance/Book Brief/context provenance and structured image-prompt audit persistence; historical migrations remain immutable. |
 
 ### Persistence/Repositories/
 
@@ -306,8 +311,9 @@
 | `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs an `IChatClient` per provider (Codex vs OpenAI-compatible), applies configured Codex/OAuth request timeout, and exposes `TestModelAsync`. |
 | `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image-reading client for vision probes and PDF page transcription; supports Codex Responses and OpenAI-compatible multimodal chat requests. |
 | `AssistantWorkflowInstructions.cs` | Core code-owned AI workflow/tool-use instructions reused across agents, including non-replayed tool-history recovery, exact-ID/pagination handling, always-on image/reference and agent-led PicturePage composition/verification rules, and Contest preparation. |
+| `SystemPromptComposer.cs` | Central composer for the one actual system-role prompt: professional charter, tool rules, dynamic book/page guidance, Project Guidance, Book Brief, then working context. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |
-| `SeedSystemPrompt.cs` | Hardcoded default system prompt seeded into every newly-created `Project`. |
+| `SeedSystemPrompt.cs` | Frozen historical seed retained only so legacy migrations can identify and clear untouched seeded guidance; runtime prompts no longer use it. |
 
 ### Search/
 
@@ -360,7 +366,8 @@
 
 | File | Description |
 |------|-------------|
-| `IProjectService.cs` / `ProjectService.cs` | Project CRUD facade. `CreateAsync` slugifies the name (collision-free via `-2`/`-3` suffix), seeds `SystemPrompt` from `SeedSystemPrompt.Default`, and syncs the Project graph node/type defaults. `RenameAsync` updates the graph projection. `UpdateSystemPromptAsync` (rejects empty) and `SetIncludeCurrentChapterAsync` back the Context Feed edits. `DeleteAsync` wipes vector chunks and internal search rows before EF-cascading the project + child graph + chapter rows. Slug stable across renames. |
+| `IProjectService.cs` / `ProjectService.cs` | Project CRUD and blank optional Project Guidance persistence; creates the Book Brief, syncs graph defaults, preserves stable slugs, and performs indexed-project cleanup on delete. |
+| `IBookBriefService.cs` / `BookBriefService.cs` | Get/create, validated partial update, explicit field clearing, and compact system-prompt formatting for the project Book Brief. |
 
 ### Writing/
 
@@ -376,9 +383,9 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Async Context Feed/editor chat assembly with the literal model workflow, full-GUID chapter/layout context, and shared paginated selected-entity representations instead of silent record limits. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction and full previous chapter, targeted active-chapter sections when required, bounded direct/lexical/vector retrieval, exclusion honoring, optional pruning, token preflight, and provenance snapshots. |
 | `AgentPayloadPaginator.cs` | Shared soft-target model payload paginator; repeats identity fields, packs logical JSON records, and segments only individually oversized text fields with explicit continuation metadata. |
-| `IEditorContextService.cs` | Editor context facade extending `IContextBuilder`; persists per-chapter context item inclusion, including explicit project-image context keys, and exposes auto/included entity/context key sets for recommendations. |
+| `IEditorContextService.cs` | Context facade with Project Guidance/Book Brief keys, explicit per-chapter inclusions/exclusions, project-image context, and recommendation key sets. |
 | `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
 | `IContextIndexingService.cs` / `ContextIndexingService.cs` | Maintains targeted direct vector rows and internal lexical search chunks for addable context items: graph entities, chapters, acts, ingest sources, and ingest source chunks; refreshes source-scoped auto mention links. |
 | `VectorIndexWorkCoordinator.cs` | Scoped coordinator that can defer and dedupe expensive chapter/body/context vector index work during review apply, while normal calls run immediately. |
@@ -432,21 +439,22 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | v6 portable export DTOs for stable graph refs, entity visuals/associations, publish title/spread settings and cover identity, chapter visuals, image context, and crop lineage. |
+| `ProjectExportModels.cs` | v7 portable DTOs for Project Guidance, Book Brief, stable graph refs, visuals/associations, publish geometry/presentation, chapter visuals, image context, and crop lineage; accepts legacy `systemPrompt` imports. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job: validates export JSON, imports images with remapped crop lineage/page settings, appends Full structure/visuals, restores v6 publish presentation and cover choices, merges non-structural graph data, records reports, and refreshes indexes best-effort. |
+| `ProjectImportJobProcessor.cs` | Runs one import job, preserving customized legacy guidance, merging Book Brief fields into blank targets, restoring v7 structure/visual/publish geometry, reporting actions, and refreshing indexes. |
 
 ### Images/
 
 | File | Description |
 |------|-------------|
 | `ProjectImageModels.cs` | Image, normalized crop, and entity-target requests/views plus persisted jobs, output state, masks, provider progress, and runtime snapshots. |
+| `ImagePromptComposer.cs` | Shared structured generation/edit brief compiler with stable ordering, actual provider-order reference labels, page geometry/reserved regions, rendered-text policy, and `gpt-image-2` size validation. |
 | `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: metadata-only listing with endpoint URLs, byte reads, upload, deterministic local crop/reuse, legacy blocking generation, metadata, delete, thumbnail, and reference scrubbing. |
-| `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Persistence-facing image job service for create/list/start/cancel/complete jobs, race-safe output saving/state/errors, and PNG/shape mask validation. |
+| `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Image job persistence for structured prompt audits, revised prompts/output IDs, lifecycle/state/errors, output saving, and PNG/shape-mask validation. |
 | `IProjectImageGenerationRuntime.cs` / `ProjectImageGenerationRuntime.cs` | Singleton FIFO image queue with one active job per project, per-job cancellation propagated to providers/retries, partial previews, completion waiters, and state notifications. |
 | `ProjectImageGenerationStartupWorker.cs` | Hosted startup worker that marks interrupted running image jobs failed and resumes queued project work. |
 | `IProjectImageProvider.cs` / `CodexProjectImageProvider.cs` | Responses image provider for Codex/OpenAI account generation and masked edits with streamed partials, explicit generate/edit actions, continuity-reference generation semantics, and source-canvas edit semantics. |
@@ -461,7 +469,7 @@
 | File | Description |
 |------|-------------|
 | `IImagesChatService.cs` / `ImagesChatService.cs` | Images adapter over the shared chat engine with image/layout guidance, automatic and attached visual context, persisted transcript visuals, and queued generation/edit tools. |
-| `ImagesChatTools.cs` | Images Chat LLM tools for paginated entity/link and source reads, compact counted search discovery, project/image reads, visual inspection/crops/masks, generation/editing with requested/actual raster metadata, and explicit chapter geometry/placement context. |
+| `ImagesChatTools.cs` | Images tools for grounded reads and structured generation/editing, ordered references, masks, shared publish-profile geometry, raster metadata, and chapter placement context. |
 | `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, cancellation and owned image jobs, current tool metadata, visible/model-only images, and mutation signaling. |
 | `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
 | `ImagesChatTurnRunner.cs` | Background turn runner for Images Chat: executes scoped chat turns outside component lifetime and replays buffered live updates to reopened panels. |
@@ -472,9 +480,9 @@
 |------|-------------|
 | `ChapterVisualModels.cs` | UI/service records for chapter visual state, role-aware PicturePage image placement with optional Freeform geometry, automatic text-fit results, rendered fit details, and structured layout diagnostics. |
 | `ChapterTextLayoutSynchronizer.cs` | Shared canonical-body synchronizer for persisted Picture Page text boxes, including deterministic single-box rebuilding when prose invalidates a multi-box text layout. |
-| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Mode-gated visual facade for background/replacement/agent-positioned Freeform image placement, font-byte-consistent rendering and largest-fitting PicturePage text, body synchronization, manifests, diagnostic snapshots, and guide-free publish surfaces. |
-| `PicturePageImageGenerationGuidance.cs` | Physical/bleed/gutter-aware PicturePage canvas/frame geometry plus model-facing full-page/slot composition constraints; workflow rules are always-on in assistant instructions. |
-| `PicturePageLayoutDiagnostics.cs` | Deterministic trim/preferred/gutter, overlapping-text, and higher-image structural checks shared by editor warnings and rendered snapshots. |
+| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Mode-gated layout facade with profile-aware prose/PicturePage rendering, silent glyph fallback, text fitting, rendered contrast/overflow diagnostics, body synchronization, manifests, and publish surfaces. |
+| `PicturePageImageGenerationGuidance.cs` | Shared-geometry full-page/slot image targets plus bleed, gutter, focal-detail, and buffered text-region prompt constraints. |
+| `PicturePageLayoutDiagnostics.cs` | Enriched trim/gutter, overlap, reading-order, role-aware typography, font-discipline, widow/orphan, and line-length diagnostics with measurements, thresholds, and corrections. |
 
 ### Fonts/
 
@@ -489,10 +497,11 @@
 
 | File | Description |
 |------|-------------|
-| `PublishModels.cs` | Publish workspace/document/export records for profile presentation modes, covers, outline selections, placements, and rendered Picture Page surfaces with physical and output geometry. |
+| `PublishModels.cs` | Publish workspace/document/export records including editable page/body metrics, presentation modes, covers, selections, placements, and rendered PicturePage geometry. |
+| `PageGeometryService.cs` | Single publish-profile-derived page/spread calculation consumed by viewer pagination, rendering, image targeting, diagnostics, and publishing. |
 | `IPublishService.cs` / `PublishService.cs` | Publish facade for profile/cover/outline/placement persistence and exports; resolves cover-aware title behavior and enriches EPUBs with native or sideways composited Picture Page surfaces. |
 | `PublishEndpoints.cs` | Cacheable HTTP endpoints for validated guide-free cover previews and native or clockwise-rotated high-resolution interior Picture Page surfaces, avoiding large Blazor payloads. |
-| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus a dependency-free mixed-layout EPUB writer with reflowable prose and one accessible fixed item per cover/Picture Page, including landscape-request and sideways spread modes. |
+| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus a mixed-layout EPUB writer using Publish Profile type metrics and shared geometry for reflowable prose and accessible fixed cover/Picture Page items. |
 
 ### Graph/
 
@@ -508,9 +517,9 @@
 | File | Description |
 |------|-------------|
 | `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, staging helpers, persisted/model-visible visuals, and pending PicturePage render-verification state. |
-| `EditorChatService.cs` | Editor adapter over the shared chat engine: assembles Context Feed/visual context, enforces post-mutation render verification, stages Review edits, and adds Contest, revision-worker, and image-job progress hooks. |
+| `EditorChatService.cs` | Editor adapter using one composed system prompt, persisted turn-context trace, vision-provider-agnostic page snapshots, post-PicturePage render verification, Review edits, contests, workers, and image-job progress. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific paginated chapter reads and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor tools for paginated entity/link/source reads, counted compact discovery, project impact scoping, library-first generation with requested/actual raster metadata, visual inspection, explicit PicturePage canvas/placement/inventories, revision agents, and Contest preparation. |
+| `EditorChatTools.cs` | Editor tools for grounded reads, explicit-request Book Brief updates, structured image generation/edit/masks, semantic PicturePage text roles, shared geometry/diagnostics, revision agents, and Contest preparation. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
 | `EditorChatTurnRunner.cs` | Background turn runner for Editor Chat: preserves active turns across tab changes while leaving explicit Stop as the cancellation path. |
@@ -526,8 +535,8 @@
 | File | Description |
 |------|-------------|
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt`, keeps Act graph nodes/structural edges synchronized, and updates targeted act context vectors on mutations. |
-| `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Multi-turn collaborative outline adapter over the shared chat engine; supplies the outline prompt/tools, persists its existing transcript schema, stages approval-mode changes, and emits outline refresh events. |
-| `OutlineCollaborationTools.cs` | Outline `AIFunction`s including paginated entity/link/source reads, counted compact discovery, compact mutation acknowledgements, and project-image crop/entity attachment. |
+| `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Outline adapter whose actual composed system prompt includes Project Guidance and Book Brief; prioritizes/directly maintains the brief while preserving staged outline changes. |
+| `OutlineCollaborationTools.cs` | Outline tools including direct partial `update_book_brief`, conservative cleanup of equivalent legacy `outline.*` facts, grounded reads/search, compact outline/entity mutations, and image crop/entity attachment. |
 | `OutlineMutationPayloads.cs` | Shared compact entity/endpoint envelopes used by direct and staged outline mutation tools without serializing full knowledge or relationship traversals. |
 | `OutlineChatTurnRunner.cs` | Background turn runner for Outline chat: owns active turn cancellation/subscription outside the Blazor component lifetime. |
 | `IAiChangeApprovalService.cs` / `AiChangeApprovalService.cs` | Applies or rejects queued AI changes from outline/editor/research chat, including outline/entity mutations and editor chapter-body edits; enforces dependency application/rejection cascading and writes hidden correction messages to the owning transcript. |

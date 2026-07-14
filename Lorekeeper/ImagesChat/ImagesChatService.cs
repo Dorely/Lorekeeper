@@ -210,7 +210,13 @@ public sealed class ImagesChatService(
         {
             var project = await projects.GetByIdAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            initialAssembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.VisualCreationWorkflow, cancellationToken);
+            initialAssembly = await contextBuilder.BuildAsync(
+                new ContextBuildRequest(
+                    project,
+                    UserMessage: userText,
+                    Purpose: ContextBuildPurpose.Images,
+                    OperatingRules: ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.VisualCreationWorkflow),
+                cancellationToken);
             systemPrompt = initialAssembly.Assemble();
             chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
             toolContext = new ImagesChatToolContext(projectId, conversation.Id, chatProvider.Id, visionReady, OnToolMutated, cancellationToken);
@@ -414,7 +420,12 @@ public sealed class ImagesChatService(
 
     private async Task<string> BuildSystemPromptAsync(Project project, CancellationToken cancellationToken)
     {
-        var assembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.VisualCreationWorkflow, cancellationToken);
+        var assembly = await contextBuilder.BuildAsync(
+            new ContextBuildRequest(
+                project,
+                Purpose: ContextBuildPurpose.Images,
+                OperatingRules: ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.VisualCreationWorkflow),
+            cancellationToken);
         return assembly.Assemble();
     }
 

@@ -74,12 +74,14 @@ public sealed record ChapterVisualTextFitDiagnostic(
     double AvailableHeightPixels,
     double RequiredHeightPixels,
     bool Fits,
-    bool FontFaceResolved,
-    bool UsedMissingGlyphFallback);
+    bool FontFaceResolved);
 
 public sealed record ChapterVisualLayoutDiagnostic(
     string Code,
     string Severity,
     string Message,
     Guid? ElementId = null,
-    Guid? RelatedElementId = null);
+    Guid? RelatedElementId = null,
+    string? MeasuredValue = null,
+    string? Threshold = null,
+    string? SuggestedCorrection = null);

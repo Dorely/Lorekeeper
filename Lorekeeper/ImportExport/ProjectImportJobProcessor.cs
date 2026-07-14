@@ -10,6 +10,7 @@ using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Projects;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.ImportExport;
@@ -30,6 +31,7 @@ public sealed class ProjectImportJobProcessor(
     IOutlineGraphSync outlineGraphSync,
     IContextIndexingService contextIndexing,
     IEntityVisualExampleService entityVisualExamples,
+    IBookBriefService bookBriefs,
     IProjectImportJobNotifier notifier,
     ILogger<ProjectImportJobProcessor> logger)
 {
@@ -77,6 +79,7 @@ public sealed class ProjectImportJobProcessor(
 
             await outlineGraphSync.RepairProjectAsync(project.Id, cancellationToken);
             await entityTypeService.EnsureDefaultsAsync(project.Id, cancellationToken);
+            await ImportProjectDirectionAsync(project, document, cancellationToken);
             await StepAsync(job, "Prepared current project graph.", cancellationToken);
 
             var state = new ImportState();
@@ -132,6 +135,55 @@ public sealed class ProjectImportJobProcessor(
             await MarkFailedAsync(job, ex, cancellationToken);
         }
     }
+
+    private async Task ImportProjectDirectionAsync(
+        Project project,
+        ProjectExportDocument document,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(project.ProjectGuidance)
+            && !string.IsNullOrWhiteSpace(document.Project.EffectiveProjectGuidance))
+        {
+            project.ProjectGuidance = document.Project.EffectiveProjectGuidance.Trim();
+            project.UpdatedAt = DateTime.UtcNow;
+            projects.Update(project);
+            await projects.SaveChangesAsync(cancellationToken);
+        }
+
+        if (document.BookBrief is not { } imported)
+            return;
+
+        var current = await bookBriefs.GetOrCreateAsync(project.Id, cancellationToken);
+        await bookBriefs.UpdateAsync(project.Id, new BookBriefPatch
+        {
+            BookKind = current.BookKind == BookKind.Unspecified && imported.BookKind != BookKind.Unspecified
+                ? imported.BookKind
+                : null,
+            Premise = Missing(current.Premise, imported.Premise),
+            Genre = Missing(current.Genre, imported.Genre),
+            PrimaryThemes = Missing(current.PrimaryThemes, imported.PrimaryThemes),
+            Purpose = Missing(current.Purpose, imported.Purpose),
+            CreativeConstraints = Missing(current.CreativeConstraints, imported.CreativeConstraints),
+            TargetAudience = Missing(current.TargetAudience, imported.TargetAudience),
+            MinimumReaderAge = current.MinimumReaderAge is null ? imported.MinimumReaderAge : null,
+            MaximumReaderAge = current.MaximumReaderAge is null ? imported.MaximumReaderAge : null,
+            ReadingLevelGuidance = Missing(current.ReadingLevelGuidance, imported.ReadingLevelGuidance),
+            TargetWordCount = current.TargetWordCount is null ? imported.TargetWordCount : null,
+            PointOfView = Missing(current.PointOfView, imported.PointOfView),
+            Tense = Missing(current.Tense, imported.Tense),
+            VoiceAndTone = Missing(current.VoiceAndTone, imported.VoiceAndTone),
+            LanguageLocale = Missing(current.LanguageLocale, imported.LanguageLocale),
+            HouseStyle = Missing(current.HouseStyle, imported.HouseStyle),
+            ReadAloudPriority = current.ReadAloudPriority is null ? imported.ReadAloudPriority : null,
+            AccessibilityGoals = Missing(current.AccessibilityGoals, imported.AccessibilityGoals),
+            VisualDirection = Missing(current.VisualDirection, imported.VisualDirection),
+        }, cancellationToken);
+    }
+
+    private static string? Missing(string current, string imported) =>
+        string.IsNullOrWhiteSpace(current) && !string.IsNullOrWhiteSpace(imported)
+            ? imported
+            : null;
 
     private async Task<ProjectExportDocument> ReadAndValidateAsync(ProjectImportJob job, CancellationToken cancellationToken)
     {

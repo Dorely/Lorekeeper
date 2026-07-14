@@ -36,8 +36,8 @@
     padding: 1.5rem 1rem 3rem;
     color: #172033;
     font-family: Georgia, "Times New Roman", serif;
-    font-size: 12pt;
-    line-height: 1.55;
+    font-size: var(--body-font-size, 12pt);
+    line-height: var(--body-line-height, 1.55);
 }
 
 .manuscript-sheet,
@@ -51,10 +51,10 @@
 
 .manuscript-sheet--normal {
     page: manuscript-page;
-    width: min(8.5in, calc(100% - 2rem));
+    width: min(var(--normal-page-width, 8.5in), calc(100% - 2rem));
     min-width: 0;
-    padding: clamp(1.25rem, 5vw, 0.5in);
-    aspect-ratio: 8.5 / 11;
+    padding: var(--page-margin, 0.5in);
+    aspect-ratio: var(--portrait-width-number, 8.5) / var(--portrait-height-number, 11);
     break-before: page;
 }
 
@@ -159,50 +159,50 @@
 
 .manuscript-cover-page--portrait {
     page: cover-portrait;
-    width: min(8.5in, calc(100% - 2rem));
-    aspect-ratio: 8.5 / 11;
+    width: min(var(--portrait-page-width, 8.5in), calc(100% - 2rem));
+    aspect-ratio: var(--portrait-width-number, 8.5) / var(--portrait-height-number, 11);
 }
 
 .manuscript-cover-page--landscape {
     page: cover-landscape;
-    width: min(11in, calc(100% - 2rem));
-    aspect-ratio: 11 / 8.5;
+    width: min(var(--landscape-page-width, 11in), calc(100% - 2rem));
+    aspect-ratio: var(--landscape-width-number, 11) / var(--landscape-height-number, 8.5);
 }
 
 .manuscript-cover-page--double-portrait {
     page: cover-double-portrait;
-    width: min(17in, calc(100% - 2rem));
-    aspect-ratio: 17 / 11;
+    width: min(var(--double-portrait-width, 17in), calc(100% - 2rem));
+    aspect-ratio: var(--double-portrait-width-number, 17) / var(--double-portrait-height-number, 11);
 }
 
 .manuscript-cover-page--double-landscape {
     page: cover-double-landscape;
-    width: min(22in, calc(100% - 2rem));
-    aspect-ratio: 22 / 8.5;
+    width: min(var(--double-landscape-width, 22in), calc(100% - 2rem));
+    aspect-ratio: var(--double-landscape-width-number, 22) / var(--double-landscape-height-number, 8.5);
 }
 
 .manuscript-picture-frame--portrait {
     page: picture-portrait;
-    width: min(8.5in, calc(100% - 2rem));
-    aspect-ratio: 8.5 / 11;
+    width: min(var(--portrait-page-width, 8.5in), calc(100% - 2rem));
+    aspect-ratio: var(--portrait-width-number, 8.5) / var(--portrait-height-number, 11);
 }
 
 .manuscript-picture-frame--landscape {
     page: picture-landscape;
-    width: min(11in, calc(100% - 2rem));
-    aspect-ratio: 11 / 8.5;
+    width: min(var(--landscape-page-width, 11in), calc(100% - 2rem));
+    aspect-ratio: var(--landscape-width-number, 11) / var(--landscape-height-number, 8.5);
 }
 
-.manuscript-picture-frame--spread-letter-portrait {
-    page: picture-spread-letter-portrait;
-    width: min(8.5in, calc(100% - 2rem));
-    aspect-ratio: 8.5 / 11;
+.manuscript-picture-frame--spread-portrait {
+    page: picture-spread-portrait;
+    width: min(var(--portrait-page-width, 8.5in), calc(100% - 2rem));
+    aspect-ratio: var(--portrait-width-number, 8.5) / var(--portrait-height-number, 11);
 }
 
-.manuscript-picture-frame--sideways-letter-portrait {
-    page: picture-sideways-letter-portrait;
-    width: min(8.5in, calc(100% - 2rem));
-    aspect-ratio: 8.5 / 11;
+.manuscript-picture-frame--sideways-portrait {
+    page: picture-sideways-portrait;
+    width: min(var(--portrait-page-width, 8.5in), calc(100% - 2rem));
+    aspect-ratio: var(--portrait-width-number, 8.5) / var(--portrait-height-number, 11);
 }
 
 .manuscript-picture-frame.is-contained img {
@@ -269,51 +269,6 @@
     font-size: 10pt;
 }
 
-@page manuscript-page {
-    size: Letter portrait;
-    margin: 0.5in;
-}
-
-@page picture-portrait {
-    size: 8.5in 11in;
-    margin: 0;
-}
-
-@page picture-landscape {
-    size: 11in 8.5in;
-    margin: 0;
-}
-
-@page picture-spread-letter-portrait {
-    size: Letter portrait;
-    margin: 0;
-}
-
-@page picture-sideways-letter-portrait {
-    size: Letter portrait;
-    margin: 0;
-}
-
-@page cover-portrait {
-    size: 8.5in 11in;
-    margin: 0;
-}
-
-@page cover-landscape {
-    size: 11in 8.5in;
-    margin: 0;
-}
-
-@page cover-double-portrait {
-    size: 17in 11in;
-    margin: 0;
-}
-
-@page cover-double-landscape {
-    size: 22in 8.5in;
-    margin: 0;
-}
-
 @media (max-width: 640px) {
     .print-toolbar-meta {
         display: none;
@@ -356,40 +311,40 @@
 
     .manuscript-sheet--normal {
         width: auto;
-        min-height: 10in;
+        min-height: calc(var(--normal-page-height, 11in) - (2 * var(--page-margin, 0.5in)));
         padding: 0;
         aspect-ratio: auto;
     }
 
     .manuscript-cover-page--portrait,
     .manuscript-picture-frame--portrait {
-        width: 8.5in;
-        height: 11in;
+        width: var(--portrait-page-width, 8.5in);
+        height: var(--portrait-page-height, 11in);
     }
 
     .manuscript-cover-page--landscape,
     .manuscript-picture-frame--landscape {
-        width: 11in;
-        height: 8.5in;
+        width: var(--landscape-page-width, 11in);
+        height: var(--landscape-page-height, 8.5in);
     }
 
     .manuscript-cover-page--double-portrait {
-        width: 17in;
-        height: 11in;
+        width: var(--double-portrait-width, 17in);
+        height: var(--double-portrait-height, 11in);
     }
 
     .manuscript-cover-page--double-landscape {
-        width: 22in;
-        height: 8.5in;
+        width: var(--double-landscape-width, 22in);
+        height: var(--double-landscape-height, 8.5in);
     }
 
-    .manuscript-picture-frame--spread-letter-portrait {
-        width: 8.5in;
-        height: 11in;
+    .manuscript-picture-frame--spread-portrait {
+        width: var(--portrait-page-width, 8.5in);
+        height: var(--portrait-page-height, 11in);
     }
 
-    .manuscript-picture-frame--sideways-letter-portrait {
-        width: 8.5in;
-        height: 11in;
+    .manuscript-picture-frame--sideways-portrait {
+        width: var(--portrait-page-width, 8.5in);
+        height: var(--portrait-page-height, 11in);
     }
 }

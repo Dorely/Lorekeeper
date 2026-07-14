@@ -76,6 +76,21 @@ public sealed class PublishService(
             throw new ArgumentOutOfRangeException(nameof(update), "The Print/PDF spread mode is invalid.");
         if (!Enum.IsDefined(update.EpubPicturePageSpreadMode))
             throw new ArgumentOutOfRangeException(nameof(update), "The EPUB spread mode is invalid.");
+        if (update.PageWidthInches is < 3 or > 24 || double.IsNaN(update.PageWidthInches) || double.IsInfinity(update.PageWidthInches))
+            throw new ArgumentOutOfRangeException(nameof(update), "Page width must be between 3 and 24 inches.");
+        if (update.PageHeightInches is < 3 or > 24 || double.IsNaN(update.PageHeightInches) || double.IsInfinity(update.PageHeightInches))
+            throw new ArgumentOutOfRangeException(nameof(update), "Page height must be between 3 and 24 inches.");
+        if (update.PageMarginInches < 0.125
+            || update.PageMarginInches > Math.Min(update.PageWidthInches, update.PageHeightInches) / 3
+            || double.IsNaN(update.PageMarginInches)
+            || double.IsInfinity(update.PageMarginInches))
+        {
+            throw new ArgumentOutOfRangeException(nameof(update), "Page margin must be at least 0.125 inches and no more than one third of the shorter page edge.");
+        }
+        if (update.BodyFontSizePoints is < 7 or > 72 || double.IsNaN(update.BodyFontSizePoints) || double.IsInfinity(update.BodyFontSizePoints))
+            throw new ArgumentOutOfRangeException(nameof(update), "Body font size must be between 7 and 72 points.");
+        if (update.BodyLineHeight is < 1 or > 2.4 || double.IsNaN(update.BodyLineHeight) || double.IsInfinity(update.BodyLineHeight))
+            throw new ArgumentOutOfRangeException(nameof(update), "Body line height must be between 1 and 2.4.");
 
         var project = await GetProjectAsync(projectId, cancellationToken);
         var profile = await EnsureProfileAsync(project, cancellationToken);
@@ -101,6 +116,11 @@ public sealed class PublishService(
         profile.TitlePageMode = update.TitlePageMode;
         profile.PrintPicturePageSpreadMode = update.PrintPicturePageSpreadMode;
         profile.EpubPicturePageSpreadMode = update.EpubPicturePageSpreadMode;
+        profile.PageWidthInches = update.PageWidthInches;
+        profile.PageHeightInches = update.PageHeightInches;
+        profile.PageMarginInches = update.PageMarginInches;
+        profile.BodyFontSizePoints = update.BodyFontSizePoints;
+        profile.BodyLineHeight = update.BodyLineHeight;
         Touch(profile, project);
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -733,6 +753,11 @@ public sealed class PublishService(
             profile.TitlePageMode,
             profile.PrintPicturePageSpreadMode,
             profile.EpubPicturePageSpreadMode,
+            profile.PageWidthInches,
+            profile.PageHeightInches,
+            profile.PageMarginInches,
+            profile.BodyFontSizePoints,
+            profile.BodyLineHeight,
             profile.SelectedCoverChapterId);
 
     private static PublishDocumentProfile ProfileDocument(PublishProfile profile) =>
@@ -758,7 +783,12 @@ public sealed class PublishService(
             profile.NumberChapters,
             IncludeTitlePage(profile),
             profile.PrintPicturePageSpreadMode,
-            profile.EpubPicturePageSpreadMode);
+            profile.EpubPicturePageSpreadMode,
+            profile.PageWidthInches,
+            profile.PageHeightInches,
+            profile.PageMarginInches,
+            profile.BodyFontSizePoints,
+            profile.BodyLineHeight);
 
     private static bool IncludeTitlePage(PublishProfile profile) => profile.TitlePageMode switch
     {

@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lorekeeper.Models;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Persistence;
@@ -62,6 +63,9 @@ public sealed class ProjectImageJobService(
             Status = ProjectImageGenerationJobStatus.Queued,
             Label = Clean(request.Label) is { Length: > 0 } label ? label : $"Image {now:yyyy-MM-dd HH:mm:ss}",
             Prompt = prompt,
+            BriefJson = CleanJson(request.BriefJson, "{}"),
+            ReferenceManifestJson = CleanJson(request.ReferenceManifestJson, "[]"),
+            TargetGeometryJson = CleanJson(request.TargetGeometryJson, "{}"),
             Size = NormalizeSize(request.Size),
             Quality = NormalizeQuality(request.Quality),
             OutputFormat = NormalizeOutputFormat(request.OutputFormat),
@@ -128,6 +132,9 @@ public sealed class ProjectImageJobService(
             Status = ProjectImageGenerationJobStatus.Queued,
             Label = Clean(request.Label) is { Length: > 0 } label ? label : $"Edit {now:yyyy-MM-dd HH:mm:ss}",
             Prompt = prompt,
+            BriefJson = CleanJson(request.BriefJson, "{}"),
+            ReferenceManifestJson = CleanJson(request.ReferenceManifestJson, "[]"),
+            TargetGeometryJson = CleanJson(request.TargetGeometryJson, "{}"),
             Size = NormalizeSize(request.Size),
             Quality = NormalizeQuality(request.Quality),
             OutputFormat = NormalizeOutputFormat(request.OutputFormat),
@@ -312,6 +319,9 @@ public sealed class ProjectImageJobService(
                 result.ImageModel,
                 image.OutputFormat,
                 image.RevisedPrompt,
+                StructuredBrief = JsonNodeOrString(job.BriefJson),
+                ReferenceManifest = JsonNodeOrString(job.ReferenceManifestJson),
+                TargetGeometry = JsonNodeOrString(job.TargetGeometryJson),
                 image.ResponseId,
                 image.CallId,
                 SourceImage = source is null ? null : new { source.Id, source.FileName, source.ContentType },
@@ -327,6 +337,12 @@ public sealed class ProjectImageJobService(
         job.MainlineModel = result.MainlineModel;
         job.ImageModel = result.ImageModel;
         job.RawProviderResponseJson = result.RawMetadataJson;
+        if (!string.IsNullOrWhiteSpace(image.RevisedPrompt))
+        {
+            var revisedPrompts = DeserializeStrings(job.ProviderRevisedPromptsJson);
+            revisedPrompts.Add(image.RevisedPrompt.Trim());
+            job.ProviderRevisedPromptsJson = JsonSerializer.Serialize(revisedPrompts, JsonOptions);
+        }
         job.OutputImageIdsJson = SerializeIds(DeserializeIds(job.OutputImageIdsJson).Append(asset.Id));
         job.OutputStatesJson = SerializeOutputStates(UpsertOutputState(
             NormalizeOutputStates(job.OutputStatesJson, job.Count),
@@ -553,7 +569,11 @@ public sealed class ProjectImageJobService(
             job.StartedAt,
             job.CompletedAt,
             DeserializeTargets(job.EntityVisualTargetsJson),
-            job.InheritSourceEntityTargets);
+            job.InheritSourceEntityTargets,
+            job.BriefJson,
+            job.ReferenceManifestJson,
+            job.TargetGeometryJson,
+            DeserializeStrings(job.ProviderRevisedPromptsJson));
 
     private static string SerializeTargets(IEnumerable<EntityVisualTarget>? targets) => JsonSerializer.Serialize(
         (targets ?? []).Where(target => target.EntityId != Guid.Empty).DistinctBy(target => target.EntityId).ToList(), JsonOptions);
@@ -605,6 +625,25 @@ public sealed class ProjectImageJobService(
 
     private static string NormalizeSize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "auto" : value.Trim();
+
+    private static string CleanJson(string? value, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return fallback;
+        _ = JsonNode.Parse(value) ?? throw new InvalidOperationException("Structured image audit JSON cannot be null.");
+        return value.Trim();
+    }
+
+    private static object JsonNodeOrString(string value)
+    {
+        try { return JsonNode.Parse(value) ?? value; }
+        catch (JsonException) { return value; }
+    }
+
+    private static List<string> DeserializeStrings(string value)
+    {
+        try { return JsonSerializer.Deserialize<List<string>>(value, JsonOptions) ?? []; }
+        catch (JsonException) { return []; }
+    }
 
     private static string NormalizeQuality(string? value) =>
         value?.Trim().ToLowerInvariant() switch

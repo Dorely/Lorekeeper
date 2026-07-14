@@ -16,6 +16,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<SearchProvider> SearchProviders => Set<SearchProvider>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<BookBrief> BookBriefs => Set<BookBrief>();
     public DbSet<Act> Acts => Set<Act>();
     public DbSet<Chapter> Chapters => Set<Chapter>();
     public DbSet<GraphNode> GraphNodes => Set<GraphNode>();
@@ -122,6 +123,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
         modelBuilder.Entity<Project>(entity =>
         {
             entity.HasIndex(e => e.Slug).IsUnique();
+        });
+
+        modelBuilder.Entity<BookBrief>(entity =>
+        {
+            entity.HasIndex(e => e.ProjectId).IsUnique();
+            entity.Property(e => e.BookKind).HasConversion<string>();
+
+            entity.HasOne(e => e.Project)
+                .WithOne(p => p.BookBrief)
+                .HasForeignKey<BookBrief>(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Act>(entity =>
