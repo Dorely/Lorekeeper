@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -21,6 +22,7 @@ public sealed class ImageGenerationBrief
     public string Setting { get; init; } = string.Empty;
     public string StyleMediumPalette { get; init; } = string.Empty;
     public string CameraFraming { get; init; } = string.Empty;
+    [Description("Placement and visual hierarchy. For page art with editable overlay text, explicitly name the naturally quiet text landing zone and match it to target.reservedTextRegions.")]
     public string Composition { get; init; } = string.Empty;
     public string LightingMood { get; init; } = string.Empty;
     public string Constraints { get; init; } = string.Empty;
@@ -55,15 +57,21 @@ public sealed class ImageGenerationTarget
     public string PageSlot { get; init; } = string.Empty;
     public string AspectRatio { get; init; } = string.Empty;
     public string Size { get; init; } = string.Empty;
+    [Description("Canvas-local percentage rectangles that the illustration must preserve as natural, quiet negative space for editable overlaid text. For a full-page target, use the corresponding page bounds for the text boxes; for an image-slot target, translate through the slot geometry.")]
     public IReadOnlyList<ImageReservedRegion>? ReservedTextRegions { get; init; }
 }
 
 public sealed class ImageReservedRegion
 {
+    [Description("Purpose of this region, such as 'body copy' or 'heading'.")]
     public string Label { get; init; } = string.Empty;
+    [Description("Left edge as a canvas-local percentage from 0 through 100.")]
     public double XPercent { get; init; }
+    [Description("Top edge as a canvas-local percentage from 0 through 100.")]
     public double YPercent { get; init; }
+    [Description("Width as a positive canvas-local percentage.")]
     public double WidthPercent { get; init; }
+    [Description("Height as a positive canvas-local percentage.")]
     public double HeightPercent { get; init; }
 }
 
@@ -467,13 +475,13 @@ public sealed class ImagePromptComposer(
         foreach (var region in reservedRegions ?? [])
         {
             ValidateRegion(region);
-            targetText.Append("\nReserve ")
+            targetText.Append("\nHard layout requirement: reserve ")
                 .Append(Fallback(region.Label, "text region"))
                 .Append(" at x=").Append(region.XPercent.ToString("0.##", CultureInfo.InvariantCulture))
                 .Append("%, y=").Append(region.YPercent.ToString("0.##", CultureInfo.InvariantCulture))
                 .Append("%, width=").Append(region.WidthPercent.ToString("0.##", CultureInfo.InvariantCulture))
                 .Append("%, height=").Append(region.HeightPercent.ToString("0.##", CultureInfo.InvariantCulture))
-                .Append("%. Keep faces, hands, focal details, and high-contrast texture outside it.");
+                .Append("%. Make the entire region naturally integrated quiet negative space with simple forms, low detail, low contrast variation, and a stable light or dark value for readable editable type. Keep faces, hands, characters, focal objects, important action, sharp edges, high-frequency texture, and strong value transitions outside it. Do not draw a placeholder rectangle, frame, sign, caption panel, or text inside it.");
         }
         AppendSection(builder, "Output target and protected regions", targetText.ToString());
     }

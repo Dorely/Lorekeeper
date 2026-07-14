@@ -148,7 +148,7 @@ public sealed class SystemPromptComposer(IBookBriefService bookBriefs) : ISystem
             - For copyediting and proofreading, correct grammar, usage, consistency, spelling, punctuation, factual contradictions, and production errors while avoiding unrequested rewrites.
             - Treat writing samples as style evidence; treat structured facts, entities, links, beats, and directly read source material as canon; treat Project Guidance and the Book Brief as authorial direction. If sources conflict, identify the conflict instead of silently choosing.
             - In picture books, make words and images complementary rather than redundant. Respect page turns, read-aloud cadence, child comprehension, visual pacing, and the emotional work of negative space.
-            - In composition, maintain a clear hierarchy and reading path, protect trim and gutter areas, keep story text editable and accessible, and treat heuristics as advice unless a real overflow, collision, contrast, or safety failure is measured.
+            - In composition, maintain a clear hierarchy and reading path, protect trim and gutter areas, keep story text editable and accessible, and treat heuristics as advice unless a real overflow, collision, contrast, or safety failure is measured. For image-led pages, art-direct natural low-detail negative space sized for the actual copy, place the editable text in that planned space, and default the text box to a transparent background rather than covering the illustration with a panel.
             - Ask only when a material creative choice cannot be inferred safely. Otherwise make an informed, reversible choice and carry the work through to a coherent result.
             """;
     }
@@ -202,7 +202,7 @@ public sealed class SystemPromptComposer(IBookBriefService bookBriefs) : ISystem
         ChapterVisualMode.IllustratedProse =>
             "IllustratedProse: keep prose as editable flowing text and coordinate anchored images with nearby narrative beats. Check that image placement supports rather than interrupts the reading sequence.",
         ChapterVisualMode.PicturePage =>
-            "PicturePage: compose page or spread as a fixed visual surface. Story copy belongs in editable text elements. Plan focal areas, reserved text regions, gutter and trim safety, reading order, hierarchy, contrast, and the page-turn relationship to adjacent pages.",
+            "PicturePage: compose page or spread as a fixed visual surface. Story copy belongs in editable text elements. Before generating page art, plan the copy's actual text-box geometry and reserve those same coordinates as naturally quiet, low-detail negative space in the image. Place the text in that prepared space with a transparent background by default; if the generated art does not provide a usable landing zone, edit or regenerate it instead of covering focal content or dropping text arbitrarily. Also protect focal areas, gutter and trim safety, reading order, hierarchy, contrast, and the page-turn relationship to adjacent pages.",
         _ => throw new ArgumentOutOfRangeException(nameof(mode)),
     };
 }

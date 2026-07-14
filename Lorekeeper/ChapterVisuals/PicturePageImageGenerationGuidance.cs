@@ -136,7 +136,6 @@ public static class PicturePageImageGenerationGuidance
             "Output composition constraints:",
             $"- Canvas: {target.AspectRatio} aspect ratio for {(target.TargetKind == "imageSlot" ? "a placed illustration" : "full-bleed page art")}.",
             "- Extend artwork through every canvas edge for bleed-aware cropping while keeping important subjects and details away from trim-loss areas.",
-            "- Keep faces, focal objects, and important action outside any reserved text regions listed below.",
             "- Do not render text, logos, watermarks, or border decorations unless the target brief explicitly requests them.",
         };
 
@@ -145,7 +144,11 @@ public static class PicturePageImageGenerationGuidance
 
         var safeAreas = DescribeTextSafeAreas(target, textElements);
         if (safeAreas.Length > 0)
-            builder.Add($"- Reserve stable, quiet, low-detail regions for overlaid type at these canvas-local percentages: {safeAreas}.");
+        {
+            builder.Add($"- Hard layout requirement: create naturally integrated, quiet negative space for editable overlaid type at these canvas-local percentages: {safeAreas}.");
+            builder.Add("- Across every reserved text region, use simple forms, low detail, low contrast variation, and a stable light or dark value. Keep faces, hands, characters, focal objects, important action, sharp edges, high-frequency texture, and strong value transitions outside it.");
+            builder.Add("- The reserved area must feel like part of the scene, not a visible placeholder rectangle, frame, sign, caption panel, or blank graphic box.");
+        }
 
         return string.Join(Environment.NewLine, builder);
     }

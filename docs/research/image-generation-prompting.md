@@ -159,7 +159,7 @@ Must change: running three-quarter pose, alarmed sideward gaze, windblown cape, 
 ```text
 intendedUse: Background art for a two-page picture-book spread with editable story text overlaid later.
 scene: A tiny fox and an enormous sleepy moon share tea on a rooftop above a quiet blue town.
-composition: Fox and teapot in the lower-left leaf; moon occupies the upper-right leaf; preserve a simple low-detail twilight band for two text boxes supplied by the target geometry.
+composition: Fox and teapot in the lower-left leaf; moon occupies the upper-right leaf; make the exact regions supplied by the target geometry into a natural twilight band with simple forms, low detail, low contrast variation, and a stable value for transparent editable type—not visible caption panels.
 constraints: Keep faces and the teapot away from trim and center gutter; no rendered text.
 target: chapterId plus optional pictureImageElementId; aspect and raster omitted so Lorekeeper derives both.
 ```

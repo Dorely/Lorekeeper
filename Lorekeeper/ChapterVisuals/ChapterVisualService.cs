@@ -721,7 +721,7 @@ public sealed class ChapterVisualService(
             null,
             $"{minimumRatio:0.00}:1 minimum sampled",
             $">= {threshold:0.0}:1 ({(isLarge ? "large" : "normal")} text)",
-            "Change the text color, add or strengthen a quiet opaque backing, or move the text to a more uniform area.");
+            "Move the text into its planned quiet region, choose a contrast-safe text color, or edit/regenerate the art to provide a more uniform light or dark field. Use an opaque backing only when explicitly requested or when those composition corrections cannot satisfy accessibility.");
     }
 
     private static SKColor Composite(SKColor foreground, SKColor background)

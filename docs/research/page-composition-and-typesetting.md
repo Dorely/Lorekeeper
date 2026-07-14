@@ -27,6 +27,7 @@ BookTrust's picture-book guidance recommends pacing with a dummy book and preser
 - Use project publish-profile width/height and chapter orientation/spread mode for one shared geometry calculation.
 - Renderers, paged viewer, image target compiler, safe guides, diagnostics, and publishers consume that calculation.
 - Full-spread art protects focal faces, actions, and text from the center gutter and trim-risk bands.
+- When page art carries story copy, Lorekeeper plans text-box geometry before generation and sends corresponding buffered rectangles as hard reserved regions. The illustration should turn those regions into natural, low-detail, tonally stable negative space rather than visible placeholder panels.
 - Text objects carry an explicit reading order. Duplicate order is an error; disagreement with the usual language-direction spatial path is a warning that can be accepted when deliberate visual cues support it.
 - Overlapping text boxes warn; an image layer above and intersecting text is an error because it can obscure copy.
 
@@ -94,6 +95,7 @@ A color pair checked in isolation can pass while text over a photograph fails lo
 - Rendered PicturePage snapshots sample the composed background within each text box and evaluate text color after blending any configured backing.
 - A sampled minimum below 4.5:1 for normal text or 3:1 for large text is an error with measured ratio, threshold, element ID, and correction.
 - Story copy stays in editable, ordered text elements. Generated raster text defaults off.
+- PicturePage text backgrounds default to fully transparent. On a contrast failure, the preferred correction order is to use the planned quiet region, choose a suitable text color, or correct the illustration; a backing panel is an explicit request or last-resort accessibility treatment.
 - Images carry alt text; complex images may need longer description in publication output.
 - Prose and image-free IllustratedProse also receive render snapshots, but their page breaks are labeled advisory because reflowable EPUB pagination changes with device and reader settings.
 
