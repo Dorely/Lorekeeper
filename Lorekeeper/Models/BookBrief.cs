@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 
 namespace Lorekeeper.Models;
@@ -16,6 +17,30 @@ public enum BookKind
     IllustratedBook,
     Poetry,
     Other,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<BookBriefField>))]
+public enum BookBriefField
+{
+    BookKind,
+    Premise,
+    Genre,
+    PrimaryThemes,
+    Purpose,
+    CreativeConstraints,
+    TargetAudience,
+    MinimumReaderAge,
+    MaximumReaderAge,
+    ReadingLevelGuidance,
+    TargetWordCount,
+    PointOfView,
+    Tense,
+    VoiceAndTone,
+    LanguageLocale,
+    HouseStyle,
+    ReadAloudPriority,
+    AccessibilityGoals,
+    VisualDirection,
 }
 
 /// <summary>
@@ -79,5 +104,6 @@ public sealed class BookBriefPatch
     public bool? ReadAloudPriority { get; init; }
     public string? AccessibilityGoals { get; init; }
     public string? VisualDirection { get; init; }
-    public IReadOnlyList<string>? ClearFields { get; init; }
+    [Description("Fields to explicitly clear. Omit this property or pass an empty array for an ordinary update. Use only the listed BookBriefField enum values; never pass 'Unspecified'.")]
+    public IReadOnlyList<BookBriefField>? ClearFields { get; init; }
 }

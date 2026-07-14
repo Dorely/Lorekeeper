@@ -8,32 +8,10 @@ namespace Lorekeeper.Projects;
 
 public sealed class BookBriefService(AppDbContext db) : IBookBriefService
 {
-    private static readonly HashSet<string> FieldNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        nameof(BookBrief.BookKind),
-        nameof(BookBrief.Premise),
-        nameof(BookBrief.Genre),
-        nameof(BookBrief.PrimaryThemes),
-        nameof(BookBrief.Purpose),
-        nameof(BookBrief.CreativeConstraints),
-        nameof(BookBrief.TargetAudience),
-        nameof(BookBrief.MinimumReaderAge),
-        nameof(BookBrief.MaximumReaderAge),
-        nameof(BookBrief.ReadingLevelGuidance),
-        nameof(BookBrief.TargetWordCount),
-        nameof(BookBrief.PointOfView),
-        nameof(BookBrief.Tense),
-        nameof(BookBrief.VoiceAndTone),
-        nameof(BookBrief.LanguageLocale),
-        nameof(BookBrief.HouseStyle),
-        nameof(BookBrief.ReadAloudPriority),
-        nameof(BookBrief.AccessibilityGoals),
-        nameof(BookBrief.VisualDirection),
-    };
-
     public async Task<BookBrief> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         var existing = await db.BookBriefs
+            .AsNoTracking()
             .SingleOrDefaultAsync(brief => brief.ProjectId == projectId, cancellationToken);
         if (existing is not null)
             return existing;
@@ -42,8 +20,10 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
             throw new InvalidOperationException($"Project {projectId} not found.");
 
         var brief = new BookBrief { ProjectId = projectId };
+        DetachTrackedBrief(projectId);
         db.BookBriefs.Add(brief);
         await db.SaveChangesAsync(cancellationToken);
+        db.Entry(brief).State = EntityState.Detached;
         return brief;
     }
 
@@ -53,7 +33,14 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(patch);
-        var brief = await GetOrCreateAsync(projectId, cancellationToken);
+        var existing = await db.BookBriefs
+            .AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.ProjectId == projectId, cancellationToken);
+        var isNew = existing is null;
+        if (isNew && !await db.Projects.AnyAsync(project => project.Id == projectId, cancellationToken))
+            throw new InvalidOperationException($"Project {projectId} not found.");
+        var brief = existing ?? new BookBrief { ProjectId = projectId };
+
         var clearFields = NormalizeClearFields(patch.ClearFields);
 
         ApplyClearFields(brief, clearFields);
@@ -61,7 +48,13 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
         Validate(brief);
 
         brief.UpdatedAt = DateTime.UtcNow;
+        DetachTrackedBrief(projectId);
+        if (isNew)
+            db.BookBriefs.Add(brief);
+        else
+            db.BookBriefs.Update(brief);
         await db.SaveChangesAsync(cancellationToken);
+        db.Entry(brief).State = EntityState.Detached;
         return brief;
     }
 
@@ -93,69 +86,67 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
         return string.Join('\n', lines);
     }
 
-    private static HashSet<string> NormalizeClearFields(IReadOnlyList<string>? values)
+    private static HashSet<BookBriefField> NormalizeClearFields(IReadOnlyList<BookBriefField>? values)
     {
-        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new HashSet<BookBriefField>();
         foreach (var value in values ?? [])
         {
-            var trimmed = value?.Trim();
-            if (string.IsNullOrWhiteSpace(trimmed))
-                continue;
-            if (!FieldNames.Contains(trimmed))
-                throw new ArgumentException($"Unknown Book Brief clear field '{trimmed}'.", nameof(values));
-            result.Add(trimmed);
+            if (!Enum.IsDefined(value))
+                throw new ArgumentException($"Unknown Book Brief clear field '{value}'.", nameof(values));
+            result.Add(value);
         }
         return result;
     }
 
-    private static void ApplyPatch(BookBrief brief, BookBriefPatch patch, IReadOnlySet<string> cleared)
+    private static void ApplyPatch(BookBrief brief, BookBriefPatch patch, IReadOnlySet<BookBriefField> cleared)
     {
-        if (patch.BookKind is { } bookKind && !cleared.Contains(nameof(BookBrief.BookKind))) brief.BookKind = bookKind;
-        SetString(value => brief.Premise = value, patch.Premise, nameof(BookBrief.Premise), cleared);
-        SetString(value => brief.Genre = value, patch.Genre, nameof(BookBrief.Genre), cleared);
-        SetString(value => brief.PrimaryThemes = value, patch.PrimaryThemes, nameof(BookBrief.PrimaryThemes), cleared);
-        SetString(value => brief.Purpose = value, patch.Purpose, nameof(BookBrief.Purpose), cleared);
-        SetString(value => brief.CreativeConstraints = value, patch.CreativeConstraints, nameof(BookBrief.CreativeConstraints), cleared);
-        SetString(value => brief.TargetAudience = value, patch.TargetAudience, nameof(BookBrief.TargetAudience), cleared);
-        if (patch.MinimumReaderAge is { } minimumReaderAge && !cleared.Contains(nameof(BookBrief.MinimumReaderAge))) brief.MinimumReaderAge = minimumReaderAge;
-        if (patch.MaximumReaderAge is { } maximumReaderAge && !cleared.Contains(nameof(BookBrief.MaximumReaderAge))) brief.MaximumReaderAge = maximumReaderAge;
-        SetString(value => brief.ReadingLevelGuidance = value, patch.ReadingLevelGuidance, nameof(BookBrief.ReadingLevelGuidance), cleared);
-        if (patch.TargetWordCount is { } targetWordCount && !cleared.Contains(nameof(BookBrief.TargetWordCount))) brief.TargetWordCount = targetWordCount;
-        SetString(value => brief.PointOfView = value, patch.PointOfView, nameof(BookBrief.PointOfView), cleared);
-        SetString(value => brief.Tense = value, patch.Tense, nameof(BookBrief.Tense), cleared);
-        SetString(value => brief.VoiceAndTone = value, patch.VoiceAndTone, nameof(BookBrief.VoiceAndTone), cleared);
-        SetString(value => brief.LanguageLocale = value, patch.LanguageLocale, nameof(BookBrief.LanguageLocale), cleared);
-        SetString(value => brief.HouseStyle = value, patch.HouseStyle, nameof(BookBrief.HouseStyle), cleared);
-        if (patch.ReadAloudPriority is { } readAloudPriority && !cleared.Contains(nameof(BookBrief.ReadAloudPriority))) brief.ReadAloudPriority = readAloudPriority;
-        SetString(value => brief.AccessibilityGoals = value, patch.AccessibilityGoals, nameof(BookBrief.AccessibilityGoals), cleared);
-        SetString(value => brief.VisualDirection = value, patch.VisualDirection, nameof(BookBrief.VisualDirection), cleared);
+        if (patch.BookKind is { } bookKind && !cleared.Contains(BookBriefField.BookKind)) brief.BookKind = bookKind;
+        SetString(value => brief.Premise = value, patch.Premise, BookBriefField.Premise, cleared);
+        SetString(value => brief.Genre = value, patch.Genre, BookBriefField.Genre, cleared);
+        SetString(value => brief.PrimaryThemes = value, patch.PrimaryThemes, BookBriefField.PrimaryThemes, cleared);
+        SetString(value => brief.Purpose = value, patch.Purpose, BookBriefField.Purpose, cleared);
+        SetString(value => brief.CreativeConstraints = value, patch.CreativeConstraints, BookBriefField.CreativeConstraints, cleared);
+        SetString(value => brief.TargetAudience = value, patch.TargetAudience, BookBriefField.TargetAudience, cleared);
+        if (patch.MinimumReaderAge is { } minimumReaderAge && !cleared.Contains(BookBriefField.MinimumReaderAge)) brief.MinimumReaderAge = minimumReaderAge;
+        if (patch.MaximumReaderAge is { } maximumReaderAge && !cleared.Contains(BookBriefField.MaximumReaderAge)) brief.MaximumReaderAge = maximumReaderAge;
+        SetString(value => brief.ReadingLevelGuidance = value, patch.ReadingLevelGuidance, BookBriefField.ReadingLevelGuidance, cleared);
+        if (patch.TargetWordCount is { } targetWordCount && !cleared.Contains(BookBriefField.TargetWordCount)) brief.TargetWordCount = targetWordCount;
+        SetString(value => brief.PointOfView = value, patch.PointOfView, BookBriefField.PointOfView, cleared);
+        SetString(value => brief.Tense = value, patch.Tense, BookBriefField.Tense, cleared);
+        SetString(value => brief.VoiceAndTone = value, patch.VoiceAndTone, BookBriefField.VoiceAndTone, cleared);
+        SetString(value => brief.LanguageLocale = value, patch.LanguageLocale, BookBriefField.LanguageLocale, cleared);
+        SetString(value => brief.HouseStyle = value, patch.HouseStyle, BookBriefField.HouseStyle, cleared);
+        if (patch.ReadAloudPriority is { } readAloudPriority && !cleared.Contains(BookBriefField.ReadAloudPriority)) brief.ReadAloudPriority = readAloudPriority;
+        SetString(value => brief.AccessibilityGoals = value, patch.AccessibilityGoals, BookBriefField.AccessibilityGoals, cleared);
+        SetString(value => brief.VisualDirection = value, patch.VisualDirection, BookBriefField.VisualDirection, cleared);
     }
 
-    private static void ApplyClearFields(BookBrief brief, IEnumerable<string> fields)
+    private static void ApplyClearFields(BookBrief brief, IEnumerable<BookBriefField> fields)
     {
         foreach (var field in fields)
         {
-            switch (field.ToUpperInvariant())
+            switch (field)
             {
-                case "BOOKKIND": brief.BookKind = BookKind.Unspecified; break;
-                case "PREMISE": brief.Premise = string.Empty; break;
-                case "GENRE": brief.Genre = string.Empty; break;
-                case "PRIMARYTHEMES": brief.PrimaryThemes = string.Empty; break;
-                case "PURPOSE": brief.Purpose = string.Empty; break;
-                case "CREATIVECONSTRAINTS": brief.CreativeConstraints = string.Empty; break;
-                case "TARGETAUDIENCE": brief.TargetAudience = string.Empty; break;
-                case "MINIMUMREADERAGE": brief.MinimumReaderAge = null; break;
-                case "MAXIMUMREADERAGE": brief.MaximumReaderAge = null; break;
-                case "READINGLEVELGUIDANCE": brief.ReadingLevelGuidance = string.Empty; break;
-                case "TARGETWORDCOUNT": brief.TargetWordCount = null; break;
-                case "POINTOFVIEW": brief.PointOfView = string.Empty; break;
-                case "TENSE": brief.Tense = string.Empty; break;
-                case "VOICEANDTONE": brief.VoiceAndTone = string.Empty; break;
-                case "LANGUAGELOCALE": brief.LanguageLocale = string.Empty; break;
-                case "HOUSESTYLE": brief.HouseStyle = string.Empty; break;
-                case "READALOUDPRIORITY": brief.ReadAloudPriority = null; break;
-                case "ACCESSIBILITYGOALS": brief.AccessibilityGoals = string.Empty; break;
-                case "VISUALDIRECTION": brief.VisualDirection = string.Empty; break;
+                case BookBriefField.BookKind: brief.BookKind = BookKind.Unspecified; break;
+                case BookBriefField.Premise: brief.Premise = string.Empty; break;
+                case BookBriefField.Genre: brief.Genre = string.Empty; break;
+                case BookBriefField.PrimaryThemes: brief.PrimaryThemes = string.Empty; break;
+                case BookBriefField.Purpose: brief.Purpose = string.Empty; break;
+                case BookBriefField.CreativeConstraints: brief.CreativeConstraints = string.Empty; break;
+                case BookBriefField.TargetAudience: brief.TargetAudience = string.Empty; break;
+                case BookBriefField.MinimumReaderAge: brief.MinimumReaderAge = null; break;
+                case BookBriefField.MaximumReaderAge: brief.MaximumReaderAge = null; break;
+                case BookBriefField.ReadingLevelGuidance: brief.ReadingLevelGuidance = string.Empty; break;
+                case BookBriefField.TargetWordCount: brief.TargetWordCount = null; break;
+                case BookBriefField.PointOfView: brief.PointOfView = string.Empty; break;
+                case BookBriefField.Tense: brief.Tense = string.Empty; break;
+                case BookBriefField.VoiceAndTone: brief.VoiceAndTone = string.Empty; break;
+                case BookBriefField.LanguageLocale: brief.LanguageLocale = string.Empty; break;
+                case BookBriefField.HouseStyle: brief.HouseStyle = string.Empty; break;
+                case BookBriefField.ReadAloudPriority: brief.ReadAloudPriority = null; break;
+                case BookBriefField.AccessibilityGoals: brief.AccessibilityGoals = string.Empty; break;
+                case BookBriefField.VisualDirection: brief.VisualDirection = string.Empty; break;
+                default: throw new ArgumentOutOfRangeException(nameof(field));
             }
         }
     }
@@ -174,10 +165,16 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
             throw new ArgumentOutOfRangeException(nameof(brief.TargetWordCount), "Target word count must be greater than zero.");
     }
 
-    private static void SetString(Action<string> setter, string? value, string fieldName, IReadOnlySet<string> cleared)
+    private static void SetString(Action<string> setter, string? value, BookBriefField field, IReadOnlySet<BookBriefField> cleared)
     {
-        if (value is not null && !cleared.Contains(fieldName))
+        if (value is not null && !cleared.Contains(field))
             setter(value.Trim());
+    }
+
+    private void DetachTrackedBrief(Guid projectId)
+    {
+        foreach (var tracked in db.BookBriefs.Local.Where(brief => brief.ProjectId == projectId).ToList())
+            db.Entry(tracked).State = EntityState.Detached;
     }
 
     private static string Field(string label, string value) =>

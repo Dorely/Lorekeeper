@@ -38,6 +38,8 @@ else
                          OnError="HandleError" />
         </div>
         <div class="outline-pane-side">
+            <BookBriefPanel ProjectId="@_workingProject!.Id"
+                            RefreshSignal="@_refreshSignal" />
             <ProjectFactsPanel ProjectId="@_workingProject!.Id"
                                RefreshSignal="@_refreshSignal"
                                OnChanged="ReloadAsync" />

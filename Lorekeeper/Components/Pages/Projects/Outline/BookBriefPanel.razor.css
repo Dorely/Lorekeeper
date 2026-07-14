@@ -1,0 +1,124 @@
+.book-brief-panel {
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.65rem;
+    background: var(--bs-body-bg);
+    overflow: hidden;
+    flex: 0 0 auto;
+}
+
+.book-brief-header {
+    display: flex;
+    align-items: center;
+    min-height: 2.5rem;
+    border-bottom: 1px solid transparent;
+}
+
+.book-brief-panel:has(.book-brief-body) .book-brief-header {
+    border-bottom-color: var(--bs-border-color);
+}
+
+.book-brief-toggle {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.6rem 0.7rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+}
+
+.book-brief-toggle:hover,
+.book-brief-toggle:focus-visible {
+    background: var(--bs-tertiary-bg);
+}
+
+.book-brief-caret {
+    width: 0.8rem;
+    color: var(--bs-secondary-color);
+    font-weight: 700;
+}
+
+.book-brief-title {
+    font-weight: 650;
+}
+
+.book-brief-count {
+    margin-left: auto;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    background: var(--bs-secondary-bg);
+    color: var(--bs-secondary-color);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.book-brief-refresh {
+    margin-right: 0.35rem;
+    font-size: 0.75rem;
+}
+
+.book-brief-body {
+    padding: 0.7rem;
+}
+
+.book-brief-help {
+    margin-bottom: 0.65rem;
+    line-height: 1.35;
+}
+
+.book-brief-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem 0.7rem;
+}
+
+.book-brief-field {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.book-brief-field-wide {
+    grid-column: 1 / -1;
+}
+
+.book-brief-field > span {
+    color: var(--bs-secondary-color);
+    font-size: 0.68rem;
+    font-weight: 650;
+    letter-spacing: 0.025em;
+    text-transform: uppercase;
+}
+
+.book-brief-field > strong {
+    overflow-wrap: anywhere;
+    font-size: 0.82rem;
+    font-weight: 500;
+    line-height: 1.35;
+    white-space: pre-line;
+}
+
+.book-brief-field > .book-brief-empty {
+    color: var(--bs-secondary-color);
+    font-style: italic;
+    font-weight: 400;
+}
+
+.book-brief-updated {
+    margin-top: 0.7rem;
+    font-size: 0.68rem;
+}
+
+@media (max-width: 900px) {
+    .book-brief-fields {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .book-brief-field-wide {
+        grid-column: auto;
+    }
+}

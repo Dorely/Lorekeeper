@@ -937,11 +937,11 @@
         _actionError = null;
         try
         {
-            var clearFields = new List<string>();
-            if (_bookBrief.MinimumReaderAge is null) clearFields.Add(nameof(BookBrief.MinimumReaderAge));
-            if (_bookBrief.MaximumReaderAge is null) clearFields.Add(nameof(BookBrief.MaximumReaderAge));
-            if (_bookBrief.TargetWordCount is null) clearFields.Add(nameof(BookBrief.TargetWordCount));
-            if (_bookBrief.ReadAloudPriority is null) clearFields.Add(nameof(BookBrief.ReadAloudPriority));
+            var clearFields = new List<BookBriefField>();
+            if (_bookBrief.MinimumReaderAge is null) clearFields.Add(BookBriefField.MinimumReaderAge);
+            if (_bookBrief.MaximumReaderAge is null) clearFields.Add(BookBriefField.MaximumReaderAge);
+            if (_bookBrief.TargetWordCount is null) clearFields.Add(BookBriefField.TargetWordCount);
+            if (_bookBrief.ReadAloudPriority is null) clearFields.Add(BookBriefField.ReadAloudPriority);
 
             _bookBrief = await BookBriefs.UpdateAsync(ProjectId, new BookBriefPatch
             {

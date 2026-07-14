@@ -1,0 +1,164 @@
+@using Lorekeeper.Models
+@using Lorekeeper.Projects
+@inject IBookBriefService BookBriefs
+
+<section class="book-brief-panel" aria-label="Book Brief">
+    <div class="book-brief-header">
+        <button type="button"
+                class="book-brief-toggle"
+                aria-expanded="@(!_collapsed)"
+                title="@(_collapsed ? "Expand Book Brief" : "Collapse Book Brief")"
+                @onclick="() => _collapsed = !_collapsed">
+            <span class="book-brief-caret">@(_collapsed ? "+" : "-")</span>
+            <span class="book-brief-title">Book Brief</span>
+            @if (_brief is not null)
+            {
+                <span class="book-brief-count">@PopulatedFieldCount(_brief) set</span>
+            }
+        </button>
+        <button type="button"
+                class="btn btn-sm btn-link book-brief-refresh"
+                disabled="@_loading"
+                @onclick="ReloadAsync">
+            Refresh
+        </button>
+    </div>
+
+    @if (!_collapsed)
+    {
+        <div class="book-brief-body">
+            @if (_loading)
+            {
+                <p class="text-muted small mb-0"><em>Loading Book Brief...</em></p>
+            }
+            else if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="alert alert-danger py-2 small mb-0">@_error</div>
+            }
+            else if (_brief is null)
+            {
+                <p class="text-muted small mb-0"><em>The Book Brief could not be loaded.</em></p>
+            }
+            else
+            {
+                <p class="book-brief-help text-muted small">
+                    Canonical high-level direction maintained by Outline Chat. Ask the agent to update it as the book's target changes.
+                </p>
+                <div class="book-brief-fields">
+                    @RenderField("Book kind", BookKindLabel(_brief.BookKind))
+                    @RenderField("Genre", _brief.Genre)
+                    @RenderField("Target audience", _brief.TargetAudience, wide: true)
+                    @RenderField("Reader age", AgeRange(_brief.MinimumReaderAge, _brief.MaximumReaderAge))
+                    @RenderField("Target words", _brief.TargetWordCount?.ToString("N0"))
+                    @RenderField("Read aloud", NullableBoolean(_brief.ReadAloudPriority))
+                    @RenderField("Language / locale", _brief.LanguageLocale)
+                    @RenderField("Premise", _brief.Premise, wide: true)
+                    @RenderField("Purpose", _brief.Purpose, wide: true)
+                    @RenderField("Primary themes", _brief.PrimaryThemes, wide: true)
+                    @RenderField("Creative constraints", _brief.CreativeConstraints, wide: true)
+                    @RenderField("Point of view", _brief.PointOfView)
+                    @RenderField("Tense", _brief.Tense)
+                    @RenderField("Voice / tone", _brief.VoiceAndTone, wide: true)
+                    @RenderField("Reading-level guidance", _brief.ReadingLevelGuidance, wide: true)
+                    @RenderField("House style", _brief.HouseStyle, wide: true)
+                    @RenderField("Accessibility goals", _brief.AccessibilityGoals, wide: true)
+                    @RenderField("Visual direction", _brief.VisualDirection, wide: true)
+                </div>
+                <div class="book-brief-updated text-muted">Updated @_brief.UpdatedAt.ToLocalTime().ToString("g")</div>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public int RefreshSignal { get; set; }
+
+    private BookBrief? _brief;
+    private Guid _loadedProjectId;
+    private int _loadedRefreshSignal = -1;
+    private bool _loading;
+    private bool _collapsed;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedProjectId == ProjectId && _loadedRefreshSignal == RefreshSignal)
+            return;
+
+        _loadedProjectId = ProjectId;
+        _loadedRefreshSignal = RefreshSignal;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _brief = await BookBriefs.GetOrCreateAsync(ProjectId);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private RenderFragment RenderField(string label, string? value, bool wide = false) => @<div class="book-brief-field @(wide ? "book-brief-field-wide" : string.Empty)">
+        <span>@label</span>
+        <strong class="@(string.IsNullOrWhiteSpace(value) ? "book-brief-empty" : string.Empty)">@DisplayValue(value)</strong>
+    </div>;
+
+    private static string DisplayValue(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "Not set" : value.Trim();
+
+    private static string BookKindLabel(BookKind value) =>
+        value == BookKind.Unspecified ? "Not set" : value.ToString();
+
+    private static string AgeRange(int? minimum, int? maximum) => (minimum, maximum) switch
+    {
+        ({ } min, { } max) => $"{min}-{max}",
+        ({ } min, null) => $"{min}+",
+        (null, { } max) => $"Up to {max}",
+        _ => "Not set",
+    };
+
+    private static string NullableBoolean(bool? value) => value switch
+    {
+        true => "Yes",
+        false => "No",
+        null => "Not set",
+    };
+
+    private static int PopulatedFieldCount(BookBrief brief)
+    {
+        var count = brief.BookKind == BookKind.Unspecified ? 0 : 1;
+        count += new[]
+        {
+            brief.Premise,
+            brief.Genre,
+            brief.PrimaryThemes,
+            brief.Purpose,
+            brief.CreativeConstraints,
+            brief.TargetAudience,
+            brief.ReadingLevelGuidance,
+            brief.PointOfView,
+            brief.Tense,
+            brief.VoiceAndTone,
+            brief.LanguageLocale,
+            brief.HouseStyle,
+            brief.AccessibilityGoals,
+            brief.VisualDirection,
+        }.Count(value => !string.IsNullOrWhiteSpace(value));
+        count += brief.MinimumReaderAge is null ? 0 : 1;
+        count += brief.MaximumReaderAge is null ? 0 : 1;
+        count += brief.TargetWordCount is null ? 0 : 1;
+        count += brief.ReadAloudPriority is null ? 0 : 1;
+        return count;
+    }
+}

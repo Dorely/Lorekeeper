@@ -132,11 +132,7 @@ public sealed class OutlineCollaborationTools(
                 name: "list_outline",
                 description: "Read the outline as structured JSON with ids, ordering, projectFacts, chapter beat counts, and staged changes when Review edits is enabled. The outline text is already in the editor Context Feed; use this for mutations, staged-state verification, or missing/insufficient feed context."),
 
-            AIFunctionFactory.Create(
-                method: (BookBriefPatch patch, bool explicitUserRequest = false) =>
-                    UpdateBookBriefAsync(context, patch, explicitUserRequest),
-                name: "update_book_brief",
-                description: "Directly apply a partial Book Brief patch and return the complete updated brief. Null properties mean unchanged; clearFields explicitly removes values. Outline Chat should maintain this whenever the user commits to high-level direction. In Editor Chat set explicitUserRequest=true only when the user explicitly asked to change the Book Brief. This bypasses Review edits by design."),
+            CreateBookBriefUpdateTool(context),
 
             AIFunctionFactory.Create(
                 method: (string title, string synopsis) => CreateActAsync(context, title, synopsis),
@@ -278,6 +274,23 @@ public sealed class OutlineCollaborationTools(
         return tools;
     }
 
+    private AITool CreateBookBriefUpdateTool(OutlineCollaborationContext context) =>
+        context.BookBriefUpdatePolicy switch
+        {
+            BookBriefUpdatePolicy.OutlineMaintainer => AIFunctionFactory.Create(
+                method: (BookBriefPatch patch) => UpdateBookBriefAsync(context, patch, explicitUserRequest: false),
+                name: "update_book_brief",
+                description: "Directly apply a partial Book Brief patch and return the complete persisted brief. Omit null fields to leave them unchanged. For ordinary updates omit clearFields or pass []; clearFields is only for deliberately removing existing values and accepts only the listed field-name enum values. This bypasses Review edits by design."),
+            BookBriefUpdatePolicy.ExplicitUserRequestOnly => AIFunctionFactory.Create(
+                method: (BookBriefPatch patch, bool explicitUserRequest = false) => UpdateBookBriefAsync(context, patch, explicitUserRequest),
+                name: "update_book_brief",
+                description: "Directly apply a partial Book Brief patch only after an explicit user request and return the complete persisted brief. Set explicitUserRequest=true only when the user explicitly requested the change. Omit null fields to leave them unchanged. For ordinary updates omit clearFields or pass []; clearFields only deliberately removes values and accepts the listed field-name enum values. This bypasses Review edits by design."),
+            _ => AIFunctionFactory.Create(
+                method: () => "Error: this chat is not authorized to change the Book Brief.",
+                name: "update_book_brief",
+                description: "This chat is not authorized to change the Book Brief."),
+        };
+
     private async Task<string> UpdateBookBriefAsync(
         OutlineCollaborationContext context,
         BookBriefPatch patch,
@@ -314,9 +327,9 @@ public sealed class OutlineCollaborationTools(
         BookBriefPatch patch,
         BookBrief updated)
     {
-        var cleared = (patch.ClearFields ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var cleared = (patch.ClearFields ?? []).ToHashSet();
         var writtenValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        void Add(string field, object? patchValue, object? updatedValue, params string[] aliases)
+        void Add(BookBriefField field, object? patchValue, object? updatedValue, params string[] aliases)
         {
             if (patchValue is null || cleared.Contains(field) || updatedValue is null)
                 return;
@@ -327,25 +340,25 @@ public sealed class OutlineCollaborationTools(
                 writtenValues[alias] = value;
         }
 
-        Add(nameof(BookBrief.BookKind), patch.BookKind, updated.BookKind, "bookkind");
-        Add(nameof(BookBrief.Premise), patch.Premise, updated.Premise, "premise");
-        Add(nameof(BookBrief.Genre), patch.Genre, updated.Genre, "genre");
-        Add(nameof(BookBrief.PrimaryThemes), patch.PrimaryThemes, updated.PrimaryThemes, "primarythemes", "themes", "theme");
-        Add(nameof(BookBrief.Purpose), patch.Purpose, updated.Purpose, "purpose");
-        Add(nameof(BookBrief.CreativeConstraints), patch.CreativeConstraints, updated.CreativeConstraints, "creativeconstraints", "constraints");
-        Add(nameof(BookBrief.TargetAudience), patch.TargetAudience, updated.TargetAudience, "targetaudience", "audience");
-        Add(nameof(BookBrief.MinimumReaderAge), patch.MinimumReaderAge, updated.MinimumReaderAge, "minimumreaderage", "minreaderage");
-        Add(nameof(BookBrief.MaximumReaderAge), patch.MaximumReaderAge, updated.MaximumReaderAge, "maximumreaderage", "maxreaderage");
-        Add(nameof(BookBrief.ReadingLevelGuidance), patch.ReadingLevelGuidance, updated.ReadingLevelGuidance, "readinglevelguidance", "readinglevel");
-        Add(nameof(BookBrief.TargetWordCount), patch.TargetWordCount, updated.TargetWordCount, "targetwordcount", "wordcount");
-        Add(nameof(BookBrief.PointOfView), patch.PointOfView, updated.PointOfView, "pointofview", "pov");
-        Add(nameof(BookBrief.Tense), patch.Tense, updated.Tense, "tense");
-        Add(nameof(BookBrief.VoiceAndTone), patch.VoiceAndTone, updated.VoiceAndTone, "voiceandtone", "voice", "tone");
-        Add(nameof(BookBrief.LanguageLocale), patch.LanguageLocale, updated.LanguageLocale, "languagelocale", "language", "locale");
-        Add(nameof(BookBrief.HouseStyle), patch.HouseStyle, updated.HouseStyle, "housestyle");
-        Add(nameof(BookBrief.ReadAloudPriority), patch.ReadAloudPriority, updated.ReadAloudPriority, "readaloudpriority", "readaloud");
-        Add(nameof(BookBrief.AccessibilityGoals), patch.AccessibilityGoals, updated.AccessibilityGoals, "accessibilitygoals", "accessibility");
-        Add(nameof(BookBrief.VisualDirection), patch.VisualDirection, updated.VisualDirection, "visualdirection", "visualstrategy");
+        Add(BookBriefField.BookKind, patch.BookKind, updated.BookKind, "bookkind");
+        Add(BookBriefField.Premise, patch.Premise, updated.Premise, "premise");
+        Add(BookBriefField.Genre, patch.Genre, updated.Genre, "genre");
+        Add(BookBriefField.PrimaryThemes, patch.PrimaryThemes, updated.PrimaryThemes, "primarythemes", "themes", "theme");
+        Add(BookBriefField.Purpose, patch.Purpose, updated.Purpose, "purpose");
+        Add(BookBriefField.CreativeConstraints, patch.CreativeConstraints, updated.CreativeConstraints, "creativeconstraints", "constraints");
+        Add(BookBriefField.TargetAudience, patch.TargetAudience, updated.TargetAudience, "targetaudience", "audience");
+        Add(BookBriefField.MinimumReaderAge, patch.MinimumReaderAge, updated.MinimumReaderAge, "minimumreaderage", "minreaderage");
+        Add(BookBriefField.MaximumReaderAge, patch.MaximumReaderAge, updated.MaximumReaderAge, "maximumreaderage", "maxreaderage");
+        Add(BookBriefField.ReadingLevelGuidance, patch.ReadingLevelGuidance, updated.ReadingLevelGuidance, "readinglevelguidance", "readinglevel");
+        Add(BookBriefField.TargetWordCount, patch.TargetWordCount, updated.TargetWordCount, "targetwordcount", "wordcount");
+        Add(BookBriefField.PointOfView, patch.PointOfView, updated.PointOfView, "pointofview", "pov");
+        Add(BookBriefField.Tense, patch.Tense, updated.Tense, "tense");
+        Add(BookBriefField.VoiceAndTone, patch.VoiceAndTone, updated.VoiceAndTone, "voiceandtone", "voice", "tone");
+        Add(BookBriefField.LanguageLocale, patch.LanguageLocale, updated.LanguageLocale, "languagelocale", "language", "locale");
+        Add(BookBriefField.HouseStyle, patch.HouseStyle, updated.HouseStyle, "housestyle");
+        Add(BookBriefField.ReadAloudPriority, patch.ReadAloudPriority, updated.ReadAloudPriority, "readaloudpriority", "readaloud");
+        Add(BookBriefField.AccessibilityGoals, patch.AccessibilityGoals, updated.AccessibilityGoals, "accessibilitygoals", "accessibility");
+        Add(BookBriefField.VisualDirection, patch.VisualDirection, updated.VisualDirection, "visualdirection", "visualstrategy");
         if (writtenValues.Count == 0)
             return [];
 
