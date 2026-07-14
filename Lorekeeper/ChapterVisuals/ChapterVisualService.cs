@@ -477,6 +477,7 @@ public sealed class ChapterVisualService(
         bool includePicturePageGenerationGuidance = true)
     {
         var builder = new StringBuilder();
+        builder.AppendLine($"Chapter id: {state.ChapterId:D}");
         builder.AppendLine($"Visual mode: {state.VisualMode}");
         if (state.VisualMode == ChapterVisualMode.Prose)
         {
@@ -486,9 +487,9 @@ public sealed class ChapterVisualService(
 
         if (state.VisualMode == ChapterVisualMode.PicturePage)
         {
-            var metrics = PageMetrics(state.PageLayoutKind);
+            var geometry = PicturePageImageGenerationGuidance.CanvasGeometry(state.PageLayoutKind);
             builder.AppendLine(
-                $"Picture page layout: {state.PageLayoutKind}; physical page {metrics.PageWidthInches:0.##} x {metrics.PageHeightInches:0.##} in; spread: {metrics.IsDouble}");
+                $"Picture page layout: {geometry.LayoutKind}; leaf {geometry.LeafWidthInches:0.##} x {geometry.LeafHeightInches:0.##} in; canvas {geometry.CanvasWidthInches:0.##} x {geometry.CanvasHeightInches:0.##} in; canvas orientation {geometry.Orientation}; canvas aspect {geometry.AspectRatio}; spread: {geometry.IsSpread}; gutter center x: {(geometry.GutterCenterXPercent is { } gutter ? $"{gutter:0.#}%" : "none")}");
             if (includePicturePageGenerationGuidance)
             {
                 foreach (var guidanceLine in PicturePageImageGenerationGuidance.BuildManifestLines(state))
@@ -498,17 +499,13 @@ public sealed class ChapterVisualService(
             {
                 var fontName = fontNames?.GetValueOrDefault(text.FontFamilyKey) ?? text.FontFamilyKey;
                 builder.AppendLine(
-                    $"Text box {text.ReadingOrder}: \"{text.Text}\" at {text.XPercent:0.#},{text.YPercent:0.#} size {text.WidthPercent:0.#}x{text.HeightPercent:0.#}; font {fontName} ({text.FontFamilyKey}) {text.FontWeight}{(text.Italic ? " italic" : string.Empty)}, {text.FontSizePoints:0.#} pt, line height {text.LineHeight:0.##}, tracking {text.LetterSpacingEm:0.###} em, {text.TextAlign}/{text.VerticalAlign}");
+                    $"Text element {text.Id:D}; reading order {text.ReadingOrder}: \"{text.Text}\" at {text.XPercent:0.#},{text.YPercent:0.#} size {text.WidthPercent:0.#}x{text.HeightPercent:0.#}; font {fontName} ({text.FontFamilyKey}) {text.FontWeight}{(text.Italic ? " italic" : string.Empty)}, {text.FontSizePoints:0.#} pt, line height {text.LineHeight:0.##}, tracking {text.LetterSpacingEm:0.###} em, {text.TextAlign}/{text.VerticalAlign}");
             }
             foreach (var image in state.PageLayout.Images.OrderBy(image => image.ZIndex))
             {
+                var frame = PicturePageImageGenerationGuidance.ForSlot(state.PageLayoutKind, image);
                 var placement =
-                    $"Image {Name(image.ImageId, imageNames)} at {image.XPercent:0.#},{image.YPercent:0.#} size {image.WidthPercent:0.#}x{image.HeightPercent:0.#}, fit {image.Fit}, z {image.ZIndex}";
-                if (includePicturePageGenerationGuidance)
-                {
-                    var slot = PicturePageImageGenerationGuidance.ForSlot(state.PageLayoutKind, image);
-                    placement += $"; target aspect {slot.AspectRatio}, recommended size {slot.RecommendedSize}";
-                }
+                    $"Image element {image.Id:D}; library image {Name(image.ImageId, imageNames)}; frame at {image.XPercent:0.#},{image.YPercent:0.#} size {image.WidthPercent:0.#}x{image.HeightPercent:0.#}; frame aspect {frame.AspectRatio}; fit {image.Fit}; z {image.ZIndex}";
                 builder.AppendLine(placement);
             }
             return builder.ToString();

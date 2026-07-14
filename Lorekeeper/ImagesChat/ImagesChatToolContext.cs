@@ -1,5 +1,4 @@
 using Lorekeeper.Images;
-using Lorekeeper.Llm;
 
 namespace Lorekeeper.ImagesChat;
 
@@ -20,7 +19,6 @@ public sealed class ImagesChatToolContext(
     public int ProviderId { get; } = providerId;
     public bool VisionReady { get; } = visionReady;
     public CancellationToken TurnCancellationToken { get; } = turnCancellationToken;
-    public AgentSkillSession Skills { get; } = new();
     public string CurrentToolCallId { get; private set; } = string.Empty;
     public string CurrentToolName { get; private set; } = string.Empty;
     public string CurrentArgumentsJson { get; private set; } = "{}";

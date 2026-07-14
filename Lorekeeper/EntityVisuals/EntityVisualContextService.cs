@@ -1,4 +1,5 @@
 using Lorekeeper.Images;
+using Lorekeeper.Models;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
@@ -14,7 +15,9 @@ public sealed record EntityVisualContextReference(
     string FileName,
     string AltText,
     string Prompt,
-    bool IsExplicitImage = false);
+    bool IsExplicitImage = false,
+    EntityVisualExampleOrigin? AssociationOrigin = null,
+    PublishAssetSource ImageSource = PublishAssetSource.Uploaded);
 
 public interface IEntityVisualContextService
 {
@@ -81,8 +84,8 @@ public sealed class EntityVisualContextService(
             if (data is null) continue;
             var mappings = references.Where(item => item.ImageId == reference.ImageId).ToList();
             var mappingText = string.Join("; ", mappings.Select(item => item.EntityId is null
-                ? $"explicit project image ({item.Label})"
-                : $"{item.EntityType} {item.EntityName} [entityId={item.EntityId:N}] ({item.Label})"));
+                ? $"explicit project image ({item.Label}); imageSource={item.ImageSource}"
+                : $"{item.EntityType} {item.EntityName} [entityId={item.EntityId:N}] ({item.Label}); associationOrigin={item.AssociationOrigin?.ToString() ?? "unknown"}; imageSource={item.ImageSource}"));
             contents.Add(new TextContent($"\nMappings: {mappingText}; imageId={reference.ImageId:N}; file={reference.FileName}; alt={reference.AltText}; prompt={reference.Prompt}"));
             contents.Add(new DataContent(data.Data, data.ContentType) { Name = data.FileName });
         }
@@ -102,7 +105,9 @@ public sealed class EntityVisualContextService(
         example.SortOrder,
         example.Image.FileName,
         example.Image.AltText,
-        example.Image.Prompt);
+        example.Image.Prompt,
+        AssociationOrigin: example.Origin,
+        ImageSource: example.Image.Source);
 }
 
 public sealed class EntityVisualContextCollector

@@ -477,7 +477,11 @@ public sealed class ProjectImageJobService(
             .Select(asset => asset.Id)
             .ToListAsync(cancellationToken);
         if (found.Count != ids.Count)
-            throw new InvalidOperationException("One or more selected reference images could not be found.");
+        {
+            var foundIds = found.ToHashSet();
+            var missingIds = ids.Where(id => !foundIds.Contains(id)).Select(id => id.ToString("D"));
+            throw new InvalidOperationException($"Reference image ids not found in this project: {string.Join(", ", missingIds)}.");
+        }
 
         return ids;
     }

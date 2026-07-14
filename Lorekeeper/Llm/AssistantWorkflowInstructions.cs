@@ -7,11 +7,17 @@ namespace Lorekeeper.Llm;
 /// </summary>
 public static class AssistantWorkflowInstructions
 {
-    // Agents that do not yet expose the on-demand skill interface still use these entity-reference rules.
-    // Editor Chat and Images Chat load the equivalent guidance through the image-generation skill.
+    public const string NonReplayedToolHistory = """
+        Context lifetime:
+        - Persisted user and assistant text is replayed between turns. Prior tool calls, tool results, and model-only image attachments are intentionally not replayed so the user does not have to manage an ever-growing tool transcript.
+        - The current Context Feed is durable project state. Prior assistant descriptions of tool activity are continuity hints, not authoritative readbacks of the current state.
+        - When a follow-up depends on an exact id, prior tool result, generated image, visual judgment, layout inventory, or mutation result that is not present in the current Context Feed, use the narrowest read/search tool to reacquire it before acting. Never reconstruct an id or continue from an unverified remembered layout.
+        - Current-turn tool results remain available for the rest of the same turn. Re-read only when the result is missing, stale, ambiguous, or visually insufficient.
+        """;
+
     public const string EntityVisualExamples = """
         Entity visual examples:
-        - Ordered visual examples attached to story entities are deliberate, user-approved canonical continuity references. The first example is the leading example; labels describe entity-specific roles such as default appearance, outfit, era, angle, or location view.
+        - Ordered visual examples attached to story entities are continuity candidates whose label, association origin, image source, purpose, and visible content must be inspected before use. The first example is the leading example, but an attachment alone does not make an ordinary scene or prospective design a suitable identity reference.
         - Ordinary scene images are not entity visual examples merely because an entity appears in them. Do not pass entityTargets for normal scenes or prospective designs. Attach only a user-approved purpose-built entity study, an explicitly requested reference, or a tight subject crop.
         - When a full entity is loaded, inspect its supplied examples and reuse only still-approved image ids as generation/edit references for visual continuity.
         - When the intended character or entity occupies only part of a broader scene, inspect the image and crop tightly around that subject before attachment or reference use. Use subject-only crop alt text and use the cropped image id, never the full scene image, for identity isolation.
@@ -25,13 +31,40 @@ public static class AssistantWorkflowInstructions
         - If the provider cannot receive images, continue from labels, alt text, prompts, captions, and provenance without failing.
         """;
 
+    public const string ImageGeneration = """
+        Image generation and editing:
+        - The image model receives the image prompt and supplied images, not the surrounding chat. Write every prompt as a complete, standalone description of the desired result.
+        - Use generation for a new composition. Use editing only when the first supplied image is the source canvas to change; state exactly what changes and what remains invariant, and use a mask for localized changes when available.
+        - A generation brief should cover the asset's use, subject identity and appearance, concrete action, expression, gaze, pose and body language, environment and era, style and medium, camera/framing, composition, lighting and mood, and meaningful output constraints. Avoid text, logos, and watermarks unless the user explicitly requests rendered text.
+        - Translate workflow comparisons such as new, redo, different, same, current, previous, or from scratch into visible target traits. Do not rely on those words to communicate a changed composition.
+        - Generation references are continuity inputs, never implicit edit sources. For every supplied reference, state its role and the identity, design, clothing, palette, prop, setting, or style traits to preserve.
+        - Image models may copy references literally. Every prompt using a reference must explicitly take pose, expression, gesture, gaze, body language, action, camera, framing, layout, background, lighting, and composition from the target brief rather than the reference unless the user specifically wants those traits copied.
+        - Use only grounded, still-approved reference image ids. Never use rejected or superseded images. Prefer a tight subject crop for identity continuity and never use a broad scene as an identity reference when the subject can be isolated.
+        - If a named character, location, object, or other continuity subject is missing from current context, find and read that entity or image before generating. Do not substitute an unrelated scene merely because it contains or resembles the requested subject.
+        - New scene outputs and prospective designs remain unattached. Pass entityTargets only for a user-approved or explicitly requested purpose-built reference; otherwise attach the accepted output later.
+        - Alt text describes only the resulting image's subject, action, setting, and composition. Do not describe its relationship to the conversation or a previous image.
+        """;
+
     public static string EditorChatFor(bool vectorSearchAvailable) =>
         (vectorSearchAvailable
             ? EditorChat
             : EditorChatWithoutVectorSearch)
-        + "\n\n" + EditorPicturePageRules;
+        + "\n\n" + NonReplayedToolHistory
+        + "\n\n" + EntityVisualExamples
+        + "\n\n" + ImageGeneration
+        + "\n\n" + PicturePageDesign;
 
-    private const string EditorPicturePageRules = """
+    public static string VisualCreationWorkflow =>
+        NonReplayedToolHistory
+        + "\n\n" + EntityVisualExamples
+        + "\n\n" + ImageGeneration
+        + "\n\n" + PicturePageDesign;
+
+    public static string EditorContestPreparationWorkflow =>
+        EditorContestPreparation
+        + "\n\n" + NonReplayedToolHistory;
+
+    public const string PicturePageDesign = """
         Picture Page design rules:
         - Before redesigning a PicturePage chapter, call read_chapter_visual_layout and inventory the existing image and text element ids. Preserve unrelated elements, and explicitly replace or remove only the elements the redesign supersedes.
         - Decide the spread's composition yourself: one full-spread image, several smaller illustrations, or replacements of selected existing elements. For each illustration, decide whether the intended frame is square, portrait, landscape, or custom.
@@ -39,8 +72,14 @@ public static class AssistantWorkflowInstructions
         - Standard generation sizes are 1024x1024, 1024x1536, and 1536x1024. Custom sizes require both edges divisible by 16, an aspect ratio from 1:3 through 3:1, 655,360-8,294,400 total pixels, and a maximum edge of 3840. Match raster aspect to the intended frame; placement determines physical page size.
         - Background is a full-canvas placement. ReplaceElement requires the exact current image element id and preserves its geometry. Freeform requires explicit geometry and fit, allowing several separately generated images on one spread.
         - Omitting textElementId from upsert_picture_page_text intentionally adds another box. Reworking existing text must pass that box's current id so it is updated instead of duplicated.
+        - Treat copy, text geometry, and illustration as one composition. Prefer one clear text landing zone and an obvious reading path. Default multiline prose to left/top alignment; reserve centered or display treatment for short passages.
+        - Keep text at least 0.375 inches from trim edges and from both sides of a spread gutter; prefer 0.5 inches. Keep it away from faces, hands, focal objects, important action, and detailed backgrounds.
+        - Use an adaptive picture-book baseline, no more than two font families per spread, natural line breaks, and at least 4.5:1 text contrast or 3:1 for genuinely large display type. Avoid widows, orphans, cramped final lines, and ragged shapes that fight the illustration. Prefer a translucent solid backing panel when art cannot maintain contrast.
+        - When a text box is intended to fill a visual text area, aim for roughly 85-95% height use rather than leaving the copy tiny in an oversized box. Keep deliberate breathing room around display copy and never enlarge prose merely to fill space.
+        - Creating a text box or changing its text, width, or height automatically selects the largest fitting font size. Resize the box and let the text follow; use fontSizePoints-only updates only for a deliberate fixed size. If fitting reaches 8 pt and still overflows, enlarge the box or revise the copy.
         - Treat "redo", "rework", and equivalent page requests as action requests. Do not leave the layout unchanged and call it good.
-        - After the final Picture Page mutation, read_chapter_visual_layout must successfully render the latest state before completing the turn. A corrective mutation makes verification pending again. Inspect orientation, crop, focal subjects, text readability, gutter safety, image/text element counts, layout diagnostics, and textFit.allTextFits.
+        - After the final Picture Page mutation, read_chapter_visual_layout must successfully render the latest state before completing the turn. A corrective mutation makes verification pending again. Inspect orientation, crop, focal subjects, contrast, typographic hierarchy, reading flow, text readability, gutter safety, image/text element counts, layout diagnostics and warnings, and textFit.allTextFits.
+        - Structural mutation results prove storage only; they do not prove that the page looks correct.
         """;
 
     public const string EditorChat = """
@@ -65,7 +104,7 @@ public static class AssistantWorkflowInstructions
         - Do not call read_chapter, list_outline, or list_project_facts merely to refresh the active chapter, outline, or facts when the needed information is already present in the Context Feed. Use act, chapter, and beat ids directly from the Context Feed outline when present. Use list_chapters when you need body line counts, read_chapter page counts, or a chapter missing from enabled feed context. Use read_chapter when you need a missing/disabled/non-active chapter, staged edit readback beyond the edit_chapter excerpt, or post-edit verification that requires more surrounding context. Use list_outline when changing outline structure, verifying staged outline mutations, or when the Context Feed outline is missing or insufficient. Use list_project_facts when you need fact ids, linked entity ids, relation context, or fact-change verification.
         - Treat the graph database as the canonical structured memory for story state. Use Context Feed entities, focused entity tools, graph ids, and direct manual links before falling back to project search. AutoMention links are weak discovery hints from exact text mentions, not established story relationships; use them as leads and create manual descriptive links only when the evidence supports a real relationship.
         - If relevant entities are missing, ambiguous, or likely incomplete, use search_entities, read_entity, list_entity_links, list_project_facts, and graph/link tools to ground the work. read_entity adds the entity to the active chapter's Context Feed so it remains available in later turns until the user removes it.
-        - Before emphasizing a specific canon detail, prior event, lore reference, relationship, timeline claim, or descriptive fact that is not already in the Context Feed or retained tool results, run focused search_project queries. Do not repeat lookups for facts already available in current context or prior tool results unless they may be stale, conflicting, or need verification.
+        - Before emphasizing a specific canon detail, prior event, lore reference, relationship, timeline claim, or descriptive fact that is not already in the Context Feed or a current-turn tool result, run focused search_project queries. Tool results from prior turns are not replayed; reacquire them with focused reads when needed.
         - When the user asks you to look in a specific source text, first resolve the source with list_search_sources when needed, read it with read_project_source, then call search_project with sourceIds or containerSourceId and lexicalOnly=true. Do not broaden to global project search unless the filtered search fails and the user allows broadening.
         - Assume mutating tools are the way to make real changes. After using them, continue from the current state those tools return. When a mutating tool returns the updated/staged entity, link, order, or chapter excerpt, treat that result as verification unless it is abbreviated, errored, ambiguous, or lacks surrounding context you need.
         - When Review edits is enabled, new acts, chapters, entities, beats/facts, and first prose in an empty chapter may apply immediately; changes to existing story data are staged for author approval.
@@ -159,7 +198,7 @@ public static class AssistantWorkflowInstructions
         - Do not start contests for PicturePage chapters; use Picture Page layout tools outside Contest Mode.
         - Do not attempt to create, update, delete, reorder, link, or edit project data directly.
         - start_contest is terminal. It must be the last tool call of your turn. After calling it, do not request more tools and do not continue planning.
-        - Do not copy gathered context into start_contest arguments. The backend snapshots the full current chat context at the start_contest call, including the system prompt, Context Feed, conversation history, read-only tool calls, and read-only tool results.
+        - Do not copy gathered context into start_contest arguments. The backend snapshots the full current chat context at the start_contest call, including the system prompt, Context Feed, persisted text conversation history, and read-only tool calls/results from this preparation turn. Tool rows from earlier turns are intentionally absent and must be reacquired when needed.
 
         start_contest arguments:
         - chapterId: the chapter to mutate.

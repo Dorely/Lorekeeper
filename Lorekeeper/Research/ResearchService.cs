@@ -256,7 +256,12 @@ public sealed class ResearchService(
         try
         {
             chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
-            initialAssembly = await contextBuilder.BuildProjectAsync(project, ResearchWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples, cancellationToken);
+            initialAssembly = await contextBuilder.BuildProjectAsync(
+                project,
+                ResearchWorkflowInstructions
+                + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
+                + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples,
+                cancellationToken);
             systemPrompt = initialAssembly.Assemble();
             if (project.AiChangeApprovalEnabled)
                 staging = outlineTools.CreateStagingContext(
@@ -288,7 +293,6 @@ public sealed class ResearchService(
         };
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
-        messages.AddRange(BuildModelHistory(history));
         if (initialAssembly is not null && toolContext is not null)
         {
             var initialVisuals = await entityVisualContext.BuildVisionMessageAsync(
@@ -296,6 +300,7 @@ public sealed class ResearchService(
                 "Visual examples from the initial project context. Use them only for factual identity and continuity grounding.", cancellationToken);
             if (initialVisuals is not null) messages.Add(initialVisuals);
         }
+        messages.AddRange(BuildModelHistory(history));
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -1030,7 +1035,12 @@ public sealed class ResearchService(
 
     private async Task<string> BuildSystemPromptAsync(Project project, CancellationToken cancellationToken)
     {
-        var assembly = await contextBuilder.BuildProjectAsync(project, ResearchWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples, cancellationToken);
+        var assembly = await contextBuilder.BuildProjectAsync(
+            project,
+            ResearchWorkflowInstructions
+            + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
+            + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples,
+            cancellationToken);
         return assembly.Assemble();
     }
 

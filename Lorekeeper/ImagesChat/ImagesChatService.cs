@@ -26,7 +26,6 @@ public sealed class ImagesChatService(
     IProjectImageService projectImages,
     IEntityVisualContextService entityVisualContext,
     ImagesChatTools tools,
-    IAgentSkillRegistry agentSkills,
     IOptions<AgentOptions> options,
     ILogger<ImagesChatService> logger) : IImagesChatService
 {
@@ -41,7 +40,6 @@ public sealed class ImagesChatService(
         - Help the user generate new project images, edit existing project images, and reason about where images fit in Picture Page and Illustrated Prose chapters.
         - Use project guidance, outline, facts, chapters, image metadata, and visual layout manifests before making image-prompt decisions.
         - Use rendered snapshot inspection when the user asks about the actual visible layout and the provider is vision-ready.
-        - Load the applicable built-in skill before composing specialized tool arguments; guarded tools do not mutate or queue work until their required skills are active.
         - Queue image generation/edit jobs with generate_image or edit_image. These tools wait for completion; after a successful job, the generated images are supplied back to your model context when the provider supports vision.
         - Do not claim an image was generated or edited unless the tool returns final saved image ids.
         - Keep final responses practical: mention saved image ids/filenames, what changed, any failed outputs, and useful next steps such as placing an image in a chapter.
@@ -211,7 +209,7 @@ public sealed class ImagesChatService(
         {
             var project = await projects.GetByIdAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            initialAssembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + agentSkills.BuildCatalogInstructions(), cancellationToken);
+            initialAssembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.VisualCreationWorkflow, cancellationToken);
             systemPrompt = initialAssembly.Assemble();
             chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
             toolContext = new ImagesChatToolContext(projectId, conversation.Id, chatProvider.Id, visionReady, OnToolMutated, cancellationToken);
@@ -237,15 +235,29 @@ public sealed class ImagesChatService(
 
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
-        messages.AddRange(BuildModelHistory(history));
-        if (turnAttachments.Count > 0)
-            messages.Add(await BuildAttachedImagesMessageAsync(projectId, turnAttachments, visionReady, cancellationToken));
         if (initialAssembly is not null)
         {
             var visualMessage = await entityVisualContext.BuildVisionMessageAsync(
                 projectId, initialAssembly.Visuals, visionReady,
-                "Entity visual examples from the initial project context. Reuse them as references for continuity-sensitive image work.", cancellationToken);
+                "Entity and explicit-image visual context from the project follows. Treat each mapping as a continuity candidate and inspect its label, association origin, image source, purpose, and visible content before using it.", cancellationToken);
             if (visualMessage is not null) messages.Add(visualMessage);
+        }
+        foreach (var persistedMessage in history)
+        {
+            if (persistedMessage.Id == userMessage.Id && turnAttachments.Count > 0)
+            {
+                messages.Add(await BuildUserMessageWithAttachmentsAsync(
+                    projectId,
+                    persistedMessage.Content,
+                    turnAttachments,
+                    visionReady,
+                    cancellationToken));
+                continue;
+            }
+
+            var modelMessage = ToModelHistoryMessage(persistedMessage);
+            if (modelMessage is not null)
+                messages.Add(modelMessage);
         }
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
@@ -476,7 +488,6 @@ public sealed class ImagesChatService(
                     yield return new ImagesChatMutated();
             }
 
-            toolContext.Skills.ActivatePending();
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
             if (modelOnlyImagesForNextRound.Count > 0)
                 messages.Add(await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound));
@@ -491,7 +502,7 @@ public sealed class ImagesChatService(
 
     private async Task<string> BuildSystemPromptAsync(Project project, CancellationToken cancellationToken)
     {
-        var assembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + agentSkills.BuildCatalogInstructions(), cancellationToken);
+        var assembly = await contextBuilder.BuildProjectAsync(project, ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.VisualCreationWorkflow, cancellationToken);
         return assembly.Assemble();
     }
 
@@ -560,15 +571,17 @@ public sealed class ImagesChatService(
         await conversations.SaveChangesAsync(CancellationToken.None);
     }
 
-    private async Task<ChatMessage> BuildAttachedImagesMessageAsync(
+    private async Task<ChatMessage> BuildUserMessageWithAttachmentsAsync(
         Guid projectId,
+        string userText,
         IReadOnlyList<ProjectImageChatAttachmentView> attachments,
         bool visionReady,
         CancellationToken cancellationToken)
     {
         var contents = new List<AIContent>
         {
-            new TextContent("Images currently attached to Images Chat for this turn. Treat these as user-provided visual context. When generating or editing a continuity-related image, pass relevant attached image ids in referenceImageIds."),
+            new TextContent(userText),
+            new TextContent("\nCurrent-turn attached images follow. Treat them as user-provided visual context. When generating or editing a continuity-related image, pass only relevant attached image ids in referenceImageIds."),
         };
 
         foreach (var attachment in attachments)
@@ -651,16 +664,6 @@ public sealed class ImagesChatService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to persist Images chat message {MessageId}", message.Id);
-        }
-    }
-
-    private static IEnumerable<ChatMessage> BuildModelHistory(IEnumerable<ProjectImageMessage> history)
-    {
-        foreach (var message in history)
-        {
-            var chatMessage = ToModelHistoryMessage(message);
-            if (chatMessage is not null)
-                yield return chatMessage;
         }
     }
 

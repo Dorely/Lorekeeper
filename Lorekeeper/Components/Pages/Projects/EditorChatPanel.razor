@@ -938,7 +938,7 @@
         }
 
         var assembly = await ContextBuilder.BuildAsync(project, currentChapter, cancellationToken);
-        _systemPrompt = assembly.Assemble(_contestEnabled ? AssistantWorkflowInstructions.EditorContestPreparation : null);
+        _systemPrompt = assembly.Assemble();
     }
 
     private IEnumerable<ChatTranscriptTokenMessage> ModelReplayTokenMessages()

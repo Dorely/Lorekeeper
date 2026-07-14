@@ -399,9 +399,7 @@ public sealed class ResearchTools(
     private async Task<IReadOnlyList<EntityVisualExampleView>> QueueEntityVisualsAsync(ResearchToolContext context, Guid entityId)
     {
         var examples = await entityVisualExamples.ListForEntityAsync(context.ProjectId, entityId);
-        context.QueueEntityVisuals(examples.Select(example => new EntityVisualContextReference(
-            example.Image.Id, example.EntityId, example.EntityType, example.EntityName, example.Label,
-            example.SortOrder, example.Image.FileName, example.Image.AltText, example.Image.Prompt)));
+        context.QueueEntityVisuals(examples.Select(EntityVisualContextService.ToReference));
         return examples;
     }
 

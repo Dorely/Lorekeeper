@@ -27,7 +27,7 @@ public sealed class ContextBuilder(
     IEntityVisualExampleService entityVisualExamples,
     IChapterVisualService chapterVisuals,
     IProjectFontService projectFonts,
-    IAgentSkillRegistry agentSkills) : IEditorContextService
+    IEmbeddingService embeddings) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         Project project,
@@ -39,13 +39,17 @@ public sealed class ContextBuilder(
             : (await preferences.ListForChapterAsync(project.Id, currentChapter.Id, cancellationToken))
                 .ToDictionary(preference => PreferenceKey(preference.Kind, preference.Key), StringComparer.Ordinal);
 
+        var assistantWorkflow = project.ContestModeEnabled
+            ? AssistantWorkflowInstructions.EditorContestPreparationWorkflow
+            : AssistantWorkflowInstructions.EditorChatFor(await embeddings.IsAvailableAsync(cancellationToken));
+
         var items = new List<ContextItem>
         {
             new(
                 Key: EditorContextKeys.AssistantWorkflow,
                 Kind: ContextItemKind.AssistantWorkflow,
                 Label: "Assistant Workflow",
-                Body: AssistantWorkflowInstructions.EditorChat + "\n\n" + agentSkills.BuildCatalogInstructions(),
+                Body: assistantWorkflow,
                 IsEnabled: true,
                 IsRemovable: false,
                 Badge: "App"),
@@ -471,7 +475,8 @@ public sealed class ContextBuilder(
                     image.FileName,
                     image.AltText,
                     image.Prompt,
-                    IsExplicitImage: true),
+                    IsExplicitImage: true,
+                    ImageSource: image.Source),
             ]);
     }
 

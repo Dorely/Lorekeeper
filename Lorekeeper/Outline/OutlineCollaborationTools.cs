@@ -459,7 +459,8 @@ public sealed class OutlineCollaborationTools(
                     image.FileName,
                     image.AltText,
                     image.Prompt,
-                    IsExplicitImage: true),
+                    IsExplicitImage: true,
+                    ImageSource: image.Source),
             ]);
             ctx.OnMutated();
             return JsonSerializer.Serialize(new
@@ -479,9 +480,7 @@ public sealed class OutlineCollaborationTools(
     private async Task<IReadOnlyList<EntityVisualExampleView>> QueueEntityVisualsAsync(OutlineCollaborationContext ctx, Guid entityId)
     {
         var examples = await entityVisualExamples.ListForEntityAsync(ctx.ProjectId, entityId);
-        ctx.QueueVisuals(examples.Select(example => new EntityVisualContextReference(
-            example.Image.Id, example.EntityId, example.EntityType, example.EntityName, example.Label,
-            example.SortOrder, example.Image.FileName, example.Image.AltText, example.Image.Prompt)));
+        ctx.QueueVisuals(examples.Select(EntityVisualContextService.ToReference));
         return examples;
     }
 

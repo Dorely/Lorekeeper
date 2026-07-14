@@ -301,8 +301,7 @@
 | `CodexChatClient.cs` | `IChatClient` implementation for Codex Responses API (SSE parser, multimodal user content, function-calling, strict-schema enforcement, reasoning and tool-argument streaming). |
 | `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs an `IChatClient` per provider (Codex vs OpenAI-compatible), applies configured Codex/OAuth request timeout, and exposes `TestModelAsync`. |
 | `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image-reading client for vision probes and PDF page transcription; supports Codex Responses and OpenAI-compatible multimodal chat requests. |
-| `AssistantWorkflowInstructions.cs` | Core code-owned AI workflow/tool-use instructions reused across agents, including exact-ID and pagination handling, always-on agent-led PicturePage composition/verification rules, Contest preparation, and entity-reference rules. |
-| `AgentSkills.cs` | Built-in `image-generation` and `picture-page-design` registry, detailed library-first PicturePage composition/typesetting guidance, `read_skill` tool, and turn-scoped required-skill activation/guards. |
+| `AssistantWorkflowInstructions.cs` | Core code-owned AI workflow/tool-use instructions reused across agents, including non-replayed tool-history recovery, exact-ID/pagination handling, always-on image/reference and agent-led PicturePage composition/verification rules, and Contest preparation. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |
 | `SeedSystemPrompt.cs` | Hardcoded default system prompt seeded into every newly-created `Project`. |
 
@@ -373,7 +372,7 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Async Context Feed/editor chat assembly with full-GUID chapter/layout context and shared paginated selected-entity representations instead of silent record limits. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Async Context Feed/editor chat assembly with the literal model workflow, full-GUID chapter/layout context, and shared paginated selected-entity representations instead of silent record limits. |
 | `AgentPayloadPaginator.cs` | Shared soft-target model payload paginator; repeats identity fields, packs logical JSON records, and segments only individually oversized text fields with explicit continuation metadata. |
 | `IEditorContextService.cs` | Editor context facade extending `IContextBuilder`; persists per-chapter context item inclusion, including explicit project-image context keys, and exposes auto/included entity/context key sets for recommendations. |
 | `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
@@ -389,7 +388,7 @@
 | `EntityVisualModels.cs` | Read/request/change records for visual examples, entity targets, and source candidates. |
 | `EntityVisualContextOptions.cs` | Limits for images per entity/turn, model input edge, and source visuals per ingest chunk. |
 | `IEntityVisualExampleService.cs` / `EntityVisualExampleService.cs` | Association/candidate reads and mutations, non-throwing entity-target validation, promotion, cleanup, and entity reindexing. |
-| `EntityVisualContextService.cs` | Bounded, deduplicated multimodal entity context assembly for agent turns. |
+| `EntityVisualContextService.cs` | Bounded, deduplicated multimodal entity context assembly with explicit association-origin and image-source metadata for agent turns. |
 
 ### Tokens/
 
@@ -446,7 +445,7 @@
 | `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Persistence-facing image job service for create/list/start/cancel/complete jobs, race-safe output saving/state/errors, and PNG/shape mask validation. |
 | `IProjectImageGenerationRuntime.cs` / `ProjectImageGenerationRuntime.cs` | Singleton FIFO image queue with one active job per project, per-job cancellation propagated to providers/retries, partial previews, completion waiters, and state notifications. |
 | `ProjectImageGenerationStartupWorker.cs` | Hosted startup worker that marks interrupted running image jobs failed and resumes queued project work. |
-| `IProjectImageProvider.cs` / `CodexProjectImageProvider.cs` | Responses image provider for Codex/OpenAI account generation and masked edits with streamed partials, reference-only generation semantics, and source-canvas edit semantics. |
+| `IProjectImageProvider.cs` / `CodexProjectImageProvider.cs` | Responses image provider for Codex/OpenAI account generation and masked edits with streamed partials, explicit generate/edit actions, continuity-reference generation semantics, and source-canvas edit semantics. |
 | `ProjectImageGenerationOptions.cs` | Configurable image model defaults, count/reference limits, retry/timeout settings, partial image count, and agent wait timeout. |
 | `DataUrl.cs` | Shared data URL parse/format helper for mask and provider payloads. |
 | `ProjectImageBinary.cs` | Validates PNG/JPEG/WebP raster input and normalizes WebP library output. |
@@ -457,8 +456,8 @@
 
 | File | Description |
 |------|-------------|
-| `IImagesChatService.cs` / `ImagesChatService.cs` | Separate project-scoped Images Chat service with project context, attached image context, tool streaming, persisted transcript/visuals, queued generation/edit tools, and model-only image context for vision-ready turns. |
-| `ImagesChatTools.cs` | Images Chat LLM tools for paginated entity/link and source reads, compact counted search discovery, project/image reads, visual inspection/crops/masks, generation/editing, and chapter placement/context. |
+| `IImagesChatService.cs` / `ImagesChatService.cs` | Separate project-scoped Images Chat service with always-on image/layout workflow guidance, pre-history automatic visual context, attached current-turn images, tool streaming, persisted transcript/visuals, and queued generation/edit tools. |
+| `ImagesChatTools.cs` | Images Chat LLM tools for paginated entity/link and source reads, compact counted search discovery, project/image reads, visual inspection/crops/masks, generation/editing with requested/actual raster metadata, and explicit chapter geometry/placement context. |
 | `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, cancellation and owned image jobs, current tool metadata, visible/model-only images, and mutation signaling. |
 | `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
 | `ImagesChatTurnRunner.cs` | Background turn runner for Images Chat: executes scoped chat turns outside component lifetime and replays buffered live updates to reopened panels. |
@@ -470,7 +469,7 @@
 | `ChapterVisualModels.cs` | UI/service records for chapter visual state, role-aware PicturePage image placement with optional Freeform geometry, automatic text-fit results, rendered fit details, and structured layout diagnostics. |
 | `ChapterTextLayoutSynchronizer.cs` | Shared canonical-body synchronizer for persisted Picture Page text boxes, including deterministic single-box rebuilding when prose invalidates a multi-box text layout. |
 | `IChapterVisualService.cs` / `ChapterVisualService.cs` | Mode-gated visual facade for background/replacement/agent-positioned Freeform image placement, font-byte-consistent rendering and largest-fitting PicturePage text, body synchronization, manifests, diagnostic snapshots, and guide-free publish surfaces. |
-| `PicturePageImageGenerationGuidance.cs` | Physical/bleed/gutter-aware PicturePage targets and model-facing full-page/slot composition constraints; workflow rules live in the page-design skill. |
+| `PicturePageImageGenerationGuidance.cs` | Physical/bleed/gutter-aware PicturePage canvas/frame geometry plus model-facing full-page/slot composition constraints; workflow rules are always-on in assistant instructions. |
 | `PicturePageLayoutDiagnostics.cs` | Deterministic trim/preferred/gutter, overlapping-text, and higher-image structural checks shared by editor warnings and rendered snapshots. |
 
 ### Fonts/
@@ -505,9 +504,9 @@
 | File | Description |
 |------|-------------|
 | `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, staging helpers, persisted/model-visible visuals, and pending PicturePage render-verification state. |
-| `EditorChatService.cs` | Persistent streaming editor chat: assembles Context Feed and visual snapshots, preloads PicturePage skills, passes complete tool envelopes without raw slicing, enforces post-mutation visual verification, stages Review edits, and routes Contest Mode. |
+| `EditorChatService.cs` | Persistent streaming editor chat: assembles exact always-on Context Feed guidance and pre-history visual snapshots, passes complete tool envelopes without raw slicing, enforces post-mutation visual verification, stages Review edits, and routes Contest Mode. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific paginated chapter reads and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor tools for paginated entity/link/source reads, counted compact discovery, project impact scoping, library-first generation, visual inspection, explicit PicturePage placement, mutation inventories, revision agents, and Contest preparation. |
+| `EditorChatTools.cs` | Editor tools for paginated entity/link/source reads, counted compact discovery, project impact scoping, library-first generation with requested/actual raster metadata, visual inspection, explicit PicturePage canvas/placement/inventories, revision agents, and Contest preparation. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
 | `EditorChatTurnRunner.cs` | Background turn runner for Editor Chat: preserves active turns across tab changes while leaving explicit Stop as the cancellation path. |

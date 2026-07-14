@@ -30,7 +30,6 @@ public sealed class ImagesChatTools(
     IProjectFontService projectFonts,
     IEditorContextService editorContext,
     IVisionModelClientFactory visionClient,
-    AgentSkillTools agentSkillTools,
     IOptions<ProjectImageGenerationOptions> imageOptions,
     IOptions<EditorChatOptions> editorOptions)
 {
@@ -43,8 +42,6 @@ public sealed class ImagesChatTools(
     {
         IList<AITool> tools =
         [
-            agentSkillTools.BuildReadSkillTool(context.Skills),
-
             AIFunctionFactory.Create(
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
                     ListSearchSourcesAsync(context, query, sourceTypes, topK),
@@ -140,18 +137,18 @@ public sealed class ImagesChatTools(
                 method: (string prompt, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, string? label = null, Guid? targetChapterId = null, Guid? targetPictureImageElementId = null) =>
                     GenerateImageAsync(context, prompt, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, entityTargets, label, targetChapterId, targetPictureImageElementId),
                 name: "generate_image",
-                description: "Generate library images. Requires the image-generation skill loaded in an earlier tool round; PicturePage targets also require picture-page-design. Ordinary scenes and prospective designs must omit entityTargets. Pass entityTargets only when the user explicitly approved or requested a purpose-built reference asset; otherwise attach an approved output later with attach_entity_visual_example. Use only grounded eligible entity ids and only still-approved referenceImageIds."),
+                description: $"Generate library images. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} referenceImageIds. Ordinary scenes and prospective designs must omit entityTargets. Pass entityTargets only when the user explicitly approved or requested a purpose-built reference asset; otherwise attach an approved output later with attach_entity_visual_example. Use only grounded eligible entity ids and only still-approved referenceImageIds."),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, string prompt, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, string? altText = null, string? size = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, Guid[]? referenceImageIds = null, EntityVisualTarget[]? entityTargets = null, bool inheritSourceEntityTargets = false, string? label = null) =>
                     EditImageAsync(context, sourceImageId, prompt, maskId, maskShapes, maskLabel, altText, size, quality, outputFormat, outputCompression, count, referenceImageIds, entityTargets, inheritSourceEntityTargets, label),
                 name: "edit_image",
-                description: "Edit a project image. Requires the image-generation skill loaded in an earlier tool round. Outputs do not inherit entity targets by default. Set inheritSourceEntityTargets=true only for a still-approved purpose-built reference whose identity role remains valid; ordinary scenes, redesigns, and prospective outputs stay unattached."),
+                description: $"Edit a project image. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} referenceImageIds in addition to the source image. Outputs do not inherit entity targets by default. Set inheritSourceEntityTargets=true only for a still-approved purpose-built reference whose identity role remains valid; ordinary scenes, redesigns, and prospective outputs stay unattached."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, Guid imageId, string? picturePagePlacementRole = null, Guid? targetPictureImageElementId = null) => AddProjectImageToChapterAsync(context, chapterId, imageId, picturePagePlacementRole, targetPictureImageElementId),
                 name: "add_project_image_to_chapter",
-                description: "Place an existing project image into a chapter visual layout. PicturePage placement requires the picture-page-design skill loaded in an earlier tool round. PicturePage roles are Freeform, Background, and ReplaceElement; ReplaceElement requires targetPictureImageElementId and preserves geometry/layer."),
+                description: "Place an existing project image into a chapter visual layout. PicturePage roles are Freeform, Background, and ReplaceElement; ReplaceElement requires targetPictureImageElementId and preserves geometry/layer."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, Guid imageId) => AddProjectImageToContextAsync(context, chapterId, imageId),
@@ -416,9 +413,15 @@ public sealed class ImagesChatTools(
             chapter = new { id = chapter.Id, chapter.Title, chapter.Synopsis },
             state.VisualMode,
             state.PageLayoutKind,
+            canvas = PicturePageCanvasPayload(state),
             state.IllustrationLayout,
             state.PageLayout,
-            manifest = chapterVisuals.BuildManifest(state, imageNames, fontNames),
+            inventory = PicturePageInventoryPayload(state),
+            manifest = chapterVisuals.BuildManifest(
+                state,
+                imageNames,
+                fontNames,
+                includePicturePageGenerationGuidance: false),
             fontCatalog = fontCatalog.Select(family => new
             {
                 family.Key,
@@ -582,12 +585,6 @@ public sealed class ImagesChatTools(
         var targetResolution = await ResolvePicturePageGenerationTargetAsync(ctx, targetChapterId, targetPictureImageElementId);
         if (targetResolution.Error is not null)
             return targetResolution.Error;
-        string[] requiredSkills = targetResolution.Target is null
-            ? [AgentSkillIds.ImageGeneration]
-            : [AgentSkillIds.ImageGeneration, AgentSkillIds.PicturePageDesign];
-        if (ctx.Skills.Require(requiredSkills) is { } skillError)
-            return skillError;
-
         var promptText = targetResolution.PromptAppendix is { Length: > 0 } appendix
             ? prompt.Trim() + appendix
             : prompt.Trim();
@@ -666,8 +663,6 @@ public sealed class ImagesChatTools(
         bool inheritSourceEntityTargets,
         string? label)
     {
-        if (ctx.Skills.Require(AgentSkillIds.ImageGeneration) is { } skillError)
-            return skillError;
         if (sourceImageId == Guid.Empty)
             return "Error: sourceImageId is required.";
         if (string.IsNullOrWhiteSpace(prompt))
@@ -736,9 +731,10 @@ public sealed class ImagesChatTools(
                 var caption = string.Equals(ctx.CurrentToolName, "edit_image", StringComparison.Ordinal)
                     ? "Edited output saved to the image library."
                     : "Generated output saved to the image library.";
-                ctx.AddVisual(await BuildVisualAsync(ctx, image, title: image.FileName, caption: caption));
+                var visual = await BuildVisualAsync(ctx, image, title: image.FileName, caption: caption);
+                ctx.AddVisual(visual);
                 ctx.AddModelOnlyImage(image);
-                outputs.Add(ImagePayload(image));
+                outputs.Add(ImageOutputPayload(image, job.Size, visual.Width, visual.Height));
             }
 
             ctx.MarkMutated();
@@ -767,12 +763,6 @@ public sealed class ImagesChatTools(
         var chapter = await chapters.GetAsync(chapterId);
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
-        if (chapter.VisualMode == ChapterVisualMode.PicturePage
-            && ctx.Skills.Require(AgentSkillIds.PicturePageDesign) is { } skillError)
-        {
-            return skillError;
-        }
-
         if (!TryParseOptionalEnum(picturePagePlacementRole, out PicturePageImagePlacementRole? parsedRole, out var roleError))
             return roleError!;
         if (targetPictureImageElementId is { } targetId && targetId != Guid.Empty && parsedRole != PicturePageImagePlacementRole.ReplaceElement)
@@ -902,6 +892,25 @@ public sealed class ImagesChatTools(
         image.SizeBytes,
     };
 
+    private static object ImageOutputPayload(ProjectImageView image, string requestedSize, int? width, int? height) => new
+    {
+        image.Id,
+        image.FileName,
+        image.ContentType,
+        image.PreviewUrl,
+        FullUrl = image.PreviewUrl.Replace("?maxEdge=640", string.Empty, StringComparison.Ordinal),
+        image.AltText,
+        image.Source,
+        image.Prompt,
+        image.GenerationModel,
+        image.SourceMetadataJson,
+        requestedSize,
+        actualRaster = RasterMetadata(width, height),
+        image.CreatedAt,
+        image.UpdatedAt,
+        image.SizeBytes,
+    };
+
     private static object JobPayload(ProjectImageJobView job) => new
     {
         job.Id,
@@ -932,6 +941,91 @@ public sealed class ImagesChatTools(
             ? ((int?)null, (int?)null)
             : (bitmap.Width, bitmap.Height);
     }
+
+    private static object RasterMetadata(int? width, int? height) => new
+    {
+        width,
+        height,
+        orientation = width is null || height is null
+            ? "unknown"
+            : width == height
+                ? "square"
+                : width > height ? "landscape" : "portrait",
+        aspectRatio = width is null || height is null || width <= 0 || height <= 0
+            ? "unknown"
+            : ReducedAspectRatio(width.Value, height.Value),
+    };
+
+    private static string ReducedAspectRatio(int width, int height)
+    {
+        var a = Math.Abs(width);
+        var b = Math.Abs(height);
+        while (b != 0)
+        {
+            var next = a % b;
+            a = b;
+            b = next;
+        }
+
+        var divisor = Math.Max(1, a);
+        return $"{width / divisor}:{height / divisor}";
+    }
+
+    private static object? PicturePageCanvasPayload(ChapterVisualState state)
+    {
+        if (state.VisualMode != ChapterVisualMode.PicturePage)
+            return null;
+
+        var geometry = PicturePageImageGenerationGuidance.CanvasGeometry(state.PageLayoutKind);
+        return new
+        {
+            layoutKind = geometry.LayoutKind,
+            leaf = new
+            {
+                widthInches = geometry.LeafWidthInches,
+                heightInches = geometry.LeafHeightInches,
+            },
+            widthInches = geometry.CanvasWidthInches,
+            heightInches = geometry.CanvasHeightInches,
+            geometry.Orientation,
+            geometry.AspectRatio,
+            geometry.IsSpread,
+            geometry.GutterCenterXPercent,
+        };
+    }
+
+    private static object PicturePageInventoryPayload(ChapterVisualState state) => new
+    {
+        imageElementIds = state.PageLayout.Images.Select(image => image.Id),
+        textElementIds = state.PageLayout.TextElements.Select(textElement => textElement.Id),
+        images = state.PageLayout.Images.Select(image =>
+        {
+            var frame = PicturePageImageGenerationGuidance.ForSlot(state.PageLayoutKind, image);
+            return new
+            {
+                imageElementId = image.Id,
+                libraryImageId = image.ImageId,
+                image.XPercent,
+                image.YPercent,
+                image.WidthPercent,
+                image.HeightPercent,
+                frameAspectRatio = frame.AspectRatio,
+                image.Fit,
+                image.Opacity,
+                image.ZIndex,
+            };
+        }),
+        textElements = state.PageLayout.TextElements.Select(textElement => new
+        {
+            textElementId = textElement.Id,
+            textElement.ReadingOrder,
+            textElement.XPercent,
+            textElement.YPercent,
+            textElement.WidthPercent,
+            textElement.HeightPercent,
+            textElement.ZIndex,
+        }),
+    };
 
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max] + "...";

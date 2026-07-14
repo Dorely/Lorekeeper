@@ -44,6 +44,21 @@ public static class PicturePageImageGenerationGuidance
             RecommendedHeightPixels: metrics.HeightPixels);
     }
 
+    public static PicturePageCanvasGeometry CanvasGeometry(ChapterPageLayoutKind kind)
+    {
+        var page = ForPage(kind);
+        return new PicturePageCanvasGeometry(
+            page.PageLayoutKind,
+            page.PageWidthInches,
+            page.PageHeightInches,
+            page.SurfaceWidthInches,
+            page.SurfaceHeightInches,
+            page.SurfaceWidthInches >= page.SurfaceHeightInches ? "landscape" : "portrait",
+            page.AspectRatio,
+            page.IsDoubleSpread,
+            page.IsDoubleSpread ? 50d : null);
+    }
+
     public static PicturePageImageGenerationTarget ForSlot(
         ChapterPageLayoutKind kind,
         PicturePageImageElement image)
@@ -144,8 +159,8 @@ public static class PicturePageImageGenerationGuidance
         var page = ForPage(state.PageLayoutKind);
         var lines = new List<string>
         {
-            $"Image generation target: full page/spread aspect {page.AspectRatio}, recommended size {page.RecommendedSize}.",
-            $"Physical page target: {FormatNumber(page.SurfaceWidthInches)} x {FormatNumber(page.SurfaceHeightInches)} inches; compose through edges for bleed while keeping important content out of trim loss areas.",
+            $"Canvas geometry: {FormatNumber(page.SurfaceWidthInches)} x {FormatNumber(page.SurfaceHeightInches)} inches, {page.AspectRatio} aspect, {(page.SurfaceWidthInches >= page.SurfaceHeightInches ? "landscape" : "portrait")} orientation.",
+            "Choose each generated raster for its intended frame; placement determines physical size.",
         };
 
         if (page.IsDoubleSpread)
@@ -284,3 +299,14 @@ public sealed record PicturePageImageGenerationTarget(
     string RecommendedSize,
     int RecommendedWidthPixels,
     int RecommendedHeightPixels);
+
+public sealed record PicturePageCanvasGeometry(
+    ChapterPageLayoutKind LayoutKind,
+    double LeafWidthInches,
+    double LeafHeightInches,
+    double CanvasWidthInches,
+    double CanvasHeightInches,
+    string Orientation,
+    string AspectRatio,
+    bool IsSpread,
+    double? GutterCenterXPercent);

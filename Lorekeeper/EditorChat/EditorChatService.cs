@@ -27,7 +27,6 @@ public sealed class EditorChatService(
     IProjectImageGenerationRuntime imageRuntime,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
-    IEmbeddingService embeddings,
     EditorChatTools tools,
     OutlineCollaborationTools outlineTools,
     IEditorContestService contestService,
@@ -36,7 +35,6 @@ public sealed class EditorChatService(
     IAiChangeApprovalService changeApproval,
     IAiChangeRepository changes,
     IServiceScopeFactory scopeFactory,
-    IAgentSkillRegistry agentSkills,
     IOptions<AgentOptions> options,
     ILogger<EditorChatService> logger) : IEditorChatService
 {
@@ -199,19 +197,7 @@ public sealed class EditorChatService(
             var assembly = await contextBuilder.BuildAsync(project, currentChapter, cancellationToken);
             initialEntityVisuals = assembly.Visuals;
             contestModeEnabled = project.ContestModeEnabled;
-            var vectorSearchAvailable = await embeddings.IsAvailableAsync(cancellationToken);
-            var assistantWorkflow = contestModeEnabled
-                ? AssistantWorkflowInstructions.EditorContestPreparation
-                : AssistantWorkflowInstructions.EditorChatFor(vectorSearchAvailable)
-                    + "\n\n" + agentSkills.BuildCatalogInstructions();
-            if (!contestModeEnabled && currentChapter?.VisualMode == ChapterVisualMode.PicturePage)
-            {
-                var picturePageSkill = agentSkills.Find(AgentSkillIds.PicturePageDesign)
-                    ?? throw new InvalidOperationException($"Built-in skill '{AgentSkillIds.PicturePageDesign}' was not found.");
-                assistantWorkflow +=
-                    $"\n\nAutomatically active skill for the current PicturePage chapter:\n\n{picturePageSkill.Instructions}";
-            }
-            systemPrompt = assembly.Assemble(assistantWorkflow);
+            systemPrompt = assembly.Assemble();
 
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
             visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
@@ -240,8 +226,6 @@ public sealed class EditorChatService(
                 outlineStaging,
                 editorStaging,
                 cancellationToken);
-            if (!contestModeEnabled && currentChapter?.VisualMode == ChapterVisualMode.PicturePage)
-                editorContext.Skills.Activate(AgentSkillIds.PicturePageDesign);
             aiTools = await tools.BuildAsync(editorContext, contestModeEnabled ? EditorChatToolMode.ContestPreparation : EditorChatToolMode.Normal, cancellationToken);
         }
         catch (Exception ex)
@@ -263,17 +247,17 @@ public sealed class EditorChatService(
 
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
-        messages.AddRange(BuildModelHistory(history));
         if (await entityVisualContext.BuildVisionMessageAsync(
             projectId,
             initialEntityVisuals,
             visionReady,
-            "Automatic entity and explicit-image visual context follows. Treat these as canonical visual examples for the entities and roles named in the text context.",
+            "Automatic entity and explicit-image visual context follows. Treat each mapping as a continuity candidate: inspect its label, association origin, image source, purpose, and visible content before deciding whether it is an appropriate reference.",
             cancellationToken) is { } entityVisualMessage)
         {
             messages.Add(entityVisualMessage);
         }
         await AddAutomaticVisualSnapshotsAsync(messages, currentChapter, providerAvailability.Provider, cancellationToken);
+        messages.AddRange(BuildModelHistory(history));
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
@@ -744,7 +728,6 @@ public sealed class EditorChatService(
                     yield return new EditorChatMutated();
             }
 
-            editorContext.Skills.ActivatePending();
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
             if (modelOnlyImagesForNextRound.Count > 0)
                 messages.Add(await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound));

@@ -396,8 +396,8 @@ public sealed class CodexProjectImageProvider(
         return BasePayload(
             mainlineModel,
             content,
-            BaseImageTool(request.Size, request.Quality, request.OutputFormat, request.OutputCompression, imageModel),
-            "Use the image_generation tool to create one story illustration or project image. Interpret the user's prompt as a standalone description of the desired output. Supplied input images are reference-only, not edit sources: preserve only the identity, design, setting, or style traits the prompt explicitly assigns to them. Take pose, expression, gaze, action, camera, framing, layout, background, lighting, and composition from the target brief, and do not copy those traits from a reference unless explicitly requested. Treat conversational process language such as new, redo, from scratch, different, current image, or not a recreation as nonvisual context; render the concrete target description instead.");
+            BaseImageTool(request.Size, request.Quality, request.OutputFormat, request.OutputCompression, imageModel, "generate"),
+            "Use the image_generation tool to create one story illustration or project image from the standalone target brief. Supplied input images are visual continuity references, not edit canvases: preserve the character identity, design, clothes, hair, age, proportions, palette, medium, recurring props, setting traits, and style assigned to each reference by the brief unless it requests a redesign or style break. Take expression, pose, gesture, gaze, body language, action, camera, framing, layout, background, lighting, and composition from the target brief rather than copying those shot-specific traits from a reference unless explicitly requested.");
     }
 
     private Dictionary<string, object?> BuildEditPayload(
@@ -418,7 +418,7 @@ public sealed class CodexProjectImageProvider(
         foreach (var reference in request.ReferenceImages.Take(options.Value.MaxReferenceImages))
             content.Add(InputImage(reference));
 
-        var tool = BaseImageTool(request.Size, request.Quality, request.OutputFormat, request.OutputCompression, imageModel);
+        var tool = BaseImageTool(request.Size, request.Quality, request.OutputFormat, request.OutputCompression, imageModel, "edit");
         if (request.Mask is not null)
         {
             tool["input_image_mask"] = new Dictionary<string, object?>
@@ -462,13 +462,15 @@ public sealed class CodexProjectImageProvider(
         string quality,
         string outputFormat,
         int? outputCompression,
-        string imageModel)
+        string imageModel,
+        string action)
     {
         var normalizedOutputFormat = NormalizeOutputFormat(outputFormat);
         var tool = new Dictionary<string, object?>
         {
             ["type"] = "image_generation",
             ["model"] = imageModel,
+            ["action"] = action,
             ["size"] = string.IsNullOrWhiteSpace(size) ? "auto" : size.Trim(),
             ["output_format"] = normalizedOutputFormat,
             ["background"] = "auto",
