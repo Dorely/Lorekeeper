@@ -47,6 +47,17 @@
                 <label><span>Display name</span><input class="form-control" @bind="_newProvider.DisplayName" placeholder="Local Ollama" /></label>
                 <label class="field-wide"><span>Endpoint URL</span><input class="form-control" @bind="_newProvider.EndpointUrl" placeholder="http://localhost:11434/v1" /></label>
                 <label><span>Initial model ID</span><input class="form-control" @bind="_newProvider.ModelId" placeholder="llama3" /></label>
+                <label>
+                    <span>Thinking effort</span>
+                    <select class="form-select" @bind="_newProvider.ReasoningEffort">
+                        <option value="">Provider default</option>
+                        @foreach (var choice in ReasoningEffortChoices)
+                        {
+                            <option value="@choice.Value">@choice.Label</option>
+                        }
+                    </select>
+                    <small class="field-note">Higher effort can improve complex work, with more latency and token use. Support depends on the model.</small>
+                </label>
                 <label><span>Authentication</span><select class="form-select" @bind="_newProvider.AuthType"><option value="@AuthType.None">None</option><option value="@AuthType.ApiKey">API key</option></select></label>
                 @if (_newProvider.AuthType == AuthType.ApiKey)
                 {
@@ -91,6 +102,17 @@
                             <div class="model-fields">
                                 <label><span>@(model.Id == _codexProvider.Id ? "Connection model" : "Display name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(model.Id == _codexProvider.Id)" /></label>
                                 <label><span>Model ID</span><input class="form-control form-control-sm" @bind="model.ModelId" /></label>
+                                <label>
+                                    <span>Thinking effort</span>
+                                    <select class="form-select form-select-sm" @bind="model.ReasoningEffort">
+                                        <option value="">Provider default</option>
+                                        @foreach (var choice in ReasoningEffortChoices)
+                                        {
+                                            <option value="@choice.Value">@choice.Label</option>
+                                        }
+                                    </select>
+                                    <small class="field-note">Higher levels use more time and tokens; model support varies.</small>
+                                </label>
                             </div>
                             <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
                             <div class="model-actions">
@@ -143,6 +165,17 @@
                             <div class="model-fields">
                                 <label><span>@(model.Id == connection.Id ? "Primary model name" : "Model name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" /></label>
                                 <label><span>Model ID</span><input class="form-control form-control-sm" @bind="model.ModelId" /></label>
+                                <label>
+                                    <span>Thinking effort</span>
+                                    <select class="form-select form-select-sm" @bind="model.ReasoningEffort">
+                                        <option value="">Provider default</option>
+                                        @foreach (var choice in ReasoningEffortChoices)
+                                        {
+                                            <option value="@choice.Value">@choice.Label</option>
+                                        }
+                                    </select>
+                                    <small class="field-note">Higher levels use more time and tokens; model support varies.</small>
+                                </label>
                             </div>
                             <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
                             <div class="model-actions">
@@ -196,6 +229,17 @@
 
     private string? _statusMessage;
     private string _statusKind = "success";
+
+    private static readonly (LlmReasoningEffort Value, string Label)[] ReasoningEffortChoices =
+    [
+        (LlmReasoningEffort.None, "None"),
+        (LlmReasoningEffort.Minimal, "Minimal"),
+        (LlmReasoningEffort.Low, "Low"),
+        (LlmReasoningEffort.Medium, "Medium"),
+        (LlmReasoningEffort.High, "High"),
+        (LlmReasoningEffort.ExtraHigh, "Extra high"),
+        (LlmReasoningEffort.Maximum, "Maximum"),
+    ];
 
     private bool AnyTestRunning => _testingProviderId is not null || _testingVisionProviderId is not null || _isTestingNewProvider;
     private IEnumerable<LlmProvider> OtherParents => _parents.Where(provider => !CodexProvider.IsCodex(provider));
@@ -535,6 +579,7 @@
             DisplayName = displayName,
             EndpointUrl = parent.EndpointUrl,
             ModelId = modelId,
+            ReasoningEffort = draft.ReasoningEffort,
             AuthType = parent.AuthType,
             CredentialSourceId = parent.Id
         };
@@ -601,10 +646,14 @@
     }
 
     private bool IsChatReady(LlmProvider provider) =>
-        _chatReadyStatus.TryGetValue(provider.Id, out var ready) && ready;
+        provider.HasCurrentChatTestSnapshot
+        && _chatReadyStatus.TryGetValue(provider.Id, out var ready)
+        && ready;
 
     private bool IsVisionReady(LlmProvider provider) =>
-        _visionReadyStatus.TryGetValue(provider.Id, out var ready) && ready;
+        provider.HasCurrentVisionTestSnapshot
+        && _visionReadyStatus.TryGetValue(provider.Id, out var ready)
+        && ready;
 
     private string DefaultButtonTitle(LlmProvider provider) =>
         IsChatReady(provider)
@@ -674,6 +723,17 @@
             <div><span class="lk-section-kicker">Shared connection</span><strong>Add another model</strong><small>Credentials and endpoint come from @(parent.DisplayName ?? parent.Name).</small></div>
             <label><span>Display name</span><input class="form-control form-control-sm" placeholder="GPT-5 Mini" @bind="draft.DisplayName" /></label>
             <label><span>Model ID</span><input class="form-control form-control-sm" placeholder="gpt-5-mini" @bind="draft.ModelId" /></label>
+            <label>
+                <span>Thinking effort</span>
+                <select class="form-select form-select-sm" @bind="draft.ReasoningEffort">
+                    <option value="">Provider default</option>
+                    @foreach (var choice in ReasoningEffortChoices)
+                    {
+                        <option value="@choice.Value">@choice.Label</option>
+                    }
+                </select>
+                <small class="field-note">Support depends on the model.</small>
+            </label>
             <div class="lk-toolbar"><button type="button" class="btn btn-sm btn-primary" @onclick="() => AddChildModelAsync(parent, draft)">Test and add</button><button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _childForms.Remove(parent.Id)">Cancel</button></div>
         </div>
     };
@@ -727,6 +787,7 @@
             DisplayName = string.IsNullOrWhiteSpace(_newProvider.DisplayName) ? null : _newProvider.DisplayName.Trim(),
             EndpointUrl = endpoint,
             ModelId = model,
+            ReasoningEffort = _newProvider.ReasoningEffort,
             AuthType = _newProvider.AuthType,
             ApiKey = _newProvider.AuthType == AuthType.ApiKey ? apiKey : null,
             IsDefault = _newProvider.IsDefault
@@ -737,6 +798,7 @@
         new(
             (_newProvider.EndpointUrl ?? string.Empty).Trim(),
             (_newProvider.ModelId ?? string.Empty).Trim(),
+            _newProvider.ReasoningEffort,
             _newProvider.AuthType,
             _newProvider.AuthType == AuthType.ApiKey ? (_newProvider.ApiKey ?? string.Empty).Trim() : string.Empty);
 
@@ -752,6 +814,7 @@
         public string? DisplayName { get; set; }
         public string? EndpointUrl { get; set; }
         public string? ModelId { get; set; }
+        public LlmReasoningEffort? ReasoningEffort { get; set; }
         public AuthType AuthType { get; set; } = AuthType.None;
         public string? ApiKey { get; set; }
         public bool IsDefault { get; set; }
@@ -760,6 +823,7 @@
     private sealed record NewProviderConnectionSnapshot(
         string EndpointUrl,
         string ModelId,
+        LlmReasoningEffort? ReasoningEffort,
         AuthType AuthType,
         string ApiKey);
 
@@ -767,6 +831,7 @@
     {
         public string? DisplayName { get; set; }
         public string? ModelId { get; set; }
+        public LlmReasoningEffort? ReasoningEffort { get; set; }
     }
 
     private sealed class ConnectionEditDraft

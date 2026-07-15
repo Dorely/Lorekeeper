@@ -7,6 +7,7 @@ public class LlmProvider
     public string? DisplayName { get; set; }
     public required string EndpointUrl { get; set; }
     public required string ModelId { get; set; }
+    public LlmReasoningEffort? ReasoningEffort { get; set; }
     public AuthType AuthType { get; set; }
     public string? ApiKey { get; set; }
     public bool IsDefault { get; set; }
@@ -17,6 +18,7 @@ public class LlmProvider
     public string? LastChatTestModelId { get; set; }
     public AuthType? LastChatTestAuthType { get; set; }
     public int? LastChatTestCredentialSourceId { get; set; }
+    public LlmReasoningEffort? LastChatTestReasoningEffort { get; set; }
     public bool LastVisionTestSucceeded { get; set; }
     public DateTime? LastVisionTestedAt { get; set; }
     public string? LastVisionTestError { get; set; }
@@ -24,6 +26,7 @@ public class LlmProvider
     public string? LastVisionTestModelId { get; set; }
     public AuthType? LastVisionTestAuthType { get; set; }
     public int? LastVisionTestCredentialSourceId { get; set; }
+    public LlmReasoningEffort? LastVisionTestReasoningEffort { get; set; }
 
     /// <summary>
     /// When set, credentials (API key / OAuth tokens) are resolved from the referenced
@@ -49,14 +52,16 @@ public class LlmProvider
         && string.Equals(LastChatTestEndpointUrl, EndpointUrl, StringComparison.Ordinal)
         && string.Equals(LastChatTestModelId, ModelId, StringComparison.Ordinal)
         && LastChatTestAuthType == AuthType
-        && LastChatTestCredentialSourceId == CredentialSourceId;
+        && LastChatTestCredentialSourceId == CredentialSourceId
+        && LastChatTestReasoningEffort == ReasoningEffort;
 
     public bool HasCurrentVisionTestSnapshot =>
         LastVisionTestSucceeded
         && string.Equals(LastVisionTestEndpointUrl, EndpointUrl, StringComparison.Ordinal)
         && string.Equals(LastVisionTestModelId, ModelId, StringComparison.Ordinal)
         && LastVisionTestAuthType == AuthType
-        && LastVisionTestCredentialSourceId == CredentialSourceId;
+        && LastVisionTestCredentialSourceId == CredentialSourceId
+        && LastVisionTestReasoningEffort == ReasoningEffort;
 
     public void MarkChatTestSucceeded(DateTime testedAt)
     {
@@ -67,6 +72,7 @@ public class LlmProvider
         LastChatTestModelId = ModelId;
         LastChatTestAuthType = AuthType;
         LastChatTestCredentialSourceId = CredentialSourceId;
+        LastChatTestReasoningEffort = ReasoningEffort;
     }
 
     public void MarkChatTestFailed(string error, DateTime testedAt)
@@ -78,6 +84,7 @@ public class LlmProvider
         LastChatTestModelId = ModelId;
         LastChatTestAuthType = AuthType;
         LastChatTestCredentialSourceId = CredentialSourceId;
+        LastChatTestReasoningEffort = ReasoningEffort;
     }
 
     public void ClearChatReadiness(string? reason = null)
@@ -95,6 +102,7 @@ public class LlmProvider
         LastVisionTestModelId = ModelId;
         LastVisionTestAuthType = AuthType;
         LastVisionTestCredentialSourceId = CredentialSourceId;
+        LastVisionTestReasoningEffort = ReasoningEffort;
     }
 
     public void MarkVisionTestFailed(string error, DateTime testedAt)
@@ -106,6 +114,7 @@ public class LlmProvider
         LastVisionTestModelId = ModelId;
         LastVisionTestAuthType = AuthType;
         LastVisionTestCredentialSourceId = CredentialSourceId;
+        LastVisionTestReasoningEffort = ReasoningEffort;
     }
 
     public void ClearVisionReadiness(string? reason = null)

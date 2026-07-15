@@ -427,8 +427,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
         {
             entity.HasIndex(e => e.Name).IsUnique();
             entity.Property(e => e.AuthType).HasConversion<string>();
+            entity.Property(e => e.ReasoningEffort).HasConversion<string>();
             entity.Property(e => e.LastChatTestAuthType).HasConversion<string>();
+            entity.Property(e => e.LastChatTestReasoningEffort).HasConversion<string>();
             entity.Property(e => e.LastVisionTestAuthType).HasConversion<string>();
+            entity.Property(e => e.LastVisionTestReasoningEffort).HasConversion<string>();
 
             entity.HasOne(e => e.CredentialSource)
                 .WithMany(e => e.ChildModels)

@@ -776,6 +776,7 @@ else
     private IJSObjectReference? _editorModule;
     private IJSObjectReference? _columnLayoutHandle;
     private Guid? _columnLayoutProjectId;
+    private bool _disposed;
     private ChapterBodyEditor? _bodyEditor;
     private EditorDocumentState? _editorDocument;
 
@@ -1100,6 +1101,8 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_disposed) return;
+
         if (firstRender)
         {
             _navHandlerRegistration = Nav.RegisterLocationChangingHandler(OnLocationChangingAsync);
@@ -1109,6 +1112,8 @@ else
         {
             await EnsureEditorModuleAsync();
         }
+
+        if (_disposed) return;
 
         if (_restoreChapterAfterRender)
         {
@@ -1128,6 +1133,7 @@ else
             try { await _titleInput.FocusAsync(); }
             catch (JSDisconnectedException) { }
             catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
         }
 
         if (_pendingRememberChapterId is { } chapterId)
@@ -1135,16 +1141,22 @@ else
             await RememberSelectedChapterAsync(chapterId);
         }
 
-        if (_pendingReviewScrollBlockId is { } blockId && _editorModule is not null)
+        var editorModule = _editorModule;
+        if (_pendingReviewScrollBlockId is { } blockId && editorModule is not null)
         {
             try
             {
                 var anchorLine = CurrentReviewBlocks().FirstOrDefault(block => block.Id == blockId)?.AnchorLine ?? 1;
-                await _editorModule.InvokeVoidAsync("scrollReviewBlock", _reviewSurfaceRef, blockId, anchorLine);
+                await editorModule.InvokeVoidAsync("scrollReviewBlock", _reviewSurfaceRef, blockId, anchorLine);
                 _pendingReviewScrollBlockId = null;
             }
             catch (JSDisconnectedException) { }
             catch (OperationCanceledException) { }
+            catch (ObjectDisposedException)
+            {
+                if (!_disposed && ReferenceEquals(_editorModule, editorModule))
+                    _editorModule = null;
+            }
             catch (JSException)
             {
                 _pendingReviewScrollBlockId = null;
@@ -1154,25 +1166,37 @@ else
 
     private async Task EnsureEditorModuleAsync()
     {
-        if (_editorModule is not null) return;
+        if (_disposed || _editorModule is not null) return;
 
         try
         {
-            _editorModule = await JS.InvokeAsync<IJSObjectReference>("import",
+            var editorModule = await JS.InvokeAsync<IJSObjectReference>("import",
                 "./Components/Pages/Projects/EditorContent.razor.js");
+
+            if (_disposed || _editorModule is not null)
+            {
+                try { await editorModule.DisposeAsync(); } catch { }
+                return;
+            }
+
+            _editorModule = editorModule;
         }
         catch (JSDisconnectedException) { }
         catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
     }
 
     private async Task AttachColumnLayoutAsync(Guid projectId)
     {
+        if (_disposed) return;
+
         await DisposeColumnLayoutAsync();
-        if (_editorModule is null) return;
+        var editorModule = _editorModule;
+        if (_disposed || editorModule is null) return;
 
         try
         {
-            _columnLayoutHandle = await _editorModule.InvokeAsync<IJSObjectReference>(
+            var columnLayoutHandle = await editorModule.InvokeAsync<IJSObjectReference>(
                 "attachColumnLayout",
                 new
                 {
@@ -1181,10 +1205,23 @@ else
                     memorySplitter = _memorySplitterRef,
                 },
                 projectId.ToString("N"));
+
+            if (_disposed)
+            {
+                try { await columnLayoutHandle.DisposeAsync(); } catch { }
+                return;
+            }
+
+            _columnLayoutHandle = columnLayoutHandle;
             _columnLayoutProjectId = projectId;
         }
         catch (JSDisconnectedException) { }
         catch (OperationCanceledException) { }
+        catch (ObjectDisposedException)
+        {
+            if (!_disposed && ReferenceEquals(_editorModule, editorModule))
+                _editorModule = null;
+        }
         catch (JSException ex)
         {
             Logger.LogWarning(ex, "Could not initialize Editor column resizing for project {ProjectId}.", projectId);
@@ -1193,26 +1230,29 @@ else
 
     private async ValueTask DisposeColumnLayoutAsync()
     {
-        if (_columnLayoutHandle is null) return;
-
-        try { await _columnLayoutHandle.InvokeVoidAsync("dispose"); } catch { }
-        try { await _columnLayoutHandle.DisposeAsync(); } catch { }
+        var columnLayoutHandle = _columnLayoutHandle;
         _columnLayoutHandle = null;
         _columnLayoutProjectId = null;
+        if (columnLayoutHandle is null) return;
+
+        try { await columnLayoutHandle.InvokeVoidAsync("dispose"); } catch { }
+        try { await columnLayoutHandle.DisposeAsync(); } catch { }
     }
 
     private async Task RestoreRememberedChapterAsync()
     {
-        if (Project is null || _editorModule is null || _chapters.Count == 0) return;
+        var project = Project;
+        var editorModule = _editorModule;
+        if (_disposed || project is null || editorModule is null || _chapters.Count == 0) return;
 
         _restoreChapterAfterRender = false;
         var targetId = _chapters[0].Id;
 
         try
         {
-            var remembered = await _editorModule.InvokeAsync<string?>(
+            var remembered = await editorModule.InvokeAsync<string?>(
                 "getLastEditorChapterId",
-                Project.Id.ToString("N"));
+                project.Id.ToString("N"));
 
             if (!string.IsNullOrWhiteSpace(remembered)
                 && Guid.TryParse(remembered, out var rememberedId)
@@ -1223,22 +1263,39 @@ else
         }
         catch (JSDisconnectedException)
         {
-            _restoreChapterAfterRender = true;
+            if (!_disposed)
+                _restoreChapterAfterRender = true;
             return;
         }
         catch (OperationCanceledException)
         {
-            _restoreChapterAfterRender = true;
+            if (!_disposed)
+                _restoreChapterAfterRender = true;
+            return;
+        }
+        catch (ObjectDisposedException)
+        {
+            if (!_disposed)
+            {
+                if (ReferenceEquals(_editorModule, editorModule))
+                    _editorModule = null;
+                _restoreChapterAfterRender = true;
+            }
             return;
         }
         catch (JSException) { }
 
-        Nav.NavigateTo($"/projects/{Project.Slug}/editor/{targetId}", replace: true);
+        if (!_disposed)
+            Nav.NavigateTo($"/projects/{project.Slug}/editor/{targetId}", replace: true);
     }
 
     private async Task RememberSelectedChapterAsync(Guid chapterId)
     {
-        if (Project is null || _editorModule is null)
+        if (_disposed) return;
+
+        var project = Project;
+        var editorModule = _editorModule;
+        if (project is null || editorModule is null)
         {
             _pendingRememberChapterId = chapterId;
             return;
@@ -1246,23 +1303,36 @@ else
 
         try
         {
-            await _editorModule.InvokeVoidAsync(
+            await editorModule.InvokeVoidAsync(
                 "setLastEditorChapterId",
-                Project.Id.ToString("N"),
+                project.Id.ToString("N"),
                 chapterId.ToString());
-            _pendingRememberChapterId = null;
+            if (!_disposed)
+                _pendingRememberChapterId = null;
         }
         catch (JSDisconnectedException)
         {
-            _pendingRememberChapterId = chapterId;
+            if (!_disposed)
+                _pendingRememberChapterId = chapterId;
         }
         catch (OperationCanceledException)
         {
-            _pendingRememberChapterId = chapterId;
+            if (!_disposed)
+                _pendingRememberChapterId = chapterId;
+        }
+        catch (ObjectDisposedException)
+        {
+            if (!_disposed)
+            {
+                if (ReferenceEquals(_editorModule, editorModule))
+                    _editorModule = null;
+                _pendingRememberChapterId = chapterId;
+            }
         }
         catch (JSException)
         {
-            _pendingRememberChapterId = null;
+            if (!_disposed)
+                _pendingRememberChapterId = null;
         }
     }
 
@@ -3104,12 +3174,18 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        if (_disposed) return;
+        _disposed = true;
+
         _navHandlerRegistration?.Dispose();
+        _navHandlerRegistration = null;
         try { await FlushAsync(); } catch { }
         await DisposeColumnLayoutAsync();
-        if (_editorModule is not null)
+        var editorModule = _editorModule;
+        _editorModule = null;
+        if (editorModule is not null)
         {
-            try { await _editorModule.DisposeAsync(); } catch { }
+            try { await editorModule.DisposeAsync(); } catch { }
         }
         _saveGate.Dispose();
         _chapterRefreshGate.Dispose();

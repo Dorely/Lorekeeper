@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Models;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.Llm;
@@ -19,14 +20,21 @@ public sealed class CodexChatClient : IChatClient
     private readonly HttpClient _httpClient;
     private readonly string _accessToken;
     private readonly string _model;
+    private readonly string? _reasoningEffort;
     private readonly string _accountId;
     private readonly ILogger<CodexChatClient> _logger;
 
-    public CodexChatClient(HttpClient httpClient, string accessToken, string model, ILogger<CodexChatClient> logger)
+    public CodexChatClient(
+        HttpClient httpClient,
+        string accessToken,
+        string model,
+        LlmReasoningEffort? reasoningEffort,
+        ILogger<CodexChatClient> logger)
     {
         _httpClient = httpClient;
         _accessToken = accessToken;
         _model = string.IsNullOrWhiteSpace(model) ? DefaultModel : model;
+        _reasoningEffort = reasoningEffort?.ToWireValue();
         _accountId = CodexProvider.ExtractAccountId(accessToken);
         _logger = logger;
     }
@@ -489,6 +497,18 @@ public sealed class CodexChatClient : IChatClient
                 ? string.Join("\n\n", instructions)
                 : "You are a helpful assistant."
         };
+
+        if (_reasoningEffort is not null)
+        {
+            body["reasoning"] = new Dictionary<string, object>
+            {
+                ["effort"] = _reasoningEffort,
+            };
+        }
+
+        // The ChatGPT Codex backend rejects the public Responses API's
+        // max_output_tokens field. ChatOptions.MaxOutputTokens is therefore
+        // intentionally not serialized on this OAuth request path.
 
         if (options?.Tools is { Count: > 0 } tools)
         {

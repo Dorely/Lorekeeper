@@ -174,7 +174,7 @@
 
 | File | Description |
 |------|-------------|
-| `Providers.razor` (+ `.razor.css`) | Connection-card LLM configuration UI: Codex OAuth, grouped credential connections and nested models, connection editing/deletion, visible chat/vision readiness, working-only defaults, and expandable add flows. |
+| `Providers.razor` (+ `.razor.css`) | Connection-card LLM configuration UI: Codex OAuth, grouped credential connections and nested models, per-model thinking effort, connection editing/deletion, readiness tests, working-only defaults, and expandable add flows. |
 | `Embeddings.razor` (+ `.razor.css`) | Active embedding summary and configuration workflow: test-before-save, dimensions, rebuild confirmation, and an explicit semantic-feature danger zone. |
 | `SearchProviders.razor` (+ `.razor.css`) | Card-based SerpApi/Brave configuration for Research: add/edit/test/activate providers, API keys, and confirmed deletion. |
 
@@ -183,7 +183,8 @@
 | File | Description |
 |------|-------------|
 | `AuthType.cs` | Enum: None, ApiKey, OAuth. |
-| `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing plus persisted chat- and vision-readiness test snapshots. |
+| `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing, per-model reasoning effort, and persisted chat/vision readiness snapshots. |
+| `LlmReasoningEffort.cs` | Full model reasoning-effort enum plus exact provider wire-value mapping (`none` through `max`). |
 | `EmbeddingConfiguration.cs` | Singleton EF entity for the active embedding setup: top-level provider connection, embedding API kind, model id, dimensions, last-tested snapshot, and timestamps. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
 | `Project.cs` | EF project root with optional user-owned `ProjectGuidance`, stable slug/settings, one `BookBrief`, and navigation to conversations, images, fonts, jobs, publishing, and graph rows. |
@@ -248,7 +249,7 @@
 | `AppDbContext.cs` | EF Core context for projects, providers, chats, writing, graph, ingest/import, publishing, chapter visuals, and project font families/faces. Configures relationships/indexes, JSON property bags, and transient SQLite lock retries. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | EF Core migrations including Project Guidance/Book Brief/context provenance and structured image-prompt audit persistence; historical migrations remain immutable. |
+| `Migrations/` | EF Core migrations including provider reasoning effort, Project Guidance/Book Brief/context provenance, and structured image-prompt audit persistence; historical migrations remain immutable. |
 
 ### Persistence/Repositories/
 
@@ -308,9 +309,9 @@
 | `ToolCallStreamingContent.cs` | `AIContent` subclasses for provider-level function-call start and argument-delta streaming. |
 | `ToolCallArguments.cs` | Shared parser/normalizer for tool-call argument JSON and SDK argument dictionaries before `AIFunction` invocation. |
 | `StreamingToolCallTracker.cs` | Normalizes provider function-call start/delta/final content into app-level started/arguments/ready updates for chat services. |
-| `CodexChatClient.cs` | `IChatClient` implementation for Codex Responses API (SSE parser, multimodal user content, function-calling, strict-schema enforcement, reasoning and tool-argument streaming). |
-| `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs an `IChatClient` per provider (Codex vs OpenAI-compatible), applies configured Codex/OAuth request timeout, and exposes `TestModelAsync`. |
-| `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image-reading client for vision probes and PDF page transcription; supports Codex Responses and OpenAI-compatible multimodal chat requests. |
+| `CodexChatClient.cs` | `IChatClient` implementation for Codex Responses API with configured reasoning effort, SSE parsing, multimodal user content, function calling, strict schemas, and tool-argument streaming. |
+| `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs Codex or OpenAI-compatible chat clients, applies exact per-model reasoning effort and Codex timeout, and exposes configured verification probes. |
+| `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image reader for vision probes and PDF transcription, with per-model reasoning effort across Codex Responses and OpenAI-compatible requests. |
 | `AssistantWorkflowInstructions.cs` | Core code-owned AI workflow/tool-use instructions reused across agents, including non-replayed tool-history recovery, exact-ID/pagination handling, always-on image/reference and agent-led PicturePage composition/verification rules, and Contest preparation. |
 | `SystemPromptComposer.cs` | Central composer for the one actual system-role prompt: professional charter, tool rules, dynamic book/page guidance, Project Guidance, Book Brief, then working context. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |

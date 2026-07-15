@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Lorekeeper.Models;
 using Microsoft.Extensions.AI;
 using OpenAI;
+using OpenAI.Chat;
 
 namespace Lorekeeper.Llm;
 
@@ -61,7 +62,12 @@ public class ChatClientFactory(
             var httpClient = httpClientFactory.CreateClient();
             var timeoutSeconds = Math.Clamp(agentOptions.Value.CodexRequestTimeoutSeconds, 1, 3600);
             httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-            return new CodexChatClient(httpClient, apiKey, provider.ModelId, loggerFactory.CreateLogger<CodexChatClient>());
+            return new CodexChatClient(
+                httpClient,
+                apiKey,
+                provider.ModelId,
+                provider.ReasoningEffort,
+                loggerFactory.CreateLogger<CodexChatClient>());
         }
 
         if (effectiveAuthType != AuthType.None && apiKey is null)
@@ -76,13 +82,45 @@ public class ChatClientFactory(
         // Local OpenAI-compatible providers (e.g. Ollama) don't require auth; use a placeholder.
         var credential = new ApiKeyCredential(apiKey ?? "ollama");
         var client = new OpenAIClient(credential, options);
-        return client.GetChatClient(provider.ModelId).AsIChatClient();
+        var chatClient = client.GetChatClient(provider.ModelId).AsIChatClient();
+        return ConfigureReasoningEffort(chatClient, provider.ReasoningEffort);
     }
 
     private static async Task TestChatClientAsync(IChatClient chatClient, CancellationToken cancellationToken)
     {
-        var options = new ChatOptions { MaxOutputTokens = 1 };
+        var options = new ChatOptions { MaxOutputTokens = 32 };
         await chatClient.GetResponseAsync("hi", options, cancellationToken);
+    }
+
+    private static IChatClient ConfigureReasoningEffort(
+        IChatClient chatClient,
+        LlmReasoningEffort? reasoningEffort)
+    {
+        if (reasoningEffort is null)
+            return chatClient;
+
+        var wireValue = reasoningEffort.Value.ToWireValue();
+        return chatClient
+            .AsBuilder()
+            .ConfigureOptions(options => ConfigureOpenAiReasoningEffort(options, wireValue))
+            .Build();
+    }
+
+    private static void ConfigureOpenAiReasoningEffort(ChatOptions options, string wireValue)
+    {
+        var existingFactory = options.RawRepresentationFactory;
+        options.RawRepresentationFactory = client =>
+        {
+            var existing = existingFactory?.Invoke(client);
+            if (existing is not null and not ChatCompletionOptions)
+                return existing;
+
+            var openAiOptions = existing as ChatCompletionOptions ?? new ChatCompletionOptions();
+#pragma warning disable OPENAI001 // ReasoningEffortLevel is experimental in the pinned OpenAI SDK.
+            openAiOptions.ReasoningEffortLevel = new ChatReasoningEffortLevel(wireValue);
+#pragma warning restore OPENAI001
+            return openAiOptions;
+        };
     }
 
     private static bool IsJwt(string token) =>

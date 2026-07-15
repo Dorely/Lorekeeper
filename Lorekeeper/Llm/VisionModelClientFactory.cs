@@ -52,6 +52,7 @@ public sealed class VisionModelClientFactory(
                 httpClient,
                 apiKey,
                 provider.ModelId,
+                provider.ReasoningEffort,
                 imageBytes,
                 mediaType,
                 prompt,
@@ -90,7 +91,7 @@ public sealed class VisionModelClientFactory(
             imageBytes,
             "image/png",
             $"Return only the exact three-character code shown in this image. The code contains letters and digits. Do not add punctuation, spaces, or explanation.",
-            maxOutputTokens: 12,
+            maxOutputTokens: 512,
             cancellationToken);
 
         var normalized = NormalizeProbeResponse(response);
@@ -121,6 +122,7 @@ public sealed class VisionModelClientFactory(
         HttpClient httpClient,
         string accessToken,
         string model,
+        LlmReasoningEffort? reasoningEffort,
         byte[] imageBytes,
         string mediaType,
         string prompt,
@@ -157,6 +159,17 @@ public sealed class VisionModelClientFactory(
                 },
             },
         };
+
+        // Unlike the public Responses API, the ChatGPT Codex backend rejects
+        // max_output_tokens. Keep the requested budget off this OAuth path.
+
+        if (reasoningEffort is not null)
+        {
+            body["reasoning"] = new Dictionary<string, object?>
+            {
+                ["effort"] = reasoningEffort.Value.ToWireValue(),
+            };
+        }
         var json = JsonSerializer.Serialize(body);
 
         logger.LogDebug(
@@ -283,8 +296,6 @@ public sealed class VisionModelClientFactory(
         var body = new Dictionary<string, object?>
         {
             ["model"] = provider.ModelId,
-            ["temperature"] = 0,
-            ["max_tokens"] = Math.Clamp(maxOutputTokens, 1, 32_000),
             ["messages"] = new[]
             {
                 new Dictionary<string, object?>
@@ -302,6 +313,18 @@ public sealed class VisionModelClientFactory(
                 },
             },
         };
+
+        var clampedMaxOutputTokens = Math.Clamp(maxOutputTokens, 1, 32_000);
+        if (provider.ReasoningEffort is { } reasoningEffort)
+        {
+            body["reasoning_effort"] = reasoningEffort.ToWireValue();
+            body["max_completion_tokens"] = clampedMaxOutputTokens;
+        }
+        else
+        {
+            body["temperature"] = 0;
+            body["max_tokens"] = clampedMaxOutputTokens;
+        }
         var json = JsonSerializer.Serialize(body);
 
         logger.LogDebug(

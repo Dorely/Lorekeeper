@@ -130,11 +130,6 @@ public class LlmProviderService(
 
     public async Task<LlmProvider> UpdateAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
-        if (provider.LastChatTestSucceeded && !provider.HasCurrentChatTestSnapshot)
-            provider.ClearChatReadiness("Provider settings changed. Run Test successfully before using this provider for chat.");
-        if (provider.LastVisionTestSucceeded && !provider.HasCurrentVisionTestSnapshot)
-            provider.ClearVisionReadiness("Provider settings changed. Run Test Vision successfully before using this provider for PDF image reading.");
-
         provider.UpdatedAt = DateTime.UtcNow;
         providers.Update(provider);
         await providers.SaveChangesAsync(cancellationToken);
@@ -386,6 +381,7 @@ public class LlmProviderService(
         target.DisplayName = source.DisplayName;
         target.EndpointUrl = source.EndpointUrl;
         target.ModelId = source.ModelId;
+        target.ReasoningEffort = source.ReasoningEffort;
         target.AuthType = source.AuthType;
         target.ApiKey = source.ApiKey;
         target.IsDefault = source.IsDefault;
