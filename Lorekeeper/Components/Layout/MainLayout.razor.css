@@ -32,15 +32,18 @@
 
 .app-brand-mark {
     align-items: center;
-    background: var(--lk-accent);
     border-radius: 0.42rem;
-    color: #fff;
     display: inline-flex;
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: 0.9rem;
     height: 1.85rem;
     justify-content: center;
+    overflow: hidden;
     width: 1.85rem;
+}
+
+.app-brand-mark img {
+    display: block;
+    height: 100%;
+    width: 100%;
 }
 
 .app-topbar-nav {

@@ -18,6 +18,7 @@
     <ElectronBuilderVersion>26.15.3</ElectronBuilderVersion>
     <ElectronPackageId>com.lorekeeper.app</ElectronPackageId>
     <ElectronSingleInstance>true</ElectronSingleInstance>
+    <ApplicationIcon Condition="$([MSBuild]::IsOSPlatform('Windows'))">wwwroot\branding\icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

@@ -3,6 +3,9 @@
   "productName": "Lorekeeper",
   "appId": "com.lorekeeper.app",
   "compression": "maximum",
+  "directories": {
+    "buildResources": "bin/wwwroot/branding"
+  },
   "publish": {
     "provider": "github",
     "owner": "Dorely",
@@ -19,6 +22,7 @@
     "!latest*.yaml"
   ],
   "win": {
+    "icon": "icon.ico",
     "target": [
       {
         "target": "nsis",
@@ -35,12 +39,16 @@
     ]
   },
   "nsis": {
-    "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
+    "installerIcon": "icon.ico",
+    "uninstallerIcon": "icon.ico",
+    "installerHeaderIcon": "icon.ico"
   },
   "portable": {
     "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
   },
   "linux": {
+    "icon": "icon.png",
     "target": [
       {
         "target": "AppImage",
@@ -62,6 +70,7 @@
     "artifactName": "${productName}-${version}-${arch}.${ext}"
   },
   "mac": {
+    "icon": "icon.png",
     "target": [
       {
         "target": "dmg",

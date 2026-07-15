@@ -21,6 +21,7 @@
 | `.github/copilot-instructions.md` | Project guidelines for AI assistants. |
 | `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates tooling/version, audits NuGet plus shipped npm/Electron dependencies, rebuilds isolated staging/output, verifies installer/updater artifacts, and writes GitHub Release checksums. |
 | `scripts/publish-windows-release.ps1` | One-command Windows publisher: requires a clean source tree, builds the requested SemVer, uploads complete updater assets to a draft `Dorely/Lorekeeper-Releases` release, then publishes it. |
+| `scripts/generate-brand-assets.py` | Deterministically exports browser PNG sizes and the multi-resolution Windows ICO from the 1024px Lorekeeper icon master. |
 | `docs/research/README.md` | Index and maintenance policy for Lorekeeper's sourced editorial, image-prompting, and composition research briefs. |
 | `docs/research/image-generation-prompting.md` | Sourced `gpt-image-2` prompting/API brief with structured reference/edit/page-target guidance and runtime contract mappings. |
 | `docs/research/story-writing-and-editorial-practice.md` | Sourced professional editing, narrative craft, picture-book practice, and system-prompt requirement brief. |
@@ -34,14 +35,14 @@
 | `Program.cs` | Host setup, hardened optional Electron renderer binding with recurring installed-build update checks/state events/restart installation, deterministic development/installed database-path selection, Blazor Interactive Server hub sizing, DI for application services, startup migration/index repair, and image/font/publish endpoints. |
 | `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*` including packaged per-user data placement and update polling, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, advisory `ChatTokens:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
 | `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
-| `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets, app metadata, public GitHub update provider, and payload exclusions for Windows, Linux, and macOS desktop artifacts. |
+| `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets, shared brand-icon resources, app metadata, public GitHub update provider, and payload exclusions for Windows, Linux, and macOS desktop artifacts. |
 | `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained publish profiles used by Electron.NET packaging (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`); Windows isolates staging from final artifacts to prevent recursive packaging. |
 
 ### Components/
 
 | File | Description |
 |------|-------------|
-| `App.razor` | Root component: `<html>` shell, head outlet, scripts. |
+| `App.razor` | Root component: `<html>` shell, responsive browser/app icon metadata, head outlet, and scripts. |
 | `Routes.razor` | `<Router>` wiring `MainLayout` and `NotFound`. |
 | `_Imports.razor` | Shared `@using` directives for all components. |
 | `EntityKnowledgeView.razor` (+ `.razor.css`) | Shared read-only entity knowledge renderer for structured wiki data and source-backed canon markdown used by graph, outline, and context entity detail surfaces. |
@@ -73,7 +74,7 @@
 
 | File | Description |
 |------|-------------|
-| `MainLayout.razor` / `.css` | Viewport-locked application shell with the slim Lorekeeper top bar, downloaded-update restart action, route-aware page/workspace padding, and global error notice. |
+| `MainLayout.razor` / `.css` | Viewport-locked application shell with the branded Lorekeeper top bar, downloaded-update restart action, route-aware page/workspace padding, and global error notice. |
 | `PrintLayout.razor` / `.css` | Minimal no-navigation layout used by print-oriented pages; owns the viewport scroll container while restoring unbounded overflow for printed output. |
 | `PageHeader.razor` | Reusable editorial page heading with eyebrow, title, description, and optional actions. |
 | `ConfigurationShell.razor` (+ `.razor.css`) | Shared configuration-page wrapper with page heading, Projects return action, and Providers/Embeddings/Search switcher. |
@@ -566,7 +567,8 @@
 | `js/autosizeTextareas.js` | Small shared JS module that attaches to `textarea[data-autosize]`, grows each textarea to its `scrollHeight`, refreshes on input/change and width changes, and prevents nested textarea scrollbars. |
 | `js/fileDownloads.js` | Browser download helper used by Import / Export and Publish to save generated graph JSON and publish export files. |
 | `fonts/` | Offline pinned OFL PicturePage families (35 static faces), per-family licenses, and source/revision documentation. |
-| `favicon.png` | Site icon. |
+| `branding/` | Lorekeeper vector master plus generated PNG/ICO variants used by the app shell, browser metadata, and Electron release packaging. |
+| `site.webmanifest` | Browser install metadata and references to the generated Lorekeeper app icons. |
 | `lib/bootstrap/` | Vendored Bootstrap distribution. |
 | `lib/vis-network/` | Vendored `vis-network` browser graph renderer assets and license files used by the Graph tab. |
 

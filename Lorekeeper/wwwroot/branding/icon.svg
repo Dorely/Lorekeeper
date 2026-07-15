@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title id="title">Lorekeeper</title>
+  <rect x="16" y="16" width="992" height="992" rx="208" fill="#425fce" />
+
+  <path
+    d="M160 330c116-39 245-18 352 69 107-87 236-108 352-69v474c-112-34-232-12-327 61l-25 20-25-20c-95-73-215-95-327-61z"
+    fill="#172033" />
+
+  <path
+    d="M190 274c113-25 221 3 302 90v420c-83-71-188-94-302-67z"
+    fill="#fff9e8" />
+  <path
+    d="M532 364c81-87 189-115 302-90v443c-114-27-219-4-302 67z"
+    fill="#fff9e8" />
+
+  <path
+    d="M270 584c91 0 132-94 242-94s151 94 242 94"
+    fill="none"
+    stroke="#d8a72e"
+    stroke-linecap="round"
+    stroke-width="24" />
+
+  <g fill="#d8a72e">
+    <circle cx="270" cy="584" r="38" />
+    <circle cx="512" cy="490" r="38" />
+    <circle cx="754" cy="584" r="38" />
+  </g>
+  <g fill="#fff9e8">
+    <circle cx="270" cy="584" r="16" />
+    <circle cx="512" cy="490" r="16" />
+    <circle cx="754" cy="584" r="16" />
+  </g>
+</svg>
