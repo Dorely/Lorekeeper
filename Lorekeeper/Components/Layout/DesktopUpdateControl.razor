@@ -1,0 +1,104 @@
+@implements IDisposable
+@using Lorekeeper.Desktop
+@inject IDesktopUpdateService DesktopUpdates
+
+@{
+    var snapshot = DesktopUpdates.Snapshot;
+}
+
+@if (snapshot.Status == DesktopUpdateStatus.Downloading)
+{
+    var percent = NormalizePercent(snapshot.DownloadPercent);
+    var downloadLabel = DownloadLabel(snapshot.Version);
+
+    <div class="desktop-update-control desktop-update-download" aria-live="polite">
+        <div class="desktop-update-copy">
+            <span class="desktop-update-label" title="@downloadLabel">@downloadLabel</span>
+            @if (percent.HasValue)
+            {
+                <span class="desktop-update-percent">@percent.Value%</span>
+            }
+        </div>
+
+        @if (percent is int value)
+        {
+            <div class="desktop-update-progress"
+                 role="progressbar"
+                 aria-label="@downloadLabel"
+                 aria-valuemin="0"
+                 aria-valuemax="100"
+                 aria-valuenow="@value"
+                 aria-valuetext="@($"{value}% complete")">
+                <span class="desktop-update-progress-fill" style="@ProgressStyle(value)"></span>
+            </div>
+        }
+        else
+        {
+            <div class="desktop-update-progress desktop-update-progress--indeterminate"
+                 role="progressbar"
+                 aria-label="@downloadLabel"
+                 aria-valuetext="Downloading">
+                <span class="desktop-update-progress-fill"></span>
+            </div>
+        }
+    </div>
+}
+else if (snapshot.Status is DesktopUpdateStatus.Ready or DesktopUpdateStatus.Restarting)
+{
+    var restarting = snapshot.Status == DesktopUpdateStatus.Restarting;
+
+    <div class="desktop-update-control">
+        <button type="button"
+                class="btn btn-sm btn-primary desktop-update-button"
+                disabled="@(!RendererInfo.IsInteractive || restarting)"
+                title="@RestartTitle(snapshot.Version)"
+                @onclick="RestartToUpdateAsync">
+            @(restarting ? "Restarting…" : "Restart to Update")
+        </button>
+    </div>
+}
+
+@code {
+    private bool _disposed;
+
+    protected override void OnInitialized()
+    {
+        DesktopUpdates.StateChanged += OnDesktopUpdateStateChanged;
+    }
+
+    private void OnDesktopUpdateStateChanged(object? sender, EventArgs args)
+    {
+        if (_disposed) return;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RestartToUpdateAsync()
+    {
+        if (!RendererInfo.IsInteractive || !DesktopUpdates.Snapshot.CanRestart) return;
+        await DesktopUpdates.RestartToUpdateAsync();
+    }
+
+    private static int? NormalizePercent(double? percent)
+    {
+        if (percent is not { } value || !double.IsFinite(value)) return null;
+        return (int)Math.Round(Math.Clamp(value, 0d, 100d), MidpointRounding.AwayFromZero);
+    }
+
+    private static string DownloadLabel(string? version) =>
+        version is { Length: > 0 }
+            ? $"Downloading Lorekeeper {version}"
+            : "Downloading update";
+
+    private static string RestartTitle(string? version) =>
+        version is { Length: > 0 }
+            ? $"Install Lorekeeper {version}"
+            : "Install the downloaded Lorekeeper update";
+
+    private static string ProgressStyle(int percent) => $"width: {percent}%";
+
+    public void Dispose()
+    {
+        _disposed = true;
+        DesktopUpdates.StateChanged -= OnDesktopUpdateStateChanged;
+    }
+}

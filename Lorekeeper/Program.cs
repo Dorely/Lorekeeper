@@ -418,7 +418,7 @@ static async Task CheckForElectronUpdatesAsync(DesktopUpdateService desktopUpdat
 {
     try
     {
-        await Electron.AutoUpdater.CheckForUpdatesAndNotifyAsync();
+        await Electron.AutoUpdater.CheckForUpdatesAsync();
     }
     catch (Exception exception)
     {

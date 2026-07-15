@@ -74,7 +74,8 @@
 
 | File | Description |
 |------|-------------|
-| `MainLayout.razor` / `.css` | Viewport-locked application shell with the branded Lorekeeper top bar, downloaded-update restart action, route-aware page/workspace padding, and global error notice. |
+| `MainLayout.razor` / `.css` | Viewport-locked application shell with the branded Lorekeeper top bar, independently interactive update-control host, route-aware page/workspace padding, and global error notice. |
+| `DesktopUpdateControl.razor` (+ `.razor.css`) | Interactive Server top-bar updater that follows live download progress, renders accessible determinate/indeterminate states, and issues the guarded one-click restart-to-install command. |
 | `PrintLayout.razor` / `.css` | Minimal no-navigation layout used by print-oriented pages; owns the viewport scroll container while restoring unbounded overflow for printed output. |
 | `PageHeader.razor` | Reusable editorial page heading with eyebrow, title, description, and optional actions. |
 | `ConfigurationShell.razor` (+ `.razor.css`) | Shared configuration-page wrapper with page heading, Projects return action, and Providers/Embeddings/Search switcher. |
@@ -362,7 +363,7 @@
 
 | File | Description |
 |------|-------------|
-| `DesktopUpdateService.cs` | Singleton installed-desktop update state including idle/download progress/readiness notifications and the guarded silent restart-to-install command consumed by the global layout. |
+| `DesktopUpdateService.cs` | Singleton installed-desktop update state including idle/download progress/readiness events and the guarded silent restart-to-install command consumed by the top-bar update control. |
 
 ### Projects/
 

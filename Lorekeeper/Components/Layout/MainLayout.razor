@@ -1,8 +1,4 @@
 @inherits LayoutComponentBase
-@implements IDisposable
-@using Lorekeeper.Desktop
-@inject IDesktopUpdateService DesktopUpdates
-@inject IJSRuntime JS
 @inject NavigationManager Navigation
 
 <div class="app-shell">
@@ -26,16 +22,7 @@
             </nav>
         }
 
-        @if (DesktopUpdates.Snapshot.CanRestart)
-        {
-            <button type="button"
-                    class="btn btn-sm btn-primary app-update-button"
-                    disabled="@_restartingToUpdate"
-                    title="@(DesktopUpdates.Snapshot.Version is { Length: > 0 } version ? $"Install Lorekeeper {version}" : "Install the downloaded Lorekeeper update")"
-                    @onclick="RestartToUpdateAsync">
-                @(_restartingToUpdate ? "Restarting…" : "Restart to Update")
-            </button>
-        }
+        <DesktopUpdateControl @rendermode="InteractiveServer" />
     </header>
 
     <main>
@@ -53,36 +40,6 @@
 </div>
 
 @code {
-    private bool _restartingToUpdate;
-
-    protected override void OnInitialized()
-    {
-        DesktopUpdates.StateChanged += OnDesktopUpdateStateChanged;
-    }
-
-    private void OnDesktopUpdateStateChanged(object? sender, EventArgs args) =>
-        _ = InvokeAsync(StateHasChanged);
-
-    private async Task RestartToUpdateAsync()
-    {
-        if (_restartingToUpdate || !DesktopUpdates.Snapshot.CanRestart) return;
-        var confirmed = await JS.InvokeAsync<bool>(
-            "confirm",
-            "Lorekeeper will close, install the downloaded update, and restart. Continue?");
-        if (!confirmed) return;
-
-        _restartingToUpdate = true;
-        try
-        {
-            await DesktopUpdates.RestartToUpdateAsync();
-        }
-        catch
-        {
-            _restartingToUpdate = false;
-            throw;
-        }
-    }
-
     private string ContentClass() => IsProjectRoute()
         ? "content content--workspace"
         : "content content--page";
@@ -96,6 +53,4 @@
     private bool IsHomeRoute() => string.IsNullOrEmpty(CurrentPath());
     private bool IsSettingsRoute() => CurrentPath().StartsWith("settings/", StringComparison.OrdinalIgnoreCase);
     private bool IsProjectRoute() => CurrentPath().StartsWith("projects/", StringComparison.OrdinalIgnoreCase);
-
-    public void Dispose() => DesktopUpdates.StateChanged -= OnDesktopUpdateStateChanged;
 }

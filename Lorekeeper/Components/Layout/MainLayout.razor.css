@@ -63,11 +63,6 @@
 .app-topbar-nav a:hover { color: var(--lk-accent); }
 .app-topbar-nav span:last-child { color: var(--lk-ink); }
 
-.app-update-button {
-    margin-left: auto;
-    white-space: nowrap;
-}
-
 main {
     display: flex;
     flex: 1;
