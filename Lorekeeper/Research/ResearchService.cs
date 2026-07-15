@@ -302,7 +302,7 @@ public sealed class ResearchService(
         {
             var initialVisuals = await entityVisualContext.BuildVisionMessageAsync(
                 projectId, initialAssembly.Visuals, toolContext.VisionReady,
-                "Visual examples from the initial project context. Use them only for factual identity and continuity grounding.", cancellationToken);
+                "Canonical visual references from the initial project context. Use them for identity and appearance continuity grounding; they are not scene tags.", cancellationToken);
             if (initialVisuals is not null) messages.Add(initialVisuals);
         }
         messages.AddRange(ChatModelHistory.Build(
@@ -454,7 +454,7 @@ public sealed class ResearchService(
             {
                 var entityMessage = await entityVisualContext.BuildVisionMessageAsync(
                     projectId, toolContext.DrainEntityVisuals(), toolContext.VisionReady,
-                    "Visual examples for entities loaded by the preceding research tools.", cancellationToken);
+                    "Canonical visual references for entities loaded by the preceding research tools.", cancellationToken);
                 if (entityMessage is not null) messages.Add(entityMessage);
 
                 var sourceVisuals = toolContext.DrainSourceVisuals();

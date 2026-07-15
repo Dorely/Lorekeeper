@@ -56,13 +56,13 @@ public sealed class IngestAgentTools(
         AIFunctionFactory.Create(
             method: (Guid candidateId, Guid entityId, string? label = null, ProjectImageCropRegion? crop = null, string? cropAltText = null) =>
                 PromoteIngestVisualAsync(context, candidateId, entityId, label, crop, cropAltText),
-            name: "promote_ingest_visual_candidate",
-            description: "Promote a source visual candidate and attach it to a resolved entity only when the visual clearly depicts that exact entity. Pass a percentage-based crop plus subject-only cropAltText when the entity occupies only part of a broader scene. Never infer identity from proximity alone or attach ambiguous/decorative images."),
+            name: "promote_ingest_entity_reference",
+            description: "Promote a source visual candidate and attach it to one resolved entity only when it is useful as a stable canonical appearance/design reference or as visual grounding for a written appearance description. If the entity occupies part of a broader image, pass a tight subject-only crop and cropAltText. Make a separate crop/promotion for each entity; do not attach ordinary narrative scenes, ambiguous images, or decorative art."),
 
         AIFunctionFactory.Create(
             method: (Guid candidateId, string reason) => SkipIngestVisualAsync(context, candidateId, reason),
             name: "skip_ingest_visual_candidate",
-            description: "Mark a source visual as skipped only when it is clearly decorative, a mask/logo, unusable, or too ambiguous to serve as any entity example. Give a concise reason."),
+            description: "Mark a source visual as skipped when it is an ordinary narrative scene rather than a useful canonical/description reference, or when it is decorative, a mask/logo, unusable, or too ambiguous. Give a concise reason."),
 
         AIFunctionFactory.Create(
             method: (string chunkSummary, string sourceSynopsis, string? notes = null) =>
@@ -103,7 +103,7 @@ public sealed class IngestAgentTools(
             context.OnMutated();
             return JsonSerializer.Serialize(new
             {
-                status = "promoted_and_attached",
+                status = "promoted_as_canonical_reference",
                 example.Id,
                 example.EntityId,
                 example.EntityName,

@@ -44,9 +44,13 @@ public sealed class ImageEditBrief
 
 public sealed class ImageReferenceUse
 {
+    [Description("Exact grounded project image id. For every depicted character with an available canonical reference, include one relevant canonical reference before optional variant, setting, prop, or style inputs.")]
     public Guid ImageId { get; init; }
+    [Description("The reference's specific job, such as 'canonical identity for Mara' or 'setting architecture'. Name the character when this is an identity reference.")]
     public string Role { get; init; } = string.Empty;
+    [Description("Visible identity, design, clothing, palette, prop, setting, or style traits that must carry into the target.")]
     public string TraitsToPreserve { get; init; } = string.Empty;
+    [Description("Pose, expression, gaze, action, framing, composition, or other reference traits that the target must replace rather than copy.")]
     public string TraitsThatMustChange { get; init; } = string.Empty;
 }
 

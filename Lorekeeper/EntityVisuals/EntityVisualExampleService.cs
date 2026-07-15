@@ -67,7 +67,7 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
                 continue;
             }
             if (!IsEligible(node))
-                errors.Add($"Entity target {target.EntityId} ({node.NodeType}) is not eligible for visual examples.");
+                errors.Add($"Entity target {target.EntityId} ({node.NodeType}) is not eligible for canonical visual references.");
         }
 
         return new EntityVisualTargetValidationResult(
@@ -127,7 +127,7 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
     public async Task<EntityVisualExampleView> UpdateAsync(Guid projectId, Guid exampleId, string label, int? sortOrder = null, EntityVisualExampleOrigin? origin = null, CancellationToken cancellationToken = default)
     {
         var example = await QueryExamples(projectId, tracking: true).FirstOrDefaultAsync(item => item.Id == exampleId, cancellationToken)
-            ?? throw new InvalidOperationException("Entity visual example was not found.");
+            ?? throw new InvalidOperationException("Entity canonical visual reference was not found.");
         example.Label = label?.Trim() ?? string.Empty;
         if (sortOrder is int requestedOrder)
         {
@@ -153,7 +153,7 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
         var node = await GetRequiredEntityNodeAsync(projectId, entityId, cancellationToken);
         var examples = await db.EntityVisualExamples.Where(example => example.GraphNodeId == node.Id).ToListAsync(cancellationToken);
         if (!orderedExampleIds.ToHashSet().SetEquals(examples.Select(example => example.Id)))
-            throw new InvalidOperationException("Reorder list must contain every visual example exactly once.");
+            throw new InvalidOperationException("Reorder list must contain every canonical visual reference exactly once.");
         var byId = examples.ToDictionary(example => example.Id);
         for (var index = 0; index < orderedExampleIds.Count; index++)
         {

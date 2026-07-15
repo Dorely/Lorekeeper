@@ -325,7 +325,7 @@ public sealed class ContextIndexingService(
             .ToListAsync(cancellationToken);
         if (visualExamples.Count > 0)
         {
-            sb.AppendLine("Visual examples:");
+            sb.AppendLine("Canonical visual references:");
             foreach (var example in visualExamples)
             {
                 sb.Append("- ").Append(example.Label).Append(" [imageId: ").Append(example.ImageId.ToString("N")).AppendLine("]");

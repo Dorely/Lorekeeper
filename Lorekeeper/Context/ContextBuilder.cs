@@ -811,7 +811,7 @@ public sealed class ContextBuilder(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
-            visualExamples = visualExamples.OrderBy(example => example.SortOrder).Select(example => new
+            canonicalVisualReferences = visualExamples.OrderBy(example => example.SortOrder).Select(example => new
             {
                 example.Id,
                 example.EntityId,

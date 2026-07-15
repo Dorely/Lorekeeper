@@ -813,7 +813,7 @@ public sealed class EditorContestService(
             batch.ProjectId,
             snapshot.Visuals,
             await providerService.IsVisionProviderWorkingAsync(candidate.ProviderId, cancellationToken),
-            "Canonical entity visual examples captured with the contest context follow.",
+            "Canonical entity visual references captured with the contest context follow.",
             cancellationToken) is { } visualMessage)
         {
             messages.Add(visualMessage);

@@ -217,7 +217,7 @@ public sealed class OutlineToolStagingContext(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
-            visualExamples = visualExamples.Select(example => new
+            canonicalVisualReferences = visualExamples.Select(example => new
             {
                 example.Id,
                 example.EntityId,

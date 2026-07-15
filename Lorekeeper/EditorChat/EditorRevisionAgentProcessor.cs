@@ -117,7 +117,7 @@ public sealed class EditorRevisionAgentProcessor(
                 job.ProjectId,
                 contextAssembly.Visuals,
                 await providerService.IsVisionProviderWorkingAsync(provider.Id, cancellationToken),
-                "Entity visual examples for this revision assignment follow. Preserve the established visual continuity they show.",
+                "Canonical entity visual references for this revision assignment follow. Preserve the established appearance continuity they show.",
                 cancellationToken) is { } visualMessage)
             {
                 messages.Add(visualMessage);
@@ -667,7 +667,7 @@ public sealed class EditorRevisionAgentProcessor(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
-            visualExamples = visualExamples.Select(example => new
+            canonicalVisualReferences = visualExamples.Select(example => new
             {
                 example.Id,
                 example.EntityId,

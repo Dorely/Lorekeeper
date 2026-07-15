@@ -246,7 +246,7 @@ public sealed class ImagesChatService(
         {
             var visualMessage = await entityVisualContext.BuildVisionMessageAsync(
                 projectId, initialAssembly.Visuals, visionReady,
-                "Entity and explicit-image visual context from the project follows. Treat each mapping as a continuity candidate and inspect its label, association origin, image source, purpose, and visible content before using it.", cancellationToken);
+                "Canonical entity references and explicit-image visual context from the project follow. Entity mappings are stable appearance/design references, not scene tags; inspect each label, association origin, image source, purpose, and visible content before using it.", cancellationToken);
             if (visualMessage is not null) messages.Add(visualMessage);
         }
         foreach (var persistedMessage in history)

@@ -458,29 +458,26 @@ public sealed class AiChangeApprovalService(
                 await entities.LinkAsync(projectId, after.FromId, after.ToId, after.EdgeType, after.Properties, cancellationToken);
                 break;
             }
-            case "attach_project_image_to_entity":
-            case "attach_entity_visual_example":
-            case "generate_project_image":
+            case "attach_entity_canonical_reference":
             case "crop_project_image":
             {
                 var after = ReadRequired<EntityVisualChange>(afterJson);
                 await entityVisualExamples.AttachAsync(projectId, after.EntityId!.Value, after.ImageId!.Value, after.Label, EntityVisualExampleOrigin.Agent, cancellationToken: cancellationToken);
                 break;
             }
-            case "update_entity_visual_example":
+            case "update_entity_canonical_reference":
             {
                 var after = ReadRequired<EntityVisualChange>(afterJson);
                 await entityVisualExamples.UpdateAsync(projectId, after.ExampleId!.Value, after.Label, after.SortOrder, cancellationToken: cancellationToken);
                 break;
             }
-            case "detach_project_image_from_entity":
-            case "detach_entity_visual_example":
+            case "detach_entity_canonical_reference":
             {
                 var before = ReadRequired<EntityVisualChange>(change.BeforeJson);
                 await entityVisualExamples.DetachAsync(projectId, before.ExampleId!.Value, cancellationToken);
                 break;
             }
-            case "import_web_image_to_entities":
+            case "import_web_image_as_entity_reference":
             {
                 var after = ReadRequired<EntityVisualChange>(afterJson);
                 var sourceImage = await entityVisualExamples.PromoteCandidateAsync(projectId, after.CandidateId!.Value, cancellationToken);

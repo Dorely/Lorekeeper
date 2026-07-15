@@ -207,7 +207,7 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one explicitly paginated entity with properties, knowledge, relationships, and ordered visual examples. Full identity fields and GUIDs are repeated on every page; omit pageNumber for page 1 and follow nextPageArguments. Vision-ready providers receive its image bytes on the next model round."),
+                description: "Read one explicitly paginated entity with properties, knowledge, relationships, and ordered canonical visual references. Full identity fields and GUIDs are repeated on every page; omit pageNumber for page 1 and follow nextPageArguments. Vision-ready providers receive its image bytes on the next model round."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),
@@ -216,8 +216,8 @@ public sealed class OutlineCollaborationTools(
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityVisualExamplesAsync(context, entityId),
-                name: "list_entity_visual_examples",
-                description: "List ordered visual examples attached to an entity and supply their bytes to a vision-ready provider on the next model round."),
+                name: "list_entity_canonical_references",
+                description: "List ordered canonical visual references attached to an entity and supply their bytes to a vision-ready provider on the next model round."),
 
             AIFunctionFactory.Create(
                 method: (string type, string name, string? propertiesJson = null, string? parentId = null, int? order = null) =>
@@ -250,24 +250,24 @@ public sealed class OutlineCollaborationTools(
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, Guid imageId, string? label = null) => AttachEntityVisualAsync(context, entityId, imageId, label),
-                name: "attach_entity_visual_example",
-                description: "Attach an existing project image to a non-structural entity as a labeled visual example."),
+                name: "attach_entity_canonical_reference",
+                description: "Attach one isolated, stable appearance or design image to a non-structural entity as a labeled canonical reference. Do not attach an ordinary narrative scene merely because the entity appears in it."),
 
             AIFunctionFactory.Create(
-                method: (Guid exampleId, string label, int? sortOrder = null) => UpdateEntityVisualAsync(context, exampleId, label, sortOrder),
-                name: "update_entity_visual_example",
-                description: "Relabel or reorder an attached entity visual example."),
+                method: (Guid canonicalReferenceId, string label, int? sortOrder = null) => UpdateEntityVisualAsync(context, canonicalReferenceId, label, sortOrder),
+                name: "update_entity_canonical_reference",
+                description: "Relabel or reorder an attached entity canonical visual reference."),
 
             AIFunctionFactory.Create(
-                method: (Guid exampleId) => DetachEntityVisualAsync(context, exampleId),
-                name: "detach_entity_visual_example",
-                description: "Detach an entity visual example without deleting its image."),
+                method: (Guid canonicalReferenceId) => DetachEntityVisualAsync(context, canonicalReferenceId),
+                name: "detach_entity_canonical_reference",
+                description: "Detach an entity canonical visual reference without deleting its image."),
 
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ProjectImageCropRegion crop, string? fileName = null, string? altText = null, EntityVisualTarget[]? entityTargets = null) =>
-                    CropProjectImageAsync(context, sourceImageId, crop, fileName, altText, entityTargets),
+                method: (Guid sourceImageId, ProjectImageCropRegion crop, string? fileName = null, string? altText = null, EntityVisualTarget? entityTarget = null) =>
+                    CropProjectImageAsync(context, sourceImageId, crop, fileName, altText, entityTarget),
                 name: "crop_project_image",
-                description: "Create a non-destructive project-library crop from an existing image using 0-100 percentage coordinates. Inspect the source first or use user-supplied coordinates, describe only the cropped subject in altText, and pass only explicit entityTargets. Source associations are never inherited."),
+                description: "Create a non-destructive project-library crop from an existing image using 0-100 percentage coordinates. Inspect the source first or use user-supplied coordinates and describe only the cropped subject in altText. Optionally attach the tight subject-only crop to one entity as its canonical reference; make separate crops for separate entities. Source associations are never inherited."),
 
         };
 
@@ -434,7 +434,7 @@ public sealed class OutlineCollaborationTools(
             canonSources = entity.CanonSources,
             links,
             relationContextPreview = RelationContextPreview(entity.Id, EntityRelationOptions, relationContext),
-            visualExamples = visuals.Select(VisualPayload),
+            canonicalVisualReferences = visuals.Select(VisualPayload),
         });
         return AgentPayloadPaginator.SerializePage(
             AgentPayloadPaginator.EntityIdentity(entity.Id, entity.Type, entity.Name, entity.Order, entity.ParentId),
@@ -482,8 +482,8 @@ public sealed class OutlineCollaborationTools(
             {
                 var after = new EntityVisualChange("attach", EntityId: entityId, ImageId: imageId, Label: label?.Trim() ?? string.Empty);
                 return await ctx.Staging.StageExternalChangeAsync(
-                    "Attach a visual example to an entity", null, after,
-                    new { status = "staged", entityId, imageId, label }, "EntityVisualExample", $"{entityId:N}/{imageId:N}");
+                    "Attach a canonical visual reference to an entity", null, after,
+                    new { status = "staged", entityId, imageId, label }, "EntityCanonicalReference", $"{entityId:N}/{imageId:N}");
             }
             var example = await entityVisualExamples.AttachAsync(ctx.ProjectId, entityId, imageId, label, EntityVisualExampleOrigin.Agent);
             ctx.OnMutated();
@@ -500,12 +500,12 @@ public sealed class OutlineCollaborationTools(
             if (ctx.Staging is not null)
             {
                 var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
-                if (current is null) return "Error: entity visual example was not found.";
+                if (current is null) return "Error: entity canonical visual reference was not found.";
                 var before = new EntityVisualChange("update", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
                 var after = before with { Label = label.Trim(), SortOrder = sortOrder ?? current.SortOrder };
                 return await ctx.Staging.StageExternalChangeAsync(
-                    "Update an entity visual example", before, after,
-                    new { status = "staged", exampleId, label, sortOrder }, "EntityVisualExample", exampleId.ToString("N"));
+                    "Update an entity canonical visual reference", before, after,
+                    new { status = "staged", canonicalReferenceId = exampleId, label, sortOrder }, "EntityCanonicalReference", exampleId.ToString("N"));
             }
             var example = await entityVisualExamples.UpdateAsync(ctx.ProjectId, exampleId, label, sortOrder);
             ctx.OnMutated();
@@ -519,15 +519,15 @@ public sealed class OutlineCollaborationTools(
         if (ctx.Staging is not null)
         {
             var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
-            if (current is null) return "Error: entity visual example was not found.";
+            if (current is null) return "Error: entity canonical visual reference was not found.";
             var before = new EntityVisualChange("detach", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
             return await ctx.Staging.StageExternalChangeAsync(
-                "Detach an entity visual example", before, null,
-                new { status = "staged", exampleId }, "EntityVisualExample", exampleId.ToString("N"));
+                "Detach an entity canonical visual reference", before, null,
+                new { status = "staged", canonicalReferenceId = exampleId }, "EntityCanonicalReference", exampleId.ToString("N"));
         }
         await entityVisualExamples.DetachAsync(ctx.ProjectId, exampleId);
         ctx.OnMutated();
-        return JsonSerializer.Serialize(new { status = "detached", exampleId });
+        return JsonSerializer.Serialize(new { status = "detached", canonicalReferenceId = exampleId });
     }
 
     private async Task<string> CropProjectImageAsync(
@@ -536,20 +536,22 @@ public sealed class OutlineCollaborationTools(
         ProjectImageCropRegion crop,
         string? fileName,
         string? altText,
-        EntityVisualTarget[]? entityTargets)
+        EntityVisualTarget? entityTarget)
     {
         try
         {
+            var targetValidation = await entityVisualExamples.ValidateTargetsAsync(
+                ctx.ProjectId,
+                entityTarget is null ? null : [entityTarget]);
+            if (!targetValidation.IsValid)
+                return $"Error: {targetValidation.Error} Use a grounded entity id or omit entityTarget.";
+
             var image = await projectImages.CropAsync(ctx.ProjectId, sourceImageId, new ProjectImageCropRequest(
                 crop,
                 fileName?.Trim() ?? string.Empty,
                 altText?.Trim() ?? string.Empty));
-            var targets = (entityTargets ?? [])
-                .Where(target => target.EntityId != Guid.Empty)
-                .DistinctBy(target => target.EntityId)
-                .ToList();
-            var associations = new List<object>();
-            foreach (var target in targets)
+            object? canonicalReference = null;
+            if (targetValidation.Targets is [var target])
             {
                 if (ctx.Staging is null)
                 {
@@ -559,19 +561,20 @@ public sealed class OutlineCollaborationTools(
                         image.Id,
                         target.Label,
                         EntityVisualExampleOrigin.Agent);
-                    associations.Add(VisualPayload(example));
-                    continue;
+                    canonicalReference = VisualPayload(example);
                 }
-
-                var after = new EntityVisualChange("attach", EntityId: target.EntityId, ImageId: image.Id, Label: target.Label?.Trim() ?? string.Empty);
-                var staged = await ctx.Staging.StageExternalChangeAsync(
-                    $"Attach cropped image to entity {target.EntityId:N}",
-                    null,
-                    after,
-                    new { status = "staged", target.EntityId, imageId = image.Id, target.Label },
-                    "EntityVisualExample",
-                    $"{target.EntityId:N}/{image.Id:N}");
-                associations.Add(JsonSerializer.Deserialize<JsonElement>(staged));
+                else
+                {
+                    var after = new EntityVisualChange("attach", EntityId: target.EntityId, ImageId: image.Id, Label: target.Label?.Trim() ?? string.Empty);
+                    var staged = await ctx.Staging.StageExternalChangeAsync(
+                        $"Attach cropped canonical reference to entity {target.EntityId:N}",
+                        null,
+                        after,
+                        new { status = "staged", target.EntityId, imageId = image.Id, target.Label },
+                        "EntityCanonicalReference",
+                        $"{target.EntityId:N}/{image.Id:N}");
+                    canonicalReference = JsonSerializer.Deserialize<JsonElement>(staged);
+                }
             }
 
             ctx.QueueVisuals([
@@ -594,7 +597,7 @@ public sealed class OutlineCollaborationTools(
                 status = "cropped",
                 sourceImageId,
                 image = new { image.Id, image.FileName, image.ContentType, image.PreviewUrl, image.AltText, image.Source },
-                associations,
+                canonicalReference,
             });
         }
         catch (Exception ex)
@@ -1391,7 +1394,7 @@ public sealed class OutlineCollaborationTools(
             summaryText = TruncatePropertyValue(entity.Summary),
             aliases = entity.Aliases.Take(4).ToArray(),
             properties = CompactProperties(entity.Properties),
-            visualExamples = (visuals ?? []).Take(4).Select(example => new
+            canonicalVisualReferences = (visuals ?? []).Take(4).Select(example => new
             {
                 example.Image.Id,
                 example.Label,

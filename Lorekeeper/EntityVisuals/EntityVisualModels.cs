@@ -16,9 +16,9 @@ public sealed record EntityVisualExampleView(
     ProjectImageView Image);
 
 public sealed record EntityVisualTarget(
-    [property: Description("Exact id of an existing project entity that is eligible for visual examples. Use an id returned by project context or an entity read/search; never invent one.")]
+    [property: Description("Exact id of an existing project entity that is eligible for canonical visual references. Use an id returned by project context or an entity read/search; never invent one.")]
     Guid EntityId,
-    [property: Description("Concise role of the represented entity in this image, such as default appearance, winter outfit, or exterior view.")]
+    [property: Description("Concise canonical role of this isolated entity reference, such as default appearance, winter outfit, or exterior view.")]
     string Label);
 
 public sealed record EntityVisualTargetValidationResult(

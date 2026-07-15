@@ -312,7 +312,7 @@
 | `CodexChatClient.cs` | `IChatClient` implementation for Codex Responses API with configured reasoning effort, SSE parsing, multimodal user content, function calling, strict schemas, and tool-argument streaming. |
 | `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs Codex or OpenAI-compatible chat clients, applies exact per-model reasoning effort and Codex timeout, and exposes configured verification probes. |
 | `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image reader for vision probes and PDF transcription, with per-model reasoning effort across Codex Responses and OpenAI-compatible requests. |
-| `AssistantWorkflowInstructions.cs` | Core code-owned AI workflow/tool-use instructions reused across agents, including non-replayed tool-history recovery, exact-ID/pagination handling, always-on image/reference and agent-led PicturePage composition/verification rules, and Contest preparation. |
+| `AssistantWorkflowInstructions.cs` | Core code-owned AI workflow/tool-use instructions reused across agents, including non-replayed tool-history recovery, exact-ID/pagination handling, canonical entity-reference coverage/isolation rules, agent-led PicturePage composition/verification, and Contest preparation. |
 | `SystemPromptComposer.cs` | Central composer for the one actual system-role prompt: professional charter, tool rules, dynamic book/page guidance, Project Guidance, Book Brief, then working context. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |
 | `SeedSystemPrompt.cs` | Frozen historical seed retained only so legacy migrations can identify and clear untouched seeded guidance; runtime prompts no longer use it. |
@@ -337,7 +337,7 @@
 | File | Description |
 |------|-------------|
 | `IResearchService.cs` / `ResearchService.cs` | Research adapter over the shared chat engine: builds project context, supplies cache-first web/graph tools, stages Review edits, and derives activity from compact or paginated entity envelopes. |
-| `ResearchTools.cs` | Research tools for explicitly paginated entity/link and web-page reads, labeled compact web discoveries, safe image inspection, confirmed import/crop/entity attachment, and staged graph mutations. |
+| `ResearchTools.cs` | Research tools for explicitly paginated entity/link and web-page reads, compact web discoveries, safe image inspection, single-entity canonical-reference import/crop, and staged graph mutations. |
 | `ResearchTurnUpdate.cs` | Streaming update records consumed by `ResearchChatPanel`: text/tool updates, pending AI change creation, graph mutation refreshes, assistant completion, and turn errors/cancellation. |
 | `ResearchChatTurnRunner.cs` | Background turn runner for Research chat: keeps active turns alive across component disposal and provides buffered update subscriptions. |
 | `ResearchActivityModels.cs` | Read models for Research Activity sidebar entity/source summaries and cache-only source detail modals. |
@@ -385,7 +385,7 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction and full previous chapter, targeted active-chapter sections when required, bounded direct/lexical/vector retrieval, exclusion honoring, optional pruning, token preflight, and provenance snapshots. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction, canonical visual-reference payloads, full previous chapter, targeted active-chapter sections, bounded retrieval, exclusion honoring, token preflight, and provenance snapshots. |
 | `AgentPayloadPaginator.cs` | Shared soft-target model payload paginator; repeats identity fields, packs logical JSON records, and segments only individually oversized text fields with explicit continuation metadata. |
 | `IEditorContextService.cs` | Context facade with Project Guidance/Book Brief keys, explicit per-chapter inclusions/exclusions, project-image context, and recommendation key sets. |
 | `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
@@ -401,7 +401,7 @@
 | `EntityVisualModels.cs` | Read/request/change records for visual examples, entity targets, and source candidates. |
 | `EntityVisualContextOptions.cs` | Limits for images per entity/turn, model input edge, and source visuals per ingest chunk. |
 | `IEntityVisualExampleService.cs` / `EntityVisualExampleService.cs` | Association/candidate reads and mutations, non-throwing entity-target validation, promotion, cleanup, and entity reindexing. |
-| `EntityVisualContextService.cs` | Bounded, deduplicated multimodal entity context assembly with explicit association-origin and image-source metadata for agent turns. |
+| `EntityVisualContextService.cs` | Bounded, deduplicated canonical-reference context assembly with explicit association-origin and image-source metadata for multimodal agent turns. |
 
 ### Tokens/
 
@@ -434,8 +434,8 @@
 | `IngestSourceAssertions.cs` | Legacy helper/model for protected source-scoped node/edge assertion JSON, ingest-created graph origin markers, report graph-action payloads, and source-subtraction operations. |
 | `IngestWikiSheet.cs` | Shared wiki/canon helper/models for ingest-managed summaries, aliases, wiki sections, source-backed `canonSource.*` markdown, canon metadata cleanup, citations, and search projection helpers. |
 | `IngestJobWorker.cs` | Hosted background worker that marks interrupted jobs/chunks stopped at startup, notifies the UI, and drains queued ingest jobs in scoped processors. |
-| `IngestJobProcessor.cs` | Runs ingest with streaming staging, bounded source/entity visuals, final synthesis, relationship promotion, retries, diagnostics, and indexing. |
-| `IngestAgentTools.cs` | Ingest tools for identity/observations/relationships, source-visual promotion with optional crop/entity attachment, final canon writes, and source progress. |
+| `IngestJobProcessor.cs` | Runs ingest with streaming staging, bounded source visuals and canonical entity references, final synthesis, relationship promotion, retries, diagnostics, and indexing. |
+| `IngestAgentTools.cs` | Ingest tools for identity/observations/relationships, single-entity canonical-reference promotion with optional subject crop, final canon writes, and source progress. |
 
 ### ImportExport/
 
@@ -454,7 +454,7 @@
 | File | Description |
 |------|-------------|
 | `ProjectImageModels.cs` | Image, normalized crop, and entity-target requests/views plus persisted jobs, output state, masks, provider progress, and runtime snapshots. |
-| `ImagePromptComposer.cs` | Shared structured generation/edit brief compiler with stable ordering, actual provider-order reference labels, page geometry/reserved regions, rendered-text policy, and `gpt-image-2` size validation. |
+| `ImagePromptComposer.cs` | Shared structured generation/edit brief compiler with canonical-character reference schema guidance, stable provider-order labels, page geometry/reserved regions, rendered-text policy, and `gpt-image-2` size validation. |
 | `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: metadata-only listing with endpoint URLs, byte reads, upload, deterministic local crop/reuse, legacy blocking generation, metadata, delete, thumbnail, and reference scrubbing. |
 | `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Image job persistence for structured prompt audits, revised prompts/output IDs, lifecycle/state/errors, output saving, and PNG/shape-mask validation. |
 | `IProjectImageGenerationRuntime.cs` / `ProjectImageGenerationRuntime.cs` | Singleton FIFO image queue with one active job per project, per-job cancellation propagated to providers/retries, partial previews, completion waiters, and state notifications. |
@@ -471,7 +471,7 @@
 | File | Description |
 |------|-------------|
 | `IImagesChatService.cs` / `ImagesChatService.cs` | Images adapter over the shared chat engine with image/layout guidance, automatic and attached visual context, persisted transcript visuals, and queued generation/edit tools. |
-| `ImagesChatTools.cs` | Images tools for grounded reads and structured generation/editing, ordered references, masks, shared publish-profile geometry, raster metadata, and chapter placement context. |
+| `ImagesChatTools.cs` | Images tools for grounded reads, explicit canonical-reference mutations/single-subject crops, unattached structured generation/editing, ordered inputs, masks, geometry, and chapter placement context. |
 | `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, cancellation and owned image jobs, current tool metadata, visible/model-only images, and mutation signaling. |
 | `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
 | `ImagesChatTurnRunner.cs` | Background turn runner for Images Chat: executes scoped chat turns outside component lifetime and replays buffered live updates to reopened panels. |
@@ -521,7 +521,7 @@
 | `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, staging helpers, persisted/model-visible visuals, and pending PicturePage render-verification state. |
 | `EditorChatService.cs` | Editor adapter using one composed system prompt, persisted turn-context trace, vision-provider-agnostic page snapshots, post-PicturePage render verification, Review edits, contests, workers, and image-job progress. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific paginated chapter reads and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor tools for grounded reads, explicit-request Book Brief updates, structured image generation/edit/masks, semantic PicturePage text roles, shared geometry/diagnostics, revision agents, and Contest preparation. |
+| `EditorChatTools.cs` | Editor tools for grounded reads, explicit canonical-reference mutations/single-subject crops, unattached structured image generation/editing, Book Brief updates, PicturePage layout, revision agents, and Contest preparation. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
 | `EditorChatTurnRunner.cs` | Background turn runner for Editor Chat: preserves active turns across tab changes while leaving explicit Stop as the cancellation path. |
@@ -538,10 +538,10 @@
 |------|-------------|
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt`, keeps Act graph nodes/structural edges synchronized, and updates targeted act context vectors on mutations. |
 | `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Outline adapter whose actual composed system prompt includes Project Guidance and Book Brief; prioritizes/directly maintains the brief while preserving staged outline changes. |
-| `OutlineCollaborationTools.cs` | Outline tools including direct partial `update_book_brief`, conservative cleanup of equivalent legacy `outline.*` facts, grounded reads/search, compact outline/entity mutations, and image crop/entity attachment. |
+| `OutlineCollaborationTools.cs` | Outline tools including direct partial `update_book_brief`, cleanup of equivalent legacy `outline.*` facts, grounded reads/search, compact outline/entity mutations, and single-entity canonical-reference crop/attachment. |
 | `OutlineMutationPayloads.cs` | Shared compact entity/endpoint envelopes used by direct and staged outline mutation tools without serializing full knowledge or relationship traversals. |
 | `OutlineChatTurnRunner.cs` | Background turn runner for Outline chat: owns active turn cancellation/subscription outside the Blazor component lifetime. |
-| `IAiChangeApprovalService.cs` / `AiChangeApprovalService.cs` | Applies or rejects queued AI changes from outline/editor/research chat, including outline/entity mutations and editor chapter-body edits; enforces dependency application/rejection cascading and writes hidden correction messages to the owning transcript. |
+| `IAiChangeApprovalService.cs` / `AiChangeApprovalService.cs` | Applies or rejects queued AI changes from outline/editor/research chat, including canonical-reference mutations, outline/entity changes, and editor chapter-body edits; enforces dependency cascading and writes hidden corrections to the owning transcript. |
 | `AiChangeReviewDrafts.cs` | Typed helper for persisted pending-change review drafts: reads editable text fields, updates draft payload JSON, validates draft metadata, and resolves effective after-payloads. |
 | `OutlineToolStagingContext.cs` | Approval-mode working snapshot that overlays staged edits/reorders/links and mirrors direct-tool compact mutation and paginated read envelopes. |
 | `OutlineChangePayloads.cs` | JSON payload records shared by staging and approval application for acts, chapters, entities, links, and reorders. |

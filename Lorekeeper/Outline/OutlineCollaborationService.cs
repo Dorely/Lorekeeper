@@ -447,7 +447,7 @@ they commit to a direction, act on it without a second confirmation.
                     projectId,
                     toolContext.DrainVisuals(),
                     toolContext.VisionReady,
-                    "Visual examples for the entities loaded by the preceding tools. Preserve the text mappings to every represented entity.",
+                    "Canonical visual references for entities loaded by the preceding tools. Use them for stable identity/design grounding; do not treat ordinary scenes as entity mappings.",
                     cancellationToken);
                 if (visualMessage is not null)
                     messages.Add(visualMessage);

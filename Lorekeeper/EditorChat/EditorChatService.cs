@@ -256,7 +256,7 @@ public sealed class EditorChatService(
             projectId,
             initialEntityVisuals,
             visionReady,
-            "Automatic entity and explicit-image visual context follows. Treat each mapping as a continuity candidate: inspect its label, association origin, image source, purpose, and visible content before deciding whether it is an appropriate reference.",
+            "Canonical entity references and explicit-image visual context follow. Entity mappings are stable appearance/design references, not scene tags: inspect each label, association origin, image source, purpose, and visible content before using it.",
             cancellationToken) is { } entityVisualMessage)
         {
             messages.Add(entityVisualMessage);

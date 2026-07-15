@@ -599,7 +599,7 @@ public sealed class IngestJobProcessor(
         {
             var visualContents = new List<AIContent>
             {
-                new TextContent("Bounded source visual candidates relevant to this chunk. Candidate IDs and locators match the metadata in the chunk prompt. Attach only when the visual clearly depicts the resolved entity."),
+                new TextContent("Bounded source visual candidates relevant to this chunk. Candidate IDs and locators match the metadata in the chunk prompt. Promote only isolated, stable canonical appearance/design references or visuals useful for grounding written appearance descriptions; crop broader images tightly to one subject."),
             };
             foreach (var candidate in sourceVisuals)
             {
@@ -838,7 +838,7 @@ public sealed class IngestJobProcessor(
                 job.ProjectId,
                 entityVisuals,
                 await providerService.IsVisionProviderWorkingAsync(finalProviderId, cancellationToken),
-                "Existing visual examples for the entity being finalized. Use them for identity grounding; do not infer unsupported textual facts from appearance.",
+                "Existing canonical visual references for the entity being finalized. Use them for identity grounding; do not infer unsupported textual facts from appearance.",
                 cancellationToken);
             if (visualMessage is not null) messages.Add(visualMessage);
         }
@@ -1278,11 +1278,11 @@ public sealed class IngestJobProcessor(
             Source visual candidates for this chunk ({{sourceVisuals.Count}}):
             {{visualSummary}}
 
-            Visual association rules:
-            - For a candidate that clearly depicts a resolved entity, call promote_ingest_visual_candidate after resolving that entity.
-            - Attach the same candidate to every clearly represented entity when appropriate.
-            - Skip decorative/layout-only art, masks, logos, and any candidate whose identity is ambiguous. Never guess from nearby text alone.
-            - Use skip_ingest_visual_candidate only when a candidate is unusable as any entity example; otherwise leave an unattached candidate inspected for later review.
+            Canonical visual reference rules:
+            - Call promote_ingest_entity_reference only when a candidate is useful as a stable appearance/design reference for one resolved entity or as visual grounding for that entity's written appearance description.
+            - If the entity occupies only part of a broader image, provide a tight subject-only crop and subject-only alt text. A multi-entity image requires a separate isolated crop and promotion for each entity; never attach the broad scene to several entities.
+            - Ordinary narrative scenes are not canonical references merely because an entity appears in them. Skip them, along with decorative/layout-only art, masks, logos, and candidates whose identity is ambiguous. Never guess from nearby text alone.
+            - Use skip_ingest_visual_candidate when a candidate is unsuitable as any canonical/description reference; otherwise leave an unattached candidate inspected for later review.
             - Vision-ready runs receive bounded candidate bytes in a separate model-only message. Other runs receive this metadata only.
 
             Entity matching workflow for this chunk:
@@ -1695,7 +1695,7 @@ public sealed class IngestJobProcessor(
     private static bool IsChunkWriteTool(string toolName) =>
         string.Equals(toolName, "append_ingest_entity_observation", StringComparison.Ordinal)
         || string.Equals(toolName, "append_ingest_relationship_observation", StringComparison.Ordinal)
-        || string.Equals(toolName, "promote_ingest_visual_candidate", StringComparison.Ordinal)
+        || string.Equals(toolName, "promote_ingest_entity_reference", StringComparison.Ordinal)
         || string.Equals(toolName, "skip_ingest_visual_candidate", StringComparison.Ordinal)
         || string.Equals(toolName, "update_ingest_source_progress", StringComparison.Ordinal);
 

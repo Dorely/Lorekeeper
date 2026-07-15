@@ -123,7 +123,7 @@ public sealed class EditorChatTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, adjacent links, relation context, and visible thumbnail chips for attached visual examples. Full identity fields and GUIDs are repeated on every page. Omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
+                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, adjacent links, relation context, and visible thumbnail chips for attached canonical visual references. Full identity fields and GUIDs are repeated on every page. Omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),
@@ -132,8 +132,8 @@ public sealed class EditorChatTools(
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityVisualExamplesAsync(context, entityId),
-                name: "list_entity_visual_examples",
-                description: "List the ordered visual examples attached to one entity and show them as visible thumbnail chips. Full image bytes are supplied on the next iteration when the provider is vision-ready."),
+                name: "list_entity_canonical_references",
+                description: "List the ordered canonical visual references attached to one entity and show them as visible thumbnail chips. Full image bytes are supplied on the next iteration when the provider is vision-ready."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int? pageNumber = null) =>
@@ -176,21 +176,21 @@ public sealed class EditorChatTools(
         tools.AddRange([
             AIFunctionFactory.Create(
                 method: (Guid entityId, Guid imageId, string? label = null) => AttachProjectImageToEntityAsync(context, entityId, imageId, label),
-                name: "attach_project_image_to_entity",
-                description: "Attach an existing project image to an eligible story entity as an ordered visual example. Use a concise entity-specific role label such as 'default appearance', 'winter outfit', or 'exterior view'."),
+                name: "attach_entity_canonical_reference",
+                description: "Attach one isolated, stable appearance or design image to an eligible story entity as an ordered canonical reference. Use a concise role label such as 'default appearance', 'winter outfit', or 'exterior view'. Do not attach an ordinary narrative scene merely because the entity appears in it."),
             AIFunctionFactory.Create(
-                method: (Guid exampleId, string label, int? sortOrder = null) => UpdateEntityVisualExampleAsync(context, exampleId, label, sortOrder),
-                name: "update_entity_visual_example",
-                description: "Update an entity visual example's role label and optionally its zero-based order."),
+                method: (Guid canonicalReferenceId, string label, int? sortOrder = null) => UpdateEntityVisualExampleAsync(context, canonicalReferenceId, label, sortOrder),
+                name: "update_entity_canonical_reference",
+                description: "Update an entity canonical visual reference's role label and optionally its zero-based order."),
             AIFunctionFactory.Create(
-                method: (Guid exampleId) => DetachProjectImageFromEntityAsync(context, exampleId),
-                name: "detach_project_image_from_entity",
-                description: "Detach one visual example association without deleting the project image."),
+                method: (Guid canonicalReferenceId) => DetachProjectImageFromEntityAsync(context, canonicalReferenceId),
+                name: "detach_entity_canonical_reference",
+                description: "Detach one canonical visual reference without deleting the project image."),
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ProjectImageCropRegion crop, string? fileName = null, string? altText = null, EntityVisualTarget[]? entityTargets = null) =>
-                    CropProjectImageAsync(context, sourceImageId, crop, fileName, altText, entityTargets),
+                method: (Guid sourceImageId, ProjectImageCropRegion crop, string? fileName = null, string? altText = null, EntityVisualTarget? entityTarget = null) =>
+                    CropProjectImageAsync(context, sourceImageId, crop, fileName, altText, entityTarget),
                 name: "crop_project_image",
-                description: "Create a non-destructive project-library crop from an existing image using 0-100 percentage coordinates. Inspect the source first or use user-supplied coordinates, describe only the cropped subject in altText, and pass only explicit entityTargets. Source associations are never inherited."),
+                description: "Create a non-destructive project-library crop from an existing image using 0-100 percentage coordinates. Inspect the source first or use user-supplied coordinates and describe only the cropped subject in altText. Optionally attach the tight subject-only crop to one entity as its canonical reference; make separate crops for separate entities. Source associations are never inherited."),
         ]);
 
         tools.Add(AIFunctionFactory.Create(
@@ -218,11 +218,11 @@ public sealed class EditorChatTools(
                 "Use pageLayoutKind for IllustratedProse or PicturePage; valid values are SinglePortrait, SingleLandscape, DoublePortrait, and DoubleLandscape."));
 
         tools.Add(AIFunctionFactory.Create(
-            method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, EntityVisualTarget[]? entityTargets = null) =>
-                GenerateProjectImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression, entityTargets),
+            method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
+                GenerateProjectImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression),
             name: "generate_project_image",
             description:
-                $"Generate one library image from a structured brief without placing it. intendedUse and scene are required. references explicitly declare role, traitsToPreserve, and traitsThatMustChange; array order is provider input order. target may identify a chapter/PicturePage element or explicit aspectRatio/size; conflicting geometry is rejected. For PicturePage art behind story copy, establish the intended text boxes before generating or supply their exact canvas-local bounds in target.reservedTextRegions, describe the same landing zone in brief.composition, and use the corresponding page bounds when placing text (translate through image-slot geometry when needed). Rendered text is disabled unless brief.allowRenderedText=true. Inspect the returned image—including every reserved text region—before placing it. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed. Prospective designs remain unattached until approved; never reuse rejected or superseded designs."));
+                $"Generate one unattached library image from a structured brief without placing it. intendedUse and scene are required. references explicitly declare role, traitsToPreserve, and traitsThatMustChange; array order is provider input order. Cover depicted characters with one canonical reference each in focal order before optional references. target may identify a chapter/PicturePage element or explicit aspectRatio/size; conflicting geometry is rejected. For PicturePage art behind story copy, establish the intended text boxes before generating or supply their exact canvas-local bounds in target.reservedTextRegions, describe the same landing zone in brief.composition, and use the corresponding page bounds when placing text (translate through image-slot geometry when needed). Rendered text is disabled unless brief.allowRenderedText=true. Inspect the returned image—including every reserved text region—before placing it. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed. This tool cannot attach its output to entities; establish a missing first canonical reference afterward with an isolated study or tight crop."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid imageId, string label, ProjectImageMaskShape[] shapes) =>
@@ -231,11 +231,11 @@ public sealed class EditorChatTools(
             description: "Create a reusable PNG edit mask for an existing project image from percentage-based rect, ellipse, or polygon shapes. Transparent pixels are editable regions."));
 
         tools.Add(AIFunctionFactory.Create(
-            method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, EntityVisualTarget[]? entityTargets = null, bool inheritSourceEntityTargets = false) =>
-                EditProjectImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, target, altText, quality, outputFormat, outputCompression, entityTargets, inheritSourceEntityTargets),
+            method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
+                EditProjectImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, target, altText, quality, outputFormat, outputCompression),
             name: "edit_image",
             description:
-                $"Edit one project image. brief.change and brief.preserve are required so the request states exactly what changes and what remains invariant. The source is provider input image 1; additional references begin at input image 2. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed. Outputs remain unattached unless explicitly approved."));
+                $"Edit one project image. brief.change and brief.preserve are required so the request states exactly what changes and what remains invariant. The source is provider input image 1; additional references begin at input image 2. Cover depicted characters with one canonical reference each in focal order before optional references. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed. Outputs are unattached and never inherit source entity associations; attach only an intentionally isolated canonical result with the explicit canonical-reference tool."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid chapterId, Guid imageId, string? picturePagePlacementRole = null, Guid? targetPictureImageElementId = null, double? xPercent = null, double? yPercent = null, double? widthPercent = null, double? heightPercent = null, string? fit = null, int? zIndex = null) =>
@@ -685,7 +685,7 @@ public sealed class EditorChatTools(
         var manualLinks = links.Where(link => !link.IsAutoLink).Select(LinkPayload).ToList();
         var autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload).ToList();
         var relationContext = await entityRelations.BuildForEntityAsync(ctx.ProjectId, entityId, _detailEntityRelationOptions);
-        var visualExamples = await AddEntityVisualsToModelAsync(ctx, entityId);
+        var canonicalVisualReferences = await AddEntityVisualsToModelAsync(ctx, entityId);
         var identity = AgentPayloadPaginator.EntityIdentity(
             entity.Id,
             entity.Type,
@@ -700,7 +700,7 @@ public sealed class EditorChatTools(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
-            visualExamples = visualExamples.Select(VisualExamplePayload),
+            canonicalVisualReferences = canonicalVisualReferences.Select(VisualExamplePayload),
             manualLinks,
             autoMentionLinks,
             relationContextPreview = RelationContextPreview(entity.Id, _detailEntityRelationOptions, relationContext),
@@ -729,8 +729,8 @@ public sealed class EditorChatTools(
             {
                 var after = new EntityVisualChange("attach", EntityId: entityId, ImageId: imageId, Label: label?.Trim() ?? string.Empty);
                 return await ctx.OutlineStaging.StageExternalChangeAsync(
-                    "Attach a visual example to an entity", null, after,
-                    new { status = "staged", entityId, imageId, label }, "EntityVisualExample", $"{entityId:N}/{imageId:N}");
+                    "Attach a canonical visual reference to an entity", null, after,
+                    new { status = "staged", entityId, imageId, label }, "EntityCanonicalReference", $"{entityId:N}/{imageId:N}");
             }
             var example = await entityVisualExamples.AttachAsync(ctx.ProjectId, entityId, imageId, label, EntityVisualExampleOrigin.Agent);
             ctx.AddModelOnlyImage(example.Image);
@@ -750,12 +750,12 @@ public sealed class EditorChatTools(
             if (ctx.OutlineStaging is not null)
             {
                 var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
-                if (current is null) return "Error: entity visual example was not found.";
+                if (current is null) return "Error: entity canonical visual reference was not found.";
                 var before = new EntityVisualChange("update", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
                 var after = before with { Label = label.Trim(), SortOrder = sortOrder ?? current.SortOrder };
                 return await ctx.OutlineStaging.StageExternalChangeAsync(
-                    "Update an entity visual example", before, after,
-                    new { status = "staged", exampleId, label, sortOrder }, "EntityVisualExample", exampleId.ToString("N"));
+                    "Update an entity canonical visual reference", before, after,
+                    new { status = "staged", canonicalReferenceId = exampleId, label, sortOrder }, "EntityCanonicalReference", exampleId.ToString("N"));
             }
             var example = await entityVisualExamples.UpdateAsync(ctx.ProjectId, exampleId, label, sortOrder);
             ctx.OnMutated();
@@ -772,15 +772,15 @@ public sealed class EditorChatTools(
         if (ctx.OutlineStaging is not null)
         {
             var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
-            if (current is null) return "Error: entity visual example was not found.";
+            if (current is null) return "Error: entity canonical visual reference was not found.";
             var before = new EntityVisualChange("detach", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
             return await ctx.OutlineStaging.StageExternalChangeAsync(
-                "Detach an entity visual example", before, null,
-                new { status = "staged", exampleId }, "EntityVisualExample", exampleId.ToString("N"));
+                "Detach an entity canonical visual reference", before, null,
+                new { status = "staged", canonicalReferenceId = exampleId }, "EntityCanonicalReference", exampleId.ToString("N"));
         }
         await entityVisualExamples.DetachAsync(ctx.ProjectId, exampleId);
         ctx.OnMutated();
-        return JsonSerializer.Serialize(new { status = "detached", exampleId });
+        return JsonSerializer.Serialize(new { status = "detached", canonicalReferenceId = exampleId });
     }
 
     private async Task<string> CropProjectImageAsync(
@@ -789,20 +789,22 @@ public sealed class EditorChatTools(
         ProjectImageCropRegion crop,
         string? fileName,
         string? altText,
-        EntityVisualTarget[]? entityTargets)
+        EntityVisualTarget? entityTarget)
     {
         try
         {
+            var targetValidation = await entityVisualExamples.ValidateTargetsAsync(
+                ctx.ProjectId,
+                entityTarget is null ? null : [entityTarget]);
+            if (!targetValidation.IsValid)
+                return $"Error: {targetValidation.Error} Use a grounded entity id or omit entityTarget.";
+
             var image = await projectImages.CropAsync(ctx.ProjectId, sourceImageId, new ProjectImageCropRequest(
                 crop,
                 fileName?.Trim() ?? string.Empty,
                 altText?.Trim() ?? string.Empty));
-            var targets = (entityTargets ?? [])
-                .Where(target => target.EntityId != Guid.Empty)
-                .DistinctBy(target => target.EntityId)
-                .ToList();
-            var associations = new List<object>();
-            foreach (var target in targets)
+            object? canonicalReference = null;
+            if (targetValidation.Targets is [var target])
             {
                 if (ctx.OutlineStaging is null)
                 {
@@ -812,19 +814,20 @@ public sealed class EditorChatTools(
                         image.Id,
                         target.Label,
                         EntityVisualExampleOrigin.Agent);
-                    associations.Add(VisualExamplePayload(example));
-                    continue;
+                    canonicalReference = VisualExamplePayload(example);
                 }
-
-                var after = new EntityVisualChange("attach", EntityId: target.EntityId, ImageId: image.Id, Label: target.Label?.Trim() ?? string.Empty);
-                var staged = await ctx.OutlineStaging.StageExternalChangeAsync(
-                    $"Attach cropped image to entity {target.EntityId:N}",
-                    null,
-                    after,
-                    new { status = "staged", target.EntityId, imageId = image.Id, target.Label },
-                    "EntityVisualExample",
-                    $"{target.EntityId:N}/{image.Id:N}");
-                associations.Add(JsonSerializer.Deserialize<JsonElement>(staged));
+                else
+                {
+                    var after = new EntityVisualChange("attach", EntityId: target.EntityId, ImageId: image.Id, Label: target.Label?.Trim() ?? string.Empty);
+                    var staged = await ctx.OutlineStaging.StageExternalChangeAsync(
+                        $"Attach cropped canonical reference to entity {target.EntityId:N}",
+                        null,
+                        after,
+                        new { status = "staged", target.EntityId, imageId = image.Id, target.Label },
+                        "EntityCanonicalReference",
+                        $"{target.EntityId:N}/{image.Id:N}");
+                    canonicalReference = JsonSerializer.Deserialize<JsonElement>(staged);
+                }
             }
 
             ctx.AddVisual(await BuildVisualAsync(ctx, image, image.FileName, "Cropped project image saved to the library."));
@@ -844,7 +847,7 @@ public sealed class EditorChatTools(
                     image.Source,
                     image.SizeBytes,
                 },
-                associations,
+                canonicalReference,
             });
         }
         catch (Exception ex)
@@ -864,7 +867,7 @@ public sealed class EditorChatTools(
                 example.Image,
                 title: example.Image.FileName,
                 caption: string.IsNullOrWhiteSpace(example.Label)
-                    ? $"Visual example for {example.EntityName}."
+                    ? $"Canonical visual reference for {example.EntityName}."
                     : $"{example.EntityName}: {example.Label}."));
         }
         return examples;
@@ -1285,8 +1288,7 @@ public sealed class EditorChatTools(
         string? altText,
         string? quality,
         string? outputFormat,
-        int? outputCompression,
-        EntityVisualTarget[]? entityTargets)
+        int? outputCompression)
     {
         CompiledImagePrompt compiled;
         try
@@ -1303,10 +1305,6 @@ public sealed class EditorChatTools(
             return $"Error: {ex.Message}";
         }
 
-        var targetValidation = await entityVisualExamples.ValidateTargetsAsync(ctx.ProjectId, entityTargets);
-        if (!targetValidation.IsValid)
-            return $"Error: {targetValidation.Error} Use an entity id from the Context Feed, search_entities, or read_entity; otherwise omit entityTargets.";
-
         ProjectImageJobView job;
         try
         {
@@ -1320,7 +1318,7 @@ public sealed class EditorChatTools(
                 1,
                 compiled.ReferenceImageIds,
                 Label: "Editor chat image",
-                EntityTargets: ctx.OutlineStaging is null ? targetValidation.Targets : null,
+                EntityTargets: null,
                 BriefJson: compiled.BriefJson,
                 ReferenceManifestJson: compiled.ReferenceManifestJson,
                 TargetGeometryJson: compiled.TargetGeometryJson), ctx.TurnCancellationToken);
@@ -1366,15 +1364,6 @@ public sealed class EditorChatTools(
                         image.UpdatedAt,
                         image.SizeBytes,
                     });
-                    foreach (var entityTarget in targetValidation.Targets)
-                    {
-                        if (ctx.OutlineStaging is null) continue;
-                        var after = new EntityVisualChange("attach", EntityId: entityTarget.EntityId, ImageId: image.Id, Label: entityTarget.Label);
-                        await ctx.OutlineStaging.StageExternalChangeAsync(
-                            $"Attach generated image to entity {entityTarget.EntityId:N}", null, after,
-                            new { status = "staged", entityTarget.EntityId, imageId = image.Id, entityTarget.Label },
-                            "EntityVisualExample", $"{entityTarget.EntityId:N}/{image.Id:N}");
-                    }
                 }
             }
 
@@ -1452,9 +1441,7 @@ public sealed class EditorChatTools(
         string? altText,
         string? quality,
         string? outputFormat,
-        int? outputCompression,
-        EntityVisualTarget[]? entityTargets,
-        bool inheritSourceEntityTargets)
+        int? outputCompression)
     {
         CompiledImagePrompt compiled;
         try
@@ -1470,20 +1457,6 @@ public sealed class EditorChatTools(
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
             return $"Error: {ex.Message}";
-        }
-
-        var targetValidation = await entityVisualExamples.ValidateTargetsAsync(ctx.ProjectId, entityTargets);
-        if (!targetValidation.IsValid)
-            return $"Error: {targetValidation.Error} Use a grounded entity id or omit entityTargets.";
-
-        var stagedTargets = targetValidation.Targets.ToList();
-        if (ctx.OutlineStaging is not null && inheritSourceEntityTargets)
-        {
-            stagedTargets.AddRange((await entityVisualExamples.ListForImageAsync(
-                    ctx.ProjectId,
-                    sourceImageId,
-                    ctx.TurnCancellationToken))
-                .Select(example => new EntityVisualTarget(example.EntityId, example.Label)));
         }
 
         Guid? effectiveMaskId = maskId;
@@ -1520,8 +1493,8 @@ public sealed class EditorChatTools(
                 ReferenceImageIds: compiled.ReferenceImageIds,
                 Label: "Editor chat image edit",
                 ExistingMaskId: effectiveMaskId,
-                EntityTargets: ctx.OutlineStaging is null ? targetValidation.Targets : null,
-                InheritSourceEntityTargets: ctx.OutlineStaging is null && inheritSourceEntityTargets,
+                EntityTargets: null,
+                InheritSourceEntityTargets: false,
                 BriefJson: compiled.BriefJson,
                 ReferenceManifestJson: compiled.ReferenceManifestJson,
                 TargetGeometryJson: compiled.TargetGeometryJson), ctx.TurnCancellationToken);
@@ -1568,16 +1541,6 @@ public sealed class EditorChatTools(
                     image.UpdatedAt,
                     image.SizeBytes,
                 });
-
-                if (ctx.OutlineStaging is null) continue;
-                foreach (var entityTarget in stagedTargets.DistinctBy(item => item.EntityId))
-                {
-                    var after = new EntityVisualChange("attach", EntityId: entityTarget.EntityId, ImageId: image.Id, Label: entityTarget.Label);
-                    await ctx.OutlineStaging.StageExternalChangeAsync(
-                        $"Attach edited image to entity {entityTarget.EntityId:N}", null, after,
-                        new { status = "staged", entityTarget.EntityId, imageId = image.Id, entityTarget.Label },
-                        "EntityVisualExample", $"{entityTarget.EntityId:N}/{image.Id:N}");
-                }
             }
 
             ctx.OnMutated();
@@ -2905,7 +2868,7 @@ public sealed class EditorChatTools(
             wikiSections = CompactWikiSections(entity.WikiSections),
             canonSources = CompactCanonSources(entity.CanonSources),
             properties = CompactProperties(entity.Properties),
-            visualExamples = (visuals ?? []).Select(example => new { example.Image.Id, example.Label, example.SortOrder, example.Image.AltText, example.Image.Prompt }),
+            canonicalVisualReferences = (visuals ?? []).Select(example => new { example.Image.Id, example.Label, example.SortOrder, example.Image.AltText, example.Image.Prompt }),
         },
         detailReadTool = "read_entity",
         detailReadArguments = new { entityId = entity.Id, pageNumber = 1 },

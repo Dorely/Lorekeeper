@@ -95,7 +95,7 @@ public sealed class ResearchTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, adjacent links, and relation context. Full identity fields and GUIDs repeat on every page; omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn."),
+                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, adjacent links, relation context, and canonical visual references. Full identity fields and GUIDs repeat on every page; omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),
@@ -108,10 +108,10 @@ public sealed class ResearchTools(
                 description: "Safely fetch, validate, cache, and visually inspect an image discovered on a read webpage. Use the exact image URL returned by the page read when more than one is available."),
 
             AIFunctionFactory.Create(
-                method: (Guid candidateId, EntityVisualTarget[] entityTargets, ProjectImageCropRegion? crop = null, string? cropFileName = null, string? cropAltText = null) =>
-                    ImportWebImageAsync(context, candidateId, entityTargets, crop, cropFileName, cropAltText),
-                name: "import_web_image_to_entities",
-                description: "After the user confirms storage, promote an inspected web image into the project library and attach it to every unambiguously represented entity. Pass a percentage-based crop plus subject-only cropAltText when the intended subject occupies only part of a broader scene. Never guess ambiguous associations."),
+                method: (Guid candidateId, EntityVisualTarget entityTarget, ProjectImageCropRegion? crop = null, string? cropFileName = null, string? cropAltText = null) =>
+                    ImportWebImageAsync(context, candidateId, entityTarget, crop, cropFileName, cropAltText),
+                name: "import_web_image_as_entity_reference",
+                description: "After the user confirms storage, promote an inspected web image and attach it to one entity only when it is a stable canonical appearance or design reference. If the entity occupies part of a broader image, pass a tight subject-only crop and cropAltText. Make a separate crop/import call for each entity; do not attach ordinary narrative scenes or ambiguous images."),
         };
 
         var allowedGraphToolNames = new HashSet<string>(StringComparer.Ordinal)
@@ -124,10 +124,10 @@ public sealed class ResearchTools(
             "create_entity",
             "update_entity",
             "link_entities",
-            "list_entity_visual_examples",
-            "attach_entity_visual_example",
-            "update_entity_visual_example",
-            "detach_entity_visual_example",
+            "list_entity_canonical_references",
+            "attach_entity_canonical_reference",
+            "update_entity_canonical_reference",
+            "detach_entity_canonical_reference",
             "crop_project_image",
         };
 
@@ -278,7 +278,7 @@ public sealed class ResearchTools(
         var manualLinks = links.Where(link => !link.IsAutoLink).Select(LinkPayload).ToList();
         var autoMentionLinks = links.Where(link => link.IsAutoLink).Select(LinkPayload).ToList();
         var relationContext = await entityRelations.BuildForEntityAsync(context.ProjectId, entityId, EntityRelationOptions);
-        var visualExamples = await QueueEntityVisualsAsync(context, entityId);
+        var canonicalVisualReferences = await QueueEntityVisualsAsync(context, entityId);
         var detail = JsonSerializer.SerializeToNode(new
         {
             properties = entity.Properties,
@@ -286,7 +286,7 @@ public sealed class ResearchTools(
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
             canonSources = entity.CanonSources,
-            visualExamples = visualExamples.Select(VisualPayload),
+            canonicalVisualReferences = canonicalVisualReferences.Select(VisualPayload),
             manualLinks,
             autoMentionLinks,
             relationContextPreview = RelationContextPreview(entity.Id, EntityRelationOptions, relationContext),
@@ -343,7 +343,7 @@ public sealed class ResearchTools(
             {
                 candidate,
                 delivery = context.VisionReady ? "image bytes supplied on the next model round" : "metadata only; provider is not vision-ready",
-                instruction = "Do not import until the user confirms storage and the represented entity is unambiguous.",
+                instruction = "Do not import until the user confirms storage and the image is suitable as a stable canonical reference. Crop to one isolated subject when the entity occupies only part of the image; ordinary narrative scenes should remain unassociated.",
             }, JsonOptions);
         }
         catch (Exception ex) { return $"Error: {ex.Message}"; }
@@ -352,13 +352,17 @@ public sealed class ResearchTools(
     private async Task<string> ImportWebImageAsync(
         ResearchToolContext context,
         Guid candidateId,
-        EntityVisualTarget[] entityTargets,
+        EntityVisualTarget entityTarget,
         ProjectImageCropRegion? crop,
         string? cropFileName,
         string? cropAltText)
     {
-        var targets = entityTargets.Where(target => target.EntityId != Guid.Empty).DistinctBy(target => target.EntityId).ToList();
-        if (targets.Count == 0) return "Error: at least one unambiguous entity target is required.";
+        var targetValidation = await entityVisualExamples.ValidateTargetsAsync(context.ProjectId, [entityTarget]);
+        if (!targetValidation.IsValid)
+            return $"Error: {targetValidation.Error} Use one grounded entity id.";
+        if (targetValidation.Targets is not [var target])
+            return "Error: one entity target is required.";
+        IReadOnlyList<EntityVisualTarget> targets = [target];
         if (context.Staging is not null)
         {
             var after = new EntityVisualChange(
@@ -369,8 +373,8 @@ public sealed class ResearchTools(
                 CropFileName: cropFileName?.Trim() ?? string.Empty,
                 CropAltText: cropAltText?.Trim() ?? string.Empty);
             return await context.Staging.StageExternalChangeAsync(
-                "Import a researched image and attach it to entities", null, after,
-                new { status = "staged", candidateId, targets }, "EntityVisualExample", candidateId.ToString("N"));
+                "Import a researched image as an entity canonical reference", null, after,
+                new { status = "staged", candidateId, entityTarget = target }, "EntityCanonicalReference", candidateId.ToString("N"));
         }
         var attached = new List<EntityVisualExampleView>();
         try
@@ -382,16 +386,15 @@ public sealed class ResearchTools(
                     crop,
                     cropFileName?.Trim() ?? string.Empty,
                     cropAltText?.Trim() ?? string.Empty));
-            foreach (var target in targets)
-                attached.Add(await entityVisualExamples.AttachAsync(
-                    context.ProjectId,
-                    target.EntityId,
-                    referenceImage.Id,
-                    target.Label,
-                    EntityVisualExampleOrigin.Research,
-                    candidateId));
+            attached.Add(await entityVisualExamples.AttachAsync(
+                context.ProjectId,
+                target.EntityId,
+                referenceImage.Id,
+                target.Label,
+                EntityVisualExampleOrigin.Research,
+                candidateId));
             context.OnMutated();
-            return JsonSerializer.Serialize(new { status = "imported", attached = attached.Select(VisualPayload) }, JsonOptions);
+            return JsonSerializer.Serialize(new { status = "imported", canonicalReference = attached.Select(VisualPayload).Single() }, JsonOptions);
         }
         catch (Exception ex) { return $"Error: {ex.Message}"; }
     }
