@@ -32,7 +32,7 @@
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors, versioned Electron/Electron Builder pins, and app dependencies including EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI, sqlite-vec, tokenizers, SkiaSharp, and ingest packages. |
 | `Program.cs` | Host setup, hardened optional Electron renderer binding with recurring installed-build update checks/state events/restart installation, deterministic development/installed database-path selection, Blazor Interactive Server hub sizing, DI for application services, startup migration/index repair, and image/font/publish endpoints. |
-| `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*` including packaged per-user data placement and update polling, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
+| `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*` including packaged per-user data placement and update polling, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, advisory `ChatTokens:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
 | `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
 | `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets, app metadata, public GitHub update provider, and payload exclusions for Windows, Linux, and macOS desktop artifacts. |
 | `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained publish profiles used by Electron.NET packaging (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`); Windows isolates staging from final artifacts to prevent recursive packaging. |
@@ -56,8 +56,8 @@
 | File | Description |
 |------|-------------|
 | `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text/image parts, duration-aware tool-call chips with visual strips, generic progress rows/previews, and transcript token-count helpers. |
-| `ChatTranscriptTokenCounter.cs` | Shared model-input token adapter for every `ChatSurface`: applies the common text-only replay policy, includes pending/live turns, and formats exact/estimated labels. |
-| `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell for transcript/live rendering, grouped adjacent tool-call chips, image visual strips with shared full-size viewing, composer controls, scrolling, and textarea autosize behavior. |
+| `ChatTranscriptTokenCounter.cs` | Shared model-input token adapter for every `ChatSurface`: applies text-only replay, includes pending/live turns, tracks settled counts, and formats advisory maximum/remaining labels. |
+| `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell for transcript/live rendering, grouped tool chips, image viewing, advisory reset suggestions, composer controls, scrolling, and textarea autosizing. |
 | `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments/results/errors, generic progress rows/previews, and Editor Revision worker transcript links. |
 
 ### ChatTurns/
@@ -65,9 +65,8 @@
 | File | Description |
 |------|-------------|
 | `ChatTurnRuntime.cs` | App-wide active-turn coordinator keyed by project and chat surface, with buffered subscriber replay and explicit cancellation separate from component disposal. |
-| `ChatTurnEngine.cs` | Shared user-facing chat protocol engine for context preflight, streaming text/tool parsing, default tool invocation, assistant tool envelopes, and common message persistence operations. |
+| `ChatTurnEngine.cs` | Shared user-facing chat protocol engine for streaming text/tool parsing, default tool invocation, assistant tool envelopes, and common message persistence operations. |
 | `ChatModelHistory.cs` | Canonical cross-turn replay policy: retains non-empty system/user/assistant text while excluding persisted tool calls, tool results, and model-only attachments. |
-| `ChatContextPreflight.cs` | Counts each assembled provider round against the configured context budget and returns an actionable local failure before an oversized request is sent. |
 | `IChatMessageStore.cs` | Common message persistence boundary implemented by the five existing feature-specific transcript repositories. |
 
 ### Components/Layout/
@@ -385,7 +384,7 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction, canonical visual-reference payloads, full previous chapter, targeted active-chapter sections, bounded retrieval, exclusion honoring, token preflight, and provenance snapshots. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction, canonical visual references, full previous chapter, bounded retrieval, exclusion honoring, token estimates, and provenance snapshots. |
 | `AgentPayloadPaginator.cs` | Shared soft-target model payload paginator; repeats identity fields, packs logical JSON records, and segments only individually oversized text fields with explicit continuation metadata. |
 | `IEditorContextService.cs` | Context facade with Project Guidance/Book Brief keys, explicit per-chapter inclusions/exclusions, project-image context, and recommendation key sets. |
 | `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
@@ -407,12 +406,12 @@
 
 | File | Description |
 |------|-------------|
+| `ChatTokenLimitOptions.cs` | Positive validated advisory chat-token default plus case-insensitive exact model overrides and the shared active-model limit resolver. |
 | `ITokenCounter.cs` / `CompositeTokenCounter.cs` | Reusable token counting abstraction; tries exact tiktoken counting first, then falls back to a char-based estimator. |
 | `TokenCountRequest.cs` / `TokenCountResult.cs` | Request/result records for model-or-encoding token counting with method/exactness/warning metadata. |
 | `TokenCountingOptions.cs` | Configuration for default encoding, model-to-encoding mappings, and char-estimator ratio. |
 | `TiktokenTokenCounter.cs` | Exact token counter backed by `Microsoft.ML.Tokenizers` tiktoken encodings. |
 | `CharEstimateTokenCounter.cs` | Conservative reusable fallback token counter based on character length. |
-| `TokenBudgetOptions.cs` / `TokenBudgetPlanner.cs` | Reusable prompt/source-token budget planner for large-context workflows such as ingest. |
 
 ### Ingest/
 

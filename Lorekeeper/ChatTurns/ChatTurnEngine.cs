@@ -45,9 +45,7 @@ public sealed record ChatToolInvocationOutcome(string Result, string? Error, boo
 /// Shared model protocol for chat surfaces. Feature services retain only their setup,
 /// persistence mapping, tool-specific progress hooks, and terminal feature behavior.
 /// </summary>
-public sealed class ChatTurnEngine(
-    ChatContextPreflight contextPreflight,
-    ILogger<ChatTurnEngine> logger)
+public sealed class ChatTurnEngine(ILogger<ChatTurnEngine> logger)
 {
     public static string ToolLoopLimitError(int maxIterations) =>
         $"Tool-call loop hit cap of {maxIterations} iterations without producing a final response.";
@@ -76,13 +74,6 @@ public sealed class ChatTurnEngine(
         ChatOptions options,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var preflight = contextPreflight.Check(messages);
-        if (!preflight.IsWithinBudget)
-        {
-            yield return new ChatRoundFailed(preflight.ErrorMessage, Cancelled: false, Text: string.Empty);
-            yield break;
-        }
-
         var textBuilder = new StringBuilder();
         var pendingCalls = new List<ChatPendingToolCall>();
         var tracker = new StreamingToolCallTracker();

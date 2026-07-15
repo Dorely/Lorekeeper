@@ -10,10 +10,12 @@
 @inject IImagesChatTurnRunner ChatTurns
 @inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
+@inject ChatTokenLimitResolver TokenLimits
 
 <ChatSurface Title="Images Chat"
-             TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel)"
-             TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel)"
+             TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel, ConversationTokenLimit)"
+             TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel, ConversationTokenLimit, ActiveModelId)"
+             ShowTokenResetSuggestion="@_conversationTokens.ShouldSuggestReset(ConversationTokenLimit)"
              Loading="@_loading"
              Messages="@_renderable"
              Live="@_live"
@@ -116,6 +118,8 @@
     private ChatProviderAvailability? _chatAvailability;
     private int _seenAttachmentRefreshKey;
 
+    private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
+    private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
     private string ChatDisabledMessage => _chatAvailability?.Message
         ?? "Configure and test a chat provider in Settings > Providers to enable LLM features.";

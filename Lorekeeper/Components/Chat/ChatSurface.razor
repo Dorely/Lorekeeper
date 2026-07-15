@@ -49,6 +49,13 @@
         @ExtraControls
     }
 
+    @if (ShowTokenResetSuggestion && !Running && !Loading)
+    {
+        <div class="chat-token-reset-suggestion" role="status">
+            This chat is over halfway through its configured token allowance. Consider Reset before continuing.
+        </div>
+    }
+
     <div class="chat-composer">
         <textarea class="form-control chat-input" rows="1" placeholder="@Placeholder"
                   @ref="_composerEl"
@@ -83,6 +90,7 @@
     [Parameter] public string Title { get; set; } = "Chat";
     [Parameter] public string? TokenText { get; set; }
     [Parameter] public string? TokenTitle { get; set; }
+    [Parameter] public bool ShowTokenResetSuggestion { get; set; }
     [Parameter] public bool Loading { get; set; }
     [Parameter] public string LoadingText { get; set; } = "Loading...";
     [Parameter] public IReadOnlyList<ChatRenderableMessage> Messages { get; set; } = [];

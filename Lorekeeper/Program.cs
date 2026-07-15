@@ -129,16 +129,25 @@ builder.Services.AddScoped<IProjectSearchIndex, SqliteFtsProjectSearchIndex>();
 builder.Services.AddScoped<IProjectSearchService, ProjectSearchService>();
 builder.Services.AddScoped<IGraphAutoLinkService, GraphAutoLinkService>();
 
-// Token counting + prompt budgets
+// Token counting + advisory chat limits
 builder.Services.Configure<TokenCountingOptions>(builder.Configuration.GetSection(TokenCountingOptions.SectionName));
-builder.Services.Configure<TokenBudgetOptions>(builder.Configuration.GetSection(TokenBudgetOptions.SectionName));
+builder.Services.AddOptions<ChatTokenLimitOptions>()
+    .Bind(builder.Configuration.GetSection(ChatTokenLimitOptions.SectionName))
+    .Validate(options => options.DefaultMaxInputTokens > 0, "ChatTokens:DefaultMaxInputTokens must be greater than zero.")
+    .Validate(
+        options => options.ModelMaxInputTokens.All(entry => !string.IsNullOrWhiteSpace(entry.Key) && entry.Value > 0),
+        "ChatTokens:ModelMaxInputTokens keys must be non-empty and values must be greater than zero.")
+    .Validate(
+        options => options.ModelMaxInputTokens.Keys.Distinct(StringComparer.OrdinalIgnoreCase).Count()
+            == options.ModelMaxInputTokens.Count,
+        "ChatTokens:ModelMaxInputTokens cannot contain model IDs that differ only by case.")
+    .ValidateOnStart();
 builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.SectionName));
 builder.Services.Configure<EditorChatOptions>(builder.Configuration.GetSection(EditorChatOptions.SectionName));
 builder.Services.AddSingleton<TiktokenTokenCounter>();
 builder.Services.AddSingleton<CharEstimateTokenCounter>();
 builder.Services.AddSingleton<ITokenCounter, CompositeTokenCounter>();
-builder.Services.AddSingleton<ITokenBudgetPlanner, TokenBudgetPlanner>();
-builder.Services.AddSingleton<ChatContextPreflight>();
+builder.Services.AddSingleton<ChatTokenLimitResolver>();
 builder.Services.AddSingleton<ChatTurnEngine>();
 builder.Services.AddSingleton<ChatTurnRuntime>();
 

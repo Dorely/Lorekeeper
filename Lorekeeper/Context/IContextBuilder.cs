@@ -18,8 +18,7 @@ public sealed record ContextBuildRequest(
     Chapter? ActiveChapter = null,
     string UserMessage = "",
     ContextBuildPurpose Purpose = ContextBuildPurpose.Editor,
-    string? OperatingRules = null,
-    int? AvailableContextTokens = null);
+    string? OperatingRules = null);
 
 /// <summary>
 /// Builds the visible Context Feed and the literal system-role message. The request is

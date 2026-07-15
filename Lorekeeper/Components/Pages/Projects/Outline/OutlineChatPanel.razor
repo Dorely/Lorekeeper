@@ -9,10 +9,12 @@
 @inject IOutlineChatTurnRunner ChatTurns
 @inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
+@inject ChatTokenLimitResolver TokenLimits
 
 <ChatSurface Title="Outline Chat"
-             TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel)"
-             TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel)"
+             TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel, ConversationTokenLimit)"
+             TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel, ConversationTokenLimit, ActiveModelId)"
+             ShowTokenResetSuggestion="@_conversationTokens.ShouldSuggestReset(ConversationTokenLimit)"
              Loading="@_loading"
              LoadingText="Loading..."
              Messages="@_renderable"
@@ -98,6 +100,8 @@
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private ChatProviderAvailability? _chatAvailability;
 
+    private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
+    private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
     private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
     private string ChatDisabledMessage => _chatAvailability?.Message

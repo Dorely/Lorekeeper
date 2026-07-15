@@ -33,7 +33,7 @@
 .chat-token-count {
     color: var(--bs-secondary-color, #6c757d);
     font-size: 0.72rem;
-    white-space: nowrap;
+    line-height: 1.2;
 }
 
 .chat-header-actions {
@@ -319,6 +319,15 @@
     justify-content: space-between;
     align-items: center;
     gap: 0.5rem;
+}
+
+.chat-token-reset-suggestion {
+    padding: 0.45rem 0.75rem;
+    border-top: 1px solid #eed4a4;
+    background: var(--lk-warning-soft, #fff7e7);
+    color: var(--lk-warning, #9a6710);
+    font-size: 0.78rem;
+    line-height: 1.35;
 }
 
 .chat-composer {

@@ -9,5 +9,4 @@ public sealed record IngestSourceStructureRequest(
     int? SourceTextTargetTokens = null)
 {
     public TokenCountRequest TokenCountRequest => new(ModelName, EncodingName);
-    public TokenBudgetRequest BudgetRequest => new(ModelName, EncodingName);
 }

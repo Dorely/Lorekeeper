@@ -34,8 +34,7 @@ public sealed class ContextBuilder(
     IBookBriefService bookBriefs,
     ISystemPromptComposer systemPrompts,
     IProjectSearchService projectSearch,
-    ITokenCounter tokenCounter,
-    ITokenBudgetPlanner tokenBudgets) : IEditorContextService
+    ITokenCounter tokenCounter) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         ContextBuildRequest request,
@@ -183,12 +182,7 @@ public sealed class ContextBuilder(
                 cancellationToken));
         }
 
-        var estimatedItems = items.Select(AddTokenEstimate).ToList();
-        return ApplyContextBudget(
-            estimatedItems,
-            request.AvailableContextTokens,
-            currentChapter,
-            request.UserMessage);
+        return new ContextAssembly(items.Select(AddTokenEstimate).ToList());
     }
 
     private async Task<string> ResolveOperatingRulesAsync(
@@ -1052,187 +1046,6 @@ public sealed class ContextBuilder(
             .ToHashSet();
         return ranked;
     }
-
-    private ContextAssembly ApplyContextBudget(
-        List<ContextItem> items,
-        int? availableContextTokens,
-        Chapter? currentChapter,
-        string userMessage)
-    {
-        var plan = tokenBudgets.Plan();
-        var budget = availableContextTokens ?? Math.Max(
-            1,
-            plan.ContextWindowTokens
-                - plan.JobMemoryReserveTokens
-                - plan.ToolSchemaReserveTokens
-                - plan.ResponseReserveTokens
-                - plan.SafetyMarginTokens);
-        var protectedTokens = items
-            .Where(item => item.IsEnabled && item.IsProtected)
-            .Sum(item => item.EstimatedTokens);
-        if (protectedTokens > budget && currentChapter is not null)
-        {
-            var currentIndex = items.FindIndex(item =>
-                item.IsEnabled
-                && item.IsProtected
-                && item.Kind == ContextItemKind.CurrentChapter
-                && string.Equals(item.Key, EditorContextKeys.CurrentChapter, StringComparison.Ordinal));
-            if (currentIndex >= 0)
-            {
-                var current = items[currentIndex];
-                var nonCurrentProtectedTokens = protectedTokens - current.EstimatedTokens;
-                var currentBudget = budget - nonCurrentProtectedTokens;
-                if (currentBudget > 0
-                    && BuildSectionedCurrentChapterBlock(currentChapter, userMessage, currentBudget) is { } sectionedBody)
-                {
-                    var sectioned = current with
-                    {
-                        Body = sectionedBody,
-                        Reason = "Active chapter sections selected to fit this turn. Call read_chapter before changing any omitted range.",
-                        EstimatedTokens = Math.Max(1, tokenCounter.Count(sectionedBody).TokenCount),
-                    };
-                    items[currentIndex] = sectioned;
-                    protectedTokens = nonCurrentProtectedTokens + sectioned.EstimatedTokens;
-                }
-            }
-        }
-        if (protectedTokens > budget)
-        {
-            throw new InvalidOperationException(
-                $"Protected editor context needs about {protectedTokens:N0} tokens, above the {budget:N0}-token context budget. "
-                + "Lorekeeper will never replace the full previous chapter with an excerpt. Increase the configured context window, shorten protected material, or explicitly remove another protected selection before sending.");
-        }
-
-        var total = items.Where(item => item.IsEnabled).Sum(item => item.EstimatedTokens);
-        if (total <= budget)
-            return new ContextAssembly(items);
-
-        var candidates = items
-            .Select((item, index) => new { Item = item, Index = index })
-            .Where(value => value.Item.IsEnabled && !value.Item.IsProtected)
-            .OrderBy(value => PrunePriority(value.Item))
-            .ThenByDescending(value => value.Index)
-            .ToList();
-        foreach (var candidate in candidates)
-        {
-            if (total <= budget)
-                break;
-            items[candidate.Index] = candidate.Item with
-            {
-                IsEnabled = false,
-                Reason = $"Omitted automatically to fit the {budget:N0}-token turn budget. {candidate.Item.Reason}".Trim(),
-            };
-            total -= candidate.Item.EstimatedTokens;
-        }
-
-        if (total > budget)
-        {
-            throw new InvalidOperationException(
-                $"The protected context fits, but the assembled system prompt still needs about {total:N0} tokens for a {budget:N0}-token budget. Disable optional Context Feed items or increase the configured context window.");
-        }
-
-        return new ContextAssembly(items);
-    }
-
-    private string? BuildSectionedCurrentChapterBlock(
-        Chapter chapter,
-        string userMessage,
-        int tokenBudget)
-    {
-        var lines = ChapterFormatting.SplitLines(chapter.Body);
-        if (lines.Count == 0)
-            return BuildCurrentChapterBlock(chapter);
-
-        var anchors = new HashSet<int> { 0, lines.Count - 1 };
-        var terms = userMessage
-            .Split([' ', '\t', '\r', '\n', ',', '.', ';', ':', '!', '?', '(', ')', '[', ']', '"'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(term => term.Length >= 4)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(20)
-            .ToList();
-        for (var index = 0; index < lines.Count && anchors.Count < 8; index++)
-        {
-            if (terms.Any(term => lines[index].Contains(term, StringComparison.OrdinalIgnoreCase)))
-                anchors.Add(index);
-        }
-        if (anchors.Count == 2 && lines.Count > 2)
-            anchors.Add(lines.Count / 2);
-
-        var radius = Math.Min(80, Math.Max(0, tokenBudget / Math.Max(24, anchors.Count * 24)));
-        while (true)
-        {
-            var ranges = MergeLineRanges(anchors
-                .Order()
-                .Select(anchor => new LineRange(
-                    Math.Max(0, anchor - radius),
-                    Math.Min(lines.Count - 1, anchor + radius)))
-                .ToList());
-            var body = BuildSectionedBody(chapter, lines, ranges);
-            if (tokenCounter.Count(body).TokenCount <= tokenBudget)
-                return body;
-            if (radius == 0)
-                return null;
-            radius = radius == 1 ? 0 : radius / 2;
-        }
-    }
-
-    private static string BuildSectionedBody(
-        Chapter chapter,
-        IReadOnlyList<string> lines,
-        IReadOnlyList<LineRange> ranges)
-    {
-        var width = Math.Max(4, lines.Count.ToString().Length);
-        var body = new StringBuilder();
-        body.Append("Chapter id: ").AppendLine(chapter.Id.ToString());
-        body.Append("Title: ").AppendLine(chapter.Title);
-        body.Append("Active visual mode: ").AppendLine(chapter.VisualMode.ToString());
-        body.AppendLine("ACTIVE CHAPTER PREFLIGHT: The complete chapter cannot fit beside the other protected context for this turn.");
-        body.AppendLine("Only the marked, line-numbered sections below are present. Before changing any omitted line, call read_chapter to read the necessary range. Do not infer omitted wording.");
-
-        var priorEnd = -1;
-        foreach (var range in ranges)
-        {
-            if (range.Start > priorEnd + 1)
-                body.Append("[OMITTED LINES ").Append(priorEnd + 2).Append('-').Append(range.Start).AppendLine("]");
-            body.Append("[INCLUDED LINES ").Append(range.Start + 1).Append('-').Append(range.End + 1).AppendLine("]");
-            for (var index = range.Start; index <= range.End; index++)
-            {
-                body.Append((index + 1).ToString().PadLeft(width, '0'))
-                    .Append(": ")
-                    .AppendLine(lines[index]);
-            }
-            priorEnd = range.End;
-        }
-        if (priorEnd < lines.Count - 1)
-            body.Append("[OMITTED LINES ").Append(priorEnd + 2).Append('-').Append(lines.Count).AppendLine("]");
-        return body.ToString().TrimEnd();
-    }
-
-    private static IReadOnlyList<LineRange> MergeLineRanges(IReadOnlyList<LineRange> ranges)
-    {
-        var merged = new List<LineRange>();
-        foreach (var range in ranges)
-        {
-            if (merged.Count == 0 || range.Start > merged[^1].End + 1)
-            {
-                merged.Add(range);
-                continue;
-            }
-            merged[^1] = merged[^1] with { End = Math.Max(merged[^1].End, range.End) };
-        }
-        return merged;
-    }
-
-    private sealed record LineRange(int Start, int End);
-
-    private static int PrunePriority(ContextItem item) => item switch
-    {
-        { IsTransient: true } => 0,
-        { Kind: ContextItemKind.WritingSample } => 1,
-        { Kind: ContextItemKind.ProjectFacts } => 2,
-        { Kind: ContextItemKind.ProjectOutline } => 3,
-        _ => 4,
-    };
 
     private static bool IsExplicitlyIncluded(
         IReadOnlyDictionary<string, EditorContextPreference> preferenceMap,

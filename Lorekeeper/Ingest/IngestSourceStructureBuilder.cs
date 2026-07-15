@@ -6,7 +6,6 @@ namespace Lorekeeper.Ingest;
 
 public sealed partial class IngestSourceStructureBuilder(
     ITokenCounter tokenCounter,
-    ITokenBudgetPlanner budgetPlanner,
     IOptions<IngestSourceStructureOptions> options) : IIngestSourceStructureBuilder
 {
     public IReadOnlyList<IngestSourceChunkDraft> Build(IngestSourceStructureRequest request)
@@ -14,11 +13,8 @@ public sealed partial class IngestSourceStructureBuilder(
         var sourceText = request.SourceText ?? string.Empty;
         if (string.IsNullOrWhiteSpace(sourceText)) return [];
 
-        var budget = budgetPlanner.Plan(request.BudgetRequest);
-        var modelSafeTokens = Math.Max(1, budget.SourceTextTargetTokens);
-        var configuredTargetTokens = Math.Max(1, request.SourceTextTargetTokens ?? options.Value.TargetTokens);
-        var targetTokens = Math.Min(configuredTargetTokens, modelSafeTokens);
-        var softMaxTokens = ResolveSoftMaxTokens(targetTokens, modelSafeTokens);
+        var targetTokens = Math.Max(1, request.SourceTextTargetTokens ?? options.Value.TargetTokens);
+        var softMaxTokens = ResolveSoftMaxTokens(targetTokens);
         var smallSectionTokens = ResolveSmallSectionTokens(targetTokens);
         var blocks = SplitIntoBlocks(sourceText);
         if (blocks.Count == 0) return [];
@@ -30,14 +26,14 @@ public sealed partial class IngestSourceStructureBuilder(
         return MergeAdjacentDrafts(drafts, sourceText, targetTokens, softMaxTokens, smallSectionTokens, request.TokenCountRequest);
     }
 
-    private int ResolveSoftMaxTokens(int targetTokens, int modelSafeTokens)
+    private int ResolveSoftMaxTokens(int targetTokens)
     {
         var ratio = double.IsFinite(options.Value.SoftMaxRatio)
             ? Math.Max(1.0, options.Value.SoftMaxRatio)
             : 1.5;
         var estimated = Math.Ceiling(targetTokens * ratio);
         var softMaxTokens = estimated >= int.MaxValue ? int.MaxValue : (int)estimated;
-        return Math.Clamp(softMaxTokens, targetTokens, modelSafeTokens);
+        return Math.Max(targetTokens, softMaxTokens);
     }
 
     private int ResolveSmallSectionTokens(int targetTokens)

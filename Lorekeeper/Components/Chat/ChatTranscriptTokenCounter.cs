@@ -12,16 +12,35 @@ public sealed record ChatTranscriptTokenMessage(
     string? ToolName = null,
     string? ErrorMessage = null);
 
-public readonly record struct ChatTranscriptTokenCount(int TokenCount, bool IsExact)
+public readonly record struct ChatTranscriptTokenCount(int TokenCount, bool IsExact, bool IsSettled)
 {
-    public static ChatTranscriptTokenCount Empty { get; } = new(0, true);
+    public static ChatTranscriptTokenCount Empty { get; } = new(0, true, true);
 
-    public string Text(string unitLabel) =>
-        $"{(IsExact ? string.Empty : "~")}{TokenCount:N0} {unitLabel}";
+    public int RemainingTokens(int maximumTokens) =>
+        Math.Max(0, Math.Max(1, maximumTokens) - TokenCount);
 
-    public string Title(string subjectLabel) => IsExact
-        ? $"Current {subjectLabel}"
-        : $"Current {subjectLabel} is estimated";
+    public bool ShouldSuggestReset(int maximumTokens) =>
+        IsSettled && (long)TokenCount * 2 > Math.Max(1, maximumTokens);
+
+    public string Text(string unitLabel, int maximumTokens)
+    {
+        var prefix = IsExact ? string.Empty : "~";
+        var resolvedMaximum = Math.Max(1, maximumTokens);
+        return $"{prefix}{TokenCount:N0} / {resolvedMaximum:N0} {unitLabel} · {prefix}{RemainingTokens(resolvedMaximum):N0} left";
+    }
+
+    public string Title(string subjectLabel, int maximumTokens, string? modelId)
+    {
+        var resolvedMaximum = Math.Max(1, maximumTokens);
+        var countLabel = IsExact
+            ? $"Current {subjectLabel}"
+            : $"Current {subjectLabel} is estimated";
+        var modelLabel = string.IsNullOrWhiteSpace(modelId) ? "the active model" : modelId.Trim();
+        var remainingLabel = IsExact
+            ? $"{RemainingTokens(resolvedMaximum):N0}"
+            : $"about {RemainingTokens(resolvedMaximum):N0}";
+        return $"{countLabel}. Advisory maximum for {modelLabel}: {resolvedMaximum:N0} tokens; {remainingLabel} remaining.";
+    }
 }
 
 public static class ChatTranscriptTokenCounter
@@ -66,7 +85,8 @@ public static class ChatTranscriptTokenCounter
 
         ChatTranscriptHelpers.AppendLiveTurnForTokenCount(sb, live);
         var result = tokenCounter.Count(sb.ToString());
-        return new ChatTranscriptTokenCount(result.TokenCount, result.IsExact);
+        var isSettled = live is null && string.IsNullOrWhiteSpace(pendingUserText);
+        return new ChatTranscriptTokenCount(result.TokenCount, result.IsExact, isSettled);
     }
 
     private static void AppendMessage(StringBuilder sb, ChatTranscriptTokenMessage message)
