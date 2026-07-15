@@ -7,7 +7,10 @@
 .entity-visual-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .entity-visual-leading { position: absolute; left: .3rem; top: .3rem; padding: .1rem .35rem; border-radius: 99px; color: white; background: rgb(0 0 0 / 65%); font-size: .65rem; }
 .entity-visual-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
-.entity-visual-actions { display: flex; align-items: center; flex-wrap: wrap; }
-.entity-visual-actions .btn { padding: .05rem .3rem; text-decoration: none; }
+.entity-visual-actions { display: grid; gap: .35rem; }
+.entity-visual-order-actions { display: flex; align-items: center; }
+.entity-visual-order-actions .btn { padding: .05rem .3rem; text-decoration: none; }
+.entity-visual-edit-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem; }
+.entity-visual-edit-actions .btn { min-width: 0; padding: .2rem .35rem; }
 .entity-visual-add { display: grid; gap: .65rem; padding: .75rem; border: 1px dashed var(--bs-border-color); border-radius: .55rem; }
 .entity-visual-upload { display: grid; }

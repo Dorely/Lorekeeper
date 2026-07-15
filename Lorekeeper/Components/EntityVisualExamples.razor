@@ -47,10 +47,14 @@
                         <input class="form-control form-control-sm" value="@example.Label" aria-label="Visual example label"
                                @onchange="args => RelabelAsync(example, args.Value?.ToString() ?? string.Empty)" />
                         <div class="entity-visual-actions">
-                            <button type="button" class="btn btn-sm btn-link" disabled="@(example.SortOrder == 0 || _saving)" @onclick="() => MoveAsync(example, -1)" title="Move earlier">↑</button>
-                            <button type="button" class="btn btn-sm btn-link" disabled="@(example.SortOrder >= _examples.Count - 1 || _saving)" @onclick="() => MoveAsync(example, 1)" title="Move later">↓</button>
-                            <button type="button" class="btn btn-sm btn-link" disabled="@_saving" @onclick="() => OpenCrop(example)">Crop</button>
-                            <button type="button" class="btn btn-sm btn-link text-danger ms-auto" disabled="@_saving" @onclick="() => DetachAsync(example)">Detach</button>
+                            <div class="entity-visual-order-actions" role="group" aria-label="Visual example order">
+                                <button type="button" class="btn btn-sm btn-link" disabled="@(example.SortOrder == 0 || _saving)" @onclick="() => MoveAsync(example, -1)" title="Move earlier" aria-label="Move visual earlier">↑</button>
+                                <button type="button" class="btn btn-sm btn-link" disabled="@(example.SortOrder >= _examples.Count - 1 || _saving)" @onclick="() => MoveAsync(example, 1)" title="Move later" aria-label="Move visual later">↓</button>
+                            </div>
+                            <div class="entity-visual-edit-actions">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_saving" @onclick="() => OpenCrop(example)">Crop</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_saving" @onclick="() => DetachAsync(example)">Detach</button>
+                            </div>
                         </div>
                     }
                     else
@@ -211,11 +215,35 @@
         });
     }
 
-    private Task DetachAsync(EntityVisualExampleView example) => MutateAsync(async () =>
+    private async Task DetachAsync(EntityVisualExampleView example)
     {
-        await EntityVisuals.DetachAsync(ProjectId, example.Id);
-        return example;
-    });
+        if (_saving) return;
+
+        var previousExamples = _examples.OrderBy(item => item.SortOrder).ToList();
+        _examples = previousExamples
+            .Where(item => item.Id != example.Id)
+            .Select((item, index) => item with { SortOrder = index })
+            .ToList();
+        _saving = true;
+        _error = string.Empty;
+        var persisted = false;
+        try
+        {
+            await EntityVisuals.DetachAsync(ProjectId, example.Id);
+            persisted = true;
+            await Changed.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            if (!persisted)
+                _examples = previousExamples;
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
 
     private void OpenImage(EntityVisualExampleView example) => _viewingExample = example;
 

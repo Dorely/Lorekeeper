@@ -1013,6 +1013,7 @@
 
         if (!nameChanged && toSet.Count == 0 && toRemove.Count == 0)
         {
+            await CloseAsync();
             return;
         }
 
@@ -1031,6 +1032,7 @@
             _entityLinks = (await Entities.ListLinksAsync(ProjectId, updated.Id)).ToList();
             InitializeEntityEditState(updated);
             await OnSaved.InvokeAsync();
+            await CloseAsync();
         }
         catch (Exception ex)
         {

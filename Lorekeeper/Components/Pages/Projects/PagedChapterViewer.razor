@@ -87,18 +87,6 @@
                          aria-label="Selected text box controls"
                                  aria-disabled="@textControlsDisabled">
                                 <label class="picture-text-toolbar__field">
-                                    <span>Role</span>
-                                    <select class="form-select form-select-sm"
-                                            disabled="@textControlsDisabled"
-                                            @bind:get="textToolbarValue.Role"
-                                            @bind:set="SetSelectedTextRoleAsync">
-                                        @foreach (var role in Enum.GetValues<PicturePageTextRole>())
-                                        {
-                                            <option value="@role">@role</option>
-                                        }
-                                    </select>
-                                </label>
-                                <label class="picture-text-toolbar__field">
                                     <span>Font</span>
                                     <select class="form-select form-select-sm"
                                             disabled="@textControlsDisabled"
@@ -694,14 +682,6 @@
             fontFamilyKey: family?.Key ?? PicturePageFontKeys.Default,
             fontWeight: face?.Weight ?? 400,
             italic: face?.Italic ?? false);
-    }
-
-    private async Task SetSelectedTextRoleAsync(PicturePageTextRole role)
-    {
-        if (!CanEditLayout || SelectedPictureText is not { Id: var selectedId } || !Enum.IsDefined(role))
-            return;
-
-        await UpdatePictureTextAsync(selectedId, role: role);
     }
 
     private async Task SetSelectedTextFontWeightAsync(int fontWeight)
@@ -1342,8 +1322,7 @@
         double? backgroundOpacity = null,
         PicturePageTextAlign? textAlign = null,
         ChapterTextVerticalAlign? verticalAlign = null,
-        PicturePageTextShadow? shadow = null,
-        PicturePageTextRole? role = null) =>
+        PicturePageTextShadow? shadow = null) =>
         await SavePageAsync(State.PageLayout with
         {
             TextElements = State.PageLayout.TextElements.Select(text => text.Id == elementId
@@ -1365,7 +1344,6 @@
                     TextAlign = textAlign ?? text.TextAlign,
                     VerticalAlign = verticalAlign ?? text.VerticalAlign,
                     Shadow = shadow ?? text.Shadow,
-                    Role = role ?? text.Role,
                 }
                 : text).ToList(),
         });

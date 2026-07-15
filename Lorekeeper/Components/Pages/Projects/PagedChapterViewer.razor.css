@@ -334,7 +334,7 @@
     background: rgba(220, 38, 38, 0.035);
 }
 
-.picture-text-toolbar__field--check {
+.picture-text-toolbar__field.picture-text-toolbar__field--check {
     min-width: 3.4rem;
     width: 3.4rem;
     align-items: start;
@@ -588,6 +588,7 @@
 
 .picture-page {
     position: relative;
+    isolation: isolate;
     container-type: inline-size;
     width: min(100%, var(--picture-page-natural-width, 8.5in));
     max-height: 100%;

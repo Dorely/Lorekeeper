@@ -15,6 +15,9 @@ export function attach(root, dotNetRef) {
         onPointerUp: null,
         onPointerCancel: null,
         onFocusOut: null,
+        onClick: null,
+        suppressNextClick: false,
+        suppressClickTimer: null,
     };
 
     state.onPaste = async (event) => {
@@ -146,6 +149,7 @@ export function attach(root, dotNetRef) {
             return;
         }
 
+        armClickSuppression(state);
         active.element.classList.remove("picture-element--active");
         const result = applyPointerPreview(active, event.clientX, event.clientY);
         if (active.mode === "resize") {
@@ -190,10 +194,19 @@ export function attach(root, dotNetRef) {
         await dotNetRef.invokeMethodAsync("UpdatePictureTextBodyAsync", id, editableText(editor));
     };
 
+    state.onClick = (event) => {
+        if (!state.suppressNextClick) return;
+
+        clearClickSuppression(state);
+        event.preventDefault();
+        event.stopPropagation();
+    };
+
     root.addEventListener("paste", state.onPaste);
     root.addEventListener("dragover", state.onDragOver);
     root.addEventListener("drop", state.onDrop);
     root.addEventListener("pointerdown", state.onPointerDown, true);
+    root.addEventListener("click", state.onClick, true);
     root.addEventListener("focusout", state.onFocusOut);
     stateByRoot.set(root, state);
 }
@@ -206,7 +219,9 @@ export function detach(root) {
     root.removeEventListener("dragover", state.onDragOver);
     root.removeEventListener("drop", state.onDrop);
     root.removeEventListener("pointerdown", state.onPointerDown, true);
+    root.removeEventListener("click", state.onClick, true);
     root.removeEventListener("focusout", state.onFocusOut);
+    clearClickSuppression(state);
     removeActivePointerListeners(state);
     cleanupActive(root, state.active);
     stateByRoot.delete(root);
@@ -290,6 +305,20 @@ function removeActivePointerListeners(state) {
     window.removeEventListener("pointermove", state.onPointerMove, true);
     window.removeEventListener("pointerup", state.onPointerUp, true);
     window.removeEventListener("pointercancel", state.onPointerCancel, true);
+}
+
+function armClickSuppression(state) {
+    clearClickSuppression(state);
+    state.suppressNextClick = true;
+    state.suppressClickTimer = window.setTimeout(() => clearClickSuppression(state), 0);
+}
+
+function clearClickSuppression(state) {
+    state.suppressNextClick = false;
+    if (state.suppressClickTimer !== null) {
+        window.clearTimeout(state.suppressClickTimer);
+        state.suppressClickTimer = null;
+    }
 }
 
 function setIllustrationDropTarget(root, active, clientX, clientY) {

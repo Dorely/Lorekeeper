@@ -171,9 +171,15 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
         var example = await db.EntityVisualExamples.Include(item => item.GraphNode).FirstOrDefaultAsync(item => item.ProjectId == projectId && item.Id == exampleId, cancellationToken);
         if (example is null) return;
         var entityId = Guid.ParseExact(example.GraphNode.Key, "N");
+        var remaining = await db.EntityVisualExamples
+            .Where(item => item.GraphNodeId == example.GraphNodeId && item.Id != example.Id)
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.CreatedAt)
+            .ToListAsync(cancellationToken);
+        for (var index = 0; index < remaining.Count; index++)
+            remaining[index].SortOrder = index;
         db.EntityVisualExamples.Remove(example);
         await db.SaveChangesAsync(cancellationToken);
-        await NormalizeOrderAsync(example.GraphNodeId, cancellationToken);
         await contextIndexing.ReindexEntityAsync(projectId, entityId, cancellationToken);
     }
 
@@ -382,13 +388,6 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
         && !string.Equals(node.NodeType, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(node.NodeType, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(node.NodeType, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
-
-    private async Task NormalizeOrderAsync(long graphNodeId, CancellationToken cancellationToken)
-    {
-        var examples = await db.EntityVisualExamples.Where(example => example.GraphNodeId == graphNodeId).OrderBy(example => example.SortOrder).ThenBy(example => example.CreatedAt).ToListAsync(cancellationToken);
-        for (var index = 0; index < examples.Count; index++) examples[index].SortOrder = index;
-        await db.SaveChangesAsync(cancellationToken);
-    }
 
     private static string CleanLabel(string? label, PublishAsset image) =>
         !string.IsNullOrWhiteSpace(label) ? label.Trim() : !string.IsNullOrWhiteSpace(image.AltText) ? image.AltText.Trim() : image.FileName;
