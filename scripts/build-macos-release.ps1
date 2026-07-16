@@ -248,8 +248,8 @@ try
     }
 
     $electronExecutable = Join-Path $appPath 'Contents/MacOS/Lorekeeper'
-    $dotnetExecutable = Join-Path $appPath "Contents/Resources/app/bin/$($manifest.executable)"
-    $sqliteVecLibrary = Join-Path $appPath 'Contents/Resources/app/bin/vec0.dylib'
+    $dotnetExecutable = Join-Path $appPath "Contents/Resources/bin/$($manifest.executable)"
+    $sqliteVecLibrary = Join-Path $appPath 'Contents/Resources/bin/vec0.dylib'
     foreach ($executable in @($electronExecutable, $dotnetExecutable, $sqliteVecLibrary))
     {
         if (-not (Test-Path -LiteralPath $executable -PathType Leaf))
