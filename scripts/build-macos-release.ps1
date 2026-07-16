@@ -216,13 +216,13 @@ try
 
     $fullAudit = Invoke-NpmAuditJson -WorkingDirectory $stageDirectory
     $electronEntry = $fullAudit.vulnerabilities.PSObject.Properties['electron']
-    $electronBlocking = if ($electronEntry)
+    $electronBlocking = @()
+    if ($electronEntry)
     {
-        @($electronEntry.Value.via | Where-Object {
+        $electronBlocking = @($electronEntry.Value.via | Where-Object {
             $_ -isnot [string] -and $severityRank[$_.severity] -ge $severityRank.moderate
         })
     }
-    else { @() }
     if ($electronBlocking.Count -gt 0)
     {
         throw 'Packaged Electron runtime audit found a moderate-or-higher advisory.'
