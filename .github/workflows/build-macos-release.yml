@@ -1,0 +1,105 @@
+name: Build macOS release
+run-name: macOS ${{ inputs.version }} (${{ inputs.correlation_id }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SemVer release version
+        required: true
+        type: string
+      source_commit:
+        description: Exact Lorekeeper source commit
+        required: true
+        type: string
+      correlation_id:
+        description: Unique orchestration identifier
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-release-${{ inputs.correlation_id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.runtime }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            runtime: osx-arm64
+            artifact_arch: arm64
+          - runner: macos-15-intel
+            runtime: osx-x64
+            artifact_arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out exact release source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+
+      - name: Verify source commit
+        shell: bash
+        env:
+          EXPECTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_COMMIT"
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build and verify DMG
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RUNTIME_IDENTIFIER: ${{ matrix.runtime }}
+        run: ./scripts/build-macos-release.ps1 -Version $env:RELEASE_VERSION -RuntimeIdentifier $env:RUNTIME_IDENTIFIER
+
+      - name: Upload architecture artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ inputs.correlation_id }}-${{ matrix.artifact_arch }}
+          path: publish/${{ matrix.runtime }}/Lorekeeper-${{ inputs.version }}-${{ matrix.artifact_arch }}.dmg
+          if-no-files-found: error
+          retention-days: 1
+
+  combine:
+    name: Combine macOS artifacts
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download architecture artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: macos-${{ inputs.correlation_id }}-*
+          path: macos-release
+          merge-multiple: true
+
+      - name: Verify combined artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "macos-release/Lorekeeper-${{ inputs.version }}-arm64.dmg"
+          test -f "macos-release/Lorekeeper-${{ inputs.version }}-x64.dmg"
+          test "$(find macos-release -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')" = "2"
+
+      - name: Upload combined macOS release
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lorekeeper-macos-${{ inputs.version }}-${{ inputs.correlation_id }}
+          path: macos-release/*.dmg
+          if-no-files-found: error
+          retention-days: 1

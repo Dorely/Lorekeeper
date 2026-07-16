@@ -5,6 +5,7 @@ public enum DesktopUpdateStatus
     Unsupported,
     Idle,
     Checking,
+    ManualUpdateAvailable,
     Downloading,
     Ready,
     Restarting,
@@ -15,9 +16,11 @@ public sealed record DesktopUpdateSnapshot(
     DesktopUpdateStatus Status,
     string? Version = null,
     double? DownloadPercent = null,
-    string? Error = null)
+    string? Error = null,
+    Uri? ReleaseUri = null)
 {
     public bool CanRestart => Status == DesktopUpdateStatus.Ready;
+    public bool CanDownload => Status == DesktopUpdateStatus.ManualUpdateAvailable && ReleaseUri is not null;
 }
 
 public interface IDesktopUpdateService
@@ -25,6 +28,7 @@ public interface IDesktopUpdateService
     event EventHandler? StateChanged;
 
     DesktopUpdateSnapshot Snapshot { get; }
+    Task OpenDownloadAsync(CancellationToken cancellationToken = default);
     Task RestartToUpdateAsync(CancellationToken cancellationToken = default);
 }
 
@@ -32,6 +36,7 @@ public sealed class DesktopUpdateService : IDesktopUpdateService
 {
     private readonly object _lock = new();
     private DesktopUpdateSnapshot _snapshot = new(DesktopUpdateStatus.Unsupported);
+    private Func<Uri, CancellationToken, Task>? _openDownload;
     private Action? _restart;
 
     public event EventHandler? StateChanged;
@@ -43,6 +48,23 @@ public sealed class DesktopUpdateService : IDesktopUpdateService
             lock (_lock)
                 return _snapshot;
         }
+    }
+
+    public Task OpenDownloadAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Func<Uri, CancellationToken, Task> openDownload;
+        Uri releaseUri;
+        lock (_lock)
+        {
+            if (!_snapshot.CanDownload || _snapshot.ReleaseUri is null || _openDownload is null)
+                throw new InvalidOperationException("No newer release is available to download.");
+
+            openDownload = _openDownload;
+            releaseUri = _snapshot.ReleaseUri;
+        }
+
+        return openDownload(releaseUri, cancellationToken);
     }
 
     public Task RestartToUpdateAsync(CancellationToken cancellationToken = default)
@@ -69,10 +91,26 @@ public sealed class DesktopUpdateService : IDesktopUpdateService
             _restart = restart;
     }
 
+    public void EnableManualDownloads(Func<Uri, CancellationToken, Task> openDownload)
+    {
+        ArgumentNullException.ThrowIfNull(openDownload);
+        lock (_lock)
+            _openDownload = openDownload;
+    }
+
     public void MarkChecking() => SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.Checking));
 
     public void MarkIdle(string? version = null) =>
         SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.Idle, Clean(version)));
+
+    public void MarkManualUpdateAvailable(string version, Uri releaseUri)
+    {
+        ArgumentNullException.ThrowIfNull(releaseUri);
+        SetSnapshot(new DesktopUpdateSnapshot(
+            DesktopUpdateStatus.ManualUpdateAvailable,
+            Clean(version),
+            ReleaseUri: releaseUri));
+    }
 
     public void MarkDownloading(string? version, double? percent = null) =>
         SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.Downloading, Clean(version), percent));

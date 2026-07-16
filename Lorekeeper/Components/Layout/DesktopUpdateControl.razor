@@ -1,12 +1,26 @@
 @implements IDisposable
 @using Lorekeeper.Desktop
 @inject IDesktopUpdateService DesktopUpdates
+@inject ILogger<DesktopUpdateControl> Logger
 
 @{
     var snapshot = DesktopUpdates.Snapshot;
 }
 
-@if (snapshot.Status == DesktopUpdateStatus.Downloading)
+@if (snapshot.Status == DesktopUpdateStatus.ManualUpdateAvailable)
+{
+    <div class="desktop-update-control">
+        <button type="button"
+                class="btn btn-sm btn-primary desktop-update-button"
+                disabled="@(!RendererInfo.IsInteractive || _openingDownload)"
+                title="@DownloadTitle(snapshot.Version)"
+                aria-label="@DownloadTitle(snapshot.Version)"
+                @onclick="OpenDownloadAsync">
+            Download Update
+        </button>
+    </div>
+}
+else if (snapshot.Status == DesktopUpdateStatus.Downloading)
 {
     var percent = NormalizePercent(snapshot.DownloadPercent);
     var downloadLabel = DownloadLabel(snapshot.Version);
@@ -60,6 +74,7 @@ else if (snapshot.Status is DesktopUpdateStatus.Ready or DesktopUpdateStatus.Res
 
 @code {
     private bool _disposed;
+    private bool _openingDownload;
 
     protected override void OnInitialized()
     {
@@ -78,6 +93,28 @@ else if (snapshot.Status is DesktopUpdateStatus.Ready or DesktopUpdateStatus.Res
         await DesktopUpdates.RestartToUpdateAsync();
     }
 
+    private async Task OpenDownloadAsync()
+    {
+        if (!RendererInfo.IsInteractive || !DesktopUpdates.Snapshot.CanDownload || _openingDownload) return;
+
+        _openingDownload = true;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            await DesktopUpdates.OpenDownloadAsync();
+        }
+        catch (Exception exception)
+        {
+            Logger.LogWarning(exception, "Could not open the Lorekeeper release download page.");
+        }
+        finally
+        {
+            _openingDownload = false;
+            if (!_disposed)
+                await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private static int? NormalizePercent(double? percent)
     {
         if (percent is not { } value || !double.IsFinite(value)) return null;
@@ -93,6 +130,11 @@ else if (snapshot.Status is DesktopUpdateStatus.Ready or DesktopUpdateStatus.Res
         version is { Length: > 0 }
             ? $"Install Lorekeeper {version}"
             : "Install the downloaded Lorekeeper update";
+
+    private static string DownloadTitle(string? version) =>
+        version is { Length: > 0 }
+            ? $"Download Lorekeeper {version} in your default browser"
+            : "Download the latest Lorekeeper update in your default browser";
 
     private static string ProgressStyle(int percent) => $"width: {percent}%";
 

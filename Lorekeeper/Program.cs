@@ -30,6 +30,7 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 var desktopUpdates = new DesktopUpdateService();
+IDesktopReleaseUpdateChecker? desktopReleaseUpdateChecker = null;
 var isElectronMode = IsElectronMode(args);
 var desktopUrl = isElectronMode ? GetDesktopUrl(builder.Configuration) : null;
 var enableDesktopDevTools = builder.Environment.IsDevelopment();
@@ -55,6 +56,13 @@ builder.Services.AddRazorComponents()
     .AddHubOptions(options => options.MaximumReceiveMessageSize = maxInteractiveServerMessageSize);
 
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient<IDesktopReleaseUpdateChecker, GitHubDesktopReleaseUpdateChecker>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Lorekeeper/1.0");
+    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+    client.DefaultRequestHeaders.TryAddWithoutValidation("X-GitHub-Api-Version", "2026-03-10");
+});
 
 if (isElectronMode)
 {
@@ -63,8 +71,10 @@ if (isElectronMode)
     builder.UseElectron(args, () => ElectronAppReady(
         desktopUrl!,
         enableDesktopDevTools,
-        enableAutoUpdates: !builder.Environment.IsDevelopment(),
+        enableAutoUpdates: !builder.Environment.IsDevelopment() && OperatingSystem.IsWindows(),
         desktopUpdates,
+        () => desktopReleaseUpdateChecker
+            ?? throw new InvalidOperationException("Desktop release update checker is unavailable."),
         desktopUpdateCheckInterval,
         desktopUpdateMonitorCancellation.Token));
     builder.WebHost.UseUrls(desktopUrl!);
@@ -251,6 +261,8 @@ builder.Services.AddScoped<IImagesChatService, ImagesChatService>();
 builder.Services.AddSingleton<IImagesChatTurnRunner, ImagesChatTurnRunner>();
 
 var app = builder.Build();
+if (isElectronMode)
+    desktopReleaseUpdateChecker = app.Services.GetRequiredService<IDesktopReleaseUpdateChecker>();
 app.Lifetime.ApplicationStopping.Register(desktopUpdateMonitorCancellation.Cancel);
 
 // Apply EF Core migrations + initialise sqlite-vec tables.
@@ -322,6 +334,7 @@ static async Task ElectronAppReady(
     bool enableDevTools,
     bool enableAutoUpdates,
     DesktopUpdateService desktopUpdates,
+    Func<IDesktopReleaseUpdateChecker> getReleaseUpdateChecker,
     TimeSpan updateCheckInterval,
     CancellationToken cancellationToken)
 {
@@ -358,11 +371,31 @@ static async Task ElectronAppReady(
     var browserWindow = await Electron.WindowManager.CreateWindowAsync(options, desktopUrl);
     browserWindow.OnReadyToShow += () => browserWindow.Show();
 
-    if (enableAutoUpdates && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PORTABLE_EXECUTABLE_DIR")))
+    var isPortable = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PORTABLE_EXECUTABLE_DIR"));
+    if (enableAutoUpdates && !isPortable)
     {
         ConfigureElectronAutoUpdater(desktopUpdates);
         _ = MonitorElectronUpdatesAsync(desktopUpdates, updateCheckInterval, cancellationToken);
     }
+    else if (!enableDevTools && (OperatingSystem.IsMacOS() || isPortable))
+    {
+        var currentVersion = await Electron.App.GetVersionAsync(cancellationToken);
+        desktopUpdates.EnableManualDownloads(OpenReleaseInDefaultBrowserAsync);
+        _ = MonitorManualUpdatesAsync(
+            currentVersion,
+            getReleaseUpdateChecker(),
+            desktopUpdates,
+            updateCheckInterval,
+            cancellationToken);
+    }
+}
+
+static async Task OpenReleaseInDefaultBrowserAsync(Uri releaseUri, CancellationToken cancellationToken)
+{
+    cancellationToken.ThrowIfCancellationRequested();
+    var error = await Electron.Shell.OpenExternalAsync(releaseUri.AbsoluteUri);
+    if (!string.IsNullOrWhiteSpace(error))
+        throw new InvalidOperationException($"The default browser could not open the release page: {error}");
 }
 
 static void ConfigureElectronAutoUpdater(DesktopUpdateService desktopUpdates)
@@ -424,6 +457,54 @@ static async Task CheckForElectronUpdatesAsync(DesktopUpdateService desktopUpdat
     {
         desktopUpdates.MarkError(exception.Message);
         Console.Error.WriteLine($"Electron auto-update check failed: {exception.Message}");
+    }
+}
+
+static async Task MonitorManualUpdatesAsync(
+    string currentVersion,
+    IDesktopReleaseUpdateChecker releaseUpdateChecker,
+    DesktopUpdateService desktopUpdates,
+    TimeSpan updateCheckInterval,
+    CancellationToken cancellationToken)
+{
+    if (cancellationToken.IsCancellationRequested) return;
+
+    await CheckForManualUpdateAsync(currentVersion, releaseUpdateChecker, desktopUpdates, cancellationToken);
+
+    using var timer = new PeriodicTimer(updateCheckInterval);
+    try
+    {
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+            await CheckForManualUpdateAsync(currentVersion, releaseUpdateChecker, desktopUpdates, cancellationToken);
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+        // Normal application shutdown.
+    }
+}
+
+static async Task CheckForManualUpdateAsync(
+    string currentVersion,
+    IDesktopReleaseUpdateChecker releaseUpdateChecker,
+    DesktopUpdateService desktopUpdates,
+    CancellationToken cancellationToken)
+{
+    try
+    {
+        var update = await releaseUpdateChecker.CheckAsync(currentVersion, cancellationToken);
+        if (update is null)
+            desktopUpdates.MarkIdle(currentVersion);
+        else
+            desktopUpdates.MarkManualUpdateAvailable(update.Version, update.ReleaseUri);
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+        throw;
+    }
+    catch (Exception exception)
+    {
+        // Keep any previously discovered release visible through transient failures.
+        Console.Error.WriteLine($"Manual desktop update check failed: {exception.Message}");
     }
 }
 

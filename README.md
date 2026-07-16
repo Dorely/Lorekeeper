@@ -42,17 +42,15 @@ OAuth unless that redirect URI is also accepted by the OAuth provider.
 
 ## Desktop Packaging
 
-Build a clean, versioned Windows x64 release from PowerShell:
+Build Windows packages without publishing them:
 
 ```powershell
 .\scripts\build-windows-release.ps1 -Version 0.2.0
 ```
 
-Omit `-Version` to use the version in `Lorekeeper.csproj`. The script verifies
-the solution build, clears only generated Windows staging/output, creates the
-installer and portable executable, audits NuGet plus the shipped npm/Electron
-runtime dependencies, and writes `SHA256SUMS.txt`. It needs network access when
-npm or Electron dependencies are not already cached.
+Omit `-Version` to use the version in `Lorekeeper.csproj`. This build-only
+script verifies the solution, audits NuGet and the shipped npm/Electron runtime,
+and produces the installer and portable executable under `publish/win-x64/`.
 
 The underlying packaging command is:
 
@@ -65,51 +63,54 @@ The build produces a per-user NSIS installer and a portable executable in
 without administrator rights, and recipients do not need .NET or Node.js. Share
 `publish/win-x64/Lorekeeper-Setup-<version>-x64.exe` with testers.
 
-Installed builds check the public
-[`Dorely/Lorekeeper-Releases`](https://github.com/Dorely/Lorekeeper-Releases)
-repository for stable updates at startup and every 15 minutes while running.
-The interval can be changed with `Desktop:UpdateCheckIntervalMinutes`. The
-portable executable does not auto-update.
-The release feed requires the Setup executable, its `.blockmap`, and
-`latest.yml` to be published together.
-
-To build and publish a new Windows release from a clean source worktree, install
-and authenticate [GitHub CLI](https://cli.github.com/), then run:
+To build and publish Windows plus Apple Silicon and Intel macOS packages as one
+release, install and authenticate [GitHub CLI](https://cli.github.com/), then run
+the single release command from Windows:
 
 ```powershell
 gh auth login
-.\scripts\publish-windows-release.ps1 -Version 0.2.0
+.\scripts\publish-release.ps1 -Version 0.2.0
 ```
 
-The publisher validates GitHub access and release-repository visibility, builds
-and audits the packages, creates a draft release, uploads the installer,
-portable executable, updater metadata, blockmap, and checksums, then publishes
-the completed release. Add `-Notes "..."` or `-NotesFile .\release-notes.md` for
-custom release notes. SemVer prerelease versions such as `0.2.0-beta.1` are
-published as GitHub prereleases and are not offered to stable installations.
-Published versions are immutable; fixes must use a higher version.
+The publisher requires a clean local `main` that exactly matches `origin/main`.
+It dispatches `.github/workflows/build-macos-release.yml` for both Mac
+architectures, builds Windows locally at the same time, waits for the correlated
+Actions run, downloads the verified DMGs, and publishes every artifact together
+only if all builds succeeded. The workflow must already be committed and pushed
+to `main`; it uses the source repository's read-only `GITHUB_TOKEN` and never
+publishes a release itself.
 
-The `/publish/` directory is intentionally git-ignored; release binaries are
-attached to the release repository rather than committed to source control.
+The completed release contains the Windows installer, portable executable,
+updater metadata and blockmap, `Lorekeeper-<version>-arm64.dmg`,
+`Lorekeeper-<version>-x64.dmg`, and one checksum file covering every asset. Add
+`-Notes "..."` or `-NotesFile .\release-notes.md` for custom notes. SemVer
+prereleases such as `0.2.0-beta.1` are published as GitHub prereleases.
+Published versions are immutable; fixes require a higher version.
 
-Release builds store the SQLite database under
-`%LOCALAPPDATA%\Lorekeeper\Data\`, outside both the installed application and
-the portable executable's temporary extraction directory. Desktop development
-continues to use the repository-local database so existing development data is
-not moved.
+Installed Windows builds use automatic updates and require the Setup executable,
+its `.blockmap`, and `latest.yml` to remain together. macOS and Windows portable
+builds instead query the public stable release API at startup and every 15
+minutes. They show **Download Update** only when the latest stable release is
+newer, and open that release in the operating system's default browser. Change
+the interval with `Desktop:UpdateCheckIntervalMinutes`.
 
-These builds are not code-signed. Windows will identify the publisher as
-unknown and may show a Microsoft Defender SmartScreen warning on the initial
-installation. Code signing is recommended before distributing beyond a small
-group of trusted testers.
+Release builds store the SQLite database in per-user application data, outside
+the installed application, mounted DMG, and portable executable's extraction
+directory. Desktop development continues to use the repository-local database.
 
-Linux and macOS packages use the matching publish profiles in
-`Lorekeeper/Properties/PublishProfiles/`. Electron.NET/electron-builder may
-require building on the target OS, except for supported Windows-to-Linux WSL
-flows.
+Windows packages are unsigned, so Windows may show an unknown-publisher or
+SmartScreen warning. macOS packages are ad-hoc signed but not Developer ID signed
+or notarized. Download the DMG matching the Mac (`arm64` for Apple Silicon, `x64`
+for Intel), drag Lorekeeper into Applications, then use **Open Anyway** in
+System Settings > Privacy & Security if Gatekeeper blocks the first launch.
+These packages are intended for trusted testers.
+
+The `/publish/` directory is git-ignored. Release binaries live on the public
+[`Dorely/Lorekeeper-Releases`](https://github.com/Dorely/Lorekeeper-Releases)
+repository rather than in source control. The private source repository consumes
+GitHub Actions minutes for its two hosted macOS jobs.
 
 ## Local Data
 
 SQLite databases, API keys, OAuth tokens, temporary verification databases, and
-publish output are local state and are ignored by git. Installed Windows builds
-keep all of that user-specific state in `%LOCALAPPDATA%\Lorekeeper\Data\`.
+publish output are local state and are ignored by git.

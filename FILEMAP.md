@@ -19,8 +19,10 @@
 | `.vscode/launch.json` | VS Code debug configurations; default F5 entry launches the Electron desktop shell, with a secondary web-hosted profile. |
 | `.vscode/tasks.json` | VS Code build task used by debug launch configurations. |
 | `.github/copilot-instructions.md` | Project guidelines for AI assistants. |
+| `.github/workflows/build-macos-release.yml` | Dispatch-only Apple Silicon/Intel macOS release builder and verifier; returns correlated DMGs to the Windows release orchestrator without publishing. |
 | `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates tooling/version, audits NuGet plus shipped npm/Electron dependencies, rebuilds isolated staging/output, verifies installer/updater artifacts, and writes GitHub Release checksums. |
-| `scripts/publish-windows-release.ps1` | One-command Windows publisher: requires a clean source tree, builds the requested SemVer, uploads complete updater assets to a draft `Dorely/Lorekeeper-Releases` release, then publishes it. |
+| `scripts/build-macos-release.ps1` | Native macOS release builder for one RID: audits dependencies, packages an ad-hoc-signed DMG, verifies signatures/architectures, mounts and smoke-tests the app, and writes a checksum. |
+| `scripts/publish-release.ps1` | Single Windows release orchestrator: dispatches correlated macOS Actions builds, builds Windows locally, assembles combined checksums, and atomically publishes every platform. |
 | `scripts/generate-brand-assets.py` | Deterministically exports browser PNG sizes and the multi-resolution Windows ICO from the 1024px Lorekeeper icon master. |
 | `docs/research/README.md` | Index and maintenance policy for Lorekeeper's sourced editorial, image-prompting, and composition research briefs. |
 | `docs/research/image-generation-prompting.md` | Sourced `gpt-image-2` prompting/API brief with structured reference/edit/page-target guidance and runtime contract mappings. |
@@ -32,11 +34,11 @@
 | File | Description |
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors, versioned Electron/Electron Builder pins, and app dependencies including EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI, sqlite-vec, tokenizers, SkiaSharp, and ingest packages. |
-| `Program.cs` | Host setup, hardened optional Electron renderer binding with recurring installed-build update checks/state events/restart installation, deterministic development/installed database-path selection, Blazor Interactive Server hub sizing, DI for application services, startup migration/index repair, and image/font/publish endpoints. |
-| `appsettings.json` / `appsettings.Development.json` | Configuration: `Desktop:*` including packaged per-user data placement and update polling, `Auth:Codex:*`, `ConnectionStrings:DefaultConnection`, `Persistence:Provider`, `Blazor:*`, advisory `ChatTokens:*`, `Ingest:Sectioning:*`, `Research:Web:*`, `Embeddings:*`, `Agents:*`. |
+| `Program.cs` | Host setup, hardened Electron binding, installed-Windows auto-updates, conditional macOS/portable release discovery and browser handoff, deterministic data placement, DI, migrations, and HTTP endpoints. |
+| `appsettings.json` / `appsettings.Development.json` | Configuration including `Desktop:*` data placement, update interval, and constrained public release API plus provider, persistence, Blazor, ingest, research, embedding, and agent settings. |
 | `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
-| `Properties/electron-builder.json` | Electron.NET/electron-builder packaging targets, shared brand-icon resources, app metadata, public GitHub update provider, and payload exclusions for Windows, Linux, and macOS desktop artifacts. |
-| `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained publish profiles used by Electron.NET packaging (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`); Windows isolates staging from final artifacts to prevent recursive packaging. |
+| `Properties/electron-builder.json` | Electron.NET packaging targets, metadata, updater provider, Windows installer/portable configuration, and ad-hoc-signed DMG-only macOS configuration. |
+| `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained profiles (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`), with Windows/macOS staging isolated from final artifacts. |
 
 ### Components/
 
@@ -75,7 +77,7 @@
 | File | Description |
 |------|-------------|
 | `MainLayout.razor` / `.css` | Viewport-locked application shell with the branded Lorekeeper top bar, independently interactive update-control host, route-aware page/workspace padding, and global error notice. |
-| `DesktopUpdateControl.razor` (+ `.razor.css`) | Interactive Server top-bar updater that follows live download progress, renders accessible determinate/indeterminate states, and issues the guarded one-click restart-to-install command. |
+| `DesktopUpdateControl.razor` (+ `.razor.css`) | Top-bar update UI for automatic download/restart progress or a conditional external-browser Download Update action when manual discovery finds a newer release. |
 | `PrintLayout.razor` / `.css` | Minimal no-navigation layout used by print-oriented pages; owns the viewport scroll container while restoring unbounded overflow for printed output. |
 | `PageHeader.razor` | Reusable editorial page heading with eyebrow, title, description, and optional actions. |
 | `ConfigurationShell.razor` (+ `.razor.css`) | Shared configuration-page wrapper with page heading, Projects return action, and Providers/Embeddings/Search switcher. |
@@ -363,7 +365,8 @@
 
 | File | Description |
 |------|-------------|
-| `DesktopUpdateService.cs` | Singleton installed-desktop update state including idle/download progress/readiness events and the guarded silent restart-to-install command consumed by the top-bar update control. |
+| `DesktopUpdateService.cs` | Singleton desktop update state for automatic progress/restart plus guarded manual release-download actions and UI notifications. |
+| `DesktopReleaseUpdateChecker.cs` | Public GitHub latest-release client with ETag reuse, constrained release URLs, SemVer comparison, and stable-release filtering for manual-update packages. |
 
 ### Projects/
 

@@ -30,7 +30,8 @@ if ([string]::IsNullOrWhiteSpace($Version))
     $Version = $versionMatch.Groups['version'].Value.Trim()
 }
 
-if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$')
+$semVerPattern = '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+if ($Version -notmatch $semVerPattern)
 {
     throw "Version '$Version' must use SemVer form such as 0.2.0 or 0.2.0-beta.1."
 }
