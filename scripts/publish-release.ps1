@@ -145,8 +145,24 @@ try
     }
 
     $tag = "v$Version"
-    $releaseLookup = @(& gh api -i "repos/$releaseRepository/releases/tags/$tag" 2>&1)
-    $releaseLookupExitCode = $LASTEXITCODE
+    $hasNativeErrorPreference = Test-Path variable:PSNativeCommandUseErrorActionPreference
+    if ($hasNativeErrorPreference)
+    {
+        $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+    }
+    try
+    {
+        $releaseLookup = @(& gh api -i "repos/$releaseRepository/releases/tags/$tag" 2>&1)
+        $releaseLookupExitCode = $LASTEXITCODE
+    }
+    finally
+    {
+        if ($hasNativeErrorPreference)
+        {
+            $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
+        }
+    }
     if ($releaseLookupExitCode -eq 0)
     {
         throw "Release $tag already exists in $releaseRepository. Release versions are immutable; choose a newer version."
