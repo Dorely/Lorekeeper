@@ -35,6 +35,16 @@ $outputDirectory = Join-Path $repoRoot "publish/$RuntimeIdentifier"
 $profileName = $RuntimeIdentifier
 $artifactArchitecture = if ($RuntimeIdentifier -eq 'osx-arm64') { 'arm64' } else { 'x64' }
 $machArchitecture = if ($RuntimeIdentifier -eq 'osx-arm64') { 'arm64' } else { 'x86_64' }
+$sqliteVecPlatformCheck = if ($RuntimeIdentifier -eq 'osx-arm64')
+{
+    # sqlite-vec ships an osx-arm64 dylib, but its package target still rejects
+    # ARM64 PlatformTarget values. The packaged dylib is validated below.
+    '-p:EnableUnsupportedPlatformTargetCheck=false'
+}
+else
+{
+    '-p:EnableUnsupportedPlatformTargetCheck=true'
+}
 $dmgPath = Join-Path $outputDirectory "Lorekeeper-$Version-$artifactArchitecture.dmg"
 
 foreach ($commandName in @('dotnet', 'node', 'npm', 'hdiutil', 'codesign', 'lipo', 'ditto'))
@@ -152,17 +162,31 @@ try
     Invoke-CheckedCommand dotnet @(
         'restore', $projectPath, '--force-evaluate',
         "-p:RuntimeIdentifier=$RuntimeIdentifier",
+        $sqliteVecPlatformCheck,
         '-p:NuGetAudit=true', '-p:NuGetAuditMode=all', '-p:NuGetAuditLevel=low',
         '-p:TreatWarningsAsErrors=true'
     )
     Invoke-CheckedCommand dotnet @(
         'build', $projectPath, '-c', 'Release',
-        "-p:RuntimeIdentifier=$RuntimeIdentifier", "-p:Version=$Version"
+        "-p:RuntimeIdentifier=$RuntimeIdentifier", $sqliteVecPlatformCheck, "-p:Version=$Version"
     )
-    Invoke-CheckedCommand dotnet @(
-        'publish', $projectPath, '-c', 'Release', "-p:PublishProfile=$profileName",
-        "-p:RuntimeIdentifier=$RuntimeIdentifier", "-p:Version=$Version", '--no-restore'
-    )
+    $previousCi = $env:CI
+    try
+    {
+        # Electron.NET does not expose electron-builder's --publish flag. Disable
+        # CI auto-detection so this artifact builder can never publish implicitly.
+        $env:CI = 'false'
+        Invoke-CheckedCommand dotnet @(
+            'publish', $projectPath, '-c', 'Release', "-p:PublishProfile=$profileName",
+            "-p:RuntimeIdentifier=$RuntimeIdentifier", $sqliteVecPlatformCheck,
+            "-p:Version=$Version", '--no-restore'
+        )
+    }
+    finally
+    {
+        if ($null -eq $previousCi) { Remove-Item Env:CI -ErrorAction SilentlyContinue }
+        else { $env:CI = $previousCi }
+    }
 
     $manifest = Get-Content -Raw (Join-Path $stageDirectory 'package.json') | ConvertFrom-Json
     $lockPath = Join-Path $stageDirectory 'package-lock.json'
@@ -225,7 +249,8 @@ try
 
     $electronExecutable = Join-Path $appPath 'Contents/MacOS/Lorekeeper'
     $dotnetExecutable = Join-Path $appPath "Contents/Resources/app/bin/$($manifest.executable)"
-    foreach ($executable in @($electronExecutable, $dotnetExecutable))
+    $sqliteVecLibrary = Join-Path $appPath 'Contents/Resources/app/bin/vec0.dylib'
+    foreach ($executable in @($electronExecutable, $dotnetExecutable, $sqliteVecLibrary))
     {
         if (-not (Test-Path -LiteralPath $executable -PathType Leaf))
         {
