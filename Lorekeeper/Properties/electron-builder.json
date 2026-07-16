@@ -72,6 +72,7 @@
   "mac": {
     "icon": "icon.png",
     "identity": "-",
+    "hardenedRuntime": false,
     "publish": null,
     "target": "dmg",
     "category": "public.app-category.productivity",
