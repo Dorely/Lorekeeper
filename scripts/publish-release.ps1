@@ -191,7 +191,7 @@ try
         $runsJson = & gh run list --repo $sourceRepository --workflow $workflowName --event workflow_dispatch --limit 30 `
             --json databaseId,displayTitle,createdAt
         if ($LASTEXITCODE -ne 0) { throw 'Could not list macOS workflow runs.' }
-        $runs = @(($runsJson -join [Environment]::NewLine) | ConvertFrom-Json)
+        $runs = ($runsJson -join [Environment]::NewLine) | ConvertFrom-Json
         $matchingRuns = @(
             $runs |
                 Where-Object { $_.displayTitle -eq $runTitle } |
