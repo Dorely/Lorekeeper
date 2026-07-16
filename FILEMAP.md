@@ -22,7 +22,7 @@
 | `.github/workflows/build-macos-release.yml` | Dispatch-only Apple Silicon/Intel macOS release builder and verifier; returns correlated DMGs to the Windows release orchestrator without publishing. |
 | `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates tooling/version, audits NuGet plus shipped npm/Electron dependencies, rebuilds isolated staging/output, verifies installer/updater artifacts, and writes GitHub Release checksums. |
 | `scripts/build-macos-release.ps1` | Native macOS release builder for one RID: audits dependencies, packages an ad-hoc-signed DMG, verifies signatures/architectures, mounts and smoke-tests the app, and writes a checksum. |
-| `scripts/publish-release.ps1` | Single Windows release orchestrator: dispatches correlated macOS Actions builds, builds Windows locally, assembles combined checksums, and atomically publishes every platform. |
+| `scripts/publish-release.ps1` | Windows release orchestrator with a local Windows-only mode or an optional correlated macOS Actions build; validates artifacts, assembles checksums, and atomically publishes the selected platforms. |
 | `scripts/generate-brand-assets.py` | Deterministically exports browser PNG sizes and the multi-resolution Windows ICO from the 1024px Lorekeeper icon master. |
 | `docs/research/README.md` | Index and maintenance policy for Lorekeeper's sourced editorial, image-prompting, and composition research briefs. |
 | `docs/research/image-generation-prompting.md` | Sourced `gpt-image-2` prompting/API brief with structured reference/edit/page-target guidance and runtime contract mappings. |
@@ -368,7 +368,7 @@
 | File | Description |
 |------|-------------|
 | `DesktopUpdateService.cs` | Singleton desktop update state for automatic progress/restart plus guarded manual release-download actions and UI notifications. |
-| `DesktopReleaseUpdateChecker.cs` | Public GitHub latest-release client with ETag reuse, constrained release URLs, SemVer comparison, and stable-release filtering for manual-update packages. |
+| `DesktopReleaseUpdateChecker.cs` | Public GitHub latest-release client with ETag reuse, constrained release URLs, SemVer comparison, stable-release filtering, and platform/architecture asset checks for manual updates. |
 
 ### Projects/
 

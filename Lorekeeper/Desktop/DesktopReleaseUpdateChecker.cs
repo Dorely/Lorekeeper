@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -43,6 +44,7 @@ public sealed class GitHubDesktopReleaseUpdateChecker(
                 || release.Prerelease
                 || !DesktopReleaseVersion.TryParse(release.TagName, out var latestVersion)
                 || latestVersion.CompareTo(installedVersion) <= 0
+                || !HasCompatibleAsset(release, latestVersion)
                 || !TryValidateReleaseUri(release.HtmlUrl, out var releaseUri))
             {
                 return null;
@@ -113,13 +115,47 @@ public sealed class GitHubDesktopReleaseUpdateChecker(
         releaseUri = null!;
         return false;
     }
+
+    private static bool HasCompatibleAsset(GitHubRelease release, DesktopReleaseVersion version)
+    {
+        if (release.Assets is null || release.Assets.Length == 0)
+            return false;
+
+        var versionText = version.ToString();
+        if (OperatingSystem.IsWindows())
+        {
+            return HasAsset(release, $"Lorekeeper-Setup-{versionText}-x64.exe")
+                && HasAsset(release, $"Lorekeeper-Portable-{versionText}-x64.exe");
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            var architecture = RuntimeInformation.OSArchitecture switch
+            {
+                Architecture.Arm64 => "arm64",
+                Architecture.X64 => "x64",
+                _ => null,
+            };
+            return architecture is not null
+                && HasAsset(release, $"Lorekeeper-{versionText}-{architecture}.dmg");
+        }
+
+        return false;
+    }
+
+    private static bool HasAsset(GitHubRelease release, string expectedName) =>
+        release.Assets?.Any(asset => asset.Name.Equals(expectedName, StringComparison.Ordinal)) == true;
 }
 
 public sealed record GitHubRelease(
     [property: JsonPropertyName("tag_name")] string TagName,
     [property: JsonPropertyName("html_url")] string HtmlUrl,
     [property: JsonPropertyName("draft")] bool Draft,
-    [property: JsonPropertyName("prerelease")] bool Prerelease);
+    [property: JsonPropertyName("prerelease")] bool Prerelease,
+    [property: JsonPropertyName("assets")] GitHubReleaseAsset[]? Assets);
+
+public sealed record GitHubReleaseAsset(
+    [property: JsonPropertyName("name")] string Name);
 
 [JsonSerializable(typeof(GitHubRelease))]
 internal sealed partial class DesktopReleaseJsonContext : JsonSerializerContext;

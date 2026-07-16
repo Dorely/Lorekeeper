@@ -63,9 +63,23 @@ The build produces a per-user NSIS installer and a portable executable in
 without administrator rights, and recipients do not need .NET or Node.js. Share
 `publish/win-x64/Lorekeeper-Setup-<version>-x64.exe` with testers.
 
+To publish only the Windows packages without consuming GitHub Actions minutes,
+install and authenticate [GitHub CLI](https://cli.github.com/), then run:
+
+```powershell
+gh auth login
+.\scripts\publish-release.ps1 -Version 0.2.1 -WindowsOnly
+```
+
+The Windows-only path builds locally, does not dispatch the macOS workflow, and
+publishes the installer, portable executable, updater metadata, blockmap, and a
+checksum file. The release is still marked latest so installed Windows builds
+and Windows portable builds can discover it. Manual-update packages containing
+this change ignore a newer release that lacks an artifact for their platform and
+architecture.
+
 To build and publish Windows plus Apple Silicon and Intel macOS packages as one
-release, install and authenticate [GitHub CLI](https://cli.github.com/), then run
-the single release command from Windows:
+release, run the same command without `-WindowsOnly`:
 
 ```powershell
 gh auth login
@@ -73,12 +87,13 @@ gh auth login
 ```
 
 The publisher requires a clean local `main` that exactly matches `origin/main`.
-It dispatches `.github/workflows/build-macos-release.yml` for both Mac
-architectures, builds Windows locally at the same time, waits for the correlated
-Actions run, downloads the verified DMGs, and publishes every artifact together
-only if all builds succeeded. The workflow must already be committed and pushed
-to `main`; it uses the source repository's read-only `GITHUB_TOKEN` and never
-publishes a release itself.
+Unless `-WindowsOnly` is used, it dispatches
+`.github/workflows/build-macos-release.yml` for both Mac architectures, builds
+Windows locally at the same time, waits for the correlated Actions run,
+downloads the verified DMGs, and publishes every artifact together only if all
+builds succeeded. The workflow must already be committed and pushed to `main`;
+it uses the source repository's read-only `GITHUB_TOKEN` and never publishes a
+release itself.
 
 The completed release contains the Windows installer, portable executable,
 updater metadata and blockmap, `Lorekeeper-<version>-arm64.dmg`,

@@ -7,7 +7,9 @@ param(
 
     [string]$NotesFile,
 
-    [switch]$Prerelease
+    [switch]$Prerelease,
+
+    [switch]$WindowsOnly
 )
 
 Set-StrictMode -Version Latest
@@ -107,15 +109,18 @@ try
     {
         throw "$releaseRepository must exist and be public; reported visibility was '$visibility'."
     }
-    $actionsEnabled = (& gh api "repos/$sourceRepository/actions/permissions" --jq '.enabled').Trim()
-    if ($LASTEXITCODE -ne 0 -or $actionsEnabled -ne 'true')
+    if (-not $WindowsOnly)
     {
-        throw "GitHub Actions must be enabled for $sourceRepository."
-    }
-    $workflowState = (& gh api "repos/$sourceRepository/actions/workflows/$workflowName" --jq '.state').Trim()
-    if ($LASTEXITCODE -ne 0 -or $workflowState -ne 'active')
-    {
-        throw "The $workflowName workflow must exist and be active on GitHub. Commit and push the release setup first."
+        $actionsEnabled = (& gh api "repos/$sourceRepository/actions/permissions" --jq '.enabled').Trim()
+        if ($LASTEXITCODE -ne 0 -or $actionsEnabled -ne 'true')
+        {
+            throw "GitHub Actions must be enabled for $sourceRepository."
+        }
+        $workflowState = (& gh api "repos/$sourceRepository/actions/workflows/$workflowName" --jq '.state').Trim()
+        if ($LASTEXITCODE -ne 0 -or $workflowState -ne 'active')
+        {
+            throw "The $workflowName workflow must exist and be active on GitHub. Commit and push the release setup first."
+        }
     }
 
     $dirtyFiles = @(& git status --porcelain)
@@ -173,42 +178,48 @@ try
         throw "Could not confirm that release $tag is unused. GitHub returned: $releaseStatusLine $releaseLookupError"
     }
 
-    Remove-GeneratedDirectory $macDownloadDirectory
+    if (-not $WindowsOnly)
+    {
+        Remove-GeneratedDirectory $macDownloadDirectory
+    }
     Remove-GeneratedDirectory $releaseDirectory
 
-    $runTitle = "macOS $Version ($correlationId)"
-    Invoke-Gh @(
-        'workflow', 'run', $workflowName,
-        '--repo', $sourceRepository,
-        '--ref', 'main',
-        '-f', "version=$Version",
-        '-f', "source_commit=$sourceCommit",
-        '-f', "correlation_id=$correlationId"
-    )
-
-    for ($attempt = 0; $attempt -lt 30 -and -not $macRunId; $attempt++)
+    if (-not $WindowsOnly)
     {
-        $runsJson = & gh run list --repo $sourceRepository --workflow $workflowName --event workflow_dispatch --limit 30 `
-            --json databaseId,displayTitle,createdAt
-        if ($LASTEXITCODE -ne 0) { throw 'Could not list macOS workflow runs.' }
-        $runs = ($runsJson -join [Environment]::NewLine) | ConvertFrom-Json
-        $matchingRuns = @(
-            $runs |
-                Where-Object { $_.displayTitle -eq $runTitle } |
-                Sort-Object createdAt -Descending
+        $runTitle = "macOS $Version ($correlationId)"
+        Invoke-Gh @(
+            'workflow', 'run', $workflowName,
+            '--repo', $sourceRepository,
+            '--ref', 'main',
+            '-f', "version=$Version",
+            '-f', "source_commit=$sourceCommit",
+            '-f', "correlation_id=$correlationId"
         )
-        if ($matchingRuns.Count -gt 0)
+
+        for ($attempt = 0; $attempt -lt 30 -and -not $macRunId; $attempt++)
         {
-            $macRunId = [string]$matchingRuns[0].databaseId
-            break
+            $runsJson = & gh run list --repo $sourceRepository --workflow $workflowName --event workflow_dispatch --limit 30 `
+                --json databaseId,displayTitle,createdAt
+            if ($LASTEXITCODE -ne 0) { throw 'Could not list macOS workflow runs.' }
+            $runs = ($runsJson -join [Environment]::NewLine) | ConvertFrom-Json
+            $matchingRuns = @(
+                $runs |
+                    Where-Object { $_.displayTitle -eq $runTitle } |
+                    Sort-Object createdAt -Descending
+            )
+            if ($matchingRuns.Count -gt 0)
+            {
+                $macRunId = [string]$matchingRuns[0].databaseId
+                break
+            }
+            Start-Sleep -Seconds 2
         }
-        Start-Sleep -Seconds 2
+        if (-not $macRunId)
+        {
+            throw "Dispatched the macOS build but could not resolve its correlated workflow run for $correlationId."
+        }
+        Write-Host "macOS workflow run: https://github.com/$sourceRepository/actions/runs/$macRunId" -ForegroundColor Cyan
     }
-    if (-not $macRunId)
-    {
-        throw "Dispatched the macOS build but could not resolve its correlated workflow run for $correlationId."
-    }
-    Write-Host "macOS workflow run: https://github.com/$sourceRepository/actions/runs/$macRunId" -ForegroundColor Cyan
 
     try
     {
@@ -221,14 +232,17 @@ try
         throw
     }
 
-    Invoke-Gh @('run', 'watch', $macRunId, '--repo', $sourceRepository, '--compact', '--exit-status')
-    New-Item -ItemType Directory -Path $macDownloadDirectory | Out-Null
-    Invoke-Gh @(
-        'run', 'download', $macRunId,
-        '--repo', $sourceRepository,
-        '--name', $macArtifactName,
-        '--dir', $macDownloadDirectory
-    )
+    if (-not $WindowsOnly)
+    {
+        Invoke-Gh @('run', 'watch', $macRunId, '--repo', $sourceRepository, '--compact', '--exit-status')
+        New-Item -ItemType Directory -Path $macDownloadDirectory | Out-Null
+        Invoke-Gh @(
+            'run', 'download', $macRunId,
+            '--repo', $sourceRepository,
+            '--name', $macArtifactName,
+            '--dir', $macDownloadDirectory
+        )
+    }
 
     $windowsArtifactNames = @(
         "Lorekeeper-Setup-$Version-x64.exe",
@@ -236,10 +250,14 @@ try
         "Lorekeeper-Portable-$Version-x64.exe",
         'latest.yml'
     )
-    $macArtifactNames = @(
-        "Lorekeeper-$Version-arm64.dmg",
-        "Lorekeeper-$Version-x64.dmg"
-    )
+    $macArtifactNames = @()
+    if (-not $WindowsOnly)
+    {
+        $macArtifactNames = @(
+            "Lorekeeper-$Version-arm64.dmg",
+            "Lorekeeper-$Version-x64.dmg"
+        )
+    }
 
     New-Item -ItemType Directory -Path $releaseDirectory | Out-Null
     foreach ($artifactName in $windowsArtifactNames)
@@ -297,7 +315,8 @@ try
     else
     {
         $sourceUrl = "https://github.com/$sourceRepository/commit/$sourceCommit"
-        $releaseArguments += @('--notes', "Automated Lorekeeper Windows and macOS release built from [$sourceCommit]($sourceUrl).")
+        $platformDescription = if ($WindowsOnly) { 'Windows-only' } else { 'Windows and macOS' }
+        $releaseArguments += @('--notes', "Automated Lorekeeper $platformDescription release built from [$sourceCommit]($sourceUrl).")
     }
     if ($Prerelease -or $Version.Contains('-'))
     {
@@ -320,7 +339,10 @@ try
         throw "Artifacts were uploaded, but $tag remains a draft. Inspect it before publishing manually."
     }
 
-    Remove-GeneratedDirectory $macDownloadDirectory
+    if (-not $WindowsOnly)
+    {
+        Remove-GeneratedDirectory $macDownloadDirectory
+    }
     Write-Host "`nPublished https://github.com/$releaseRepository/releases/tag/$tag" -ForegroundColor Green
     Write-Host "Release staging retained at $releaseDirectory"
 }
