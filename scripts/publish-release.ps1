@@ -145,25 +145,22 @@ try
     }
 
     $tag = "v$Version"
+    $releaseLookupOutputPath = [System.IO.Path]::GetTempFileName()
     $releaseLookupErrorPath = [System.IO.Path]::GetTempFileName()
-    $hasNativeErrorPreference = Test-Path variable:PSNativeCommandUseErrorActionPreference
-    if ($hasNativeErrorPreference)
-    {
-        $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
-        $PSNativeCommandUseErrorActionPreference = $false
-    }
     try
     {
-        $releaseLookup = @(& gh api -i "repos/$releaseRepository/releases/tags/$tag" 2>$releaseLookupErrorPath)
-        $releaseLookupExitCode = $LASTEXITCODE
+        $releaseLookupProcess = Start-Process -FilePath (Get-Command gh).Source -ArgumentList @(
+            'api', '--include', "repos/$releaseRepository/releases/tags/$tag"
+        ) -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput $releaseLookupOutputPath `
+            -RedirectStandardError $releaseLookupErrorPath
+        $releaseLookupExitCode = $releaseLookupProcess.ExitCode
+        $releaseLookup = @([System.IO.File]::ReadAllLines($releaseLookupOutputPath))
         $releaseLookupError = [System.IO.File]::ReadAllText($releaseLookupErrorPath).Trim()
     }
     finally
     {
-        if ($hasNativeErrorPreference)
-        {
-            $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
-        }
+        Remove-Item -LiteralPath $releaseLookupOutputPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $releaseLookupErrorPath -Force -ErrorAction SilentlyContinue
     }
     if ($releaseLookupExitCode -eq 0)
