@@ -11,6 +11,7 @@ public interface IWritingCoachService
         string userText,
         string? currentSampleTitle,
         string? currentSampleBody,
+        IReadOnlyList<Guid> imageIds,
         CancellationToken cancellationToken = default);
     Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default);
 }

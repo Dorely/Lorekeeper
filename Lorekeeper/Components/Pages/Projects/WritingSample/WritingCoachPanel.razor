@@ -7,11 +7,13 @@
 @implements IAsyncDisposable
 @inject IWritingCoachService Coach
 @inject IWritingCoachTurnRunner ChatTurns
+@inject IChatImageAttachmentService ImageAttachments
 @inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
 @inject ChatTokenLimitResolver TokenLimits
 
 <ChatSurface Title="Writing Coach"
+             ProjectId="@ProjectId"
              TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel, ConversationTokenLimit)"
              TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel, ConversationTokenLimit, ActiveModelId)"
              ShowTokenResetSuggestion="@_conversationTokens.ShouldSuggestReset(ConversationTokenLimit)"
@@ -75,6 +77,7 @@
     private string? _pendingUserText;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private ChatProviderAvailability? _chatAvailability;
+    private IReadOnlyDictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>> _messageImages = new Dictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>>();
     private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
@@ -99,6 +102,7 @@
             _conversation = await Coach.GetOrCreateAsync(ProjectId);
             _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
             _messages = (await Coach.LoadMessagesAsync(_conversation.Id)).ToList();
+            _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.WritingCoach);
             var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
             RebuildRenderable(activeTurn?.StartedAtUtc);
             if (activeTurn is not null)
@@ -107,7 +111,7 @@
                     Id: Guid.NewGuid(),
                     Role: ChatMessageRole.User,
                     Status: ChatMessageStatus.Completed,
-                    Parts: [new ChatTextPart(activeTurn.UserText)]));
+                    Parts: ChatImageParts.BuildUserParts(activeTurn.UserText, activeTurn.Images)));
                 _pendingUserText = activeTurn.UserText;
                 _live = new ChatLiveTurn();
                 _running = true;
@@ -128,13 +132,20 @@
         RequestScroll(force: true);
     }
 
-    private async Task SendAsync()
+    private async Task SendAsync(ChatComposerSubmission submission)
     {
-        var text = _input?.Trim();
+        var text = submission.Text.Trim();
         if (_running || string.IsNullOrEmpty(text)) return;
         if (ChatDisabled)
         {
             _error = ChatDisabledMessage;
+            return;
+        }
+        if (submission.Images.Count > 0
+            && (_chatAvailability?.Provider is null
+                || !await Providers.IsVisionProviderWorkingAsync(_chatAvailability.Provider.Id)))
+        {
+            _error = "The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.";
             return;
         }
 
@@ -151,7 +162,7 @@
             Id: Guid.NewGuid(),
             Role: ChatMessageRole.User,
             Status: ChatMessageStatus.Completed,
-            Parts: [new ChatTextPart(text)]));
+            Parts: ChatImageParts.BuildUserParts(text, submission.Images)));
         _live = new ChatLiveTurn();
         _pendingUserText = text;
         UpdateConversationTokenCount();
@@ -159,7 +170,7 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        if (!ChatTurns.TryStart(ProjectId, text, draft.Title, draft.Body))
+        if (!ChatTurns.TryStart(ProjectId, text, draft.Title, draft.Body, submission.Images))
         {
             _error = "Writing Coach already has a running turn.";
             ReleaseRunningUi();
@@ -290,6 +301,7 @@
     {
         if (_conversation is null) return;
         _messages = (await Coach.LoadMessagesAsync(_conversation.Id)).ToList();
+        _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.WritingCoach);
         RebuildRenderable();
         _pendingUserText = null;
         _live = null;
@@ -316,8 +328,16 @@
                 Id: message.Id,
                 Role: ToChatRole(message.Role),
                 Status: ToChatStatus(message.Status),
-                Parts: BuildMessageParts(message, byCallId)));
+                Parts: BuildPartsWithImages(message, byCallId)));
         }
+    }
+
+    private List<ChatMessagePart> BuildPartsWithImages(WritingCoachMessage message, IReadOnlyDictionary<string, WritingCoachMessage> byCallId)
+    {
+        var parts = BuildMessageParts(message, byCallId);
+        if (message.Role == WritingCoachMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
+            ChatImageParts.Append(parts, images);
+        return parts;
     }
 
     private static ChatMessageRole ToChatRole(WritingCoachMessageRole role) => role == WritingCoachMessageRole.User

@@ -333,7 +333,7 @@
 .chat-composer {
     border-top: 1px solid var(--bs-border-color, #dee2e6);
     padding: 0.5rem;
-    display: flex;
+    display: grid;
     gap: 0.5rem;
     align-items: flex-end;
 }
@@ -346,6 +346,16 @@
     overflow-y: hidden;
     line-height: 1.4;
 }
+
+.chat-composer-row { display: flex; gap: .5rem; align-items: flex-end; }
+.chat-composer-row textarea { min-width: 0; }
+.chat-attach-button { flex: 0 0 auto; width: 2.35rem; font-size: 1.15rem; line-height: 1; }
+.chat-composer-images { display: flex; flex-wrap: wrap; gap: .4rem; }
+.chat-composer-image { max-width: 12rem; display: grid; grid-template-columns: 2.25rem minmax(0,1fr) auto; align-items: center; gap: .35rem; padding: .25rem; border: 1px solid var(--lk-line); border-radius: var(--lk-radius-md); background: var(--lk-soft); font-size: .75rem; }
+.chat-composer-image img { width: 2.25rem; height: 2.25rem; object-fit: contain; border-radius: .2rem; background: var(--lk-surface); }
+.chat-composer-image > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-composer-image button { border: 0; background: transparent; color: var(--lk-muted); }
+.chat-composer-error { color: var(--lk-danger); font-size: .78rem; }
 
 /* Lorekeeper editorial surface */
 .chat-surface {

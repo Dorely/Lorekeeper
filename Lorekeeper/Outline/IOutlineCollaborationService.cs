@@ -33,7 +33,7 @@ public interface IOutlineCollaborationService
     /// Sends a user message and yields incremental updates as the assistant responds and
     /// invokes tools. Persists user / assistant / tool messages as the turn progresses.
     /// </summary>
-    IAsyncEnumerable<OutlineTurnUpdate> SendAsync(Guid projectId, string userText, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<OutlineTurnUpdate> SendAsync(Guid projectId, string userText, IReadOnlyList<Guid> imageIds, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Wipes the project's conversation. The next <see cref="GetOrCreateAsync"/> call

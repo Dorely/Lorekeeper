@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.ChatTurns;
 
 namespace Lorekeeper.Components.Chat;
 
@@ -53,6 +54,32 @@ public sealed record ChatImageVisual(
     int? Width,
     int? Height,
     string? ToolCallId = null);
+
+public sealed record ChatComposerSubmission(
+    string Text,
+    IReadOnlyList<ChatTurnImageAttachment> Images);
+
+public static class ChatImageParts
+{
+    public static List<ChatMessagePart> BuildUserParts(string text, IReadOnlyList<ChatTurnImageAttachment> images)
+    {
+        var parts = string.IsNullOrEmpty(text) ? [] : new List<ChatMessagePart> { new ChatTextPart(text) };
+        Append(parts, images);
+        return parts;
+    }
+
+    public static void Append(List<ChatMessagePart> parts, IReadOnlyList<ChatTurnImageAttachment> images)
+    {
+        parts.AddRange(images.Select(image => new ChatImagePart(new ChatImageVisual(
+            image.ImageId,
+            image.FileName,
+            image.AltText,
+            image.PreviewUrl,
+            image.FullUrl,
+            Width: null,
+            Height: null))));
+    }
+}
 
 public sealed class ChatToolChip
 {

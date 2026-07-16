@@ -116,9 +116,10 @@ export function attachAutoSize(element) {
     resize(element);
 }
 
-export function attachComposer(element) {
+export function attachComposer(element, dotNetRef) {
     if (!element) return;
     const state = ensureComposer(element);
+    state.dotNetRef = dotNetRef;
     if (state.attached) return;
 
     state.attached = true;
@@ -137,6 +138,29 @@ export function attachComposer(element) {
     };
 
     element.addEventListener('keydown', state.onKeyDown);
+    state.onPaste = async event => {
+        const files = Array.from(event.clipboardData?.items || [])
+            .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+            .map(item => item.getAsFile())
+            .filter(Boolean);
+        if (files.length === 0) return;
+
+        event.preventDefault();
+        const text = event.clipboardData?.getData('text/plain') || '';
+        if (text) {
+            const start = element.selectionStart ?? element.value.length;
+            const end = element.selectionEnd ?? start;
+            element.setRangeText(text, start, end, 'end');
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        for (const file of files) {
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            const name = file.name || `pasted-image-${Date.now()}.png`;
+            await state.dotNetRef?.invokeMethodAsync('ReceivePastedImageAsync', name, file.type, bytes);
+        }
+    };
+    element.addEventListener('paste', state.onPaste);
 }
 
 function ensureComposer(element) {
@@ -144,8 +168,19 @@ function ensureComposer(element) {
     element.__chatSurfaceComposer = {
         attached: false,
         onKeyDown: null,
+        onPaste: null,
+        dotNetRef: null,
     };
     return element.__chatSurfaceComposer;
+}
+
+export function detachComposer(element) {
+    const state = element?.__chatSurfaceComposer;
+    if (!state?.attached) return;
+    element.removeEventListener('keydown', state.onKeyDown);
+    element.removeEventListener('paste', state.onPaste);
+    state.attached = false;
+    state.dotNetRef = null;
 }
 
 function findSendButton(element) {

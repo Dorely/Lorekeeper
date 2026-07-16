@@ -16,6 +16,7 @@
 @inject IChapterService Chapters
 @inject IChapterVisualService Visuals
 @inject IProjectImageService Images
+@inject IEditorContextService EditorContext
 @inject IActService Acts
 @inject IEditorChatService Chat
 @inject IAiChangeApprovalService ChangeApproval
@@ -732,13 +733,16 @@ else
         }
     </div>
 
-    <ProjectImagePickerModal ProjectId="Project.Id"
-                             ChapterId="_activeChapterId"
-                             IsOpen="_imagesModalOpen"
-                             CanAddToChapter="@(!LayoutControlsLocked)"
-                             OnClose="CloseImagesModal"
-                             OnAddToChapter="AddImageToChapterAsync"
-                             OnContextChanged="OnContextChangedAsync" />
+    <ProjectImageLibraryPickerModal ProjectId="Project.Id"
+                                    IsOpen="_imagesModalOpen"
+                                    Title="Choose a chapter image"
+                                    PrimaryActionLabel="Add to chapter"
+                                    PrimaryActionEnabled="@(!LayoutControlsLocked && _activeChapterId is not null)"
+                                    SecondaryActionLabel="Add to context"
+                                    SecondaryActionEnabled="@(_activeChapterId is not null)"
+                                    OnClose="CloseImagesModal"
+                                    OnPrimaryAction="AddImageToChapterAsync"
+                                    OnSecondaryAction="AddImageToContextAsync" />
 }
 
 @code {
@@ -1086,17 +1090,29 @@ else
 
     private void CloseImagesModal() => _imagesModalOpen = false;
 
-    private async Task AddImageToChapterAsync(Guid imageId)
+    private async Task AddImageToChapterAsync(ProjectImageView image)
     {
         if (LayoutControlsLocked) return;
         if (Project is null || _activeChapterId is not Guid chapterId) return;
         if (!await FlushAsync()) return;
-        var result = await Visuals.AddImageToChapterAsync(Project.Id, chapterId, imageId);
+        var result = await Visuals.AddImageToChapterAsync(Project.Id, chapterId, image.Id);
         if (_mode != EditorMode.Layout)
             _mode = EditorMode.Layout;
         await OnVisualStateChangedAsync(result.State);
         await ApplyEditorReadOnlyAsync(EditorReadOnly);
         StateHasChanged();
+    }
+
+    private async Task AddImageToContextAsync(ProjectImageView image)
+    {
+        if (Project is null || _activeChapterId is not Guid chapterId) return;
+        await EditorContext.SetItemIncludedAsync(
+            Project.Id,
+            chapterId,
+            ContextItemKind.ProjectImage,
+            EditorContextKeys.ProjectImage(image.Id),
+            isIncluded: true);
+        await OnContextChangedAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

@@ -14,6 +14,7 @@ namespace Lorekeeper.Writing;
 public sealed class WritingCoachService(
     IProjectRepository projects,
     IWritingCoachConversationRepository conversations,
+    IChatImageAttachmentService imageAttachments,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     WritingCoachTools tools,
@@ -77,6 +78,7 @@ public sealed class WritingCoachService(
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.WritingCoach, cancellationToken);
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
 
@@ -89,6 +91,7 @@ public sealed class WritingCoachService(
         string userText,
         string? currentSampleTitle,
         string? currentSampleBody,
+        IReadOnlyList<Guid> imageIds,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
@@ -102,6 +105,13 @@ public sealed class WritingCoachService(
             yield break;
         }
 
+        if (imageIds.Count > 0 && !await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken))
+        {
+            yield return new WritingCoachTurnError("The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.", Cancelled: false);
+            yield break;
+        }
+        await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
+
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
 
         var userMessage = new WritingCoachMessage
@@ -114,6 +124,7 @@ public sealed class WritingCoachService(
         };
         conversation.UpdatedAt = DateTime.UtcNow;
         await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
+        await imageAttachments.PersistAsync(projectId, ChatTurnSurface.WritingCoach, userMessage.Id, imageIds, cancellationToken);
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
@@ -146,10 +157,16 @@ public sealed class WritingCoachService(
 
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, CoachSystemPrompt) };
-        messages.AddRange(ChatModelHistory.Build(
-            history,
-            message => message.Role.ToString(),
-            message => message.Content));
+        foreach (var persistedMessage in history)
+        {
+            if (persistedMessage.Id == userMessage.Id && imageIds.Count > 0)
+            {
+                messages.Add(await imageAttachments.BuildUserMessageAsync(projectId, persistedMessage.Content, imageIds, cancellationToken: cancellationToken));
+                continue;
+            }
+            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content);
+            if (replay is not null) messages.Add(replay);
+        }
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)

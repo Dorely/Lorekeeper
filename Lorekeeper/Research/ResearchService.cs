@@ -18,6 +18,7 @@ namespace Lorekeeper.Research;
 public sealed class ResearchService(
     IProjectRepository projects,
     IResearchConversationRepository conversations,
+    IChatImageAttachmentService imageAttachments,
     ISearchProviderService searchProviders,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
@@ -192,6 +193,7 @@ public sealed class ResearchService(
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Research, cancellationToken);
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
 
@@ -202,6 +204,7 @@ public sealed class ResearchService(
     public async IAsyncEnumerable<ResearchTurnUpdate> SendAsync(
         Guid projectId,
         string userText,
+        IReadOnlyList<Guid> imageIds,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
@@ -235,6 +238,13 @@ public sealed class ResearchService(
             yield break;
         }
         var chatProvider = providerAvailability.Provider!;
+        var visionReady = await providerService.IsVisionProviderWorkingAsync(chatProvider.Id, cancellationToken);
+        if (imageIds.Count > 0 && !visionReady)
+        {
+            yield return new ResearchTurnError("The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.", Cancelled: false);
+            yield break;
+        }
+        await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
 
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
         var userMessage = new ResearchMessage
@@ -247,6 +257,7 @@ public sealed class ResearchService(
         };
         conversation.UpdatedAt = DateTime.UtcNow;
         await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
+        await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Research, userMessage.Id, imageIds, cancellationToken);
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
@@ -274,7 +285,6 @@ public sealed class ResearchService(
                     conversation.Id,
                     AiChangeConversationKind.Research,
                     OnToolMutated);
-            var visionReady = await providerService.IsVisionProviderWorkingAsync(chatProvider.Id, cancellationToken);
             toolContext = new ResearchToolContext(projectId, conversation.Id, OnToolMutated, staging, visionReady);
             aiTools = await tools.BuildAsync(toolContext, cancellationToken);
         }
@@ -305,10 +315,16 @@ public sealed class ResearchService(
                 "Canonical visual references from the initial project context. Use them for identity and appearance continuity grounding; they are not scene tags.", cancellationToken);
             if (initialVisuals is not null) messages.Add(initialVisuals);
         }
-        messages.AddRange(ChatModelHistory.Build(
-            history,
-            message => message.Role.ToString(),
-            message => message.Content));
+        foreach (var persistedMessage in history)
+        {
+            if (persistedMessage.Id == userMessage.Id && imageIds.Count > 0)
+            {
+                messages.Add(await imageAttachments.BuildUserMessageAsync(projectId, persistedMessage.Content, imageIds, cancellationToken: cancellationToken));
+                continue;
+            }
+            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content);
+            if (replay is not null) messages.Add(replay);
+        }
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)

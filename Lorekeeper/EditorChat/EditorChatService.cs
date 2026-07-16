@@ -21,6 +21,7 @@ public sealed class EditorChatService(
     IProjectRepository projects,
     IChapterService chapters,
     IEditorConversationRepository conversations,
+    IChatImageAttachmentService imageAttachments,
     IContextBuilder contextBuilder,
     IChapterVisualService chapterVisuals,
     IProjectImageService projectImages,
@@ -117,6 +118,7 @@ public sealed class EditorChatService(
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Editor, cancellationToken);
         await contestService.DiscardInactiveContestBatchesAsync(projectId, cancellationToken);
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
@@ -128,6 +130,7 @@ public sealed class EditorChatService(
         Guid projectId,
         Guid? currentChapterId,
         string userText,
+        IReadOnlyList<Guid> imageIds,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
@@ -162,6 +165,14 @@ public sealed class EditorChatService(
             yield break;
         }
 
+        var visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
+        if (imageIds.Count > 0 && !visionReady)
+        {
+            yield return new EditorChatTurnError("The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.", Cancelled: false);
+            yield break;
+        }
+        await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
+
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
         var userMessage = new EditorMessage
         {
@@ -173,13 +184,13 @@ public sealed class EditorChatService(
         };
         conversation.UpdatedAt = DateTime.UtcNow;
         await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
+        await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Editor, userMessage.Id, imageIds, cancellationToken);
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
         EditorChatContext editorContext = null!;
         Chapter? currentChapter = null;
         var contestModeEnabled = false;
-        var visionReady = false;
         IReadOnlyList<EntityVisualContextReference> initialEntityVisuals = [];
         string systemPrompt = string.Empty;
         string? setupError = null;
@@ -205,7 +216,6 @@ public sealed class EditorChatService(
             await turnEngine.UpdateMessageAsync(conversations, userMessage, cancellationToken);
 
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
-            visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
 
             OutlineToolStagingContext? outlineStaging = null;
             EditorChatChangeStagingContext? editorStaging = null;
@@ -262,10 +272,16 @@ public sealed class EditorChatService(
             messages.Add(entityVisualMessage);
         }
         await AddAutomaticVisualSnapshotsAsync(messages, currentChapter, providerAvailability.Provider, cancellationToken);
-        messages.AddRange(ChatModelHistory.Build(
-            history,
-            message => message.Role.ToString(),
-            message => message.Content));
+        foreach (var persistedMessage in history)
+        {
+            if (persistedMessage.Id == userMessage.Id && imageIds.Count > 0)
+            {
+                messages.Add(await imageAttachments.BuildUserMessageAsync(projectId, persistedMessage.Content, imageIds, cancellationToken: cancellationToken));
+                continue;
+            }
+            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content);
+            if (replay is not null) messages.Add(replay);
+        }
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)

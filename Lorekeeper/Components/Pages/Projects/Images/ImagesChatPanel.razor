@@ -8,11 +8,14 @@
 @implements IAsyncDisposable
 @inject IImagesChatService ImagesChat
 @inject IImagesChatTurnRunner ChatTurns
+@inject IChatImageAttachmentService ImageAttachments
 @inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
 @inject ChatTokenLimitResolver TokenLimits
 
 <ChatSurface Title="Images Chat"
+             ProjectId="@ProjectId"
+             OnLibraryImagesChanged="NotifyLibraryImagesChangedAsync"
              TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel, ConversationTokenLimit)"
              TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel, ConversationTokenLimit, ActiveModelId)"
              ShowTokenResetSuggestion="@_conversationTokens.ShouldSuggestReset(ConversationTokenLimit)"
@@ -117,6 +120,7 @@
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private ChatProviderAvailability? _chatAvailability;
     private int _seenAttachmentRefreshKey;
+    private IReadOnlyDictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>> _messageImages = new Dictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>>();
 
     private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
@@ -152,6 +156,7 @@
             _conversation = await ImagesChat.GetOrCreateAsync(ProjectId);
             _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
             _messages = (await ImagesChat.LoadMessagesAsync(_conversation.Id)).ToList();
+            _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Images);
             await LoadAttachmentsAsync();
             _systemPrompt = await ImagesChat.GetSystemPromptAsync(ProjectId);
             var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
@@ -162,7 +167,7 @@
                     Guid.NewGuid(),
                     ChatMessageRole.User,
                     ChatMessageStatus.Completed,
-                    [new ChatTextPart(activeTurn.UserText)]));
+                    BuildUserPendingParts(activeTurn.UserText, activeTurn.Images)));
                 _pendingUserText = activeTurn.UserText;
                 _live = new ChatLiveTurn();
                 _running = true;
@@ -183,13 +188,20 @@
         RequestScroll(force: true);
     }
 
-    private async Task SendAsync()
+    private async Task SendAsync(ChatComposerSubmission submission)
     {
-        var text = _input.Trim();
+        var text = submission.Text.Trim();
         if (_running || string.IsNullOrWhiteSpace(text)) return;
         if (ChatDisabled)
         {
             _error = ChatDisabledMessage;
+            return;
+        }
+        if (submission.Images.Count > 0
+            && (_chatAvailability?.Provider is null
+                || !await Providers.IsVisionProviderWorkingAsync(_chatAvailability.Provider.Id)))
+        {
+            _error = "The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.";
             return;
         }
 
@@ -202,7 +214,7 @@
             Guid.NewGuid(),
             ChatMessageRole.User,
             ChatMessageStatus.Completed,
-            BuildUserPendingParts(text)));
+            BuildUserPendingParts(text, submission.Images)));
         _live = new ChatLiveTurn();
         _pendingUserText = text;
         UpdateConversationTokenCount();
@@ -210,7 +222,7 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        if (!ChatTurns.TryStart(ProjectId, text))
+        if (!ChatTurns.TryStart(ProjectId, text, submission.Images))
         {
             _error = "Images Chat already has a running turn.";
             ReleaseRunningUi();
@@ -376,6 +388,7 @@
     {
         if (_conversation is null) return;
         _messages = (await ImagesChat.LoadMessagesAsync(_conversation.Id)).ToList();
+        _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Images);
         _systemPrompt = await ImagesChat.GetSystemPromptAsync(ProjectId);
         RebuildRenderable();
         _pendingUserText = null;
@@ -401,8 +414,16 @@
                 message.Id,
                 message.Role == ProjectImageMessageRole.User ? ChatMessageRole.User : ChatMessageRole.Assistant,
                 ToChatStatus(message.Status),
-                BuildMessageParts(message, byCallId)));
+                BuildPartsWithImages(message, byCallId)));
         }
+    }
+
+    private List<ChatMessagePart> BuildPartsWithImages(ProjectImageMessage message, IReadOnlyDictionary<string, ProjectImageMessage> byCallId)
+    {
+        var parts = BuildMessageParts(message, byCallId);
+        if (message.Role == ProjectImageMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
+            ChatImageParts.Append(parts, images);
+        return parts;
     }
 
     private static ChatMessageStatus ToChatStatus(ProjectImageMessageStatus status) => status switch
@@ -508,12 +529,17 @@
             visual.Height,
             visual.ToolCallId);
 
-    private List<ChatMessagePart> BuildUserPendingParts(string text)
+    private List<ChatMessagePart> BuildUserPendingParts(string text, IReadOnlyList<ChatTurnImageAttachment> composerImages)
     {
-        var parts = new List<ChatMessagePart> { new ChatTextPart(text) };
-        parts.AddRange(_attachments.Select(attachment => new ChatImagePart(ToChatImageVisual(attachment))));
+        var parts = ChatImageParts.BuildUserParts(text, composerImages);
+        var composerIds = composerImages.Select(image => image.ImageId).ToHashSet();
+        parts.AddRange(_attachments
+            .Where(attachment => !composerIds.Contains(attachment.ImageId))
+            .Select(attachment => new ChatImagePart(ToChatImageVisual(attachment))));
         return parts;
     }
+
+    private Task NotifyLibraryImagesChangedAsync() => OnImagesChanged.InvokeAsync();
 
     private static ChatImageVisual ToChatImageVisual(ProjectImageChatAttachmentView attachment) =>
         new(

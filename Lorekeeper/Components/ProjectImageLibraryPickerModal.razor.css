@@ -1,0 +1,13 @@
+.project-image-picker-backdrop { position: fixed; inset: 0; z-index: 1060; display: grid; place-items: center; padding: 1rem; background: rgb(15 23 42 / 58%); backdrop-filter: blur(2px); }
+.project-image-picker { width: min(62rem, 100%); max-height: min(45rem, 92vh); display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; gap: .75rem; padding: 1rem; border: 1px solid var(--lk-line); border-radius: var(--lk-radius-lg); background: var(--lk-surface); box-shadow: var(--lk-shadow-md); }
+.project-image-picker-header,.project-image-picker-toolbar,.project-image-picker-footer { display: flex; align-items: center; gap: .5rem; }
+.project-image-picker-header { justify-content: space-between; border-bottom: 1px solid var(--lk-line); padding-bottom: .65rem; }
+.project-image-picker-header h5 { margin: 0; font-family: Georgia, "Times New Roman", serif; }
+.project-image-picker-grid { min-height: 0; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: .75rem; }
+.project-image-picker-card { overflow: hidden; padding: 0; border: 1px solid var(--lk-line); border-radius: var(--lk-radius-md); color: inherit; text-align: left; background: var(--lk-surface); }
+.project-image-picker-card:hover,.project-image-picker-card.selected { border-color: var(--lk-accent); background: var(--lk-accent-soft); }
+.project-image-picker-card img { width: 100%; aspect-ratio: 4 / 3; display: block; object-fit: contain; background: var(--lk-soft); }
+.project-image-picker-card-body { display: grid; gap: .3rem; padding: .6rem; font-size: .84rem; }
+.project-image-picker-card-body span { color: var(--lk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-image-picker-footer { justify-content: flex-end; border-top: 1px solid var(--lk-line); padding-top: .65rem; }
+.project-image-picker-empty { padding: 1rem; border: 1px dashed var(--lk-line); border-radius: var(--lk-radius-md); color: var(--lk-muted); }

@@ -7,11 +7,13 @@
 @implements IAsyncDisposable
 @inject IOutlineCollaborationService Collab
 @inject IOutlineChatTurnRunner ChatTurns
+@inject IChatImageAttachmentService ImageAttachments
 @inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
 @inject ChatTokenLimitResolver TokenLimits
 
 <ChatSurface Title="Outline Chat"
+             ProjectId="@ProjectId"
              TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel, ConversationTokenLimit)"
              TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel, ConversationTokenLimit, ActiveModelId)"
              ShowTokenResetSuggestion="@_conversationTokens.ShouldSuggestReset(ConversationTokenLimit)"
@@ -99,6 +101,7 @@
     private string _systemPrompt = string.Empty;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private ChatProviderAvailability? _chatAvailability;
+    private IReadOnlyDictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>> _messageImages = new Dictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>>();
 
     private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
@@ -125,6 +128,7 @@
             _systemPrompt = await Collab.GetSystemPromptAsync(ProjectId);
             _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
             _messages = (await Collab.LoadMessagesAsync(_conversation.Id)).ToList();
+            _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Outline);
             _approvalEnabled = await Collab.GetAiChangeApprovalEnabledAsync(ProjectId);
             await LoadPendingChangesAsync(openIfPending: false);
             var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
@@ -135,7 +139,7 @@
                     Id: Guid.NewGuid(),
                     Role: ChatMessageRole.User,
                     Status: ChatMessageStatus.Completed,
-                    Parts: [new ChatTextPart(activeTurn.UserText)]));
+                    Parts: ChatImageParts.BuildUserParts(activeTurn.UserText, activeTurn.Images)));
                 _pendingUserText = activeTurn.UserText;
                 _live = new ChatLiveTurn();
                 _running = true;
@@ -156,9 +160,9 @@
         RequestScroll(force: true);
     }
 
-    private async Task SendAsync()
+    private async Task SendAsync(ChatComposerSubmission submission)
     {
-        var text = _input?.Trim();
+        var text = submission.Text.Trim();
         if (string.IsNullOrEmpty(text) || _running) return;
         if (ChatDisabled)
         {
@@ -168,6 +172,13 @@
         if (PendingChangeCount > 0)
         {
             _showPendingChanges = true;
+            return;
+        }
+        if (submission.Images.Count > 0
+            && (_chatAvailability?.Provider is null
+                || !await Providers.IsVisionProviderWorkingAsync(_chatAvailability.Provider.Id)))
+        {
+            _error = "The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.";
             return;
         }
 
@@ -180,7 +191,7 @@
             Id: Guid.NewGuid(),
             Role: ChatMessageRole.User,
             Status: ChatMessageStatus.Completed,
-            Parts: [new ChatTextPart(text)]));
+            Parts: ChatImageParts.BuildUserParts(text, submission.Images)));
         _live = new ChatLiveTurn();
         _pendingUserText = text;
         UpdateConversationTokenCount();
@@ -188,7 +199,7 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        if (!ChatTurns.TryStart(ProjectId, text))
+        if (!ChatTurns.TryStart(ProjectId, text, submission.Images))
         {
             _error = "Outline Chat already has a running turn.";
             ReleaseRunningUi();
@@ -333,6 +344,7 @@
     {
         if (_conversation is null) return;
         _messages = (await Collab.LoadMessagesAsync(_conversation.Id)).ToList();
+        _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Outline);
         RebuildRenderable();
         _pendingUserText = null;
         _live = null;
@@ -392,8 +404,16 @@
                 Id: m.Id,
                 Role: ToChatRole(m.Role),
                 Status: ToChatStatus(m.Status),
-                Parts: BuildMessageParts(m, byCallId)));
+                Parts: BuildPartsWithImages(m, byCallId)));
         }
+    }
+
+    private List<ChatMessagePart> BuildPartsWithImages(OutlineMessage message, IReadOnlyDictionary<string, OutlineMessage> byCallId)
+    {
+        var parts = BuildMessageParts(message, byCallId);
+        if (message.Role == OutlineMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
+            ChatImageParts.Append(parts, images);
+        return parts;
     }
 
     private static ChatMessageRole ToChatRole(OutlineMessageRole role) => role == OutlineMessageRole.User

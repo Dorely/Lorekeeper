@@ -160,6 +160,7 @@ builder.Services.AddSingleton<ITokenCounter, CompositeTokenCounter>();
 builder.Services.AddSingleton<ChatTokenLimitResolver>();
 builder.Services.AddSingleton<ChatTurnEngine>();
 builder.Services.AddSingleton<ChatTurnRuntime>();
+builder.Services.AddScoped<IChatImageAttachmentService, ChatImageAttachmentService>();
 
 // Projects
 builder.Services.AddScoped<IProjectService, ProjectService>();

@@ -11,7 +11,7 @@ public interface IImagesChatService
     Task RemoveAttachmentAsync(Guid projectId, Guid attachmentId, CancellationToken cancellationToken = default);
     Task ClearAttachmentsAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default);
-    IAsyncEnumerable<ImagesChatTurnUpdate> SendAsync(Guid projectId, string userText, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<ImagesChatTurnUpdate> SendAsync(Guid projectId, string userText, IReadOnlyList<Guid> imageIds, CancellationToken cancellationToken = default);
     Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default);
 }
 

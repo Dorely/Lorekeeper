@@ -9,11 +9,13 @@
 @implements IAsyncDisposable
 @inject IResearchService Research
 @inject IResearchChatTurnRunner ChatTurns
+@inject IChatImageAttachmentService ImageAttachments
 @inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
 @inject ChatTokenLimitResolver TokenLimits
 
 <ChatSurface Title="Research"
+             ProjectId="@ProjectId"
              TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel, ConversationTokenLimit)"
              TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel, ConversationTokenLimit, ActiveModelId)"
              ShowTokenResetSuggestion="@_conversationTokens.ShouldSuggestReset(ConversationTokenLimit)"
@@ -97,6 +99,7 @@
     private string _systemPrompt = string.Empty;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private ChatProviderAvailability? _chatAvailability;
+    private IReadOnlyDictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>> _messageImages = new Dictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>>();
 
     private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
@@ -121,6 +124,7 @@
             _conversation = await Research.GetOrCreateAsync(ProjectId);
             _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
             _messages = (await Research.LoadMessagesAsync(_conversation.Id)).ToList();
+            _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Research);
             _approvalEnabled = await Research.GetAiChangeApprovalEnabledAsync(ProjectId);
             _systemPrompt = await Research.GetSystemPromptAsync(ProjectId);
             await LoadPendingChangesAsync(openIfPending: false);
@@ -132,7 +136,7 @@
                     Guid.NewGuid(),
                     ChatMessageRole.User,
                     ChatMessageStatus.Completed,
-                    [new ChatTextPart(activeTurn.UserText)]));
+                    ChatImageParts.BuildUserParts(activeTurn.UserText, activeTurn.Images)));
                 _pendingUserText = activeTurn.UserText;
                 _live = new ChatLiveTurn();
                 _running = true;
@@ -153,9 +157,9 @@
         RequestScroll(force: true);
     }
 
-    private async Task SendAsync()
+    private async Task SendAsync(ChatComposerSubmission submission)
     {
-        var text = _input.Trim();
+        var text = submission.Text.Trim();
         if (_running || string.IsNullOrWhiteSpace(text)) return;
         if (ChatDisabled)
         {
@@ -165,6 +169,13 @@
         if (PendingChangeCount > 0)
         {
             await OpenPendingChangesAsync();
+            return;
+        }
+        if (submission.Images.Count > 0
+            && (_chatAvailability?.Provider is null
+                || !await Providers.IsVisionProviderWorkingAsync(_chatAvailability.Provider.Id)))
+        {
+            _error = "The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.";
             return;
         }
 
@@ -177,7 +188,7 @@
             Guid.NewGuid(),
             ChatMessageRole.User,
             ChatMessageStatus.Completed,
-            [new ChatTextPart(text)]));
+            ChatImageParts.BuildUserParts(text, submission.Images)));
         _live = new ChatLiveTurn();
         _pendingUserText = text;
         UpdateConversationTokenCount();
@@ -185,7 +196,7 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        if (!ChatTurns.TryStart(ProjectId, text))
+        if (!ChatTurns.TryStart(ProjectId, text, submission.Images))
         {
             _error = "Research Chat already has a running turn.";
             ReleaseRunningUi();
@@ -324,6 +335,7 @@
     {
         if (_conversation is null) return;
         _messages = (await Research.LoadMessagesAsync(_conversation.Id)).ToList();
+        _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Research);
         _systemPrompt = await Research.GetSystemPromptAsync(ProjectId);
         RebuildRenderable();
         _pendingUserText = null;
@@ -385,8 +397,16 @@
                 message.Id,
                 message.Role == ResearchMessageRole.User ? ChatMessageRole.User : ChatMessageRole.Assistant,
                 ToChatStatus(message.Status),
-                BuildMessageParts(message, byCallId)));
+                BuildPartsWithImages(message, byCallId)));
         }
+    }
+
+    private List<ChatMessagePart> BuildPartsWithImages(ResearchMessage message, IReadOnlyDictionary<string, ResearchMessage> byCallId)
+    {
+        var parts = BuildMessageParts(message, byCallId);
+        if (message.Role == ResearchMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
+            ChatImageParts.Append(parts, images);
+        return parts;
     }
 
     private static ChatMessageStatus ToChatStatus(ResearchMessageStatus status) => status switch

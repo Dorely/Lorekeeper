@@ -18,7 +18,8 @@ public sealed record ChatTurnSnapshot(
     Guid ProjectId,
     ChatTurnSurface Surface,
     DateTime StartedAtUtc,
-    string UserText);
+    string UserText,
+    IReadOnlyList<ChatTurnImageAttachment> Images);
 
 public interface IChatTurnSubscription<TUpdate> : IAsyncDisposable
 {
@@ -50,7 +51,8 @@ public sealed class ChatTurnRuntime
         string userText,
         Func<CancellationToken, IAsyncEnumerable<TUpdate>> run,
         Func<Exception, bool, TUpdate> errorUpdateFactory,
-        Func<TUpdate, bool> isTerminalUpdate)
+        Func<TUpdate, bool> isTerminalUpdate,
+        IReadOnlyList<ChatTurnImageAttachment>? images = null)
     {
         ActiveTurn<TUpdate> turn;
         lock (_lock)
@@ -58,7 +60,7 @@ public sealed class ChatTurnRuntime
             if (_activeTurns.ContainsKey(key))
                 return false;
 
-            turn = new ActiveTurn<TUpdate>(key, userText, RemoveSubscription);
+            turn = new ActiveTurn<TUpdate>(key, userText, images ?? [], RemoveSubscription);
             _activeTurns[key] = turn;
         }
 
@@ -161,6 +163,7 @@ public sealed class ChatTurnRuntime
     private sealed class ActiveTurn<TUpdate>(
         ChatTurnKey key,
         string userText,
+        IReadOnlyList<ChatTurnImageAttachment> images,
         Action<ChatTurnKey, Guid, Guid> removeSubscription) : IActiveTurn
     {
         private readonly object _turnLock = new();
@@ -175,7 +178,7 @@ public sealed class ChatTurnRuntime
         public DateTime StartedAtUtc { get; } = DateTime.UtcNow;
         public CancellationToken CancellationToken => _cts.Token;
         public bool IsCancellationRequested => _cts.IsCancellationRequested;
-        public ChatTurnSnapshot Snapshot => new(TurnId, Key.ProjectId, Key.Surface, StartedAtUtc, userText);
+        public ChatTurnSnapshot Snapshot => new(TurnId, Key.ProjectId, Key.Surface, StartedAtUtc, userText, images);
 
         public IChatTurnSubscription<TUpdate> Subscribe()
         {

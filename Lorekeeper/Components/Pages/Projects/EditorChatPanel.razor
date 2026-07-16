@@ -12,6 +12,7 @@
 @implements IAsyncDisposable
 @inject IEditorChatService Chat
 @inject IEditorChatTurnRunner ChatTurns
+@inject IChatImageAttachmentService ImageAttachments
 @inject IContextBuilder ContextBuilder
 @inject IProjectRepository Projects
 @inject IChapterService Chapters
@@ -21,6 +22,7 @@
 @inject ILogger<EditorChatPanel> Logger
 
 <ChatSurface Title="Editor Chat"
+             ProjectId="@ProjectId"
              TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel, ConversationTokenLimit)"
              TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel, ConversationTokenLimit, ActiveModelId)"
              ShowTokenResetSuggestion="@_conversationTokens.ShouldSuggestReset(ConversationTokenLimit)"
@@ -145,6 +147,7 @@
     private int? _contestProviderSlot2Id;
     private int? _contestProviderSlot3Id;
     private ChatProviderAvailability? _chatAvailability;
+    private IReadOnlyDictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>> _messageImages = new Dictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>>();
 
     private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
@@ -282,6 +285,7 @@
         {
             _conversation = await Chat.GetOrCreateAsync(ProjectId, cancellationToken);
             _messages = (await Chat.LoadMessagesAsync(_conversation.Id, cancellationToken)).ToList();
+            _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Editor, cancellationToken);
             _approvalEnabled = await Chat.GetAiChangeApprovalEnabledAsync(ProjectId, cancellationToken);
             _chatAvailability = await ProviderService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
             _providers = await ProviderService.ListWorkingChatProvidersAsync(cancellationToken);
@@ -301,7 +305,7 @@
                     Id: Guid.NewGuid(),
                     Role: ChatMessageRole.User,
                     Status: ChatMessageStatus.Completed,
-                    Parts: [new ChatTextPart(activeTurn.UserText)]));
+                    Parts: ChatImageParts.BuildUserParts(activeTurn.UserText, activeTurn.Images)));
                 _pendingUserText = activeTurn.UserText;
                 _live = new ChatLiveTurn();
                 _running = true;
@@ -326,9 +330,9 @@
         RequestScroll(force: true);
     }
 
-    private async Task SendAsync()
+    private async Task SendAsync(ChatComposerSubmission submission)
     {
-        var text = _input?.Trim();
+        var text = submission.Text.Trim();
         if (_running || string.IsNullOrEmpty(text)) return;
         if (ChatDisabled)
         {
@@ -355,6 +359,13 @@
             await OpenPendingChangesAsync();
             return;
         }
+        if (submission.Images.Count > 0
+            && (_chatAvailability?.Provider is null
+                || !await ProviderService.IsVisionProviderWorkingAsync(_chatAvailability.Provider.Id)))
+        {
+            _error = "The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.";
+            return;
+        }
 
         _input = string.Empty;
         _running = true;
@@ -365,7 +376,7 @@
             Id: Guid.NewGuid(),
             Role: ChatMessageRole.User,
             Status: ChatMessageStatus.Completed,
-            Parts: [new ChatTextPart(text)]));
+            Parts: ChatImageParts.BuildUserParts(text, submission.Images)));
         _live = new ChatLiveTurn();
         _pendingUserText = text;
         UpdateConversationTokenCount();
@@ -386,7 +397,7 @@
                 await OnAiTurnStarting.InvokeAsync();
 
             phase = "starting editor chat turn";
-            if (!ChatTurns.TryStart(ProjectId, CurrentChapterId, text))
+            if (!ChatTurns.TryStart(ProjectId, CurrentChapterId, text, submission.Images))
             {
                 _error = "Editor chat already has a running turn.";
                 if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)
@@ -672,6 +683,7 @@
     {
         if (_conversation is null) return;
         _messages = (await Chat.LoadMessagesAsync(_conversation.Id)).ToList();
+        _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Editor);
         RebuildRenderable();
         _pendingUserText = null;
         _live = null;
@@ -900,8 +912,16 @@
                 Id: message.Id,
                 Role: ToChatRole(message.Role),
                 Status: ToChatStatus(message.Status),
-                Parts: BuildMessageParts(message, byCallId, ProjectId)));
+                Parts: BuildPartsWithImages(message, byCallId)));
         }
+    }
+
+    private List<ChatMessagePart> BuildPartsWithImages(EditorMessage message, IReadOnlyDictionary<string, EditorMessage> byCallId)
+    {
+        var parts = BuildMessageParts(message, byCallId, ProjectId);
+        if (message.Role == EditorMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
+            ChatImageParts.Append(parts, images);
+        return parts;
     }
 
     private static ChatMessageRole ToChatRole(EditorMessageRole role) => role == EditorMessageRole.User

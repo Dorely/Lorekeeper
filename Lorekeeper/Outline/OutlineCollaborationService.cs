@@ -16,6 +16,7 @@ namespace Lorekeeper.Outline;
 public sealed class OutlineCollaborationService(
     IProjectRepository projects,
     IOutlineConversationRepository conversations,
+    IChatImageAttachmentService imageAttachments,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     OutlineCollaborationTools tools,
@@ -202,6 +203,7 @@ they commit to a direction, act on it without a second confirmation.
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Outline, cancellationToken);
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
         conversations.RemoveConversation(existing);
@@ -211,6 +213,7 @@ they commit to a direction, act on it without a second confirmation.
     public async IAsyncEnumerable<OutlineTurnUpdate> SendAsync(
         Guid projectId,
         string userText,
+        IReadOnlyList<Guid> imageIds,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
@@ -232,6 +235,14 @@ they commit to a direction, act on it without a second confirmation.
             yield break;
         }
 
+        var visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
+        if (imageIds.Count > 0 && !visionReady)
+        {
+            yield return new TurnError("The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.", Cancelled: false);
+            yield break;
+        }
+        await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
+
         // Persist the user message immediately so it appears in history even if the LLM call fails.
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
         var userMsg = new OutlineMessage
@@ -244,6 +255,7 @@ they commit to a direction, act on it without a second confirmation.
         };
         conversation.UpdatedAt = DateTime.UtcNow;
         await turnEngine.AddMessageAsync(conversations, userMsg, cancellationToken);
+        await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Outline, userMsg.Id, imageIds, cancellationToken);
 
         // Resolve the chat client + tools up front so any wiring failure surfaces before we start streaming.
         IChatClient chat = null!;
@@ -268,7 +280,6 @@ they commit to a direction, act on it without a second confirmation.
                 staging = tools.CreateStagingContext(projectId, conversation.Id, onDirectMutationApplied: OnToolMutated);
 
             // OnMutated is captured by every mutating tool; we drain it via _mutatedSinceYield.
-            var visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
             toolContext = new OutlineCollaborationContext(projectId, OnToolMutated, staging, visionReady);
             aiTools = await tools.BuildAsync(toolContext, cancellationToken);
         }
@@ -292,10 +303,16 @@ they commit to a direction, act on it without a second confirmation.
         // Build the running message list from persisted history (already includes the user msg above).
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
-        messages.AddRange(ChatModelHistory.Build(
-            history,
-            message => message.Role.ToString(),
-            message => message.Content));
+        foreach (var persistedMessage in history)
+        {
+            if (persistedMessage.Id == userMsg.Id && imageIds.Count > 0)
+            {
+                messages.Add(await imageAttachments.BuildUserMessageAsync(projectId, persistedMessage.Content, imageIds, cancellationToken: cancellationToken));
+                continue;
+            }
+            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content);
+            if (replay is not null) messages.Add(replay);
+        }
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         OutlineMessage? activeAssistant = null;

@@ -69,17 +69,10 @@
     @if (_showAdd && Editable)
     {
         <div class="entity-visual-add">
-            <label class="form-label small" for="@_pickerId">Attach from image library</label>
+            <label class="form-label small">Attach from image library</label>
             <div class="input-group input-group-sm">
-                <select id="@_pickerId" class="form-select" @bind="_selectedImageId">
-                    <option value="">Choose an image…</option>
-                    @foreach (var image in _library.Where(image => _examples.All(example => example.Image.Id != image.Id)))
-                    {
-                        <option value="@image.Id">@image.FileName</option>
-                    }
-                </select>
                 <input class="form-control" placeholder="Role label (optional)" @bind="_newLabel" />
-                <button type="button" class="btn btn-outline-primary" disabled="@(_saving || _selectedImageId == Guid.Empty)" @onclick="AttachSelectedAsync">Attach</button>
+                <button type="button" class="btn btn-outline-primary" disabled="@_saving" @onclick="OpenLibraryPicker">Choose image</button>
             </div>
             <div class="entity-visual-upload">
                 <label class="form-label small mb-1">Or upload a PNG, JPEG, or WebP</label>
@@ -88,6 +81,14 @@
         </div>
     }
 </section>
+
+<ProjectImageLibraryPickerModal ProjectId="@ProjectId"
+                                IsOpen="@_libraryPickerOpen"
+                                Title="Attach visual example"
+                                PrimaryActionLabel="Attach to entity"
+                                ExcludedImageIds="@AttachedImageIds"
+                                OnPrimaryAction="AttachSelectedAsync"
+                                OnClose="CloseLibraryPicker" />
 
 @if (_viewingExample is not null)
 {
@@ -111,18 +112,17 @@
 
 @code {
     private const long MaxUploadBytes = 25 * 1024 * 1024;
-    private readonly string _pickerId = $"entity-visual-picker-{Guid.NewGuid():N}";
     private List<EntityVisualExampleView> _examples = [];
-    private List<ProjectImageView> _library = [];
-    private Guid _selectedImageId;
     private string _newLabel = string.Empty;
     private string _error = string.Empty;
     private bool _loading;
     private bool _saving;
     private bool _showAdd;
+    private bool _libraryPickerOpen;
     private Guid _loadedEntityId;
     private EntityVisualExampleView? _viewingExample;
     private EntityVisualExampleView? _croppingExample;
+    private IReadOnlyCollection<Guid> AttachedImageIds => _examples.Select(example => example.Image.Id).ToList();
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter, EditorRequired] public Guid EntityId { get; set; }
@@ -156,20 +156,21 @@
         }
     }
 
-    private async Task ToggleAddAsync()
+    private Task ToggleAddAsync()
     {
         _showAdd = !_showAdd;
-        if (_showAdd && _library.Count == 0)
-            _library = (await ProjectImages.ListAsync(ProjectId)).ToList();
+        return Task.CompletedTask;
     }
 
-    private async Task AttachSelectedAsync()
+    private async Task AttachSelectedAsync(ProjectImageView image)
     {
-        if (_selectedImageId == Guid.Empty) return;
-        await MutateAsync(() => EntityVisuals.AttachAsync(ProjectId, EntityId, _selectedImageId, _newLabel, EntityVisualExampleOrigin.Manual));
-        _selectedImageId = Guid.Empty;
+        await MutateAsync(() => EntityVisuals.AttachAsync(ProjectId, EntityId, image.Id, _newLabel, EntityVisualExampleOrigin.Manual));
         _newLabel = string.Empty;
     }
+
+    private void OpenLibraryPicker() => _libraryPickerOpen = true;
+
+    private void CloseLibraryPicker() => _libraryPickerOpen = false;
 
     private async Task UploadAsync(InputFileChangeEventArgs args)
     {
@@ -183,7 +184,6 @@
             await stream.CopyToAsync(memory);
             var image = await ProjectImages.UploadAsync(ProjectId, new ProjectImageUpload(file.Name, file.ContentType, memory.ToArray(), file.Name));
             await EntityVisuals.AttachAsync(ProjectId, EntityId, image.Id, _newLabel, EntityVisualExampleOrigin.Manual);
-            _library.Insert(0, image);
             _newLabel = string.Empty;
             await ReloadAsync();
             await Changed.InvokeAsync();
@@ -282,8 +282,6 @@
                 result.Image.Id,
                 _croppingExample.Label,
                 EntityVisualExampleOrigin.Manual);
-            if (_library.All(image => image.Id != result.Image.Id))
-                _library.Insert(0, result.Image);
             _croppingExample = null;
             await ReloadAsync();
             await Changed.InvokeAsync();

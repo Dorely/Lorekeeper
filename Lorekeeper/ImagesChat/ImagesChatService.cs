@@ -20,6 +20,7 @@ namespace Lorekeeper.ImagesChat;
 public sealed class ImagesChatService(
     IProjectRepository projects,
     IProjectImageConversationRepository conversations,
+    IChatImageAttachmentService imageAttachments,
     AppDbContext db,
     IContextBuilder contextBuilder,
     ILlmProviderService providerService,
@@ -160,6 +161,7 @@ public sealed class ImagesChatService(
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Images, cancellationToken);
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
 
@@ -170,6 +172,7 @@ public sealed class ImagesChatService(
     public async IAsyncEnumerable<ImagesChatTurnUpdate> SendAsync(
         Guid projectId,
         string userText,
+        IReadOnlyList<Guid> imageIds,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
@@ -185,7 +188,14 @@ public sealed class ImagesChatService(
 
         var chatProvider = providerAvailability.Provider;
         var visionReady = await providerService.IsVisionProviderWorkingAsync(chatProvider.Id, cancellationToken);
+        if (imageIds.Count > 0 && !visionReady)
+        {
+            yield return new ImagesChatTurnError("The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.", Cancelled: false);
+            yield break;
+        }
+        await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
         var turnAttachments = await ListAttachmentsAsync(projectId, cancellationToken);
+        var allTurnImageIds = imageIds.Concat(turnAttachments.Select(attachment => attachment.ImageId)).Distinct().ToList();
         var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
         var userMessage = new ProjectImageMessage
         {
@@ -197,8 +207,10 @@ public sealed class ImagesChatService(
         };
         conversation.UpdatedAt = DateTime.UtcNow;
         await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
-        if (turnAttachments.Count > 0)
-            await PersistVisualsAsync(userMessage.Id, toolCallId: null, BuildAttachmentVisuals(turnAttachments));
+        await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Images, userMessage.Id, imageIds, cancellationToken);
+        var additionalContextAttachments = turnAttachments.Where(attachment => !imageIds.Contains(attachment.ImageId)).ToList();
+        if (additionalContextAttachments.Count > 0)
+            await PersistVisualsAsync(userMessage.Id, toolCallId: null, BuildAttachmentVisuals(additionalContextAttachments));
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
@@ -251,14 +263,21 @@ public sealed class ImagesChatService(
         }
         foreach (var persistedMessage in history)
         {
-            if (persistedMessage.Id == userMessage.Id && turnAttachments.Count > 0)
+            if (persistedMessage.Id == userMessage.Id && allTurnImageIds.Count > 0)
             {
-                messages.Add(await BuildUserMessageWithAttachmentsAsync(
-                    projectId,
-                    persistedMessage.Content,
-                    turnAttachments,
-                    visionReady,
-                    cancellationToken));
+                if (visionReady)
+                {
+                    messages.Add(await imageAttachments.BuildUserMessageAsync(
+                        projectId,
+                        persistedMessage.Content,
+                        allTurnImageIds,
+                        "Current-turn attached images follow. Treat them as user-provided visual context. When generating or editing a continuity-related image, pass only relevant attached image ids in referenceImageIds.",
+                        cancellationToken));
+                }
+                else
+                {
+                    messages.Add(await BuildUserMessageWithAttachmentsAsync(projectId, persistedMessage.Content, turnAttachments, visionReady, cancellationToken));
+                }
                 continue;
             }
 

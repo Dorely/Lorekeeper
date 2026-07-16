@@ -12,6 +12,6 @@ public interface IResearchService
     Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<ResearchActivity> GetActivityAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<ResearchSourceDetail?> GetSourceDetailAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default);
-    IAsyncEnumerable<ResearchTurnUpdate> SendAsync(Guid projectId, string userText, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<ResearchTurnUpdate> SendAsync(Guid projectId, string userText, IReadOnlyList<Guid> imageIds, CancellationToken cancellationToken = default);
     Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default);
 }

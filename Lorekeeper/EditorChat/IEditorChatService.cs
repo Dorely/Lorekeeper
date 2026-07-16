@@ -18,7 +18,7 @@ public interface IEditorChatService
     Task ResolveContestCandidateLineAsync(Guid projectId, Guid chapterId, ContestCandidateReviewLineResolution request, CancellationToken cancellationToken = default);
     Task KeepContestCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default);
     Task FinishContestBatchAsync(Guid batchId, CancellationToken cancellationToken = default);
-    IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(Guid projectId, Guid? currentChapterId, string userText, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(Guid projectId, Guid? currentChapterId, string userText, IReadOnlyList<Guid> imageIds, CancellationToken cancellationToken = default);
     Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default);
 }
 

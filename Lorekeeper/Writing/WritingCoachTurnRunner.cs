@@ -5,7 +5,7 @@ namespace Lorekeeper.Writing;
 
 public interface IWritingCoachTurnRunner
 {
-    bool TryStart(Guid projectId, string userText, string? currentSampleTitle, string? currentSampleBody);
+    bool TryStart(Guid projectId, string userText, string? currentSampleTitle, string? currentSampleBody, IReadOnlyList<ChatTurnImageAttachment> images);
     ChatTurnSnapshot? GetActiveTurn(Guid projectId);
     IChatTurnSubscription<WritingCoachTurnUpdate>? Subscribe(Guid projectId);
     void Cancel(Guid projectId);
@@ -17,13 +17,14 @@ public sealed class WritingCoachTurnRunner(
 {
     private static ChatTurnKey Key(Guid projectId) => new(projectId, ChatTurnSurface.WritingCoach);
 
-    public bool TryStart(Guid projectId, string userText, string? currentSampleTitle, string? currentSampleBody) =>
+    public bool TryStart(Guid projectId, string userText, string? currentSampleTitle, string? currentSampleBody, IReadOnlyList<ChatTurnImageAttachment> images) =>
         runtime.TryStart(
             Key(projectId),
             userText,
-            cancellationToken => RunAsync(projectId, userText, currentSampleTitle, currentSampleBody, cancellationToken),
+            cancellationToken => RunAsync(projectId, userText, currentSampleTitle, currentSampleBody, images.Select(image => image.ImageId).ToList(), cancellationToken),
             static (ex, cancelled) => new WritingCoachTurnError(cancelled ? "Cancelled." : ex.Message, cancelled),
-            static update => update is WritingCoachAssistantMessageCompleted or WritingCoachTurnError);
+            static update => update is WritingCoachAssistantMessageCompleted or WritingCoachTurnError,
+            images);
 
     public ChatTurnSnapshot? GetActiveTurn(Guid projectId) => runtime.GetActiveTurn(Key(projectId));
 
@@ -36,11 +37,12 @@ public sealed class WritingCoachTurnRunner(
         string userText,
         string? currentSampleTitle,
         string? currentSampleBody,
+        IReadOnlyList<Guid> imageIds,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var coach = scope.ServiceProvider.GetRequiredService<IWritingCoachService>();
-        await foreach (var update in coach.SendAsync(projectId, userText, currentSampleTitle, currentSampleBody, cancellationToken))
+        await foreach (var update in coach.SendAsync(projectId, userText, currentSampleTitle, currentSampleBody, imageIds, cancellationToken))
             yield return update;
     }
 }
