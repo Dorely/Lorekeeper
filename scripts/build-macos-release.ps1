@@ -29,7 +29,6 @@ if ($actualArchitecture -ne $expectedArchitecture)
 }
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$solutionPath = Join-Path $repoRoot 'Lorekeeper.sln'
 $projectPath = Join-Path $repoRoot 'Lorekeeper/Lorekeeper.csproj'
 $stageDirectory = Join-Path $repoRoot "publish/$RuntimeIdentifier-stage"
 $outputDirectory = Join-Path $repoRoot "publish/$RuntimeIdentifier"
@@ -151,13 +150,13 @@ try
     Remove-GeneratedDirectory $outputDirectory
 
     Invoke-CheckedCommand dotnet @(
-        'restore', $solutionPath, '--force-evaluate',
+        'restore', $projectPath, '--force-evaluate',
         "-p:RuntimeIdentifier=$RuntimeIdentifier",
         '-p:NuGetAudit=true', '-p:NuGetAuditMode=all', '-p:NuGetAuditLevel=low',
         '-p:TreatWarningsAsErrors=true'
     )
     Invoke-CheckedCommand dotnet @(
-        'build', $solutionPath, '-c', 'Release',
+        'build', $projectPath, '-c', 'Release',
         "-p:RuntimeIdentifier=$RuntimeIdentifier", "-p:Version=$Version"
     )
     Invoke-CheckedCommand dotnet @(
