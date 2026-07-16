@@ -145,6 +145,7 @@ try
     }
 
     $tag = "v$Version"
+    $releaseLookupErrorPath = [System.IO.Path]::GetTempFileName()
     $hasNativeErrorPreference = Test-Path variable:PSNativeCommandUseErrorActionPreference
     if ($hasNativeErrorPreference)
     {
@@ -153,8 +154,9 @@ try
     }
     try
     {
-        $releaseLookup = @(& gh api -i "repos/$releaseRepository/releases/tags/$tag" 2>&1)
+        $releaseLookup = @(& gh api -i "repos/$releaseRepository/releases/tags/$tag" 2>$releaseLookupErrorPath)
         $releaseLookupExitCode = $LASTEXITCODE
+        $releaseLookupError = [System.IO.File]::ReadAllText($releaseLookupErrorPath).Trim()
     }
     finally
     {
@@ -162,15 +164,16 @@ try
         {
             $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
         }
+        Remove-Item -LiteralPath $releaseLookupErrorPath -Force -ErrorAction SilentlyContinue
     }
     if ($releaseLookupExitCode -eq 0)
     {
         throw "Release $tag already exists in $releaseRepository. Release versions are immutable; choose a newer version."
     }
     $releaseStatusLine = if ($releaseLookup.Count -gt 0) { [string]$releaseLookup[0] } else { '' }
-    if ($releaseStatusLine -notmatch '^HTTP/\S+ 404 ')
+    if (($releaseStatusLine -notmatch '^HTTP/\S+ 404 ') -and ($releaseLookupError -notmatch '\(HTTP 404\)'))
     {
-        throw "Could not confirm that release $tag is unused. GitHub returned: $releaseStatusLine"
+        throw "Could not confirm that release $tag is unused. GitHub returned: $releaseStatusLine $releaseLookupError"
     }
 
     Remove-GeneratedDirectory $macDownloadDirectory
