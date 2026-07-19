@@ -369,6 +369,9 @@ static async Task ElectronAppReady(
     if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
         options.AutoHideMenuBar = true;
 
+    if (OperatingSystem.IsMacOS())
+        Electron.App.WindowAllClosed += Electron.App.Quit;
+
     var browserWindow = await Electron.WindowManager.CreateWindowAsync(options, desktopUrl);
     browserWindow.OnReadyToShow += () => browserWindow.Show();
 

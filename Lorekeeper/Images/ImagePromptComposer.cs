@@ -14,7 +14,9 @@ namespace Lorekeeper.Images;
 public sealed class ImageGenerationBrief
 {
     public string IntendedUse { get; init; } = string.Empty;
+    [Description("The required visible story moment and action. Include details grounded by the user or project context, but leave unspecified visual details open to the image model.")]
     public string Scene { get; init; } = string.Empty;
+    [Description("Characters and other required subjects. Include every depicted character so each available canonical reference can be supplied.")]
     public string Subjects { get; init; } = string.Empty;
     public string Appearance { get; init; } = string.Empty;
     public string Action { get; init; } = string.Empty;
@@ -25,7 +27,9 @@ public sealed class ImageGenerationBrief
     [Description("Placement and visual hierarchy. For page art with editable overlay text, explicitly name the naturally quiet text landing zone and match it to target.reservedTextRegions.")]
     public string Composition { get; init; } = string.Empty;
     public string LightingMood { get; init; } = string.Empty;
+    [Description("Only meaningful story, continuity, safety, or output constraints. Prefer positive requirements and avoid invented exclusions such as 'and nothing else'.")]
     public string Constraints { get; init; } = string.Empty;
+    [Description("Disabled for normal page art. Enable only for intentionally baked-in text or the temporary text-bearing image in a two-pass PicturePage fallback.")]
     public bool AllowRenderedText { get; init; }
     public string RenderedText { get; init; } = string.Empty;
 }
@@ -33,7 +37,9 @@ public sealed class ImageGenerationBrief
 public sealed class ImageEditBrief
 {
     public string IntendedUse { get; init; } = string.Empty;
+    [Description("Describe the coherent desired result, not a brittle command such as 'move the character but change nothing else'. Prefer regeneration for spatial or compositional changes.")]
     public string Change { get; init; } = string.Empty;
+    [Description("Only the identity, story, style, or composition anchors that materially require continuity. Do not require every unmentioned pixel or secondary detail to remain exact.")]
     public string Preserve { get; init; } = string.Empty;
     public string Composition { get; init; } = string.Empty;
     public string LightingMood { get; init; } = string.Empty;
@@ -164,8 +170,12 @@ public sealed class ImagePromptComposer(
         AppendSection(builder, "Lighting and mood", brief.LightingMood);
         AppendReferences(builder, manifest);
         AppendSection(builder, "Constraints and exclusions", brief.Constraints);
+        AppendSection(
+            builder,
+            "Creative latitude",
+            "Meet every stated story, continuity, composition, and output requirement. Freely compose visual details that are not prescribed by the brief or references so the result feels intentional and coherent. Do not infer that unspecified details are forbidden, and do not add literal exclusions such as 'nothing else'.");
         AppendRenderedTextPolicy(builder, brief.AllowRenderedText, brief.RenderedText);
-        AppendTarget(builder, targetResolution, target?.ReservedTextRegions);
+        AppendTarget(builder, targetResolution, target?.ReservedTextRegions, brief.AllowRenderedText);
 
         return BuildResult(
             builder,
@@ -199,15 +209,18 @@ public sealed class ImagePromptComposer(
         var builder = new StringBuilder();
         AppendSection(builder, "Intended use", brief.IntendedUse);
         AppendSection(builder, "Edit source — provider input image 1", $"{source.FileName} ({source.Id:D}). This is the image to edit.");
-        AppendSection(builder, "Change only", brief.Change);
-        AppendSection(builder, "Keep invariant", brief.Preserve);
+        AppendSection(builder, "Desired edited result", brief.Change);
+        AppendSection(builder, "Continuity priorities", brief.Preserve);
         AppendSection(builder, "Composition after edit", brief.Composition);
         AppendSection(builder, "Lighting and mood after edit", brief.LightingMood);
         AppendReferences(builder, manifest);
         AppendSection(builder, "Additional constraints and exclusions", brief.Constraints);
         AppendRenderedTextPolicy(builder, brief.AllowRenderedText, brief.RenderedText);
-        AppendTarget(builder, targetResolution, target?.ReservedTextRegions);
-        AppendSection(builder, "Edit discipline", "Change only the requested area or traits. Preserve all unmentioned people, identity anchors, objects, geometry, crop, style, palette, lighting, and background details exactly as they appear in provider input image 1.");
+        AppendTarget(builder, targetResolution, target?.ReservedTextRegions, brief.AllowRenderedText);
+        AppendSection(
+            builder,
+            "Edit discipline",
+            "Make the requested revision as one coherent image. Preserve the explicitly listed continuity priorities, but do not freeze every unmentioned pixel or secondary detail. Allow nearby pose, framing, lighting, background, texture, and geometry to adapt naturally when needed to integrate the edit. Keep unrelated major subjects and story facts recognizable without duplicating, deforming, or partially reconstructing them.");
 
         return BuildResult(
             builder,
@@ -469,7 +482,8 @@ public sealed class ImagePromptComposer(
     private static void AppendTarget(
         StringBuilder builder,
         TargetResolution target,
-        IReadOnlyList<ImageReservedRegion>? reservedRegions)
+        IReadOnlyList<ImageReservedRegion>? reservedRegions,
+        bool renderedTextAllowed)
     {
         var targetText = new StringBuilder();
         targetText.Append("Raster size: ").Append(target.Size)
@@ -479,13 +493,17 @@ public sealed class ImagePromptComposer(
         foreach (var region in reservedRegions ?? [])
         {
             ValidateRegion(region);
-            targetText.Append("\nHard layout requirement: reserve ")
+            targetText.Append("\nHard requirement for this generation attempt: reserve ")
                 .Append(Fallback(region.Label, "text region"))
                 .Append(" at x=").Append(region.XPercent.ToString("0.##", CultureInfo.InvariantCulture))
                 .Append("%, y=").Append(region.YPercent.ToString("0.##", CultureInfo.InvariantCulture))
                 .Append("%, width=").Append(region.WidthPercent.ToString("0.##", CultureInfo.InvariantCulture))
                 .Append("%, height=").Append(region.HeightPercent.ToString("0.##", CultureInfo.InvariantCulture))
-                .Append("%. Make the entire region naturally integrated quiet negative space with simple forms, low detail, low contrast variation, and a stable light or dark value for readable editable type. Keep faces, hands, characters, focal objects, important action, sharp edges, high-frequency texture, and strong value transitions outside it. Do not draw a placeholder rectangle, frame, sign, caption panel, or text inside it.");
+                .Append("%. Make the entire region naturally integrated quiet negative space with simple forms, low detail, low contrast variation, and a stable light or dark value for readable editable type. Keep faces, hands, characters, focal objects, important action, sharp edges, high-frequency texture, and strong value transitions outside it. Do not draw a placeholder rectangle, frame, sign, or caption panel.");
+            targetText.Append(renderedTextAllowed
+                ? " When the rendered-text policy supplies exact text, place only that text within the intended reserved region and keep the underlying composition suitable for later text removal."
+                : " Do not draw text inside it.");
+            targetText.Append(" This region is binding for this image attempt even though the page-layout assistant may revise the editable text placement after inspecting the result.");
         }
         AppendSection(builder, "Output target and protected regions", targetText.ToString());
     }

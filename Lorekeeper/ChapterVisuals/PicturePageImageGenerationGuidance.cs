@@ -136,17 +136,18 @@ public static class PicturePageImageGenerationGuidance
             "Output composition constraints:",
             $"- Canvas: {target.AspectRatio} aspect ratio for {(target.TargetKind == "imageSlot" ? "a placed illustration" : "full-bleed page art")}.",
             "- Extend artwork through every canvas edge for bleed-aware cropping while keeping important subjects and details away from trim-loss areas.",
+            "- Do not depict a page border, book mockup, binding seam, fold, or simulated gutter in the artwork.",
             "- Do not render text, logos, watermarks, or border decorations unless the target brief explicitly requests them.",
         };
 
         if (target.IsDoubleSpread)
-            builder.Add("- Two-page spread: keep important subjects and details away from the center gutter and the adjacent safety margin on both sides.");
+            builder.Add("- Two-page spread: the center gutter is a protected geometric risk area, not a visible feature to draw. Keep faces, characters, focal action, and important details away from it and the adjacent safety margin on both sides.");
 
         var safeAreas = DescribeTextSafeAreas(target, textElements);
         if (safeAreas.Length > 0)
         {
-            builder.Add($"- Hard layout requirement: create naturally integrated, quiet negative space for editable overlaid type at these canvas-local percentages: {safeAreas}.");
-            builder.Add("- Across every reserved text region, use simple forms, low detail, low contrast variation, and a stable light or dark value. Keep faces, hands, characters, focal objects, important action, sharp edges, high-frequency texture, and strong value transitions outside it.");
+            builder.Add($"- Hard layout requirement for this generation attempt: create naturally integrated, quiet negative space for the full editable copy area at these canvas-local percentages: {safeAreas}.");
+            builder.Add("- Preserve every reserved region as one fully usable text field: use simple forms, low detail, low contrast variation, and a stable light or dark value throughout it. Keep faces, hands, characters, focal objects, important action, sharp edges, high-frequency texture, and strong value transitions outside it.");
             builder.Add("- The reserved area must feel like part of the scene, not a visible placeholder rectangle, frame, sign, caption panel, or blank graphic box.");
         }
 
@@ -166,7 +167,7 @@ public static class PicturePageImageGenerationGuidance
         };
 
         if (page.IsDoubleSpread)
-            lines.Add("Two-page spread geometry: keep important details away from the center gutter.");
+            lines.Add("Two-page spread geometry: do not depict a gutter or binding seam; keep faces, characters, focal action, and important details away from the protected center gutter area.");
 
         var safeAreas = DescribeTextSafeAreas(page, state.PageLayout.TextElements);
         if (safeAreas.Length > 0)
