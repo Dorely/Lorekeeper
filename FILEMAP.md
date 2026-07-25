@@ -19,10 +19,10 @@
 | `.vscode/launch.json` | VS Code debug configurations; default F5 entry launches the Electron desktop shell, with a secondary web-hosted profile. |
 | `.vscode/tasks.json` | VS Code build task used by debug launch configurations. |
 | `.github/copilot-instructions.md` | Project guidelines for AI assistants. |
-| `.github/workflows/build-macos-release.yml` | Dispatch-only Apple Silicon/Intel macOS release builder and verifier; returns correlated DMGs to the Windows release orchestrator without publishing. |
+| `.github/workflows/build-macos-release.yml` | Dispatch-only Apple Silicon/Intel macOS release builder and verifier; uploads one correlated DMG per architecture for the Windows release orchestrator. |
 | `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates tooling/version, audits NuGet plus shipped npm/Electron dependencies, rebuilds isolated staging/output, verifies installer/updater artifacts, and writes GitHub Release checksums. |
 | `scripts/build-macos-release.ps1` | Native macOS release builder for one RID: audits dependencies, packages an ad-hoc-signed DMG, verifies signatures/architectures, mounts and smoke-tests the app, and writes a checksum. |
-| `scripts/publish-release.ps1` | Windows release orchestrator with a local Windows-only mode or an optional correlated macOS Actions build; validates artifacts, assembles checksums, and atomically publishes the selected platforms. |
+| `scripts/publish-release.ps1` | Windows release orchestrator with a local Windows-only mode or an optional correlated macOS Actions build; downloads each architecture, atomically publishes the selected platforms, and removes temporary Actions artifacts after publication. |
 | `scripts/generate-brand-assets.py` | Deterministically exports browser PNG sizes and the multi-resolution Windows ICO from the 1024px Lorekeeper icon master. |
 | `docs/research/README.md` | Index and maintenance policy for Lorekeeper's sourced editorial, image-prompting, and composition research briefs. |
 | `docs/research/image-generation-prompting.md` | Sourced `gpt-image-2` prompting/API brief with structured reference/edit/page-target guidance and runtime contract mappings. |
