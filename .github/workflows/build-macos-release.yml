@@ -75,31 +75,3 @@ jobs:
           path: publish/${{ matrix.runtime }}/Lorekeeper-${{ inputs.version }}-${{ matrix.artifact_arch }}.dmg
           if-no-files-found: error
           retention-days: 1
-
-  combine:
-    name: Combine macOS artifacts
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download architecture artifacts
-        uses: actions/download-artifact@v5
-        with:
-          pattern: macos-${{ inputs.correlation_id }}-*
-          path: macos-release
-          merge-multiple: true
-
-      - name: Verify combined artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f "macos-release/Lorekeeper-${{ inputs.version }}-arm64.dmg"
-          test -f "macos-release/Lorekeeper-${{ inputs.version }}-x64.dmg"
-          test "$(find macos-release -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')" = "2"
-
-      - name: Upload combined macOS release
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lorekeeper-macos-${{ inputs.version }}-${{ inputs.correlation_id }}
-          path: macos-release/*.dmg
-          if-no-files-found: error
-          retention-days: 1

@@ -45,7 +45,10 @@ $windowsOutputDirectory = Join-Path $repoRoot 'publish\win-x64'
 $releaseDirectory = Join-Path $repoRoot "publish\release-$Version"
 $correlationId = [Guid]::NewGuid().ToString('N')
 $macDownloadDirectory = Join-Path $repoRoot "publish\macos-action-$correlationId"
-$macArtifactName = "Lorekeeper-macos-$Version-$correlationId"
+$macWorkflowArtifactNames = @(
+    "macos-$correlationId-arm64",
+    "macos-$correlationId-x64"
+)
 $buildScript = Join-Path $PSScriptRoot 'build-windows-release.ps1'
 $macRunId = $null
 
@@ -97,6 +100,40 @@ function Stop-MacRun
         Write-Warning "Cancelling macOS workflow run $macRunId because the local release failed."
         & gh run cancel $macRunId --repo $sourceRepository 2>$null | Out-Null
     }
+}
+
+function Remove-MacRunArtifacts
+{
+    if (-not $macRunId)
+    {
+        return
+    }
+
+    $artifactIds = @(
+        & gh api "repos/$sourceRepository/actions/runs/$macRunId/artifacts?per_page=100" `
+            --paginate `
+            --jq '.artifacts[].id'
+    )
+    if ($LASTEXITCODE -ne 0)
+    {
+        Write-Warning "The release was published, but the temporary artifacts for macOS workflow run $macRunId could not be listed. They will expire after one day."
+        return
+    }
+
+    $artifactIds = @($artifactIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $deletedCount = 0
+    foreach ($artifactId in $artifactIds)
+    {
+        & gh api --method DELETE "repos/$sourceRepository/actions/artifacts/$artifactId" 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0)
+        {
+            Write-Warning "The release was published, but temporary Actions artifact $artifactId could not be deleted. It will expire after one day."
+            continue
+        }
+        $deletedCount++
+    }
+
+    Write-Host "Deleted $deletedCount temporary macOS Actions artifact(s) from workflow run $macRunId."
 }
 
 Push-Location $repoRoot
@@ -236,12 +273,15 @@ try
     {
         Invoke-Gh @('run', 'watch', $macRunId, '--repo', $sourceRepository, '--compact', '--exit-status')
         New-Item -ItemType Directory -Path $macDownloadDirectory | Out-Null
-        Invoke-Gh @(
-            'run', 'download', $macRunId,
-            '--repo', $sourceRepository,
-            '--name', $macArtifactName,
-            '--dir', $macDownloadDirectory
-        )
+        foreach ($artifactName in $macWorkflowArtifactNames)
+        {
+            Invoke-Gh @(
+                'run', 'download', $macRunId,
+                '--repo', $sourceRepository,
+                '--name', $artifactName,
+                '--dir', $macDownloadDirectory
+            )
+        }
     }
 
     $windowsArtifactNames = @(
@@ -341,6 +381,7 @@ try
 
     if (-not $WindowsOnly)
     {
+        Remove-MacRunArtifacts
         Remove-GeneratedDirectory $macDownloadDirectory
     }
     Write-Host "`nPublished https://github.com/$releaseRepository/releases/tag/$tag" -ForegroundColor Green
