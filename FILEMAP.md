@@ -14,6 +14,7 @@
 | `AGENTS.md` | Authoritative operating rules for agents and contributors. |
 | `CLAUDE.md` | Claude compatibility entry point that delegates all project guidance to `AGENTS.md`. |
 | `docs/architecture.md` | Current technical architecture, ownership boundaries, persistence/security constraints, platform scope, and validation commands. |
+| `docs/publishing-roadmap.md` | Status-labeled five-phase route to end-to-end book production, including Phase 1 feature order, assistant parity, migration safety, and verification gates. |
 | `FILEMAP.md` | This file — concise map of every source file. |
 | `Lorekeeper.sln` | Solution file containing the `Lorekeeper` project. |
 | `global.json` | Pins the .NET SDK version (`rollForward: latestFeature`). |
@@ -30,6 +31,10 @@
 | `docs/research/image-generation-prompting.md` | Sourced `gpt-image-2` prompting/API brief with structured reference/edit/page-target guidance and runtime contract mappings. |
 | `docs/research/story-writing-and-editorial-practice.md` | Sourced professional editing, narrative craft, picture-book practice, and system-prompt requirement brief. |
 | `docs/research/page-composition-and-typesetting.md` | Sourced page/spread, typography, accessibility, diagnostic threshold, and shared-geometry brief. |
+| `docs/research/publishing-industry-and-file-standards.md` | Sourced print/ebook workflow, service-input, metadata, preflight, edition, and artifact requirements. |
+| `docs/research/book-authoring-and-design-software.md` | Competitor capability matrix, missing editing/design tools, delivery phases, and Lorekeeper integration proposals. |
+| `docs/research/open-source-publishing-stack.md` | Preliminary editor/renderer/color/validation license screen, release-audit requirements, rejected licenses, proposed press sidecar, and PDF/X spike gate. |
+| `docs/research/structured-manuscripts-and-safe-migration.md` | Semantic manuscript design plus WAL-safe backup, data conversion, validation, recovery, legacy import, and assistant-parity plan. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
 

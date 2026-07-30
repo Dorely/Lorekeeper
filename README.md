@@ -5,7 +5,9 @@ story planning, drafting, research, ingest, and publishing.
 
 See [VISION.md](VISION.md) for the product direction and
 [docs/architecture.md](docs/architecture.md) for the current technical
-boundaries, ownership model, and validation guidance.
+boundaries, ownership model, and validation guidance. The researched,
+status-labeled path from the current workbench to end-to-end book production is
+in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 
 ## Current Capabilities
 
@@ -20,8 +22,9 @@ boundaries, ownership model, and validation guidance.
 - Project image generation and editing, canonical entity visual references,
   illustrated prose, Picture Page composition, font management, and layout
   diagnostics.
-- Project import/export plus TXT, Markdown, mixed-layout EPUB, and print/PDF
-  publishing.
+- Project import/export plus TXT, Markdown, mixed-layout EPUB, and a
+  browser/operating-system print-preview workflow. The current print path is not
+  a PDF-byte renderer, PDF/X conformance engine, or vendor preflight system.
 - Configurable Codex/OpenAI-compatible chat and embedding providers, configurable
   web search, and local SQLite persistence.
 

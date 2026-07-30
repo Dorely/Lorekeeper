@@ -2,10 +2,12 @@
 
 ## Status and Scope
 
-Lorekeeper is a desktop-first, local AI-assisted long-form storytelling
-workbench and narrative-coherence testbed. Normal user operation is through an
-Electron.NET desktop shell backed by a local ASP.NET Core host. The same Blazor
-application can run directly in a browser for local development and debugging.
+Lorekeeper is a desktop-first, local AI-assisted long-form bookmaking workbench.
+Its implemented foundation centers on narrative coherence, project research,
+drafting, images, page composition, and early publishing workflows. Normal user
+operation is through an Electron.NET desktop shell backed by a local ASP.NET
+Core host. The same Blazor application can run directly in a browser for local
+development and debugging.
 
 The project declares Windows x64, Linux x64, macOS x64, and macOS arm64 runtime
 identifiers. Declared targets preserve the intended cross-platform desktop
@@ -16,9 +18,12 @@ The implemented workbench includes project and outline management, graph-backed
 story state, semantic and lexical retrieval, source ingest, web research,
 writing samples and coaching, context-aware chapter editing, assistant review
 and contest workflows, project image generation and editing, illustrated and
-picture-page composition, import/export, and TXT, Markdown, EPUB, and print/PDF
-publishing. `VISION.md` remains the product direction and is not proof that every
-future narrative-coherence goal is complete.
+picture-page composition, import/export, TXT, Markdown, EPUB, and a browser/OS
+print-preview workflow. `VISION.md` remains the product direction and is not
+proof that every future bookmaking goal is complete. The researched delivery
+sequence and verification gates are documented in
+`docs/publishing-roadmap.md`; roadmap statuses do not change this document's
+current-runtime claims.
 
 ## Stack and Host Topology
 
@@ -148,8 +153,24 @@ synchronization, fonts, geometry, fitting, and layout diagnostics.
 `IPageGeometryService` provides the shared page/spread calculations used by the
 editor, image targets, diagnostics, previews, and exporters. Publishing services
 own metadata, outline selection, image placement, covers, and TXT, Markdown,
-EPUB, print/PDF output. Do not duplicate page geometry or silently diverge
-editor and export rendering rules.
+EPUB, and browser/OS print-preview output. Do not duplicate page geometry or
+silently diverge editor and export rendering rules.
+
+The current Print/PDF path is an HTML print view handed to the browser or
+operating-system print dialog. It does not generate, parse, or certify PDF bytes,
+does not implement PDF/X, and does not represent vendor-specific preflight.
+`PublishProfile` is currently one project-owned profile rather than a
+multi-edition production model. These are current boundaries, not press-ready
+claims.
+
+The planned publishing architecture is documented, but not implemented, in the
+publishing roadmap and supporting research briefs. Its intended boundaries are a
+versioned semantic manuscript, edition-specific projections, a separately
+contained press renderer, immutable artifacts and manifests, and complete UI/
+assistant access through shared application services. When implementation
+changes those boundaries, this architecture document must be updated in the
+same feature; the roadmap must not be used as a substitute for current technical
+documentation.
 
 ### Desktop and Release Behavior
 

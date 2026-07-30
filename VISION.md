@@ -1,90 +1,106 @@
-# Vision Statement: Narrative Coherence Engine
+# Vision: an AI-native bookmaking studio
 
-This project is a proof-of-concept system for AI-assisted long-form storytelling that demonstrates one core capability:
+Lorekeeper is an end-to-end environment for creating books with AI while keeping
+the author in control. It joins long-form narrative intelligence, professional
+editing, visual composition, and publication production in one durable project.
 
-> An LLM can generate and assist with multi-chapter narrative writing while maintaining consistency with both established canon and evolving story state.
+The product's foundational insight remains:
 
-The system achieves this by combining:
+> An AI can assist across a long book while respecting established canon,
+> evolving story state, authorial intent, and reviewable change.
 
-- **Structured story memory** — characters, events, relationships
-- **Retrievable context** — vectorized lore and prior chapters
-- **User-guided control** — over what the AI knows and uses
+The destination extends that insight through the rest of bookmaking. An author
+should be able to plan, draft, revise, design, proof, and produce validated
+publication files without moving the manuscript through a chain of unrelated
+external tools.
 
-## What This System Must Do
+## Product pillars
 
-At its core, the app is not a writing tool — it is a controlled environment for testing narrative intelligence.
+### 1. Narrative and project intelligence
 
-It must:
+- Maintain structured people, places, events, relationships, sources, and
+  project facts.
+- Retrieve the most relevant canon and prior text for each task.
+- Keep authorial direction, Book Brief, source provenance, and generated output
+  visible and correctable.
+- Detect contradictions and help the author resolve them without silently
+  rewriting canon.
 
-### 1. Maintain Story State Over Time
+### 2. A professional semantic manuscript
 
-- Track characters, events, and locations as structured data
-- Update this state after every chapter
-- Use it to influence future writing decisions
+- Store the meaning and structure of the book, not only presentation text.
+- Support long-form organization, rich editing, named styles, references,
+  assets, and stable anchors for review.
+- Preserve one canonical source while allowing paperback, ebook, illustrated,
+  and later reference-book editions to differ intentionally.
+- Make migrations, imports, exports, and revisions safe, inspectable, and
+  recoverable.
 
-### 2. Inject Relevant Context Into Generation
+### 3. Human-led AI collaboration
 
-- Select only the most relevant story elements for each scene
-- Ground AI output in:
-  - Prior chapters
-  - Extracted lore
-  - User-defined tone/style
-- Make this context visible and adjustable
+- Let authors write and design manually, delegate bounded work, compare
+  alternatives, and review proposed changes.
+- Give assistants complete access to the same safe capabilities as the UI
+  through shared application services.
+- Require stable references, validation, revision awareness, and reviewable
+  mutations rather than opaque document replacement.
+- Reserve proof approval, external publication, rights declarations, purchases,
+  and other consequential actions for explicit human decisions.
 
-### 3. Enable Assisted Writing Without Losing Control
+### 4. Book design and edition production
 
-- Allow the user to:
-  - Write manually
-  - Expand or modify text with AI
-- Ensure all AI output is shaped by:
-  - Current context
-  - Stored narrative memory
-  - Writing style reference
+- Provide approachable defaults for prose books and progressively deeper tools
+  for editorial review, page design, illustrated books, and nonfiction.
+- Generate deterministic pagination, real previews, full-wrap covers, EPUB, and
+  vendor-specific print artifacts from the semantic manuscript.
+- Preflight fonts, images, color, geometry, metadata, accessibility, and format
+  constraints inside Lorekeeper.
+- Make every artifact traceable to its source revision, edition settings,
+  assets, renderer, validation profile, and proof state.
 
-### 4. Detect and Surface Inconsistencies
+### 5. Trustworthy publication
 
-- Identify contradictions in:
-  - Character state
-  - Timeline of events
-  - Established lore
-- Present them clearly and actionably
-- Allow the user to resolve or override them
+- Never describe an artifact as print-ready, accessible, PDF/X-conformant, or
+  vendor-compatible without evidence for that declared scope.
+- Keep standards, vendor requirements, dependency licenses, and validation
+  profiles versioned and reviewable.
+- Preserve local-first ownership of projects and credentials.
+- Prefer permissively licensed, inspectable production components and make
+  dependency obligations explicit.
 
-### 5. Evolve Memory as the Story Grows
+## Delivery shape
 
-- Extract new information from each chapter
-- Update both:
-  - Structured graph (entities + relationships)
-  - Vector memory (semantic retrieval)
-- Log these changes transparently
+Lorekeeper will grow in five deliberate phases:
 
-## What This System Is Not
+1. publisher-ready novel and paperback/EPUB foundation;
+2. professional editing and proofing;
+3. illustrated and picture-book design;
+4. nonfiction and reference books;
+5. publisher operations and controlled distribution.
 
-To stay focused, this project explicitly avoids:
+The detailed scope and verification gates live in
+[`docs/publishing-roadmap.md`](docs/publishing-roadmap.md). That roadmap
+distinguishes research and plans from implemented or verified behavior.
 
-- Polished UX or onboarding
-- Broad LLM provider support
-- Monetization or productization
-- General-purpose chat interfaces
+## Success criteria
 
-This is not a competitor to Scrivener or Notion.
+Lorekeeper succeeds when:
 
-It is a testbed for solving narrative coherence with AI.
+- a long book remains coherent as its manuscript, canon, assets, and editions
+  evolve;
+- authors understand what context and changes AI assistants use;
+- manual and assistant actions follow the same validation and review paths;
+- existing projects survive structural evolution without content loss;
+- a supported edition can be created, edited, designed, rendered, preflighted,
+  proofed, and packaged inside the application;
+- publication claims are backed by repeatable automated checks, independent
+  inspection, vendor acceptance, and physical proofs where relevant;
+- the system remains maintainable enough to extend from novels to illustrated
+  and reference books without parallel document or rendering models.
 
-## Success Criteria
+## Guiding principle
 
-The POC is successful if:
-
-- A multi-chapter story (e.g. in the Warcraft Universe) can be written
-- The system consistently:
-  - References past events correctly
-  - Maintains character traits and states
-  - Avoids major timeline contradictions
-- The user can:
-  - See what context the AI is using
-  - Understand why outputs are generated
-  - Correct mistakes through interaction
-
-## Guiding Principle
-
-The system must not just generate text — it must demonstrate that it understands and respects the evolving story.
+Lorekeeper should understand the book as both a living body of ideas and a
+physical or digital publication. Intelligence, authorship, design, and production
+must remain connected—but never at the cost of user control or trustworthy
+output.

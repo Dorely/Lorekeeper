@@ -143,11 +143,33 @@
 - Before completion, search for obsolete names and paths, inspect the complete
   diff, and confirm that documentation matches the resulting code.
 
+## Independent Feature Review
+
+- At the end of every coherent feature, after implementation and primary
+  verification but before staging or committing, launch a fresh sub-agent with
+  instructions to review the complete feature diff harshly.
+- Give the reviewer the feature intent, acceptance criteria, required context
+  documents, verification performed, and permission to inspect all affected
+  callers and consumers. Keep the reviewer independent: it reports findings and
+  does not edit the working tree.
+- Require prioritized, actionable findings covering correctness, data safety,
+  migrations, security, obsolete paths, architecture boundaries, assistant/UI
+  parity, tests, and documentation as applicable. Documentation-only features
+  still require review for unsupported claims, source quality, current-versus-
+  planned labeling, internal consistency, and missing scope.
+- Address every actionable finding before commit. If fixes materially change the
+  feature, use a fresh follow-up review or send the completed fixes back to the
+  reviewer for explicit re-review.
+- Do not commit with unresolved high- or medium-severity findings. Record and
+  report any reasoned disagreement rather than silently ignoring it.
+- Include the review outcome and any remaining low-severity limitations in the
+  completion report.
+
 ## Completion and Commits
 
 - A feature is complete only when its full impact area is implemented, obsolete
   runtime code is removed, documentation is current, and relevant verification
-  succeeds.
+  and the independent feature review succeed.
 - Once a feature is complete, inspect the final diff and status, stage only that
   feature's files, and create a focused commit with a descriptive message.
 - Commit every completed feature before beginning another one. Do not combine
