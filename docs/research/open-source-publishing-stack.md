@@ -1,9 +1,9 @@
 # Open-source publishing stack preliminary screen
 
-Last reviewed: 2026-07-29
-Research access date: 2026-07-29
-Decision state: preliminary technical and license screen; no dependency is
-approved or adopted.
+Last reviewed: 2026-07-30
+Research access date: 2026-07-30
+Decision state: the first renderer candidate was implemented and rejected;
+WeasyPrint 69 is the next unapproved fallback spike.
 
 ## Executive conclusion
 
@@ -11,7 +11,7 @@ There is no mature, permissively licensed .NET package that can be dropped into
 Lorekeeper today and truthfully guarantee professional book pagination,
 PDF/X-1a:2001, color conversion, cover production, and preflight.
 
-The best path is a deliberately bounded renderer:
+The first deliberately bounded renderer path was:
 
 - **ProseMirror** for the browser-hosted semantic editor;
 - **Typst** for deterministic typesetting and pagination;
@@ -30,8 +30,14 @@ Blazor application provider-neutral, makes crashes and timeouts containable,
 allows exact binary pinning per desktop runtime, and avoids binding business
 logic to Typst source text.
 
-This is a proposed Phase 1 architecture, not a claim that the stack already
-emits PDF/X. A time-boxed conformance spike is the first implementation gate.
+The 2026-07-30 conformance spike proved the PDF 1.7 layout path and rejected
+this stack as the sole Phase 1 renderer because it cannot emit PDF/X-1a. The
+executable evidence and no-go decision are in
+[`press-renderer-conformance-spike.md`](press-renderer-conformance-spike.md).
+WeasyPrint 69 is now the lead free fallback because its current BSD-licensed API
+exposes PDF/X-1a/-3/-4, CMYK colors, and custom ICC output intents. Those API
+features remain unapproved until the same external conformance, license,
+packaging, and vendor gates pass.
 
 ## Evidence boundary
 
@@ -92,7 +98,7 @@ Adoption constraints:
 Sources: [ProseMirror guide](https://prosemirror.net/docs/guide/) and
 [repository/license](https://github.com/ProseMirror/prosemirror).
 
-### Typst — preferred layout candidate
+### Typst — proven PDF 1.7 reference; rejected as sole press renderer
 
 The Typst compiler is Apache-2.0 and can be embedded or run locally. It provides
 high-level document layout, font handling, automatic page breaking, headers,
@@ -100,15 +106,17 @@ footers, references, tables, and fast deterministic PDF generation. Current
 documentation supports PDF 1.4–2.0 plus PDF/A and PDF/UA profiles, defaulting to
 PDF 1.7.
 
-Important limitation: Typst's documented standards list does **not** include
-PDF/X. It can provide layout and much of the PDF foundation, but its ordinary
-export cannot be labeled PDF/X-1a.
+The spike confirmed the important limitation: Typst's documented standards list
+does **not** include PDF/X. It can provide layout and much of the PDF foundation,
+but its ordinary export cannot be labeled PDF/X-1a. It is retained only as a
+reference/benchmark unless a separately licensed and independently verified
+conformance path emerges.
 
 Sources: [Typst open-source policy](https://typst.app/open-source/),
 [repository](https://github.com/typst/typst), and
 [PDF export documentation](https://typst.app/docs/reference/pdf/).
 
-### krilla — preferred PDF extension-point candidate
+### krilla — proven backend; unselected custom extension point
 
 krilla is dual MIT/Apache-2.0. It exposes high-level PDF graphics and metadata,
 font subsetting, page labels, tagged PDF, PDF versions, and validated PDF/A/UA
@@ -116,23 +124,24 @@ profiles. Its upstream tests include Arlington/veraPDF checks, snapshots, and
 multiple viewers. It deliberately does not do text layout or page breaking,
 which is why it complements rather than replaces Typst.
 
-Important limitation: krilla does not currently advertise PDF/X. Phase 1 would
-need a narrow, upstreamable implementation of the exact PDF/X-1a rules required
-by the certified vendor profile: output intent, metadata, version, page boxes,
-font embedding, permitted colors, transparency/prohibited features, and
+Important limitation: krilla does not currently advertise PDF/X. Implementing
+the exact PDF/X-1a rules ourselves remains a last-resort fallback because it
+would make Lorekeeper responsible for output intent, metadata, version, page
+boxes, font embedding, permitted colors, transparency/prohibited features, and
 validation diagnostics.
 
 Source: [krilla repository and license](https://github.com/LaurenzV/krilla).
 
-### moxcms — preferred color-conversion candidate
+### moxcms — exercised color-conversion component
 
 moxcms is a pure-Rust color-management library under Apache-2.0/BSD-3-Clause.
 It converts among ICC profiles without adding a native C runtime. It is a strong
 fit for controlled RGB-to-CMYK and grayscale conversion in the press sidecar.
 
-It is not itself a prepress policy engine. Lorekeeper must own rendering intents,
-black-generation choices, total-area-coverage diagnostics, profile provenance,
-and golden-image tests.
+The spike exercised its sRGB transform but did not select or bundle a CMYK
+profile. It is not itself a PDF writer or prepress policy engine. Lorekeeper
+must own rendering intents, black-generation choices, total-area-coverage
+diagnostics, profile provenance, and golden-image tests.
 
 Source: [moxcms repository and license](https://github.com/awxkee/moxcms).
 
@@ -169,7 +178,7 @@ Source: [EPUBCheck repository](https://github.com/w3c/epubcheck).
 | [GoPdfSuit v6](https://pkg.go.dev/github.com/chinmay-sawant/gopdfsuit/v6) | MIT, Go; v6 published 2026-06-16 | Monitor | An actively developed AI-assisted entrant, but it has not demonstrated the required book-pagination and PDF/X certification scope |
 | [PDFluent](https://pdfluent.com/) | Desktop editor is free; developer SDK is separately licensed and paid | Reject as a free runtime dependency; commercial fallback | The SDK is not open source or royalty-free merely because the editor is free |
 | [Paged.js](https://github.com/pagedjs/pagedjs/) | MIT, JavaScript; moving repository evidence | Spike comparison | Strong CSS Paged Media/book preview fit, but its Chromium print path does not establish PDF/X, color, or deterministic cross-platform output |
-| [WeasyPrint 68.1](https://github.com/Kozea/WeasyPrint) | BSD-3-Clause, Python plus native/transitive dependencies | Spike comparison | Mature paged HTML/CSS, but adds another runtime and has no documented PDF/X output |
+| [WeasyPrint 69](https://doc.courtbouillon.org/weasyprint/latest/api_reference.html) | BSD-3-Clause, Python plus native/transitive dependencies | **Next fallback spike** | Current API lists PDF/X-1a/-3/-4 plus CMYK and custom output-intent controls; pagination, native packaging, ICC rights, Acrobat, and vendor evidence remain unproven |
 | [Vivliostyle Core 2.44.1](https://www.npmjs.com/package/%40vivliostyle/core) | AGPL-3.0 | Reject for shipped runtime | Strong web-publication layout, but the core license does not meet the default |
 | [SILE](https://github.com/sile-typesetter/sile) | MIT, Lua/native toolchain; moving repository evidence | Spike comparison | Book-focused typesetting is promising, but integration, packaging, and PDF/X still require proof |
 | [Chromium](https://chromium.googlesource.com/chromium/src/+/main/LICENSE) | BSD-style root license with a large mixed-license dependency inventory | Existing preview only | Lorekeeper already receives Chromium through Electron, but browser print is not PDF/X or vendor preflight; a separate full inventory would be required for any new renderer use |
@@ -253,10 +262,10 @@ The spike must demonstrate:
    the same independent profile;
 9. successful KDP and IngramSpark upload preflights using separate profiles.
 
-If Typst/krilla cannot meet the gate cleanly, stop and compare the fallback
-paths—Little CMS, a narrowly isolated LGPL component, a commercial SDK, or
-limiting the certified vendor scope. Do not hide conversion behind an
-uninspected command-line postprocessor.
+Typst/krilla did not meet the gate. The accepted next comparison is WeasyPrint
+69, followed only if needed by a direct krilla extension, a narrowly isolated
+LGPL component, a commercial SDK, or a reduced certified vendor scope. Do not
+hide conversion behind an uninspected command-line postprocessor.
 
 ## Validation strategy
 
@@ -283,10 +292,11 @@ shown to fail closed.
 | Decision | Status |
 |---|---|
 | Semantic editor based on ProseMirror | Planned |
-| Rust press sidecar with versioned JSON protocol | Planned, pending spike |
-| Typst for high-level layout | Planned, pending spike |
-| krilla extension for PDF writing/conformance | Planned, pending spike |
-| moxcms for ICC transforms | Planned, pending spike |
+| Versioned JSON press-process protocol | Proven as a disposable fixture; production boundary not adopted |
+| Typst for high-level layout | Rejected as the sole Phase 1 renderer; retained as benchmark |
+| krilla extension for PDF writing/conformance | Last-resort fallback, not selected |
+| moxcms for ICC transforms | sRGB path exercised; CMYK/profile path unproven |
+| WeasyPrint 69 fallback | Planned for the next conformance spike |
 | EPUBCheck in shipped runtime | Evaluate |
 | Claim PDF/X-1a support | Blocked until independent and vendor validation |
 | Ship copyleft or revenue-restricted PDF dependencies | Rejected by default |
@@ -308,7 +318,9 @@ shown to fail closed.
 - Adobe, [PDF/X conformance verification](https://helpx.adobe.com/acrobat/using/pdf-x-pdf-a-pdf.html)
   and [Preflight profiles](https://helpx.adobe.com/acrobat/using/preflight-profiles-acrobat-pro.html).
 - Paged.js, [repository and license](https://github.com/pagedjs/pagedjs/).
-- Kozea, [WeasyPrint repository and license](https://github.com/Kozea/WeasyPrint).
+- Kozea, [WeasyPrint repository and license](https://github.com/Kozea/WeasyPrint),
+  [PDF variant/output-intent API](https://doc.courtbouillon.org/weasyprint/latest/api_reference.html),
+  and [PDF/X/CMYK usage](https://doc.courtbouillon.org/weasyprint/latest/common_use_cases.html).
 - Vivliostyle, [Core 2.44.1 package and license](https://www.npmjs.com/package/%40vivliostyle/core).
 - SILE, [repository and license](https://github.com/sile-typesetter/sile).
 - PDFluent, [editor and SDK licensing](https://pdfluent.com/).

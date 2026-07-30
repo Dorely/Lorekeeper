@@ -1,6 +1,6 @@
 # End-to-end book publishing roadmap
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 ## Destination
 
@@ -123,12 +123,10 @@ are explicitly outside this phase.
 
 ### Implementation prerequisite
 
-The verification gates below require automated fixtures and a test project, but
-the repository currently has no test project and `AGENTS.md` forbids adding one
-without an explicit user request. Phase 1 implementation must not begin beyond
-disposable exploratory spike work until the user explicitly authorizes adding
-and maintaining the required automated tests. Approval of this roadmap alone is
-not that authorization.
+Automated fixtures and test-project work were explicitly authorized by the user
+on 2026-07-30. Every data-, layout-, and conformance-sensitive feature must add
+and maintain the relevant tests; this authorization does not relax the
+feature-by-feature migration, review, verification, or commit gates.
 
 ### Phase 1 feature sequence
 
@@ -137,7 +135,7 @@ begins.
 
 #### 1. Renderer and conformance spike
 
-Status: `Planned`
+Status: `Researched` — executable candidate rejected on 2026-07-30
 
 Build a disposable, test-focused `Lorekeeper.Press` prototype to prove or reject
 the Typst + krilla + moxcms direction before changing user data.
@@ -167,6 +165,40 @@ passes. If it fails, evaluate the documented fallbacks explicitly.
 Assistant parity: expose no end-user assistant tools for a disposable spike.
 The resulting protocol must nonetheless be designed for future structured
 assistant diagnostics.
+
+Outcome: the pinned Typst 0.15.1 + krilla 0.8.2 + moxcms 0.9.0 candidate
+proved deterministic PDF 1.7 interior/cover generation but cannot emit
+PDF/X-1a:2001. It was rejected as the sole press renderer. No Acrobat or vendor
+claim was made, no production runtime or persisted data changed, and Feature 2
+remains blocked. Evidence and the accepted decision are in
+[`research/press-renderer-conformance-spike.md`](research/press-renderer-conformance-spike.md)
+and
+[`decisions/0001-reject-typst-as-sole-press-renderer.md`](decisions/0001-reject-typst-as-sole-press-renderer.md).
+
+#### 1a. PDF/X fallback conformance spike
+
+Status: `Planned`
+
+Repeat Feature 1's conformance and release gates with WeasyPrint 69 as the lead
+free fallback. Its current BSD-licensed API exposes PDF/X-1a, PDF/X-3, PDF/X-4,
+CMYK colors, and custom ICC output intents, but those API capabilities are not
+accepted as conformance evidence.
+
+Additional deliverables:
+
+- select a vendor/paper-appropriate CMYK ICC profile only after its
+  redistribution terms, fingerprint, notices, and security scan are recorded;
+- compare its prose pagination, widow/orphan, recto, page-number, running-head,
+  hyphenation, and cover-placement control against the Typst fixture;
+- contain HTML/CSS/file/network inputs so imported or assistant-authored content
+  cannot read local files or fetch undeclared URLs;
+- measure Python/native packaging, cold/warm startup, binary footprint, and
+  cross-platform release obligations;
+- run the named Acrobat PDF/X-1a profile, deliberate invalid fixtures, KDP and
+  Ingram vendor upload preflights, and record all artifact hashes.
+
+Gate: Feature 2 remains blocked until this fallback passes or a subsequent
+candidate is explicitly accepted with a reduced certified scope.
 
 #### 2. Structured manuscript schema and migration
 

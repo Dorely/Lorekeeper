@@ -27,6 +27,9 @@ These briefs are engineering references for Lorekeeper's prompts, automation, co
 - [Structured manuscripts and safe migration](structured-manuscripts-and-safe-migration.md)
   — semantic document ownership, WAL-safe backup, expand/migrate/validate/
   contract conversion, legacy imports, recovery, and assistant parity.
+- [Press renderer and conformance spike](press-renderer-conformance-spike.md)
+  — executable Typst/krilla/moxcms evidence, fail-closed PDF/X result,
+  dependency/license inventory, and the WeasyPrint fallback decision.
 
 ## Scope and evidence policy
 

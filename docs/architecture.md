@@ -38,7 +38,10 @@ current-runtime claims.
 - PdfPig, Docnet, and VersOne.Epub for source ingest and EPUB handling
 - Bootstrap and vis-network vendored under `Lorekeeper/wwwroot`
 
-The solution contains one application project. `Program.cs` owns host startup,
+The solution contains one application project. A standalone,
+non-production `Lorekeeper.Press` Rust 2024 crate is retained as a disposable
+renderer/conformance spike; it is not referenced by the solution, packaged, or
+invoked by the application. `Program.cs` owns host startup,
 dependency registration, middleware, local media and OAuth endpoints, database
 migration, interrupted-work reconciliation, desktop update setup, and Electron
 window creation. Blazor interactivity is opted into per page or component with
@@ -163,6 +166,15 @@ does not implement PDF/X, and does not represent vendor-specific preflight.
 multi-edition production model. These are current boundaries, not press-ready
 claims.
 
+`Lorekeeper.Press` proves only a local PDF 1.7 fixture path. Its versioned JSON
+protocol validates child job IDs, accepts semantic book content and explicit
+geometry, and returns artifact hashes plus structured diagnostics. Its Typst
+world has no filesystem or network loader. The experimental Ingram profile
+fails closed and emits no artifact because Typst 0.15.1 has no PDF/X mode and no
+reviewed CMYK press profile is bundled. This spike is not a production renderer,
+KDP/Ingram compatibility claim, or substitute for the future application
+service and assistant boundary.
+
 The planned publishing architecture is documented, but not implemented, in the
 publishing roadmap and supporting research briefs. Its intended boundaries are a
 versioned semantic manuscript, edition-specific projections, a separately
@@ -234,6 +246,7 @@ Requirements:
 
 - .NET 10 SDK, pinned by `global.json`
 - Node.js 22.12 or later for Electron.NET desktop builds and packaging
+- Rust 1.92 or later only when building the disposable `Lorekeeper.Press` spike
 
 Build and start the browser-hosted development app:
 
@@ -269,8 +282,17 @@ Documentation-only work must still validate every referenced path,
 configuration key, launch profile, and command, and should run broader checks
 when the documentation asserts that those checks work.
 
-There are currently no automated test projects. Do not add one without explicit
-user direction. Successful compilation does not validate OAuth, provider calls,
+The .NET solution still has no automated test project. The user explicitly
+authorized automated publishing fixtures on 2026-07-30, and the standalone
+press spike owns Rust fixture tests. Run its locked verification separately:
+
+```powershell
+cd Lorekeeper.Press
+cargo test --locked
+.\scripts\verify-spike.ps1 -PopplerBin <poppler-bin-directory>
+```
+
+Successful compilation does not validate OAuth, provider calls,
 embeddings, web search, image generation, publication output, packaging,
 automatic updates, or OS-specific Electron behavior. Exercise the relevant
 integration on the relevant platform before claiming it works, and report

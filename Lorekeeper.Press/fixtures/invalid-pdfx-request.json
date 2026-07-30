@@ -1,0 +1,24 @@
+{
+  "protocolVersion": 1,
+  "jobId": "invalid-pdfx-claim",
+  "profile": "ingram-pdf-x1a-experimental-v1",
+  "document": {
+    "title": "A Deliberate Rejection",
+    "author": "Lorekeeper Fixture",
+    "chapters": [
+      {
+        "title": "Only Chapter",
+        "body": "This request must fail closed because the candidate renderer cannot establish PDF/X-1a:2001 conformance."
+      }
+    ]
+  },
+  "trim": {
+    "widthInches": 6.0,
+    "heightInches": 9.0
+  },
+  "cover": {
+    "bleedInches": 0.125,
+    "paperCaliperInchesPerPage": 0.0025,
+    "backCopy": "No artifact should be emitted."
+  }
+}

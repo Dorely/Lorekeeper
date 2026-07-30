@@ -491,3 +491,6 @@ $RECYCLE.BIN/
 *.db-wal
 .playwright-mcp/
 
+# Rust spike output
+/Lorekeeper.Press/target/
+

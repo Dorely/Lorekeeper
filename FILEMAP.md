@@ -35,6 +35,24 @@
 | `docs/research/book-authoring-and-design-software.md` | Competitor capability matrix, missing editing/design tools, delivery phases, and Lorekeeper integration proposals. |
 | `docs/research/open-source-publishing-stack.md` | Preliminary editor/renderer/color/validation license screen, release-audit requirements, rejected licenses, proposed press sidecar, and PDF/X spike gate. |
 | `docs/research/structured-manuscripts-and-safe-migration.md` | Semantic manuscript design plus WAL-safe backup, data conversion, validation, recovery, legacy import, and assistant-parity plan. |
+| `docs/research/press-renderer-conformance-spike.md` | Executable Typst/krilla/moxcms spike evidence, fail-closed PDF/X result, external-gate disposition, and free fallback comparison. |
+| `docs/research/press-spike-license-inventory.json` | Generated exact-version/checksum/VCS/license-file inventory for every target-inclusive Rust spike dependency and bundled asset notice. |
+| `docs/decisions/0001-reject-typst-as-sole-press-renderer.md` | Accepted no-go decision for the first press renderer candidate and the WeasyPrint 69 fallback gate. |
+
+## Lorekeeper.Press/ — Disposable renderer spike
+
+| File | Description |
+|------|-------------|
+| `Cargo.toml` / `Cargo.lock` | Unpublished Rust 2024 crate with exact Typst, krilla-resolving, moxcms, PDF inspection, serialization, and fixture dependency pins. |
+| `src/main.rs` / `src/lib.rs` | Stdin/stdout JSON process envelope and library surface for the non-production spike. |
+| `src/protocol.rs` | Versioned request/response, profile, artifact, evidence, and structured diagnostic contracts. |
+| `src/world.rs` | In-memory Typst world with pinned embedded fonts and no filesystem, package, or network loader. |
+| `src/render.rs` | 6 × 9 PDF 1.7 interior/wrap-cover compilation, page-count spine calculation, fail-closed PDF/X response, hashing, and preflight orchestration. |
+| `src/inspect.rs` | Independent `lopdf` structural inspection for page geometry, fonts, color spaces, images, output intents, transparency, encryption, and actions. |
+| `src/tests.rs` / `tests/process_contract.rs` | Authorized unit/adversarial/process fixtures for deterministic output, recursive PDF inspection, warning handling, immutable containment, complete envelopes, and PDF/X rejection. |
+| `fixtures/*.json` | Representative PDF 1.7 book request and deliberate unsupported PDF/X request. |
+| `scripts/verify-spike.ps1` | Locked tests, optimized build, process fixtures, timing/size evidence, and optional independent Poppler checks. |
+| `scripts/generate-license-report.ps1` | Deterministic Cargo metadata, checksum, upstream VCS, license expression, and license/notice hash inventory generator. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
 
