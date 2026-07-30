@@ -7,6 +7,7 @@
 @inject IPublicationEditionService Editions
 @inject IPublicationRenderService Renders
 @inject IPublicationCoverService CoverDesigns
+@inject IPublicationPackageService Packages
 @inject IManuscriptStyleService ManuscriptStyles
 @inject IPublishAssistantService PublishAssistant
 @inject IProjectImageService ProjectImages
@@ -599,6 +600,96 @@ else
                     }
                 </section>
 
+                <section class="publish-card" aria-labelledby="package-title">
+                    <div class="publish-card-heading publish-card-heading-actions">
+                        <div>
+                            <span class="publish-step">PKG</span>
+                            <h2 id="package-title">Preflight and publication package</h2>
+                            <p>Validate this edition and assemble its Preview PDF, EPUB 3, manifest, report, and cover files without an external conversion tool.</p>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_packageBusy" @onclick="RunPreflightAsync">Run preflight</button>
+                            <button type="button" class="btn btn-sm btn-primary" disabled="@(_packageBusy || _preflight?.CanPackage != true)" @onclick="BuildPackageAsync">Build package</button>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_packageError))
+                    {
+                        <div class="alert alert-danger py-2">@_packageError</div>
+                    }
+                    @if (_preflight is not null)
+                    {
+                        <div class="d-flex gap-2 align-items-center mb-2">
+                            <span class="badge text-bg-warning">Preview</span>
+                            <strong>@(_preflight.CanPackage ? "Package checks passed" : "Package blocked")</strong>
+                            <span class="small text-muted">
+                                @_preflight.ProfileId &middot; @_preflight.ProfileVersion &middot;
+                                reviewed @_preflight.ProfileReviewedAtUtc.ToString("yyyy-MM-dd")
+                            </span>
+                        </div>
+                        <div class="small mb-2">
+                            Profile sources:
+                            @foreach (var source in _preflight.ProfileSources)
+                            {
+                                <a class="ms-1" href="@source" target="_blank" rel="noopener noreferrer">@SourceHost(source)</a>
+                            }
+                        </div>
+                        @foreach (var item in _preflight.Items)
+                        {
+                            <div class="small @(item.Severity == "error" ? "text-danger" : "text-warning-emphasis")">
+                                <code>@item.Code</code> @item.Message
+                            </div>
+                        }
+                        <div class="row g-3 mt-1">
+                            <div class="col-lg-6">
+                                <strong class="small">Digital proof: @_preflight.DigitalProof.Status</strong>
+                                <ul class="small mb-2">
+                                    @foreach (var check in _preflight.DigitalProof.Checklist)
+                                    {
+                                        <li>@check</li>
+                                    }
+                                </ul>
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-success"
+                                        disabled="@(_packageBusy || CurrentPackageArtifact is null)"
+                                        @onclick="RecordDigitalProofAsync">
+                                    Confirm digital proof
+                                </button>
+                            </div>
+                            <div class="col-lg-6">
+                                <strong class="small">Physical proof: @_preflight.PhysicalProof.Status</strong>
+                                <ul class="small mb-2">
+                                    @foreach (var check in _preflight.PhysicalProof.Checklist)
+                                    {
+                                        <li>@check</li>
+                                    }
+                                </ul>
+                                <textarea class="form-control form-control-sm mb-2"
+                                          rows="2"
+                                          maxlength="2000"
+                                          placeholder="Required: record the inspected physical proof and any corrections."
+                                          @bind="_physicalProofNote"></textarea>
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-success"
+                                        disabled="@(_packageBusy || !CanRecordPhysicalProof || string.IsNullOrWhiteSpace(_physicalProofNote))"
+                                        @onclick="RecordPhysicalProofAsync">
+                                    Record physical proof
+                                </button>
+                            </div>
+                        </div>
+                    }
+                    @if (_packageArtifacts.Count > 0)
+                    {
+                        <div class="d-flex flex-wrap gap-2 mt-3">
+                            @foreach (var artifact in _packageArtifacts)
+                            {
+                                <a class="btn btn-sm btn-outline-primary" href="@ArtifactDownloadUrl(artifact.Id)">
+                                    Download @artifact.Kind
+                                </a>
+                            }
+                        </div>
+                    }
+                </section>
+
                 <section class="publish-card" aria-labelledby="cover-title">
                     <div class="publish-card-heading publish-card-heading-actions">
                         <div>
@@ -1141,6 +1232,8 @@ else
     private IReadOnlyList<PublicationEditionAuditView> _editionAudit = [];
     private IReadOnlyList<PublicationRenderJobView> _renderJobs = [];
     private PublicationCoverDesignView? _coverDesign;
+    private PublicationPreflightReport? _preflight;
+    private IReadOnlyList<PublicationArtifactView> _packageArtifacts = [];
     private EditionDraft _editionDraft = new();
     private Guid? _loadedProjectId;
     private Guid? _selectedEditionId;
@@ -1163,6 +1256,7 @@ else
     private bool _assistantBusy;
     private bool _renderBusy;
     private bool _coverDesignSaving;
+    private bool _packageBusy;
     private string? _loadError;
     private string? _editionDraftError;
     private string? _coverError;
@@ -1174,6 +1268,8 @@ else
     private string? _editionActionError;
     private string? _renderError;
     private string? _renderComparison;
+    private string? _packageError;
+    private string _physicalProofNote = string.Empty;
     private string _coverTitle = string.Empty;
     private string _coverSubtitle = string.Empty;
     private string _coverAuthor = string.Empty;
@@ -1589,6 +1685,7 @@ else
         if (Project is null) return;
         _loading = true;
         _loadError = null;
+        InvalidatePackageState();
         try
         {
             _editionSummaries = await Editions.ListAsync(Project.Id);
@@ -1640,6 +1737,8 @@ else
     private async Task RefreshWorkspaceAsync()
     {
         if (Project is null || _selectedEditionId is not Guid editionId) return;
+        var priorFingerprint = _workspace?.SourceFingerprint;
+        var priorRenderIdentity = CurrentRenderIdentity(_renderJobs);
         var workspace = await Publishing.GetWorkspaceAsync(Project.Id, editionId);
         _workspace = workspace;
         _editionAudit = await Editions.GetAuditAsync(Project.Id, editionId);
@@ -1648,6 +1747,11 @@ else
         _editionDraft.Revision = workspace.Edition.Revision;
         _editionSummaries = workspace.Editions;
         _placements = OrderPlacementViews(workspace.Placements);
+        if (!string.Equals(priorFingerprint, workspace.SourceFingerprint, StringComparison.Ordinal)
+            || !string.Equals(priorRenderIdentity, CurrentRenderIdentity(_renderJobs), StringComparison.Ordinal))
+        {
+            InvalidatePackageState();
+        }
         PrunePlacementDraft();
     }
 
@@ -1685,6 +1789,7 @@ else
                     _coverDesign.ImageFocalYPercent,
                     _coverDesign.Revision,
                     AcknowledgeTemplate: true));
+            InvalidatePackageState();
             _liveMessage = "Cover design saved and current template acknowledged.";
         }
         catch (Exception exception)
@@ -1694,6 +1799,112 @@ else
         finally
         {
             _coverDesignSaving = false;
+        }
+    }
+
+    private async Task RunPreflightAsync()
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        _packageBusy = true;
+        _packageError = null;
+        try
+        {
+            await FlushEditionSaveAsync();
+            _preflight = await Packages.PreflightAsync(Project.Id, editionId);
+        }
+        catch (Exception exception)
+        {
+            _packageError = exception.Message;
+        }
+        finally
+        {
+            _packageBusy = false;
+        }
+    }
+
+    private async Task BuildPackageAsync()
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        _packageBusy = true;
+        _packageError = null;
+        try
+        {
+            var result = await Packages.BuildAsync(Project.Id, editionId);
+            _preflight = result.Preflight;
+            _packageArtifacts = result.Artifacts;
+            _liveMessage = "Preview publication package is ready.";
+        }
+        catch (Exception exception)
+        {
+            _packageError = exception.Message;
+        }
+        finally
+        {
+            _packageBusy = false;
+        }
+    }
+
+    private PublicationArtifactView? CurrentPackageArtifact =>
+        _packageArtifacts.FirstOrDefault(artifact =>
+            artifact.Kind == PublicationArtifactKind.PublicationPackage
+            && !artifact.IsStale)
+        ?? _preflight?.CurrentPackage;
+
+    private static string SourceHost(string source) => new Uri(source).Host;
+
+    private bool CanRecordPhysicalProof =>
+        CurrentPackageArtifact is { } package
+        && string.Equals(_preflight?.DigitalProof.PackageSha256, package.Sha256, StringComparison.Ordinal);
+
+    private async Task RecordDigitalProofAsync()
+    {
+        if (Project is null
+            || _selectedEditionId is not Guid editionId
+            || CurrentPackageArtifact is not { } package)
+        {
+            return;
+        }
+        await RecordProofAsync(editionId, package.Id, PublicationProofKind.Digital, string.Empty);
+    }
+
+    private async Task RecordPhysicalProofAsync()
+    {
+        if (Project is null
+            || _selectedEditionId is not Guid editionId
+            || CurrentPackageArtifact is not { } package)
+        {
+            return;
+        }
+        await RecordProofAsync(editionId, package.Id, PublicationProofKind.Physical, _physicalProofNote);
+    }
+
+    private async Task RecordProofAsync(
+        Guid editionId,
+        Guid packageArtifactId,
+        PublicationProofKind kind,
+        string note)
+    {
+        _packageBusy = true;
+        _packageError = null;
+        try
+        {
+            _preflight = await Packages.RecordProofAsync(
+                Project!.Id,
+                editionId,
+                packageArtifactId,
+                kind,
+                note);
+            if (kind == PublicationProofKind.Physical)
+                _physicalProofNote = string.Empty;
+            _liveMessage = $"{kind} proof recorded for the exact package hash.";
+        }
+        catch (Exception exception)
+        {
+            _packageError = exception.Message;
+        }
+        finally
+        {
+            _packageBusy = false;
         }
     }
 
@@ -1708,6 +1919,7 @@ else
             await FlushEditionSaveAsync();
             await Renders.RequestAsync(Project.Id, editionId);
             _renderJobs = await Renders.ListAsync(Project.Id, editionId);
+            InvalidatePackageState();
             StartRenderPolling(Project.Id, editionId);
             _liveMessage = "PDF render queued.";
         }
@@ -1727,7 +1939,10 @@ else
         _renderBusy = true;
         try
         {
+            var priorRenderIdentity = CurrentRenderIdentity(_renderJobs);
             _renderJobs = await Renders.ListAsync(Project.Id, editionId);
+            if (!string.Equals(priorRenderIdentity, CurrentRenderIdentity(_renderJobs), StringComparison.Ordinal))
+                InvalidatePackageState();
         }
         catch (Exception exception)
         {
@@ -1795,7 +2010,10 @@ else
                 {
                     if (_selectedEditionId == editionId)
                     {
+                        var priorRenderIdentity = CurrentRenderIdentity(_renderJobs);
                         _renderJobs = jobs;
+                        if (!string.Equals(priorRenderIdentity, CurrentRenderIdentity(jobs), StringComparison.Ordinal))
+                            InvalidatePackageState();
                         StateHasChanged();
                     }
                 });
@@ -1889,6 +2107,7 @@ else
                 _editionDraft.Revision = updated.Revision;
                 if (_workspace is not null)
                     _workspace = _workspace with { Edition = updated };
+                InvalidatePackageState();
                 _editionSummaries = await Editions.ListAsync(targetProjectId);
                 _editionSavedVersion = versionToSave;
                 _editionDraftLastSavedAt = DateTime.Now;
@@ -1931,6 +2150,23 @@ else
         cts.Cancel();
         cts.Dispose();
     }
+
+    private void InvalidatePackageState()
+    {
+        _preflight = null;
+        _packageArtifacts = [];
+        _packageError = null;
+    }
+
+    private static string CurrentRenderIdentity(IReadOnlyList<PublicationRenderJobView> jobs) =>
+        string.Join(
+            "|",
+            jobs.Where(job => job.Status == PublicationRenderStatus.Completed)
+                .SelectMany(job => job.Artifacts)
+                .Where(artifact => artifact.Kind is PublicationArtifactKind.InteriorPdf or PublicationArtifactKind.CoverPdf)
+                .OrderByDescending(artifact => artifact.CreatedAt)
+                .Take(2)
+                .Select(artifact => $"{artifact.Kind}:{artifact.Sha256}"));
 
     private async Task SetCoverChapterAsync(ChangeEventArgs e)
     {

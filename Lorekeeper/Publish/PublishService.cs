@@ -206,6 +206,15 @@ public sealed class PublishService(
                     || placement.TargetId != profile.SelectedCoverChapterId)
                 && TargetIncluded(sections, placement.TargetKind, placement.TargetId))
             .ToList();
+        var matterDocuments = matter
+            .Select(item => new PublishMatterDocument(
+                item.Id,
+                item.Location,
+                item.Kind,
+                item.Title,
+                item.SortOrder,
+                ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision)))
+            .ToList();
         var referencedAssetIds = sections
             .SelectMany(section => section.Chapters)
             .SelectMany(chapter => chapter.IllustrationLayout.Images.Select(image => image.ImageId)
@@ -213,6 +222,10 @@ public sealed class PublishService(
                 .Concat(chapter.Manuscript.Content
                     .Where(block => block.Type == ManuscriptBlockType.Figure)
                     .Select(block => block.ImageId!.Value)))
+            .Concat(matterDocuments
+                .SelectMany(item => item.Manuscript.Content)
+                .Where(block => block.Type == ManuscriptBlockType.Figure)
+                .Select(block => block.ImageId!.Value))
             .Concat(validPlacements.Select(placement => placement.AssetId))
             .ToHashSet();
         var assets = referencedAssetIds.Count == 0
@@ -260,7 +273,7 @@ public sealed class PublishService(
             project.Name,
             project.Slug,
             DateTime.UtcNow,
-            ProfileDocument(profile, matter),
+            ProfileDocument(profile),
             cover,
             sections,
             assets.Values.Select(AssetDocument).ToList(),
@@ -268,6 +281,7 @@ public sealed class PublishService(
         {
             CoverPageLayoutKind = coverPageLayoutKind,
             NamedStyles = namedStyles,
+            Matter = matterDocuments,
         };
     }
 
@@ -384,9 +398,7 @@ public sealed class PublishService(
                 chapter.Title);
     }
 
-    private static PublishDocumentProfile ProfileDocument(
-        PublicationEdition profile,
-        IReadOnlyList<PublicationMatter> matter) =>
+    private static PublishDocumentProfile ProfileDocument(PublicationEdition profile) =>
         new(
             profile.TitleOverride,
             profile.Subtitle,
@@ -396,9 +408,6 @@ public sealed class PublishService(
             profile.Copyright,
             profile.Isbn,
             profile.Description,
-            MatterText(matter, PublicationMatterKind.Dedication),
-            MatterText(matter, PublicationMatterKind.Acknowledgments),
-            MatterText(matter, PublicationMatterKind.References),
             profile.IncludeTableOfContents,
             profile.IncludeVisibleTableOfContents,
             profile.IncludeActSynopses,
@@ -415,19 +424,6 @@ public sealed class PublishService(
             profile.PageMarginInches,
             profile.BodyFontSizePoints,
             profile.BodyLineHeight);
-
-    private static string MatterText(
-        IReadOnlyList<PublicationMatter> matter,
-        PublicationMatterKind kind) =>
-        string.Join(
-            "\n\n",
-            matter
-                .Where(item => item.Kind == kind)
-                .Select(item => ManuscriptCodec.ProjectPlainText(
-                    item.ManuscriptJson,
-                    item.Id,
-                    item.Revision))
-                .Where(text => !string.IsNullOrWhiteSpace(text)));
 
     private static bool IncludeTitlePage(PublicationEdition profile) => profile.TitlePageMode switch
     {

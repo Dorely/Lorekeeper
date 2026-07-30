@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using System.Text;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Publish;
@@ -6,6 +8,36 @@ namespace Lorekeeper.Tests;
 
 public sealed class SemanticPublishFormattingTests
 {
+    [Fact]
+    public void EveryIncludedMatterKindRendersInOrderIntoEpub()
+    {
+        var matter = Enum.GetValues<PublicationMatterKind>()
+            .Select((kind, index) => new PublishMatterDocument(
+                Guid.NewGuid(),
+                index < 5 ? PublicationMatterLocation.Front : PublicationMatterLocation.Back,
+                kind,
+                $"Matter {index:D2} {kind}",
+                index,
+                ManuscriptCodec.FromPlainText(Guid.NewGuid(), $"Body {index:D2} {kind}", revision: 1)))
+            .ToList();
+        var document = MinimalPublishDocument() with { Matter = matter };
+
+        var epub = new EpubPublishFormatter(new PageGeometryService(null!)).Render(document);
+
+        using var archive = new ZipArchive(new MemoryStream(epub), ZipArchiveMode.Read);
+        var renderedMatterEntries = archive.Entries
+            .Where(entry => entry.FullName.StartsWith("OEBPS/matter-", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(matter.Count, renderedMatterEntries.Count);
+        for (var index = 0; index < matter.Count; index++)
+        {
+            using var reader = new StreamReader(renderedMatterEntries[index].Open(), Encoding.UTF8);
+            var xhtml = reader.ReadToEnd();
+            Assert.Contains($"Matter {index:D2}", xhtml, StringComparison.Ordinal);
+            Assert.Contains($"Body {index:D2}", xhtml, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void MarkdownAndHtmlPreserveSemanticBlocksMarksAndFigures()
     {
@@ -274,9 +306,6 @@ public sealed class SemanticPublishFormattingTests
                 Copyright: string.Empty,
                 Isbn: string.Empty,
                 Description: string.Empty,
-                Dedication: string.Empty,
-                Acknowledgments: string.Empty,
-                References: string.Empty,
                 IncludeTableOfContents: true,
                 IncludeVisibleTableOfContents: true,
                 IncludeActSynopses: false,

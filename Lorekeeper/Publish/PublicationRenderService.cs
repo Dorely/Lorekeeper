@@ -591,6 +591,27 @@ public sealed class PublicationRenderProcessor(
                 text = PlainText(block),
             }).ToArray(),
         }).ToArray();
+        var matter = document.Matter
+            .OrderBy(item => item.Location)
+            .ThenBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .Select(item => new
+            {
+                id = item.Id,
+                location = item.Location.ToString(),
+                kind = item.Kind.ToString(),
+                title = PublicationMatterFormatting.Title(item),
+                body = SemanticPublishFormatting.PlainText(
+                    item.Manuscript,
+                    imageId => document.Assets.FirstOrDefault(asset => asset.Id == imageId)),
+                blocks = item.Manuscript.Content.Select(block => new
+                {
+                    id = block.Id,
+                    type = block.Type.ToString(),
+                    text = PlainText(block),
+                }).ToArray(),
+            })
+            .ToArray();
         if (chapters.Length == 0)
             throw new InvalidOperationException("Include at least one non-empty chapter before rendering.");
         return new
@@ -606,9 +627,7 @@ public sealed class PublicationRenderProcessor(
                 language = string.IsNullOrWhiteSpace(document.Profile.Language) ? "en" : document.Profile.Language,
                 publisher = document.Profile.Publisher,
                 copyright = document.Profile.Copyright,
-                dedication = document.Profile.Dedication,
-                acknowledgments = document.Profile.Acknowledgments,
-                references = document.Profile.References,
+                matter,
                 includeTitlePage = document.Profile.IncludeTitlePage,
                 includeVisibleTableOfContents = document.Profile.IncludeVisibleTableOfContents,
                 chapters,

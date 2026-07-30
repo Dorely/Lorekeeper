@@ -60,9 +60,10 @@
 | `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
 | `ProjectExportCompatibilityTests.cs` | Current v9 named-style/manuscript fixtures plus v8 import-boundary and visual-layout compatibility checks. |
 | `ProjectImportJobIntegrationTests.cs` | Real v9 SQLite import-job round trip for marked/figured manuscripts, named styles, and final image-ID remapping. |
-| `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, and image-backed figures survive Markdown/EPUB-oriented publication rendering. |
+| `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, image-backed figures, and every ordered matter kind survive Markdown/EPUB-oriented publication rendering. |
 | `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, and in-use deletion fixtures. |
 | `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
+| `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, render/source drift, language/ISBN/profile/color rejection, exact-package proof isolation, and assistant-authorization fixtures. |
 
 ## tools/semantic-editor/
 
@@ -97,10 +98,10 @@
 | `assets/fonts.conf` | Minimal sibling-font-only Fontconfig policy copied beside the frozen executable with pinned Liberation Serif files. |
 | `src/lorekeeper_press_weasy/protocol.py` | Strict versioned request/response, diagnostic, artifact, and conformance-evidence contracts shared with the first spike. |
 | `src/lorekeeper_press_weasy/pdfx.py` | Exact-pinned PDF/X-1a:2001/PDF 1.3 adapter required because WeasyPrint 69's stock name targets the 2003 revision. |
-| `src/lorekeeper_press_weasy/render.py` | Generated/escaped paged HTML, restricted ICC fetcher, interior/wrap-cover rendering, hashing, and internal checks. |
+| `src/lorekeeper_press_weasy/markup.py` / `render.py` | Pure ordered semantic-matter/chapter markup plus generated paged HTML, restricted ICC fetcher, interior/wrap-cover rendering, hashing, and internal checks. |
 | `src/lorekeeper_press_weasy/inspect.py` | Independent pypdf inspection for PDF version, page boxes, fonts, colors, images, output intents, transparency, annotations, encryption, and actions. |
 | `src/lorekeeper_press_weasy/geometry.py` / `storage.py` | Measured PDF box geometry plus exclusive-lock, staged, fsynced, immutable job publication. |
-| `tests/*.py` | Authorized protocol/semantic-block, recursive PDF inspection, measured geometry, and concurrent immutable-publication fixtures. |
+| `tests/*.py` | Authorized protocol/semantic-block/matter-order, recursive PDF inspection, measured geometry, and concurrent immutable-publication fixtures. |
 | `scripts/build-windows-spike.ps1` / `scripts/extract-pyinstaller-native.py` / `scripts/audit-pyinstaller-binaries.py` | Archive-owned native extraction, controlled frozen Windows build, and fail-closed source classification/hashing of collected binaries. |
 | `scripts/verify-spike.ps1` / `scripts/verify-artifacts.py` | Frozen-process adversarial/repeatability harness plus independent PDF parse, text, box, and hash verification. |
 | `scripts/generate-license-inventory.py` | Deterministic uv-lock/package-metadata/license-file hash inventory generator for the active fallback environment. |
@@ -193,7 +194,7 @@
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
 | `ImagesPage.razor` | Images tab at `/projects/{Slug}/images`; wraps `ProjectLayout` and hosts `Images.ImagesContent`. |
 | `PublishPage.razor` | Publish tab at `/projects/{Slug}/publish`; wraps `ProjectLayout` and hosts `Publish.PublishContent`. |
-| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Scrollable embedded preview and Print/PDF document at `/projects/{Slug}/manuscript/print`; derives sheet/spread dimensions and body type from Publish Profile geometry, supports whole/split/sideways spreads, and waits for decoded assets before printing. |
+| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Edition-scoped embedded Print/PDF preview carrying ordered semantic matter and mixed-layout chapters; derives sheet/spread dimensions and body type from edition geometry and waits for decoded assets before printing. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
 
@@ -227,7 +228,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Responsive Publish workspace for autosaved metadata and shared page/body geometry, cover-aware title pages, PDF/EPUB spread presentation, outline/placement choices, preview/print, and exports. |
+| `PublishContent.razor` (+ `.razor.css`) | Responsive edition workspace for metadata, content/matter/style/cover design, deterministic press previews, product-form preflight/package downloads, and explicit exact-package proof records. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -589,18 +590,19 @@
 
 | File | Description |
 |------|-------------|
-| `PublishModels.cs` | Edition workspace, revision-aware mutations, matter/style mapping, document projection, export, cover, selection, placement, and rendered Picture Page contracts. |
+| `PublishModels.cs` | Edition workspace, revision-aware mutations, ordered semantic-matter/style mapping, document projection, export, cover, selection, placement, and rendered Picture Page contracts. |
 | `PageGeometryService.cs` | Default-publication-edition-derived page/spread calculation consumed by viewer pagination, rendering, image targeting, diagnostics, and publishing. |
 | `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning application boundary for edition lifecycle, settings, content, matter, style mappings, placements, audit history, comparison, and deterministic source fingerprints. |
 | `PublicationEditionMigrationService.cs` | Independent v10 online-backup, mapping-hash, validation, and journal boundary for losslessly replacing legacy single-profile publishing state. |
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
-| `PublishAssistantTools.cs` | Dedicated Publish assistant tool catalog exposing the complete edition mutation/read surface and migration diagnostics through owning services. |
+| `PublishAssistantTools.cs` | Dedicated Publish assistant tool catalog exposing the complete edition, render, cover, preflight, and package surface through owning services. |
 | `PublishAssistantService.cs` | Visible dedicated Publish assistant one-turn orchestration using the configured chat provider and the shared Publish tool catalog. |
-| `PublicationRenderService.cs` | Persisted/recoverable render queue, contained press adapter, immutable verified artifacts, semantic page maps, stale-state derivation, and render comparison. |
+| `PublicationRenderService.cs` | Persisted/recoverable render queue, contained ordered-matter press adapter, immutable verified artifacts, semantic page maps, stale-state derivation, and render comparison. |
 | `PublicationCoverService.cs` | Edition full-wrap template calculation, revisioned cover design, ISBN-13/vendor/spine diagnostics, and acknowledgement invalidation. |
-| `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade for edition-scoped TXT, Markdown, EPUB, and print-preview documents. |
+| `PublicationPackageService.cs` | Versioned fail-closed Preview preflight, product-form-specific deterministic package assembly, manifests, reports, and exact-package proof records. |
+| `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying every included ordered semantic-matter document into edition-scoped TXT, Markdown, EPUB, press, and print-preview output. |
 | `PublishEndpoints.cs` | Cacheable/range HTTP endpoints for validated cover/Picture Page surfaces and project-scoped immutable publication artifact viewing/download. |
-| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus a mixed-layout EPUB writer using Publish Profile type metrics and shared geometry for reflowable prose and accessible fixed cover/Picture Page items. |
+| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus an ordered semantic-matter, mixed-layout EPUB writer using shared geometry for reflowable prose and accessible fixed cover/Picture Page items. |
 
 ### Graph/
 

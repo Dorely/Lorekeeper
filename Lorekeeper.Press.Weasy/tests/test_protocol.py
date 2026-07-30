@@ -4,6 +4,7 @@ import copy
 import unittest
 
 from lorekeeper_press_weasy.protocol import validate_request
+from lorekeeper_press_weasy.markup import interior_content
 
 
 VALID_REQUEST = {
@@ -14,6 +15,7 @@ VALID_REQUEST = {
         "title": "Fixture",
         "author": "Lorekeeper",
         "chapters": [{"title": "One", "body": "A paragraph."}],
+        "matter": [],
     },
     "trim": {"widthInches": 6, "heightInches": 9},
     "cover": {
@@ -54,6 +56,70 @@ class ProtocolTests(unittest.TestCase):
 
         self.assertIsNotNone(request)
         self.assertEqual([], diagnostics)
+
+    def test_ordered_semantic_matter_is_accepted(self) -> None:
+        request = copy.deepcopy(VALID_REQUEST)
+        request["document"]["matter"] = [
+            {
+                "id": "33333333-3333-3333-3333-333333333333",
+                "location": "Back",
+                "kind": "AboutAuthor",
+                "title": "About the Author",
+                "body": "Biography.",
+                "blocks": [
+                    {
+                        "id": "44444444-4444-4444-4444-444444444444",
+                        "type": "Paragraph",
+                        "text": "Biography.",
+                    }
+                ],
+            }
+        ]
+
+        parsed, diagnostics = validate_request(request)
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual([], diagnostics)
+
+    def test_front_and_back_matter_render_around_chapters(self) -> None:
+        request = copy.deepcopy(VALID_REQUEST)
+        request["document"]["matter"] = [
+            {
+                "id": "33333333-3333-3333-3333-333333333333",
+                "location": "Front",
+                "kind": "Epigraph",
+                "title": "Epigraph",
+                "body": "Before",
+                "blocks": [
+                    {
+                        "id": "44444444-4444-4444-4444-444444444444",
+                        "type": "Paragraph",
+                        "text": "Before",
+                    }
+                ],
+            },
+            {
+                "id": "55555555-5555-5555-5555-555555555555",
+                "location": "Back",
+                "kind": "Custom",
+                "title": "Appendix",
+                "body": "After",
+                "blocks": [
+                    {
+                        "id": "66666666-6666-6666-6666-666666666666",
+                        "type": "Paragraph",
+                        "text": "After",
+                    }
+                ],
+            },
+        ]
+
+        rendered = interior_content(request["document"])
+
+        self.assertLess(rendered.index("Before"), rendered.index('class="chapter"'))
+        self.assertLess(rendered.index('class="chapter"'), rendered.index("After"))
+        self.assertNotIn("lk-block-33333333", rendered)
+        self.assertNotIn("lk-block-55555555", rendered)
 
     def test_unknown_fields_fail_closed(self) -> None:
         value = copy.deepcopy(VALID_REQUEST)

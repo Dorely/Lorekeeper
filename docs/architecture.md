@@ -245,10 +245,41 @@ acknowledgement after geometry changes. ISBN-13 validation is shared by UI,
 assistant, and render gating; the contained renderer emits the EAN-13 symbol or
 the permitted KDP overlay reserve and suppresses unsafe narrow-spine text.
 
+`PublicationPackageService` owns the versioned Preview preflight and final
+artifact-assembly boundary. It verifies current source fingerprints, correlated
+interior/cover render evidence, page geometry, page-box consistency, embedded
+fonts, annotations, security, Ingram output intent/transparency and fail-closed
+color-space evidence, cover diagnostics, ISBN, metadata, content, supported
+product geometry, page count, language, and the current prose-only print-image
+boundary before packaging. It
+normalizes the EPUB modification timestamp and ZIP entry metadata, validates
+safe EPUB entry paths plus container, OPF 3 metadata/manifest/spine, resource,
+XHTML, TOC/landmark, and navigation relationships, and writes deterministic
+product-form-specific package bytes. EPUB editions contain the normalized EPUB;
+paperback editions contain only their validated interior/cover PDFs, so a print
+identifier is never copied into a digital artifact. Every included ordered
+semantic-matter document is projected into TXT, Markdown, EPUB, browser print,
+and contained press output. The service persists SHA-256-addressed EPUB,
+front-cover, report, manifest, package, and
+exact-package proof records as edition artifacts. Package freshness combines
+the source fingerprint, stable applicable input hashes/runtime provenance,
+profile/rule version, assembler version, and the EPUB-exporter version only for
+EPUB packages; exact PDF row IDs remain
+an internal correlation snapshot and never leak into portable bytes. A short
+serializable transaction rechecks
+the source immediately before each package/proof write, so a concurrent
+fingerprint-affecting mutation cannot be mislabeled. Digital and
+physical proof confirmations are explicit user UI actions; assistant tools may
+read preflight/proof state and build an eligible package but cannot approve a
+proof. External EPUBCheck, Acrobat, vendor-upload, reader/device, and
+physical-production evidence remains a release gate, so all output stays
+`Preview`.
+
 Development resolves the exact-locked Python project and fingerprinted native
 payload. Packaged releases must configure a frozen renderer and ship controlled
 fonts/notices. This remains Preview, not a PDF/X or vendor-conformance claim.
-`PublishAssistantTools` exposes the full edition and render service surfaces
+`PublishAssistantTools` exposes the full edition, render, cover, preflight, and
+package service surfaces
 with the same IDs, validation, revisions, fingerprints, and diagnostics as the
 UI.
 

@@ -97,6 +97,8 @@ conversion/preflight tool.
 
 ## Phase 1 — publisher-ready novel foundation
 
+Status: `Preview; release certification pending`
+
 ### Certified outcome
 
 An existing or new prose-first project can be edited as a structured manuscript
@@ -419,7 +421,39 @@ changes; a user must acknowledge material layout changes before proof approval.
 
 #### 7. Preflight, EPUB 3, and publication package
 
-Status: `Planned`
+Status: `Preview; external conformance and production-proof validation pending`
+
+Implemented in the application on 2026-07-30. Edition-scoped preflight now
+checks metadata, content, ISBN/vendor rules, current artifact fingerprints,
+correlated render evidence, page geometry/boxes, embedded fonts, annotations,
+security, fail-closed output-intent/transparency/color evidence for the Ingram
+Preview profile, supported product/page/language scope, and cover
+template/barcode diagnostics. Eligible editions produce deterministic
+product-form-specific ZIPs: paperback packages contain the exact validated
+interior/cover PDFs, while EPUB packages contain a normalized,
+relationship-checked EPUB 3; both include a front-cover image when available, a
+SHA-256 manifest, and the complete preflight report. Print packages never
+synthesize a digital artifact from print-edition metadata or its ISBN. Every
+included semantic front/back-matter row is preserved in explicit order through
+TXT, Markdown, browser print, EPUB, and contained press rendering. The EPUB path
+emits and validates TOC and landmark navigation,
+spine XHTML, internal resources, and alternative text; mixed unsupported
+scripts and language marks fail closed for the initial English/Latin scope,
+including manuscript-figure and illustrated-prose captions/alternative text.
+Missing, malformed, empty, RGB, or unknown Ingram color-space evidence also
+fails closed.
+Package identity includes stable validated input hashes/provenance and every
+owning runtime/profile version; exact row IDs stay internal for build
+correlation, and source/input state is transactionally rechecked before
+persistence. ISBN rules distinguish optional supplied identifiers,
+Ingram requirements, Lorekeeper-generated barcodes, and KDP overlay reserves.
+Exact-package digital and physical proof records are explicit
+user actions; the Publish assistant can run/explain preflight and build packages
+through the same service but cannot approve proofs. The in-app structural EPUB
+check is not EPUBCheck, the press evidence is not Acrobat conformance, and no
+vendor upload, reader matrix, packaged-runtime matrix, or physical-production
+proof has been completed. Those gates keep the feature and Phase 1 output
+`Preview`.
 
 Complete the in-app production path.
 

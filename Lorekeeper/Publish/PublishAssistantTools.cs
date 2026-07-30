@@ -12,7 +12,8 @@ public sealed class PublishAssistantTools(
     IPublishService publishing,
     IPublicationEditionMigrationService migrations,
     IPublicationRenderService renders,
-    IPublicationCoverService covers)
+    IPublicationCoverService covers,
+    IPublicationPackageService packages)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -152,6 +153,14 @@ public sealed class PublishAssistantTools(
                     UpdateCoverAsync(context, editionId, update),
                 name: "update_publication_cover_design",
                 description: "Update every editable cover property and optionally acknowledge the current calculated template."),
+            AIFunctionFactory.Create(
+                method: (Guid editionId) => PreflightAsync(context, editionId),
+                name: "preflight_publication_edition",
+                description: "Run the same versioned metadata, content, PDF, cover, barcode, staleness, and scope checks as the UI."),
+            AIFunctionFactory.Create(
+                method: (Guid editionId) => BuildPackageAsync(context, editionId),
+                name: "build_publication_package",
+                description: "Build Preview EPUB, manifest, report, cover image when available, and downloadable package only when preflight has no errors."),
         ];
         return Task.FromResult(tools);
     }
@@ -319,6 +328,12 @@ public sealed class PublishAssistantTools(
         Guid editionId,
         PublicationCoverDesignUpdate update) =>
         Serialize(await covers.UpdateAsync(context.ProjectId, editionId, update));
+
+    private async Task<string> PreflightAsync(PublishAssistantContext context, Guid editionId) =>
+        Serialize(await packages.PreflightAsync(context.ProjectId, editionId));
+
+    private async Task<string> BuildPackageAsync(PublishAssistantContext context, Guid editionId) =>
+        Serialize(await packages.BuildAsync(context.ProjectId, editionId));
 
     private static string Serialize<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
 }

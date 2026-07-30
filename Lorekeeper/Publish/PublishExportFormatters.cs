@@ -19,7 +19,7 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
         var sb = new StringBuilder();
         AppendCenteredTitle(sb, document);
         AppendMetadata(sb, document);
-        AppendMatter(sb, "Dedication", document.Profile.Dedication);
+        AppendMatter(sb, document, PublicationMatterLocation.Front);
 
         if (document.Profile.IncludeTableOfContents)
             AppendPlainToc(sb, document);
@@ -46,8 +46,7 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
             }
         }
 
-        AppendMatter(sb, "Acknowledgments", document.Profile.Acknowledgments);
-        AppendMatter(sb, "References", document.Profile.References);
+        AppendMatter(sb, document, PublicationMatterLocation.Back);
         return Encoding.UTF8.GetBytes(sb.ToString().TrimEnd() + Environment.NewLine);
     }
 
@@ -95,6 +94,25 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
         if (string.IsNullOrWhiteSpace(text)) return;
         AppendMatterStart(sb, title);
         AppendText(sb, text);
+    }
+
+    private static void AppendMatter(
+        StringBuilder sb,
+        PublishDocument document,
+        PublicationMatterLocation location)
+    {
+        foreach (var item in document.Matter
+            .Where(item => item.Location == location)
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id))
+        {
+            AppendMatter(
+                sb,
+                PublicationMatterFormatting.Title(item),
+                SemanticPublishFormatting.PlainText(
+                    item.Manuscript,
+                    imageId => document.Assets.FirstOrDefault(asset => asset.Id == imageId)));
+        }
     }
 
     private static void AppendMatterStart(StringBuilder sb, string title)
@@ -174,7 +192,7 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
         if (!string.IsNullOrWhiteSpace(document.Profile.Author))
             sb.AppendLine().Append("_by ").Append(EscapeInline(document.Profile.Author)).AppendLine("_");
         AppendMetadata(sb, document);
-        AppendMatter(sb, "Dedication", document.Profile.Dedication);
+        AppendMatter(sb, document, PublicationMatterLocation.Front);
 
         if (document.Profile.IncludeTableOfContents)
             AppendToc(sb, document);
@@ -207,8 +225,7 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
             }
         }
 
-        AppendMatter(sb, "Acknowledgments", document.Profile.Acknowledgments);
-        AppendMatter(sb, "References", document.Profile.References);
+        AppendMatter(sb, document, PublicationMatterLocation.Back);
         return Encoding.UTF8.GetBytes(sb.ToString().TrimEnd() + Environment.NewLine);
     }
 
@@ -251,6 +268,25 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
         sb.AppendLine().Append("## ").AppendLine(title).AppendLine();
         foreach (var line in SplitLines(text.TrimEnd()))
             sb.AppendLine(EscapeInline(line));
+    }
+
+    private static void AppendMatter(
+        StringBuilder sb,
+        PublishDocument document,
+        PublicationMatterLocation location)
+    {
+        foreach (var item in document.Matter
+            .Where(item => item.Location == location)
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id))
+        {
+            AppendMatter(
+                sb,
+                PublicationMatterFormatting.Title(item),
+                SemanticPublishFormatting.Markdown(
+                    item.Manuscript,
+                    imageId => document.Assets.FirstOrDefault(asset => asset.Id == imageId)));
+        }
     }
 
     private static void AppendBlockquote(StringBuilder sb, string text)
@@ -451,7 +487,7 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
                 RenderXhtmlPage(document, "Description", RenderMatterBody("Description", document.Profile.Description)),
                 IncludeInNavigation: false));
         }
-        AddMatter(items, document, "dedication", "Dedication", document.Profile.Dedication);
+        AddMatter(items, document, imageItems, PublicationMatterLocation.Front);
         if (document.Profile.IncludeTableOfContents && document.Profile.IncludeVisibleTableOfContents)
             items.Add(new EpubXhtmlItem("toc-page", "toc.xhtml", "Table of Contents", RenderXhtmlPage(document, "Table of Contents", RenderVisibleToc(document))));
 
@@ -488,8 +524,7 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
             }
         }
 
-        AddMatter(items, document, "acknowledgments", "Acknowledgments", document.Profile.Acknowledgments);
-        AddMatter(items, document, "references", "References", document.Profile.References);
+        AddMatter(items, document, imageItems, PublicationMatterLocation.Back);
         return items;
     }
 
@@ -517,6 +552,14 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
             {
                 if (document.Assets.FirstOrDefault(asset => asset.Id == block.ImageId) is { } asset)
                     assets[asset.Id] = asset;
+            }
+        }
+        foreach (var block in document.Matter.SelectMany(item => item.Manuscript.Content))
+        {
+            if (block.Type == ManuscriptBlockType.Figure
+                && document.Assets.FirstOrDefault(asset => asset.Id == block.ImageId) is { } asset)
+            {
+                assets[asset.Id] = asset;
             }
         }
 
@@ -624,10 +667,28 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
             IncludeInNavigation: false));
     }
 
-    private static void AddMatter(List<EpubXhtmlItem> items, PublishDocument document, string id, string title, string text)
+    private static void AddMatter(
+        List<EpubXhtmlItem> items,
+        PublishDocument document,
+        IReadOnlyList<EpubImageItem> imageItems,
+        PublicationMatterLocation location)
     {
-        if (string.IsNullOrWhiteSpace(text)) return;
-        items.Add(new EpubXhtmlItem(id, $"{id}.xhtml", title, RenderXhtmlPage(document, title, RenderMatterBody(title, text))));
+        foreach (var item in document.Matter
+            .Where(item => item.Location == location)
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id))
+        {
+            var id = $"matter-{item.Id:N}";
+            var title = PublicationMatterFormatting.Title(item);
+            var content = SemanticPublishFormatting.Html(
+                item.Manuscript,
+                imageId => ImageHref(imageItems, imageId));
+            items.Add(new EpubXhtmlItem(
+                id,
+                $"{id}.xhtml",
+                title,
+                RenderXhtmlPage(document, title, RenderSemanticMatterBody(title, content))));
+        }
     }
 
     private static string RenderTitleBody(PublishDocument document)
@@ -728,6 +789,9 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
         return sb.ToString();
     }
 
+    private static string RenderSemanticMatterBody(string title, string content) =>
+        $"<section class=\"matter-page\"><h1>{Html(title)}</h1>{content}</section>";
+
     private static void AppendFigures(
         StringBuilder sb,
         PublishDocument document,
@@ -789,15 +853,22 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
     {
         if (!blocksByBlock.TryGetValue((blockId, position), out var blocks)) return;
         foreach (var block in blocks)
-            AppendAssetFigure(sb, imageItems, block.ImageId, block.Caption);
+            AppendAssetFigure(sb, imageItems, block.ImageId, block.Caption, block.AltTextOverride);
     }
 
-    private static void AppendAssetFigure(StringBuilder sb, IReadOnlyList<EpubImageItem> imageItems, Guid imageId, string caption)
+    private static void AppendAssetFigure(
+        StringBuilder sb,
+        IReadOnlyList<EpubImageItem> imageItems,
+        Guid imageId,
+        string caption,
+        string altTextOverride)
     {
-        var href = ImageHref(imageItems, imageId);
-        if (href is null) return;
+        var image = imageItems.FirstOrDefault(candidate => !candidate.IsCover && candidate.Asset.Id == imageId);
+        if (image is null) return;
+        var alt = string.IsNullOrWhiteSpace(altTextOverride) ? image.Asset.AltText : altTextOverride;
 
-        sb.Append("<figure class=\"figure\"><img src=\"").Append(Html(href)).AppendLine("\" alt=\"\" />");
+        sb.Append("<figure class=\"figure\"><img src=\"").Append(Html(image.Href))
+            .Append("\" alt=\"").Append(Html(alt)).AppendLine("\" />");
         if (!string.IsNullOrWhiteSpace(caption))
             sb.Append("<figcaption>").Append(Html(caption)).AppendLine("</figcaption>");
         sb.AppendLine("</figure>");
@@ -950,6 +1021,20 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
         sb.AppendLine("<h1>Table of Contents</h1><ol>");
         foreach (var item in xhtmlItems.Where(item => item.IncludeInNavigation))
             sb.Append("<li><a href=\"").Append(item.Href).Append("\">").Append(Html(item.Title)).AppendLine("</a></li>");
+        sb.AppendLine("</ol></nav>");
+        sb.AppendLine("""<nav epub:type="landmarks" id="landmarks">""");
+        sb.AppendLine("<h2>Landmarks</h2><ol>");
+        if (xhtmlItems.FirstOrDefault(item => item.Id == "cover-page") is { } cover)
+            sb.Append("<li><a epub:type=\"cover\" href=\"").Append(cover.Href).AppendLine("\">Cover</a></li>");
+        if (xhtmlItems.FirstOrDefault(item => item.Id == "title") is { } title)
+            sb.Append("<li><a epub:type=\"titlepage\" href=\"").Append(title.Href).AppendLine("\">Title Page</a></li>");
+        var body = xhtmlItems.FirstOrDefault(item =>
+                item.Id.StartsWith("chapter-", StringComparison.Ordinal)
+                || item.Id.StartsWith("act-", StringComparison.Ordinal)
+                || item.Id.StartsWith("section-", StringComparison.Ordinal))
+            ?? xhtmlItems.FirstOrDefault(item => item.IncludeInNavigation);
+        if (body is not null)
+            sb.Append("<li><a epub:type=\"bodymatter\" href=\"").Append(body.Href).AppendLine("\">Start Reading</a></li>");
         sb.AppendLine("</ol></nav>");
         sb.AppendLine("</body></html>");
         return sb.ToString();
@@ -1259,7 +1344,11 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
         images.FirstOrDefault(image => image.IsCover)?.Id;
 
     private static string ImageExtension(string contentType) =>
-        contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ? "jpg" : "png";
+        contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase)
+            ? "jpg"
+            : contentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase)
+                ? "webp"
+                : "png";
 
     private static string Language(PublishDocument document) =>
         string.IsNullOrWhiteSpace(document.Profile.Language) ? "en" : document.Profile.Language.Trim();
@@ -1276,6 +1365,28 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
 
     private sealed record EpubViewport(int Width, int Height);
     private sealed record EpubImageItem(string Id, string Href, PublishAssetDocument Asset, bool IsCover);
+}
+
+internal static class PublicationMatterFormatting
+{
+    public static string Title(PublishMatterDocument item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Title))
+            return item.Title.Trim();
+        return item.Kind switch
+        {
+            PublicationMatterKind.TitlePage => "Title Page",
+            PublicationMatterKind.Copyright => "Copyright",
+            PublicationMatterKind.Dedication => "Dedication",
+            PublicationMatterKind.Epigraph => "Epigraph",
+            PublicationMatterKind.Contents => "Contents",
+            PublicationMatterKind.Acknowledgments => "Acknowledgments",
+            PublicationMatterKind.AboutAuthor => "About the Author",
+            PublicationMatterKind.AlsoBy => "Also By",
+            PublicationMatterKind.References => "References",
+            _ => "Additional Matter",
+        };
+    }
 }
 
 internal static class SemanticPublishFormatting

@@ -22,6 +22,7 @@ public enum PublicationArtifactKind
     Manifest,
     PreflightReport,
     PublicationPackage,
+    ProofRecord,
 }
 
 public class PublicationRenderJob

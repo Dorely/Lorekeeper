@@ -42,6 +42,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Edition-aware full-wrap cover design with page-count/paper-caliper geometry,
   copy and background controls, template acknowledgement, ISBN-13/EAN-13
   barcode or KDP overlay-reserve behavior, cover PDF output, and assistant parity.
+- Versioned Preview publication preflight with renderer-evidence checks,
+  deterministic EPUB 3/package assembly, downloadable manifests and reports,
+  exact-package digital/physical proof records, and matching assistant
+  preflight/package controls. Independent EPUBCheck, Acrobat, vendor-upload, and
+  physical-production validation remain release gates.
 - Versioned project import/export (current v11 manuscripts/styles/editions/covers,
   isolated v8-v10 adapters, and v1-v7 text adapters) plus TXT,
   Markdown, mixed-layout EPUB, and a

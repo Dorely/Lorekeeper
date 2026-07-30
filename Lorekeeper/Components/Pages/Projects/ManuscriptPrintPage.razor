@@ -82,14 +82,9 @@ else if (_document is not null)
             </section>
         }
 
-        @if (!string.IsNullOrWhiteSpace(_document.Profile.Dedication))
+        @foreach (var item in Matter(PublicationMatterLocation.Front))
         {
-            <section class="manuscript-matter manuscript-centered-matter manuscript-sheet manuscript-sheet--normal">
-                @foreach (var paragraph in SplitParagraphs(_document.Profile.Dedication))
-                {
-                    <p>@RenderParagraph(paragraph)</p>
-                }
-            </section>
+            @RenderMatter(item)
         }
 
         @if (_document.Profile.IncludeTableOfContents && _document.Profile.IncludeVisibleTableOfContents)
@@ -204,26 +199,9 @@ else if (_document is not null)
             }
         }
 
-        @if (!string.IsNullOrWhiteSpace(_document.Profile.Acknowledgments))
+        @foreach (var item in Matter(PublicationMatterLocation.Back))
         {
-            <section class="manuscript-matter manuscript-sheet manuscript-sheet--normal">
-                <h2>Acknowledgments</h2>
-                @foreach (var paragraph in SplitParagraphs(_document.Profile.Acknowledgments))
-                {
-                    <p>@RenderParagraph(paragraph)</p>
-                }
-            </section>
-        }
-
-        @if (!string.IsNullOrWhiteSpace(_document.Profile.References))
-        {
-            <section class="manuscript-matter manuscript-sheet manuscript-sheet--normal">
-                <h2>References</h2>
-                @foreach (var paragraph in SplitParagraphs(_document.Profile.References))
-                {
-                    <p>@RenderParagraph(paragraph)</p>
-                }
-            </section>
+            @RenderMatter(item)
         }
     </article>
 }
@@ -336,6 +314,40 @@ else if (_document is not null)
                 && placement.PlacementKind == placementKind)
             .OrderBy(placement => placement.SortOrder);
     }
+
+    private IEnumerable<PublishMatterDocument> Matter(PublicationMatterLocation location)
+    {
+        if (_document is null)
+            return [];
+        return _document.Matter
+            .Where(item => item.Location == location)
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id);
+    }
+
+    private RenderFragment RenderMatter(PublishMatterDocument item) => builder =>
+    {
+        var sequence = 0;
+        builder.OpenElement(sequence++, "section");
+        builder.AddAttribute(sequence++, "class", "manuscript-matter manuscript-sheet manuscript-sheet--normal");
+        builder.OpenElement(sequence++, "h2");
+        builder.AddContent(sequence++, PublicationMatterFormatting.Title(item));
+        builder.CloseElement();
+        builder.OpenElement(sequence++, "div");
+        builder.AddAttribute(sequence++, "class", "manuscript-prose");
+        foreach (var block in item.Manuscript.Content)
+        {
+            builder.AddMarkupContent(
+                sequence++,
+                SemanticPublishFormatting.HtmlBlock(
+                    block,
+                    imageId => FindAsset(imageId) is { } asset
+                        ? ImageDataUrl(asset)
+                        : null));
+        }
+        builder.CloseElement();
+        builder.CloseElement();
+    };
 
     private static IReadOnlyList<IReadOnlyList<string>> SplitParagraphs(string text)
     {

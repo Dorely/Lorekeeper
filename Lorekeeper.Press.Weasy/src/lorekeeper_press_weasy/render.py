@@ -13,6 +13,7 @@ from weasyprint.logger import LOGGER
 
 from .geometry import POINTS_PER_INCH, geometry_errors, measured_dimensions
 from .inspect import PdfInspection, inspect_pdf, pdfx_2001_errors
+from .markup import interior_content
 from .pdfx import DECLARED_STANDARD, PROFILE_NAME, register_pdfx_2001_profile
 from .protocol import (
     INGRAM_PROFILE,
@@ -220,49 +221,6 @@ def _compile(
 
 def _interior_html(request: dict[str, Any], profile_path: Path | None) -> str:
     document = request["document"]
-    front_matter = []
-    if document.get("includeTitlePage", False):
-        subtitle = (
-            f"<p class=\"subtitle\">{html.escape(document.get('subtitle', ''))}</p>"
-            if document.get("subtitle")
-            else ""
-        )
-        front_matter.append(
-            f'<section class="front title-page"><h1>{html.escape(document["title"])}</h1>'
-            f'{subtitle}<p>{html.escape(document["author"])}</p></section>'
-        )
-    if document.get("copyright") or document.get("publisher"):
-        front_matter.append(
-            f'<section class="front copyright-page"><p>{html.escape(document.get("copyright", ""))}</p>'
-            f'<p>{html.escape(document.get("publisher", ""))}</p></section>'
-        )
-    if document.get("dedication"):
-        front_matter.append(
-            f'<section class="front dedication"><p>{html.escape(document["dedication"])}</p></section>'
-        )
-    if document.get("includeVisibleTableOfContents", False):
-        items = "".join(
-            f"<li>{html.escape(chapter['title'])}</li>"
-            for chapter in document["chapters"]
-        )
-        front_matter.append(f'<section class="front contents"><h1>Contents</h1><ol>{items}</ol></section>')
-    chapters = []
-    for chapter in document["chapters"]:
-        chapter_id = chapter.get("id", "")
-        if chapter.get("blocks") is not None:
-            paragraphs = "".join(
-                _block_html(chapter_id, block)
-                for block in chapter["blocks"]
-            )
-        else:
-            paragraphs = "".join(
-                f"<p>{html.escape(paragraph)}</p>"
-                for paragraph in chapter["body"].split("\n\n")
-                if paragraph
-            )
-        chapters.append(
-            f'<section class="chapter"><h1>{html.escape(chapter["title"])}</h1>{paragraphs}</section>'
-        )
     return _html_document(
         request,
         profile_path,
@@ -281,6 +239,8 @@ def _interior_html(request: dict[str, Any], profile_path: Path | None) -> str:
         body {{ font-family: "Liberation Serif", serif; font-size: {request["trim"].get("bodyFontSizePoints", 11)}pt; line-height: {request["trim"].get("bodyLineHeight", 1.32)}; }}
         .chapter {{ page: chapter; break-before: right; }}
         .front {{ page: front; break-after: page; }}
+        .matter {{ break-before: page; break-after: page; }}
+        .back {{ page: chapter; }}
         .title-page {{ align-items: center; display: flex; flex-direction: column; justify-content: center; text-align: center; }}
         .title-page h1 {{ font-size: 28pt; margin-bottom: 0.2in; }}
         .copyright-page {{ display: flex; flex-direction: column; justify-content: end; font-size: 9pt; }}
@@ -290,25 +250,8 @@ def _interior_html(request: dict[str, Any], profile_path: Path | None) -> str:
         p {{ margin: 0; text-align: justify; text-indent: 1.25em; hyphens: auto; orphans: 3; widows: 3; }}
         h1 + p {{ text-indent: 0; }}
         """,
-        "".join(front_matter) + "".join(chapters),
+        interior_content(document),
     )
-
-
-def _block_html(chapter_id: str, block: dict[str, Any]) -> str:
-    anchor = f"lk-block-{chapter_id.replace('-', '')}{block['id'].replace('-', '')}"
-    text = html.escape(block["text"])
-    block_type = block["type"]
-    if block_type == "SceneBreak":
-        return f'<p id="{anchor}" class="scene-break">* * *</p>'
-    if block_type == "Heading":
-        return f'<h2 id="{anchor}">{text}</h2>'
-    if block_type == "BlockQuote":
-        return f'<blockquote id="{anchor}">{text}</blockquote>'
-    if block_type == "ListItem":
-        return f'<p id="{anchor}" class="list-item">â€¢ {text}</p>'
-    if block_type == "Figure":
-        return f'<p id="{anchor}" class="figure-caption">{text}</p>'
-    return f'<p id="{anchor}">{text}</p>'
 
 
 def _cover_html(

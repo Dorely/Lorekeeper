@@ -137,15 +137,12 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
     if isinstance(document, dict):
         _keys(
             document,
-            {"title", "author", "chapters"},
+            {"title", "author", "chapters", "matter"},
             {
                 "language",
                 "subtitle",
                 "publisher",
                 "copyright",
-                "dedication",
-                "acknowledgments",
-                "references",
                 "includeTitlePage",
                 "includeVisibleTableOfContents",
             },
@@ -156,17 +153,18 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
         _bounded_text(document.get("author"), "document.author", 1, 500, diagnostics)
         if "language" in document:
             _bounded_text(document.get("language"), "document.language", 2, 40, diagnostics)
-        for field_name in ("subtitle", "publisher", "copyright", "dedication", "acknowledgments", "references"):
+        for field_name in ("subtitle", "publisher", "copyright"):
             if field_name in document:
                 _bounded_text(document.get(field_name), f"document.{field_name}", 0, 100_000, diagnostics)
         for field_name in ("includeTitlePage", "includeVisibleTableOfContents"):
             if field_name in document and not isinstance(document.get(field_name), bool):
                 diagnostics.append(_error("PRESS_BOOLEAN_INVALID", f"document.{field_name} must be a boolean."))
+        total_characters = 0
+        total_blocks = 0
         chapters = document.get("chapters")
         if not isinstance(chapters, list) or not 1 <= len(chapters) <= 500:
             diagnostics.append(_error("PRESS_CHAPTERS_INVALID", "document.chapters must contain 1-500 chapters."))
         else:
-            total_characters = 0
             for index, chapter in enumerate(chapters):
                 if not isinstance(chapter, dict):
                     diagnostics.append(_error("PRESS_CHAPTER_INVALID", f"document.chapters[{index}] must be an object."))
@@ -191,6 +189,7 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
                     if not isinstance(blocks, list) or len(blocks) > 100_000:
                         diagnostics.append(_error("PRESS_BLOCKS_INVALID", f"document.chapters[{index}].blocks must be a list."))
                     else:
+                        total_blocks += len(blocks)
                         for block_index, block in enumerate(blocks):
                             if not isinstance(block, dict):
                                 diagnostics.append(_error("PRESS_BLOCK_INVALID", f"document.chapters[{index}].blocks[{block_index}] must be an object."))
@@ -205,8 +204,59 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
                             _uuid(block.get("id"), f"document.chapters[{index}].blocks[{block_index}].id", diagnostics)
                             _bounded_text(block.get("type"), f"document.chapters[{index}].blocks[{block_index}].type", 1, 40, diagnostics)
                             _bounded_text(block.get("text"), f"document.chapters[{index}].blocks[{block_index}].text", 0, 2_000_000, diagnostics)
-            if total_characters > 10_000_000:
-                diagnostics.append(_error("PRESS_DOCUMENT_TOO_LARGE", "Chapter content exceeds 10,000,000 characters."))
+        matter = document.get("matter")
+        if not isinstance(matter, list) or len(matter) > 500:
+            diagnostics.append(_error("PRESS_MATTER_INVALID", "document.matter must be a list with at most 500 items."))
+        else:
+            for index, item in enumerate(matter):
+                path = f"document.matter[{index}]"
+                if not isinstance(item, dict):
+                    diagnostics.append(_error("PRESS_MATTER_INVALID", f"{path} must be an object."))
+                    continue
+                _exact_keys(item, {"id", "location", "kind", "title", "body", "blocks"}, path, diagnostics)
+                _bounded_text(item.get("id"), f"{path}.id", 1, 80, diagnostics)
+                _uuid(item.get("id"), f"{path}.id", diagnostics)
+                if item.get("location") not in {"Front", "Back"}:
+                    diagnostics.append(_error("PRESS_MATTER_LOCATION_INVALID", f"{path}.location is invalid."))
+                if item.get("kind") not in {
+                    "TitlePage",
+                    "Copyright",
+                    "Dedication",
+                    "Epigraph",
+                    "Contents",
+                    "Acknowledgments",
+                    "AboutAuthor",
+                    "AlsoBy",
+                    "References",
+                    "Custom",
+                }:
+                    diagnostics.append(_error("PRESS_MATTER_KIND_INVALID", f"{path}.kind is invalid."))
+                _bounded_text(item.get("title"), f"{path}.title", 1, 500, diagnostics)
+                _bounded_text(item.get("body"), f"{path}.body", 0, 2_000_000, diagnostics)
+                if isinstance(item.get("body"), str):
+                    total_characters += len(item["body"])
+                blocks = item.get("blocks")
+                if not isinstance(blocks, list) or len(blocks) > 100_000:
+                    diagnostics.append(_error("PRESS_BLOCKS_INVALID", f"{path}.blocks must be a list."))
+                else:
+                    total_blocks += len(blocks)
+                    for block_index, block in enumerate(blocks):
+                        block_path = f"{path}.blocks[{block_index}]"
+                        if not isinstance(block, dict):
+                            diagnostics.append(_error("PRESS_BLOCK_INVALID", f"{block_path} must be an object."))
+                            continue
+                        _exact_keys(block, {"id", "type", "text"}, block_path, diagnostics)
+                        _bounded_text(block.get("id"), f"{block_path}.id", 1, 80, diagnostics)
+                        _uuid(block.get("id"), f"{block_path}.id", diagnostics)
+                        _bounded_text(block.get("type"), f"{block_path}.type", 1, 40, diagnostics)
+                        _bounded_text(block.get("text"), f"{block_path}.text", 0, 2_000_000, diagnostics)
+        if total_characters > 10_000_000 or total_blocks > 100_000:
+            diagnostics.append(
+                _error(
+                    "PRESS_DOCUMENT_TOO_LARGE",
+                    "Combined chapter and matter content exceeds the press-runtime limits.",
+                )
+            )
     else:
         diagnostics.append(_error("PRESS_DOCUMENT_INVALID", "document must be an object."))
 

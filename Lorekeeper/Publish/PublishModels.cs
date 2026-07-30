@@ -229,11 +229,20 @@ public sealed record PublishDocument(
     public string SourceFingerprint { get; init; } = string.Empty;
     public ChapterPageLayoutKind? CoverPageLayoutKind { get; init; }
     public IReadOnlyList<PublishManuscriptStyleDocument> NamedStyles { get; init; } = [];
+    public IReadOnlyList<PublishMatterDocument> Matter { get; init; } = [];
 
     public string DisplayTitle => string.IsNullOrWhiteSpace(Profile.TitleOverride)
         ? ProjectName
         : Profile.TitleOverride.Trim();
 }
+
+public sealed record PublishMatterDocument(
+    Guid Id,
+    PublicationMatterLocation Location,
+    PublicationMatterKind Kind,
+    string Title,
+    int SortOrder,
+    ManuscriptDocument Manuscript);
 
 public sealed record PublishManuscriptStyleDocument(
     string Name,
@@ -250,9 +259,6 @@ public sealed record PublishDocumentProfile(
     string Copyright,
     string Isbn,
     string Description,
-    string Dedication,
-    string Acknowledgments,
-    string References,
     bool IncludeTableOfContents,
     bool IncludeVisibleTableOfContents,
     bool IncludeActSynopses,
