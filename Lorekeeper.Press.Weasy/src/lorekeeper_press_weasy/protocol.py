@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import UUID
 
 from . import __version__
 
 
 PROTOCOL_VERSION = 1
-KDP_PROFILE = "kdp-paperback-6x9-spike-v1"
-INGRAM_PROFILE = "ingram-pdf-x1a-experimental-v1"
+KDP_PROFILE = "kdp-paperback-6x9-preview-v1"
+INGRAM_PROFILE = "ingram-pdf-x1a-preview-v1"
 SUPPORTED_PROFILES = frozenset((KDP_PROFILE, INGRAM_PROFILE))
 
 
@@ -91,6 +92,7 @@ def response(
     *,
     artifacts: list[dict[str, Any]] | None = None,
     evidence: RenderEvidence | None = None,
+    page_map: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "protocolVersion": PROTOCOL_VERSION,
@@ -100,6 +102,7 @@ def response(
         "artifacts": artifacts or [],
         "diagnostics": [diagnostic.to_dict() for diagnostic in diagnostics],
         "evidence": (evidence or RenderEvidence()).to_dict(),
+        "pageMap": page_map or [],
     }
 
 
@@ -132,9 +135,33 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
 
     document = value.get("document")
     if isinstance(document, dict):
-        _exact_keys(document, {"title", "author", "chapters"}, "document", diagnostics)
+        _keys(
+            document,
+            {"title", "author", "chapters"},
+            {
+                "language",
+                "subtitle",
+                "publisher",
+                "copyright",
+                "dedication",
+                "acknowledgments",
+                "references",
+                "includeTitlePage",
+                "includeVisibleTableOfContents",
+            },
+            "document",
+            diagnostics,
+        )
         _bounded_text(document.get("title"), "document.title", 1, 500, diagnostics)
         _bounded_text(document.get("author"), "document.author", 1, 500, diagnostics)
+        if "language" in document:
+            _bounded_text(document.get("language"), "document.language", 2, 40, diagnostics)
+        for field_name in ("subtitle", "publisher", "copyright", "dedication", "acknowledgments", "references"):
+            if field_name in document:
+                _bounded_text(document.get(field_name), f"document.{field_name}", 0, 100_000, diagnostics)
+        for field_name in ("includeTitlePage", "includeVisibleTableOfContents"):
+            if field_name in document and not isinstance(document.get(field_name), bool):
+                diagnostics.append(_error("PRESS_BOOLEAN_INVALID", f"document.{field_name} must be a boolean."))
         chapters = document.get("chapters")
         if not isinstance(chapters, list) or not 1 <= len(chapters) <= 500:
             diagnostics.append(_error("PRESS_CHAPTERS_INVALID", "document.chapters must contain 1-500 chapters."))
@@ -144,12 +171,40 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
                 if not isinstance(chapter, dict):
                     diagnostics.append(_error("PRESS_CHAPTER_INVALID", f"document.chapters[{index}] must be an object."))
                     continue
-                _exact_keys(chapter, {"title", "body"}, f"document.chapters[{index}]", diagnostics)
+                _keys(
+                    chapter,
+                    {"title", "body"},
+                    {"id", "blocks"},
+                    f"document.chapters[{index}]",
+                    diagnostics,
+                )
                 _bounded_text(chapter.get("title"), f"document.chapters[{index}].title", 1, 500, diagnostics)
                 body = chapter.get("body")
                 _bounded_text(body, f"document.chapters[{index}].body", 1, 2_000_000, diagnostics)
                 if isinstance(body, str):
                     total_characters += len(body)
+                if "id" in chapter:
+                    _bounded_text(chapter.get("id"), f"document.chapters[{index}].id", 1, 80, diagnostics)
+                    _uuid(chapter.get("id"), f"document.chapters[{index}].id", diagnostics)
+                blocks = chapter.get("blocks")
+                if blocks is not None:
+                    if not isinstance(blocks, list) or len(blocks) > 100_000:
+                        diagnostics.append(_error("PRESS_BLOCKS_INVALID", f"document.chapters[{index}].blocks must be a list."))
+                    else:
+                        for block_index, block in enumerate(blocks):
+                            if not isinstance(block, dict):
+                                diagnostics.append(_error("PRESS_BLOCK_INVALID", f"document.chapters[{index}].blocks[{block_index}] must be an object."))
+                                continue
+                            _exact_keys(
+                                block,
+                                {"id", "type", "text"},
+                                f"document.chapters[{index}].blocks[{block_index}]",
+                                diagnostics,
+                            )
+                            _bounded_text(block.get("id"), f"document.chapters[{index}].blocks[{block_index}].id", 1, 80, diagnostics)
+                            _uuid(block.get("id"), f"document.chapters[{index}].blocks[{block_index}].id", diagnostics)
+                            _bounded_text(block.get("type"), f"document.chapters[{index}].blocks[{block_index}].type", 1, 40, diagnostics)
+                            _bounded_text(block.get("text"), f"document.chapters[{index}].blocks[{block_index}].text", 0, 2_000_000, diagnostics)
             if total_characters > 10_000_000:
                 diagnostics.append(_error("PRESS_DOCUMENT_TOO_LARGE", "Chapter content exceeds 10,000,000 characters."))
     else:
@@ -157,9 +212,21 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
 
     trim = value.get("trim")
     if isinstance(trim, dict):
-        _exact_keys(trim, {"widthInches", "heightInches"}, "trim", diagnostics)
+        _keys(
+            trim,
+            {"widthInches", "heightInches"},
+            {"marginInches", "bodyFontSizePoints", "bodyLineHeight"},
+            "trim",
+            diagnostics,
+        )
         _bounded_number(trim.get("widthInches"), "trim.widthInches", 4.0, 12.0, diagnostics)
         _bounded_number(trim.get("heightInches"), "trim.heightInches", 6.0, 15.0, diagnostics)
+        if "marginInches" in trim:
+            _bounded_number(trim.get("marginInches"), "trim.marginInches", 0.25, 2.0, diagnostics)
+        if "bodyFontSizePoints" in trim:
+            _bounded_number(trim.get("bodyFontSizePoints"), "trim.bodyFontSizePoints", 6.0, 36.0, diagnostics)
+        if "bodyLineHeight" in trim:
+            _bounded_number(trim.get("bodyLineHeight"), "trim.bodyLineHeight", 0.8, 3.0, diagnostics)
         if (
             isinstance(trim.get("widthInches"), (int, float))
             and not isinstance(trim.get("widthInches"), bool)
@@ -173,7 +240,7 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
             diagnostics.append(
                 _error(
                     "PRESS_PROFILE_TRIM_MISMATCH",
-                    "The spike profiles are restricted to exactly 6 × 9 inches.",
+                    "The initial paperback profiles are restricted to exactly 6 × 9 inches.",
                 )
             )
     else:
@@ -202,6 +269,21 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
     return (value if not diagnostics else None), diagnostics
 
 
+def _keys(
+    value: dict[str, Any],
+    required: set[str],
+    optional: set[str],
+    path: str,
+    diagnostics: list[Diagnostic],
+) -> None:
+    unknown = sorted(set(value) - required - optional)
+    missing = sorted(required - set(value))
+    if unknown:
+        diagnostics.append(_error("PRESS_UNKNOWN_FIELD", f"{path} contains unknown fields: {', '.join(unknown)}."))
+    if missing:
+        diagnostics.append(_error("PRESS_REQUIRED_FIELD", f"{path} is missing fields: {', '.join(missing)}."))
+
+
 def _exact_keys(
     value: dict[str, Any],
     expected: set[str],
@@ -227,6 +309,13 @@ def _bounded_text(
         diagnostics.append(
             _error("PRESS_TEXT_INVALID", f"{path} must contain {minimum}-{maximum} characters.")
         )
+
+
+def _uuid(value: Any, path: str, diagnostics: list[Diagnostic]) -> None:
+    try:
+        UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        diagnostics.append(_error("PRESS_UUID_INVALID", f"{path} must be a UUID."))
 
 
 def _bounded_number(

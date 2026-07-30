@@ -5,6 +5,7 @@
 @implements IAsyncDisposable
 @inject IPublishService Publishing
 @inject IPublicationEditionService Editions
+@inject IPublicationRenderService Renders
 @inject IManuscriptStyleService ManuscriptStyles
 @inject IPublishAssistantService PublishAssistant
 @inject IProjectImageService ProjectImages
@@ -508,6 +509,93 @@ else
                             </div>
                         </fieldset>
                     </div>
+                </section>
+
+                <section class="publish-card" aria-labelledby="press-preview-title">
+                    <div class="publish-card-heading publish-card-heading-actions">
+                        <div>
+                            <span class="publish-step">PDF</span>
+                            <h2 id="press-preview-title">Typeset PDF preview</h2>
+                            <p>Render immutable interior and cover PDFs from the current edition. The embedded PDF viewer provides thumbnails, zoom, and text search.</p>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    disabled="@_renderBusy" @onclick="RefreshRendersAsync">Refresh</button>
+                            <button type="button" class="btn btn-sm btn-primary"
+                                    disabled="@(!CanRenderPdf)" @onclick="RequestRenderAsync">
+                                @(_renderBusy ? "Workingâ€¦" : "Render PDFs")
+                            </button>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_renderError))
+                    {
+                        <div class="alert alert-danger py-2" role="alert">@_renderError</div>
+                    }
+                    @if (_renderJobs.Count == 0)
+                    {
+                        <div class="publish-inline-empty">No press renders yet. The current Preview renderer is pinned but is not a vendor-conformance claim.</div>
+                    }
+                    else
+                    {
+                        var latestRender = _renderJobs[0];
+                        <div class="publish-render-status" aria-live="polite">
+                            <strong>@latestRender.Status</strong>
+                            <span>@latestRender.ProgressPercent% Â· @latestRender.ProgressMessage</span>
+                            @if (latestRender.Status is PublicationRenderStatus.Queued or PublicationRenderStatus.Rendering)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => CancelRenderAsync(latestRender.Id)">Cancel</button>
+                            }
+                        </div>
+                        @foreach (var diagnostic in latestRender.Diagnostics)
+                        {
+                            <div class="small @(diagnostic.Severity == "error" ? "text-danger" : "text-warning-emphasis")">
+                                <code>@diagnostic.Code</code> @diagnostic.Message
+                            </div>
+                        }
+                        @if (latestRender.Artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf) is { } interior)
+                        {
+                            <div class="publish-artifact-heading">
+                                <div>
+                                    <strong>@interior.FileName</strong>
+                                    <span>@interior.PageCount pages Â· SHA-256 @interior.Sha256[..12]â€¦</span>
+                                    @if (interior.IsStale)
+                                    {
+                                        <span class="badge text-bg-warning">Stale</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge text-bg-success">Current</span>
+                                    }
+                                </div>
+                                <a class="btn btn-sm btn-outline-primary" href="@ArtifactDownloadUrl(interior.Id)">Download</a>
+                            </div>
+                            <iframe class="publish-pdf-frame" src="@ArtifactViewUrl(interior.Id)"
+                                    title="Actual typeset interior PDF"></iframe>
+                        }
+                        @if (latestRender.Artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.CoverPdf) is { } coverPdf)
+                        {
+                            <div class="publish-artifact-heading">
+                                <div>
+                                    <strong>Cover PDF</strong><span>SHA-256 @coverPdf.Sha256[..12]â€¦</span>
+                                    <span class="badge @(coverPdf.IsStale ? "text-bg-warning" : "text-bg-success")">
+                                        @(coverPdf.IsStale ? "Stale" : "Current")
+                                    </span>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <a class="btn btn-sm btn-outline-secondary" href="@ArtifactViewUrl(coverPdf.Id)" target="_blank">Preview</a>
+                                    <a class="btn btn-sm btn-outline-primary" href="@ArtifactDownloadUrl(coverPdf.Id)">Download</a>
+                                </div>
+                            </div>
+                        }
+                        @if (_renderJobs.Count > 1)
+                        {
+                            <button type="button" class="btn btn-sm btn-link px-0" @onclick="CompareLatestRendersAsync">Explain changes from previous render</button>
+                            @if (!string.IsNullOrWhiteSpace(_renderComparison))
+                            {
+                                <p class="small text-muted">@_renderComparison</p>
+                            }
+                        }
+                    }
                 </section>
 
                 <section class="publish-card" aria-labelledby="cover-title">
@@ -1021,6 +1109,7 @@ else
     private IReadOnlyList<ProjectImageView> _projectImageLibrary = [];
     private IReadOnlyList<ManuscriptStyleView> _namedStyles = [];
     private IReadOnlyList<PublicationEditionAuditView> _editionAudit = [];
+    private IReadOnlyList<PublicationRenderJobView> _renderJobs = [];
     private EditionDraft _editionDraft = new();
     private Guid? _loadedProjectId;
     private Guid? _selectedEditionId;
@@ -1041,6 +1130,7 @@ else
     private bool _disposing;
     private bool _creatingEdition;
     private bool _assistantBusy;
+    private bool _renderBusy;
     private string? _loadError;
     private string? _editionDraftError;
     private string? _coverError;
@@ -1050,6 +1140,8 @@ else
     private string? _imagesLoadError;
     private string? _exportError;
     private string? _editionActionError;
+    private string? _renderError;
+    private string? _renderComparison;
     private string _newEditionName = "Paperback";
     private PublicationEditionFormat _newEditionFormat = PublicationEditionFormat.Paperback;
     private string _printDialogUrl = string.Empty;
@@ -1078,6 +1170,7 @@ else
     private IJSObjectReference? _downloadModule;
     private IJSObjectReference? _autoSizer;
     private CancellationTokenSource? _editionDraftAutosaveCts;
+    private CancellationTokenSource? _renderPollingCts;
     private IDisposable? _navHandlerRegistration;
     private long _editionDraftVersion;
     private long _editionSavedVersion;
@@ -1108,6 +1201,12 @@ else
         && !HasBusyMutation
         && _editionSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
         && !HasPendingEditionSave;
+    private bool CanRenderPdf => !_renderBusy
+        && _workspace?.Edition.Format == PublicationEditionFormat.Paperback
+        && IncludedChapterCount > 0
+        && !HasPendingEditionSave
+        && _editionSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
+        && _renderJobs.All(job => job.Status is not PublicationRenderStatus.Queued and not PublicationRenderStatus.Rendering);
 
     private string DisplayTitle => string.IsNullOrWhiteSpace(_editionDraft.TitleOverride)
         ? _workspace?.Edition.ProjectName ?? Project?.Name ?? "Untitled book"
@@ -1261,6 +1360,9 @@ else
     private string OutlineUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/outline";
     private string EditorRootUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/editor";
     private string EditorUrl(Guid chapterId) => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/editor/{chapterId}";
+    private string ArtifactViewUrl(Guid artifactId) =>
+        Project is null ? "#" : $"/projects/{Project.Id:N}/publish/artifacts/{artifactId:N}";
+    private string ArtifactDownloadUrl(Guid artifactId) => $"{ArtifactViewUrl(artifactId)}/download";
 
     protected override async Task OnParametersSetAsync()
     {
@@ -1362,6 +1464,7 @@ else
         {
             return;
         }
+        StopRenderPolling();
         await FlushEditionSaveAsync();
         _selectedEditionId = editionId;
         await LoadWorkspaceAsync(resetProfile: true);
@@ -1469,6 +1572,7 @@ else
             _workspace = workspace;
             _namedStyles = await ManuscriptStyles.ListAsync(Project.Id);
             _editionAudit = await Editions.GetAuditAsync(Project.Id, _selectedEditionId.Value);
+            _renderJobs = await Renders.ListAsync(Project.Id, _selectedEditionId.Value);
             _placements = OrderPlacementViews(workspace.Placements);
             if (resetProfile)
             {
@@ -1499,10 +1603,136 @@ else
         var workspace = await Publishing.GetWorkspaceAsync(Project.Id, editionId);
         _workspace = workspace;
         _editionAudit = await Editions.GetAuditAsync(Project.Id, editionId);
+        _renderJobs = await Renders.ListAsync(Project.Id, editionId);
         _editionDraft.Revision = workspace.Edition.Revision;
         _editionSummaries = workspace.Editions;
         _placements = OrderPlacementViews(workspace.Placements);
         PrunePlacementDraft();
+    }
+
+    private async Task RequestRenderAsync()
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId || !CanRenderPdf) return;
+        _renderBusy = true;
+        _renderError = null;
+        _renderComparison = null;
+        try
+        {
+            await FlushEditionSaveAsync();
+            await Renders.RequestAsync(Project.Id, editionId);
+            _renderJobs = await Renders.ListAsync(Project.Id, editionId);
+            StartRenderPolling(Project.Id, editionId);
+            _liveMessage = "PDF render queued.";
+        }
+        catch (Exception exception)
+        {
+            _renderError = exception.Message;
+        }
+        finally
+        {
+            _renderBusy = false;
+        }
+    }
+
+    private async Task RefreshRendersAsync()
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        _renderBusy = true;
+        try
+        {
+            _renderJobs = await Renders.ListAsync(Project.Id, editionId);
+        }
+        catch (Exception exception)
+        {
+            _renderError = exception.Message;
+        }
+        finally
+        {
+            _renderBusy = false;
+        }
+    }
+
+    private async Task CancelRenderAsync(Guid jobId)
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        _renderBusy = true;
+        try
+        {
+            await Renders.CancelAsync(Project.Id, editionId, jobId);
+            _renderJobs = await Renders.ListAsync(Project.Id, editionId);
+        }
+        catch (Exception exception)
+        {
+            _renderError = exception.Message;
+        }
+        finally
+        {
+            _renderBusy = false;
+        }
+    }
+
+    private async Task CompareLatestRendersAsync()
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId || _renderJobs.Count < 2) return;
+        try
+        {
+            var comparison = await Renders.CompareAsync(
+                Project.Id,
+                editionId,
+                _renderJobs[1].Id,
+                _renderJobs[0].Id);
+            _renderComparison = comparison.Explanation;
+        }
+        catch (Exception exception)
+        {
+            _renderError = exception.Message;
+        }
+    }
+
+    private void StartRenderPolling(Guid projectId, Guid editionId)
+    {
+        StopRenderPolling();
+        _renderPollingCts = new CancellationTokenSource();
+        _ = PollRendersAsync(projectId, editionId, _renderPollingCts.Token);
+    }
+
+    private async Task PollRendersAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                var jobs = await Renders.ListAsync(projectId, editionId, cancellationToken);
+                await InvokeAsync(() =>
+                {
+                    if (_selectedEditionId == editionId)
+                    {
+                        _renderJobs = jobs;
+                        StateHasChanged();
+                    }
+                });
+                if (jobs.All(job => job.Status is not PublicationRenderStatus.Queued and not PublicationRenderStatus.Rendering))
+                    return;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (Exception exception)
+        {
+            await InvokeAsync(() => _renderError = exception.Message);
+        }
+    }
+
+    private void StopRenderPolling()
+    {
+        _renderPollingCts?.Cancel();
+        _renderPollingCts?.Dispose();
+        _renderPollingCts = null;
     }
 
     private void ScheduleEditionAutosave()
@@ -2242,6 +2472,7 @@ else
     public async ValueTask DisposeAsync()
     {
         _disposing = true;
+        StopRenderPolling();
         _navHandlerRegistration?.Dispose();
         try { await FlushEditionSaveAsync(); } catch { }
 

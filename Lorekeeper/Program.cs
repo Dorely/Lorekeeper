@@ -249,6 +249,12 @@ builder.Services.AddScoped<IPublishExportFormatter, EpubPublishFormatter>();
 builder.Services.AddScoped<IPublishService, PublishService>();
 builder.Services.AddScoped<IPublicationEditionService, PublicationEditionService>();
 builder.Services.AddScoped<IPublicationActorContext, PublicationActorContext>();
+builder.Services.Configure<PublicationPressOptions>(
+    builder.Configuration.GetSection(PublicationPressOptions.SectionName));
+builder.Services.AddSingleton<IPublicationRenderQueue, PublicationRenderQueue>();
+builder.Services.AddScoped<IPublicationRenderService, PublicationRenderService>();
+builder.Services.AddScoped<PublicationRenderProcessor>();
+builder.Services.AddHostedService<PublicationRenderWorker>();
 builder.Services.AddScoped<PublishAssistantTools>();
 builder.Services.AddScoped<IPublishAssistantService, PublishAssistantService>();
 builder.Services.AddSingleton<IPublicationEditionMigrationService, PublicationEditionMigrationService>();
@@ -288,6 +294,10 @@ using (var scope = app.Services.CreateScope())
     await manuscriptMigration.ApplyPendingAsync(db);
     var editionMigration = scope.ServiceProvider.GetRequiredService<IPublicationEditionMigrationService>();
     await editionMigration.ApplyPendingAsync(db);
+    // The guarded manuscript and edition transformations intentionally stop at
+    // their owned schema boundaries. Apply later additive migrations only after
+    // both validated cutovers have completed.
+    await db.Database.MigrateAsync();
 
     var embeddingConfiguration = await db.EmbeddingConfigurations.AsNoTracking().FirstOrDefaultAsync();
     var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();

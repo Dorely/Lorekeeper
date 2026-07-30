@@ -88,7 +88,7 @@
 | `scripts/verify-spike.ps1` | Locked tests, optimized build, process fixtures, timing/size evidence, and optional independent Poppler checks. |
 | `scripts/generate-license-report.ps1` | Deterministic Cargo metadata, checksum, upstream VCS, license expression, and license/notice hash inventory generator. |
 
-## Lorekeeper.Press.Weasy/ — Disposable PDF/X fallback spike
+## Lorekeeper.Press.Weasy/ — Preview press renderer
 
 | File | Description |
 |------|-------------|
@@ -100,7 +100,7 @@
 | `src/lorekeeper_press_weasy/render.py` | Generated/escaped paged HTML, restricted ICC fetcher, interior/wrap-cover rendering, hashing, and internal checks. |
 | `src/lorekeeper_press_weasy/inspect.py` | Independent pypdf inspection for PDF version, page boxes, fonts, colors, images, output intents, transparency, annotations, encryption, and actions. |
 | `src/lorekeeper_press_weasy/geometry.py` / `storage.py` | Measured PDF box geometry plus exclusive-lock, staged, fsynced, immutable job publication. |
-| `tests/*.py` | Authorized protocol, recursive PDF inspection, measured geometry, and concurrent immutable-publication fixtures. |
+| `tests/*.py` | Authorized protocol/semantic-block, recursive PDF inspection, measured geometry, and concurrent immutable-publication fixtures. |
 | `scripts/build-windows-spike.ps1` / `scripts/extract-pyinstaller-native.py` / `scripts/audit-pyinstaller-binaries.py` | Archive-owned native extraction, controlled frozen Windows build, and fail-closed source classification/hashing of collected binaries. |
 | `scripts/verify-spike.ps1` / `scripts/verify-artifacts.py` | Frozen-process adversarial/repeatability harness plus independent PDF parse, text, box, and hash verification. |
 | `scripts/generate-license-inventory.py` | Deterministic uv-lock/package-metadata/license-file hash inventory generator for the active fallback environment. |
@@ -316,6 +316,7 @@
 | `PublicationMatter.cs` | Edition-owned semantic front/back matter, named-style mappings, immutable audit entries, and edition-migration journal entities. |
 | `PublicationImagePlacement.cs` | Edition-owned interior image placements before/after acts or chapters and at chapter openings/endings. |
 | `PublishAsset.cs` | EF entity for uploaded/generated/edited/cropped project images with bytes, crop lineage/coordinates, alt text, prompt/source metadata, masks, and placement navigation. |
+| `PublicationRender.cs` | Edition render jobs, immutable artifact bytes/provenance, statuses, and stable manuscript-block page-map persistence. |
 | `EntityVisualExample.cs` | Ordered labeled many-to-many link between an eligible graph entity and project image, with origin and source provenance. |
 | `SourceVisualCandidate.cs` | Cached normalized Research/Ingest image bytes and artifact/web provenance before project-library promotion. |
 | `ProjectImageConversation.cs` | EF entity for the separate project-scoped Images Chat transcript. |
@@ -594,8 +595,9 @@
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
 | `PublishAssistantTools.cs` | Dedicated Publish assistant tool catalog exposing the complete edition mutation/read surface and migration diagnostics through owning services. |
 | `PublishAssistantService.cs` | Visible dedicated Publish assistant one-turn orchestration using the configured chat provider and the shared Publish tool catalog. |
+| `PublicationRenderService.cs` | Persisted/recoverable render queue, contained press adapter, immutable verified artifacts, semantic page maps, stale-state derivation, and render comparison. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade for edition-scoped TXT, Markdown, EPUB, and print-preview documents. |
-| `PublishEndpoints.cs` | Cacheable HTTP endpoints for validated guide-free cover previews and native or clockwise-rotated high-resolution interior Picture Page surfaces, avoiding large Blazor payloads. |
+| `PublishEndpoints.cs` | Cacheable/range HTTP endpoints for validated cover/Picture Page surfaces and project-scoped immutable publication artifact viewing/download. |
 | `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus a mixed-layout EPUB writer using Publish Profile type metrics and shared geometry for reflowable prose and accessible fixed cover/Picture Page items. |
 
 ### Graph/

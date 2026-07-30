@@ -36,11 +36,14 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   identifiers, included content, semantic matter, named-style mappings, image
   placements, Picture Page cover sources, clone/archive/compare/audit workflows,
   deterministic staleness fingerprints, and matching Publish assistant tools.
+- Preview paperback press jobs with cancellation/restart recovery, immutable
+  SHA-256-verified interior and cover PDFs, actual in-app PDF viewing, semantic
+  block-to-page maps, render comparisons, and matching assistant controls.
 - Versioned project import/export (current v10 manuscripts/styles/editions,
   isolated v8-v9 adapters, and v1-v7 text adapters) plus TXT,
   Markdown, mixed-layout EPUB, and a
-  browser/operating-system print-preview workflow. The current print path is not
-  a PDF-byte renderer, PDF/X conformance engine, or vendor preflight system.
+  browser/operating-system print-preview workflow. Generated press PDFs are
+  explicitly Preview artifacts, not PDF/X conformance or vendor-preflight claims.
 - Configurable Codex/OpenAI-compatible chat and embedding providers, configurable
   web search, and local SQLite persistence.
 

@@ -228,12 +228,22 @@ the native notice bundle is incomplete. Acrobat/vendor/physical-proof evidence
 and cross-platform packaging also remain incomplete, so the spike returns no
 independently validated or claimed standard and is not a production runtime.
 
-The structured-manuscript and publication-edition boundaries of the planned
-publishing architecture are implemented. `PublishAssistantTools` exposes the
-complete edition/matter/style/placement service surface with the same IDs,
-validation, revisions, fingerprints, audit, and migration diagnostics used by
-the UI. A production-contained press renderer, immutable artifacts/manifests,
-and their UI/assistant surfaces remain the next planned boundary.
+The structured-manuscript, publication-edition, and Preview press-runtime
+boundaries are implemented. `PublicationRenderService` persists edition-scoped
+queue state, immutable artifact bytes/hashes, renderer/profile provenance,
+diagnostics, and stable block-to-page mappings. `PublicationRenderWorker`
+recovers interrupted jobs and owns cancellation; `PublicationRenderProcessor`
+contains the child process, clears its environment, bounds its lifetime and
+paths, and verifies every returned length/hash before persistence. Project-
+scoped range endpoints serve actual PDF bytes, and source-fingerprint mismatch
+marks immutable artifacts stale.
+
+Development resolves the exact-locked Python project and fingerprinted native
+payload. Packaged releases must configure a frozen renderer and ship controlled
+fonts/notices. This remains Preview, not a PDF/X or vendor-conformance claim.
+`PublishAssistantTools` exposes the full edition and render service surfaces
+with the same IDs, validation, revisions, fingerprints, and diagnostics as the
+UI.
 
 ### Desktop and Release Behavior
 

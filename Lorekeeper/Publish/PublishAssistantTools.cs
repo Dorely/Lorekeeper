@@ -10,7 +10,8 @@ public sealed record PublishAssistantContext(Guid ProjectId);
 public sealed class PublishAssistantTools(
     IPublicationEditionService editions,
     IPublishService publishing,
-    IPublicationEditionMigrationService migrations)
+    IPublicationEditionMigrationService migrations,
+    IPublicationRenderService renders)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -120,6 +121,27 @@ public sealed class PublishAssistantTools(
                 method: () => ReadMigrationAsync(),
                 name: "read_publication_migration_state",
                 description: "Read the publication-edition migration journal and protected backup diagnostics. Restore remains user-confirmed."),
+            AIFunctionFactory.Create(
+                method: (Guid editionId) => RequestRenderAsync(context, editionId),
+                name: "request_publication_render",
+                description: "Queue deterministic interior and cover PDF rendering for a paperback edition."),
+            AIFunctionFactory.Create(
+                method: (Guid editionId) => ListRendersAsync(context, editionId),
+                name: "list_publication_renders",
+                description: "Inspect render status, progress, diagnostics, immutable artifacts, hashes, and stale state."),
+            AIFunctionFactory.Create(
+                method: (Guid editionId, Guid jobId) => CancelRenderAsync(context, editionId, jobId),
+                name: "cancel_publication_render",
+                description: "Cancel a queued or running press render."),
+            AIFunctionFactory.Create(
+                method: (Guid editionId, Guid jobId) => ReadPageMapAsync(context, editionId, jobId),
+                name: "read_publication_page_map",
+                description: "Read stable manuscript block IDs mapped to pages in one completed render."),
+            AIFunctionFactory.Create(
+                method: (Guid editionId, Guid leftJobId, Guid rightJobId) =>
+                    CompareRendersAsync(context, editionId, leftJobId, rightJobId),
+                name: "compare_publication_renders",
+                description: "Explain page-count and block-pagination changes between two renders."),
         ];
         return Task.FromResult(tools);
     }
@@ -259,6 +281,25 @@ public sealed class PublishAssistantTools(
 
     private async Task<string> ReadMigrationAsync() =>
         Serialize(await migrations.GetHistoryAsync());
+
+    private async Task<string> RequestRenderAsync(PublishAssistantContext context, Guid editionId) =>
+        Serialize(await renders.RequestAsync(context.ProjectId, editionId));
+
+    private async Task<string> ListRendersAsync(PublishAssistantContext context, Guid editionId) =>
+        Serialize(await renders.ListAsync(context.ProjectId, editionId));
+
+    private async Task<string> CancelRenderAsync(PublishAssistantContext context, Guid editionId, Guid jobId) =>
+        Serialize(await renders.CancelAsync(context.ProjectId, editionId, jobId));
+
+    private async Task<string> ReadPageMapAsync(PublishAssistantContext context, Guid editionId, Guid jobId) =>
+        Serialize(await renders.GetPageMapAsync(context.ProjectId, editionId, jobId));
+
+    private async Task<string> CompareRendersAsync(
+        PublishAssistantContext context,
+        Guid editionId,
+        Guid leftJobId,
+        Guid rightJobId) =>
+        Serialize(await renders.CompareAsync(context.ProjectId, editionId, leftJobId, rightJobId));
 
     private static string Serialize<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
 }

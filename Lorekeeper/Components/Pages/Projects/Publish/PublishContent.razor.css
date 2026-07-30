@@ -143,6 +143,32 @@
     padding: clamp(1rem, 2vw, 1.35rem);
 }
 
+.publish-render-status,
+.publish-artifact-heading {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    justify-content: space-between;
+    margin: 0.75rem 0;
+}
+
+.publish-render-status span,
+.publish-artifact-heading span {
+    color: var(--publish-muted);
+    font-size: 0.78rem;
+    margin-left: 0.45rem;
+}
+
+.publish-pdf-frame {
+    background: #3b3f46;
+    border: 1px solid var(--publish-line);
+    border-radius: 0.5rem;
+    height: min(70vh, 52rem);
+    min-height: 32rem;
+    width: 100%;
+}
+
 .publish-card-heading {
     align-items: start;
     display: flex;

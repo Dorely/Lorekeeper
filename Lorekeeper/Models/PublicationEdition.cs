@@ -127,6 +127,8 @@ public class PublicationEdition
     public ICollection<PublicationEditionStyleMapping> StyleMappings { get; set; } = [];
     public ICollection<PublicationImagePlacement> ImagePlacements { get; set; } = [];
     public ICollection<PublicationEditionAuditEntry> AuditEntries { get; set; } = [];
+    public ICollection<PublicationRenderJob> RenderJobs { get; set; } = [];
+    public ICollection<PublicationArtifact> Artifacts { get; set; } = [];
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

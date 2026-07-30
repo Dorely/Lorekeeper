@@ -342,7 +342,19 @@ independent settings and identifiers.
 
 #### 5. Deterministic novel typesetting and real preview
 
-Status: `Planned`
+Status: `Preview; packaged-runtime validation pending`
+
+Implemented in the application on 2026-07-30. Paperback editions now queue
+contained WeasyPrint render jobs with restart recovery, progress, cancellation,
+timeout/process-tree containment, safe job roots, response validation, and
+SHA-256 verification before immutable PDF bytes are persisted. Semantic block
+anchors produce page maps; actual PDF bytes are served with range requests to
+the embedded Chromium PDF viewer; artifacts report current/stale state and two
+renders can explain page and block movement. The Publish assistant has the same
+request, cancel, inspect, page-map, and comparison surface. The runtime remains
+`Preview`: checked-in cross-platform frozen distributions, macOS verification,
+independent snapshots on every packaged runtime, Acrobat/vendor preflight, and
+physical proofs remain Feature 7 release gates.
 
 Integrate the proven press sidecar as a production runtime.
 

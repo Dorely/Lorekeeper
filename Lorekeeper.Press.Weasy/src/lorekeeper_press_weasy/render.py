@@ -68,7 +68,7 @@ def render_request(
 
     try:
         interior_html = _interior_html(request, profile_path)
-        interior_data, interior_warnings = _compile(
+        interior_data, interior_warnings, page_map = _compile(
             interior_html,
             profile_path,
             profile_data,
@@ -80,7 +80,7 @@ def render_request(
 
         page_count = interior_inspection.page_count
         cover_html, spine_width = _cover_html(request, profile_path, page_count)
-        cover_data, cover_warnings = _compile(
+        cover_data, cover_warnings, _ = _compile(
             cover_html,
             profile_path,
             profile_data,
@@ -153,6 +153,7 @@ def render_request(
             completion_diagnostics,
             artifacts=artifacts,
             evidence=evidence,
+            page_map=page_map,
         )
     except Exception as exception:
         return response(
@@ -167,7 +168,7 @@ def _compile(
     profile_path: Path | None,
     profile_data: bytes | None,
     press_profile: str,
-) -> tuple[bytes, list[str]]:
+) -> tuple[bytes, list[str], list[dict[str, Any]]]:
     register_pdfx_2001_profile()
     profile_uri = profile_path.resolve().as_uri() if profile_path is not None else None
 
@@ -186,7 +187,7 @@ def _compile(
         options: dict[str, Any] = {
             "full_fonts": True,
             "presentational_hints": False,
-            "pdf_identifier": b"lorekeeper-press-spike-v1",
+            "pdf_identifier": b"lorekeeper-press-preview-v1",
         }
         if press_profile == INGRAM_PROFILE:
             options.update(
@@ -196,20 +197,69 @@ def _compile(
             )
         else:
             options.update(pdf_version="1.7", output_intent="srgb")
-        data = HTML(string=source, url_fetcher=fetch).write_pdf(**options)
-        return data, capture.messages
+        document = HTML(string=source, url_fetcher=fetch).render()
+        page_map = []
+        for page_number, page in enumerate(document.pages, start=1):
+            for anchor in page.anchors:
+                if not anchor.startswith("lk-block-"):
+                    continue
+                encoded = anchor.removeprefix("lk-block-")
+                if len(encoded) == 64:
+                    page_map.append(
+                        {
+                            "chapterId": encoded[:32],
+                            "blockId": encoded[32:],
+                            "pageNumber": page_number,
+                        }
+                    )
+        data = document.write_pdf(**options)
+        return data, capture.messages, page_map
     finally:
         LOGGER.removeHandler(capture)
 
 
 def _interior_html(request: dict[str, Any], profile_path: Path | None) -> str:
-    chapters = []
-    for chapter in request["document"]["chapters"]:
-        paragraphs = "".join(
-            f"<p>{html.escape(paragraph)}</p>"
-            for paragraph in chapter["body"].split("\n\n")
-            if paragraph
+    document = request["document"]
+    front_matter = []
+    if document.get("includeTitlePage", False):
+        subtitle = (
+            f"<p class=\"subtitle\">{html.escape(document.get('subtitle', ''))}</p>"
+            if document.get("subtitle")
+            else ""
         )
+        front_matter.append(
+            f'<section class="front title-page"><h1>{html.escape(document["title"])}</h1>'
+            f'{subtitle}<p>{html.escape(document["author"])}</p></section>'
+        )
+    if document.get("copyright") or document.get("publisher"):
+        front_matter.append(
+            f'<section class="front copyright-page"><p>{html.escape(document.get("copyright", ""))}</p>'
+            f'<p>{html.escape(document.get("publisher", ""))}</p></section>'
+        )
+    if document.get("dedication"):
+        front_matter.append(
+            f'<section class="front dedication"><p>{html.escape(document["dedication"])}</p></section>'
+        )
+    if document.get("includeVisibleTableOfContents", False):
+        items = "".join(
+            f"<li>{html.escape(chapter['title'])}</li>"
+            for chapter in document["chapters"]
+        )
+        front_matter.append(f'<section class="front contents"><h1>Contents</h1><ol>{items}</ol></section>')
+    chapters = []
+    for chapter in document["chapters"]:
+        chapter_id = chapter.get("id", "")
+        if chapter.get("blocks") is not None:
+            paragraphs = "".join(
+                _block_html(chapter_id, block)
+                for block in chapter["blocks"]
+            )
+        else:
+            paragraphs = "".join(
+                f"<p>{html.escape(paragraph)}</p>"
+                for paragraph in chapter["body"].split("\n\n")
+                if paragraph
+            )
         chapters.append(
             f'<section class="chapter"><h1>{html.escape(chapter["title"])}</h1>{paragraphs}</section>'
         )
@@ -219,20 +269,46 @@ def _interior_html(request: dict[str, Any], profile_path: Path | None) -> str:
         f"""
         @page {{
           size: {request["trim"]["widthInches"]}in {request["trim"]["heightInches"]}in;
-          margin: 0.75in 0.625in 0.75in 0.75in;
+          margin: {request["trim"].get("marginInches", 0.75)}in;
           @bottom-center {{ content: counter(page); font-family: "Liberation Serif", serif; font-size: 9pt; }}
         }}
         @page :left {{ margin-left: 0.625in; margin-right: 0.75in; }}
         @page :right {{ margin-left: 0.75in; margin-right: 0.625in; }}
+        @page :left {{ @top-center {{ content: string(chapter-title); font-size: 8.5pt; }} }}
+        @page :right {{ @top-center {{ content: "{html.escape(document["title"])}"; font-size: 8.5pt; }} }}
+        @page front {{ @bottom-center {{ content: counter(page, lower-roman); }} }}
         @page chapter:first {{ @top-center {{ content: none; }} }}
-        body {{ font-family: "Liberation Serif", serif; font-size: 11pt; line-height: 1.32; }}
+        body {{ font-family: "Liberation Serif", serif; font-size: {request["trim"].get("bodyFontSizePoints", 11)}pt; line-height: {request["trim"].get("bodyLineHeight", 1.32)}; }}
         .chapter {{ page: chapter; break-before: right; }}
+        .front {{ page: front; break-after: page; }}
+        .title-page {{ align-items: center; display: flex; flex-direction: column; justify-content: center; text-align: center; }}
+        .title-page h1 {{ font-size: 28pt; margin-bottom: 0.2in; }}
+        .copyright-page {{ display: flex; flex-direction: column; justify-content: end; font-size: 9pt; }}
+        .dedication {{ display: flex; align-items: center; justify-content: center; text-align: center; }}
+        .contents li {{ margin-bottom: 0.12in; }}
         h1 {{ string-set: chapter-title content(); text-align: center; margin: 1.25in 0 0.55in; }}
         p {{ margin: 0; text-align: justify; text-indent: 1.25em; hyphens: auto; orphans: 3; widows: 3; }}
         h1 + p {{ text-indent: 0; }}
         """,
-        "".join(chapters),
+        "".join(front_matter) + "".join(chapters),
     )
+
+
+def _block_html(chapter_id: str, block: dict[str, Any]) -> str:
+    anchor = f"lk-block-{chapter_id.replace('-', '')}{block['id'].replace('-', '')}"
+    text = html.escape(block["text"])
+    block_type = block["type"]
+    if block_type == "SceneBreak":
+        return f'<p id="{anchor}" class="scene-break">* * *</p>'
+    if block_type == "Heading":
+        return f'<h2 id="{anchor}">{text}</h2>'
+    if block_type == "BlockQuote":
+        return f'<blockquote id="{anchor}">{text}</blockquote>'
+    if block_type == "ListItem":
+        return f'<p id="{anchor}" class="list-item">â€¢ {text}</p>'
+    if block_type == "Figure":
+        return f'<p id="{anchor}" class="figure-caption">{text}</p>'
+    return f'<p id="{anchor}">{text}</p>'
 
 
 def _cover_html(
@@ -298,7 +374,7 @@ def _html_document(
       html, body { color: #000000; background: #ffffff; }
     """
     return f"""<!doctype html>
-<html lang="en">
+<html lang="{html.escape(request["document"].get("language", "en"), quote=True)}">
 <head>
   <meta charset="utf-8">
   <meta name="author" content="{html.escape(request["document"]["author"], quote=True)}">

@@ -1,7 +1,7 @@
 [project]
 name = "lorekeeper-press-weasy"
 version = "0.1.0"
-description = "Disposable WeasyPrint PDF/X conformance candidate for Lorekeeper"
+description = "Contained deterministic PDF renderer for Lorekeeper publication previews"
 requires-python = ">=3.13,<3.15"
 dependencies = [
     "cffi==2.0.0",

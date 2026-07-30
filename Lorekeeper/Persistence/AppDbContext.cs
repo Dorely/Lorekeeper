@@ -66,6 +66,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<PublicationImagePlacement> PublicationImagePlacements => Set<PublicationImagePlacement>();
     public DbSet<PublicationEditionAuditEntry> PublicationEditionAuditEntries => Set<PublicationEditionAuditEntry>();
     public DbSet<PublicationEditionMigrationJournal> PublicationEditionMigrationJournals => Set<PublicationEditionMigrationJournal>();
+    public DbSet<PublicationRenderJob> PublicationRenderJobs => Set<PublicationRenderJob>();
+    public DbSet<PublicationArtifact> PublicationArtifacts => Set<PublicationArtifact>();
+    public DbSet<PublicationPageMapEntry> PublicationPageMapEntries => Set<PublicationPageMapEntry>();
     public DbSet<PublishAsset> PublishAssets => Set<PublishAsset>();
     public DbSet<ProjectImageGenerationJob> ProjectImageGenerationJobs => Set<ProjectImageGenerationJob>();
     public DbSet<ProjectImageMask> ProjectImageMasks => Set<ProjectImageMask>();
@@ -996,6 +999,42 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Edition)
                 .WithMany(e => e.AuditEntries)
                 .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationRenderJob>(entity =>
+        {
+            entity.HasIndex(e => new { e.EditionId, e.CreatedAt });
+            entity.HasIndex(e => new { e.Status, e.CreatedAt });
+            entity.Property(e => e.Status).HasConversion<string>();
+            entity.HasOne(e => e.Edition)
+                .WithMany(e => e.RenderJobs)
+                .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationArtifact>(entity =>
+        {
+            entity.HasIndex(e => new { e.EditionId, e.Kind, e.CreatedAt });
+            entity.HasIndex(e => new { e.RenderJobId, e.Kind }).IsUnique();
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.HasOne(e => e.Edition)
+                .WithMany(e => e.Artifacts)
+                .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.RenderJob)
+                .WithMany(e => e.Artifacts)
+                .HasForeignKey(e => e.RenderJobId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationPageMapEntry>(entity =>
+        {
+            entity.HasIndex(e => new { e.RenderJobId, e.ChapterId, e.BlockId }).IsUnique();
+            entity.HasIndex(e => new { e.RenderJobId, e.PageNumber });
+            entity.HasOne(e => e.RenderJob)
+                .WithMany(e => e.PageMapEntries)
+                .HasForeignKey(e => e.RenderJobId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
