@@ -268,6 +268,128 @@ public sealed class ManuscriptMigrationIntegrationTests
         Assert.True((await service.GetStateAsync()).RecoveryRequired);
     }
 
+    [Fact]
+    public async Task CurrentSchemaDatabaseUpgradesEveryV1PayloadAtomicallyAndIdempotently()
+    {
+        using var fixture = new MigrationFixture();
+        var chapterId = await fixture.CreateV7DatabaseAsync("Versioned\n\ncontent");
+        await fixture.AddLegacyRevisionSessionsAsync(chapterId);
+        await fixture.AddActiveLegacyContestAsync(chapterId);
+        await fixture.AddLegacyAiChangesAsync(chapterId);
+        var service = fixture.CreateService();
+        await using (var firstMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(firstMigration);
+        await fixture.DowngradeAllStructuredJsonToV1Async();
+
+        await using (var upgrade = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(upgrade);
+        await using (var restart = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(restart);
+
+        await using var verification = fixture.CreateDbContext();
+        var journals = await verification.ManuscriptMigrationJournals
+            .AsNoTracking()
+            .OrderBy(journal => journal.StartedAt)
+            .ToListAsync();
+        var v2Journal = Assert.Single(
+            journals,
+            journal => journal.MigrationName == ManuscriptMigrationService.SchemaV2MigrationName);
+        Assert.Equal(ManuscriptMigrationStatus.Completed, v2Journal.Status);
+        Assert.Equal(v2Journal.SourceHash, v2Journal.TargetHash);
+        Assert.True(File.Exists(v2Journal.BackupPath));
+        Assert.True(v2Journal.ChapterCount > 0);
+        Assert.True(v2Journal.ContestBatchCount > 0);
+        Assert.True(v2Journal.ContestCandidateCount > 0);
+        Assert.True(v2Journal.RevisionSessionCount > 0);
+        Assert.Equal(
+            ManuscriptDocument.CurrentSchemaVersion,
+            (await verification.Chapters.AsNoTracking().SingleAsync()).Manuscript.SchemaVersion);
+        Assert.False(await fixture.AnySchemaV1PayloadsAsync());
+    }
+
+    [Fact]
+    public async Task V1CustomRoleIsNormalizedMaterializedAndImmediatelyEditable()
+    {
+        using var fixture = new MigrationFixture();
+        _ = await fixture.CreateV7DatabaseAsync("Styled text");
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.SetCustomV1ParagraphRoleAsync("Fancy Role</style>");
+        Assert.True(await fixture.AnySchemaV1PayloadsAsync());
+
+        await using (var upgrade = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(upgrade);
+
+        await using var verification = fixture.CreateDbContext();
+        var journals = await verification.ManuscriptMigrationJournals.AsNoTracking().ToListAsync();
+        Assert.True(
+            await verification.Projects.AnyAsync(),
+            string.Join(" | ", journals.Select(journal => journal.ErrorDetail)));
+        var chapter = await verification.Chapters.SingleAsync();
+        Assert.Equal(ManuscriptDocument.CurrentSchemaVersion, chapter.Manuscript.SchemaVersion);
+        var style = await verification.ManuscriptStyleDefinitions.AsNoTracking().SingleAsync();
+        Assert.Equal(style.SemanticRole, chapter.Manuscript.Content[0].StyleRole);
+        Assert.True(ManuscriptSemanticRoles.IsValid(style.SemanticRole));
+        ManuscriptStyleService.ValidateDocumentReferences(
+            chapter.Manuscript,
+            [
+                new ManuscriptStyleView(
+                    style.Id,
+                    style.Name,
+                    style.Kind,
+                    style.SemanticRole,
+                    System.Text.Json.JsonSerializer.Deserialize<ManuscriptStyleProperties>(
+                        style.DefinitionJson,
+                        ManuscriptCodec.JsonOptions)!,
+                    style.Revision),
+            ]);
+
+        var (edited, _) = ManuscriptOperations.Apply(
+            chapter.Manuscript,
+            [new ReplaceManuscriptBlockText(chapter.Manuscript.Content[0].Id, "Edited safely")]);
+        chapter.ManuscriptJson = ManuscriptCodec.Serialize(edited);
+        chapter.ManuscriptRevision = edited.Revision;
+        await verification.SaveChangesAsync();
+        Assert.Equal("Edited safely", (await verification.Chapters.AsNoTracking().SingleAsync()).PlainText);
+    }
+
+    [Fact]
+    public async Task PendingAiPayloadCustomRoleIsMaterializedAndRemainsValidAfterUpgrade()
+    {
+        using var fixture = new MigrationFixture();
+        var chapterId = await fixture.CreateV7DatabaseAsync("Current body");
+        await fixture.AddLegacyAiChangesAsync(chapterId);
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.SetPendingAiAfterCustomV1RoleAsync("AI Opening</style>");
+
+        await using (var upgrade = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(upgrade);
+
+        await using var verification = fixture.CreateDbContext();
+        var style = await verification.ManuscriptStyleDefinitions.AsNoTracking().SingleAsync();
+        var pending = await verification.AiChanges.AsNoTracking()
+            .SingleAsync(change => change.Status == AiChangeStatus.Pending);
+        var proposed = Assert.Single(
+            ManuscriptSchemaUpgrade.ExtractCurrentDocuments(pending.AfterJson));
+        var styles = new[]
+        {
+            new ManuscriptStyleView(
+                style.Id,
+                style.Name,
+                style.Kind,
+                style.SemanticRole,
+                System.Text.Json.JsonSerializer.Deserialize<ManuscriptStyleProperties>(
+                    style.DefinitionJson,
+                    ManuscriptCodec.JsonOptions)!,
+                style.Revision),
+        };
+        ManuscriptStyleService.ValidateDocumentReferences(proposed, styles);
+        Assert.Equal(style.SemanticRole, proposed.Content[0].StyleRole);
+    }
+
     private sealed class MigrationFixture : IDisposable
     {
         private readonly string _directory = Path.Combine(
@@ -577,6 +699,156 @@ public sealed class ManuscriptMigrationIntegrationTests
             command.Parameters.AddWithValue("$json", json);
             await command.ExecuteNonQueryAsync();
         }
+
+        public async Task DowngradeAllStructuredJsonToV1Async()
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            foreach (var (table, columns) in JsonPayloadColumns)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText =
+                    $"UPDATE {table} SET "
+                    + string.Join(
+                        ", ",
+                        columns.Select(column =>
+                            $"{column} = replace(replace({column}, '\"schemaVersion\":2', '\"schemaVersion\":1'), 'schemaVersion\\\":2', 'schemaVersion\\\":1')"))
+                    + ";";
+                await command.ExecuteNonQueryAsync();
+            }
+        }
+
+        public async Task SetCustomV1ParagraphRoleAsync(string role)
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            string json;
+            await using (var select = connection.CreateCommand())
+            {
+                select.CommandText = "SELECT ManuscriptJson FROM Chapters;";
+                json = (string)(await select.ExecuteScalarAsync())!;
+            }
+            var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
+            node["schemaVersion"] = 1;
+            node["content"]!.AsArray()[0]!["styleRole"] = role;
+            await using var update = connection.CreateCommand();
+            update.CommandText = "UPDATE Chapters SET ManuscriptJson = $json;";
+            update.Parameters.AddWithValue(
+                "$json",
+                node.ToJsonString(ManuscriptCodec.JsonOptions));
+            await update.ExecuteNonQueryAsync();
+        }
+
+        public async Task SetPendingAiAfterCustomV1RoleAsync(string role)
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            string json;
+            Guid changeId;
+            await using (var select = connection.CreateCommand())
+            {
+                select.CommandText =
+                    "SELECT Id, AfterJson FROM AiChanges WHERE Status = 'Pending' LIMIT 1;";
+                await using var reader = await select.ExecuteReaderAsync();
+                Assert.True(await reader.ReadAsync());
+                changeId = Guid.Parse(reader.GetString(0));
+                json = reader.GetString(1);
+            }
+            var root = System.Text.Json.Nodes.JsonNode.Parse(json)!;
+            Assert.True(RewriteFirstManuscript(root, role));
+            await using var update = connection.CreateCommand();
+            update.CommandText = "UPDATE AiChanges SET AfterJson = $json WHERE Id = $id;";
+            update.Parameters.AddWithValue(
+                "$json",
+                root.ToJsonString(ManuscriptCodec.JsonOptions));
+            update.Parameters.AddWithValue("$id", changeId.ToString().ToUpperInvariant());
+            await update.ExecuteNonQueryAsync();
+        }
+
+        private static bool RewriteFirstManuscript(
+            System.Text.Json.Nodes.JsonNode node,
+            string role)
+        {
+            if (node is System.Text.Json.Nodes.JsonObject obj)
+            {
+                if (obj["schemaVersion"]?.GetValue<int>() == ManuscriptDocument.CurrentSchemaVersion
+                    && obj["content"] is System.Text.Json.Nodes.JsonArray content)
+                {
+                    obj["schemaVersion"] = 1;
+                    content[0]!["styleRole"] = role;
+                    return true;
+                }
+                foreach (var property in obj.ToList())
+                {
+                    if (property.Value is System.Text.Json.Nodes.JsonValue value
+                        && value.TryGetValue<string>(out var embedded)
+                        && embedded.TrimStart().StartsWith('{'))
+                    {
+                        var parsed = System.Text.Json.Nodes.JsonNode.Parse(embedded);
+                        if (parsed is not null && RewriteFirstManuscript(parsed, role))
+                        {
+                            obj[property.Key] = parsed.ToJsonString(ManuscriptCodec.JsonOptions);
+                            return true;
+                        }
+                    }
+                    else if (property.Value is not null
+                        && RewriteFirstManuscript(property.Value, role))
+                    {
+                        return true;
+                    }
+                }
+            }
+            else if (node is System.Text.Json.Nodes.JsonArray array)
+            {
+                foreach (var item in array)
+                {
+                    if (item is not null && RewriteFirstManuscript(item, role))
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        public async Task<bool> AnySchemaV1PayloadsAsync()
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            foreach (var (table, columns) in JsonPayloadColumns)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText =
+                    $"SELECT {string.Join(" || ", columns.Select(column => $"COALESCE({column}, '')"))} FROM {table};";
+                await using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var value = reader.GetString(0);
+                    if (value.Contains("schemaVersion\\\":1", StringComparison.Ordinal)
+                        || value.Contains("\"schemaVersion\":1", StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private static readonly IReadOnlyList<(string Table, string[] Columns)> JsonPayloadColumns =
+        [
+            ("Chapters", ["ManuscriptJson"]),
+            ("ContestBatches", ["OriginalManuscriptJson", "AcceptedManuscriptJson"]),
+            ("ContestCandidates", ["ProposedManuscriptJson", "ReviewStateJson"]),
+            ("EditorRevisionSessions", ["OriginalManuscriptJson", "OperationsJson", "ProposalJson"]),
+            (
+                "AiChanges",
+                [
+                    "ArgumentsJson",
+                    "BeforeJson",
+                    "AfterJson",
+                    "DraftAfterJson",
+                    "ReviewStateJson",
+                    "ResultJson",
+                ]),
+        ];
 
         public void Dispose()
         {

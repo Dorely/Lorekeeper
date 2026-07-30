@@ -17,15 +17,23 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   writing coaching, research, and project images, including streaming tools,
   reviewable changes, visual context, and background revision agents.
 - Versioned structured chapter manuscripts with stable block anchors,
-  revision-aware manual and assistant operations, and plain-text projections for
-  existing reading and publishing surfaces.
+  revision-aware manual and assistant operations, plain-text reading projections,
+  and semantic Markdown/EPUB publication projections.
+- Schema-driven semantic chapter editing with persistent heading levels 1-6,
+  intentional line breaks, scene
+  breaks, quotations, list items, project-image figures with alt text and
+  captions, named paragraph/character styles, rich inline marks, undo/redo,
+  normalized paste, find/replace, and outline navigation. Manual edits and AI
+  assistants share one revision-checked manuscript boundary; HTML is not
+  authoritative.
 - Text, EPUB, PDF, image, and webpage ingest with structured source provenance,
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval.
 - Project image generation and editing, canonical entity visual references,
   illustrated prose, Picture Page composition, font management, and layout
   diagnostics.
-- Versioned project import/export (v8 manuscripts with v1-v7 adapters) plus TXT,
+- Versioned project import/export (current v9 manuscripts/styles, an isolated v8
+  manuscript adapter, and v1-v7 text adapters) plus TXT,
   Markdown, mixed-layout EPUB, and a
   browser/operating-system print-preview workflow. The current print path is not
   a PDF-byte renderer, PDF/X conformance engine, or vendor preflight system.
@@ -166,3 +174,16 @@ the available backups and requires an explicit two-step confirmation before
 scheduling a restore. The selected backup is applied during the next startup,
 before normal app workers begin. Keep those backups with your other local-data
 backups; they are not included in project exports.
+
+If a semantic-editor save collides with a newer chapter revision, Lorekeeper
+places the unsaved manuscript JSON in browser/Electron local storage under a
+chapter-specific conflict key and locks that editor. This recovery copy is
+unencrypted local manuscript content outside SQLite. It survives a page/circuit
+reload, can be downloaded from the conflict banner, and is removed only when
+the user explicitly loads the current saved version. Clearing browser/site data
+removes it; it is not included in database backups or project exports.
+
+Picture Page and Illustrated Prose layouts also carry revisions. If another
+editor, manuscript save, or image deletion changes the active layout, a stale
+visual save is rejected and the viewer reloads the current layout with a visible
+notice instead of reintroducing removed images or overwriting newer anchors.

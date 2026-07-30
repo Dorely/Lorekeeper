@@ -17,6 +17,9 @@ $solutionPath = Join-Path $repoRoot 'Lorekeeper.sln'
 $projectPath = Join-Path $repoRoot 'Lorekeeper\Lorekeeper.csproj'
 $stageDirectory = Join-Path $repoRoot 'publish\win-x64-stage'
 $outputDirectory = Join-Path $repoRoot 'publish\win-x64'
+$semanticEditorDirectory = Join-Path $repoRoot 'tools\semantic-editor'
+$semanticEditorBundle = Join-Path $repoRoot 'Lorekeeper\wwwroot\js\semantic-editor.bundle.js'
+$semanticEditorNotice = Join-Path $repoRoot 'Lorekeeper\wwwroot\js\semantic-editor.NOTICES.txt'
 
 if ([string]::IsNullOrWhiteSpace($Version))
 {
@@ -80,14 +83,23 @@ function Invoke-CheckedCommand
 {
     param(
         [Parameter(Mandatory)][string]$FilePath,
-        [Parameter(Mandatory)][string[]]$Arguments
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [string]$WorkingDirectory = $repoRoot
     )
 
     Write-Host "`n> $FilePath $($Arguments -join ' ')" -ForegroundColor Cyan
-    & $FilePath @Arguments
-    if ($LASTEXITCODE -ne 0)
+    Push-Location $WorkingDirectory
+    try
     {
-        throw "Command '$FilePath' failed with exit code $LASTEXITCODE."
+        & $FilePath @Arguments
+        if ($LASTEXITCODE -ne 0)
+        {
+            throw "Command '$FilePath' failed with exit code $LASTEXITCODE."
+        }
+    }
+    finally
+    {
+        Pop-Location
     }
 }
 
@@ -176,6 +188,28 @@ try
     Remove-GeneratedDirectory $stageDirectory
     Remove-GeneratedDirectory $outputDirectory
 
+    foreach ($requiredPath in @(
+        (Join-Path $semanticEditorDirectory 'package-lock.json'),
+        (Join-Path $semanticEditorDirectory 'THIRD_PARTY_NOTICES.md'),
+        $semanticEditorBundle,
+        $semanticEditorNotice))
+    {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf))
+        {
+            throw "Required semantic-editor release input is missing: $requiredPath"
+        }
+    }
+    $semanticEditorBundleHash = (Get-FileHash -LiteralPath $semanticEditorBundle -Algorithm SHA256).Hash
+    Invoke-CheckedCommand $npmCommand @('ci') $semanticEditorDirectory
+    Invoke-CheckedCommand $npmCommand @('test') $semanticEditorDirectory
+    Invoke-CheckedCommand $npmCommand @('audit', '--audit-level=high') $semanticEditorDirectory
+    Invoke-CheckedCommand $npmCommand @('run', 'build') $semanticEditorDirectory
+    $rebuiltSemanticEditorHash = (Get-FileHash -LiteralPath $semanticEditorBundle -Algorithm SHA256).Hash
+    if ($rebuiltSemanticEditorHash -ne $semanticEditorBundleHash)
+    {
+        throw 'The checked-in semantic-editor bundle is stale. Rebuild and commit it before packaging.'
+    }
+
     Invoke-CheckedCommand dotnet @(
         'restore',
         $solutionPath,
@@ -201,6 +235,17 @@ try
         "-p:Version=$Version",
         '--no-restore'
     )
+
+    $stagedSemanticBundles = @(Get-ChildItem -LiteralPath $stageDirectory -Recurse -File -Filter 'semantic-editor.bundle.js')
+    $stagedSemanticNotices = @(Get-ChildItem -LiteralPath $stageDirectory -Recurse -File -Filter 'semantic-editor.NOTICES.txt')
+    if ($stagedSemanticBundles.Count -ne 1 -or $stagedSemanticNotices.Count -ne 1)
+    {
+        throw 'The release stage must contain exactly one semantic-editor bundle and its shipped notice.'
+    }
+    if ((Get-FileHash -LiteralPath $stagedSemanticBundles[0].FullName -Algorithm SHA256).Hash -ne $semanticEditorBundleHash)
+    {
+        throw 'The staged semantic-editor bundle does not match the verified source artifact.'
+    }
 
     $manifest = Get-Content -Raw (Join-Path $stageDirectory 'package.json') | ConvertFrom-Json
     $lockPath = Join-Path $stageDirectory 'package-lock.json'

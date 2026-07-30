@@ -357,9 +357,18 @@ public sealed class EditorRevisionAgentProcessor(
                 description: "Read the explicitly paginated parent Editor conversation. Every page reports complete message IDs, roles, order, tool names, character counts, and history-window completeness; follow nextPageArguments."),
 
             AIFunctionFactory.Create(
-                method: () => ReadAssignedManuscriptAsync(assignedChapterId),
+                method: (int startBlock = 0, int blockCount = 40) =>
+                    ReadAssignedManuscriptAsync(assignedChapterId, startBlock, blockCount),
                 name: "read_assigned_manuscript",
-                description: "Read the assigned chapter's complete semantic manuscript, stable block IDs, inline marks, style roles, source hash, and required revision token."),
+                description: "Read at most 40 assigned semantic manuscript blocks with stable IDs, inline marks, style roles, total/hasMore metadata, source hash, and required revision token."),
+
+            AIFunctionFactory.Create(
+                method: (string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
+                    InspectAssignedManuscriptAsync(assignedChapterId, query, blockType, styleRole, start, count),
+                name: "inspect_assigned_manuscript",
+                description:
+                    "Validate and structurally search the assigned manuscript by optional text, blockType, and semantic styleRole. " +
+                    "Returns at most 40 matching stable blocks with pagination metadata and bounded normalization/schema diagnostics."),
 
             AIFunctionFactory.Create(
                 method: (
@@ -371,7 +380,7 @@ public sealed class EditorRevisionAgentProcessor(
                     CaptureAssignedManuscriptOperationsAsync(edit, assignedChapterId, summary, rationale, expectedRevision, operations, notes),
                 name: "apply_assigned_manuscript_operations",
                 description:
-                    "Terminal mutating tool. Edit only the assigned chapter through semantic insert, replace, delete, move, split, merge, block-style, or inline-mark operations. " +
+                    "Terminal mutating tool. Edit only the assigned chapter through semantic insert, replace, delete, move, split, merge, block-type, block-style, or inline-mark operations. " +
                     "Use stable block IDs and expectedRevision from read_assigned_manuscript. " +
                     "Do not call any more tools after this."),
         };
@@ -722,17 +731,52 @@ public sealed class EditorRevisionAgentProcessor(
             pageNumber);
     }
 
-    private async Task<string> ReadAssignedManuscriptAsync(Guid chapterId)
+    private async Task<string> ReadAssignedManuscriptAsync(
+        Guid chapterId,
+        int startBlock,
+        int blockCount)
     {
+        startBlock = Math.Max(0, startBlock);
+        blockCount = Math.Clamp(blockCount, 1, 40);
         var snapshot = await manuscripts.GetManuscriptAsync(chapterId)
             ?? throw new InvalidOperationException($"Assigned manuscript {chapterId:N} was not found.");
+        var blocks = snapshot.Document.Content.Skip(startBlock).Take(blockCount).ToList();
         return JsonSerializer.Serialize(new
         {
             snapshot.ChapterId,
             snapshot.Revision,
             snapshot.SourceHash,
-            blocks = snapshot.Document.Content,
+            totalBlocks = snapshot.Document.Content.Count,
+            startBlock,
+            blocks,
+            hasMore = startBlock + blocks.Count < snapshot.Document.Content.Count,
         }, ManuscriptCodec.JsonOptions);
+    }
+
+    private async Task<string> InspectAssignedManuscriptAsync(
+        Guid chapterId,
+        string? query,
+        string? blockType,
+        string? styleRole,
+        int start,
+        int count)
+    {
+        var snapshot = await manuscripts.GetManuscriptAsync(chapterId)
+            ?? throw new InvalidOperationException($"Assigned manuscript {chapterId:N} was not found.");
+        return JsonSerializer.Serialize(
+            new
+            {
+                snapshot.ChapterId,
+                snapshot.Revision,
+                inspection = ManuscriptInspection.Inspect(
+                    snapshot.Document,
+                    query,
+                    blockType,
+                    styleRole,
+                    start,
+                    count),
+            },
+            ManuscriptCodec.JsonOptions);
     }
 
     private Task<string> CaptureAssignedManuscriptOperationsAsync(
@@ -785,6 +829,10 @@ public sealed class EditorRevisionAgentProcessor(
         var source = ManuscriptCodec.Deserialize(session.OriginalManuscriptJson);
         var operations = ManuscriptOperationInput.ToOperations(edit.Operations);
         var (proposedDocument, changedBlockIds) = ManuscriptOperations.Apply(source, operations);
+        await manuscripts.ValidateDocumentReferencesAsync(
+            chapter.Id,
+            proposedDocument,
+            cancellationToken: cancellationToken);
         var newBody = ManuscriptCodec.ProjectPlainText(proposedDocument);
         var result = BuildEditResult(session.ChapterTitle, session.OriginalPlainText, newBody, edit);
 

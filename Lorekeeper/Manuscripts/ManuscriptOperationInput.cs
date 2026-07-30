@@ -12,7 +12,10 @@ public sealed record ManuscriptOperationInput(
     int? EndOffset = null,
     string? Mark = null,
     bool? Enabled = null,
-    string? Value = null)
+    string? Value = null,
+    Guid? ImageId = null,
+    string? AltText = null,
+    int? HeadingLevel = null)
 {
     public static IReadOnlyList<ManuscriptOperation> ToOperations(
         IReadOnlyList<ManuscriptOperationInput> operations) =>
@@ -23,7 +26,10 @@ public sealed record ManuscriptOperationInput(
                     Required(operation.Index, "index"),
                     ParseEnum<ManuscriptBlockType>(operation.BlockType, "blockType"),
                     operation.Text ?? string.Empty,
-                    operation.StyleRole),
+                    operation.StyleRole,
+                    operation.ImageId,
+                    operation.AltText,
+                    operation.HeadingLevel),
                 "replaceblocktext" => new ReplaceManuscriptBlockText(
                     Required(operation.BlockId, "blockId"),
                     operation.Text ?? string.Empty),
@@ -37,6 +43,13 @@ public sealed record ManuscriptOperationInput(
                 "mergeblocks" => new MergeManuscriptBlocks(
                     Required(operation.BlockId, "blockId"),
                     Required(operation.SecondBlockId, "secondBlockId")),
+                "setblocktype" => new SetManuscriptBlockType(
+                    Required(operation.BlockId, "blockId"),
+                    ParseEnum<ManuscriptBlockType>(operation.BlockType, "blockType"),
+                    operation.StyleRole,
+                    operation.ImageId,
+                    operation.AltText,
+                    operation.HeadingLevel),
                 "setblockstyle" => new SetManuscriptBlockStyle(
                     Required(operation.BlockId, "blockId"),
                     Required(operation.StyleRole, "styleRole")),
@@ -60,7 +73,7 @@ public sealed record ManuscriptOperationInput(
             : throw new ArgumentException($"{name} is required.");
 
     private static T ParseEnum<T>(string? value, string name) where T : struct, Enum =>
-        Enum.TryParse<T>(value, ignoreCase: true, out var parsed)
+        Enum.TryParse<T>(value, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
             ? parsed
             : throw new ArgumentException($"{name} must be one of: {string.Join(", ", Enum.GetNames<T>())}.");
 }

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Context;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.Outline;
@@ -57,7 +58,8 @@ public static class AiChangeReviewDiffBuilder
                 editablePayload.Title,
                 editablePayload.Subtitle,
                 fields,
-                showSingleFieldLabel: editablePayload.Fields.Count != 1 || !string.Equals(editablePayload.Fields[0].Key, "Body", StringComparison.OrdinalIgnoreCase));
+                showSingleFieldLabel: editablePayload.Fields.Count != 1
+                    || !string.Equals(editablePayload.Fields[0].Key, "Body", StringComparison.OrdinalIgnoreCase));
             return true;
         }
 
@@ -84,8 +86,40 @@ public static class AiChangeReviewDiffBuilder
             diff = Build(
                 "Chapter body",
                 after.Title,
-                [new DiffFieldInput("Body", before.PlainText, after.PlainText, EditableOwnerChangeId(change, hasAfterPayload: true))],
-                showSingleFieldLabel: false);
+                BuildChapterManuscriptFields(
+                    before,
+                    after,
+                    EditableOwnerChangeId(change, hasAfterPayload: true)),
+                showSingleFieldLabel: true);
+            return true;
+        }
+
+        if (string.Equals(change.ResourceKind, "ManuscriptStyle", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryReadChange<ManuscriptStyleChange>(change.BeforeJson, out var beforePayload)
+                || !TryReadChange<ManuscriptStyleChange>(
+                    AiChangeReviewDrafts.EffectiveAfterJson(change),
+                    out var afterPayload))
+            {
+                return false;
+            }
+
+            var before = beforePayload.Before;
+            var input = afterPayload.After;
+            diff = Build(
+                input is null ? "Delete named style" : before is null ? "Create named style" : "Update named style",
+                input?.Name ?? before?.Name,
+                [
+                    new DiffFieldInput("Name", "Name", before?.Name ?? "(not set)", input?.Name ?? "(deleted)", null),
+                    new DiffFieldInput("Kind", "Kind", before?.Kind.ToString() ?? "(not set)", input?.Kind.ToString() ?? "(deleted)", null),
+                    new DiffFieldInput("SemanticRole", "Semantic role", before?.SemanticRole ?? "(not set)", input?.SemanticRole ?? "(deleted)", null),
+                    new DiffFieldInput(
+                        "Definition",
+                        "Definition",
+                        FormatStyleDefinition(before?.Definition),
+                        FormatStyleDefinition(input?.Definition),
+                        null),
+                ]);
             return true;
         }
 
@@ -201,6 +235,12 @@ public static class AiChangeReviewDiffBuilder
             SetTitle(ref title, "Chapter changes");
             SetSubtitle(ref subtitle, after.Title);
             AddOrUpdateField(fields, "Body", before.PlainText, after.PlainText, EditableOwnerChangeId(change, hasAfterPayload: true));
+            AddOrUpdateField(
+                fields,
+                "Structure and formatting",
+                FormatManuscriptStructure(before.Manuscript),
+                FormatManuscriptStructure(after.Manuscript),
+                ownerChangeId: null);
             return true;
         }
 
@@ -231,6 +271,48 @@ public static class AiChangeReviewDiffBuilder
             AddOrUpdateField(fields, "Synopsis", before?.Synopsis ?? string.Empty, after?.Synopsis ?? string.Empty, ownerChangeId);
             AddOrUpdateField(fields, "Visual mode", before?.VisualMode.ToString() ?? string.Empty, after?.VisualMode.ToString() ?? string.Empty, ownerChangeId: null);
             AddOrUpdateField(fields, "Page layout", before?.PageLayoutKind.ToString() ?? string.Empty, after?.PageLayoutKind.ToString() ?? string.Empty, ownerChangeId: null);
+            return true;
+        }
+
+        if (string.Equals(change.ResourceKind, "ManuscriptStyle", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryReadChange<ManuscriptStyleChange>(change.BeforeJson, out var beforePayload)
+                || !TryReadChange<ManuscriptStyleChange>(
+                    AiChangeReviewDrafts.EffectiveAfterJson(change),
+                    out var afterPayload))
+            {
+                return false;
+            }
+
+            var before = beforePayload.Before;
+            var input = afterPayload.After;
+            SetTitle(ref title, "Named style changes");
+            SetSubtitle(ref subtitle, input?.Name ?? before?.Name ?? string.Empty);
+            var prefix = $"Style {input?.Id ?? before?.Id}: ";
+            AddOrUpdateField(
+                fields,
+                prefix + "Name",
+                before?.Name ?? "(not set)",
+                input?.Name ?? "(deleted)",
+                null);
+            AddOrUpdateField(
+                fields,
+                prefix + "Kind",
+                before?.Kind.ToString() ?? "(not set)",
+                input?.Kind.ToString() ?? "(deleted)",
+                null);
+            AddOrUpdateField(
+                fields,
+                prefix + "Semantic role",
+                before?.SemanticRole ?? "(not set)",
+                input?.SemanticRole ?? "(deleted)",
+                null);
+            AddOrUpdateField(
+                fields,
+                prefix + "Definition",
+                FormatStyleDefinition(before?.Definition),
+                FormatStyleDefinition(input?.Definition),
+                null);
             return true;
         }
 
@@ -308,6 +390,79 @@ public static class AiChangeReviewDiffBuilder
         }
 
         fields[key] = new DiffFieldInput(key, oldText, newText, ownerChangeId);
+    }
+
+    private static IReadOnlyList<DiffFieldInput> BuildChapterManuscriptFields(
+        ChapterManuscriptChange before,
+        ChapterManuscriptChange after,
+        Guid? editableOwnerChangeId) =>
+        [
+            new DiffFieldInput(
+                "Body",
+                "Body",
+                before.PlainText,
+                after.PlainText,
+                editableOwnerChangeId),
+            new DiffFieldInput(
+                "Structure",
+                "Structure and formatting",
+                FormatManuscriptStructure(before.Manuscript),
+                FormatManuscriptStructure(after.Manuscript),
+                OwnerChangeId: null),
+        ];
+
+    private static string FormatManuscriptStructure(ManuscriptDocument manuscript)
+    {
+        var builder = new StringBuilder();
+        for (var blockIndex = 0; blockIndex < manuscript.Content.Count; blockIndex++)
+        {
+            var block = manuscript.Content[blockIndex];
+            builder
+                .Append("Block ")
+                .Append(blockIndex + 1)
+                .Append(": id=")
+                .Append(block.Id)
+                .Append("; type=")
+                .Append(block.Type)
+                .Append("; style=")
+                .Append(block.StyleRole);
+            if (block.HeadingLevel is not null)
+                builder.Append("; heading-level=").Append(block.HeadingLevel.Value);
+            if (block.ImageId is not null)
+                builder.Append("; image-id=").Append(block.ImageId.Value);
+            if (block.AltText is not null)
+                builder.Append("; alt=").Append(JsonSerializer.Serialize(block.AltText));
+            builder.AppendLine();
+
+            var offset = 0;
+            for (var inlineIndex = 0; inlineIndex < block.Content.Count; inlineIndex++)
+            {
+                var inline = block.Content[inlineIndex];
+                builder
+                    .Append("  Span ")
+                    .Append(inlineIndex + 1)
+                    .Append(": offsets=")
+                    .Append(offset)
+                    .Append("..")
+                    .Append(offset + inline.Text.Length)
+                    .Append("; marks=");
+                if (inline.Marks.Count == 0)
+                {
+                    builder.Append("none");
+                }
+                else
+                {
+                    builder.Append(string.Join(
+                        ", ",
+                        inline.Marks.Select(mark => mark.Value is null
+                            ? mark.Type.ToString()
+                            : $"{mark.Type}({JsonSerializer.Serialize(mark.Value)})")));
+                }
+                builder.AppendLine();
+                offset += inline.Text.Length;
+            }
+        }
+        return builder.ToString().TrimEnd();
     }
 
     private static void AppendReadOnlyChapterVisualFields(AiChange change, List<DiffFieldInput> fields)
@@ -409,6 +564,13 @@ public static class AiChangeReviewDiffBuilder
 
         return new ReviewDiff(title, subtitle, sections);
     }
+
+    private static string FormatStyleDefinition(ManuscriptStyleProperties? definition) =>
+        definition is null
+            ? "(not set)"
+            : JsonSerializer.Serialize(
+                definition,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
 
     private static bool FieldTextEquals(string oldText, string newText)
     {

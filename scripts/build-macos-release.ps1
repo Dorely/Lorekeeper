@@ -32,6 +32,9 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $projectPath = Join-Path $repoRoot 'Lorekeeper/Lorekeeper.csproj'
 $stageDirectory = Join-Path $repoRoot "publish/$RuntimeIdentifier-stage"
 $outputDirectory = Join-Path $repoRoot "publish/$RuntimeIdentifier"
+$semanticEditorDirectory = Join-Path $repoRoot 'tools/semantic-editor'
+$semanticEditorBundle = Join-Path $repoRoot 'Lorekeeper/wwwroot/js/semantic-editor.bundle.js'
+$semanticEditorNotice = Join-Path $repoRoot 'Lorekeeper/wwwroot/js/semantic-editor.NOTICES.txt'
 $profileName = $RuntimeIdentifier
 $artifactArchitecture = if ($RuntimeIdentifier -eq 'osx-arm64') { 'arm64' } else { 'x64' }
 $machArchitecture = if ($RuntimeIdentifier -eq 'osx-arm64') { 'arm64' } else { 'x86_64' }
@@ -159,6 +162,28 @@ try
     Remove-GeneratedDirectory $stageDirectory
     Remove-GeneratedDirectory $outputDirectory
 
+    foreach ($requiredPath in @(
+        (Join-Path $semanticEditorDirectory 'package-lock.json'),
+        (Join-Path $semanticEditorDirectory 'THIRD_PARTY_NOTICES.md'),
+        $semanticEditorBundle,
+        $semanticEditorNotice))
+    {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf))
+        {
+            throw "Required semantic-editor release input is missing: $requiredPath"
+        }
+    }
+    $semanticEditorBundleHash = (Get-FileHash -LiteralPath $semanticEditorBundle -Algorithm SHA256).Hash
+    Invoke-CheckedCommand npm @('ci') $semanticEditorDirectory
+    Invoke-CheckedCommand npm @('test') $semanticEditorDirectory
+    Invoke-CheckedCommand npm @('audit', '--audit-level=high') $semanticEditorDirectory
+    Invoke-CheckedCommand npm @('run', 'build') $semanticEditorDirectory
+    $rebuiltSemanticEditorHash = (Get-FileHash -LiteralPath $semanticEditorBundle -Algorithm SHA256).Hash
+    if ($rebuiltSemanticEditorHash -ne $semanticEditorBundleHash)
+    {
+        throw 'The checked-in semantic-editor bundle is stale. Rebuild and commit it before packaging.'
+    }
+
     Invoke-CheckedCommand dotnet @(
         'restore', $projectPath, '--force-evaluate',
         "-p:RuntimeIdentifier=$RuntimeIdentifier",
@@ -186,6 +211,17 @@ try
     {
         if ($null -eq $previousCi) { Remove-Item Env:CI -ErrorAction SilentlyContinue }
         else { $env:CI = $previousCi }
+    }
+
+    $stagedSemanticBundles = @(Get-ChildItem -LiteralPath $stageDirectory -Recurse -File -Filter 'semantic-editor.bundle.js')
+    $stagedSemanticNotices = @(Get-ChildItem -LiteralPath $stageDirectory -Recurse -File -Filter 'semantic-editor.NOTICES.txt')
+    if ($stagedSemanticBundles.Count -ne 1 -or $stagedSemanticNotices.Count -ne 1)
+    {
+        throw 'The release stage must contain exactly one semantic-editor bundle and its shipped notice.'
+    }
+    if ((Get-FileHash -LiteralPath $stagedSemanticBundles[0].FullName -Algorithm SHA256).Hash -ne $semanticEditorBundleHash)
+    {
+        throw 'The staged semantic-editor bundle does not match the verified source artifact.'
     }
 
     $manifest = Get-Content -Raw (Join-Path $stageDirectory 'package.json') | ConvertFrom-Json

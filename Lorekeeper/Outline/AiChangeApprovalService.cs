@@ -20,6 +20,7 @@ public sealed class AiChangeApprovalService(
     IActService acts,
     IChapterService chapters,
     IManuscriptService manuscripts,
+    IManuscriptStyleService manuscriptStyles,
     IChapterVisualService chapterVisuals,
     IEntityService entities,
     IVectorIndexWorkCoordinator indexWork,
@@ -83,6 +84,13 @@ public sealed class AiChangeApprovalService(
         var aggregate = chapterBodyChanges[^1];
         var finalAfter = ReadOptional<ChapterManuscriptChange>(AiChangeReviewDrafts.EffectiveAfterJson(aggregate))
             ?? throw new InvalidOperationException("The active chapter body review change no longer has a proposed body.");
+        if (!ManuscriptCodec.IsPlainTextOnly(chapter.Manuscript)
+            || !ManuscriptCodec.IsPlainTextOnly(finalAfter.Manuscript))
+        {
+            throw new InvalidOperationException(
+                "Line-by-line review is unavailable for semantically formatted manuscripts. "
+                + "Use the pending changes review to keep or reject the complete structured manuscript change.");
+        }
 
         var now = DateTime.UtcNow;
         foreach (var folded in chapterBodyChanges.Take(chapterBodyChanges.Count - 1))
@@ -154,6 +162,13 @@ public sealed class AiChangeApprovalService(
 
         var proposed = ReadOptional<ChapterManuscriptChange>(AiChangeReviewDrafts.EffectiveAfterJson(aggregate))
             ?? throw new InvalidOperationException("The active chapter body review change no longer has a proposed body.");
+        if (!ManuscriptCodec.IsPlainTextOnly(chapter.Manuscript)
+            || !ManuscriptCodec.IsPlainTextOnly(proposed.Manuscript))
+        {
+            throw new InvalidOperationException(
+                "Line-by-line review is unavailable for semantically formatted manuscripts. "
+                + "Keep or reject the complete structured manuscript change.");
+        }
 
         if (!AiChangeReviewDiffBuilder.TryBuild(aggregate, out var diff))
             throw new InvalidOperationException("The active chapter body review no longer contains a text diff.");
@@ -174,10 +189,10 @@ public sealed class AiChangeApprovalService(
 
         if (!string.Equals(newCurrentBody, chapter.PlainText, StringComparison.Ordinal))
         {
-            await manuscripts.ReplacePlainTextAsync(
+            await manuscripts.ReplaceDocumentAsync(
                 chapter.Id,
                 chapter.ManuscriptRevision,
-                newCurrentBody,
+                ManuscriptCodec.ReparsePreservingBlockIds(chapter.Manuscript, newCurrentBody),
                 cancellationToken);
             chapter = await chapters.ReloadFromStoreAsync(chapter.Id, cancellationToken)
                 ?? throw new InvalidOperationException($"Chapter {chapter.Id} not found after review save.");
@@ -443,6 +458,26 @@ public sealed class AiChangeApprovalService(
                     after.Id,
                     before?.Revision ?? checked(after.Revision - 1),
                     after.Manuscript,
+                    cancellationToken);
+                break;
+            }
+            case "upsert_manuscript_style":
+            {
+                var staged = ReadRequired<ManuscriptStyleChange>(afterJson);
+                var input = staged.After
+                    ?? throw new InvalidOperationException("The staged named-style update has no target state.");
+                await manuscriptStyles.UpsertAsync(projectId, input, cancellationToken);
+                break;
+            }
+            case "delete_manuscript_style":
+            {
+                var staged = ReadRequired<ManuscriptStyleChange>(afterJson);
+                var before = staged.Before
+                    ?? throw new InvalidOperationException("The staged named-style deletion has no source state.");
+                await manuscriptStyles.DeleteAsync(
+                    projectId,
+                    before.Id,
+                    before.Revision,
                     cancellationToken);
                 break;
             }

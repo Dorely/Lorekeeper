@@ -490,6 +490,8 @@ $RECYCLE.BIN/
 *.db-shm
 *.db-wal
 .playwright-mcp/
+**/.migration-backups/
+**/.mutation-locks/
 
 # Rust spike output
 /Lorekeeper.Press/target/

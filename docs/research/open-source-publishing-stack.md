@@ -291,7 +291,7 @@ shown to fail closed.
 
 | Decision | Status |
 |---|---|
-| Semantic editor based on ProseMirror | Planned |
+| Semantic editor based on ProseMirror | Implemented with exact-pinned MIT dependencies and an owned Lorekeeper schema/adapter |
 | Versioned JSON press-process protocol | Proven as a disposable fixture; production boundary not adopted |
 | Typst for high-level layout | Rejected as the sole Phase 1 renderer; retained as benchmark |
 | krilla extension for PDF writing/conformance | Last-resort fallback, not selected |

@@ -15,6 +15,9 @@ public sealed class EditorChatChangeStagingContext(
     private AiChangeBatch? _batch;
     private readonly List<AiChange> _newChanges = [];
     private readonly Dictionary<Guid, ManuscriptDocument> _chapterManuscriptDrafts = [];
+    private readonly Dictionary<Guid, ManuscriptStyleView> _manuscriptStyleDrafts = [];
+    private readonly Dictionary<Guid, Guid> _manuscriptStyleProducerChanges = [];
+    private bool _manuscriptStylesLoaded;
     private Guid? _assistantMessageId;
     private string _toolCallId = string.Empty;
     private string _toolName = string.Empty;
@@ -51,28 +54,7 @@ public sealed class EditorChatChangeStagingContext(
     public bool TryGetChapterManuscriptDraft(Guid chapterId, out ManuscriptDocument document) =>
         _chapterManuscriptDrafts.TryGetValue(chapterId, out document!);
 
-    public async Task StageChapterBodyEditAsync(
-        Chapter chapter,
-        string beforeBody,
-        string newBody,
-        string summary,
-        string result,
-        CancellationToken cancellationToken = default)
-    {
-        var beforeDocument = TryGetChapterManuscriptDraft(chapter.Id, out var staged)
-            ? staged
-            : string.Equals(chapter.PlainText, beforeBody, StringComparison.Ordinal)
-                ? chapter.Manuscript
-                : ManuscriptCodec.FromPlainText(chapter.Id, beforeBody, chapter.ManuscriptRevision);
-        var afterDocument = ManuscriptCodec.ReparsePreservingBlockIds(beforeDocument, newBody);
-        await StageChapterManuscriptEditAsync(
-            chapter,
-            beforeDocument,
-            afterDocument,
-            summary,
-            result,
-            cancellationToken);
-    }
+    public bool HasStagedManuscriptEdits => _chapterManuscriptDrafts.Count > 0;
 
     public async Task StageChapterManuscriptEditAsync(
         Chapter chapter,
@@ -93,6 +75,29 @@ public sealed class EditorChatChangeStagingContext(
             chapter.Id, chapter.Title, beforeDocument.Revision, ManuscriptCodec.Serialize(beforeDocument));
         var after = new ChapterManuscriptChange(
             chapter.Id, chapter.Title, afterDocument.Revision, ManuscriptCodec.Serialize(afterDocument));
+        var usedParagraphRoles = afterDocument.Content
+            .Select(block => block.StyleRole)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var usedCharacterRoles = afterDocument.Content
+            .SelectMany(block => block.Content)
+            .SelectMany(inline => inline.Marks)
+            .Where(mark => mark.Type == ManuscriptMarkType.CharacterStyle)
+            .Select(mark => mark.Value!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var usedStyles = _manuscriptStyleDrafts.Values
+            .Where(style => style.Kind == ManuscriptStyleKind.Paragraph
+                ? usedParagraphRoles.Contains(style.SemanticRole)
+                : usedCharacterRoles.Contains(style.SemanticRole))
+            .ToList();
+        var styleDependencies = usedStyles
+            .Where(style => _manuscriptStyleProducerChanges.ContainsKey(style.Id))
+            .Select(style => _manuscriptStyleProducerChanges[style.Id])
+            .Distinct()
+            .ToList();
+        var referencedResources = usedStyles
+            .Select(style => Resource("ManuscriptStyle", style.Id))
+            .Append(Resource("Chapter", chapter.Id))
+            .ToList();
         await StageChangeAsync(
             summary,
             before,
@@ -100,12 +105,73 @@ public sealed class EditorChatChangeStagingContext(
             result,
             resourceKind: "ChapterManuscript",
             resourceId: Resource("Chapter", chapter.Id),
-            referencedResources: [Resource("Chapter", chapter.Id)],
-            cancellationToken);
+            referencedResources,
+            cancellationToken,
+            dependsOnChangeIds: styleDependencies);
         _chapterManuscriptDrafts[chapter.Id] = afterDocument;
     }
 
-    private async Task StageChangeAsync(
+    public async Task<IReadOnlyList<ManuscriptStyleView>> ListManuscriptStyleDraftsAsync(
+        IManuscriptStyleService styles,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_manuscriptStylesLoaded)
+        {
+            foreach (var style in await styles.ListAsync(projectId, cancellationToken))
+                _manuscriptStyleDrafts[style.Id] = style;
+            _manuscriptStylesLoaded = true;
+        }
+        return _manuscriptStyleDrafts.Values
+            .OrderBy(style => style.Kind)
+            .ThenBy(style => style.Name)
+            .ToList();
+    }
+
+    public async Task StageManuscriptStyleChangeAsync(
+        ManuscriptStyleView? before,
+        ManuscriptStyleInput? after,
+        ManuscriptStyleView? preview,
+        string summary,
+        string result,
+        CancellationToken cancellationToken = default)
+    {
+        var id = before?.Id ?? after?.Id;
+        var resource = id is Guid styleId ? Resource("ManuscriptStyle", styleId) : $"ManuscriptStyle:new:{after?.SemanticRole}";
+        var isCreate = before is null && after is not null && after.ExpectedRevision is null;
+        var dependsOn = id is Guid dependentId
+            && _manuscriptStyleProducerChanges.TryGetValue(dependentId, out var producerId)
+                ? new[] { producerId }
+                : [];
+        var current = before is null
+            ? null
+            : new ManuscriptStyleInput(
+                before.Id,
+                before.Name,
+                before.Kind,
+                before.SemanticRole,
+                before.Definition,
+                before.Revision);
+        var change = await StageChangeAsync(
+            summary,
+            new ManuscriptStyleChange(before, current),
+            new ManuscriptStyleChange(before, after),
+            result,
+            resourceKind: "ManuscriptStyle",
+            resourceId: resource,
+            referencedResources: [resource],
+            cancellationToken,
+            createdResources: isCreate ? [resource] : [],
+            dependsOnChangeIds: dependsOn);
+        if (id is Guid changedId && change is not null)
+            _manuscriptStyleProducerChanges[changedId] = change.Id;
+        if (preview is not null)
+            _manuscriptStyleDrafts[preview.Id] = preview;
+        else if (before is not null)
+            _manuscriptStyleDrafts.Remove(before.Id);
+        _manuscriptStylesLoaded = true;
+    }
+
+    private async Task<AiChange?> StageChangeAsync(
         string summary,
         object? before,
         object? after,
@@ -113,12 +179,14 @@ public sealed class EditorChatChangeStagingContext(
         string resourceKind,
         string resourceId,
         IReadOnlyCollection<string> referencedResources,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<string>? createdResources = null,
+        IReadOnlyCollection<Guid>? dependsOnChangeIds = null)
     {
         var beforeJson = Serialize(before);
         var afterJson = Serialize(after);
         if (string.Equals(beforeJson, afterJson, StringComparison.Ordinal))
-            return;
+            return null;
 
         var batch = await EnsureBatchAsync(cancellationToken);
         var change = new AiChange
@@ -134,14 +202,15 @@ public sealed class EditorChatChangeStagingContext(
             ResultJson = resultJson,
             ResourceKind = resourceKind,
             ResourceId = resourceId,
-            CreatedResourceIdsJson = "[]",
+            CreatedResourceIdsJson = Serialize(createdResources ?? []),
             ReferencedResourceIdsJson = Serialize(referencedResources),
-            DependsOnChangeIdsJson = "[]",
+            DependsOnChangeIdsJson = Serialize(dependsOnChangeIds ?? []),
         };
 
         await changes.AddChangeAsync(change, cancellationToken);
         await changes.SaveChangesAsync(cancellationToken);
         _newChanges.Add(change);
+        return change;
     }
 
     private async Task<AiChangeBatch> EnsureBatchAsync(CancellationToken cancellationToken)

@@ -102,6 +102,7 @@ public class Project
     public ICollection<PublishImagePlacement> PublishImagePlacements { get; set; } = [];
 
     public ICollection<ProjectFontFamily> FontFamilies { get; set; } = [];
+    public ICollection<ManuscriptStyleDefinition> ManuscriptStyles { get; set; } = [];
 
     /// <summary>Single source of truth for the vector-store scope key for a project.</summary>
     public static string ScopeKey(Guid id) => $"project:{id:N}";

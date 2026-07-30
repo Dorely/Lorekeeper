@@ -46,6 +46,7 @@
 | `docs/decisions/0001-reject-typst-as-sole-press-renderer.md` | Accepted no-go decision for the first press renderer candidate and the WeasyPrint 69 fallback gate. |
 | `docs/decisions/0002-accept-weasyprint-for-preview-press-runtime.md` | Accepted reduced-scope decision for exact-pinned WeasyPrint as the future Preview press-runtime foundation. |
 | `docs/schemas/manuscript-v1.schema.json` | Published JSON Schema for canonical structured-manuscript v1 documents, blocks, inline nodes, marks, and semantic style roles. |
+| `docs/schemas/manuscript-v2.schema.json` | Current semantic-manuscript schema with figure blocks and expanded character marks. |
 
 ## Lorekeeper.Tests/
 
@@ -56,7 +57,21 @@
 | `ManuscriptMigrationIntegrationTests.cs` | Actual legacy-schema WAL database migration, backup/journal/hash, confirmation, and restore drill. |
 | `ChapterVisualMigrationTests.cs` | Picture Page multi-box and illustrated-prose stable-anchor migration fixtures. |
 | `EditorChatStagingTests.cs` | Review-mode fixture proving sequential semantic operations share one staged manuscript overlay. |
-| `ProjectExportV8Tests.cs` | v8 serialization and prevalidation fixtures for canonical manuscripts and stable visual references. |
+| `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
+| `ProjectExportCompatibilityTests.cs` | Current v9 named-style/manuscript fixtures plus v8 import-boundary and visual-layout compatibility checks. |
+| `ProjectImportJobIntegrationTests.cs` | Real v9 SQLite import-job round trip for marked/figured manuscripts, named styles, and final image-ID remapping. |
+| `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, and image-backed figures survive Markdown/EPUB-oriented publication rendering. |
+| `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, and in-use deletion fixtures. |
+| `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
+
+## tools/semantic-editor/
+
+| File | Description |
+|------|-------------|
+| `package.json` / `package-lock.json` | Exact-pinned ProseMirror and esbuild dependency graph plus deterministic test/build commands. |
+| `src/semantic-editor.js` | Owned ProseMirror schema/adapter, toolbar, autosave queue, paste diagnostics, outline, counts, and find/replace behavior. |
+| `test/semantic-editor.test.js` | Node/jsdom fixtures for round-trip fidelity, stable IDs, accessibility/read-only state, save draining, conflicts, paste, links, and marked-text find. |
+| `THIRD_PARTY_NOTICES.md` | Runtime/build dependency inventory and MIT notice for the semantic-editor bundle. |
 
 ## Lorekeeper.Press/ — Disposable renderer spike
 
@@ -161,7 +176,8 @@
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter workspace with mode-specific controls, keyed body-editor documents, serialized external refresh coordination, resizable Chat/Memory columns, chapter visuals, and inline AI/Contest review. |
-| `ChapterBodyEditor.razor` (+ `.razor.css`, `.razor.js`) | Isolated keyed prose textarea that owns its DOM, wrapping-aware line gutter, serialized debounced save/flush contract, read-only state, and JavaScript lifetime. |
+| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with revision-aware document save/flush, read-only toolbar locking, paste diagnostics, and JavaScript lifetime ownership. |
+| `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Named paragraph/character style manager with revision-aware create/edit/delete controls and stable semantic roles. |
 | `PagedChapterViewer.razor` (+ `.razor.css`, `.razor.js`) | Publish-profile-aware viewer/editor for Prose, IllustratedProse, and PicturePage chapters with advisory prose pagination, semantic text roles, anchored images, safety guides, enriched diagnostics, and drag/resize/layer/type controls. |
 | `ProjectFontManagerModal.razor` | PicturePage font catalog manager for multi-file static TTF/OTF imports, available-face inspection, rights reminders, and guarded custom-family deletion. |
 | `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: defers/coalesces transcript hydration, reconciles editor lock state with persistent turns, streams tool/contest updates, and routes active-chapter changes into Review mode. |
@@ -231,7 +247,7 @@
 
 | File | Description |
 |------|-------------|
-| `WritingSampleContent.razor` (+ `.razor.css`) | Top-level Writing Sample tab orchestrator. Three-pane CSS-grid layout (coach chat | sample editor | sample list), loads project-scoped samples, autosaves the active sample body through the shared editor JS bridge, supports title edits, and flushes pending edits before sample switches or coach sends. |
+| `WritingSampleContent.razor` (+ `.razor.css` / `.razor.js`) | Top-level Writing Sample tab orchestrator. Three-pane CSS-grid layout (coach chat | sample editor | sample list), owns its serialized textarea/gutter bridge, autosaves the active sample body, supports title edits, and flushes pending edits before sample switches or coach sends. |
 | `WritingCoachPanel.razor` (+ `.razor.css`) | Writing Coach adapter over `ChatSurface`; keeps transcripts visible, disables LLM controls without a working provider, and streams project-level coaching/read-only tool cards. |
 | `WritingSampleListPanel.razor` (+ `.razor.css`) | Right-side sample manager with clickable active rows, excerpts, updated timestamps, `New`, and delete-with-confirm. |
 
@@ -261,6 +277,7 @@
 | `ChapterVisualLayouts.cs` | Serializable IllustratedProse/PicturePage layouts using stable manuscript block/range references while preserving text roles, type settings, geometry, and image placement. |
 | `ManuscriptMigrationJournal.cs` | Durable structured-manuscript migration phase, counts, hashes, backup path, timing, and redacted failure state. |
 | `ProjectFontFamily.cs` / `ProjectFontFace.cs` | Project-scoped EF entities for imported font families and static face bytes, with weight/italic metadata and project cascade ownership. |
+| `ManuscriptStyleDefinition.cs` | Project-owned named paragraph/character style entity with normalized uniqueness keys, immutable semantic identity, definition JSON, and revision token. |
 | `EditorContextPreference.cs` | EF entity for per-chapter Context Feed include/exclude preferences keyed by context item kind + stable item key. |
 | `EditorConversation.cs` | EF entity — one persistent multi-turn editor chat per `Project` (unique on `ProjectId`). Owns ordered `EditorMessage`s; cascade-deleted with the project. |
 | `EditorMessage.cs` | EF Editor transcript row with role/content/tool metadata plus the bounded included/omitted context-provenance snapshot stored on outgoing user turns. |
@@ -314,10 +331,11 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context for projects, providers, chats, writing, graph, ingest/import, publishing, chapter visuals, and project font families/faces. Configures relationships/indexes, JSON property bags, and transient SQLite lock retries. |
+| `AppDbContext.cs` | EF Core context for projects, providers, chats, writing, graph, ingest/import, publishing, chapter visuals, fonts, and named manuscript styles. Configures relationships/indexes, JSON property bags, and transient SQLite lock retries. |
+| `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | Immutable EF history plus the structured-manuscript v1 forward schema migration and current model snapshot. |
+| `Migrations/` | Immutable EF history plus structured-manuscript and semantic-editor/named-style forward migrations with the current model snapshot. |
 
 ### Persistence/Repositories/
 
@@ -510,13 +528,13 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | v8 portable DTOs with canonical manuscripts/revisions and stable visual refs; retains isolated v1-v7 body and legacy-guidance input adapters. |
+| `ProjectExportModels.cs` | Current v9 portable DTOs with v2 manuscripts, named styles, revisions, and stable visual refs; retains isolated older input adapters. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job, importing v8 manuscripts losslessly or adapting v1-v7 bodies/visual anchors at the boundary, then refreshing projections and indexes. |
+| `ProjectImportJobProcessor.cs` | Runs one import job, importing v9 manuscripts/styles, adapting v8 manuscript-v1 or v1-v7 text only at the boundary, then refreshing projections and indexes. |
 
 ### Images/
 
@@ -632,8 +650,12 @@
 | File | Description |
 |------|-------------|
 | `ManuscriptModels.cs` | Versioned manuscript document/block/inline/mark model, style roles, semantic operation records, snapshots, and revision-conflict contract. |
+| `ManuscriptSemanticRoles.cs` | Safe semantic-role identifier validation plus deterministic normalization for manuscript-v1 migration and v8 import. |
 | `ManuscriptCodec.cs` | Plain-text normalization/projection, deterministic migration IDs, validation, serialization, hashing, and stable-ID reparsing. |
-| `ManuscriptOperations.cs` / `ManuscriptOperationInput.cs` | Transactional insert/replace/delete/move/split/merge/style/mark transformations and assistant-safe operation DTO conversion. |
+| `ManuscriptOperations.cs` / `ManuscriptOperationInput.cs` | Transactional insert/replace/delete/move/split/merge/type/style/mark transformations and assistant-safe operation DTO conversion. |
+| `ManuscriptInspection.cs` | Shared schema validation, normalization diagnostics, and structural block search used by Editor and revision-worker assistants. |
+| `ManuscriptSchemaUpgrade.cs` | Strict lossless v1-to-v2 document and nested historical-payload upgrader used by startup migration and the isolated v8 import adapter. |
+| `ManuscriptStyleService.cs` | Revision-checked named paragraph/character style ownership, validation, immutable semantic keys, and usage-safe deletion. |
 | `IManuscriptService.cs` | Canonical revision-aware chapter manuscript read, replace, and semantic-operation service contract. |
 | `ManuscriptMigrationService.cs` | Cross-process-serialized, WAL-safe Online Backup API migration/recovery owner for resumable schema/data transformation, atomic validation journaling, retention, and confirmed restore. |
 
@@ -644,6 +666,7 @@
 | `app.css` | App-wide Lorekeeper design tokens and shared editorial treatments for typography, controls, cards, status, empty states, navigation, and Bootstrap primitives. |
 | `text-select-cursor.svg` | High-contrast outlined I-beam cursor used by editable text surfaces so the pointer remains visible on light and dark backgrounds. |
 | `js/autosizeTextareas.js` | Small shared JS module that attaches to `textarea[data-autosize]`, grows each textarea to its `scrollHeight`, refreshes on input/change and width changes, and prevents nested textarea scrollbars. |
+| `js/semantic-editor.bundle.js` / `semantic-editor.NOTICES.txt` | Deterministic ProseMirror ESM bundle built from `tools/semantic-editor`, plus the shipped runtime dependency/license notice. |
 | `js/fileDownloads.js` | Browser download helper used by Import / Export and Publish to save generated graph JSON and publish export files. |
 | `fonts/` | Offline pinned OFL PicturePage families (35 static faces), per-family licenses, and source/revision documentation. |
 | `branding/` | Lorekeeper vector master plus generated PNG/ICO variants used by the app shell, browser metadata, and Electron release packaging. |

@@ -4,7 +4,7 @@ namespace Lorekeeper.Manuscripts;
 
 public sealed record ManuscriptDocument
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     [JsonRequired]
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
@@ -23,6 +23,12 @@ public sealed record ManuscriptBlock
     public ManuscriptBlockType Type { get; init; } = ManuscriptBlockType.Paragraph;
     [JsonRequired]
     public string StyleRole { get; init; } = ManuscriptStyleRoles.Body;
+    [JsonRequired]
+    public int? HeadingLevel { get; init; }
+    [JsonRequired]
+    public Guid? ImageId { get; init; }
+    [JsonRequired]
+    public string? AltText { get; init; }
     [JsonRequired]
     public List<ManuscriptInline> Content { get; init; } = [];
 }
@@ -50,6 +56,7 @@ public enum ManuscriptBlockType
     SceneBreak,
     BlockQuote,
     ListItem,
+    Figure,
 }
 
 public enum ManuscriptInlineType
@@ -66,15 +73,22 @@ public enum ManuscriptMarkType
     Code,
     Link,
     Language,
+    SmallCaps,
+    Superscript,
+    Subscript,
+    CharacterStyle,
 }
 
 public static class ManuscriptStyleRoles
 {
     public const string Body = "body";
     public const string Heading = "heading";
+    public const string ChapterHeading = "chapter-heading";
+    public const string Subheading = "subheading";
     public const string SceneBreak = "scene-break";
     public const string BlockQuote = "block-quote";
     public const string ListItem = "list-item";
+    public const string FigureCaption = "figure-caption";
 }
 
 public sealed record ManuscriptSnapshot(
@@ -100,6 +114,7 @@ public sealed record ManuscriptRangeReference(
 [JsonDerivedType(typeof(MoveManuscriptBlock), "moveBlock")]
 [JsonDerivedType(typeof(SplitManuscriptBlock), "splitBlock")]
 [JsonDerivedType(typeof(MergeManuscriptBlocks), "mergeBlocks")]
+[JsonDerivedType(typeof(SetManuscriptBlockType), "setBlockType")]
 [JsonDerivedType(typeof(SetManuscriptBlockStyle), "setBlockStyle")]
 [JsonDerivedType(typeof(SetManuscriptInlineMark), "setInlineMark")]
 public abstract record ManuscriptOperation;
@@ -108,7 +123,10 @@ public sealed record InsertManuscriptBlock(
     int Index,
     ManuscriptBlockType Type,
     string Text,
-    string? StyleRole = null) : ManuscriptOperation;
+    string? StyleRole = null,
+    Guid? ImageId = null,
+    string? AltText = null,
+    int? HeadingLevel = null) : ManuscriptOperation;
 
 public sealed record ReplaceManuscriptBlockText(
     string BlockId,
@@ -128,6 +146,14 @@ public sealed record SplitManuscriptBlock(
 public sealed record MergeManuscriptBlocks(
     string FirstBlockId,
     string SecondBlockId) : ManuscriptOperation;
+
+public sealed record SetManuscriptBlockType(
+    string BlockId,
+    ManuscriptBlockType Type,
+    string? StyleRole = null,
+    Guid? ImageId = null,
+    string? AltText = null,
+    int? HeadingLevel = null) : ManuscriptOperation;
 
 public sealed record SetManuscriptBlockStyle(
     string BlockId,

@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Security.Cryptography;
+using System.Text;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
@@ -33,6 +35,8 @@ public sealed class ProjectImportJobProcessor(
     IContextIndexingService contextIndexing,
     IEntityVisualExampleService entityVisualExamples,
     IBookBriefService bookBriefs,
+    IManuscriptStyleService manuscriptStyles,
+    IProjectMutationCoordinator projectMutations,
     IProjectImportJobNotifier notifier,
     ILogger<ProjectImportJobProcessor> logger)
 {
@@ -77,6 +81,10 @@ public sealed class ProjectImportJobProcessor(
             var document = await ReadAndValidateAsync(job, cancellationToken);
             var project = await projects.GetByIdAsync(job.ProjectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {job.ProjectId} not found.");
+            await ValidateManuscriptStyleCompatibilityAsync(
+                project.Id,
+                document,
+                cancellationToken);
 
             await outlineGraphSync.RepairProjectAsync(project.Id, cancellationToken);
             await entityTypeService.EnsureDefaultsAsync(project.Id, cancellationToken);
@@ -88,11 +96,14 @@ public sealed class ProjectImportJobProcessor(
             await ImportEntityTypesAsync(job, document, cancellationToken);
             await StepAsync(job, "Imported entity type definitions.", cancellationToken);
 
-            await ImportProjectImagesAsync(job, document, state, cancellationToken);
-            await StepAsync(job, "Imported project images.", cancellationToken);
-
             if (document.ExportKind == ProjectExportKind.Full)
             {
+                await using var mutationLease = await projectMutations.AcquireAsync(
+                    job.ProjectId,
+                    cancellationToken);
+                await ImportProjectImagesAsync(job, document, state, cancellationToken);
+                await StepAsync(job, "Imported project images.", cancellationToken);
+                await ImportManuscriptStylesAsync(job, document.ManuscriptStyles, cancellationToken);
                 await AppendStructuralItemsAsync(job, document, state, cancellationToken);
                 if (document.PublishProfiles.FirstOrDefault() is { } importedProfile)
                 {
@@ -106,6 +117,8 @@ public sealed class ProjectImportJobProcessor(
             }
             else
             {
+                await ImportProjectImagesAsync(job, document, state, cancellationToken);
+                await StepAsync(job, "Imported project images.", cancellationToken);
                 await StepAsync(job, "Skipped structural outline data for non-structural import.", cancellationToken);
             }
 
@@ -203,6 +216,7 @@ public sealed class ProjectImportJobProcessor(
             throw new InvalidOperationException($"Unsupported import format '{document.FormatId}'.");
         if (document.FormatVersion < 1 || document.FormatVersion > ProjectExportDocument.CurrentFormatVersion)
             throw new InvalidOperationException($"Unsupported import format version {document.FormatVersion}.");
+        document = AdaptLegacyManuscriptStyles(document);
 
         var duplicateNode = document.Nodes
             .GroupBy(node => StableKey(node.NodeType, node.Key), StringComparer.Ordinal)
@@ -243,6 +257,50 @@ public sealed class ProjectImportJobProcessor(
 
     internal static void ValidateChapterPayloads(ProjectExportDocument document)
     {
+        document = AdaptLegacyManuscriptStyles(document);
+        if (document.FormatVersion >= 8)
+        {
+            foreach (var style in document.ManuscriptStyles)
+            {
+                ManuscriptStyleService.ValidateInput(new ManuscriptStyleInput(
+                    style.Id,
+                    style.Name,
+                    style.Kind,
+                    style.SemanticRole,
+                    style.Definition));
+            }
+            if (document.ManuscriptStyles
+                .GroupBy(
+                    style => $"{style.Kind}:{style.Name.Trim().ToLowerInvariant()}",
+                    StringComparer.Ordinal)
+                .Any(group => group.Count() > 1))
+            {
+                throw new InvalidOperationException("Import file contains duplicate named manuscript styles.");
+            }
+            if (document.ManuscriptStyles
+                .GroupBy(
+                    style => $"{style.Kind}:{style.SemanticRole.Trim().ToLowerInvariant()}",
+                    StringComparer.Ordinal)
+                .Any(group => group.Count() > 1))
+            {
+                throw new InvalidOperationException("Import file maps more than one named style to the same semantic role.");
+            }
+        }
+        var duplicateImage = document.Images
+            .GroupBy(image => image.Id)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateImage is not null)
+            throw new InvalidOperationException($"Import file contains duplicate image '{duplicateImage.Key:N}'.");
+        var exportedImageIds = document.Images.Select(image => image.Id).ToHashSet();
+        var exportedStyles = document.FormatVersion >= 8
+            ? document.ManuscriptStyles.Select(style => new ManuscriptStyleView(
+                style.Id,
+                style.Name,
+                style.Kind,
+                style.SemanticRole,
+                style.Definition,
+                style.Revision)).ToList()
+            : [];
         var duplicateChapter = document.Chapters
             .GroupBy(chapter => chapter.Id)
             .FirstOrDefault(group => group.Count() > 1);
@@ -254,7 +312,7 @@ public sealed class ProjectImportJobProcessor(
             try
             {
                 var manuscript = document.FormatVersion >= 8
-                    ? ReadCurrentManuscript(chapter)
+                    ? ReadCurrentManuscript(chapter, document.FormatVersion)
                     : ManuscriptCodec.FromPlainText(
                         chapter.Id,
                         chapter.Body,
@@ -262,8 +320,18 @@ public sealed class ProjectImportJobProcessor(
                         deterministicIds: true);
                 if (document.FormatVersion >= 8)
                 {
-                    ValidateCurrentPageLayout(chapter, manuscript);
-                    ValidateCurrentIllustrationLayout(chapter, manuscript);
+                    ManuscriptStyleService.ValidateDocumentReferences(manuscript, exportedStyles);
+                    var missingFigure = manuscript.Content.FirstOrDefault(block =>
+                        block.Type == ManuscriptBlockType.Figure
+                        && block.ImageId is Guid imageId
+                        && !exportedImageIds.Contains(imageId));
+                    if (missingFigure is not null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Figure block {missingFigure.Id} references an image that is not included in the export.");
+                    }
+                    ValidateCurrentPageLayout(chapter, manuscript, exportedImageIds);
+                    ValidateCurrentIllustrationLayout(chapter, manuscript, exportedImageIds);
                 }
                 else
                 {
@@ -290,19 +358,198 @@ public sealed class ProjectImportJobProcessor(
         }
     }
 
-    private static ManuscriptDocument ReadCurrentManuscript(ProjectExportChapter chapter)
+    private async Task ImportManuscriptStylesAsync(
+        ProjectImportJob job,
+        IReadOnlyList<ProjectExportManuscriptStyle> importedStyles,
+        CancellationToken cancellationToken)
+    {
+        var existing = (await manuscriptStyles.ListAsync(job.ProjectId, cancellationToken)).ToList();
+        var usedNames = existing
+            .GroupBy(style => style.Kind)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(style => style.Name).ToHashSet(StringComparer.OrdinalIgnoreCase));
+        foreach (var kind in Enum.GetValues<ManuscriptStyleKind>())
+            usedNames.TryAdd(kind, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        foreach (var imported in importedStyles)
+        {
+            var roleMatch = existing.FirstOrDefault(style =>
+                style.Kind == imported.Kind
+                && string.Equals(
+                    style.SemanticRole,
+                    imported.SemanticRole,
+                    StringComparison.OrdinalIgnoreCase));
+            if (roleMatch is not null)
+            {
+                if (roleMatch.Definition != imported.Definition)
+                    throw new InvalidOperationException(
+                        $"Named style role '{imported.SemanticRole}' conflicts with the target project.");
+                continue;
+            }
+            var name = imported.Name.Trim();
+            var collision = existing.FirstOrDefault(style =>
+                style.Kind == imported.Kind
+                && string.Equals(style.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (collision is not null
+                && collision.SemanticRole == imported.SemanticRole
+                && collision.Definition == imported.Definition)
+            {
+                continue;
+            }
+            if (collision is not null)
+                name = AllocateImportedStyleName(name, usedNames[imported.Kind], forceSuffix: true);
+            else
+                usedNames[imported.Kind].Add(name);
+            var created = await manuscriptStyles.UpsertAsync(
+                job.ProjectId,
+                new ManuscriptStyleInput(
+                    null,
+                    name,
+                    imported.Kind,
+                    imported.SemanticRole,
+                    imported.Definition),
+                cancellationToken);
+            existing.Add(created);
+            await AddReportAsync(
+                job,
+                ProjectImportReportItemKind.Structural,
+                $"Imported named style {created.Name}",
+                $"{created.Kind} style for semantic role {created.SemanticRole}.",
+                "ManuscriptStyle",
+                created.Id.ToString("N"),
+                cancellationToken: cancellationToken);
+        }
+    }
+
+    private async Task ValidateManuscriptStyleCompatibilityAsync(
+        Guid projectId,
+        ProjectExportDocument document,
+        CancellationToken cancellationToken)
+    {
+        var existing = await manuscriptStyles.ListAsync(projectId, cancellationToken);
+        foreach (var imported in document.ManuscriptStyles)
+        {
+            var roleMatch = existing.FirstOrDefault(style =>
+                style.Kind == imported.Kind
+                && string.Equals(
+                    style.SemanticRole,
+                    imported.SemanticRole,
+                    StringComparison.OrdinalIgnoreCase));
+            if (roleMatch is not null && roleMatch.Definition != imported.Definition)
+            {
+                throw new InvalidOperationException(
+                    $"Named style role '{imported.SemanticRole}' conflicts with the target project's "
+                    + $"{imported.Kind.ToString().ToLowerInvariant()} style '{roleMatch.Name}'.");
+            }
+        }
+
+        var overlay = existing.ToList();
+        overlay.AddRange(document.ManuscriptStyles
+            .Where(imported => !overlay.Any(style =>
+                style.Kind == imported.Kind
+                && string.Equals(
+                    style.SemanticRole,
+                    imported.SemanticRole,
+                    StringComparison.OrdinalIgnoreCase)))
+            .Select(imported => new ManuscriptStyleView(
+                imported.Id,
+                imported.Name,
+                imported.Kind,
+                imported.SemanticRole,
+                imported.Definition,
+                imported.Revision)));
+        foreach (var chapter in document.Chapters)
+        {
+            var manuscript = document.FormatVersion >= 8
+                ? ReadCurrentManuscript(chapter, document.FormatVersion)
+                : ManuscriptCodec.FromPlainText(
+                    chapter.Id,
+                    chapter.Body,
+                    revision: 1,
+                    deterministicIds: true);
+            ManuscriptStyleService.ValidateDocumentReferences(manuscript, overlay);
+        }
+    }
+
+    internal static ProjectExportDocument AdaptLegacyManuscriptStyles(ProjectExportDocument document)
+    {
+        if (document.FormatVersion != 8 || document.ManuscriptStyles.Count > 0)
+            return document;
+
+        var roles = document.Chapters
+            .Select(chapter => ReadCurrentManuscript(chapter, document.FormatVersion))
+            .SelectMany(manuscript => manuscript.Content)
+            .Select(block => block.StyleRole)
+            .Where(role => !ManuscriptStyleService.BuiltInParagraphRoles.Contains(role))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(role => role, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var styles = roles.Select(role => new ProjectExportManuscriptStyle(
+            DeterministicImportedStyleId(document.Project.Id, role),
+            AllocateImportedStyleName($"Imported {role}", names),
+            ManuscriptStyleKind.Paragraph,
+            role,
+            new ManuscriptStyleProperties(),
+            1)).ToList();
+        return document with { ManuscriptStyles = styles };
+    }
+
+    private static Guid DeterministicImportedStyleId(Guid projectId, string semanticRole)
+    {
+        var bytes = SHA256.HashData(
+            Encoding.UTF8.GetBytes($"lorekeeper-imported-style-v8:{projectId:N}:{semanticRole}"));
+        return new Guid(bytes.AsSpan(0, 16));
+    }
+
+    internal static string AllocateImportedStyleName(
+        string requestedName,
+        ISet<string> usedNames,
+        bool forceSuffix = false)
+    {
+        var normalized = requestedName.Trim();
+        if (!forceSuffix)
+        {
+            var direct = normalized[..Math.Min(normalized.Length, 80)];
+            if (usedNames.Add(direct))
+                return direct;
+        }
+
+        var suffix = " (imported)";
+        var stem = normalized[..Math.Min(normalized.Length, 80 - suffix.Length)];
+        var candidate = $"{stem}{suffix}";
+        var number = 2;
+        while (!usedNames.Add(candidate))
+        {
+            var numberedSuffix = $"{suffix} {number++}";
+            stem = normalized[..Math.Min(normalized.Length, 80 - numberedSuffix.Length)];
+            candidate = $"{stem}{numberedSuffix}";
+        }
+        return candidate;
+    }
+
+    private static ManuscriptDocument ReadCurrentManuscript(
+        ProjectExportChapter chapter,
+        int formatVersion)
     {
         if (string.IsNullOrWhiteSpace(chapter.ManuscriptJson))
-            throw new InvalidDataException("The v8 manuscript document is missing.");
+            throw new InvalidDataException($"The v{formatVersion} manuscript document is missing.");
+        var manuscriptJson = formatVersion == 8
+            ? ManuscriptSchemaUpgrade.UpgradeV1DocumentJson(
+                chapter.ManuscriptJson,
+                chapter.Id,
+                chapter.ManuscriptRevision)
+            : chapter.ManuscriptJson;
         return ManuscriptCodec.Deserialize(
-            chapter.ManuscriptJson,
+            manuscriptJson,
             chapter.Id,
             chapter.ManuscriptRevision);
     }
 
     private static void ValidateCurrentPageLayout(
         ProjectExportChapter chapter,
-        ManuscriptDocument manuscript)
+        ManuscriptDocument manuscript,
+        IReadOnlySet<Guid> exportedImageIds)
     {
         if (string.IsNullOrWhiteSpace(chapter.PageLayoutJson))
             return;
@@ -310,6 +557,13 @@ public sealed class ProjectImportJobProcessor(
             chapter.PageLayoutJson,
             ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The Picture Page layout is null.");
+        var missingImage = layout.Images.FirstOrDefault(
+            image => !exportedImageIds.Contains(image.ImageId));
+        if (missingImage is not null)
+        {
+            throw new InvalidDataException(
+                $"Picture Page element {missingImage.Id:N} references an image that is not included in the export.");
+        }
         var hydrated = ChapterTextLayoutSynchronizer.Hydrate(layout, manuscript);
         if (!string.Equals(
             ManuscriptCodec.NormalizePlainText(ChapterTextLayoutSynchronizer.ProjectBody(hydrated)),
@@ -322,14 +576,22 @@ public sealed class ProjectImportJobProcessor(
 
     private static void ValidateCurrentIllustrationLayout(
         ProjectExportChapter chapter,
-        ManuscriptDocument manuscript)
+        ManuscriptDocument manuscript,
+        IReadOnlySet<Guid> exportedImageIds)
     {
         if (string.IsNullOrWhiteSpace(chapter.IllustrationLayoutJson))
             return;
-        _ = JsonSerializer.Deserialize<IllustratedProseLayout>(
+        var layout = JsonSerializer.Deserialize<IllustratedProseLayout>(
             chapter.IllustrationLayoutJson,
             ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The illustrated-prose layout is null.");
+        var missingImage = layout.Images.FirstOrDefault(
+            image => !exportedImageIds.Contains(image.ImageId));
+        if (missingImage is not null)
+        {
+            throw new InvalidDataException(
+                $"Illustrated Prose element {missingImage.Id:N} references an image that is not included in the export.");
+        }
         var validationChapter = new Chapter
         {
             Id = chapter.Id,
@@ -444,7 +706,11 @@ public sealed class ProjectImportJobProcessor(
             var tracked = await chapterRepo.GetByIdAsync(created.Id, cancellationToken)
                 ?? throw new InvalidOperationException($"Created chapter {created.Id} could not be reloaded.");
             var importedManuscript = document.FormatVersion >= 8
-                ? ImportCurrentManuscript(importedChapter, tracked.Id)
+                ? ImportCurrentManuscript(
+                    importedChapter,
+                    tracked.Id,
+                    document.FormatVersion,
+                    state.ImageMap)
                 : ManuscriptCodec.FromPlainText(
                     tracked.Id,
                     importedChapter.Body,
@@ -889,7 +1155,7 @@ public sealed class ProjectImportJobProcessor(
         string layoutJson,
         IReadOnlyDictionary<Guid, Guid> imageMap)
     {
-        if (string.IsNullOrWhiteSpace(layoutJson) || imageMap.Count == 0)
+        if (string.IsNullOrWhiteSpace(layoutJson))
             return layoutJson;
 
         try
@@ -899,7 +1165,8 @@ public sealed class ProjectImportJobProcessor(
             var images = layout.Images
                 .Select(image => imageMap.TryGetValue(image.ImageId, out var localImageId)
                     ? image with { ImageId = localImageId }
-                    : image)
+                    : throw new InvalidDataException(
+                        $"Illustrated Prose element {image.Id:N} references an image that was not imported."))
                 .ToList();
             return JsonSerializer.Serialize(layout with { Images = images }, JsonOptions);
         }
@@ -909,12 +1176,28 @@ public sealed class ProjectImportJobProcessor(
         }
     }
 
-    private static ManuscriptDocument ImportCurrentManuscript(
+    internal static ManuscriptDocument ImportCurrentManuscript(
         ProjectExportChapter chapter,
-        Guid localChapterId)
+        Guid localChapterId,
+        int formatVersion,
+        IReadOnlyDictionary<Guid, Guid> imageMap)
     {
-        var imported = ReadCurrentManuscript(chapter);
-        var remapped = imported with { ManuscriptId = localChapterId };
+        var imported = ReadCurrentManuscript(chapter, formatVersion);
+        var remapped = imported with
+        {
+            ManuscriptId = localChapterId,
+            Content = imported.Content.Select(block =>
+                block.Type == ManuscriptBlockType.Figure
+                    ? block with
+                    {
+                        ImageId = block.ImageId is Guid exportedImageId
+                            && imageMap.TryGetValue(exportedImageId, out var localImageId)
+                                ? localImageId
+                                : throw new InvalidOperationException(
+                                    $"Figure block {block.Id} references an image that was not imported."),
+                    }
+                    : block).ToList(),
+        };
         ManuscriptCodec.Validate(remapped, localChapterId, remapped.Revision);
         return remapped;
     }
@@ -923,7 +1206,7 @@ public sealed class ProjectImportJobProcessor(
         string layoutJson,
         IReadOnlyDictionary<Guid, Guid> imageMap)
     {
-        if (string.IsNullOrWhiteSpace(layoutJson) || imageMap.Count == 0)
+        if (string.IsNullOrWhiteSpace(layoutJson))
             return layoutJson;
 
         try
@@ -933,7 +1216,8 @@ public sealed class ProjectImportJobProcessor(
             var images = layout.Images
                 .Select(image => imageMap.TryGetValue(image.ImageId, out var localImageId)
                     ? image with { ImageId = localImageId }
-                    : image)
+                    : throw new InvalidDataException(
+                        $"Picture Page element {image.Id:N} references an image that was not imported."))
                 .ToList();
             return JsonSerializer.Serialize(layout with { Images = images }, JsonOptions);
         }

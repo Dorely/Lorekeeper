@@ -1,0 +1,26 @@
+.manuscript-styles-panel {
+    display: grid;
+    gap: .75rem;
+    padding: .75rem 0;
+}
+
+.manuscript-style-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .65rem;
+    align-items: end;
+}
+
+.manuscript-style-form label {
+    display: grid;
+    gap: .2rem;
+    min-width: 9rem;
+    font-size: .82rem;
+}
+
+.manuscript-style-form label:has(input[type="checkbox"]) {
+    display: flex;
+    min-width: auto;
+    align-items: center;
+    gap: .35rem;
+}

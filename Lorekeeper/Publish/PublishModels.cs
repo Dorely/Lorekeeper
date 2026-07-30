@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.Publish;
 
@@ -146,11 +147,18 @@ public sealed record PublishDocument(
     IReadOnlyList<PublishImagePlacementDocument> Placements)
 {
     public ChapterPageLayoutKind? CoverPageLayoutKind { get; init; }
+    public IReadOnlyList<PublishManuscriptStyleDocument> NamedStyles { get; init; } = [];
 
     public string DisplayTitle => string.IsNullOrWhiteSpace(Profile.TitleOverride)
         ? ProjectName
         : Profile.TitleOverride.Trim();
 }
+
+public sealed record PublishManuscriptStyleDocument(
+    string Name,
+    ManuscriptStyleKind Kind,
+    string SemanticRole,
+    ManuscriptStyleProperties Definition);
 
 public sealed record PublishDocumentProfile(
     string TitleOverride,
@@ -202,7 +210,8 @@ public sealed record PublishChapterDocument(
     ChapterVisualMode VisualMode,
     ChapterPageLayoutKind PageLayoutKind,
     IllustratedProseLayout IllustrationLayout,
-    PicturePageLayout PageLayout)
+    PicturePageLayout PageLayout,
+    ManuscriptDocument Manuscript)
 {
     public PublishPicturePageDocument? RenderedPicturePage { get; init; }
 }

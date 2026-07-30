@@ -16,7 +16,13 @@ public static class ManuscriptOperations
                     if (insert.Index < 0 || insert.Index > blocks.Count)
                         throw new ArgumentOutOfRangeException(nameof(insert.Index));
                     ValidateBlockText(insert.Type, insert.Text);
-                    var inserted = NewBlock(insert.Type, insert.Text, insert.StyleRole);
+                    var inserted = NewBlock(
+                        insert.Type,
+                        insert.Text,
+                        insert.StyleRole,
+                        insert.ImageId,
+                        insert.AltText,
+                        insert.HeadingLevel);
                     blocks.Insert(insert.Index, inserted);
                     changed.Add(inserted.Id);
                     break;
@@ -51,6 +57,8 @@ public static class ManuscriptOperations
                     var splitIndex = Find(blocks, split.BlockId);
                     var splitBlock = blocks[splitIndex];
                     RequireTextBlock(splitBlock);
+                    if (splitBlock.Type == ManuscriptBlockType.Figure)
+                        throw new InvalidOperationException("Figure blocks cannot be split; edit the caption instead.");
                     var splitText = ManuscriptCodec.Text(splitBlock);
                     if (split.Offset < 0 || split.Offset > splitText.Length)
                         throw new ArgumentOutOfRangeException(nameof(split.Offset));
@@ -62,7 +70,8 @@ public static class ManuscriptOperations
                     var tail = NewBlock(
                         splitBlock.Type,
                         SliceContent(splitBlock.Content, split.Offset, splitText.Length),
-                        splitBlock.StyleRole);
+                        splitBlock.StyleRole,
+                        headingLevel: splitBlock.HeadingLevel);
                     blocks.Insert(splitIndex + 1, tail);
                     changed.Add(split.BlockId);
                     changed.Add(tail.Id);
@@ -75,6 +84,22 @@ public static class ManuscriptOperations
                         throw new InvalidOperationException("Only adjacent blocks can be merged.");
                     RequireTextBlock(blocks[firstIndex]);
                     RequireTextBlock(blocks[secondIndex]);
+                    if (blocks[firstIndex].Type == ManuscriptBlockType.Figure
+                        || blocks[secondIndex].Type == ManuscriptBlockType.Figure)
+                    {
+                        throw new InvalidOperationException(
+                            "Figure blocks cannot be merged because their image metadata must remain attached.");
+                    }
+                    if (blocks[firstIndex].Type != blocks[secondIndex].Type
+                        || blocks[firstIndex].HeadingLevel != blocks[secondIndex].HeadingLevel
+                        || !string.Equals(
+                            blocks[firstIndex].StyleRole,
+                            blocks[secondIndex].StyleRole,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidOperationException(
+                            "Blocks must have the same type, heading level, and style role before merging.");
+                    }
                     var mergedContent = new List<ManuscriptInline>();
                     foreach (var inline in blocks[firstIndex].Content.Concat(blocks[secondIndex].Content))
                         AppendInline(mergedContent, Clone(inline));
@@ -85,6 +110,40 @@ public static class ManuscriptOperations
                     blocks.RemoveAt(secondIndex);
                     changed.Add(merge.FirstBlockId);
                     changed.Add(merge.SecondBlockId);
+                    break;
+
+                case SetManuscriptBlockType blockType:
+                    var typeIndex = Find(blocks, blockType.BlockId);
+                    var current = blocks[typeIndex];
+                    var typeIsUnchanged = blockType.Type == current.Type;
+                    if (blockType.Type == ManuscriptBlockType.SceneBreak
+                        && !string.IsNullOrEmpty(ManuscriptCodec.Text(current)))
+                    {
+                        throw new InvalidOperationException(
+                            "A text block must be empty before it can become a scene break.");
+                    }
+                    blocks[typeIndex] = current with
+                    {
+                        Type = blockType.Type,
+                        StyleRole = string.IsNullOrWhiteSpace(blockType.StyleRole)
+                            ? typeIsUnchanged
+                                ? current.StyleRole
+                                : DefaultStyle(blockType.Type)
+                            : blockType.StyleRole.Trim(),
+                        Content = blockType.Type == ManuscriptBlockType.SceneBreak
+                            ? []
+                            : current.Content,
+                        ImageId = blockType.Type == ManuscriptBlockType.Figure
+                            ? blockType.ImageId ?? (typeIsUnchanged ? current.ImageId : null)
+                            : null,
+                        AltText = blockType.Type == ManuscriptBlockType.Figure
+                            ? blockType.AltText?.Trim() ?? (typeIsUnchanged ? current.AltText : null)
+                            : null,
+                        HeadingLevel = blockType.Type == ManuscriptBlockType.Heading
+                            ? blockType.HeadingLevel ?? current.HeadingLevel ?? 2
+                            : null,
+                    };
+                    changed.Add(blockType.BlockId);
                     break;
 
                 case SetManuscriptBlockStyle style:
@@ -213,18 +272,27 @@ public static class ManuscriptOperations
     private static ManuscriptBlock NewBlock(
         ManuscriptBlockType type,
         string text,
-        string? styleRole) =>
+        string? styleRole,
+        Guid? imageId = null,
+        string? altText = null,
+        int? headingLevel = null) =>
         NewBlock(
             type,
             type == ManuscriptBlockType.SceneBreak
                 ? []
                 : [new ManuscriptInline { Text = text }],
-            styleRole);
+            styleRole,
+            imageId,
+            altText,
+            headingLevel);
 
     private static ManuscriptBlock NewBlock(
         ManuscriptBlockType type,
         List<ManuscriptInline> content,
-        string? styleRole) =>
+        string? styleRole,
+        Guid? imageId = null,
+        string? altText = null,
+        int? headingLevel = null) =>
         new()
         {
             Id = Guid.NewGuid().ToString("N"),
@@ -233,6 +301,9 @@ public static class ManuscriptOperations
             Content = type == ManuscriptBlockType.SceneBreak
                 ? []
                 : content,
+            ImageId = type == ManuscriptBlockType.Figure ? imageId : null,
+            AltText = type == ManuscriptBlockType.Figure ? altText?.Trim() : null,
+            HeadingLevel = type == ManuscriptBlockType.Heading ? headingLevel ?? 2 : null,
         };
 
     private static List<ManuscriptInline> SliceContent(
@@ -298,6 +369,7 @@ public static class ManuscriptOperations
             ManuscriptBlockType.SceneBreak => ManuscriptStyleRoles.SceneBreak,
             ManuscriptBlockType.BlockQuote => ManuscriptStyleRoles.BlockQuote,
             ManuscriptBlockType.ListItem => ManuscriptStyleRoles.ListItem,
+            ManuscriptBlockType.Figure => ManuscriptStyleRoles.FigureCaption,
             _ => ManuscriptStyleRoles.Body,
         };
 }

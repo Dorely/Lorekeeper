@@ -4,6 +4,7 @@ using System.Text.Json;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -487,7 +488,10 @@ public sealed class PublishService(
         var referencedAssetIds = sections
             .SelectMany(section => section.Chapters)
             .SelectMany(chapter => chapter.IllustrationLayout.Images.Select(image => image.ImageId)
-                .Concat(chapter.PageLayout.Images.Select(image => image.ImageId)))
+                .Concat(chapter.PageLayout.Images.Select(image => image.ImageId))
+                .Concat(chapter.Manuscript.Content
+                    .Where(block => block.Type == ManuscriptBlockType.Figure)
+                    .Select(block => block.ImageId!.Value)))
             .Concat(validPlacements.Select(placement => placement.AssetId))
             .ToHashSet();
         var assets = referencedAssetIds.Count == 0
@@ -513,6 +517,21 @@ public sealed class PublishService(
         var coverPageLayoutKind = profile.SelectedCoverChapterId is Guid coverChapterId
             ? chapters.FirstOrDefault(chapter => chapter.Id == coverChapterId)?.PageLayoutKind
             : null;
+        var namedStyles = (await db.ManuscriptStyleDefinitions
+            .AsNoTracking()
+            .Where(style => style.ProjectId == projectId)
+            .OrderBy(style => style.Kind)
+            .ThenBy(style => style.Name)
+            .ToListAsync(cancellationToken))
+            .Select(style => new PublishManuscriptStyleDocument(
+                style.Name,
+                style.Kind,
+                style.SemanticRole,
+                ManuscriptStyleService.NormalizeDefinition(
+                    JsonSerializer.Deserialize<ManuscriptStyleProperties>(
+                        style.DefinitionJson,
+                        ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties())))
+            .ToList();
 
         return new PublishDocument(
             project.Id,
@@ -526,6 +545,7 @@ public sealed class PublishService(
             placementDocuments)
         {
             CoverPageLayoutKind = coverPageLayoutKind,
+            NamedStyles = namedStyles,
         };
     }
 
@@ -983,7 +1003,8 @@ public sealed class PublishService(
             chapter.VisualMode,
             pageLayoutKind,
             illustrationLayout,
-            pageLayout);
+            pageLayout,
+            chapter.Manuscript);
     }
 
     private static PublishAssetDocument AssetDocument(PublishAsset asset) =>

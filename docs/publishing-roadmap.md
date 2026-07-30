@@ -246,10 +246,9 @@ Deliverables:
   IDs with hash validation and fail-closed ambiguity handling;
 - project export v8 for structured manuscripts and stable visual-layout
   references, with isolated v1–v7 import adapters;
-- a temporary textarea adapter that reads the manuscript's plain-text
-  projection and translates revision-aware saves through the manuscript
-  service's parse/diff commands, never through `Chapter.Body` or a parallel
-  whole-string persistence path;
+- the temporary textarea adapter used during the cutover (removed when Feature
+  3 installed the schema-driven editor), which translated revision-aware saves
+  through the manuscript service and never wrote `Chapter.Body`;
 - rebuilt search/vector/graph/Picture Page projections;
 - removal of direct obsolete runtime body access after cutover.
 
@@ -272,27 +271,34 @@ and restore tests pass before any existing database is contracted.
 
 #### 3. Semantic rich-text editor and named styles
 
-Status: `Planned`
+Status: `Implementation complete; release validation pending`
 
 Replace the textarea experience with a ProseMirror-based editor that uses the
 new service boundary.
 
 Deliverables:
 
-- paragraph, chapter heading, subheading, scene break, block quote, list, link,
-  and image/figure-capable base nodes;
+- paragraph, structurally persistent heading levels 1-6, intentional hard line
+  breaks, scene break, block quote, list, link, and project-image figure nodes
+  with required alt text and captions;
 - emphasis, strong, small-caps intent, superscript/subscript, language, and
   character-style marks;
 - named paragraph/character styles with edition-independent semantics;
+- semantic Markdown/EPUB projection so authored block/mark/figure intent is not
+  flattened at the existing publishing boundary;
 - project export v9 that round-trips semantic style definitions, with an
   isolated v8 import adapter;
 - removal of the temporary textarea adapter after every editor workflow uses
-  schema-driven transactions;
+  schema-driven transactions (implemented);
 - paste/import normalization with warnings;
 - undo/redo, keyboard behavior, special characters, find/replace preview,
   document outline, counts, autosave/conflict handling, and accessible focus;
 - existing context, contest, revision-agent, Picture Page, and review workflows
-  operating through structured commands.
+  operating through structured commands. Picture Page whole-block edits,
+  insertions, deletions, and reading-order moves preserve stable references;
+  partial-block range edits deliberately fail closed and are routed to the
+  manuscript editor. Visual layouts use monotonic revisions and project-scoped
+  image validation so stale editors cannot reintroduce deleted assets.
 
 Assistant parity: every block/mark/style command, structural search, validation,
 and normalization diagnostic is available to the Editor assistant through the

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Lorekeeper.Context;
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -145,6 +146,25 @@ public sealed class ProjectImportExportService(
                     .OrderBy(profile => profile.CreatedAt)
                     .Select(profile => ProjectPublishProfile(profile))
                     .ToListAsync(cancellationToken)
+                : [],
+            ManuscriptStyles = kind == ProjectExportKind.Full
+                ? (await db.ManuscriptStyleDefinitions
+                    .AsNoTracking()
+                    .Where(style => style.ProjectId == projectId)
+                    .OrderBy(style => style.Kind)
+                    .ThenBy(style => style.Name)
+                    .ToListAsync(cancellationToken))
+                    .Select(style => new ProjectExportManuscriptStyle(
+                        style.Id,
+                        style.Name,
+                        style.Kind,
+                        style.SemanticRole,
+                        ManuscriptStyleService.NormalizeDefinition(
+                            JsonSerializer.Deserialize<ManuscriptStyleProperties>(
+                                style.DefinitionJson,
+                                ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties()),
+                        style.Revision))
+                    .ToList()
                 : [],
             Acts = kind == ProjectExportKind.Full
                 ? (await acts.ListByProjectAsync(projectId, cancellationToken)).Select(ProjectAct).ToList()

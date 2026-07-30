@@ -1,0 +1,216 @@
+@using Lorekeeper.Manuscripts
+@using Lorekeeper.Models
+@inject IManuscriptStyleService Styles
+@inject IJSRuntime JS
+
+<div class="manuscript-styles-panel">
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger" role="alert">@_error</div>
+    }
+    <div class="manuscript-style-form">
+        <label>Name <input class="form-control" @bind="_name" /></label>
+        <label>
+            Kind
+            <select class="form-select" @bind="_kind">
+                <option value="@ManuscriptStyleKind.Paragraph">Paragraph</option>
+                <option value="@ManuscriptStyleKind.Character">Character</option>
+            </select>
+        </label>
+        <label>Semantic role <input class="form-control" @bind="_semanticRole" /></label>
+        <label>
+            Font family
+            <select class="form-select" @bind="_fontFamilyKey">
+                <option value="">Inherit</option>
+                <option value="serif">Serif</option>
+                <option value="sans">Sans serif</option>
+                <option value="mono">Monospace</option>
+            </select>
+        </label>
+        <label>Font size (pt) <input class="form-control" type="number" min="1" max="288" step="0.5" @bind="_fontSizePoints" /></label>
+        <label>Weight <input class="form-control" type="number" min="100" max="900" step="100" @bind="_fontWeight" /></label>
+        <label>Line height <input class="form-control" type="number" min="0.1" max="5" step="0.05" @bind="_lineHeight" /></label>
+        <label><input type="checkbox" @bind="_italic" /> Italic</label>
+        <label><input type="checkbox" @bind="_smallCaps" /> Small caps</label>
+        @if (_kind == ManuscriptStyleKind.Paragraph)
+        {
+            <label>Space before (pt) <input class="form-control" type="number" min="0" max="288" step="0.5" @bind="_spaceBeforePoints" /></label>
+            <label>Space after (pt) <input class="form-control" type="number" min="0" max="288" step="0.5" @bind="_spaceAfterPoints" /></label>
+            <label>
+                Alignment
+                <select class="form-select" @bind="_textAlign">
+                    <option value="">Inherit</option>
+                    <option value="left">Left</option>
+                    <option value="right">Right</option>
+                    <option value="center">Center</option>
+                    <option value="justify">Justify</option>
+                </select>
+            </label>
+            <label><input type="checkbox" @bind="_keepWithNext" /> Keep with next in paginated output</label>
+        }
+        <button type="button" class="btn btn-sm btn-primary" @onclick="SaveAsync">
+            @(_editingId is null ? "Add style" : "Save style")
+        </button>
+        @if (_editingId is not null)
+        {
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ResetForm">Cancel</button>
+        }
+    </div>
+    <table class="table table-sm">
+        <thead><tr><th>Name</th><th>Kind</th><th>Role</th><th>Revision</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var style in _styles)
+            {
+                <tr @key="style.Id">
+                    <td>@style.Name</td>
+                    <td>@style.Kind</td>
+                    <td><code>@style.SemanticRole</code></td>
+                    <td>@style.Revision</td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => Edit(style)">Edit</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(style)">Delete</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public Func<Task<bool>>? BeforeChange { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private List<ManuscriptStyleView> _styles = [];
+    private Guid? _loadedProjectId;
+    private Guid? _editingId;
+    private long? _expectedRevision;
+    private string _name = string.Empty;
+    private ManuscriptStyleKind _kind = ManuscriptStyleKind.Paragraph;
+    private string _semanticRole = string.Empty;
+    private string? _fontFamilyKey;
+    private double? _fontSizePoints;
+    private int? _fontWeight;
+    private double? _lineHeight;
+    private bool _italic;
+    private bool _smallCaps;
+    private double? _spaceBeforePoints;
+    private double? _spaceAfterPoints;
+    private bool _keepWithNext;
+    private string? _textAlign;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedProjectId == ProjectId)
+            return;
+        _loadedProjectId = ProjectId;
+        await ReloadAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        try
+        {
+            _error = null;
+            if (BeforeChange is not null && !await BeforeChange())
+            {
+                _error = "Save the current manuscript draft before changing named styles.";
+                return;
+            }
+            await Styles.UpsertAsync(
+                ProjectId,
+                new ManuscriptStyleInput(
+                    _editingId,
+                    _name,
+                    _kind,
+                    _semanticRole,
+                    new ManuscriptStyleProperties(
+                        _fontFamilyKey,
+                        _fontSizePoints,
+                        _fontWeight,
+                        _italic,
+                        _smallCaps,
+                        _lineHeight,
+                        _kind == ManuscriptStyleKind.Paragraph ? _spaceBeforePoints : null,
+                        _kind == ManuscriptStyleKind.Paragraph ? _spaceAfterPoints : null,
+                        _kind == ManuscriptStyleKind.Paragraph ? _keepWithNext : null,
+                        _kind == ManuscriptStyleKind.Paragraph ? _textAlign : null),
+                    _expectedRevision));
+            ResetForm();
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+    }
+
+    private void Edit(ManuscriptStyleView style)
+    {
+        _editingId = style.Id;
+        _expectedRevision = style.Revision;
+        _name = style.Name;
+        _kind = style.Kind;
+        _semanticRole = style.SemanticRole;
+        _fontFamilyKey = style.Definition.FontFamilyKey;
+        _fontSizePoints = style.Definition.FontSizePoints;
+        _fontWeight = style.Definition.FontWeight;
+        _lineHeight = style.Definition.LineHeight;
+        _italic = style.Definition.Italic ?? false;
+        _smallCaps = style.Definition.SmallCaps ?? false;
+        _spaceBeforePoints = style.Definition.SpaceBeforePoints;
+        _spaceAfterPoints = style.Definition.SpaceAfterPoints;
+        _keepWithNext = style.Definition.KeepWithNext ?? false;
+        _textAlign = style.Definition.TextAlign;
+    }
+
+    private async Task DeleteAsync(ManuscriptStyleView style)
+    {
+        try
+        {
+            _error = null;
+            if (!await JS.InvokeAsync<bool>(
+                "confirm",
+                $"Delete {style.Kind.ToString().ToLowerInvariant()} style '{style.Name}' ({style.SemanticRole})?"))
+            {
+                return;
+            }
+            if (BeforeChange is not null && !await BeforeChange())
+            {
+                _error = "Save the current manuscript draft before deleting a named style.";
+                return;
+            }
+            await Styles.DeleteAsync(ProjectId, style.Id, style.Revision);
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+    }
+
+    private async Task ReloadAsync() =>
+        _styles = (await Styles.ListAsync(ProjectId)).ToList();
+
+    private void ResetForm()
+    {
+        _editingId = null;
+        _expectedRevision = null;
+        _name = string.Empty;
+        _kind = ManuscriptStyleKind.Paragraph;
+        _semanticRole = string.Empty;
+        _fontFamilyKey = null;
+        _fontSizePoints = null;
+        _fontWeight = null;
+        _lineHeight = null;
+        _italic = false;
+        _smallCaps = false;
+        _spaceBeforePoints = null;
+        _spaceAfterPoints = null;
+        _keepWithNext = false;
+        _textAlign = null;
+    }
+}

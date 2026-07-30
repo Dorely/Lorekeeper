@@ -1,52 +1,230 @@
 .chapter-edit-surface {
-    display: flex;
-    align-items: stretch;
+    position: relative;
+    display: block;
     width: 100%;
     height: 100%;
     min-height: 0;
+    overflow: auto;
+    background: var(--bs-body-bg, #fff);
 }
 
 .chapter-edit-surface--hidden {
     display: none;
 }
 
-.line-gutter {
-    flex: 0 0 auto;
-    box-sizing: border-box;
-    padding: 0.375rem 0.5rem 0.375rem 0.6rem;
-    font-family: var(--bs-font-monospace, monospace);
-    font-size: 0.95rem;
-    line-height: 1.5;
-    color: var(--bs-secondary-color, #6c757d);
-    background: var(--bs-tertiary-bg, #f8f9fa);
-    border-right: 1px solid var(--bs-border-color-translucent, #e9ecef);
-    text-align: right;
-    user-select: none;
-    overflow: hidden;
-    white-space: pre;
+.semantic-editor ::deep .semantic-editor-toolbar {
+    position: sticky;
+    z-index: 4;
+    top: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    align-items: center;
+    padding: 0.55rem 0.7rem;
+    border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+    background: color-mix(in srgb, var(--bs-body-bg, #fff) 94%, transparent);
+    backdrop-filter: blur(10px);
 }
 
-.line-gutter ::deep .line-gutter-row {
-    box-sizing: border-box;
-    white-space: nowrap;
+.semantic-editor ::deep .semantic-editor-button,
+.semantic-editor ::deep .semantic-editor-select {
+    min-height: 2rem;
+    border: 1px solid var(--bs-border-color, #ced4da);
+    border-radius: 0.35rem;
+    color: var(--bs-body-color, #212529);
+    background: var(--bs-body-bg, #fff);
 }
 
-.chapter-body {
-    flex: 1 1 auto;
-    resize: none;
-    border: 0;
-    border-radius: 0;
-    font-family: var(--bs-font-monospace, monospace);
-    font-size: 0.95rem;
-    line-height: 1.5;
+.semantic-editor ::deep .semantic-editor-button {
+    padding: 0.25rem 0.55rem;
+    font-weight: 600;
+}
+
+.semantic-editor ::deep .semantic-editor-button:hover,
+.semantic-editor ::deep .semantic-editor-button:focus-visible,
+.semantic-editor ::deep .semantic-editor-select:focus-visible {
+    border-color: var(--bs-primary, #0d6efd);
+    outline: 2px solid color-mix(in srgb, var(--bs-primary, #0d6efd) 30%, transparent);
+    outline-offset: 1px;
+}
+
+.semantic-editor ::deep .semantic-editor-select {
+    max-width: 11rem;
+    padding: 0.25rem 1.8rem 0.25rem 0.45rem;
+}
+
+.semantic-editor ::deep .semantic-editor-surface {
+    max-width: 52rem;
+    min-height: calc(100% - 7rem);
+    margin: 0 auto;
+    padding: clamp(1.5rem, 4vw, 4rem);
+}
+
+.semantic-editor ::deep .semantic-prosemirror {
+    position: relative;
+    min-height: 40rem;
+    color: var(--bs-body-color, #212529);
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 1.08rem;
+    line-height: 1.72;
     outline: none;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
 }
 
-.chapter-edit-surface--locked .chapter-body {
+.semantic-editor ::deep .semantic-prosemirror pre {
+    white-space: pre-wrap;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .ProseMirror-separator,
+.semantic-editor ::deep .semantic-prosemirror .ProseMirror-trailingBreak {
+    display: inline !important;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .ProseMirror-selectednode {
+    outline: 2px solid var(--bs-primary, #0d6efd);
+}
+
+.semantic-editor ::deep .semantic-prosemirror p,
+.semantic-editor ::deep .semantic-prosemirror blockquote,
+.semantic-editor ::deep .semantic-prosemirror .semantic-list-item,
+.semantic-editor ::deep .semantic-prosemirror figure {
+    margin: 0 0 1em;
+}
+
+.semantic-editor ::deep .semantic-prosemirror figure img {
+    display: block;
+    max-width: 100%;
+    max-height: 70vh;
+    width: auto;
+    height: auto;
+    margin: 0 auto 0.65rem;
+    object-fit: contain;
+}
+
+.semantic-editor ::deep .semantic-prosemirror figure figcaption {
+    color: var(--text-secondary);
+    font-size: 0.92em;
+    text-align: center;
+}
+
+.semantic-editor ::deep .semantic-prosemirror figure.ProseMirror-selectednode {
+    outline: 2px solid var(--accent);
+    outline-offset: 0.25rem;
+}
+
+.semantic-editor ::deep .semantic-prosemirror h1 {
+    margin: 1.5em 0 1em;
+    text-align: center;
+    font-size: 1.8rem;
+}
+
+.semantic-editor ::deep .semantic-prosemirror h2 {
+    margin: 1.4em 0 0.7em;
+    font-size: 1.35rem;
+}
+
+.semantic-editor ::deep .semantic-prosemirror blockquote {
+    padding-left: 1rem;
+    border-left: 0.25rem solid var(--bs-border-color, #ced4da);
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.semantic-editor ::deep .semantic-prosemirror .semantic-list-item {
+    display: list-item;
+    margin-left: 2rem;
+}
+
+.semantic-editor ::deep .semantic-prosemirror hr[data-scene-break] {
+    width: 6rem;
+    margin: 2rem auto;
+    border: 0;
+    text-align: center;
+}
+
+.semantic-editor ::deep .semantic-prosemirror hr[data-scene-break]::after {
+    content: "* * *";
+    color: var(--bs-body-color, #212529);
+}
+
+.semantic-editor ::deep .semantic-small-caps {
+    font-variant: small-caps;
+}
+
+.semantic-editor ::deep .semantic-find-panel,
+.semantic-editor ::deep .semantic-outline {
+    position: sticky;
+    z-index: 3;
+    top: 3.2rem;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin: 0.5rem;
+    padding: 0.6rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    background: var(--bs-body-bg, #fff);
+    box-shadow: 0 0.4rem 1.2rem rgb(0 0 0 / 10%);
+}
+
+.semantic-editor ::deep .semantic-find-panel[hidden],
+.semantic-editor ::deep .semantic-outline[hidden] {
+    display: none;
+}
+
+.semantic-editor ::deep .semantic-find-panel input {
+    min-width: 8rem;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--bs-border-color, #ced4da);
+    border-radius: 0.35rem;
+}
+
+.semantic-editor ::deep .semantic-outline {
+    display: block;
+    max-width: 25rem;
+}
+
+.semantic-editor ::deep .semantic-outline ol {
+    max-height: 15rem;
+    margin: 0.4rem 0 0;
+    overflow: auto;
+}
+
+.semantic-editor ::deep .semantic-outline button {
+    border: 0;
+    color: var(--bs-link-color, #0d6efd);
+    background: transparent;
+    text-align: left;
+}
+
+.semantic-editor ::deep .semantic-editor-status {
+    position: sticky;
+    bottom: 0;
+    padding: 0.4rem 0.8rem;
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+    color: var(--bs-secondary-color, #6c757d);
+    background: var(--bs-body-bg, #fff);
+    text-align: right;
+    font-size: 0.8rem;
+}
+
+.semantic-editor-warning {
+    position: sticky;
+    z-index: 5;
+    bottom: 2.2rem;
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0.5rem;
+    padding: 0.65rem 0.8rem;
+    border: 1px solid var(--bs-warning-border-subtle, #ffe69c);
+    border-radius: 0.45rem;
+    background: var(--bs-warning-bg-subtle, #fff3cd);
+    color: var(--bs-warning-text-emphasis, #664d03);
+}
+
+.chapter-edit-surface--locked ::deep .semantic-prosemirror {
     cursor: not-allowed;
-    background: var(--bs-tertiary-bg, #f8f9fa);
-}
-
-.chapter-body:focus {
-    box-shadow: none;
+    opacity: 0.82;
 }

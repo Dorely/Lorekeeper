@@ -51,6 +51,79 @@ public sealed class EditorChatStagingTests
         Assert.True(ManuscriptCodec.ContentEquals(marked, secondBefore.Manuscript));
     }
 
+    [Fact]
+    public async Task NamedStyleMutationStagesReviewableBeforeAndAfterPayloads()
+    {
+        var repository = new MemoryAiChangeRepository();
+        var context = new EditorChatChangeStagingContext(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            repository);
+        context.BeginToolCall(Guid.NewGuid(), "style-call", "upsert_manuscript_style", "{}");
+        var styleId = Guid.NewGuid();
+        var input = new ManuscriptStyleInput(
+            styleId,
+            "Body",
+            ManuscriptStyleKind.Paragraph,
+            "body",
+            new ManuscriptStyleProperties(FontSizePoints: 11));
+
+        await context.StageManuscriptStyleChangeAsync(
+            null,
+            input,
+            new ManuscriptStyleView(
+                styleId,
+                input.Name,
+                input.Kind,
+                input.SemanticRole,
+                input.Definition,
+                1),
+            "Create body style",
+            "{}");
+
+        var change = Assert.Single(repository.Changes);
+        Assert.Equal("ManuscriptStyle", change.ResourceKind);
+        Assert.Equal("upsert_manuscript_style", change.ToolName);
+        var payload = JsonSerializer.Deserialize<ManuscriptStyleChange>(
+            change.AfterJson)!;
+        Assert.Null(payload.Before);
+        Assert.Equal("body", payload.After!.SemanticRole);
+    }
+
+    [Fact]
+    public async Task NamedStyleDeletionStagesADistinctApprovalPayload()
+    {
+        var repository = new MemoryAiChangeRepository();
+        var context = new EditorChatChangeStagingContext(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            repository);
+        context.BeginToolCall(Guid.NewGuid(), "delete-call", "delete_manuscript_style", "{}");
+        var before = new ManuscriptStyleView(
+            Guid.NewGuid(),
+            "Opening",
+            ManuscriptStyleKind.Paragraph,
+            "opening",
+            new ManuscriptStyleProperties(FontSizePoints: 12),
+            4);
+
+        await context.StageManuscriptStyleChangeAsync(
+            before,
+            after: null,
+            preview: null,
+            "Delete opening style",
+            "{}");
+
+        var change = Assert.Single(repository.Changes);
+        Assert.Equal("delete_manuscript_style", change.ToolName);
+        var beforePayload = JsonSerializer.Deserialize<ManuscriptStyleChange>(change.BeforeJson)!;
+        var afterPayload = JsonSerializer.Deserialize<ManuscriptStyleChange>(change.AfterJson)!;
+        Assert.NotNull(beforePayload.After);
+        Assert.Equal(before.Id, afterPayload.Before!.Id);
+        Assert.Null(afterPayload.After);
+        Assert.NotEqual(change.BeforeJson, change.AfterJson);
+    }
+
     private sealed class MemoryAiChangeRepository : IAiChangeRepository
     {
         public List<AiChange> Changes { get; } = [];

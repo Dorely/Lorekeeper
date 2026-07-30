@@ -41,10 +41,14 @@ public static class ChapterTextLayoutSynchronizer
             synchronized = ReconcileReferences(layout, manuscript);
         }
 
-        var json = JsonSerializer.Serialize(synchronized, JsonOptions);
-        if (string.Equals(chapter.PageLayoutJson, json, StringComparison.Ordinal))
+        var currentRevisionJson = JsonSerializer.Serialize(
+            synchronized with { Revision = layout.Revision },
+            JsonOptions);
+        if (string.Equals(chapter.PageLayoutJson, currentRevisionJson, StringComparison.Ordinal))
             return false;
-        chapter.PageLayoutJson = json;
+        chapter.PageLayoutJson = JsonSerializer.Serialize(
+            synchronized with { Revision = checked(layout.Revision + 1) },
+            JsonOptions);
         return true;
     }
 

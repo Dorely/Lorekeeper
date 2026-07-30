@@ -2,6 +2,7 @@
 @layout PrintLayout
 @rendermode InteractiveServer
 @using Lorekeeper.Models
+@using Lorekeeper.Manuscripts
 @using Lorekeeper.Publish
 @using Lorekeeper.Projects
 @using Microsoft.AspNetCore.Components.Rendering
@@ -30,7 +31,10 @@ else if (!string.IsNullOrWhiteSpace(_error))
 }
 else if (_document is not null)
 {
-    <style>@((MarkupString)PrintGeometryCss(_document.Profile))</style>
+    <style>@((MarkupString)(
+        PrintGeometryCss(_document.Profile)
+        + EpubPublishFormatter.RenderSemanticInlineRules()
+        + EpubPublishFormatter.RenderNamedStyleRules(_document.NamedStyles)))</style>
     <div class="print-toolbar @(Embedded ? "is-embedded" : null)">
         @if (!Embedded)
         {
@@ -378,18 +382,31 @@ else if (_document is not null)
         var sequence = 0;
         builder.OpenElement(sequence++, "div");
         builder.AddAttribute(sequence++, "class", "manuscript-prose");
-        var paragraphs = SplitParagraphs(chapter.PlainText);
-        var blocksByParagraph = chapter.IllustrationLayout.Images
-            .GroupBy(block => (block.ParagraphIndex, block.AnchorPosition))
+        var illustrationsByBlock = chapter.IllustrationLayout.Images
+            .GroupBy(block => (block.BlockId, block.AnchorPosition))
             .ToDictionary(group => group.Key, group => group.OrderBy(block => block.SortOrder).ToList());
 
-        for (var index = 0; index < paragraphs.Count; index++)
+        foreach (var block in chapter.Manuscript.Content)
         {
-            RenderIllustrationBlocks(builder, ref sequence, blocksByParagraph, index, ChapterImageAnchorPosition.BeforeParagraph);
-            builder.OpenElement(sequence++, "p");
-            builder.AddContent(sequence++, RenderParagraph(paragraphs[index]));
-            builder.CloseElement();
-            RenderIllustrationBlocks(builder, ref sequence, blocksByParagraph, index, ChapterImageAnchorPosition.AfterParagraph);
+            RenderIllustrationBlocks(
+                builder,
+                ref sequence,
+                illustrationsByBlock,
+                block.Id,
+                ChapterImageAnchorPosition.BeforeParagraph);
+            builder.AddMarkupContent(
+                sequence++,
+                SemanticPublishFormatting.HtmlBlock(
+                    block,
+                    imageId => FindAsset(imageId) is { } asset
+                        ? ImageDataUrl(asset)
+                        : null));
+            RenderIllustrationBlocks(
+                builder,
+                ref sequence,
+                illustrationsByBlock,
+                block.Id,
+                ChapterImageAnchorPosition.AfterParagraph);
         }
 
         builder.CloseElement();
@@ -455,11 +472,11 @@ else if (_document is not null)
     private void RenderIllustrationBlocks(
         RenderTreeBuilder builder,
         ref int sequence,
-        IReadOnlyDictionary<(int ParagraphIndex, ChapterImageAnchorPosition Position), List<IllustratedProseImageBlock>> blocksByParagraph,
-        int paragraphIndex,
+        IReadOnlyDictionary<(string BlockId, ChapterImageAnchorPosition Position), List<IllustratedProseImageBlock>> blocksByBlock,
+        string blockId,
         ChapterImageAnchorPosition position)
     {
-        if (!blocksByParagraph.TryGetValue((paragraphIndex, position), out var blocks)) return;
+        if (!blocksByBlock.TryGetValue((blockId, position), out var blocks)) return;
         foreach (var block in blocks)
         {
             if (FindAsset(block.ImageId) is { } asset)

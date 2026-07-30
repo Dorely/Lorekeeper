@@ -124,8 +124,8 @@ public sealed class ManuscriptCodecTests
 
         Assert.Throws<InvalidDataException>(() =>
             ManuscriptCodec.Deserialize(json.Replace(
-                "\"schemaVersion\":1",
-                "\"schemaVersion\":1,\"unknown\":true",
+                $"\"schemaVersion\":{ManuscriptDocument.CurrentSchemaVersion}",
+                $"\"schemaVersion\":{ManuscriptDocument.CurrentSchemaVersion},\"unknown\":true",
                 StringComparison.Ordinal)));
         Assert.Throws<InvalidDataException>(() =>
             ManuscriptCodec.Deserialize(
@@ -158,6 +158,115 @@ public sealed class ManuscriptCodecTests
     }
 
     [Fact]
+    public void FlagMarksRejectValuesThatTheEditorCannotRoundTrip()
+    {
+        var document = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Marked", revision: 1);
+        document.Content[0].Content[0].Marks.Add(new ManuscriptMark
+        {
+            Type = ManuscriptMarkType.Emphasis,
+            Value = "not-semantic",
+        });
+
+        Assert.Throws<InvalidDataException>(() => ManuscriptCodec.Serialize(document));
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Marked", revision: 1);
+        Assert.Throws<InvalidDataException>(() =>
+            ManuscriptOperations.Apply(
+                source,
+                [
+                    new SetManuscriptInlineMark(
+                        source.Content[0].Id,
+                        0,
+                        6,
+                        ManuscriptMarkType.Strong,
+                        Enabled: true,
+                        Value: "not-semantic"),
+                ]));
+    }
+
+    [Fact]
+    public void SemanticEditorMarksAndStructuralInspectionShareTheDomainSchema()
+    {
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Chapter\n\nBody", revision: 4);
+        var (styled, _) = ManuscriptOperations.Apply(
+            source,
+            [
+                new SetManuscriptBlockStyle(source.Content[0].Id, ManuscriptStyleRoles.ChapterHeading),
+                new SetManuscriptInlineMark(
+                    source.Content[1].Id,
+                    0,
+                    4,
+                    ManuscriptMarkType.SmallCaps,
+                    Enabled: true),
+                new SetManuscriptInlineMark(
+                    source.Content[1].Id,
+                    0,
+                    4,
+                    ManuscriptMarkType.CharacterStyle,
+                    Enabled: true,
+                    Value: "lead-in"),
+            ]);
+
+        var inspection = ManuscriptInspection.Inspect(
+            styled,
+            query: "Chapter",
+            blockType: nameof(ManuscriptBlockType.Paragraph),
+            styleRole: ManuscriptStyleRoles.ChapterHeading);
+        var roundTrip = ManuscriptCodec.Deserialize(
+            ManuscriptCodec.Serialize(styled),
+            styled.ManuscriptId,
+            styled.Revision);
+
+        Assert.True(inspection.IsValid);
+        Assert.Equal(source.Content[0].Id, Assert.Single(inspection.Matches).Id);
+        Assert.Contains(
+            roundTrip.Content[1].Content.SelectMany(inline => inline.Marks),
+            mark => mark.Type == ManuscriptMarkType.SmallCaps);
+        Assert.Contains(
+            roundTrip.Content[1].Content.SelectMany(inline => inline.Marks),
+            mark => mark.Type == ManuscriptMarkType.CharacterStyle && mark.Value == "lead-in");
+    }
+
+    [Fact]
+    public void ManuscriptValidationRejectsUnsafeRichEditorLinks()
+    {
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Link", revision: 1);
+        source.Content[0] = source.Content[0] with
+        {
+            Content =
+            [
+                new ManuscriptInline
+                {
+                    Text = "Link",
+                    Marks =
+                    [
+                        new ManuscriptMark
+                        {
+                            Type = ManuscriptMarkType.Link,
+                            Value = "javascript:alert(1)",
+                        },
+                    ],
+                },
+            ],
+        };
+
+        Assert.Throws<InvalidDataException>(() => ManuscriptCodec.Serialize(source));
+    }
+
+    [Fact]
+    public void ManuscriptValidationRejectsXmlForbiddenControlCharacters()
+    {
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Valid", revision: 1);
+        source.Content[0] = source.Content[0] with
+        {
+            Content = [new ManuscriptInline { Text = "Invalid\u0001text" }],
+        };
+
+        var error = Assert.Throws<InvalidDataException>(() => ManuscriptCodec.Serialize(source));
+
+        Assert.Contains("XML-forbidden", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void OperationsAdvanceOneRevisionAndReturnStableChangedIds()
     {
         var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "One\n\nTwo", revision: 8);
@@ -174,6 +283,76 @@ public sealed class ManuscriptCodecTests
         Assert.Equal([firstId], changed);
         Assert.Equal("One revised\n\nTwo", ManuscriptCodec.ProjectPlainText(result));
         Assert.Equal(ManuscriptMarkType.Strong, result.Content[0].Content[0].Marks.Single().Type);
+    }
+
+    [Fact]
+    public void BlockTypeChangesPreserveStableIdsAndContent()
+    {
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Heading", revision: 2);
+        var blockId = source.Content[0].Id;
+
+        var (result, changed) = ManuscriptOperations.Apply(
+            source,
+            [
+                new SetManuscriptBlockType(
+                    blockId,
+                    ManuscriptBlockType.Heading,
+                    ManuscriptStyleRoles.ChapterHeading),
+            ]);
+
+        Assert.Equal(blockId, Assert.Single(result.Content).Id);
+        Assert.Equal(ManuscriptBlockType.Heading, result.Content[0].Type);
+        Assert.Equal(ManuscriptStyleRoles.ChapterHeading, result.Content[0].StyleRole);
+        Assert.Equal("Heading", ManuscriptCodec.Text(result.Content[0]));
+        Assert.Equal([blockId], changed);
+    }
+
+    [Fact]
+    public void SameHeadingTypeMetadataEditPreservesNamedParagraphStyle()
+    {
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Heading", revision: 2);
+        var blockId = source.Content[0].Id;
+        source.Content[0] = source.Content[0] with
+        {
+            Type = ManuscriptBlockType.Heading,
+            StyleRole = "custom-heading",
+            HeadingLevel = 2,
+        };
+
+        var (result, _) = ManuscriptOperations.Apply(
+            source,
+            [new SetManuscriptBlockType(blockId, ManuscriptBlockType.Heading, HeadingLevel: 3)]);
+
+        Assert.Equal("custom-heading", result.Content[0].StyleRole);
+        Assert.Equal(3, result.Content[0].HeadingLevel);
+    }
+
+    [Fact]
+    public void SameFigureTypeMetadataEditPreservesNamedStyleAndExistingImage()
+    {
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Caption", revision: 2);
+        var blockId = source.Content[0].Id;
+        var imageId = Guid.NewGuid();
+        source.Content[0] = source.Content[0] with
+        {
+            Type = ManuscriptBlockType.Figure,
+            StyleRole = "custom-figure",
+            ImageId = imageId,
+            AltText = "Old alternative text",
+        };
+
+        var (result, _) = ManuscriptOperations.Apply(
+            source,
+            [
+                new SetManuscriptBlockType(
+                    blockId,
+                    ManuscriptBlockType.Figure,
+                    AltText: "Updated alternative text"),
+            ]);
+
+        Assert.Equal("custom-figure", result.Content[0].StyleRole);
+        Assert.Equal(imageId, result.Content[0].ImageId);
+        Assert.Equal("Updated alternative text", result.Content[0].AltText);
     }
 
     [Fact]

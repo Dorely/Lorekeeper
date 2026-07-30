@@ -1,6 +1,7 @@
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Context;
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -14,7 +15,8 @@ public sealed class ProjectImageService(
     IProjectImageGenerationRuntime imageRuntime,
     IOptions<ProjectImageGenerationOptions> imageOptions,
     IChapterVisualService chapterVisuals,
-    IContextIndexingService contextIndexing) : IProjectImageService
+    IContextIndexingService contextIndexing,
+    IProjectMutationCoordinator projectMutations) : IProjectImageService
 {
     public async Task<IReadOnlyList<ProjectImageView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -289,15 +291,35 @@ public sealed class ProjectImageService(
 
     public async Task DeleteAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default)
     {
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var project = await GetProjectAsync(projectId, cancellationToken);
         var asset = await db.PublishAssets.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken);
         if (asset is null) return;
+        var figureChapters = (await db.Chapters
+            .AsNoTracking()
+            .Where(chapter => chapter.ProjectId == projectId)
+            .Select(chapter => new { chapter.Title, chapter.ManuscriptJson })
+            .ToListAsync(cancellationToken))
+            .Where(chapter => ManuscriptCodec.Deserialize(chapter.ManuscriptJson).Content.Any(
+                block => block.Type == ManuscriptBlockType.Figure && block.ImageId == imageId))
+            .Select(chapter => chapter.Title)
+            .ToList();
+        if (figureChapters.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Image '{asset.FileName}' is used by a semantic figure in: "
+                + string.Join(", ", figureChapters)
+                + ". Remove or replace those figures before deleting the image.");
+        }
         var entityIds = await AttachedEntityIdsAsync(projectId, imageId, cancellationToken);
 
         foreach (var placement in await db.PublishImagePlacements.Where(placement => placement.ProjectId == projectId && placement.AssetId == imageId).ToListAsync(cancellationToken))
             db.PublishImagePlacements.Remove(placement);
 
-        await chapterVisuals.RemoveImageReferencesAsync(projectId, imageId, cancellationToken);
+        await chapterVisuals.RemoveImageReferencesUnderProjectMutationLeaseAsync(
+            projectId,
+            imageId,
+            cancellationToken);
 
         db.PublishAssets.Remove(asset);
         project.UpdatedAt = DateTime.UtcNow;

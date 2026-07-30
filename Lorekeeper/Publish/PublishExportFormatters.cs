@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Text;
 using Lorekeeper.ChapterVisuals;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.Publish;
@@ -122,7 +123,11 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
             return;
         }
 
-        AppendText(sb, chapter.PlainText);
+        AppendText(
+            sb,
+            SemanticPublishFormatting.PlainText(
+                chapter.Manuscript,
+                imageId => FindAsset(document, imageId)));
         foreach (var image in chapter.IllustrationLayout.Images.OrderBy(image => image.SortOrder))
         {
             if (FindAsset(document, image.ImageId) is { } asset)
@@ -244,7 +249,8 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
     {
         if (string.IsNullOrWhiteSpace(text)) return;
         sb.AppendLine().Append("## ").AppendLine(title).AppendLine();
-        sb.AppendLine(text.TrimEnd());
+        foreach (var line in SplitLines(text.TrimEnd()))
+            sb.AppendLine(EscapeInline(line));
     }
 
     private static void AppendBlockquote(StringBuilder sb, string text)
@@ -252,7 +258,7 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
         if (string.IsNullOrWhiteSpace(text)) return;
         sb.AppendLine();
         foreach (var line in SplitLines(text.Trim()))
-            sb.Append("> ").AppendLine(line);
+            sb.Append("> ").AppendLine(EscapeInline(line));
     }
 
     private static void AppendPlacements(
@@ -288,7 +294,7 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
             sb.AppendLine();
             sb.AppendLine("> Picture page");
             foreach (var text in chapter.PageLayout.TextElements.OrderBy(text => text.ReadingOrder))
-                sb.AppendLine().AppendLine(text.Text.TrimEnd());
+                sb.AppendLine().AppendLine(EscapeInline(text.Text.TrimEnd()));
             foreach (var image in chapter.PageLayout.Images.OrderBy(image => image.ZIndex))
             {
                 if (FindAsset(document, image.ImageId) is { } asset)
@@ -297,27 +303,38 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
             return;
         }
 
-        var paragraphs = SplitMarkdownParagraphs(chapter.PlainText);
-        var blocksByParagraph = chapter.IllustrationLayout.Images
-            .GroupBy(block => (block.ParagraphIndex, block.AnchorPosition))
+        var illustrationsByBlock = chapter.IllustrationLayout.Images
+            .GroupBy(block => (block.BlockId, block.AnchorPosition))
             .ToDictionary(group => group.Key, group => group.OrderBy(block => block.SortOrder).ToList());
-
-        for (var index = 0; index < paragraphs.Count; index++)
+        foreach (var manuscriptBlock in chapter.Manuscript.Content)
         {
-            AppendIllustrationBlocks(sb, document, blocksByParagraph, index, ChapterImageAnchorPosition.BeforeParagraph);
-            sb.AppendLine().AppendLine(paragraphs[index].TrimEnd());
-            AppendIllustrationBlocks(sb, document, blocksByParagraph, index, ChapterImageAnchorPosition.AfterParagraph);
+            AppendIllustrationBlocks(
+                sb,
+                document,
+                illustrationsByBlock,
+                manuscriptBlock.Id,
+                ChapterImageAnchorPosition.BeforeParagraph);
+            sb.AppendLine().AppendLine(
+                SemanticPublishFormatting.MarkdownBlock(
+                    manuscriptBlock,
+                    imageId => FindAsset(document, imageId)));
+            AppendIllustrationBlocks(
+                sb,
+                document,
+                illustrationsByBlock,
+                manuscriptBlock.Id,
+                ChapterImageAnchorPosition.AfterParagraph);
         }
     }
 
     private static void AppendIllustrationBlocks(
         StringBuilder sb,
         PublishDocument document,
-        IReadOnlyDictionary<(int ParagraphIndex, ChapterImageAnchorPosition Position), List<IllustratedProseImageBlock>> blocksByParagraph,
-        int paragraphIndex,
+        IReadOnlyDictionary<(string BlockId, ChapterImageAnchorPosition Position), List<IllustratedProseImageBlock>> blocksByBlock,
+        string blockId,
         ChapterImageAnchorPosition position)
     {
-        if (!blocksByParagraph.TryGetValue((paragraphIndex, position), out var blocks)) return;
+        if (!blocksByBlock.TryGetValue((blockId, position), out var blocks)) return;
         foreach (var block in blocks)
         {
             if (FindAsset(document, block.ImageId) is { } asset)
@@ -369,10 +386,12 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
             .Split('\n');
 
     private static string EscapeHeading(string heading) =>
-        heading.Replace("\r", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal).Trim();
+        EscapeInline(
+            heading.Replace("\r", " ", StringComparison.Ordinal)
+                .Replace("\n", " ", StringComparison.Ordinal));
 
     private static string EscapeInline(string value) =>
-        value.Replace("[", "\\[", StringComparison.Ordinal).Replace("]", "\\]", StringComparison.Ordinal).Trim();
+        SemanticPublishFormatting.EscapeMarkdownLiteral(value).Trim();
 
 }
 
@@ -393,7 +412,7 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
         {
             WriteEntry(archive, "mimetype", ContentType, CompressionLevel.NoCompression, Encoding.ASCII);
             WriteEntry(archive, "META-INF/container.xml", RenderContainer(), CompressionLevel.SmallestSize, Utf8NoBom);
-            WriteEntry(archive, "OEBPS/styles.css", RenderStylesheet(document.Profile), CompressionLevel.SmallestSize, Utf8NoBom);
+            WriteEntry(archive, "OEBPS/styles.css", RenderStylesheet(document), CompressionLevel.SmallestSize, Utf8NoBom);
             WriteEntry(archive, "OEBPS/package.opf", RenderPackage(document, xhtmlItems, imageItems), CompressionLevel.SmallestSize, Utf8NoBom);
             WriteEntry(archive, "OEBPS/nav.xhtml", RenderNavigation(document, xhtmlItems), CompressionLevel.SmallestSize, Utf8NoBom);
 
@@ -736,16 +755,26 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
     private static void AppendVisualChapterBody(StringBuilder sb, PublishChapterDocument chapter, IReadOnlyList<EpubImageItem> imageItems)
     {
         sb.AppendLine("<div class=\"chapter-body\">");
-        var paragraphs = SplitParagraphs(chapter.PlainText);
-        var blocksByParagraph = chapter.IllustrationLayout.Images
-            .GroupBy(block => (block.ParagraphIndex, block.AnchorPosition))
+        var illustrationsByBlock = chapter.IllustrationLayout.Images
+            .GroupBy(block => (block.BlockId, block.AnchorPosition))
             .ToDictionary(group => group.Key, group => group.OrderBy(block => block.SortOrder).ToList());
-
-        for (var index = 0; index < paragraphs.Count; index++)
+        foreach (var manuscriptBlock in chapter.Manuscript.Content)
         {
-            AppendIllustrationFigures(sb, imageItems, blocksByParagraph, index, ChapterImageAnchorPosition.BeforeParagraph);
-            AppendParagraph(sb, paragraphs[index], "prose");
-            AppendIllustrationFigures(sb, imageItems, blocksByParagraph, index, ChapterImageAnchorPosition.AfterParagraph);
+            AppendIllustrationFigures(
+                sb,
+                imageItems,
+                illustrationsByBlock,
+                manuscriptBlock.Id,
+                ChapterImageAnchorPosition.BeforeParagraph);
+            sb.Append(SemanticPublishFormatting.HtmlBlock(
+                manuscriptBlock,
+                imageId => ImageHref(imageItems, imageId)));
+            AppendIllustrationFigures(
+                sb,
+                imageItems,
+                illustrationsByBlock,
+                manuscriptBlock.Id,
+                ChapterImageAnchorPosition.AfterParagraph);
         }
 
         sb.AppendLine("</div>");
@@ -754,11 +783,11 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
     private static void AppendIllustrationFigures(
         StringBuilder sb,
         IReadOnlyList<EpubImageItem> imageItems,
-        IReadOnlyDictionary<(int ParagraphIndex, ChapterImageAnchorPosition Position), List<IllustratedProseImageBlock>> blocksByParagraph,
-        int paragraphIndex,
+        IReadOnlyDictionary<(string BlockId, ChapterImageAnchorPosition Position), List<IllustratedProseImageBlock>> blocksByBlock,
+        string blockId,
         ChapterImageAnchorPosition position)
     {
-        if (!blocksByParagraph.TryGetValue((paragraphIndex, position), out var blocks)) return;
+        if (!blocksByBlock.TryGetValue((blockId, position), out var blocks)) return;
         foreach (var block in blocks)
             AppendAssetFigure(sb, imageItems, block.ImageId, block.Caption);
     }
@@ -989,15 +1018,17 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
         }
     }
 
-    private static string RenderStylesheet(PublishDocumentProfile profile)
+    internal static string RenderStylesheet(PublishDocument document)
     {
+        var profile = document.Profile;
+        var semanticInlineRules = RenderSemanticInlineRules();
         var fontSize = profile.BodyFontSizePoints.ToString("0.###", CultureInfo.InvariantCulture);
         var lineHeight = profile.BodyLineHeight.ToString("0.###", CultureInfo.InvariantCulture);
         var marginPercent = Math.Clamp(
             profile.PageMarginInches / Math.Max(0.001, profile.PageWidthInches) * 100,
             0,
             20).ToString("0.###", CultureInfo.InvariantCulture);
-        return $$"""
+        var css = $$"""
         body {
           color: #172033;
           font-family: Georgia, "Times New Roman", serif;
@@ -1053,6 +1084,8 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
           margin: 0 0 1.25em;
         }
 
+        {{semanticInlineRules}}
+
         .chapter-body p,
         .matter-page p {
           margin: 0 0 0.9em;
@@ -1103,6 +1136,98 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
           border: 0;
         }
         """;
+        var sb = new StringBuilder(css);
+        sb.Append(RenderNamedStyleRules(document.NamedStyles));
+        return sb.ToString();
+    }
+
+    internal static string RenderSemanticInlineRules() =>
+        ".small-caps { font-variant-caps: small-caps; }";
+
+    internal static string RenderNamedStyleRules(
+        IReadOnlyList<PublishManuscriptStyleDocument> styles)
+    {
+        var sb = new StringBuilder();
+        foreach (var style in styles)
+        {
+            var selector = style.Kind == ManuscriptStyleKind.Character
+                ? $"[data-character-style=\"{CssString(style.SemanticRole)}\" i]"
+                : $"[data-style-role=\"{CssString(style.SemanticRole)}\" i]";
+            var declarations = StyleDeclarations(style.Definition);
+            if (declarations.Count == 0)
+                continue;
+            sb.AppendLine().Append(selector).AppendLine(" {");
+            foreach (var declaration in declarations)
+                sb.Append("  ").Append(declaration).AppendLine(";");
+            sb.AppendLine("}");
+        }
+        return sb.ToString();
+    }
+
+    private static IReadOnlyList<string> StyleDeclarations(ManuscriptStyleProperties definition)
+    {
+        var declarations = new List<string>();
+        var families = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["serif"] = "Georgia, \"Times New Roman\", serif",
+            ["sans"] = "Arial, Helvetica, sans-serif",
+            ["mono"] = "\"Courier New\", Courier, monospace",
+        };
+        if (definition.FontFamilyKey is { } fontKey && families.TryGetValue(fontKey, out var family))
+            declarations.Add($"font-family: {family}");
+        if (definition.FontSizePoints is double fontSize)
+            declarations.Add($"font-size: {fontSize.ToString("0.###", CultureInfo.InvariantCulture)}pt");
+        if (definition.FontWeight is int fontWeight)
+            declarations.Add($"font-weight: {fontWeight}");
+        if (definition.Italic is true)
+            declarations.Add("font-style: italic");
+        if (definition.SmallCaps is true)
+            declarations.Add("font-variant-caps: small-caps");
+        if (definition.LineHeight is double styleLineHeight)
+            declarations.Add($"line-height: {styleLineHeight.ToString("0.###", CultureInfo.InvariantCulture)}");
+        if (definition.SpaceBeforePoints is double before)
+            declarations.Add($"margin-top: {before.ToString("0.###", CultureInfo.InvariantCulture)}pt");
+        if (definition.SpaceAfterPoints is double after)
+            declarations.Add($"margin-bottom: {after.ToString("0.###", CultureInfo.InvariantCulture)}pt");
+        if (definition.TextAlign is { } align)
+            declarations.Add($"text-align: {align.ToLowerInvariant()}");
+        if (definition.KeepWithNext is true)
+        {
+            declarations.Add("break-after: avoid");
+            declarations.Add("page-break-after: avoid");
+        }
+        return declarations;
+    }
+
+    private static string CssString(string value)
+    {
+        var sb = new StringBuilder(value.Length);
+        foreach (var character in value)
+        {
+            switch (character)
+            {
+                case '\\':
+                    sb.Append("\\\\");
+                    break;
+                case '"':
+                    sb.Append("\\\"");
+                    break;
+                case '<':
+                case '>':
+                case '&':
+                    sb.Append('\\').Append(((int)character).ToString("x", CultureInfo.InvariantCulture)).Append(' ');
+                    break;
+                case '\r':
+                case '\n':
+                case '\f':
+                    sb.Append('\\').Append(((int)character).ToString("x", CultureInfo.InvariantCulture)).Append(' ');
+                    break;
+                default:
+                    sb.Append(character);
+                    break;
+            }
+        }
+        return sb.ToString();
     }
 
     private static void WriteEntry(ZipArchive archive, string name, string content, CompressionLevel compressionLevel, Encoding encoding)
@@ -1151,4 +1276,233 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
 
     private sealed record EpubViewport(int Width, int Height);
     private sealed record EpubImageItem(string Id, string Href, PublishAssetDocument Asset, bool IsCover);
+}
+
+internal static class SemanticPublishFormatting
+{
+    public static string PlainText(
+        ManuscriptDocument manuscript,
+        Func<Guid, PublishAssetDocument?> asset)
+    {
+        var blocks = new List<string>();
+        foreach (var block in manuscript.Content)
+        {
+            if (block.Type == ManuscriptBlockType.SceneBreak)
+            {
+                blocks.Add("***");
+                continue;
+            }
+            var text = ManuscriptCodec.Text(block);
+            if (block.Type == ManuscriptBlockType.Figure)
+            {
+                var image = asset(block.ImageId!.Value);
+                var label = image?.FileName ?? block.ImageId.Value.ToString("N");
+                blocks.Add(string.IsNullOrWhiteSpace(text)
+                    ? $"[Figure: {label}; alt: {block.AltText}]"
+                    : $"[Figure: {label}; alt: {block.AltText}; caption: {text}]");
+                continue;
+            }
+            blocks.Add(text);
+        }
+        return string.Join(Environment.NewLine + Environment.NewLine, blocks);
+    }
+
+    public static string Markdown(
+        ManuscriptDocument manuscript,
+        Func<Guid, PublishAssetDocument?> asset)
+    {
+        var blocks = new List<string>();
+        foreach (var block in manuscript.Content)
+            blocks.Add(MarkdownBlock(block, asset));
+        return string.Join(Environment.NewLine + Environment.NewLine, blocks);
+    }
+
+    internal static string MarkdownBlock(
+        ManuscriptBlock block,
+        Func<Guid, PublishAssetDocument?> asset)
+    {
+        if (!ManuscriptStyleService.BuiltInParagraphRoles.Contains(block.StyleRole))
+        {
+            return HtmlBlock(
+                block,
+                imageId => asset(imageId) is { } image
+                    ? $"data:{image.ContentType};base64,{Convert.ToBase64String(image.Data)}"
+                    : null);
+        }
+        var text = string.Concat(block.Content.Select(MarkdownInline));
+        return block.Type switch
+        {
+            ManuscriptBlockType.Heading =>
+                $"{new string('#', block.HeadingLevel ?? 2)} {text}",
+            ManuscriptBlockType.SceneBreak => "***",
+            ManuscriptBlockType.BlockQuote => string.Join(
+                Environment.NewLine,
+                text.Split('\n').Select(line => $"> {line}")),
+            ManuscriptBlockType.ListItem => $"- {text}",
+            ManuscriptBlockType.Figure => MarkdownFigure(
+                block,
+                text,
+                asset(block.ImageId!.Value)),
+            _ => text,
+        };
+    }
+
+    public static string Html(
+        ManuscriptDocument manuscript,
+        Func<Guid, string?> imageHref)
+    {
+        var sb = new StringBuilder();
+        foreach (var block in manuscript.Content)
+            sb.Append(HtmlBlock(block, imageHref));
+        return sb.ToString();
+    }
+
+    internal static string HtmlBlock(
+        ManuscriptBlock block,
+        Func<Guid, string?> imageHref)
+    {
+        var content = string.Concat(block.Content.Select(HtmlInline));
+        var role = WebUtility.HtmlEncode(block.StyleRole);
+        return block.Type switch
+        {
+            ManuscriptBlockType.Heading =>
+                $"<h{block.HeadingLevel ?? 2} data-style-role=\"{role}\">{content}</h{block.HeadingLevel ?? 2}>",
+            ManuscriptBlockType.SceneBreak =>
+                $"<hr class=\"scene-break\" data-style-role=\"{role}\" />",
+            ManuscriptBlockType.BlockQuote =>
+                $"<blockquote data-style-role=\"{role}\">{content}</blockquote>",
+            ManuscriptBlockType.ListItem =>
+                $"<ul><li data-style-role=\"{role}\">{content}</li></ul>",
+            ManuscriptBlockType.Figure => HtmlFigure(block, content, role, imageHref),
+            _ => $"<p data-style-role=\"{role}\">{content}</p>",
+        };
+    }
+
+    private static string HtmlFigure(
+        ManuscriptBlock block,
+        string content,
+        string role,
+        Func<Guid, string?> imageHref)
+    {
+        var href = imageHref(block.ImageId!.Value)
+            ?? throw new InvalidOperationException(
+                $"Figure image {block.ImageId:N} is missing from the publication.");
+        var caption = string.IsNullOrWhiteSpace(content)
+            ? string.Empty
+            : $"<figcaption>{content}</figcaption>";
+        return $"<figure data-style-role=\"{role}\"><img src=\"{WebUtility.HtmlEncode(href)}\" "
+            + $"alt=\"{WebUtility.HtmlEncode(block.AltText)}\" />{caption}</figure>";
+    }
+
+    private static string MarkdownFigure(
+        ManuscriptBlock block,
+        string caption,
+        PublishAssetDocument? asset)
+    {
+        if (asset is null)
+            throw new InvalidOperationException($"Figure image {block.ImageId:N} is missing from the publication.");
+        var dataUrl = $"data:{asset.ContentType};base64,{Convert.ToBase64String(asset.Data)}";
+        var markdown = $"![{EscapeMarkdown(block.AltText ?? string.Empty)}]({dataUrl})";
+        return string.IsNullOrWhiteSpace(caption)
+            ? markdown
+            : $"{markdown}{Environment.NewLine}_{caption}_";
+    }
+
+    private static string MarkdownInline(ManuscriptInline inline)
+    {
+        var hasCode = inline.Marks.Any(mark => mark.Type == ManuscriptMarkType.Code);
+        var text = hasCode
+            ? $"<code>{EncodeHtmlInlineText(inline.Text)}</code>"
+            : EscapeMarkdown(inline.Text);
+        foreach (var mark in inline.Marks
+            .Where(mark => mark.Type != ManuscriptMarkType.Code)
+            .OrderBy(mark => mark.Type))
+        {
+            text = mark.Type switch
+            {
+                ManuscriptMarkType.Emphasis => $"*{text}*",
+                ManuscriptMarkType.Strong => $"**{text}**",
+                ManuscriptMarkType.Underline => $"<u>{text}</u>",
+                ManuscriptMarkType.Strikethrough => $"~~{text}~~",
+                ManuscriptMarkType.Link =>
+                    $"<a href=\"{WebUtility.HtmlEncode(mark.Value!)}\">{text}</a>",
+                ManuscriptMarkType.Language => $"<span lang=\"{WebUtility.HtmlEncode(mark.Value!)}\">{text}</span>",
+                ManuscriptMarkType.SmallCaps => $"<span class=\"small-caps\">{text}</span>",
+                ManuscriptMarkType.Superscript => $"<sup>{text}</sup>",
+                ManuscriptMarkType.Subscript => $"<sub>{text}</sub>",
+                ManuscriptMarkType.CharacterStyle =>
+                    $"<span data-character-style=\"{WebUtility.HtmlEncode(mark.Value!)}\">{text}</span>",
+                _ => text,
+            };
+        }
+        return text;
+    }
+
+    private static string HtmlInline(ManuscriptInline inline)
+    {
+        var text = EncodeHtmlInlineText(inline.Text);
+        foreach (var mark in inline.Marks)
+        {
+            text = mark.Type switch
+            {
+                ManuscriptMarkType.Emphasis => $"<em>{text}</em>",
+                ManuscriptMarkType.Strong => $"<strong>{text}</strong>",
+                ManuscriptMarkType.Underline => $"<u>{text}</u>",
+                ManuscriptMarkType.Strikethrough => $"<s>{text}</s>",
+                ManuscriptMarkType.Code => $"<code>{text}</code>",
+                ManuscriptMarkType.Link => $"<a href=\"{WebUtility.HtmlEncode(mark.Value)}\">{text}</a>",
+                ManuscriptMarkType.Language => $"<span lang=\"{WebUtility.HtmlEncode(mark.Value)}\">{text}</span>",
+                ManuscriptMarkType.SmallCaps => $"<span class=\"small-caps\">{text}</span>",
+                ManuscriptMarkType.Superscript => $"<sup>{text}</sup>",
+                ManuscriptMarkType.Subscript => $"<sub>{text}</sub>",
+                ManuscriptMarkType.CharacterStyle =>
+                    $"<span data-character-style=\"{WebUtility.HtmlEncode(mark.Value)}\">{text}</span>",
+                _ => text,
+            };
+        }
+        return text;
+    }
+
+    internal static string EscapeMarkdownLiteral(string value)
+    {
+        const string punctuation = "\\`*_{}[]<>()#+-.!|~^$%\"'/,:=?@";
+        var normalized = value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        var sb = new StringBuilder(normalized.Length);
+        var lines = normalized.Split('\n');
+        for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+        {
+            if (lineIndex > 0)
+                sb.Append("<br />").AppendLine();
+            foreach (var character in lines[lineIndex])
+            {
+                if (character == '&')
+                {
+                    sb.Append("&amp;");
+                    continue;
+                }
+                if (character == '<')
+                {
+                    sb.Append("&lt;");
+                    continue;
+                }
+                if (character == '>')
+                {
+                    sb.Append("&gt;");
+                    continue;
+                }
+                if (punctuation.Contains(character))
+                    sb.Append('\\');
+                sb.Append(character);
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string EncodeHtmlInlineText(string value) =>
+        WebUtility.HtmlEncode(
+            value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n'))
+            .Replace("\n", "<br />", StringComparison.Ordinal);
+
+    private static string EscapeMarkdown(string value) =>
+        EscapeMarkdownLiteral(value);
 }

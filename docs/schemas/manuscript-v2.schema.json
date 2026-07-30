@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lorekeeper.local/schemas/manuscript-v2.schema.json",
+  "title": "Lorekeeper manuscript v2",
+  "$comment": "This schema describes the interchange structure. Lorekeeper's runtime validation remains authoritative and also enforces unique block IDs, at most one mark of each type per inline run, URI parsing, asset/style catalog references, and owner ID/revision matching.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "manuscriptId", "revision", "content"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "manuscriptId": { "type": "string", "format": "uuid" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "content": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/block" }
+    }
+  },
+  "$defs": {
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "styleRole", "headingLevel", "imageId", "altText", "content"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": {
+          "enum": ["paragraph", "heading", "sceneBreak", "blockQuote", "listItem", "figure"]
+        },
+        "styleRole": {
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "headingLevel": { "type": ["integer", "null"], "minimum": 1, "maximum": 6 },
+        "imageId": { "type": ["string", "null"], "format": "uuid" },
+        "altText": { "type": ["string", "null"] },
+        "content": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/inline" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "heading" } } },
+          "then": { "properties": { "headingLevel": { "type": "integer", "minimum": 1, "maximum": 6 } } },
+          "else": { "properties": { "headingLevel": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "figure" } } },
+          "then": {
+            "properties": {
+              "imageId": { "type": "string", "format": "uuid" },
+              "altText": { "type": "string", "pattern": "\\S" }
+            }
+          },
+          "else": {
+            "properties": {
+              "imageId": { "type": "null" },
+              "altText": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "sceneBreak" } } },
+          "then": { "properties": { "content": { "maxItems": 0 } } }
+        }
+      ]
+    },
+    "inline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "text", "marks"],
+      "properties": {
+        "type": { "const": "text" },
+        "text": {
+          "type": "string",
+          "pattern": "^(?![\\s\\S]*(?:\\r?\\n|\\r)[ \\t]*(?:\\r?\\n|\\r))[\\s\\S]*$"
+        },
+        "marks": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/mark" },
+          "not": {
+            "allOf": [
+              { "contains": { "properties": { "type": { "const": "superscript" } }, "required": ["type"] } },
+              { "contains": { "properties": { "type": { "const": "subscript" } }, "required": ["type"] } }
+            ]
+          }
+        }
+      }
+    },
+    "mark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["emphasis", "strong", "underline", "strikethrough", "code", "link", "language", "smallCaps", "superscript", "subscript", "characterStyle"]
+        },
+        "value": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["link", "language", "characterStyle"] }
+            }
+          },
+          "then": {
+            "required": ["value"],
+            "properties": { "value": { "type": "string", "minLength": 1 } }
+          },
+          "else": {
+            "properties": { "value": { "type": "null" } }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "characterStyle" } } },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "string",
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "language" } } },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "string",
+                "pattern": "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$"
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "link" } } },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "string",
+                "pattern": "^(?:https?://|mailto:|tel:|#[A-Za-z0-9][A-Za-z0-9._~:%-]*$)"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

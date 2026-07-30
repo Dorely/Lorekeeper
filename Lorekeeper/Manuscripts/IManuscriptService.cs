@@ -6,12 +6,6 @@ public interface IManuscriptService
         Guid chapterId,
         CancellationToken cancellationToken = default);
 
-    Task<ManuscriptMutationResult> ReplacePlainTextAsync(
-        Guid chapterId,
-        long expectedRevision,
-        string plainText,
-        CancellationToken cancellationToken = default);
-
     Task<ManuscriptMutationResult> ReplaceDocumentAsync(
         Guid chapterId,
         long expectedRevision,
@@ -22,5 +16,17 @@ public interface IManuscriptService
         Guid chapterId,
         long expectedRevision,
         IReadOnlyList<ManuscriptOperation> operations,
+        CancellationToken cancellationToken = default);
+
+    Task<ManuscriptMutationResult> ApplyUnderProjectMutationLeaseAsync(
+        Guid chapterId,
+        long expectedRevision,
+        IReadOnlyList<ManuscriptOperation> operations,
+        CancellationToken cancellationToken = default);
+
+    Task ValidateDocumentReferencesAsync(
+        Guid chapterId,
+        ManuscriptDocument document,
+        IReadOnlyList<ManuscriptStyleView>? styleCatalog = null,
         CancellationToken cancellationToken = default);
 }

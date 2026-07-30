@@ -33,6 +33,7 @@ public sealed class ManuscriptMigrationService(
     ILogger<ManuscriptMigrationService> logger) : IManuscriptMigrationService
 {
     public const string MigrationName = "structured-manuscript-v1";
+    public const string SchemaV2MigrationName = "semantic-manuscript-v2";
     private const int MaxAutomaticBackups = 5;
     private static readonly TimeSpan RestoreTokenLifetime = TimeSpan.FromMinutes(10);
     private readonly Dictionary<string, (string Path, DateTime ExpiresAt)> _restoreTokens = [];
@@ -48,11 +49,19 @@ public sealed class ManuscriptMigrationService(
         var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
         var hasCurrentColumns = await HasColumnAsync("Chapters", "ManuscriptJson", cancellationToken);
         var hasInterruptedTransform = hasCurrentColumns
-            && await ContainsLegacyManuscriptsAsync(cancellationToken);
-        if (!needsDataMigration && pending.Count == 0 && !hasInterruptedTransform)
+            && await ContainsUnstructuredManuscriptsAsync(cancellationToken);
+        var needsSchemaV2Upgrade = hasCurrentColumns
+            && await ContainsSchemaV1ManuscriptsAsync(cancellationToken);
+        if (!needsDataMigration
+            && pending.Count == 0
+            && !hasInterruptedTransform
+            && !needsSchemaV2Upgrade)
             return;
 
         string? backupPath = null;
+        var activeMigrationName = MigrationName;
+        var activeSourceVersion = 7;
+        var activeTargetVersion = 8;
         try
         {
             if (await DatabaseHasUserSchemaAsync(cancellationToken))
@@ -64,22 +73,30 @@ public sealed class ManuscriptMigrationService(
             await ClearStrandedMigrationLockAsync(db, cancellationToken);
             await db.Database.MigrateAsync(cancellationToken);
 
-            if (!await ContainsLegacyManuscriptsAsync(cancellationToken))
-                return;
-
-            var journal = new ManuscriptMigrationJournal
+            if (await ContainsUnstructuredManuscriptsAsync(cancellationToken))
             {
-                MigrationName = MigrationName,
-                SourceSchemaVersion = 7,
-                TargetSchemaVersion = 8,
-                Phase = ManuscriptMigrationPhase.Transform,
-                Status = ManuscriptMigrationStatus.Running,
-                BackupPath = backupPath ?? string.Empty,
-            };
-            db.ManuscriptMigrationJournals.Add(journal);
-            await db.SaveChangesAsync(cancellationToken);
+                var journal = new ManuscriptMigrationJournal
+                {
+                    MigrationName = MigrationName,
+                    SourceSchemaVersion = 7,
+                    TargetSchemaVersion = 8,
+                    Phase = ManuscriptMigrationPhase.Transform,
+                    Status = ManuscriptMigrationStatus.Running,
+                    BackupPath = backupPath ?? string.Empty,
+                };
+                db.ManuscriptMigrationJournals.Add(journal);
+                await db.SaveChangesAsync(cancellationToken);
+                _ = await TransformAsync(journal.Id, cancellationToken);
+            }
 
-            _ = await TransformAsync(journal.Id, cancellationToken);
+            if (await ContainsSchemaV1ManuscriptsAsync(cancellationToken))
+            {
+                activeMigrationName = SchemaV2MigrationName;
+                activeSourceVersion = 1;
+                activeTargetVersion = 2;
+                await UpgradeSchemaV1Async(backupPath ?? string.Empty, cancellationToken);
+            }
+
             await EnsureHealthyAsync(_connectionString, cancellationToken);
             PruneAutomaticBackups();
         }
@@ -89,7 +106,14 @@ public sealed class ManuscriptMigrationService(
             if (backupPath is not null)
             {
                 await RestoreDatabaseFileAsync(backupPath, createDiagnosticBackup: false, cancellationToken);
-                await CreateRecoveryShellAsync(db, backupPath, exception, cancellationToken);
+                await CreateRecoveryShellAsync(
+                    db,
+                    backupPath,
+                    activeMigrationName,
+                    activeSourceVersion,
+                    activeTargetVersion,
+                    exception,
+                    cancellationToken);
                 logger.LogWarning(
                     "Preserved the original database at {BackupPath} and started a recovery shell.",
                     backupPath);
@@ -104,6 +128,9 @@ public sealed class ManuscriptMigrationService(
     private async Task CreateRecoveryShellAsync(
         AppDbContext db,
         string backupPath,
+        string migrationName,
+        int sourceVersion,
+        int targetVersion,
         Exception exception,
         CancellationToken cancellationToken)
     {
@@ -114,9 +141,9 @@ public sealed class ManuscriptMigrationService(
         db.ChangeTracker.Clear();
         db.ManuscriptMigrationJournals.Add(new ManuscriptMigrationJournal
         {
-            MigrationName = MigrationName,
-            SourceSchemaVersion = 7,
-            TargetSchemaVersion = 8,
+            MigrationName = migrationName,
+            SourceSchemaVersion = sourceVersion,
+            TargetSchemaVersion = targetVersion,
             Phase = ManuscriptMigrationPhase.Validate,
             Status = ManuscriptMigrationStatus.Failed,
             BackupPath = backupPath,
@@ -929,7 +956,7 @@ public sealed class ManuscriptMigrationService(
         await EnsureHealthyAsync(_connectionString, cancellationToken);
     }
 
-    private async Task<bool> ContainsLegacyManuscriptsAsync(CancellationToken cancellationToken)
+    private async Task<bool> ContainsUnstructuredManuscriptsAsync(CancellationToken cancellationToken)
     {
         if (!await TableExistsAsync("Chapters", cancellationToken))
             return false;
@@ -942,34 +969,403 @@ public sealed class ManuscriptMigrationService(
                     SELECT 1 FROM Chapters
                     WHERE CASE WHEN json_valid(ManuscriptJson) = 1
                         THEN COALESCE(json_extract(ManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END != 1
+                        ELSE 0 END NOT IN (1, 2)
                        OR lower(COALESCE(json_extract(ManuscriptJson, '$.manuscriptId'), '')) != lower(Id)
                        OR COALESCE(json_extract(ManuscriptJson, '$.revision'), -1) != ManuscriptRevision)
                 OR EXISTS (
                     SELECT 1 FROM ContestBatches
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                             THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                            ELSE 0 END != 1
+                            ELSE 0 END NOT IN (1, 2)
                        OR CASE WHEN json_valid(AcceptedManuscriptJson) = 1
                             THEN COALESCE(json_extract(AcceptedManuscriptJson, '$.schemaVersion'), 0)
-                            ELSE 0 END != 1)
+                            ELSE 0 END NOT IN (1, 2))
                 OR EXISTS (
                     SELECT 1 FROM ContestCandidates
                     WHERE CASE WHEN json_valid(ProposedManuscriptJson) = 1
                         THEN COALESCE(json_extract(ProposedManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END != 1)
+                        ELSE 0 END NOT IN (1, 2))
                 OR EXISTS (
                     SELECT 1 FROM EditorRevisionSessions
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                         THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END != 1)
-                OR EXISTS (
-                    SELECT 1 FROM AiChanges
-                    WHERE ResourceKind = 'ChapterBody'
-                       OR ToolName IN ('edit_chapter', 'edit_assigned_chapter'))
+                        ELSE 0 END NOT IN (1, 2))
             THEN 1 ELSE 0 END;
             """;
-        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
+        if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1)
+            return true;
+
+        await using var aiChanges = connection.CreateCommand();
+        aiChanges.CommandText =
+            """
+            SELECT BeforeJson, AfterJson
+            FROM AiChanges
+            WHERE ResourceKind = 'ChapterBody'
+               OR ToolName IN ('edit_chapter', 'edit_assigned_chapter');
+            """;
+        await using var reader = await aiChanges.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (!ManuscriptSchemaUpgrade.ContainsStructuredDocument(reader.GetString(0))
+                || !ManuscriptSchemaUpgrade.ContainsStructuredDocument(reader.GetString(1)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private async Task<bool> ContainsSchemaV1ManuscriptsAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        foreach (var spec in SchemaUpgradeColumns)
+        {
+            if (!await TableExistsAsync(_connectionString, spec.Table, cancellationToken))
+                continue;
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT {string.Join(", ", spec.Columns)} FROM {spec.Table};";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                for (var index = 0; index < spec.Columns.Count; index++)
+                {
+                    if (!reader.IsDBNull(index)
+                        && ManuscriptSchemaUpgrade.ContainsV1Document(reader.GetString(index)))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private async Task UpgradeSchemaV1Async(
+        string backupPath,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var journalId = Guid.NewGuid();
+        var startedAt = DateTime.UtcNow;
+        await using (var insertJournal = connection.CreateCommand())
+        {
+            insertJournal.Transaction = transaction;
+            insertJournal.CommandText =
+                """
+                INSERT INTO ManuscriptMigrationJournals (
+                    Id, MigrationName, SourceSchemaVersion, TargetSchemaVersion, Phase, Status,
+                    BackupPath, ChapterCount, ContestBatchCount, ContestCandidateCount,
+                    RevisionSessionCount, SourceHash, TargetHash, ValidationReportJson,
+                    ErrorDetail, StartedAt, CompletedAt)
+                VALUES (
+                    $id, $name, 1, 2, 'Transform', 'Running',
+                    $backup, 0, 0, 0, 0, '', '', '{}', NULL, $startedAt, NULL);
+                """;
+            insertJournal.Parameters.AddWithValue("$id", journalId.ToString());
+            insertJournal.Parameters.AddWithValue("$name", SchemaV2MigrationName);
+            insertJournal.Parameters.AddWithValue("$backup", backupPath);
+            insertJournal.Parameters.AddWithValue("$startedAt", startedAt);
+            if (await insertJournal.ExecuteNonQueryAsync(cancellationToken) != 1)
+                throw new InvalidDataException("The manuscript-v2 migration journal could not be created.");
+        }
+
+        var sourceHashes = new List<string>();
+        var targetHashes = new List<string>();
+        var upgradedByTable = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var spec in SchemaUpgradeColumns)
+        {
+            if (!await TableExistsAsync(_connectionString, spec.Table, cancellationToken))
+                continue;
+            var rows = new List<(string Id, string?[] Values)>();
+            await using (var select = connection.CreateCommand())
+            {
+                select.Transaction = transaction;
+                select.CommandText = $"SELECT {spec.IdColumn}, {string.Join(", ", spec.Columns)} FROM {spec.Table};";
+                await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var values = new string?[spec.Columns.Count];
+                    for (var index = 0; index < spec.Columns.Count; index++)
+                        values[index] = reader.IsDBNull(index + 1) ? null : reader.GetString(index + 1);
+                    rows.Add((reader.GetString(0), values));
+                }
+            }
+
+            var tableCount = 0;
+            foreach (var row in rows)
+            {
+                var assignments = new List<string>();
+                await using var update = connection.CreateCommand();
+                update.Transaction = transaction;
+                for (var index = 0; index < row.Values.Length; index++)
+                {
+                    var value = row.Values[index];
+                    if (value is null || !ManuscriptSchemaUpgrade.ContainsV1Document(value))
+                        continue;
+                    var result = ManuscriptSchemaUpgrade.UpgradeEmbeddedV1Documents(value);
+                    if (result.Count == 0)
+                        continue;
+                    assignments.Add($"{spec.Columns[index]} = $value{index}");
+                    update.Parameters.AddWithValue($"$value{index}", result.Json);
+                    sourceHashes.AddRange(result.SourceHashes);
+                    targetHashes.AddRange(result.TargetHashes);
+                    tableCount += result.Count;
+                }
+                if (assignments.Count == 0)
+                    continue;
+                update.CommandText =
+                    $"UPDATE {spec.Table} SET {string.Join(", ", assignments)} "
+                    + $"WHERE {spec.IdColumn} COLLATE NOCASE = $id;";
+                update.Parameters.AddWithValue("$id", row.Id);
+                if (await update.ExecuteNonQueryAsync(cancellationToken) != 1)
+                    throw new InvalidDataException($"{spec.Table} row {row.Id} could not be upgraded uniquely.");
+            }
+            upgradedByTable[spec.Table] = tableCount;
+        }
+        var materializedStyleCount = await MaterializeLegacyStylesAsync(
+            connection,
+            transaction,
+            cancellationToken);
+
+        var sourceHash = AggregateHash(sourceHashes);
+        var targetHash = AggregateHash(targetHashes);
+        if (!string.Equals(sourceHash, targetHash, StringComparison.Ordinal))
+            throw new InvalidDataException("Manuscript-v2 migration hash validation failed.");
+        if (sourceHashes.Count == 0)
+            throw new InvalidDataException("Manuscript-v2 migration found no upgradeable documents.");
+
+        var completedAt = DateTime.UtcNow;
+        var report = JsonSerializer.Serialize(new
+        {
+            sourceSchemaVersion = 1,
+            targetSchemaVersion = 2,
+            documentCount = sourceHashes.Count,
+            upgradedByTable,
+            materializedStyleCount,
+            sourceHash,
+            targetHash,
+            validatedAtUtc = completedAt,
+        });
+        await using (var complete = connection.CreateCommand())
+        {
+            complete.Transaction = transaction;
+            complete.CommandText =
+                """
+                UPDATE ManuscriptMigrationJournals
+                SET Phase = 'Complete', Status = 'Completed',
+                    ChapterCount = $chapters, ContestBatchCount = $batches,
+                    ContestCandidateCount = $candidates, RevisionSessionCount = $sessions,
+                    SourceHash = $sourceHash, TargetHash = $targetHash,
+                    ValidationReportJson = $report, CompletedAt = $completedAt
+                WHERE Id COLLATE NOCASE = $id;
+                """;
+            complete.Parameters.AddWithValue("$chapters", upgradedByTable.GetValueOrDefault("Chapters"));
+            complete.Parameters.AddWithValue("$batches", upgradedByTable.GetValueOrDefault("ContestBatches"));
+            complete.Parameters.AddWithValue("$candidates", upgradedByTable.GetValueOrDefault("ContestCandidates"));
+            complete.Parameters.AddWithValue("$sessions", upgradedByTable.GetValueOrDefault("EditorRevisionSessions"));
+            complete.Parameters.AddWithValue("$sourceHash", sourceHash);
+            complete.Parameters.AddWithValue("$targetHash", targetHash);
+            complete.Parameters.AddWithValue("$report", report);
+            complete.Parameters.AddWithValue("$completedAt", completedAt);
+            complete.Parameters.AddWithValue("$id", journalId.ToString());
+            if (await complete.ExecuteNonQueryAsync(cancellationToken) != 1)
+                throw new InvalidDataException("The manuscript-v2 migration journal could not be finalized.");
+        }
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task<int> MaterializeLegacyStylesAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var rolesByProject = new Dictionary<
+            string,
+            Dictionary<ManuscriptStyleKind, HashSet<string>>>(
+                StringComparer.OrdinalIgnoreCase);
+        await using (var selectPayloads = connection.CreateCommand())
+        {
+            selectPayloads.Transaction = transaction;
+            selectPayloads.CommandText =
+                """
+                SELECT ProjectId, ManuscriptJson FROM Chapters
+                UNION ALL SELECT ProjectId, OriginalManuscriptJson FROM ContestBatches
+                UNION ALL SELECT ProjectId, AcceptedManuscriptJson FROM ContestBatches
+                UNION ALL
+                    SELECT batch.ProjectId, candidate.ProposedManuscriptJson
+                    FROM ContestCandidates candidate
+                    JOIN ContestBatches batch ON batch.Id = candidate.BatchId
+                UNION ALL
+                    SELECT batch.ProjectId, candidate.ReviewStateJson
+                    FROM ContestCandidates candidate
+                    JOIN ContestBatches batch ON batch.Id = candidate.BatchId
+                UNION ALL
+                    SELECT job.ProjectId, session.OriginalManuscriptJson
+                    FROM EditorRevisionSessions session
+                    JOIN EditorRevisionJobs job ON job.Id = session.JobId
+                UNION ALL
+                    SELECT job.ProjectId, session.OperationsJson
+                    FROM EditorRevisionSessions session
+                    JOIN EditorRevisionJobs job ON job.Id = session.JobId
+                UNION ALL
+                    SELECT job.ProjectId, session.ProposalJson
+                    FROM EditorRevisionSessions session
+                    JOIN EditorRevisionJobs job ON job.Id = session.JobId
+                UNION ALL
+                    SELECT batch.ProjectId, change.ArgumentsJson
+                    FROM AiChanges change
+                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId
+                UNION ALL
+                    SELECT batch.ProjectId, change.BeforeJson
+                    FROM AiChanges change
+                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId
+                UNION ALL
+                    SELECT batch.ProjectId, change.AfterJson
+                    FROM AiChanges change
+                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId
+                UNION ALL
+                    SELECT batch.ProjectId, change.DraftAfterJson
+                    FROM AiChanges change
+                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId
+                UNION ALL
+                    SELECT batch.ProjectId, change.ReviewStateJson
+                    FROM AiChanges change
+                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId
+                UNION ALL
+                    SELECT batch.ProjectId, change.ResultJson
+                    FROM AiChanges change
+                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId;
+                """;
+            await using var reader = await selectPayloads.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (reader.IsDBNull(1))
+                    continue;
+                var projectId = reader.GetString(0);
+                if (!rolesByProject.TryGetValue(projectId, out var rolesByKind))
+                {
+                    rolesByKind = new Dictionary<ManuscriptStyleKind, HashSet<string>>
+                    {
+                        [ManuscriptStyleKind.Paragraph] = new(StringComparer.OrdinalIgnoreCase),
+                        [ManuscriptStyleKind.Character] = new(StringComparer.OrdinalIgnoreCase),
+                    };
+                    rolesByProject[projectId] = rolesByKind;
+                }
+                foreach (var manuscript in ManuscriptSchemaUpgrade.ExtractCurrentDocuments(
+                    reader.GetString(1)))
+                {
+                    foreach (var role in manuscript.Content
+                        .Select(block => block.StyleRole)
+                        .Where(role => !ManuscriptStyleService.BuiltInParagraphRoles.Contains(role)))
+                    {
+                        rolesByKind[ManuscriptStyleKind.Paragraph].Add(role);
+                    }
+                    foreach (var role in manuscript.Content
+                        .SelectMany(block => block.Content)
+                        .SelectMany(inline => inline.Marks)
+                        .Where(mark => mark.Type == ManuscriptMarkType.CharacterStyle)
+                        .Select(mark => mark.Value!))
+                    {
+                        rolesByKind[ManuscriptStyleKind.Character].Add(role);
+                    }
+                }
+            }
+        }
+
+        var created = 0;
+        foreach (var (projectId, rolesByKind) in rolesByProject)
+        {
+            var projectGuid = Guid.Parse(projectId);
+            foreach (var (kind, roles) in rolesByKind)
+            {
+                var existingRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                await using (var selectStyles = connection.CreateCommand())
+                {
+                    selectStyles.Transaction = transaction;
+                    selectStyles.CommandText =
+                        """
+                        SELECT Name, SemanticRole
+                        FROM ManuscriptStyleDefinitions
+                        WHERE ProjectId = $projectId AND Kind = $kind;
+                        """;
+                    selectStyles.Parameters.AddWithValue("$projectId", projectId);
+                    selectStyles.Parameters.AddWithValue("$kind", kind.ToString());
+                    await using var reader = await selectStyles.ExecuteReaderAsync(cancellationToken);
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        existingNames.Add(reader.GetString(0));
+                        existingRoles.Add(reader.GetString(1));
+                    }
+                }
+
+                foreach (var role in roles.Order(StringComparer.OrdinalIgnoreCase))
+                {
+                    if (existingRoles.Contains(role))
+                        continue;
+                    var name = AllocateMigratedStyleName($"Imported {role}", existingNames);
+
+                    var now = DateTime.UtcNow;
+                    await using var insert = connection.CreateCommand();
+                    insert.Transaction = transaction;
+                    insert.CommandText =
+                        """
+                        INSERT INTO ManuscriptStyleDefinitions (
+                            Id, ProjectId, Name, NameKey, Kind, SemanticRole, SemanticRoleKey,
+                            DefinitionJson, Revision, CreatedAt, UpdatedAt)
+                        VALUES (
+                            $id, $projectId, $name, $nameKey, $kind, $role, $roleKey,
+                            $definition, 1, $now, $now);
+                        """;
+                    insert.Parameters.AddWithValue(
+                        "$id",
+                        DeterministicStyleId(projectGuid, kind, role).ToString().ToUpperInvariant());
+                    insert.Parameters.AddWithValue("$projectId", projectId);
+                    insert.Parameters.AddWithValue("$name", name);
+                    insert.Parameters.AddWithValue("$nameKey", name.ToLowerInvariant());
+                    insert.Parameters.AddWithValue("$kind", kind.ToString());
+                    insert.Parameters.AddWithValue("$role", role);
+                    insert.Parameters.AddWithValue("$roleKey", role.ToLowerInvariant());
+                    insert.Parameters.AddWithValue(
+                        "$definition",
+                        JsonSerializer.Serialize(new ManuscriptStyleProperties(), ManuscriptCodec.JsonOptions));
+                    insert.Parameters.AddWithValue("$now", now);
+                    if (await insert.ExecuteNonQueryAsync(cancellationToken) != 1)
+                        throw new InvalidDataException($"Legacy manuscript style '{role}' could not be materialized.");
+                    existingRoles.Add(role);
+                    created++;
+                }
+            }
+        }
+        return created;
+    }
+
+    private static string AllocateMigratedStyleName(string requestedName, ISet<string> usedNames)
+    {
+        var direct = requestedName[..Math.Min(requestedName.Length, 80)];
+        if (usedNames.Add(direct))
+            return direct;
+        var number = 2;
+        while (true)
+        {
+            var suffix = $" {number++}";
+            var candidate =
+                $"{requestedName[..Math.Min(requestedName.Length, 80 - suffix.Length)]}{suffix}";
+            if (usedNames.Add(candidate))
+                return candidate;
+        }
+    }
+
+    private static Guid DeterministicStyleId(
+        Guid projectId,
+        ManuscriptStyleKind kind,
+        string semanticRole)
+    {
+        var bytes = SHA256.HashData(
+            Encoding.UTF8.GetBytes(
+                $"lorekeeper-semantic-style-v2:{projectId:N}:{kind}:{semanticRole}"));
+        return new Guid(bytes.AsSpan(0, 16));
     }
 
     private async Task<bool> DatabaseHasUserSchemaAsync(CancellationToken cancellationToken) =>
@@ -1129,40 +1525,18 @@ public sealed class ManuscriptMigrationService(
         Guid expectedManuscriptId,
         long? expectedRevision = null)
     {
-        if (!LooksLikeManuscript(value))
-            return false;
-
         try
         {
-            var document = ManuscriptCodec.Deserialize(value);
-            ManuscriptCodec.Validate(
-                document,
+            return ManuscriptSchemaUpgrade.IsStructuredManuscript(
+                value,
                 expectedManuscriptId,
-                expectedRevision ?? document.Revision);
-            return true;
+                expectedRevision);
         }
         catch (InvalidDataException exception)
         {
             throw new InvalidDataException(
-                $"A schema-v1 manuscript does not match its owning chapter {expectedManuscriptId:N}.",
+                $"A structured manuscript does not match its owning chapter {expectedManuscriptId:N}.",
                 exception);
-        }
-    }
-
-    private static bool LooksLikeManuscript(string value)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(value);
-            return document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("schemaVersion", out var schemaVersion)
-                && schemaVersion.ValueKind == JsonValueKind.Number
-                && schemaVersion.TryGetInt32(out var version)
-                && version == ManuscriptDocument.CurrentSchemaVersion;
-        }
-        catch (JsonException)
-        {
-            return false;
         }
     }
 
@@ -1253,6 +1627,30 @@ public sealed class ManuscriptMigrationService(
     private sealed record LegacyChapterChange(Guid Id, string Title, string Body);
 
     private sealed record ScheduledRestore(string BackupPath);
+
+    private sealed record SchemaUpgradeColumnSet(
+        string Table,
+        string IdColumn,
+        IReadOnlyList<string> Columns);
+
+    private static readonly IReadOnlyList<SchemaUpgradeColumnSet> SchemaUpgradeColumns =
+    [
+        new("Chapters", "Id", ["ManuscriptJson"]),
+        new("ContestBatches", "Id", ["OriginalManuscriptJson", "AcceptedManuscriptJson"]),
+        new("ContestCandidates", "Id", ["ProposedManuscriptJson", "ReviewStateJson"]),
+        new("EditorRevisionSessions", "Id", ["OriginalManuscriptJson", "OperationsJson", "ProposalJson"]),
+        new(
+            "AiChanges",
+            "Id",
+            [
+                "ArgumentsJson",
+                "BeforeJson",
+                "AfterJson",
+                "DraftAfterJson",
+                "ReviewStateJson",
+                "ResultJson",
+            ]),
+    ];
 
     private sealed record ManuscriptMigrationReport(
         int ChapterCount,

@@ -828,11 +828,15 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("OperationFormat")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Notes")
+                    b.Property<string>("OperationsJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -863,10 +867,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OperationsJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -1950,6 +1950,64 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("MigrationName", "StartedAt");
 
                     b.ToTable("ManuscriptMigrationJournals");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ManuscriptStyleDefinition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefinitionJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NameKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SemanticRole")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SemanticRoleKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "Kind", "NameKey")
+                        .IsUnique();
+
+                    b.HasIndex("ProjectId", "Kind", "SemanticRoleKey")
+                        .IsUnique();
+
+                    b.ToTable("ManuscriptStyleDefinitions");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.OAuthToken", b =>
@@ -3836,6 +3894,17 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("CredentialSource");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.ManuscriptStyleDefinition", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.Project", "Project")
+                        .WithMany("ManuscriptStyles")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.OAuthToken", b =>
                 {
                     b.HasOne("Lorekeeper.Models.LlmProvider", "Provider")
@@ -4291,6 +4360,8 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("IngestJobs");
 
                     b.Navigation("IngestSources");
+
+                    b.Navigation("ManuscriptStyles");
 
                     b.Navigation("Nodes");
 

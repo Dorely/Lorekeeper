@@ -200,10 +200,9 @@ representative reads before committing the transition.
 ### Stage E — cut over and contract
 
 - change all application consumers to the manuscript service and projections;
-- keep the existing textarea temporarily functional through an explicit UI
-  adapter that reads the plain-text projection and translates revision-aware
-  saves into manuscript parse/diff commands; it never reads/writes
-  `Chapter.Body` and is removed when the semantic editor ships;
+- use the schema-driven ProseMirror UI adapter that reads/writes canonical
+  manuscript documents through revision-aware service commands; it never
+  persists DOM/HTML or reads/writes `Chapter.Body`;
 - change assistant tools to stable block/range operations with revision tokens;
 - update project export to a new version containing structured manuscripts and
   their stable references;

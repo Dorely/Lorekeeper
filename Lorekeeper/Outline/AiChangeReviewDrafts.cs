@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.Outline;
@@ -24,20 +23,6 @@ public static class AiChangeReviewDrafts
         var kind = GetKind(change);
         switch (kind)
         {
-            case ReviewDraftPayloadKind.ChapterBody:
-            {
-                if (!TryReadChange<ChapterManuscriptChange>(change.BeforeJson, out var before)
-                    || !TryReadChange<ChapterManuscriptChange>(EffectiveAfterJson(change), out var after))
-                {
-                    return false;
-                }
-
-                payload = new AiChangeReviewEditablePayload(
-                    "Chapter body",
-                    after.Title,
-                    [new AiChangeReviewEditableField("Body", "Body", before.PlainText, after.PlainText, OldExists: true, NewExists: true)]);
-                return true;
-            }
             case ReviewDraftPayloadKind.Act:
             {
                 var before = ReadOptional<OutlineActChange>(change.BeforeJson);
@@ -116,21 +101,6 @@ public static class AiChangeReviewDrafts
         var kind = GetKind(change);
         switch (kind)
         {
-            case ReviewDraftPayloadKind.ChapterBody:
-            {
-                if (!TryReadChange<ChapterManuscriptChange>(EffectiveAfterJson(change), out var after))
-                    return Fail("Could not read the chapter-body draft.", out draftAfterJson, out error);
-                if (!FieldKeyEquals(fieldKey, "Body"))
-                    return Fail($"Chapter body changes do not have a '{fieldKey}' field.", out draftAfterJson, out error);
-
-                var document = ManuscriptCodec.ReparsePreservingBlockIds(after.Manuscript, newText);
-                draftAfterJson = Serialize(after with
-                {
-                    Revision = document.Revision,
-                    ManuscriptJson = ManuscriptCodec.Serialize(document),
-                });
-                return true;
-            }
             case ReviewDraftPayloadKind.Act:
             {
                 if (!TryReadChange<OutlineActChange>(EffectiveAfterJson(change), out var after))
@@ -214,8 +184,6 @@ public static class AiChangeReviewDrafts
         var kind = GetKind(change);
         switch (kind)
         {
-            case ReviewDraftPayloadKind.ChapterBody:
-                return ValidateChapterBody(change, draftAfterJson, out error);
             case ReviewDraftPayloadKind.Act:
                 return ValidateAct(change, draftAfterJson, out error);
             case ReviewDraftPayloadKind.Chapter:
@@ -226,25 +194,6 @@ public static class AiChangeReviewDrafts
                 error = $"AI change '{change.ToolName}' does not support review drafts.";
                 return false;
         }
-    }
-
-    private static bool ValidateChapterBody(AiChange change, string draftAfterJson, out string? error)
-    {
-        error = null;
-        if (!TryReadChange<ChapterManuscriptChange>(change.AfterJson, out var original)
-            || !TryReadChange<ChapterManuscriptChange>(draftAfterJson, out var draft))
-        {
-            error = "Could not read the chapter-body draft.";
-            return false;
-        }
-
-        if (draft.Id != original.Id || !string.Equals(draft.Title, original.Title, StringComparison.Ordinal))
-        {
-            error = "The chapter-body draft changed immutable metadata.";
-            return false;
-        }
-
-        return true;
     }
 
     private static bool ValidateAct(AiChange change, string draftAfterJson, out string? error)
@@ -313,11 +262,6 @@ public static class AiChangeReviewDrafts
 
     private static ReviewDraftPayloadKind GetKind(AiChange change)
     {
-        if (string.Equals(change.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
-        {
-            return ReviewDraftPayloadKind.ChapterBody;
-        }
-
         if (IsTool(change, "create_act", "update_act")) return ReviewDraftPayloadKind.Act;
         if (IsTool(change, "create_chapter", "update_chapter")) return ReviewDraftPayloadKind.Chapter;
         if (IsTool(change, "create_entity", "update_entity")) return ReviewDraftPayloadKind.Entity;
@@ -390,7 +334,6 @@ public static class AiChangeReviewDrafts
     private enum ReviewDraftPayloadKind
     {
         Unsupported,
-        ChapterBody,
         Act,
         Chapter,
         Entity,

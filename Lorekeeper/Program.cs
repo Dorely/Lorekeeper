@@ -87,6 +87,8 @@ else
 
 // Persistence
 builder.Services.AddLorekeeperPersistence(builder.Configuration);
+builder.Services.AddSingleton<IProjectMutationCoordinator>(
+    _ => new ProjectMutationCoordinator(databaseConnectionString));
 builder.Services.AddScoped<ILlmProviderRepository, LlmProviderRepository>();
 builder.Services.AddScoped<IEmbeddingConfigurationRepository, EmbeddingConfigurationRepository>();
 builder.Services.AddScoped<ISearchProviderRepository, SearchProviderRepository>();
@@ -177,6 +179,7 @@ builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationSe
 builder.Services.AddScoped<IChapterVisualService, ChapterVisualService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
 builder.Services.AddScoped<IProjectFontService, ProjectFontService>();
+builder.Services.AddScoped<IManuscriptStyleService, ManuscriptStyleService>();
 builder.Services.Configure<EntityVisualContextOptions>(builder.Configuration.GetSection(EntityVisualContextOptions.SectionName));
 builder.Services.AddScoped<IEntityVisualExampleService, EntityVisualExampleService>();
 builder.Services.AddScoped<IEntityVisualContextService, EntityVisualContextService>();

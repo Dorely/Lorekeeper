@@ -1,0 +1,21 @@
+{
+  "name": "lorekeeper-semantic-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/semantic-editor.js --bundle --format=esm --target=es2022 --minify --legal-comments=external --outfile=../../Lorekeeper/wwwroot/js/semantic-editor.bundle.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "prosemirror-commands": "1.7.1",
+    "prosemirror-history": "1.5.0",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-model": "1.25.11",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-view": "1.42.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "jsdom": "26.1.0"
+  }
+}

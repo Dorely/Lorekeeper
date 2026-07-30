@@ -192,16 +192,25 @@ else
                         @onclick="() => SetModeAsync(EditorMode.Review)">Review</button>
             </div>
 
+            <details class="manuscript-style-details">
+                <summary>Named manuscript styles</summary>
+                <ManuscriptStylesPanel @key="_styleCatalogVersion"
+                                       ProjectId="Project.Id"
+                                       BeforeChange="FlushAsync"
+                                       Changed="OnManuscriptStylesChangedAsync" />
+            </details>
+
             <div class="@ChapterEditorClass()">
                 @if (!IsPicturePageChapter && _editorDocument is { } editorDocument)
                 {
                     <ChapterBodyEditor @key="EditorKey(editorDocument)"
                                        @ref="_bodyEditor"
+                                       ProjectId="Project.Id"
                                        ChapterId="@editorDocument.ChapterId"
-                                       InitialBody="@editorDocument.Body"
+                                       InitialManuscriptJson="@editorDocument.ManuscriptJson"
                                        IsVisible="@(_mode == EditorMode.Edit)"
                                        IsReadOnly="EditorReadOnly"
-                                       SaveAsync="SaveBodyAsync" />
+                                       SaveAsync="SaveDocumentAsync" />
                 }
 
                 @if (_mode is EditorMode.Read or EditorMode.Layout && _visualState is not null)
@@ -791,6 +800,7 @@ else
     private bool _disposed;
     private ChapterBodyEditor? _bodyEditor;
     private EditorDocumentState? _editorDocument;
+    private long _styleCatalogVersion;
 
     private SaveState _saveState = SaveState.Idle;
     private DateTime? _lastSavedAt;
@@ -1075,12 +1085,22 @@ else
         }
         if (_current is not null && _current.Id == state.ChapterId)
         {
+            var manuscriptChanged = _current.ManuscriptRevision != state.ManuscriptRevision;
+            if (manuscriptChanged)
+            {
+                var reloaded = await Chapters.ReloadFromStoreAsync(state.ChapterId);
+                if (reloaded is not null)
+                {
+                    _current = reloaded;
+                    ReplaceCachedChapter(reloaded);
+                    SynchronizeExternalEditorDocument(reloaded);
+                }
+            }
             _current.ManuscriptRevision = state.ManuscriptRevision;
             _current.VisualMode = state.VisualMode;
             if (state.VisualMode != ChapterVisualMode.Prose)
                 _current.PageLayoutKind = state.PageLayoutKind;
             UpdateChapterMetrics(state.Body);
-            SynchronizeExternalEditorDocument(state.ChapterId, state.Body);
         }
 
         await LoadChapterImagesAsync();
@@ -1357,7 +1377,10 @@ else
         }
     }
 
-    private async Task<bool> SaveBodyAsync(Guid chapterId, string body)
+    private async Task<ChapterBodyEditor.SemanticEditorSaveResult> SaveDocumentAsync(
+        Guid chapterId,
+        long expectedRevision,
+        string manuscriptJson)
     {
         await _saveGate.WaitAsync();
         try
@@ -1366,22 +1389,33 @@ else
             _saveError = null;
             await InvokeAsync(StateHasChanged);
 
-            var expectedRevision = _current is { Id: var currentId } && currentId == chapterId
-                ? _current.ManuscriptRevision
-                : (await Manuscripts.GetManuscriptAsync(chapterId))?.Revision
-                    ?? throw new InvalidOperationException("The chapter manuscript no longer exists.");
-            await Manuscripts.ReplacePlainTextAsync(chapterId, expectedRevision, body);
-            var updated = await Chapters.ReloadFromStoreAsync(chapterId)
-                ?? throw new InvalidOperationException("The saved chapter could not be reloaded.");
-            if (_current is not null && _current.Id == chapterId)
+            var document = ManuscriptCodec.Deserialize(
+                manuscriptJson,
+                chapterId,
+                expectedRevision);
+            var result = await Manuscripts.ReplaceDocumentAsync(
+                chapterId,
+                expectedRevision,
+                document);
+            Chapter? updated = null;
+            try
             {
-                _current = updated;
-                ReplaceCachedChapter(updated);
-                RecordEditorSave(chapterId, body);
-                UpdateChapterMetrics(body);
+                updated = await Chapters.ReloadFromStoreAsync(chapterId);
+                if (updated is not null && _current is not null && _current.Id == chapterId)
+                {
+                    _current = updated;
+                    ReplaceCachedChapter(updated);
+                    RecordEditorSave(updated);
+                    UpdateChapterMetrics(updated.PlainText);
+                }
             }
-
-            if (updated.VectorIndexState == VectorIndexState.Failed)
+            catch (Exception exception)
+            {
+                _saveError =
+                    $"Revision {result.Snapshot.Revision} was saved, but the editor could not refresh: "
+                    + exception.Message;
+            }
+            if (updated?.VectorIndexState == VectorIndexState.Failed)
             {
                 _saveState = SaveState.IndexFailed;
                 _saveError = updated.VectorIndexError;
@@ -1390,17 +1424,39 @@ else
             {
                 _saveState = SaveState.Saved;
             }
-
+            try
+            {
+                await RefreshContextSurfacesAsync();
+            }
+            catch (Exception exception)
+            {
+                _saveError ??=
+                    $"Revision {result.Snapshot.Revision} was saved, but context refresh failed: "
+                    + exception.Message;
+            }
             _lastSavedAt = DateTime.Now;
-
-            await RefreshContextSurfacesAsync();
-            return true;
+            return new ChapterBodyEditor.SemanticEditorSaveResult(true, result.Snapshot.Revision);
+        }
+        catch (ManuscriptRevisionConflictException ex)
+        {
+            var current = await Manuscripts.GetManuscriptAsync(chapterId)
+                ?? throw new InvalidOperationException(
+                    "The chapter was deleted while resolving an editing conflict.");
+            _saveState = SaveState.SaveFailed;
+            _saveError =
+                $"This chapter changed at revision {ex.ActualRevision}. "
+                + "Your local draft is preserved in the editor until you download it or load the current version.";
+            return new ChapterBodyEditor.SemanticEditorSaveResult(
+                false,
+                expectedRevision,
+                Conflict: true,
+                CurrentManuscriptJson: ManuscriptCodec.Serialize(current.Document));
         }
         catch (Exception ex)
         {
             _saveState = SaveState.SaveFailed;
             _saveError = ex.Message;
-            return false;
+            return new ChapterBodyEditor.SemanticEditorSaveResult(false, expectedRevision);
         }
         finally
         {
@@ -1472,8 +1528,15 @@ else
         return classes;
     }
 
-    private static EditorDocumentKey EditorKey(EditorDocumentState document) =>
-        new(document.ChapterId, document.Revision);
+    private EditorDocumentKey EditorKey(EditorDocumentState document) =>
+        new(document.ChapterId, document.RenderVersion, _styleCatalogVersion);
+
+    private async Task OnManuscriptStylesChangedAsync()
+    {
+        if (!await FlushAsync())
+            return;
+        _styleCatalogVersion++;
+    }
 
     private ChapterPageLayoutKind CurrentPageLayoutKind() =>
         _visualState?.PageLayoutKind ?? _current?.PageLayoutKind ?? ChapterPageLayoutKind.SinglePortrait;
@@ -2940,6 +3003,8 @@ else
     private string SaveStatusText() => _saveState switch
     {
         SaveState.Saving => "Saving…",
+        SaveState.Saved when _lastSavedAt is { } ts && !string.IsNullOrWhiteSpace(_saveError) =>
+            $"Saved {ts:HH:mm:ss} with warning: {_saveError}",
         SaveState.Saved when _lastSavedAt is { } ts => $"Saved {ts:HH:mm:ss}",
         SaveState.IndexFailed => "Saved — vector index out of date, will retry",
         SaveState.SaveFailed => $"Save failed: {_saveError}",
@@ -3023,6 +3088,7 @@ else
         }
         finally
         {
+            _styleCatalogVersion++;
             _chapterLocked = false;
             try
             {
@@ -3081,6 +3147,7 @@ else
         }
         finally
         {
+            _styleCatalogVersion++;
             StateHasChanged();
         }
     }
@@ -3108,7 +3175,7 @@ else
 
             _current = fresh;
             ReplaceCachedChapter(fresh);
-            SynchronizeExternalEditorDocument(fresh.Id, fresh.PlainText);
+            SynchronizeExternalEditorDocument(fresh);
             UpdateChapterMetrics(fresh.PlainText);
 
             await LoadVisualStateAsync();
@@ -3127,33 +3194,49 @@ else
 
     private void InstallEditorDocument(Chapter chapter)
     {
-        var revision = _editorDocument?.Revision ?? 0;
-        _editorDocument = new EditorDocumentState(chapter.Id, chapter.PlainText, revision);
+        var renderVersion = _editorDocument?.RenderVersion ?? 0;
+        _editorDocument = new EditorDocumentState(
+            chapter.Id,
+            chapter.ManuscriptJson,
+            chapter.ManuscriptRevision,
+            renderVersion);
     }
 
-    private void SynchronizeExternalEditorDocument(Guid chapterId, string body)
+    private void SynchronizeExternalEditorDocument(Chapter chapter)
     {
-        if (_editorDocument is not { } document || document.ChapterId != chapterId)
+        if (_editorDocument is not { } document || document.ChapterId != chapter.Id)
         {
-            var revision = (_editorDocument?.Revision ?? 0) + 1;
-            _editorDocument = new EditorDocumentState(chapterId, body, revision);
+            var renderVersion = (_editorDocument?.RenderVersion ?? 0) + 1;
+            _editorDocument = new EditorDocumentState(
+                chapter.Id,
+                chapter.ManuscriptJson,
+                chapter.ManuscriptRevision,
+                renderVersion);
             return;
         }
 
-        if (string.Equals(document.Body, body, StringComparison.Ordinal))
+        if (document.ManuscriptRevision == chapter.ManuscriptRevision
+            && string.Equals(document.ManuscriptJson, chapter.ManuscriptJson, StringComparison.Ordinal))
             return;
 
         _editorDocument = document with
         {
-            Body = body,
-            Revision = document.Revision + 1,
+            ManuscriptJson = chapter.ManuscriptJson,
+            ManuscriptRevision = chapter.ManuscriptRevision,
+            RenderVersion = document.RenderVersion + 1,
         };
     }
 
-    private void RecordEditorSave(Guid chapterId, string body)
+    private void RecordEditorSave(Chapter chapter)
     {
-        if (_editorDocument is { } document && document.ChapterId == chapterId)
-            _editorDocument = document with { Body = body };
+        if (_editorDocument is { } document && document.ChapterId == chapter.Id)
+        {
+            _editorDocument = document with
+            {
+                ManuscriptJson = chapter.ManuscriptJson,
+                ManuscriptRevision = chapter.ManuscriptRevision,
+            };
+        }
     }
 
     private void ReplaceCachedChapter(Chapter chapter)
@@ -3234,9 +3317,13 @@ else
 
     private enum EditorMode { Edit, Read, Layout, Review }
 
-    private readonly record struct EditorDocumentState(Guid ChapterId, string Body, long Revision);
+    private readonly record struct EditorDocumentState(
+        Guid ChapterId,
+        string ManuscriptJson,
+        long ManuscriptRevision,
+        long RenderVersion);
 
-    private readonly record struct EditorDocumentKey(Guid ChapterId, long Revision);
+    private readonly record struct EditorDocumentKey(Guid ChapterId, long Revision, long StyleCatalogVersion);
 
     private sealed record ReviewProjection(
         bool HasChanges,

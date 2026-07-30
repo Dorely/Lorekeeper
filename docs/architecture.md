@@ -163,11 +163,28 @@ revision; stable block IDs are the canonical prose anchors for Picture Page text
 ranges and illustrated-prose images. `IManuscriptService` is the only runtime
 write boundary for manuscript content. The revision is an EF optimistic
 concurrency token, so simultaneous writers cannot silently overwrite one
-another. The temporary textarea edits a
-plain-text projection through revision-aware reparsing, while assistant,
-contest, revision-agent, approval, import, indexing, visual, and publishing
-paths consume the same document or projection. Direct chapter-body persistence
-is no longer a runtime path.
+another. Manuscript reference writes and named-style/project-image deletion
+also share a project-scoped async mutation boundary backed by an in-process
+semaphore and an adjacent per-database file lock. The boundary therefore
+serializes browser-hosted and desktop processes sharing one SQLite file, so
+validate-then-save and validate-then-delete cannot interleave into dangling JSON
+references. Composite import, Picture Page text, and image-deletion workflows
+use explicit under-held-lease service methods; mutation ownership is never
+inferred from async execution context.
+The
+ProseMirror editor, assistant, contest, revision-agent, approval,
+import, indexing, visual, and publishing paths consume the same document or
+projection. Direct chapter-body persistence is no longer a runtime path.
+Picture Page text edits resolve whole-block references into move/insert/delete/
+replace manuscript operations, preserving block identity when text boxes move
+in reading order. Partial-block range text edits fail closed and must be made
+in the manuscript editor; layout-only changes and whole-block edits remain
+available in Picture Page. Picture Page and Illustrated Prose layouts carry
+monotonic revisions. Every reference-changing save, manuscript reconciliation,
+mode initialization, and image-reference removal advances the relevant layout
+revision; stale visual editors fail closed, reload the current layout, and show
+a visible conflict notice. Visual saves validate every referenced image under
+the same cross-process project mutation lease.
 `IPageGeometryService` provides the shared page/spread calculations used by the
 editor, image targets, diagnostics, previews, and exporters. Publishing services
 own metadata, outline selection, image placement, covers, and TXT, Markdown,
@@ -256,9 +273,43 @@ exposes redacted journal/backup state and requires a short-lived, explicit
 confirmation token to schedule restore. The database is replaced only during
 the next startup, before normal workers start, and a diagnostic backup is made
 first. Backup files and their directory use owner-only ACLs/permissions.
-Project export format v8 carries canonical manuscript documents and
-stable visual references, while v1-v7 text adapters exist only at the import
-boundary.
+The current manuscript schema is v2. Startup safely upgrades v1 documents in
+live chapters and every historical/review JSON payload under the same protected
+backup, transaction, projection-hash, and journal boundary. Project export
+format v9 carries v2 manuscripts, stable visual references, and project named
+paragraph/character style definitions. The v8 manuscript-v1 adapter and v1-v7
+text adapters exist only at the import boundary.
+
+Manuscript v2 stores structural heading level separately from edition-independent
+style role, so assigning or removing a named paragraph style cannot change a
+chapter heading into a subheading. Figure blocks own a project image ID,
+alternative text, and caption content. Manuscript saves and assistant previews
+validate image ownership; image deletion refuses live figure references; v9
+imports preflight and remap figure asset IDs. Current Markdown and EPUB
+publication projections consume the structured manuscript rather than flattening
+these blocks and marks through the plain-text projection.
+
+The chapter editor is an exact-pinned ProseMirror bundle built from
+`tools/semantic-editor/package-lock.json`. Browser transactions are adapted to
+Lorekeeper manuscript JSON and cross `IManuscriptService.ReplaceDocumentAsync`
+with an expected revision; neither DOM nor HTML is persisted. Paste is
+constrained by the owned schema and reports removed elements. Manual edits and
+Editor/revision-worker tools share block, mark, style, validation, and
+structural-inspection semantics. Named style semantic roles and
+paragraph/character kinds are immutable stable keys; definitions are
+revision-checked and semantic roles are unique per project and kind.
+
+On a manuscript revision conflict, the browser adapter preserves the unsaved
+v2 JSON in chapter-keyed browser/Electron local storage, locks the stale editor,
+and exposes download or explicit reload-current actions. The copy is
+unencrypted manuscript content outside SQLite; it survives UI remounts, is not
+part of database backup/export, and is deleted only when the user explicitly
+loads the current saved manuscript. Clearing site data removes it.
+
+Windows and macOS release builders run the semantic-editor locked install,
+fixtures, audit, and deterministic rebuild, fail if the committed bundle is
+stale, and verify that exactly one matching bundle and shipped notice reached
+the release stage.
 
 Applied EF Core migration files are immutable schema history. Never edit,
 reorder, or delete an applied migration to make the migration directory resemble
@@ -341,6 +392,9 @@ export fixtures with:
 
 ```powershell
 dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj
+npm ci --prefix tools/semantic-editor
+npm test --prefix tools/semantic-editor
+npm run build --prefix tools/semantic-editor
 ```
 
 The standalone press spike owns separate Rust fixture tests. Run its locked

@@ -4,7 +4,10 @@ using Lorekeeper.Manuscripts;
 namespace Lorekeeper.Models;
 
 public sealed record IllustratedProseLayout(
-    IReadOnlyList<IllustratedProseImageBlock> Images);
+    IReadOnlyList<IllustratedProseImageBlock> Images)
+{
+    public long Revision { get; init; }
+}
 
 public sealed record IllustratedProseImageBlock(
     Guid Id,
@@ -24,7 +27,10 @@ public sealed record IllustratedProseImageBlock(
 
 public sealed record PicturePageLayout(
     IReadOnlyList<PicturePageImageElement> Images,
-    IReadOnlyList<PicturePageTextElement> TextElements);
+    IReadOnlyList<PicturePageTextElement> TextElements)
+{
+    public long Revision { get; init; }
+}
 
 public sealed record PicturePageImageElement(
     Guid Id,

@@ -136,12 +136,42 @@ public static partial class ManuscriptCodec
                 throw new InvalidDataException("The manuscript cannot contain a null block.");
             if (string.IsNullOrWhiteSpace(block.Id) || !ids.Add(block.Id))
                 throw new InvalidDataException("Manuscript block IDs must be non-empty and unique.");
+            if (!ContainsOnlyXmlCharacters(block.Id))
+                throw new InvalidDataException("Manuscript block IDs must contain only XML-safe characters.");
+            if (!Enum.IsDefined(block.Type))
+                throw new InvalidDataException($"Block {block.Id} has an unsupported block type.");
             if (string.IsNullOrWhiteSpace(block.StyleRole))
                 throw new InvalidDataException($"Block {block.Id} has no semantic style role.");
+            if (!ManuscriptSemanticRoles.IsValid(block.StyleRole))
+            {
+                throw new InvalidDataException(
+                    $"Block {block.Id} has an invalid semantic style role. Roles must be lowercase hyphenated identifiers.");
+            }
+            if (block.Type == ManuscriptBlockType.Heading
+                && block.HeadingLevel is not (>= 1 and <= 6))
+            {
+                throw new InvalidDataException($"Heading block {block.Id} requires a level from 1 through 6.");
+            }
+            if (block.Type != ManuscriptBlockType.Heading && block.HeadingLevel is not null)
+                throw new InvalidDataException($"Non-heading block {block.Id} cannot contain a heading level.");
             if (block.Content is null)
                 throw new InvalidDataException($"Block {block.Id} has no inline-content collection.");
             if (block.Type == ManuscriptBlockType.SceneBreak && block.Content.Count != 0)
                 throw new InvalidDataException($"Scene-break block {block.Id} cannot contain inline text.");
+            if (block.Type == ManuscriptBlockType.Figure
+                && (block.ImageId is null || block.ImageId == Guid.Empty || string.IsNullOrWhiteSpace(block.AltText)))
+            {
+                throw new InvalidDataException(
+                    $"Figure block {block.Id} requires a project image ID and non-empty alternative text.");
+            }
+            if (block.AltText is not null && !ContainsOnlyXmlCharacters(block.AltText))
+                throw new InvalidDataException($"Figure block {block.Id} contains XML-forbidden alternative text.");
+            if (block.Type != ManuscriptBlockType.Figure
+                && (block.ImageId is not null || block.AltText is not null))
+            {
+                throw new InvalidDataException(
+                    $"Non-figure block {block.Id} cannot contain figure image metadata.");
+            }
             if (block.Type != ManuscriptBlockType.SceneBreak
                 && block.Content.Any(inline => inline.Type != ManuscriptInlineType.Text))
             {
@@ -151,12 +181,72 @@ public static partial class ManuscriptCodec
             {
                 if (inline is null || inline.Text is null || inline.Marks is null)
                     throw new InvalidDataException($"Block {block.Id} contains an incomplete inline node.");
+                if (!Enum.IsDefined(inline.Type))
+                    throw new InvalidDataException($"Block {block.Id} contains an unsupported inline type.");
+                if (!ContainsOnlyXmlCharacters(inline.Text))
+                    throw new InvalidDataException($"Block {block.Id} contains XML-forbidden text.");
                 if (ContainsBlockDelimiter(inline.Text))
                     throw new InvalidDataException($"Block {block.Id} contains a paragraph delimiter.");
                 if (inline.Marks.Any(mark => mark is null))
                     throw new InvalidDataException($"Block {block.Id} contains a null inline mark.");
-                if (inline.Marks.GroupBy(mark => (mark.Type, mark.Value)).Any(group => group.Count() > 1))
+                if (inline.Marks.Any(mark => !Enum.IsDefined(mark.Type)))
+                    throw new InvalidDataException($"Block {block.Id} contains an unsupported inline mark.");
+                if (inline.Marks.Any(mark =>
+                        mark.Value is not null && !ContainsOnlyXmlCharacters(mark.Value)))
+                {
+                    throw new InvalidDataException(
+                        $"Block {block.Id} contains an inline-mark value with XML-forbidden characters.");
+                }
+                if (inline.Marks.GroupBy(mark => mark.Type).Any(group => group.Count() > 1))
                     throw new InvalidDataException($"Block {block.Id} contains duplicate inline marks.");
+                if (inline.Marks.Any(mark =>
+                        mark.Type is ManuscriptMarkType.Link
+                            or ManuscriptMarkType.Language
+                            or ManuscriptMarkType.CharacterStyle
+                        && string.IsNullOrWhiteSpace(mark.Value)))
+                {
+                    throw new InvalidDataException(
+                        $"Block {block.Id} contains a value-bearing mark without a value.");
+                }
+                if (inline.Marks.Any(mark =>
+                        mark.Type == ManuscriptMarkType.CharacterStyle
+                        && !ManuscriptSemanticRoles.IsValid(mark.Value)))
+                {
+                    throw new InvalidDataException(
+                        $"Block {block.Id} contains an invalid character-style semantic role.");
+                }
+                if (inline.Marks.Any(mark =>
+                        mark.Type is not (
+                            ManuscriptMarkType.Link
+                            or ManuscriptMarkType.Language
+                            or ManuscriptMarkType.CharacterStyle)
+                        && mark.Value is not null))
+                {
+                    throw new InvalidDataException(
+                        $"Block {block.Id} contains a value on a flag-style inline mark.");
+                }
+                if (inline.Marks.Any(mark =>
+                        mark.Type == ManuscriptMarkType.Link
+                        && mark.Value is { } link
+                        && !IsSafeLink(link)))
+                {
+                    throw new InvalidDataException(
+                        $"Block {block.Id} contains an unsafe link protocol.");
+                }
+                if (inline.Marks.Any(mark =>
+                        mark.Type == ManuscriptMarkType.Language
+                        && mark.Value is { } language
+                        && !LanguageTagRegex().IsMatch(language)))
+                {
+                    throw new InvalidDataException(
+                        $"Block {block.Id} contains an invalid BCP-47 language tag.");
+                }
+                if (inline.Marks.Any(mark => mark.Type == ManuscriptMarkType.Superscript)
+                    && inline.Marks.Any(mark => mark.Type == ManuscriptMarkType.Subscript))
+                {
+                    throw new InvalidDataException(
+                        $"Block {block.Id} contains conflicting superscript and subscript marks.");
+                }
             }
         }
     }
@@ -194,6 +284,40 @@ public static partial class ManuscriptCodec
     internal static bool ContainsBlockDelimiter(string value) =>
         BlankLineRegex().IsMatch(value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n'));
 
+    private static bool ContainsOnlyXmlCharacters(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            int codePoint;
+            if (char.IsHighSurrogate(character))
+            {
+                if (index + 1 >= value.Length || !char.IsLowSurrogate(value[index + 1]))
+                    return false;
+                codePoint = char.ConvertToUtf32(character, value[++index]);
+            }
+            else if (char.IsLowSurrogate(character))
+            {
+                return false;
+            }
+            else
+            {
+                codePoint = character;
+            }
+
+            if (codePoint is 0x9 or 0xA or 0xD)
+                continue;
+            if (codePoint is >= 0x20 and <= 0xD7FF
+                or >= 0xE000 and <= 0xFFFD
+                or >= 0x10000 and <= 0x10FFFF)
+            {
+                continue;
+            }
+            return false;
+        }
+        return true;
+    }
+
     public static string Text(ManuscriptBlock block) =>
         block.Type == ManuscriptBlockType.SceneBreak
             ? "***"
@@ -205,10 +329,36 @@ public static partial class ManuscriptCodec
             JsonSerializer.Serialize(right.Content, JsonOptions),
             StringComparison.Ordinal);
 
+    public static bool IsPlainTextOnly(ManuscriptDocument document) =>
+        document.Content.All(block =>
+            block.Type switch
+            {
+                ManuscriptBlockType.SceneBreak =>
+                    string.Equals(
+                        block.StyleRole,
+                        ManuscriptStyleRoles.SceneBreak,
+                        StringComparison.OrdinalIgnoreCase),
+                ManuscriptBlockType.Paragraph =>
+                    string.Equals(
+                        block.StyleRole,
+                        ManuscriptStyleRoles.Body,
+                        StringComparison.OrdinalIgnoreCase)
+                    && block.Content.All(inline => inline.Marks.Count == 0),
+                _ => false,
+            });
+
     private static bool IsSceneBreak(string value)
     {
         var compact = string.Concat(value.Where(character => !char.IsWhiteSpace(character)));
         return compact is "***" or "###";
+    }
+
+    private static bool IsSafeLink(string value)
+    {
+        if (value.StartsWith('#'))
+            return FragmentLinkRegex().IsMatch(value);
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "https" or "mailto" or "tel";
     }
 
     private static string DeterministicBlockId(
@@ -453,4 +603,10 @@ public static partial class ManuscriptCodec
 
     [GeneratedRegex(@"\n[ \t]*\n(?:[ \t]*\n)*", RegexOptions.CultureInvariant)]
     private static partial Regex BlankRunRegex();
+
+    [GeneratedRegex(@"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$", RegexOptions.CultureInvariant)]
+    private static partial Regex LanguageTagRegex();
+
+    [GeneratedRegex(@"^#[A-Za-z0-9][A-Za-z0-9._~:%-]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex FragmentLinkRegex();
 }

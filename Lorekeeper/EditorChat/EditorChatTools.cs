@@ -25,6 +25,7 @@ public sealed class EditorChatTools(
     IChapterService chapters,
     IManuscriptService manuscripts,
     IManuscriptMigrationService manuscriptMigrations,
+    IManuscriptStyleService manuscriptStyles,
     IEntityService entities,
     IEntityTypeService entityTypes,
     IProjectFactService projectFacts,
@@ -155,11 +156,19 @@ public sealed class EditorChatTools(
                     "Use this before any manuscript mutation and pass the returned revision to preview_manuscript_operations or apply_manuscript_operations."),
 
             AIFunctionFactory.Create(
+                method: (Guid chapterId, string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
+                    InspectManuscriptAsync(context, chapterId, query, blockType, styleRole, start, count),
+                name: "inspect_manuscript",
+                description:
+                    "Validate a manuscript and structurally search all blocks by optional text, blockType, and semantic styleRole. " +
+                    "Returns at most 40 matching stable blocks plus bounded normalization/schema diagnostics, total counts, start, and hasMore. Review mode inspects the current staged manuscript."),
+
+            AIFunctionFactory.Create(
                 method: (Guid chapterId, long expectedRevision, ManuscriptOperationInput[] operations) =>
                     PreviewManuscriptOperationsAsync(context, chapterId, expectedRevision, operations),
                 name: "preview_manuscript_operations",
                 description:
-                    "Validate semantic insert, replace, delete, move, split, merge, block-style, and inline-mark operations without saving. " +
+                    "Validate semantic insert, replace, delete, move, split, merge, block-type, block-style, and inline-mark operations without saving. " +
                     "Returns the projected text, changed stable block IDs, and next revision. Stale revisions fail closed."),
 
             AIFunctionFactory.Create(
@@ -168,7 +177,9 @@ public sealed class EditorChatTools(
                 name: "apply_manuscript_operations",
                 description:
                     "Apply validated semantic manuscript operations through the same revision-checked service used by the editor. " +
-                    "Supports insertBlock, replaceBlockText, deleteBlock, moveBlock, splitBlock, mergeBlocks, setBlockStyle, and setInlineMark. " +
+                    "Supports insertBlock, replaceBlockText, deleteBlock, moveBlock, splitBlock, mergeBlocks, setBlockType, setBlockStyle, and setInlineMark. " +
+                    "Block types include paragraph, heading, sceneBreak, blockQuote, listItem, and figure; marks include emphasis, strong, underline, strikethrough, code, link, language, smallCaps, superscript, subscript, and characterStyle. " +
+                    "Heading operations persist headingLevel (1-6) separately from styleRole. Figure insert/type operations require an existing project imageId and non-empty altText; text is the caption. " +
                     "Returns changed stable block IDs, the new revision, and source hash; stale revisions and invalid ranges fail closed."),
 
             AIFunctionFactory.Create(
@@ -176,6 +187,12 @@ public sealed class EditorChatTools(
                 name: "read_manuscript_migration_state",
                 description:
                     "Read structured-manuscript migration, validation journal, protected backup, and recovery state. Read-only; never treats an incomplete migration as successful."),
+
+            AIFunctionFactory.Create(
+                method: () => ListManuscriptStylesAsync(context),
+                name: "list_manuscript_styles",
+                description:
+                    "Read every project named paragraph and character style, including stable ID, semantic role, validated definition, and revision token."),
 
             AIFunctionFactory.Create(
                 method: () => ListProjectImagesAsync(context),
@@ -206,6 +223,50 @@ public sealed class EditorChatTools(
         }
 
         tools.AddRange([
+            AIFunctionFactory.Create(
+                method: (
+                    Guid? styleId,
+                    string name,
+                    string kind,
+                    string semanticRole,
+                    long? expectedRevision = null,
+                    string? fontFamilyKey = null,
+                    double? fontSizePoints = null,
+                    int? fontWeight = null,
+                    bool? italic = null,
+                    bool? smallCaps = null,
+                    double? lineHeight = null,
+                    double? spaceBeforePoints = null,
+                    double? spaceAfterPoints = null,
+                    bool? keepWithNext = null,
+                    string? textAlign = null) =>
+                    UpsertManuscriptStyleAsync(
+                        context,
+                        styleId,
+                        name,
+                        kind,
+                        semanticRole,
+                        expectedRevision,
+                        fontFamilyKey,
+                        fontSizePoints,
+                        fontWeight,
+                        italic,
+                        smallCaps,
+                        lineHeight,
+                        spaceBeforePoints,
+                        spaceAfterPoints,
+                        keepWithNext,
+                        textAlign),
+                name: "upsert_manuscript_style",
+                description:
+                    "Create or revision-check update a named paragraph or character style through the shared style service. "
+                    + "Use list_manuscript_styles first; updates require styleId and expectedRevision."),
+            AIFunctionFactory.Create(
+                method: (Guid styleId, long expectedRevision) =>
+                    DeleteManuscriptStyleAsync(context, styleId, expectedRevision),
+                name: "delete_manuscript_style",
+                description:
+                    "Delete a named style through the shared revision-checked service. Use list_manuscript_styles first."),
             AIFunctionFactory.Create(
                 method: (Guid entityId, Guid imageId, string? label = null) => AttachProjectImageToEntityAsync(context, entityId, imageId, label),
                 name: "attach_entity_canonical_reference",
@@ -367,6 +428,135 @@ public sealed class EditorChatTools(
         }
 
         return tools;
+    }
+
+    private async Task<string> ListManuscriptStylesAsync(EditorChatContext ctx) =>
+        JsonSerializer.Serialize(
+            new
+            {
+                styles = ctx.ReviewEdits && ctx.EditorStaging is not null
+                    ? await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
+                        manuscriptStyles,
+                        ctx.TurnCancellationToken)
+                    : await manuscriptStyles.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken),
+            },
+            ManuscriptCodec.JsonOptions);
+
+    private async Task<string> UpsertManuscriptStyleAsync(
+        EditorChatContext ctx,
+        Guid? styleId,
+        string name,
+        string kind,
+        string semanticRole,
+        long? expectedRevision,
+        string? fontFamilyKey,
+        double? fontSizePoints,
+        int? fontWeight,
+        bool? italic,
+        bool? smallCaps,
+        double? lineHeight,
+        double? spaceBeforePoints,
+        double? spaceAfterPoints,
+        bool? keepWithNext,
+        string? textAlign)
+    {
+        if (!Enum.TryParse<ManuscriptStyleKind>(kind, ignoreCase: true, out var parsedKind))
+            throw new InvalidOperationException("Style kind must be Paragraph or Character.");
+        var stagedStyleId = styleId
+            ?? (ctx.ReviewEdits && ctx.EditorStaging is not null ? Guid.NewGuid() : null);
+        var input = new ManuscriptStyleInput(
+                stagedStyleId,
+                name,
+                parsedKind,
+                semanticRole,
+                new ManuscriptStyleProperties(
+                    fontFamilyKey,
+                    fontSizePoints,
+                    fontWeight,
+                    italic,
+                    smallCaps,
+                    lineHeight,
+                    spaceBeforePoints,
+                    spaceAfterPoints,
+                    keepWithNext,
+                    textAlign),
+                expectedRevision);
+        if (ctx.ReviewEdits && ctx.EditorStaging is not null)
+        {
+            var draftStyles = await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
+                manuscriptStyles,
+                ctx.TurnCancellationToken);
+            var before = styleId is null
+                ? null
+                : draftStyles.FirstOrDefault(style => style.Id == styleId)
+                    ?? throw new InvalidOperationException("The named style was not found.");
+            var preview = ManuscriptStyleService.PreviewUpsert(draftStyles, input);
+            var payload = JsonSerializer.Serialize(
+                new { staged = true, style = preview },
+                ManuscriptCodec.JsonOptions);
+            await ctx.EditorStaging.StageManuscriptStyleChangeAsync(
+                before,
+                input,
+                preview,
+                $"Upsert named style {preview.Name}",
+                payload,
+                ctx.TurnCancellationToken);
+            return payload;
+        }
+        var style = await manuscriptStyles.UpsertAsync(
+            ctx.ProjectId,
+            input,
+            ctx.TurnCancellationToken);
+        ctx.OnMutated();
+        return JsonSerializer.Serialize(new { style }, ManuscriptCodec.JsonOptions);
+    }
+
+    private async Task<string> DeleteManuscriptStyleAsync(
+        EditorChatContext ctx,
+        Guid styleId,
+        long expectedRevision)
+    {
+        if (ctx.ReviewEdits && ctx.EditorStaging is not null)
+        {
+            if (ctx.EditorStaging.HasStagedManuscriptEdits)
+            {
+                throw new InvalidOperationException(
+                    "Do not delete named styles in the same review turn as manuscript edits. "
+                    + "Apply or reject the manuscript changes first.");
+            }
+            var before = (await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
+                    manuscriptStyles,
+                    ctx.TurnCancellationToken))
+                .FirstOrDefault(style => style.Id == styleId)
+                ?? throw new InvalidOperationException("The named style was not found.");
+            if (before.Revision != expectedRevision)
+                throw new ManuscriptStyleConflictException(expectedRevision, before.Revision);
+            await manuscriptStyles.ValidateDeleteAsync(
+                ctx.ProjectId,
+                styleId,
+                expectedRevision,
+                ctx.TurnCancellationToken);
+            var payload = JsonSerializer.Serialize(
+                new { staged = true, deletedStyleId = styleId, expectedRevision },
+                ManuscriptCodec.JsonOptions);
+            await ctx.EditorStaging.StageManuscriptStyleChangeAsync(
+                before,
+                null,
+                null,
+                $"Delete named style {before.Name}",
+                payload,
+                ctx.TurnCancellationToken);
+            return payload;
+        }
+        await manuscriptStyles.DeleteAsync(
+            ctx.ProjectId,
+            styleId,
+            expectedRevision,
+            ctx.TurnCancellationToken);
+        ctx.OnMutated();
+        return JsonSerializer.Serialize(
+            new { deletedStyleId = styleId, expectedRevision },
+            ManuscriptCodec.JsonOptions);
     }
 
     private async Task<string> ListSearchSourcesAsync(
@@ -1148,6 +1338,16 @@ public sealed class EditorChatTools(
         {
             var converted = ManuscriptOperationInput.ToOperations(operations);
             var (document, changedBlockIds) = ManuscriptOperations.Apply(source, converted);
+            var styleCatalog = ctx.ReviewEdits && ctx.EditorStaging is not null
+                ? await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
+                    manuscriptStyles,
+                    ctx.TurnCancellationToken)
+                : null;
+            await manuscripts.ValidateDocumentReferencesAsync(
+                chapterId,
+                document,
+                styleCatalog,
+                ctx.TurnCancellationToken);
             return JsonSerializer.Serialize(new
             {
                 preview = true,
@@ -1163,6 +1363,35 @@ public sealed class EditorChatTools(
         {
             return $"Error: {exception.Message}";
         }
+    }
+
+    private async Task<string> InspectManuscriptAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        string? query,
+        string? blockType,
+        string? styleRole,
+        int start,
+        int count)
+    {
+        var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId:N} was not found in this project.";
+        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken);
+        if (snapshot is null)
+            return $"Error: manuscript {chapterId:N} was not found.";
+        var document = ctx.ReviewEdits
+            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
+                ? staged
+                : snapshot.Document;
+        return JsonSerializer.Serialize(
+            new
+            {
+                chapter = new { chapter.Id, chapter.Title },
+                document.Revision,
+                inspection = ManuscriptInspection.Inspect(document, query, blockType, styleRole, start, count),
+            },
+            ManuscriptCodec.JsonOptions);
     }
 
     private async Task<string> ApplyManuscriptOperationsAsync(
@@ -1188,6 +1417,14 @@ public sealed class EditorChatTools(
             if (ctx.ReviewEdits && ctx.EditorStaging is not null)
             {
                 var (document, changedBlockIds) = ManuscriptOperations.Apply(source, converted);
+                var styleCatalog = await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
+                    manuscriptStyles,
+                    ctx.TurnCancellationToken);
+                await manuscripts.ValidateDocumentReferencesAsync(
+                    chapterId,
+                    document,
+                    styleCatalog,
+                    ctx.TurnCancellationToken);
                 var summary = $"Edit {changedBlockIds.Count} manuscript block(s)";
                 var payload = JsonSerializer.Serialize(new
                 {

@@ -37,3 +37,15 @@ public sealed record PicturePageTextFitResult(
     ChapterVisualTextFitDiagnostic Diagnostic,
     bool HitMinimum,
     bool HitMaximum);
+
+public sealed class ChapterVisualRevisionConflictException(
+    string layoutKind,
+    long expected,
+    long actual)
+    : InvalidOperationException(
+        $"{layoutKind} layout revision conflict: expected {expected}, current revision is {actual}. "
+        + "Reload the chapter visual layout before saving.")
+{
+    public long ExpectedRevision { get; } = expected;
+    public long ActualRevision { get; } = actual;
+}

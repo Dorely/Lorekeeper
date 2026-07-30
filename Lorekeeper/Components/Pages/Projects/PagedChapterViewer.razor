@@ -17,6 +17,10 @@
 
 <style>@((MarkupString)FontFaceCss())</style>
 <div class="@PagedViewerClass()" tabindex="0" @ref="_viewerRoot">
+    @if (!string.IsNullOrWhiteSpace(_saveNotice))
+    {
+        <div class="alert alert-warning py-2" role="status">@_saveNotice</div>
+    }
     @if (State.VisualMode == ChapterVisualMode.PicturePage)
     {
         var pageMetrics = _pageGeometry;
@@ -375,6 +379,7 @@
     private readonly Dictionary<Guid, double> _textBackgroundOpacityDrafts = [];
     private CancellationTokenSource? _textStyleSaveDebounce;
     private bool _disposed;
+    private string? _saveNotice;
     private bool _fontManagerOpen;
     private bool _isFittingText;
     private Guid _fontProjectId;
@@ -753,6 +758,10 @@
                 State.PageLayout,
                 selectedId);
             await OnChanged.InvokeAsync(result.State);
+        }
+        catch (ChapterVisualRevisionConflictException)
+        {
+            await ReloadAfterVisualConflictAsync();
         }
         finally
         {
@@ -1295,7 +1304,15 @@
                         ? candidate with { XPercent = x, YPercent = y }
                         : candidate).ToList(),
                 };
-                state = await Visuals.SavePageLayoutAsync(State.ChapterId, adjustedLayout);
+                try
+                {
+                    state = await Visuals.SavePageLayoutAsync(State.ChapterId, adjustedLayout);
+                }
+                catch (ChapterVisualRevisionConflictException)
+                {
+                    await ReloadAfterVisualConflictAsync();
+                    return;
+                }
             }
         }
 
@@ -1370,15 +1387,40 @@
     private async Task SaveIllustrationsAsync(IllustratedProseLayout layout)
     {
         if (!CanEditLayout) return;
-        var updated = await Visuals.SaveIllustrationLayoutAsync(State.ChapterId, layout);
-        await OnChanged.InvokeAsync(updated);
+        try
+        {
+            _saveNotice = null;
+            var updated = await Visuals.SaveIllustrationLayoutAsync(State.ChapterId, layout);
+            await OnChanged.InvokeAsync(updated);
+        }
+        catch (ChapterVisualRevisionConflictException)
+        {
+            await ReloadAfterVisualConflictAsync();
+        }
     }
 
     private async Task SavePageAsync(PicturePageLayout layout)
     {
         if (!CanEditLayout) return;
-        var updated = await Visuals.SavePageLayoutAsync(State.ChapterId, layout);
-        await OnChanged.InvokeAsync(updated);
+        try
+        {
+            _saveNotice = null;
+            var updated = await Visuals.SavePageLayoutAsync(State.ChapterId, layout);
+            await OnChanged.InvokeAsync(updated);
+        }
+        catch (ChapterVisualRevisionConflictException)
+        {
+            await ReloadAfterVisualConflictAsync();
+        }
+    }
+
+    private async Task ReloadAfterVisualConflictAsync()
+    {
+        _saveNotice = "This visual layout changed in another editor. Lorekeeper reloaded the current layout; review it before saving again.";
+        _selectedPictureElement = null;
+        var current = await Visuals.GetAsync(State.ChapterId);
+        if (current is not null)
+            await OnChanged.InvokeAsync(current);
     }
 
     public async ValueTask DisposeAsync()

@@ -307,6 +307,14 @@ public sealed class EditorContestService(
 
         var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {batch.ChapterId} not found.");
+        if (!ManuscriptCodec.IsPlainTextOnly(chapter.Manuscript)
+            || !ManuscriptCodec.IsPlainTextOnly(
+                ManuscriptCodec.Deserialize(candidate.ProposedManuscriptJson)))
+        {
+            throw new InvalidOperationException(
+                "Line-by-line contest review is unavailable for semantically formatted manuscripts. "
+                + "Keep or reject the complete structured candidate.");
+        }
         if (!ManuscriptCodec.ContentEquals(chapter.Manuscript, EffectiveAcceptedManuscript(batch)))
             throw new InvalidOperationException("The chapter changed outside Contest Review. Finish or restart the contest before continuing.");
 
@@ -872,6 +880,10 @@ public sealed class EditorContestService(
         var (proposedDocument, _) = ManuscriptOperations.Apply(
             source,
             ManuscriptOperationInput.ToOperations(response.Operations));
+        await manuscripts.ValidateDocumentReferencesAsync(
+            batch.ChapterId,
+            proposedDocument,
+            cancellationToken: cancellationToken);
         stopwatch.Stop();
         return new ContestCandidateResult(raw, response, proposedDocument, stopwatch.Elapsed);
     }

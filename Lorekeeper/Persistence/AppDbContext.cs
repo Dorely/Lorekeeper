@@ -69,6 +69,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<SourceVisualCandidate> SourceVisualCandidates => Set<SourceVisualCandidate>();
     public DbSet<ProjectFontFamily> ProjectFontFamilies => Set<ProjectFontFamily>();
     public DbSet<ProjectFontFace> ProjectFontFaces => Set<ProjectFontFace>();
+    public DbSet<ManuscriptStyleDefinition> ManuscriptStyleDefinitions => Set<ManuscriptStyleDefinition>();
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
         SaveChangesWithLockRetryAsync(acceptAllChangesOnSuccess: true, cancellationToken);
@@ -796,6 +797,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Family)
                 .WithMany(f => f.Faces)
                 .HasForeignKey(e => e.FamilyId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ManuscriptStyleDefinition>(entity =>
+        {
+            entity.HasIndex(style => new { style.ProjectId, style.Kind, style.NameKey }).IsUnique();
+            entity.HasIndex(style => new { style.ProjectId, style.Kind, style.SemanticRoleKey }).IsUnique();
+            entity.Property(style => style.Kind).HasConversion<string>();
+            entity.Property(style => style.Revision).IsConcurrencyToken();
+            entity.HasOne(style => style.Project)
+                .WithMany(project => project.ManuscriptStyles)
+                .HasForeignKey(style => style.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
