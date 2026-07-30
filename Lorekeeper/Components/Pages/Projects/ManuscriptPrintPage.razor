@@ -1,4 +1,4 @@
-@page "/projects/{Slug}/manuscript/print"
+@page "/projects/{Slug}/publish/{EditionId:guid}/preview"
 @layout PrintLayout
 @rendermode InteractiveServer
 @using Lorekeeper.Models
@@ -115,7 +115,7 @@ else if (_document is not null)
         {
             @foreach (var publishSection in _document.Sections)
             {
-                @foreach (var placement in Placements(PublishOutlineTargetKind.Act, publishSection.ActId, PublishImagePlacementKind.BeforeAct))
+                @foreach (var placement in Placements(PublishOutlineTargetKind.Act, publishSection.ActId, PublicationImagePlacementKind.BeforeAct))
                 {
                     @RenderFigure(placement)
                 }
@@ -139,21 +139,21 @@ else if (_document is not null)
                     </section>
                 }
 
-                @foreach (var placement in Placements(PublishOutlineTargetKind.Act, publishSection.ActId, PublishImagePlacementKind.AfterAct))
+                @foreach (var placement in Placements(PublishOutlineTargetKind.Act, publishSection.ActId, PublicationImagePlacementKind.AfterAct))
                 {
                     @RenderFigure(placement)
                 }
 
                 @foreach (var chapter in publishSection.Chapters)
                 {
-                    @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.BeforeChapter))
+                    @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.BeforeChapter))
                     {
                         @RenderFigure(placement)
                     }
 
                     @if (chapter.VisualMode == ChapterVisualMode.PicturePage)
                     {
-                        @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterOpening))
+                        @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.ChapterOpening))
                         {
                             @RenderFigure(placement)
                         }
@@ -163,7 +163,7 @@ else if (_document is not null)
                                 <img src="@PicturePageSurfaceUrl(chapter.Id, frame.RotateClockwise)" alt="@frame.AltText" />
                             </section>
                         }
-                        @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding))
+                        @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.ChapterEnding))
                         {
                             @RenderFigure(placement)
                         }
@@ -184,19 +184,19 @@ else if (_document is not null)
                                     }
                                 </div>
                             }
-                            @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterOpening))
+                            @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.ChapterOpening))
                             {
                                 @RenderFigure(placement, standalone: false)
                             }
                             @RenderChapterBody(chapter)
-                            @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding))
+                            @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.ChapterEnding))
                             {
                                 @RenderFigure(placement, standalone: false)
                             }
                         </section>
                     }
 
-                    @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.AfterChapter))
+                    @foreach (var placement in Placements(PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.AfterChapter))
                     {
                         @RenderFigure(placement)
                     }
@@ -230,6 +230,7 @@ else if (_document is not null)
 
 @code {
     [Parameter] public string Slug { get; set; } = string.Empty;
+    [Parameter] public Guid EditionId { get; set; }
     [SupplyParameterFromQuery(Name = "autoprint")] public bool Autoprint { get; set; }
     [SupplyParameterFromQuery(Name = "embedded")] public bool Embedded { get; set; }
 
@@ -248,7 +249,7 @@ else if (_document is not null)
 
     protected override async Task OnParametersSetAsync()
     {
-        var key = Slug;
+        var key = $"{Slug}:{EditionId:N}";
         if (_loadedKey == key) return;
 
         _loadedKey = key;
@@ -268,7 +269,7 @@ else if (_document is not null)
                 return;
             }
 
-            _document = await Publishing.GetDocumentAsync(project.Id);
+            _document = await Publishing.GetDocumentAsync(project.Id, EditionId);
         }
         catch (Exception ex)
         {
@@ -321,10 +322,10 @@ else if (_document is not null)
         catch (JSDisconnectedException) { }
     }
 
-    private IEnumerable<PublishImagePlacementDocument> Placements(
+    private IEnumerable<PublicationImagePlacementDocument> Placements(
         PublishOutlineTargetKind targetKind,
         Guid? targetId,
-        PublishImagePlacementKind placementKind)
+        PublicationImagePlacementKind placementKind)
     {
         if (_document is null || targetId is null)
             return [];
@@ -505,7 +506,7 @@ else if (_document is not null)
         builder.CloseElement();
     }
 
-    private static RenderFragment RenderFigure(PublishImagePlacementDocument placement, bool standalone = true) => builder =>
+    private static RenderFragment RenderFigure(PublicationImagePlacementDocument placement, bool standalone = true) => builder =>
     {
         var sequence = 0;
         builder.OpenElement(sequence++, "figure");

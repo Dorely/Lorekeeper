@@ -7,6 +7,8 @@ using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Lorekeeper.Manuscripts;
 
@@ -34,6 +36,7 @@ public sealed class ManuscriptMigrationService(
 {
     public const string MigrationName = "structured-manuscript-v1";
     public const string SchemaV2MigrationName = "semantic-manuscript-v2";
+    public const string SchemaV2EfMigrationId = "20260730180725_SemanticManuscriptV2";
     private const int MaxAutomaticBackups = 5;
     private static readonly TimeSpan RestoreTokenLifetime = TimeSpan.FromMinutes(10);
     private readonly Dictionary<string, (string Path, DateTime ExpiresAt)> _restoreTokens = [];
@@ -71,7 +74,7 @@ public sealed class ManuscriptMigrationService(
             }
 
             await ClearStrandedMigrationLockAsync(db, cancellationToken);
-            await db.Database.MigrateAsync(cancellationToken);
+            await MigrateManuscriptSchemaAsync(db, cancellationToken);
 
             if (await ContainsUnstructuredManuscriptsAsync(cancellationToken))
             {
@@ -136,7 +139,7 @@ public sealed class ManuscriptMigrationService(
     {
         db.ChangeTracker.Clear();
         await ClearStrandedMigrationLockAsync(db, cancellationToken);
-        await db.Database.MigrateAsync(cancellationToken);
+        await MigrateManuscriptSchemaAsync(db, cancellationToken);
         await db.Database.ExecuteSqlRawAsync("DELETE FROM Projects;", cancellationToken);
         db.ChangeTracker.Clear();
         db.ManuscriptMigrationJournals.Add(new ManuscriptMigrationJournal
@@ -158,6 +161,11 @@ public sealed class ManuscriptMigrationService(
         await db.SaveChangesAsync(cancellationToken);
         await EnsureHealthyAsync(_connectionString, cancellationToken);
     }
+
+    private static Task MigrateManuscriptSchemaAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken) =>
+        db.Database.GetService<IMigrator>().MigrateAsync(SchemaV2EfMigrationId, cancellationToken);
 
     public async Task<ManuscriptMigrationState> GetStateAsync(CancellationToken cancellationToken = default)
     {

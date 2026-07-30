@@ -73,10 +73,10 @@ public sealed class ChapterVisualService(
                     layout with { Revision = checked(layout.Revision + 1) },
                     JsonOptions);
             }
-            var coverProfiles = await db.PublishProfiles
-                .Where(profile => profile.SelectedCoverChapterId == chapter.Id)
+            var coverEditions = await db.PublicationEditions
+                .Where(edition => edition.SelectedCoverChapterId == chapter.Id)
                 .ToListAsync(cancellationToken);
-            foreach (var profile in coverProfiles)
+            foreach (var profile in coverEditions)
             {
                 profile.SelectedCoverChapterId = null;
                 profile.UpdatedAt = DateTime.UtcNow;
@@ -595,8 +595,10 @@ public sealed class ChapterVisualService(
             : state.IllustrationLayout.Images.Select(image => image.ImageId);
         var assets = await LoadImageAssetsAsync(chapter.ProjectId, imageIds, cancellationToken);
         var edge = (int)Clamp(maxEdge, 320, 2400, 1400);
-        var profile = await db.PublishProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(candidate => candidate.ProjectId == chapter.ProjectId, cancellationToken);
+        var profile = await db.PublicationEditions.AsNoTracking()
+            .FirstOrDefaultAsync(
+                candidate => candidate.ProjectId == chapter.ProjectId && candidate.IsDefault,
+                cancellationToken);
         var geometry = pageGeometry.Calculate(profile, state.PageLayoutKind);
         if (state.VisualMode == ChapterVisualMode.PicturePage)
         {
@@ -839,7 +841,8 @@ public sealed class ChapterVisualService(
             .FirstOrDefault();
         var profile = projectId == Guid.Empty
             ? null
-            : db.PublishProfiles.AsNoTracking().FirstOrDefault(candidate => candidate.ProjectId == projectId);
+            : db.PublicationEditions.AsNoTracking().FirstOrDefault(
+                candidate => candidate.ProjectId == projectId && candidate.IsDefault);
         return pageGeometry.Calculate(profile, state.PageLayoutKind);
     }
 

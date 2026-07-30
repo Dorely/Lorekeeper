@@ -1,8 +1,12 @@
 @using Lorekeeper.Images
+@using Lorekeeper.Manuscripts
 @using Lorekeeper.Models
 @using Lorekeeper.Publish
 @implements IAsyncDisposable
 @inject IPublishService Publishing
+@inject IPublicationEditionService Editions
+@inject IManuscriptStyleService ManuscriptStyles
+@inject IPublishAssistantService PublishAssistant
 @inject IProjectImageService ProjectImages
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -20,6 +24,30 @@ else if (_loading)
         <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
         <span>Preparing your publishing workspace…</span>
     </div>
+}
+else if (_editionSummaries.Count == 0)
+{
+    <section class="publish-load-error" aria-labelledby="edition-empty-title">
+        <div>
+            <h2 id="edition-empty-title">Create the first publication edition</h2>
+            <p>An edition owns its format, vendor, ISBN, included content, matter, styles, cover, and artifacts.</p>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            <input class="form-control" aria-label="Edition name" placeholder="Paperback"
+                   @bind="_newEditionName" @bind:event="oninput" />
+            <select class="form-select" aria-label="Edition format" @bind="_newEditionFormat">
+                <option value="@PublicationEditionFormat.Paperback">Paperback</option>
+                <option value="@PublicationEditionFormat.Epub">EPUB</option>
+            </select>
+            <button type="button" class="btn btn-primary" disabled="@_creatingEdition" @onclick="CreateEditionAsync">
+                @(_creatingEdition ? "Creatingâ€¦" : "Create edition")
+            </button>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_editionActionError))
+        {
+            <p class="text-danger" role="alert">@_editionActionError</p>
+        }
+    </section>
 }
 else if (_workspace is null)
 {
@@ -39,14 +67,43 @@ else
                 <span class="publish-eyebrow">Book publishing</span>
                 <h1 id="publish-title">Prepare your manuscript</h1>
                 <p>Choose what belongs in the book, review its presentation, and export when everything is ready.</p>
+                <label class="publish-field">
+                    <span>Publication edition</span>
+                    <select class="form-select" value="@_selectedEditionId" @onchange="SelectEditionAsync">
+                        @foreach (var edition in _editionSummaries)
+                        {
+                            <option value="@edition.Id">@edition.Name · @edition.Format · @edition.Vendor@(edition.IsDefault ? " · default" : null)</option>
+                        }
+                    </select>
+                </label>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                            disabled="@HasBusyMutation" @onclick="CloneEditionAsync">Clone</button>
+                    @if (!_workspace.Edition.IsDefault)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                disabled="@HasBusyMutation" @onclick="SetDefaultEditionAsync">Make default</button>
+                    }
+                    @if (_editionSummaries.Count > 1)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                disabled="@HasBusyMutation" @onclick="CompareEditionAsync">Compare</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger"
+                                disabled="@HasBusyMutation" @onclick="ArchiveEditionAsync">Archive</button>
+                    }
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_editionActionError))
+                {
+                    <div class="small mt-2" role="status">@_editionActionError</div>
+                }
             </div>
 
             <div class="publish-header-status" aria-live="polite" aria-atomic="true">
                 <span class="publish-status-dot @SaveStatusDotClass" aria-hidden="true"></span>
                 <span class="@SaveStatusTextClass">@SaveStatusText</span>
-                @if (_profileSaveState == SaveState.SaveFailed)
+                @if (_editionSaveState == SaveState.SaveFailed)
                 {
-                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@ProfileSaveInProgress" @onclick="RetryProfileSaveAsync">
+                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@EditionSaveInProgress" @onclick="RetryEditionSaveAsync">
                         Retry save
                     </button>
                 }
@@ -55,6 +112,86 @@ else
 
         <div class="publish-layout">
             <div class="publish-main">
+                <section class="publish-card" aria-labelledby="publish-assistant-title">
+                    <div class="publish-card-heading">
+                        <div><span class="publish-step">AI</span><h2 id="publish-assistant-title">Publish assistant</h2></div>
+                        <p>The assistant uses the same revision-aware edition services as these controls.</p>
+                    </div>
+                    <textarea class="form-control" rows="3" @bind="_assistantPrompt"
+                              placeholder="Compare this edition, update its settings, or inspect its matter and audit history."></textarea>
+                    <button class="btn btn-sm btn-primary mt-2" disabled="@_assistantBusy" @onclick="AskPublishAssistantAsync">
+                        @(_assistantBusy ? "Working…" : "Ask Publish assistant")
+                    </button>
+                    @if (!string.IsNullOrWhiteSpace(_assistantResponse))
+                    {
+                        <div class="alert alert-secondary mt-2 mb-0">@_assistantResponse</div>
+                    }
+                </section>
+                <section class="publish-card" aria-labelledby="edition-settings-title">
+                    <div class="publish-card-heading">
+                        <div>
+                            <span class="publish-step">Edition</span>
+                            <h2 id="edition-settings-title">Product settings</h2>
+                        </div>
+                        <p>These choices belong only to @_editionDraft.Name.</p>
+                    </div>
+                    <div class="publish-form-grid">
+                        <label class="publish-field">
+                            <span>Edition name</span>
+                            <input class="form-control" @bind="_editionDraft.Name" @bind:event="oninput"
+                                   @bind:after="ScheduleEditionAutosave" />
+                        </label>
+                        <label class="publish-field">
+                            <span>Format</span>
+                            <select class="form-select" @bind="_editionDraft.Format" @bind:after="ScheduleEditionAutosave">
+                                <option value="@PublicationEditionFormat.Paperback">Paperback</option>
+                                <option value="@PublicationEditionFormat.Epub">EPUB</option>
+                            </select>
+                        </label>
+                        <label class="publish-field">
+                            <span>Vendor</span>
+                            <select class="form-select" @bind="_editionDraft.Vendor" @bind:after="ScheduleEditionAutosave">
+                                <option value="@PublicationVendor.Generic">Generic</option>
+                                <option value="@PublicationVendor.AmazonKdp">Amazon KDP</option>
+                                <option value="@PublicationVendor.IngramSpark">IngramSpark</option>
+                            </select>
+                        </label>
+                        <label class="publish-field">
+                            <span>Vendor profile version</span>
+                            <input class="form-control" @bind="_editionDraft.VendorProfileVersion" @bind:event="oninput"
+                                   @bind:after="ScheduleEditionAutosave" />
+                        </label>
+                        <label class="publish-field">
+                            <span>Binding</span>
+                            <select class="form-select" @bind="_editionDraft.Binding" @bind:after="ScheduleEditionAutosave">
+                                <option value="@PublicationBinding.PerfectBound">Perfect bound</option>
+                                <option value="@PublicationBinding.Digital">Digital</option>
+                            </select>
+                        </label>
+                        <label class="publish-field">
+                            <span>Paper</span>
+                            <select class="form-select" @bind="_editionDraft.Paper" @bind:after="ScheduleEditionAutosave">
+                                <option value="@PublicationPaper.White">White</option>
+                                <option value="@PublicationPaper.Cream">Cream</option>
+                                <option value="@PublicationPaper.Digital">Digital</option>
+                            </select>
+                        </label>
+                        <label class="publish-field">
+                            <span>Ink</span>
+                            <select class="form-select" @bind="_editionDraft.Ink" @bind:after="ScheduleEditionAutosave">
+                                <option value="@PublicationInk.BlackAndWhite">Black &amp; white</option>
+                                <option value="@PublicationInk.Color">Color</option>
+                                <option value="@PublicationInk.Digital">Digital</option>
+                            </select>
+                        </label>
+                        <label class="publish-toggle">
+                            <input class="form-check-input" type="checkbox" @bind="_editionDraft.Bleed"
+                                   @bind:after="ScheduleEditionAutosave" />
+                            <span><strong>Include bleed</strong></span>
+                        </label>
+                    </div>
+                </section>
+
                 <section class="publish-card" aria-labelledby="identity-title">
                     <div class="publish-card-heading">
                         <div>
@@ -67,24 +204,24 @@ else
                     <div class="publish-form-grid">
                         <label class="publish-field publish-field-wide">
                             <span>Title</span>
-                            <input class="form-control" autocomplete="off" placeholder="@_workspace.Profile.ProjectName"
-                                   @bind="_profile.TitleOverride" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                            <input class="form-control" autocomplete="off" placeholder="@_workspace.Edition.ProjectName"
+                                   @bind="_editionDraft.TitleOverride" @bind:event="oninput" @bind:after="ScheduleEditionAutosave" />
                             <small>Leave blank to use the project name.</small>
                         </label>
                         <label class="publish-field publish-field-wide">
                             <span>Subtitle <em>Optional</em></span>
                             <input class="form-control" autocomplete="off" placeholder="A subtitle for your book"
-                                   @bind="_profile.Subtitle" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                                   @bind="_editionDraft.Subtitle" @bind:event="oninput" @bind:after="ScheduleEditionAutosave" />
                         </label>
                         <label class="publish-field">
                             <span>Author</span>
                             <input class="form-control" autocomplete="name" placeholder="Author name"
-                                   @bind="_profile.Author" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                                   @bind="_editionDraft.Author" @bind:event="oninput" @bind:after="ScheduleEditionAutosave" />
                         </label>
                         <label class="publish-field">
                             <span>Language</span>
                             <input class="form-control" autocomplete="off" placeholder="en" aria-describedby="language-help"
-                                   @bind="_profile.Language" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                                   @bind="_editionDraft.Language" @bind:event="oninput" @bind:after="ScheduleEditionAutosave" />
                             <small id="language-help">Use a language tag such as en or en-US.</small>
                         </label>
                     </div>
@@ -103,23 +240,23 @@ else
                         <label class="publish-field">
                             <span>Publisher <em>Optional</em></span>
                             <input class="form-control" autocomplete="organization"
-                                   @bind="_profile.Publisher" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                                   @bind="_editionDraft.Publisher" @bind:event="oninput" @bind:after="ScheduleEditionAutosave" />
                         </label>
                         <label class="publish-field">
                             <span>ISBN <em>Optional</em></span>
                             <input class="form-control" autocomplete="off" inputmode="numeric"
-                                   @bind="_profile.Isbn" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                                   @bind="_editionDraft.Isbn" @bind:event="oninput" @bind:after="ScheduleEditionAutosave" />
                         </label>
                         <label class="publish-field publish-field-wide">
                             <span>Copyright notice <em>Optional</em></span>
                             <input class="form-control" autocomplete="off" placeholder="© 2026 Author name"
-                                   @bind="_profile.Copyright" @bind:event="oninput" @bind:after="ScheduleProfileAutosave" />
+                                   @bind="_editionDraft.Copyright" @bind:event="oninput" @bind:after="ScheduleEditionAutosave" />
                         </label>
                         <label class="publish-field publish-field-wide">
                             <span>Description <em>Optional</em></span>
                             <textarea class="form-control" data-autosize data-autosize-resize="vertical" rows="3"
                                       placeholder="A short description of the book"
-                                      @bind="_profile.Description" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
+                                      @bind="_editionDraft.Description" @bind:event="oninput" @bind:after="ScheduleEditionAutosave"></textarea>
                         </label>
                     </div>
                 </section>
@@ -134,22 +271,105 @@ else
                     </div>
 
                     <div class="publish-stack">
-                        <label class="publish-field">
-                            <span>Dedication <em>Optional</em></span>
-                            <textarea class="form-control" data-autosize data-autosize-resize="vertical" rows="2"
-                                      @bind="_profile.Dedication" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
-                        </label>
-                        <label class="publish-field">
-                            <span>Acknowledgments <em>Optional</em></span>
-                            <textarea class="form-control" data-autosize data-autosize-resize="vertical" rows="3"
-                                      @bind="_profile.Acknowledgments" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
-                        </label>
-                        <label class="publish-field">
-                            <span>References <em>Optional</em></span>
-                            <textarea class="form-control" data-autosize data-autosize-resize="vertical" rows="3"
-                                      @bind="_profile.References" @bind:event="oninput" @bind:after="ScheduleProfileAutosave"></textarea>
-                        </label>
+                        @foreach (var item in _workspace.Matter.OrderBy(item => item.Location).ThenBy(item => item.SortOrder))
+                        {
+                            <div class="publish-inline-row">
+                                <div>
+                                    <strong>@item.Title</strong>
+                                    <div class="small text-muted">@item.Location · @item.Kind · revision @item.Revision</div>
+                                    <div class="small">@MatterPlainText(item)</div>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                        disabled="@HasBusyMutation"
+                                        @onclick="() => DeleteMatterAsync(item)">Remove</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        disabled="@HasBusyMutation"
+                                        @onclick="() => BeginEditMatter(item)">Edit</button>
+                            </div>
+                        }
+                        @if (_editingMatterId is not null)
+                        {
+                            <div class="publish-form-grid border rounded p-3">
+                                <label class="publish-field"><span>Title</span>
+                                    <input class="form-control" @bind="_matterTitle" /></label>
+                                <label class="publish-field"><span>Location</span>
+                                    <select class="form-select" @bind="_matterLocation">
+                                        <option value="@PublicationMatterLocation.Front">Front</option>
+                                        <option value="@PublicationMatterLocation.Back">Back</option>
+                                    </select></label>
+                                <label class="publish-field"><span>Kind</span>
+                                    <select class="form-select" @bind="_matterKind">
+                                        @foreach (var kind in Enum.GetValues<PublicationMatterKind>())
+                                        {
+                                            <option value="@kind">@kind</option>
+                                        }
+                                    </select></label>
+                                <label class="publish-field"><span>Order</span>
+                                    <input class="form-control" type="number" @bind="_matterSortOrder" /></label>
+                                <label class="publish-field"><span><input type="checkbox" @bind="_matterIncluded" /> Include</span></label>
+                                <label class="publish-field publish-field-wide">
+                                    <span>Semantic document JSON</span>
+                                    <textarea class="form-control font-monospace" rows="10" @bind="_matterJson"></textarea>
+                                    <small>All blocks, marks, styles, links, and figures are preserved and schema-validated on save.</small>
+                                </label>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-primary" @onclick="SaveMatterAsync">Save matter</button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="CancelMatterEdit">Cancel</button>
+                                </div>
+                            </div>
+                        }
+                        <div class="d-flex flex-wrap gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    disabled="@HasBusyMutation"
+                                    @onclick="() => AddMatterAsync(PublicationMatterKind.Dedication)">Add dedication</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    disabled="@HasBusyMutation"
+                                    @onclick="() => AddMatterAsync(PublicationMatterKind.Acknowledgments)">Add acknowledgments</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    disabled="@HasBusyMutation"
+                                    @onclick="() => AddMatterAsync(PublicationMatterKind.Custom)">Add custom page</button>
+                        </div>
                     </div>
+                </section>
+
+                <section class="publish-card" aria-labelledby="edition-style-title">
+                    <div class="publish-card-heading">
+                        <div><span class="publish-step">Styles</span><h2 id="edition-style-title">Edition style mappings</h2></div>
+                        <p>Override named manuscript styles for this edition without changing the source manuscript.</p>
+                    </div>
+                    @foreach (var mapping in _workspace.StyleMappings)
+                    {
+                        <div class="publish-inline-row">
+                            <span><strong>@mapping.StyleName</strong> · @mapping.SemanticRole ·
+                                @(mapping.Override.FontSizePoints?.ToString() ?? "inherited") pt ·
+                                line @(mapping.Override.LineHeight?.ToString() ?? "inherited") · revision @mapping.Revision</span>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteStyleMappingAsync(mapping)">Remove</button>
+                        </div>
+                    }
+                    <div class="d-flex gap-2 mt-2">
+                        <select class="form-select" @bind="_styleMappingStyleId">
+                            <option value="">Choose named style</option>
+                            @foreach (var style in _namedStyles)
+                            {
+                                <option value="@style.Id">@style.Name · @style.Kind</option>
+                            }
+                        </select>
+                        <input class="form-control" type="number" step="0.1" placeholder="Font pt"
+                               title="Override font size in points" @bind="_styleFontSize" />
+                        <input class="form-control" type="number" step="0.05" placeholder="Line height"
+                               title="Override line height" @bind="_styleLineHeight" />
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="AddStyleMappingAsync">Map style</button>
+                    </div>
+                    @if (_editionAudit.Count > 0)
+                    {
+                        <details class="mt-3">
+                            <summary>Audit history (@_editionAudit.Count)</summary>
+                            @foreach (var entry in _editionAudit.Take(10))
+                            {
+                                <div class="small">@entry.CreatedAt.ToLocalTime(): @entry.Action · @entry.AfterHash[..Math.Min(12, entry.AfterHash.Length)]</div>
+                            }
+                        </details>
+                    }
                 </section>
 
                 <section class="publish-card" aria-labelledby="formatting-title">
@@ -166,15 +386,15 @@ else
                             <legend>Table of contents</legend>
                             <label class="publish-toggle">
                                 <input class="form-check-input" type="checkbox"
-                                       @bind="_profile.IncludeTableOfContents" @bind:after="ScheduleProfileAutosave" />
+                                       @bind="_editionDraft.IncludeTableOfContents" @bind:after="ScheduleEditionAutosave" />
                                 <span>
                                     <strong>Include navigation table of contents</strong>
                                     <small>Add linked navigation to supported exports.</small>
                                 </span>
                             </label>
-                            <label class="publish-toggle publish-dependent @(!_profile.IncludeTableOfContents ? "is-disabled" : null)">
-                                <input class="form-check-input" type="checkbox" disabled="@(!_profile.IncludeTableOfContents)"
-                                       @bind="_profile.IncludeVisibleTableOfContents" @bind:after="ScheduleProfileAutosave" />
+                            <label class="publish-toggle publish-dependent @(!_editionDraft.IncludeTableOfContents ? "is-disabled" : null)">
+                                <input class="form-check-input" type="checkbox" disabled="@(!_editionDraft.IncludeTableOfContents)"
+                                       @bind="_editionDraft.IncludeVisibleTableOfContents" @bind:after="ScheduleEditionAutosave" />
                                 <span>
                                     <strong>Show a visible contents page</strong>
                                     <small>Render the contents as a page in EPUB and print.</small>
@@ -186,17 +406,17 @@ else
                             <legend>Act presentation</legend>
                             <label class="publish-toggle">
                                 <input class="form-check-input" type="checkbox"
-                                       @bind="_profile.IncludeActHeadings" @bind:after="ScheduleProfileAutosave" />
+                                       @bind="_editionDraft.IncludeActHeadings" @bind:after="ScheduleEditionAutosave" />
                                 <span><strong>Show act headings</strong></span>
                             </label>
-                            <label class="publish-toggle publish-dependent @(!_profile.IncludeActHeadings ? "is-disabled" : null)">
-                                <input class="form-check-input" type="checkbox" disabled="@(!_profile.IncludeActHeadings)"
-                                       @bind="_profile.NumberActs" @bind:after="ScheduleProfileAutosave" />
+                            <label class="publish-toggle publish-dependent @(!_editionDraft.IncludeActHeadings ? "is-disabled" : null)">
+                                <input class="form-check-input" type="checkbox" disabled="@(!_editionDraft.IncludeActHeadings)"
+                                       @bind="_editionDraft.NumberActs" @bind:after="ScheduleEditionAutosave" />
                                 <span><strong>Number acts</strong></span>
                             </label>
                             <label class="publish-toggle">
                                 <input class="form-check-input" type="checkbox"
-                                       @bind="_profile.IncludeActSynopses" @bind:after="ScheduleProfileAutosave" />
+                                       @bind="_editionDraft.IncludeActSynopses" @bind:after="ScheduleEditionAutosave" />
                                 <span><strong>Include act synopses</strong></span>
                             </label>
                         </fieldset>
@@ -205,17 +425,17 @@ else
                             <legend>Chapter presentation</legend>
                             <label class="publish-toggle">
                                 <input class="form-check-input" type="checkbox"
-                                       @bind="_profile.IncludeChapterHeadings" @bind:after="ScheduleProfileAutosave" />
+                                       @bind="_editionDraft.IncludeChapterHeadings" @bind:after="ScheduleEditionAutosave" />
                                 <span><strong>Show chapter headings</strong></span>
                             </label>
-                            <label class="publish-toggle publish-dependent @(!_profile.IncludeChapterHeadings ? "is-disabled" : null)">
-                                <input class="form-check-input" type="checkbox" disabled="@(!_profile.IncludeChapterHeadings)"
-                                       @bind="_profile.NumberChapters" @bind:after="ScheduleProfileAutosave" />
+                            <label class="publish-toggle publish-dependent @(!_editionDraft.IncludeChapterHeadings ? "is-disabled" : null)">
+                                <input class="form-check-input" type="checkbox" disabled="@(!_editionDraft.IncludeChapterHeadings)"
+                                       @bind="_editionDraft.NumberChapters" @bind:after="ScheduleEditionAutosave" />
                                 <span><strong>Number chapters</strong></span>
                             </label>
                             <label class="publish-toggle">
                                 <input class="form-check-input" type="checkbox"
-                                       @bind="_profile.IncludeChapterSynopses" @bind:after="ScheduleProfileAutosave" />
+                                       @bind="_editionDraft.IncludeChapterSynopses" @bind:after="ScheduleEditionAutosave" />
                                 <span><strong>Include chapter synopses</strong></span>
                             </label>
                         </fieldset>
@@ -238,27 +458,27 @@ else
                                 <label class="publish-field">
                                     <span>Page width (inches)</span>
                                     <input class="form-control" type="number" min="3" max="24" step="0.125"
-                                           @bind="_profile.PageWidthInches" @bind:after="ScheduleProfileAutosave" />
+                                           @bind="_editionDraft.PageWidthInches" @bind:after="ScheduleEditionAutosave" />
                                 </label>
                                 <label class="publish-field">
                                     <span>Page height (inches)</span>
                                     <input class="form-control" type="number" min="3" max="24" step="0.125"
-                                           @bind="_profile.PageHeightInches" @bind:after="ScheduleProfileAutosave" />
+                                           @bind="_editionDraft.PageHeightInches" @bind:after="ScheduleEditionAutosave" />
                                 </label>
                                 <label class="publish-field">
                                     <span>Page margin (inches)</span>
                                     <input class="form-control" type="number" min="0.125" max="8" step="0.0625"
-                                           @bind="_profile.PageMarginInches" @bind:after="ScheduleProfileAutosave" />
+                                           @bind="_editionDraft.PageMarginInches" @bind:after="ScheduleEditionAutosave" />
                                 </label>
                                 <label class="publish-field">
                                     <span>Body type (points)</span>
                                     <input class="form-control" type="number" min="7" max="72" step="0.5"
-                                           @bind="_profile.BodyFontSizePoints" @bind:after="ScheduleProfileAutosave" />
+                                           @bind="_editionDraft.BodyFontSizePoints" @bind:after="ScheduleEditionAutosave" />
                                 </label>
                                 <label class="publish-field">
                                     <span>Body line height</span>
                                     <input class="form-control" type="number" min="1" max="2.4" step="0.05"
-                                           @bind="_profile.BodyLineHeight" @bind:after="ScheduleProfileAutosave" />
+                                           @bind="_editionDraft.BodyLineHeight" @bind:after="ScheduleEditionAutosave" />
                                     <small>A multiplier such as 1.45, not a point value.</small>
                                 </label>
                             </div>
@@ -270,7 +490,7 @@ else
                             <div class="publish-spread-options">
                                 <label class="publish-field">
                                     <span>Print / PDF double spreads</span>
-                                    <select class="form-select" @bind="_profile.PrintPicturePageSpreadMode" @bind:after="ScheduleProfileAutosave">
+                                    <select class="form-select" @bind="_editionDraft.PrintPicturePageSpreadMode" @bind:after="ScheduleEditionAutosave">
                                         <option value="@PrintPicturePageSpreadMode.WholeSpread">Whole spread unrotated on one normal page</option>
                                         <option value="@PrintPicturePageSpreadMode.SidewaysWholeSpread">Whole spread rotated on one tall page</option>
                                         <option value="@PrintPicturePageSpreadMode.SplitLeaves">Split into separate pages</option>
@@ -279,7 +499,7 @@ else
                                 </label>
                                 <label class="publish-field">
                                     <span>EPUB double spreads</span>
-                                    <select class="form-select" @bind="_profile.EpubPicturePageSpreadMode" @bind:after="ScheduleProfileAutosave">
+                                    <select class="form-select" @bind="_editionDraft.EpubPicturePageSpreadMode" @bind:after="ScheduleEditionAutosave">
                                         <option value="@EpubPicturePageSpreadMode.RequestLandscape">Whole spread with landscape requested</option>
                                         <option value="@EpubPicturePageSpreadMode.SidewaysPortrait">Whole spread rotated sideways</option>
                                     </select>
@@ -546,9 +766,9 @@ else
                     <div class="publish-summary-heading">
                         <span class="publish-eyebrow">Export summary</span>
                         <h2 id="summary-title">@DisplayTitle</h2>
-                        @if (!string.IsNullOrWhiteSpace(_profile.Author))
+                        @if (!string.IsNullOrWhiteSpace(_editionDraft.Author))
                         {
-                            <p>by @_profile.Author</p>
+                            <p>by @_editionDraft.Author</p>
                         }
                     </div>
 
@@ -791,16 +1011,21 @@ else
 @code {
     [CascadingParameter] public Project? Project { get; set; }
 
-    private static readonly TimeSpan ProfileAutosaveDelay = TimeSpan.FromMilliseconds(900);
+    private static readonly TimeSpan EditionAutosaveDelay = TimeSpan.FromMilliseconds(900);
 
-    private readonly SemaphoreSlim _profileSaveGate = new(1, 1);
+    private readonly SemaphoreSlim _editionSaveGate = new(1, 1);
     private readonly HashSet<Guid> _deletingPlacementIds = [];
     private PublishWorkspaceView? _workspace;
-    private IReadOnlyList<PublishImagePlacementView> _placements = [];
+    private IReadOnlyList<PublicationEditionSummary> _editionSummaries = [];
+    private IReadOnlyList<PublicationImagePlacementView> _placements = [];
     private IReadOnlyList<ProjectImageView> _projectImageLibrary = [];
-    private ProfileDraft _profile = new();
+    private IReadOnlyList<ManuscriptStyleView> _namedStyles = [];
+    private IReadOnlyList<PublicationEditionAuditView> _editionAudit = [];
+    private EditionDraft _editionDraft = new();
     private Guid? _loadedProjectId;
+    private Guid? _selectedEditionId;
     private Guid? _editingPlacementId;
+    private Guid? _editingMatterId;
     private Guid? _placementAssetId;
     private Guid? _confirmDeletePlacementId;
     private bool _loading;
@@ -814,20 +1039,36 @@ else
     private bool _placementActionBusy;
     private bool _printing;
     private bool _disposing;
+    private bool _creatingEdition;
+    private bool _assistantBusy;
     private string? _loadError;
-    private string? _profileError;
+    private string? _editionDraftError;
     private string? _coverError;
     private string? _outlineError;
     private string? _placementError;
     private string? _placementDialogError;
     private string? _imagesLoadError;
     private string? _exportError;
+    private string? _editionActionError;
+    private string _newEditionName = "Paperback";
+    private PublicationEditionFormat _newEditionFormat = PublicationEditionFormat.Paperback;
     private string _printDialogUrl = string.Empty;
     private string _placementTargetKey = string.Empty;
     private string _placementCaption = string.Empty;
     private string _imageSearch = string.Empty;
+    private string _assistantPrompt = string.Empty;
+    private string _assistantResponse = string.Empty;
+    private string _styleMappingStyleId = string.Empty;
+    private double? _styleFontSize;
+    private double? _styleLineHeight;
+    private string _matterTitle = string.Empty;
+    private string _matterJson = string.Empty;
+    private PublicationMatterLocation _matterLocation;
+    private PublicationMatterKind _matterKind;
+    private int _matterSortOrder;
+    private bool _matterIncluded;
     private string _liveMessage = string.Empty;
-    private PublishImagePlacementKind _placementKind = PublishImagePlacementKind.ChapterOpening;
+    private PublicationImagePlacementKind _placementKind = PublicationImagePlacementKind.ChapterOpening;
     private PublishExportFormat? _exportingFormat;
     private ElementReference _placementDialogElement;
     private ElementReference _printDialogElement;
@@ -836,17 +1077,17 @@ else
     private ElementReference _printDialogReturnFocusElement;
     private IJSObjectReference? _downloadModule;
     private IJSObjectReference? _autoSizer;
-    private CancellationTokenSource? _profileAutosaveCts;
+    private CancellationTokenSource? _editionDraftAutosaveCts;
     private IDisposable? _navHandlerRegistration;
-    private long _profileDraftVersion;
-    private long _profileSavedVersion;
-    private SaveState _profileSaveState = SaveState.Idle;
-    private DateTime? _profileLastSavedAt;
+    private long _editionDraftVersion;
+    private long _editionSavedVersion;
+    private SaveState _editionSaveState = SaveState.Idle;
+    private DateTime? _editionDraftLastSavedAt;
     private bool _focusPlacementDialog;
     private bool _focusPrintDialog;
 
-    private bool ProfileSaveInProgress => _profileSaveState == SaveState.Saving;
-    private bool HasPendingProfileSave => _profileSavedVersion != _profileDraftVersion;
+    private bool EditionSaveInProgress => _editionSaveState == SaveState.Saving;
+    private bool HasPendingEditionSave => _editionSavedVersion != _editionDraftVersion;
     private bool OutlineBusy => _outlineBusy || _coverBusy;
     private bool HasSelectedPlacementTarget => TryParseTargetKey(_placementTargetKey, out var kind, out var id)
         && PlacementTargets.Any(target => target.Kind == kind && target.Id == id);
@@ -860,38 +1101,38 @@ else
         && _exportingFormat is null
         && !_printing
         && !HasBusyMutation
-        && _profileSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
-        && !HasPendingProfileSave;
+        && _editionSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
+        && !HasPendingEditionSave;
     private bool CanPrint => _exportingFormat is null
         && !_printing
         && !HasBusyMutation
-        && _profileSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
-        && !HasPendingProfileSave;
+        && _editionSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
+        && !HasPendingEditionSave;
 
-    private string DisplayTitle => string.IsNullOrWhiteSpace(_profile.TitleOverride)
-        ? _workspace?.Profile.ProjectName ?? Project?.Name ?? "Untitled book"
-        : _profile.TitleOverride.Trim();
+    private string DisplayTitle => string.IsNullOrWhiteSpace(_editionDraft.TitleOverride)
+        ? _workspace?.Edition.ProjectName ?? Project?.Name ?? "Untitled book"
+        : _editionDraft.TitleOverride.Trim();
 
-    private bool IncludeTitlePageEffective => _profile.TitlePageMode switch
+    private bool IncludeTitlePageEffective => _editionDraft.TitlePageMode switch
     {
         PublishTitlePageMode.Include => true,
         PublishTitlePageMode.Omit => false,
-        _ => _workspace?.Profile.SelectedCoverChapterId is null,
+        _ => _workspace?.Edition.SelectedCoverChapterId is null,
     };
 
-    private string TitlePageOptionHelp => _profile.TitlePageMode switch
+    private string TitlePageOptionHelp => _editionDraft.TitlePageMode switch
     {
-        PublishTitlePageMode.Automatic when _workspace?.Profile.SelectedCoverChapterId is not null =>
+        PublishTitlePageMode.Automatic when _workspace?.Edition.SelectedCoverChapterId is not null =>
             "Automatically omitted because a cover is selected. Changing this saves an explicit choice.",
         PublishTitlePageMode.Automatic =>
             "Automatically included because no cover is selected. Changing this saves an explicit choice.",
         _ => "This explicit choice is kept when the cover changes.",
     };
 
-    private string SelectedCoverValue => _workspace?.Profile.SelectedCoverChapterId?.ToString("N") ?? string.Empty;
+    private string SelectedCoverValue => _workspace?.Edition.SelectedCoverChapterId?.ToString("N") ?? string.Empty;
 
     private PublishCoverCandidateView? SelectedCoverCandidate =>
-        _workspace?.Profile.SelectedCoverChapterId is Guid coverId
+        _workspace?.Edition.SelectedCoverChapterId is Guid coverId
             ? _workspace.CoverCandidates.FirstOrDefault(candidate => candidate.Id == coverId)
             : null;
 
@@ -914,7 +1155,7 @@ else
                 messages.Add("Include at least one manuscript chapter.");
             if (SelectedCoverCandidate is null)
                 messages.Add("No cover is selected. Exports can still be created without one.");
-            if (string.IsNullOrWhiteSpace(_profile.Author))
+            if (string.IsNullOrWhiteSpace(_editionDraft.Author))
                 messages.Add("Add an author name if this is a reader-facing edition.");
             return messages;
         }
@@ -939,18 +1180,18 @@ else
         }
     }
 
-    private IReadOnlyList<PublishImagePlacementKind> ValidPlacementKinds
+    private IReadOnlyList<PublicationImagePlacementKind> ValidPlacementKinds
     {
         get
         {
             if (!TryParseTargetKey(_placementTargetKey, out var kind, out _)) return [];
             return kind == PublishOutlineTargetKind.Act
-                ? [PublishImagePlacementKind.BeforeAct, PublishImagePlacementKind.AfterAct]
+                ? [PublicationImagePlacementKind.BeforeAct, PublicationImagePlacementKind.AfterAct]
                 : [
-                    PublishImagePlacementKind.BeforeChapter,
-                    PublishImagePlacementKind.ChapterOpening,
-                    PublishImagePlacementKind.ChapterEnding,
-                    PublishImagePlacementKind.AfterChapter,
+                    PublicationImagePlacementKind.BeforeChapter,
+                    PublicationImagePlacementKind.ChapterOpening,
+                    PublicationImagePlacementKind.ChapterEnding,
+                    PublicationImagePlacementKind.AfterChapter,
                 ];
         }
     }
@@ -970,18 +1211,18 @@ else
 
     private string SaveStatusText => HasBusyMutation
         ? "Saving publishing change…"
-        : _profileSaveState switch
+        : _editionSaveState switch
     {
         SaveState.Dirty => "Waiting to save changes…",
         SaveState.Saving => "Saving changes…",
-        SaveState.Saved when _profileLastSavedAt is { } savedAt => $"All changes saved at {savedAt:h:mm tt}",
+        SaveState.Saved when _editionDraftLastSavedAt is { } savedAt => $"All changes saved at {savedAt:h:mm tt}",
         SaveState.SaveFailed => "Changes could not be saved",
         _ => "All changes saved",
     };
 
     private string SaveStatusTextClass => HasBusyMutation
         ? "text-muted"
-        : _profileSaveState switch
+        : _editionSaveState switch
     {
         SaveState.Dirty => "text-warning-emphasis",
         SaveState.SaveFailed => "text-danger",
@@ -990,7 +1231,7 @@ else
 
     private string SaveStatusDotClass => HasBusyMutation
         ? "is-saving"
-        : _profileSaveState switch
+        : _editionSaveState switch
     {
         SaveState.Dirty => "is-dirty",
         SaveState.Saving => "is-saving",
@@ -998,7 +1239,7 @@ else
         _ => "is-saved",
     };
 
-    private string ExportBlockedMessage => _profileSaveState switch
+    private string ExportBlockedMessage => _editionSaveState switch
     {
         SaveState.Dirty or SaveState.Saving => "Exports will be available as soon as your changes are saved.",
         SaveState.SaveFailed => "Retry the failed save before exporting, so the export never uses stale settings.",
@@ -1008,8 +1249,9 @@ else
 
     private string PrintUrl(bool autoprint)
     {
-        if (Project is null) return "#";
-        var baseUrl = $"/projects/{Uri.EscapeDataString(Project.Slug)}/manuscript/print";
+        if (Project is null || _selectedEditionId is not Guid editionId) return "#";
+        var baseUrl =
+            $"/projects/{Uri.EscapeDataString(Project.Slug)}/publish/{editionId:N}/preview";
         return autoprint
             ? $"{baseUrl}?embedded=true&autoprint=true"
             : $"{baseUrl}?embedded=true";
@@ -1024,7 +1266,7 @@ else
     {
         if (Project is null || _loadedProjectId == Project.Id) return;
         if (_loadedProjectId is not null)
-            await FlushProfileSaveAsync();
+            await FlushEditionSaveAsync();
 
         _loadedProjectId = Project.Id;
         await LoadWorkspaceAsync(resetProfile: true);
@@ -1065,6 +1307,141 @@ else
 
     private Task RetryLoadAsync() => LoadWorkspaceAsync(resetProfile: true);
 
+    private async Task AskPublishAssistantAsync()
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId || _assistantBusy) return;
+        _assistantBusy = true;
+        _assistantResponse = string.Empty;
+        try
+        {
+            await FlushEditionSaveAsync();
+            _assistantResponse = await PublishAssistant.AskAsync(
+                Project.Id,
+                editionId,
+                _assistantPrompt);
+            await RefreshWorkspaceAsync();
+        }
+        catch (Exception exception)
+        {
+            _assistantResponse = exception.Message;
+        }
+        finally
+        {
+            _assistantBusy = false;
+        }
+    }
+
+    private async Task CreateEditionAsync()
+    {
+        if (Project is null || _creatingEdition) return;
+        _creatingEdition = true;
+        _editionActionError = null;
+        try
+        {
+            var created = await Editions.CreateAsync(
+                Project.Id,
+                new PublicationEditionCreate(_newEditionName, _newEditionFormat));
+            _selectedEditionId = created.Id;
+            await LoadWorkspaceAsync(resetProfile: true);
+            _liveMessage = $"Created publication edition {created.Name}.";
+        }
+        catch (Exception exception)
+        {
+            _editionActionError = exception.Message;
+        }
+        finally
+        {
+            _creatingEdition = false;
+        }
+    }
+
+    private async Task SelectEditionAsync(ChangeEventArgs args)
+    {
+        if (!Guid.TryParse(args.Value?.ToString(), out var editionId)
+            || _editionSummaries.All(edition => edition.Id != editionId))
+        {
+            return;
+        }
+        await FlushEditionSaveAsync();
+        _selectedEditionId = editionId;
+        await LoadWorkspaceAsync(resetProfile: true);
+    }
+
+    private async Task CloneEditionAsync()
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        _editionActionError = null;
+        try
+        {
+            await FlushEditionSaveAsync();
+            var clone = await Editions.CloneAsync(
+                Project.Id,
+                editionId,
+                $"{_editionDraft.Name} copy",
+                _editionDraft.Revision);
+            _selectedEditionId = clone.Id;
+            await LoadWorkspaceAsync(resetProfile: true);
+            _liveMessage = $"Cloned {_editionDraft.Name}. The ISBN was cleared.";
+        }
+        catch (Exception exception)
+        {
+            _editionActionError = exception.Message;
+        }
+    }
+
+    private async Task SetDefaultEditionAsync()
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        try
+        {
+            var updated = await Editions.SetDefaultAsync(
+                Project.Id,
+                editionId,
+                _editionDraft.Revision);
+            _editionDraft.Revision = updated.Revision;
+            await RefreshWorkspaceAsync();
+            _liveMessage = $"{updated.Name} is now the default edition.";
+        }
+        catch (Exception exception)
+        {
+            _editionActionError = exception.Message;
+        }
+    }
+
+    private async Task ArchiveEditionAsync()
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        try
+        {
+            await Editions.ArchiveAsync(Project.Id, editionId, _editionDraft.Revision);
+            _selectedEditionId = _editionSummaries.First(edition => edition.Id != editionId).Id;
+            await LoadWorkspaceAsync(resetProfile: true);
+            _liveMessage = "Publication edition archived.";
+        }
+        catch (Exception exception)
+        {
+            _editionActionError = exception.Message;
+        }
+    }
+
+    private async Task CompareEditionAsync()
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        var other = _editionSummaries.FirstOrDefault(candidate => candidate.Id != editionId);
+        if (other is null) return;
+        try
+        {
+            var comparison = await Editions.CompareAsync(Project.Id, editionId, other.Id);
+            _editionActionError = comparison.Differences.Count == 0
+                ? $"{comparison.Left.Name} and {comparison.Right.Name} have the same compared settings."
+                : string.Join(" · ", comparison.Differences);
+        }
+        catch (Exception exception)
+        {
+            _editionActionError = exception.Message;
+        }
+    }
+
     private async Task LoadWorkspaceAsync(bool resetProfile)
     {
         if (Project is null) return;
@@ -1072,18 +1449,36 @@ else
         _loadError = null;
         try
         {
-            var workspace = await Publishing.GetWorkspaceAsync(Project.Id);
+            _editionSummaries = await Editions.ListAsync(Project.Id);
+            if (_editionSummaries.Count == 0)
+            {
+                _selectedEditionId = null;
+                _workspace = null;
+                return;
+            }
+            if (_selectedEditionId is not Guid selectedId
+                || _editionSummaries.All(edition => edition.Id != selectedId))
+            {
+                _selectedEditionId = _editionSummaries
+                    .FirstOrDefault(edition => edition.IsDefault)?.Id
+                    ?? _editionSummaries[0].Id;
+            }
+            var workspace = await Publishing.GetWorkspaceAsync(
+                Project.Id,
+                _selectedEditionId.Value);
             _workspace = workspace;
+            _namedStyles = await ManuscriptStyles.ListAsync(Project.Id);
+            _editionAudit = await Editions.GetAuditAsync(Project.Id, _selectedEditionId.Value);
             _placements = OrderPlacementViews(workspace.Placements);
             if (resetProfile)
             {
-                CancelProfileAutosave();
-                _profile = ProfileDraft.From(workspace.Profile);
-                _profileDraftVersion = 0;
-                _profileSavedVersion = 0;
-                _profileSaveState = SaveState.Idle;
-                _profileLastSavedAt = null;
-                _profileError = null;
+                CancelEditionAutosave();
+                _editionDraft = EditionDraft.From(workspace.Edition);
+                _editionDraftVersion = 0;
+                _editionSavedVersion = 0;
+                _editionSaveState = SaveState.Idle;
+                _editionDraftLastSavedAt = null;
+                _editionDraftError = null;
             }
             PrunePlacementDraft();
         }
@@ -1100,95 +1495,107 @@ else
 
     private async Task RefreshWorkspaceAsync()
     {
-        if (Project is null) return;
-        var workspace = await Publishing.GetWorkspaceAsync(Project.Id);
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        var workspace = await Publishing.GetWorkspaceAsync(Project.Id, editionId);
         _workspace = workspace;
+        _editionAudit = await Editions.GetAuditAsync(Project.Id, editionId);
+        _editionDraft.Revision = workspace.Edition.Revision;
+        _editionSummaries = workspace.Editions;
         _placements = OrderPlacementViews(workspace.Placements);
         PrunePlacementDraft();
     }
 
-    private void ScheduleProfileAutosave()
+    private void ScheduleEditionAutosave()
     {
         if (_loadedProjectId is null && Project is null) return;
-        _profileDraftVersion++;
-        _profileError = null;
-        _profileSaveState = SaveState.Dirty;
-        CancelProfileAutosave();
-        _profileAutosaveCts = new CancellationTokenSource();
-        _ = DebouncedProfileSaveAsync(_profileAutosaveCts.Token);
+        _editionDraftVersion++;
+        _editionDraftError = null;
+        _editionSaveState = SaveState.Dirty;
+        CancelEditionAutosave();
+        _editionDraftAutosaveCts = new CancellationTokenSource();
+        _ = DebouncedEditionSaveAsync(_editionDraftAutosaveCts.Token);
     }
 
     private void SetTitlePageMode(ChangeEventArgs e)
     {
-        _profile.TitlePageMode = e.Value is bool value && value
+        _editionDraft.TitlePageMode = e.Value is bool value && value
             ? PublishTitlePageMode.Include
             : PublishTitlePageMode.Omit;
-        ScheduleProfileAutosave();
+        ScheduleEditionAutosave();
     }
 
-    private async Task DebouncedProfileSaveAsync(CancellationToken cancellationToken)
+    private async Task DebouncedEditionSaveAsync(CancellationToken cancellationToken)
     {
         try
         {
-            await Task.Delay(ProfileAutosaveDelay, cancellationToken);
+            await Task.Delay(EditionAutosaveDelay, cancellationToken);
             if (_disposing) return;
-            await InvokeAsync(SaveProfileCoreAsync);
+            await InvokeAsync(SaveEditionCoreAsync);
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
     }
 
-    private async Task RetryProfileSaveAsync()
+    private async Task RetryEditionSaveAsync()
     {
-        _profileError = null;
-        await FlushProfileSaveAsync();
+        _editionDraftError = null;
+        await FlushEditionSaveAsync();
     }
 
-    private async Task FlushProfileSaveAsync()
+    private async Task FlushEditionSaveAsync()
     {
-        CancelProfileAutosave();
-        await SaveProfileCoreAsync();
+        CancelEditionAutosave();
+        await SaveEditionCoreAsync();
     }
 
-    private async Task SaveProfileCoreAsync()
+    private async Task SaveEditionCoreAsync()
     {
         var projectId = _loadedProjectId ?? Project?.Id;
         if (projectId is not Guid targetProjectId) return;
 
-        await _profileSaveGate.WaitAsync();
+        await _editionSaveGate.WaitAsync();
         try
         {
-            while (_profileSavedVersion != _profileDraftVersion)
+            while (_editionSavedVersion != _editionDraftVersion)
             {
-                var versionToSave = _profileDraftVersion;
-                _profileError = null;
-                _profileSaveState = SaveState.Saving;
+                var versionToSave = _editionDraftVersion;
+                _editionDraftError = null;
+                _editionSaveState = SaveState.Saving;
                 await NotifyStateChangedAsync();
 
-                await Publishing.SaveProfileAsync(targetProjectId, _profile.ToUpdate());
-                _profileSavedVersion = versionToSave;
-                _profileLastSavedAt = DateTime.Now;
-                _profileSaveState = _profileSavedVersion == _profileDraftVersion ? SaveState.Saved : SaveState.Dirty;
-                _liveMessage = _profileSaveState == SaveState.Saved ? "Publishing settings saved." : "More publishing changes are waiting to save.";
+                if (_selectedEditionId is not Guid editionId)
+                    throw new InvalidOperationException("Select a publication edition before saving.");
+                var updated = await Editions.UpdateAsync(
+                    targetProjectId,
+                    editionId,
+                    _editionDraft.ToUpdate());
+                _editionDraft.Revision = updated.Revision;
+                if (_workspace is not null)
+                    _workspace = _workspace with { Edition = updated };
+                _editionSummaries = await Editions.ListAsync(targetProjectId);
+                _editionSavedVersion = versionToSave;
+                _editionDraftLastSavedAt = DateTime.Now;
+                _editionSaveState = _editionSavedVersion == _editionDraftVersion ? SaveState.Saved : SaveState.Dirty;
+                _liveMessage = _editionSaveState == SaveState.Saved ? "Publishing settings saved." : "More publishing changes are waiting to save.";
             }
         }
         catch (Exception ex)
         {
-            _profileError = ex.Message;
-            _profileSaveState = SaveState.SaveFailed;
+            _editionDraftError = ex.Message;
+            _editionSaveState = SaveState.SaveFailed;
             _liveMessage = $"Publishing settings could not be saved. {ex.Message}";
         }
         finally
         {
-            _profileSaveGate.Release();
+            _editionSaveGate.Release();
             await NotifyStateChangedAsync();
         }
     }
 
     private async ValueTask OnLocationChangingAsync(LocationChangingContext context)
     {
-        await FlushProfileSaveAsync();
-        if (_profileSaveState == SaveState.SaveFailed && HasPendingProfileSave)
+        await FlushEditionSaveAsync();
+        if (_editionSaveState == SaveState.SaveFailed && HasPendingEditionSave)
             context.PreventNavigation();
     }
 
@@ -1199,11 +1606,11 @@ else
         catch (ObjectDisposedException) { }
     }
 
-    private void CancelProfileAutosave()
+    private void CancelEditionAutosave()
     {
-        var cts = _profileAutosaveCts;
+        var cts = _editionDraftAutosaveCts;
         if (cts is null) return;
-        _profileAutosaveCts = null;
+        _editionDraftAutosaveCts = null;
         cts.Cancel();
         cts.Dispose();
     }
@@ -1216,7 +1623,13 @@ else
         try
         {
             Guid? chapterId = Guid.TryParseExact(e.Value?.ToString(), "N", out var parsedId) ? parsedId : null;
-            await Publishing.SetCoverChapterAsync(Project.Id, chapterId);
+            if (_selectedEditionId is not Guid editionId) return;
+            var updated = await Editions.SetCoverChapterAsync(
+                Project.Id,
+                editionId,
+                chapterId,
+                _editionDraft.Revision);
+            _editionDraft.Revision = updated.Revision;
             await RefreshWorkspaceAsync();
             _liveMessage = chapterId is null ? "Cover removed." : "Cover picture page selected.";
         }
@@ -1231,35 +1644,188 @@ else
         }
     }
 
+    private static string MatterPlainText(PublicationMatterView item) =>
+        ManuscriptCodec.ProjectPlainText(item.Manuscript);
+
+    private void BeginEditMatter(PublicationMatterView item)
+    {
+        _editingMatterId = item.Id;
+        _matterTitle = item.Title;
+        _matterJson = ManuscriptCodec.Serialize(item.Manuscript);
+        _matterLocation = item.Location;
+        _matterKind = item.Kind;
+        _matterSortOrder = item.SortOrder;
+        _matterIncluded = item.IsIncluded;
+    }
+
+    private void CancelMatterEdit() => _editingMatterId = null;
+
+    private async Task SaveMatterAsync()
+    {
+        if (Project is null
+            || _selectedEditionId is not Guid editionId
+            || _workspace?.Matter.FirstOrDefault(item => item.Id == _editingMatterId) is not { } current)
+            return;
+        try
+        {
+            var document = ManuscriptCodec.Deserialize(
+                _matterJson,
+                current.Id,
+                current.Revision);
+            _ = await Editions.UpsertMatterAsync(
+                Project.Id,
+                editionId,
+                new PublicationMatterInput(
+                    current.Id,
+                    _matterLocation,
+                    _matterKind,
+                    _matterTitle,
+                    ManuscriptCodec.Serialize(document),
+                    _matterIncluded,
+                    _matterSortOrder,
+                    current.Revision),
+                _editionDraft.Revision);
+            _editingMatterId = null;
+            await RefreshWorkspaceAsync();
+            _liveMessage = "Publication matter saved.";
+        }
+        catch (Exception exception)
+        {
+            _editionActionError = exception.Message;
+        }
+    }
+
+    private async Task AddMatterAsync(PublicationMatterKind kind)
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId || _workspace is null) return;
+        try
+        {
+            var location = kind is PublicationMatterKind.Acknowledgments
+                or PublicationMatterKind.AboutAuthor
+                or PublicationMatterKind.AlsoBy
+                or PublicationMatterKind.References
+                    ? PublicationMatterLocation.Back
+                    : PublicationMatterLocation.Front;
+            var title = kind == PublicationMatterKind.Custom ? "Custom page" : kind.ToString();
+            var empty = ManuscriptCodec.CreateEmpty(Guid.Empty);
+            _ = await Editions.UpsertMatterAsync(
+                Project.Id,
+                editionId,
+                new PublicationMatterInput(
+                    null,
+                    location,
+                    kind,
+                    title,
+                    ManuscriptCodec.Serialize(empty),
+                    true,
+                    _workspace.Matter.Count,
+                    0),
+                _editionDraft.Revision);
+            await RefreshWorkspaceAsync();
+            _liveMessage = $"{title} added.";
+        }
+        catch (Exception ex)
+        {
+            _editionActionError = ex.Message;
+        }
+    }
+
+    private async Task DeleteMatterAsync(PublicationMatterView item)
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        try
+        {
+            await Editions.DeleteMatterAsync(Project.Id, editionId, item.Id, _editionDraft.Revision);
+            await RefreshWorkspaceAsync();
+            _liveMessage = $"{item.Title} removed.";
+        }
+        catch (Exception ex)
+        {
+            _editionActionError = ex.Message;
+        }
+    }
+
+    private async Task AddStyleMappingAsync()
+    {
+        if (Project is null
+            || _selectedEditionId is not Guid editionId
+            || !Guid.TryParse(_styleMappingStyleId, out var styleId))
+            return;
+        try
+        {
+            _ = await Editions.UpsertStyleMappingAsync(
+                Project.Id,
+                editionId,
+                new PublicationEditionStyleMappingInput(
+                    styleId,
+                    new ManuscriptStyleProperties(
+                        FontSizePoints: _styleFontSize,
+                        LineHeight: _styleLineHeight)),
+                _editionDraft.Revision);
+            _styleMappingStyleId = string.Empty;
+            _styleFontSize = null;
+            _styleLineHeight = null;
+            await RefreshWorkspaceAsync();
+        }
+        catch (Exception exception)
+        {
+            _editionActionError = exception.Message;
+        }
+    }
+
+    private async Task DeleteStyleMappingAsync(PublicationEditionStyleMappingView mapping)
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        try
+        {
+            await Editions.DeleteStyleMappingAsync(
+                Project.Id,
+                editionId,
+                mapping.Id,
+                _editionDraft.Revision);
+            await RefreshWorkspaceAsync();
+        }
+        catch (Exception exception)
+        {
+            _editionActionError = exception.Message;
+        }
+    }
+
     private async Task SetOutlineSelectionAsync(PublishOutlineTargetKind kind, Guid targetId, ChangeEventArgs e)
     {
         var included = e.Value is bool value && value;
-        await ApplyOutlineSelectionsAsync([new PublishOutlineSelectionUpdate(kind, targetId, included)]);
+        await ApplyOutlineSelectionsAsync([new PublicationEditionOutlineItemUpdate(kind, targetId, included)]);
     }
 
     private async Task SetAllOutlineSelectionsAsync(bool included)
     {
         if (_workspace is null) return;
-        var updates = new List<PublishOutlineSelectionUpdate>();
+        var updates = new List<PublicationEditionOutlineItemUpdate>();
         foreach (var section in _workspace.Sections)
         {
             if (section.ActId is Guid actId)
                 updates.Add(new(PublishOutlineTargetKind.Act, actId, included));
             updates.AddRange(section.Chapters
                 .Where(chapter => !IsCoverChapter(chapter.Id))
-                .Select(chapter => new PublishOutlineSelectionUpdate(PublishOutlineTargetKind.Chapter, chapter.Id, included)));
+                .Select(chapter => new PublicationEditionOutlineItemUpdate(PublishOutlineTargetKind.Chapter, chapter.Id, included)));
         }
         await ApplyOutlineSelectionsAsync(updates);
     }
 
-    private async Task ApplyOutlineSelectionsAsync(IReadOnlyList<PublishOutlineSelectionUpdate> updates)
+    private async Task ApplyOutlineSelectionsAsync(IReadOnlyList<PublicationEditionOutlineItemUpdate> updates)
     {
         if (Project is null || updates.Count == 0) return;
         _outlineBusy = true;
         _outlineError = null;
         try
         {
-            await Publishing.SetOutlineSelectionsAsync(Project.Id, updates);
+            if (_selectedEditionId is not Guid editionId) return;
+            var updated = await Editions.SetOutlineSelectionsAsync(
+                Project.Id,
+                editionId,
+                updates,
+                _editionDraft.Revision);
+            _editionDraft.Revision = updated.Revision;
             await RefreshWorkspaceAsync();
             _liveMessage = "Manuscript selection updated.";
         }
@@ -1276,15 +1842,15 @@ else
 
     private Task OpenAddPlacementAsync() => OpenPlacementDialogAsync(null);
 
-    private Task OpenEditPlacementAsync(PublishImagePlacementView placement) => OpenPlacementDialogAsync(placement);
+    private Task OpenEditPlacementAsync(PublicationImagePlacementView placement) => OpenPlacementDialogAsync(placement);
 
-    private async Task OpenPlacementDialogAsync(PublishImagePlacementView? placement)
+    private async Task OpenPlacementDialogAsync(PublicationImagePlacementView? placement)
     {
         _placementError = null;
         _confirmDeletePlacementId = null;
         _editingPlacementId = placement?.Id;
         _placementTargetKey = placement is null ? string.Empty : TargetKey(placement.TargetKind, placement.TargetId);
-        _placementKind = placement?.PlacementKind ?? PublishImagePlacementKind.ChapterOpening;
+        _placementKind = placement?.PlacementKind ?? PublicationImagePlacementKind.ChapterOpening;
         _placementAssetId = placement?.AssetId;
         _placementCaption = placement?.Caption ?? string.Empty;
         _imageSearch = string.Empty;
@@ -1343,21 +1909,34 @@ else
         {
             if (_editingPlacementId is Guid placementId)
             {
-                var request = new PublishImagePlacementUpdate(assetId, targetKind, targetId, _placementKind, _placementCaption);
-                var updated = await Publishing.UpdateImagePlacementAsync(Project.Id, placementId, request);
+                var request = new PublicationImagePlacementUpdate(assetId, targetKind, targetId, _placementKind, _placementCaption);
+                if (_selectedEditionId is not Guid editionId) return;
+                var updated = await Editions.UpdateImagePlacementAsync(
+                    Project.Id,
+                    editionId,
+                    placementId,
+                    request,
+                    _editionDraft.Revision);
                 _placements = OrderPlacementViews(_placements.Select(placement => placement.Id == placementId ? updated : placement));
                 _liveMessage = "Image placement updated.";
             }
             else
             {
-                var request = new PublishImagePlacementCreate(assetId, targetKind, targetId, _placementKind, _placementCaption);
-                var created = await Publishing.AddImagePlacementAsync(Project.Id, request);
+                var request = new PublicationImagePlacementCreate(assetId, targetKind, targetId, _placementKind, _placementCaption);
+                if (_selectedEditionId is not Guid editionId) return;
+                var created = await Editions.AddImagePlacementAsync(
+                    Project.Id,
+                    editionId,
+                    request,
+                    _editionDraft.Revision);
                 _placements = OrderPlacementViews([.. _placements, created]);
                 _liveMessage = "Image placement added.";
             }
             _placementError = null;
             _placementDialogOpen = false;
             _placementDialogError = null;
+            await RefreshWorkspaceAsync();
+            _editionDraft.Revision = _workspace!.Edition.Revision;
         }
         catch (Exception ex)
         {
@@ -1382,7 +1961,7 @@ else
         if (e.Key == "Escape") ClosePlacementDialog();
     }
 
-    private bool CanMovePlacement(PublishImagePlacementView placement, int delta)
+    private bool CanMovePlacement(PublicationImagePlacementView placement, int delta)
     {
         var group = PlacementGroup(placement);
         var index = group.FindIndex(candidate => candidate.Id == placement.Id);
@@ -1390,7 +1969,7 @@ else
         return index >= 0 && nextIndex >= 0 && nextIndex < group.Count;
     }
 
-    private async Task MovePlacementAsync(PublishImagePlacementView placement, int delta)
+    private async Task MovePlacementAsync(PublicationImagePlacementView placement, int delta)
     {
         if (Project is null) return;
         var group = PlacementGroup(placement);
@@ -1403,13 +1982,20 @@ else
         try
         {
             (group[index], group[nextIndex]) = (group[nextIndex], group[index]);
-            await Publishing.ReorderImagePlacementsAsync(Project.Id, group.Select(candidate => candidate.Id).ToList());
+            if (_selectedEditionId is not Guid editionId) return;
+            await Editions.ReorderImagePlacementsAsync(
+                Project.Id,
+                editionId,
+                group.Select(candidate => candidate.Id).ToList(),
+                _editionDraft.Revision);
 
-            var reorderedGroup = new Queue<PublishImagePlacementView>(group.Select((candidate, order) => candidate with { SortOrder = order }));
+            var reorderedGroup = new Queue<PublicationImagePlacementView>(group.Select((candidate, order) => candidate with { SortOrder = order }));
             _placements = _placements
                 .Select(candidate => SamePlacementGroup(candidate, placement) ? reorderedGroup.Dequeue() : candidate)
                 .ToList();
             _liveMessage = $"{placement.AssetFileName} moved {(delta < 0 ? "up" : "down")}.";
+            await RefreshWorkspaceAsync();
+            _editionDraft.Revision = _workspace!.Edition.Revision;
         }
         catch (Exception ex)
         {
@@ -1422,15 +2008,15 @@ else
         }
     }
 
-    private List<PublishImagePlacementView> PlacementGroup(PublishImagePlacementView placement) =>
+    private List<PublicationImagePlacementView> PlacementGroup(PublicationImagePlacementView placement) =>
         _placements.Where(candidate => SamePlacementGroup(candidate, placement)).ToList();
 
-    private static bool SamePlacementGroup(PublishImagePlacementView left, PublishImagePlacementView right) =>
+    private static bool SamePlacementGroup(PublicationImagePlacementView left, PublicationImagePlacementView right) =>
         left.TargetKind == right.TargetKind
         && left.TargetId == right.TargetId
         && left.PlacementKind == right.PlacementKind;
 
-    private IReadOnlyList<PublishImagePlacementView> OrderPlacementViews(IEnumerable<PublishImagePlacementView> placements) =>
+    private IReadOnlyList<PublicationImagePlacementView> OrderPlacementViews(IEnumerable<PublicationImagePlacementView> placements) =>
         placements
             .OrderBy(placement => PlacementTargetOrder(placement.TargetKind, placement.TargetId))
             .ThenBy(placement => PlacementKindOrder(placement.PlacementKind))
@@ -1456,12 +2042,12 @@ else
         return int.MaxValue;
     }
 
-    private static int PlacementKindOrder(PublishImagePlacementKind kind) => kind switch
+    private static int PlacementKindOrder(PublicationImagePlacementKind kind) => kind switch
     {
-        PublishImagePlacementKind.BeforeAct or PublishImagePlacementKind.BeforeChapter => 0,
-        PublishImagePlacementKind.ChapterOpening => 1,
-        PublishImagePlacementKind.ChapterEnding => 2,
-        PublishImagePlacementKind.AfterAct or PublishImagePlacementKind.AfterChapter => 3,
+        PublicationImagePlacementKind.BeforeAct or PublicationImagePlacementKind.BeforeChapter => 0,
+        PublicationImagePlacementKind.ChapterOpening => 1,
+        PublicationImagePlacementKind.ChapterEnding => 2,
+        PublicationImagePlacementKind.AfterAct or PublicationImagePlacementKind.AfterChapter => 3,
         _ => int.MaxValue,
     };
 
@@ -1475,10 +2061,17 @@ else
         _placementError = null;
         try
         {
-            await Publishing.DeleteImagePlacementAsync(Project.Id, placementId);
+            if (_selectedEditionId is not Guid editionId) return;
+            await Editions.DeleteImagePlacementAsync(
+                Project.Id,
+                editionId,
+                placementId,
+                _editionDraft.Revision);
             _placements = _placements.Where(placement => placement.Id != placementId).ToList();
             _confirmDeletePlacementId = null;
             _liveMessage = "Image placement deleted.";
+            await RefreshWorkspaceAsync();
+            _editionDraft.Revision = _workspace!.Edition.Revision;
         }
         catch (Exception ex)
         {
@@ -1499,11 +2092,13 @@ else
         _exportError = null;
         try
         {
-            await FlushProfileSaveAsync();
-            if (_profileSaveState == SaveState.SaveFailed || HasPendingProfileSave)
+            await FlushEditionSaveAsync();
+            if (_editionSaveState == SaveState.SaveFailed || HasPendingEditionSave)
                 throw new InvalidOperationException("Your latest publishing settings could not be saved. Retry the save before exporting.");
 
-            var file = await Publishing.ExportAsync(Project.Id, format);
+            if (_selectedEditionId is not Guid editionId)
+                throw new InvalidOperationException("Select a publication edition before exporting.");
+            var file = await Publishing.ExportAsync(Project.Id, editionId, format);
             await _downloadModule.InvokeVoidAsync("downloadBytes", file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
             _liveMessage = $"{ExportFormatLabel(format)} export downloaded.";
         }
@@ -1525,8 +2120,8 @@ else
         _exportError = null;
         try
         {
-            await FlushProfileSaveAsync();
-            if (_profileSaveState == SaveState.SaveFailed || HasPendingProfileSave)
+            await FlushEditionSaveAsync();
+            if (_editionSaveState == SaveState.SaveFailed || HasPendingEditionSave)
                 throw new InvalidOperationException("Your latest publishing settings could not be saved. Retry the save before opening the publish view.");
             _printDialogUrl = PrintUrl(autoprint);
             _printDialogLoading = true;
@@ -1585,9 +2180,9 @@ else
         NormalizePlacementKind();
     }
 
-    private bool IsCoverChapter(Guid chapterId) => _workspace?.Profile.SelectedCoverChapterId == chapterId;
+    private bool IsCoverChapter(Guid chapterId) => _workspace?.Edition.SelectedCoverChapterId == chapterId;
 
-    private bool PlacementIsActive(PublishImagePlacementView placement) =>
+    private bool PlacementIsActive(PublicationImagePlacementView placement) =>
         PlacementTargets.Any(target => target.Kind == placement.TargetKind && target.Id == placement.TargetId);
 
     private static bool IsNonPortraitCover(ChapterPageLayoutKind kind) => kind != ChapterPageLayoutKind.SinglePortrait;
@@ -1626,14 +2221,14 @@ else
         _ => "Single portrait",
     };
 
-    private static string HumanizePlacement(PublishImagePlacementKind kind) => kind switch
+    private static string HumanizePlacement(PublicationImagePlacementKind kind) => kind switch
     {
-        PublishImagePlacementKind.BeforeAct => "Before act",
-        PublishImagePlacementKind.AfterAct => "After act",
-        PublishImagePlacementKind.BeforeChapter => "Before chapter",
-        PublishImagePlacementKind.ChapterOpening => "Chapter opening",
-        PublishImagePlacementKind.ChapterEnding => "Chapter ending",
-        PublishImagePlacementKind.AfterChapter => "After chapter",
+        PublicationImagePlacementKind.BeforeAct => "Before act",
+        PublicationImagePlacementKind.AfterAct => "After act",
+        PublicationImagePlacementKind.BeforeChapter => "Before chapter",
+        PublicationImagePlacementKind.ChapterOpening => "Chapter opening",
+        PublicationImagePlacementKind.ChapterEnding => "Chapter ending",
+        PublicationImagePlacementKind.AfterChapter => "After chapter",
         _ => kind.ToString(),
     };
 
@@ -1648,7 +2243,7 @@ else
     {
         _disposing = true;
         _navHandlerRegistration?.Dispose();
-        try { await FlushProfileSaveAsync(); } catch { }
+        try { await FlushEditionSaveAsync(); } catch { }
 
         if (_downloadModule is not null)
         {
@@ -1666,8 +2261,17 @@ else
 
     private sealed record PlacementTarget(PublishOutlineTargetKind Kind, Guid Id, string Label);
 
-    private sealed class ProfileDraft
+    private sealed class EditionDraft
     {
+        public long Revision { get; set; }
+        public string Name { get; set; } = "Edition";
+        public PublicationEditionFormat Format { get; set; } = PublicationEditionFormat.Paperback;
+        public PublicationVendor Vendor { get; set; } = PublicationVendor.Generic;
+        public string VendorProfileVersion { get; set; } = "preview-1";
+        public PublicationBinding Binding { get; set; } = PublicationBinding.PerfectBound;
+        public PublicationPaper Paper { get; set; } = PublicationPaper.White;
+        public PublicationInk Ink { get; set; } = PublicationInk.BlackAndWhite;
+        public bool Bleed { get; set; }
         public string TitleOverride { get; set; } = string.Empty;
         public string Subtitle { get; set; } = string.Empty;
         public string Author { get; set; } = string.Empty;
@@ -1676,9 +2280,6 @@ else
         public string Copyright { get; set; } = string.Empty;
         public string Isbn { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
-        public string Dedication { get; set; } = string.Empty;
-        public string Acknowledgments { get; set; } = string.Empty;
-        public string References { get; set; } = string.Empty;
         public bool IncludeTableOfContents { get; set; } = true;
         public bool IncludeVisibleTableOfContents { get; set; } = true;
         public bool IncludeActSynopses { get; set; }
@@ -1696,8 +2297,17 @@ else
         public double BodyFontSizePoints { get; set; } = 12;
         public double BodyLineHeight { get; set; } = 1.55;
 
-        public static ProfileDraft From(PublishProfileView profile) => new()
+        public static EditionDraft From(PublicationEditionView profile) => new()
         {
+            Revision = profile.Revision,
+            Name = profile.Name,
+            Format = profile.Format,
+            Vendor = profile.Vendor,
+            VendorProfileVersion = profile.VendorProfileVersion,
+            Binding = profile.Binding,
+            Paper = profile.Paper,
+            Ink = profile.Ink,
+            Bleed = profile.Bleed,
             TitleOverride = profile.TitleOverride,
             Subtitle = profile.Subtitle,
             Author = profile.Author,
@@ -1706,9 +2316,6 @@ else
             Copyright = profile.Copyright,
             Isbn = profile.Isbn,
             Description = profile.Description,
-            Dedication = profile.Dedication,
-            Acknowledgments = profile.Acknowledgments,
-            References = profile.References,
             IncludeTableOfContents = profile.IncludeTableOfContents,
             IncludeVisibleTableOfContents = profile.IncludeVisibleTableOfContents,
             IncludeActSynopses = profile.IncludeActSynopses,
@@ -1727,7 +2334,7 @@ else
             BodyLineHeight = profile.BodyLineHeight,
         };
 
-        public PublishProfileUpdate ToUpdate() => new(
+        public PublicationEditionUpdate ToUpdate() => new(
             TitleOverride,
             Subtitle,
             Author,
@@ -1736,9 +2343,6 @@ else
             Copyright,
             Isbn,
             Description,
-            Dedication,
-            Acknowledgments,
-            References,
             IncludeTableOfContents,
             IncludeVisibleTableOfContents,
             IncludeActSynopses,
@@ -1754,6 +2358,15 @@ else
             PageHeightInches,
             PageMarginInches,
             BodyFontSizePoints,
-            BodyLineHeight);
+            BodyLineHeight,
+            Revision,
+            Name,
+            Format,
+            Vendor,
+            VendorProfileVersion,
+            Binding,
+            Paper,
+            Ink,
+            Bleed);
     }
 }

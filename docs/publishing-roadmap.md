@@ -309,7 +309,7 @@ between manual and assistant edits.
 
 #### 4. Publication editions and book structure
 
-Status: `Planned`
+Status: `Implementation complete; release validation pending`
 
 Evolve the one-profile Publish workspace into edition-scoped configuration.
 

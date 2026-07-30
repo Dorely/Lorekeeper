@@ -9,6 +9,72 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
+    public void V10WritesEditionsWithoutLegacyPublishProfiles()
+    {
+        var document = Document(new ProjectExportChapter());
+        var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
+
+        Assert.Equal(10, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"publishProfiles\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void V9PublishProfileIsolatedAdapterCreatesMatterAndClearsLegacyShape()
+    {
+        var projectId = Guid.NewGuid();
+        var legacyId = Guid.NewGuid();
+        var legacy = new ProjectExportLegacyPublishProfile(
+            legacyId,
+            "Legacy title",
+            "",
+            "Author",
+            "en",
+            "",
+            "",
+            "",
+            "",
+            "For my family",
+            "Thanks",
+            "",
+            true,
+            true,
+            false,
+            false,
+            true,
+            true,
+            false,
+            false,
+            PublishTitlePageMode.Automatic,
+            PrintPicturePageSpreadMode.WholeSpread,
+            EpubPicturePageSpreadMode.RequestLandscape,
+            6,
+            9,
+            0.75,
+            11,
+            1.3,
+            null);
+        var document = Document(new ProjectExportChapter()) with
+        {
+            FormatVersion = 9,
+            Project = new ProjectExportProject(projectId, "Book", "book", "", true, true),
+            LegacyPublishProfiles = [legacy],
+        };
+
+        var adapted = ProjectImportJobProcessor.AdaptLegacyPublicationEditions(document);
+
+        Assert.Null(adapted.LegacyPublishProfiles);
+        var edition = Assert.Single(adapted.PublicationEditions);
+        Assert.Equal(legacyId, edition.Id);
+        Assert.Equal(PublicationEditionFormat.Paperback, edition.Format);
+        Assert.Equal(2, edition.Matter.Count);
+        Assert.All(edition.Matter, item =>
+            Assert.Equal(
+                item.Id,
+                ManuscriptCodec.Deserialize(item.ManuscriptJson).ManuscriptId));
+    }
+
+    [Fact]
     public void CurrentChapterWritesStructuredManuscriptWithoutLegacyBody()
     {
         var chapterId = Guid.NewGuid();

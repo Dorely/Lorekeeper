@@ -247,6 +247,11 @@ builder.Services.AddScoped<IPublishExportFormatter, PlainTextPublishFormatter>()
 builder.Services.AddScoped<IPublishExportFormatter, MarkdownPublishFormatter>();
 builder.Services.AddScoped<IPublishExportFormatter, EpubPublishFormatter>();
 builder.Services.AddScoped<IPublishService, PublishService>();
+builder.Services.AddScoped<IPublicationEditionService, PublicationEditionService>();
+builder.Services.AddScoped<IPublicationActorContext, PublicationActorContext>();
+builder.Services.AddScoped<PublishAssistantTools>();
+builder.Services.AddScoped<IPublishAssistantService, PublishAssistantService>();
+builder.Services.AddSingleton<IPublicationEditionMigrationService, PublicationEditionMigrationService>();
 builder.Services.AddScoped<IPageGeometryService, PageGeometryService>();
 
 // Context + editor chat
@@ -281,6 +286,8 @@ using (var scope = app.Services.CreateScope())
 
     var manuscriptMigration = scope.ServiceProvider.GetRequiredService<IManuscriptMigrationService>();
     await manuscriptMigration.ApplyPendingAsync(db);
+    var editionMigration = scope.ServiceProvider.GetRequiredService<IPublicationEditionMigrationService>();
+    await editionMigration.ApplyPendingAsync(db);
 
     var embeddingConfiguration = await db.EmbeddingConfigurations.AsNoTracking().FirstOrDefaultAsync();
     var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();

@@ -311,7 +311,10 @@
 | `ProjectImportJob.cs` | EF entity for durable project import job state: uploaded JSON payload, source format metadata, status/progress counters, import counts, warnings, errors, and timestamps. |
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
-| `PublishProfile.cs` | EF entity and enums for one saved publish profile per project: metadata, matter, title-page behavior, independent PDF/EPUB spread modes, prose pagination, and the optional Picture Page cover. |
+| `PublicationEdition.cs` | Edition aggregate root and product enums for independent paperback/EPUB settings, metadata, geometry, identifier, status, default selection, and Picture Page cover source. |
+| `PublicationEditionOutlineItem.cs` | Edition-owned, ordered act/chapter inclusion records with typed foreign keys. |
+| `PublicationMatter.cs` | Edition-owned semantic front/back matter, named-style mappings, immutable audit entries, and edition-migration journal entities. |
+| `PublicationImagePlacement.cs` | Edition-owned interior image placements before/after acts or chapters and at chapter openings/endings. |
 | `PublishAsset.cs` | EF entity for uploaded/generated/edited/cropped project images with bytes, crop lineage/coordinates, alt text, prompt/source metadata, masks, and placement navigation. |
 | `EntityVisualExample.cs` | Ordered labeled many-to-many link between an eligible graph entity and project image, with origin and source provenance. |
 | `SourceVisualCandidate.cs` | Cached normalized Research/Ingest image bytes and artifact/web provenance before project-library promotion. |
@@ -321,8 +324,6 @@
 | `ProjectImageMessageVisual.cs` | EF entity for Images Chat visual attachments, including project-image references or optional stored bytes. |
 | `ProjectImageGenerationJob.cs` | EF image job with structured brief, compiled prompt, ordered reference manifest, target geometry, provider revised prompts/IDs, outputs, progress, and diagnostics. |
 | `ProjectImageMask.cs` | EF entity for validated PNG masks tied to source project images, using transparent pixels as editable regions. |
-| `PublishOutlineSelection.cs` | EF entity for per-project act/chapter publish inclusion flags; act selection controls the act page while chapters remain independently selectable. |
-| `PublishImagePlacement.cs` | EF entity for cover-independent interior image placements before/after acts or chapters and chapter openings/endings, with captions and ordering. |
 | `GraphNode.cs` | Generic graph node: `(ProjectId, NodeType, Key)` unique, JSON properties bag. Cascade-deleted with its `Project`. |
 | `GraphEdge.cs` | Directed edge between graph nodes with type, JSON properties, optional relationship-specific `SortOrder`, and timestamps. |
 | `GraphEntityType.cs` | Lightweight project-scoped graph type registry entry for UI/LLM labels/defaults. Descriptive rather than restrictive; arbitrary node types remain valid. |
@@ -335,7 +336,7 @@
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | Immutable EF history plus structured-manuscript and semantic-editor/named-style forward migrations with the current model snapshot. |
+| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, and lossless publication-edition forward migrations with the current model snapshot. |
 
 ### Persistence/Repositories/
 
@@ -586,9 +587,14 @@
 
 | File | Description |
 |------|-------------|
-| `PublishModels.cs` | Publish workspace/document/export records including editable page/body metrics, presentation modes, covers, selections, placements, and rendered PicturePage geometry. |
-| `PageGeometryService.cs` | Single publish-profile-derived page/spread calculation consumed by viewer pagination, rendering, image targeting, diagnostics, and publishing. |
-| `IPublishService.cs` / `PublishService.cs` | Publish facade for profile/cover/outline/placement persistence and exports; resolves cover-aware title behavior and enriches EPUBs with native or sideways composited Picture Page surfaces. |
+| `PublishModels.cs` | Edition workspace, revision-aware mutations, matter/style mapping, document projection, export, cover, selection, placement, and rendered Picture Page contracts. |
+| `PageGeometryService.cs` | Default-publication-edition-derived page/spread calculation consumed by viewer pagination, rendering, image targeting, diagnostics, and publishing. |
+| `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning application boundary for edition lifecycle, settings, content, matter, style mappings, placements, audit history, comparison, and deterministic source fingerprints. |
+| `PublicationEditionMigrationService.cs` | Independent v10 online-backup, mapping-hash, validation, and journal boundary for losslessly replacing legacy single-profile publishing state. |
+| `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
+| `PublishAssistantTools.cs` | Dedicated Publish assistant tool catalog exposing the complete edition mutation/read surface and migration diagnostics through owning services. |
+| `PublishAssistantService.cs` | Visible dedicated Publish assistant one-turn orchestration using the configured chat provider and the shared Publish tool catalog. |
+| `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade for edition-scoped TXT, Markdown, EPUB, and print-preview documents. |
 | `PublishEndpoints.cs` | Cacheable HTTP endpoints for validated guide-free cover previews and native or clockwise-rotated high-resolution interior Picture Page surfaces, avoiding large Blazor payloads. |
 | `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus a mixed-layout EPUB writer using Publish Profile type metrics and shared geometry for reflowable prose and accessible fixed cover/Picture Page items. |
 

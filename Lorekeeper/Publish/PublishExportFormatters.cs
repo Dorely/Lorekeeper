@@ -181,7 +181,7 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
 
         foreach (var section in document.Sections)
         {
-            AppendPlacements(sb, document, PublishOutlineTargetKind.Act, section.ActId, PublishImagePlacementKind.BeforeAct);
+            AppendPlacements(sb, document, PublishOutlineTargetKind.Act, section.ActId, PublicationImagePlacementKind.BeforeAct);
             if (section.IncludePage)
             {
                 if (section.IncludeHeading)
@@ -190,20 +190,20 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
                     AppendBlockquote(sb, section.Synopsis);
             }
 
-            AppendPlacements(sb, document, PublishOutlineTargetKind.Act, section.ActId, PublishImagePlacementKind.AfterAct);
+            AppendPlacements(sb, document, PublishOutlineTargetKind.Act, section.ActId, PublicationImagePlacementKind.AfterAct);
 
             foreach (var chapter in section.Chapters)
             {
-                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.BeforeChapter);
+                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.BeforeChapter);
                 sb.AppendLine();
                 if (chapter.IncludeHeading)
                     sb.Append("### ").AppendLine(EscapeHeading(chapter.Title));
                 if (document.Profile.IncludeChapterSynopses)
                     AppendBlockquote(sb, chapter.Synopsis);
-                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterOpening);
+                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.ChapterOpening);
                 AppendVisualMarkdown(sb, document, chapter);
-                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding);
-                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.AfterChapter);
+                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.ChapterEnding);
+                AppendPlacements(sb, document, PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.AfterChapter);
             }
         }
 
@@ -266,7 +266,7 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
         PublishDocument document,
         PublishOutlineTargetKind targetKind,
         Guid? targetId,
-        PublishImagePlacementKind placementKind)
+        PublicationImagePlacementKind placementKind)
     {
         if (targetId is null) return;
         foreach (var placement in document.Placements.Where(placement =>
@@ -557,7 +557,7 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
             chapter,
             imageItems,
             $"{chapterId}-before",
-            [PublishImagePlacementKind.BeforeChapter, PublishImagePlacementKind.ChapterOpening]);
+            [PublicationImagePlacementKind.BeforeChapter, PublicationImagePlacementKind.ChapterOpening]);
 
         if (picturePage.SurfaceWidthPixels <= 0 || picturePage.SurfaceHeightPixels <= 0)
             throw new InvalidOperationException($"Picture Page chapter '{chapter.Title}' has invalid rendered surface dimensions.");
@@ -590,7 +590,7 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
             chapter,
             imageItems,
             $"{chapterId}-after",
-            [PublishImagePlacementKind.ChapterEnding, PublishImagePlacementKind.AfterChapter]);
+            [PublicationImagePlacementKind.ChapterEnding, PublicationImagePlacementKind.AfterChapter]);
     }
 
     private static void AddPicturePageCompanion(
@@ -599,7 +599,7 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
         PublishChapterDocument chapter,
         IReadOnlyList<EpubImageItem> imageItems,
         string id,
-        IReadOnlyList<PublishImagePlacementKind> placementKinds)
+        IReadOnlyList<PublicationImagePlacementKind> placementKinds)
     {
         var figures = new StringBuilder();
         foreach (var placementKind in placementKinds)
@@ -691,31 +691,31 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
     private static string RenderActBody(PublishDocument document, PublishSectionDocument section, IReadOnlyList<EpubImageItem> imageItems)
     {
         var sb = new StringBuilder();
-        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Act, section.ActId, PublishImagePlacementKind.BeforeAct);
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Act, section.ActId, PublicationImagePlacementKind.BeforeAct);
         sb.AppendLine("<section class=\"act-page\">");
         if (section.IncludeHeading)
             sb.Append("<h1>").Append(Html(section.Title)).AppendLine("</h1>");
         if (document.Profile.IncludeActSynopses)
             AppendTextBlocks(sb, section.Synopsis, "synopsis");
         sb.AppendLine("</section>");
-        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Act, section.ActId, PublishImagePlacementKind.AfterAct);
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Act, section.ActId, PublicationImagePlacementKind.AfterAct);
         return sb.ToString();
     }
 
     private static string RenderChapterBody(PublishDocument document, PublishChapterDocument chapter, IReadOnlyList<EpubImageItem> imageItems)
     {
         var sb = new StringBuilder();
-        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.BeforeChapter);
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.BeforeChapter);
         sb.AppendLine("<article class=\"chapter-page\">");
         if (chapter.IncludeHeading)
             sb.Append("<h1>").Append(Html(chapter.Title)).AppendLine("</h1>");
         if (document.Profile.IncludeChapterSynopses)
             AppendTextBlocks(sb, chapter.Synopsis, "synopsis");
-        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterOpening);
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.ChapterOpening);
         AppendVisualChapterBody(sb, chapter, imageItems);
-        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.ChapterEnding);
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.ChapterEnding);
         sb.AppendLine("</article>");
-        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublishImagePlacementKind.AfterChapter);
+        AppendFigures(sb, document, imageItems, PublishOutlineTargetKind.Chapter, chapter.Id, PublicationImagePlacementKind.AfterChapter);
         return sb.ToString();
     }
 
@@ -734,7 +734,7 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
         IReadOnlyList<EpubImageItem> imageItems,
         PublishOutlineTargetKind targetKind,
         Guid? targetId,
-        PublishImagePlacementKind placementKind)
+        PublicationImagePlacementKind placementKind)
     {
         if (targetId is null) return;
         foreach (var placement in document.Placements.Where(placement =>
@@ -973,7 +973,7 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
         }
     }
 
-    private static IReadOnlyList<PublishImagePlacementDocument> Placements(PublishDocument document, PublishOutlineTargetKind kind, Guid? targetId) =>
+    private static IReadOnlyList<PublicationImagePlacementDocument> Placements(PublishDocument document, PublishOutlineTargetKind kind, Guid? targetId) =>
         targetId is null
             ? []
             : document.Placements.Where(placement => placement.TargetKind == kind && placement.TargetId == targetId).ToList();

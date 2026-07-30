@@ -59,12 +59,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<WebIngestCandidate> WebIngestCandidates => Set<WebIngestCandidate>();
     public DbSet<ProjectImportJob> ProjectImportJobs => Set<ProjectImportJob>();
     public DbSet<ProjectImportReportItem> ProjectImportReportItems => Set<ProjectImportReportItem>();
-    public DbSet<PublishProfile> PublishProfiles => Set<PublishProfile>();
+    public DbSet<PublicationEdition> PublicationEditions => Set<PublicationEdition>();
+    public DbSet<PublicationEditionOutlineItem> PublicationEditionOutlineItems => Set<PublicationEditionOutlineItem>();
+    public DbSet<PublicationMatter> PublicationMatter => Set<PublicationMatter>();
+    public DbSet<PublicationEditionStyleMapping> PublicationEditionStyleMappings => Set<PublicationEditionStyleMapping>();
+    public DbSet<PublicationImagePlacement> PublicationImagePlacements => Set<PublicationImagePlacement>();
+    public DbSet<PublicationEditionAuditEntry> PublicationEditionAuditEntries => Set<PublicationEditionAuditEntry>();
+    public DbSet<PublicationEditionMigrationJournal> PublicationEditionMigrationJournals => Set<PublicationEditionMigrationJournal>();
     public DbSet<PublishAsset> PublishAssets => Set<PublishAsset>();
     public DbSet<ProjectImageGenerationJob> ProjectImageGenerationJobs => Set<ProjectImageGenerationJob>();
     public DbSet<ProjectImageMask> ProjectImageMasks => Set<ProjectImageMask>();
-    public DbSet<PublishOutlineSelection> PublishOutlineSelections => Set<PublishOutlineSelection>();
-    public DbSet<PublishImagePlacement> PublishImagePlacements => Set<PublishImagePlacement>();
     public DbSet<EntityVisualExample> EntityVisualExamples => Set<EntityVisualExample>();
     public DbSet<SourceVisualCandidate> SourceVisualCandidates => Set<SourceVisualCandidate>();
     public DbSet<ProjectFontFamily> ProjectFontFamilies => Set<ProjectFontFamily>();
@@ -738,21 +742,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<PublishProfile>(entity =>
+        modelBuilder.Entity<PublicationEdition>(entity =>
         {
-            entity.HasIndex(e => e.ProjectId).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.Name }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.IsDefault })
+                .IsUnique()
+                .HasFilter("\"IsDefault\" = 1");
             entity.HasIndex(e => e.SelectedCoverChapterId);
+            entity.Property(e => e.Format).HasConversion<string>();
+            entity.Property(e => e.Vendor).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+            entity.Property(e => e.Binding).HasConversion<string>();
+            entity.Property(e => e.Paper).HasConversion<string>();
+            entity.Property(e => e.Ink).HasConversion<string>();
             entity.Property(e => e.TitlePageMode).HasConversion<string>();
             entity.Property(e => e.PrintPicturePageSpreadMode).HasConversion<string>();
             entity.Property(e => e.EpubPicturePageSpreadMode).HasConversion<string>();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
 
             entity.HasOne(e => e.Project)
-                .WithMany(p => p.PublishProfiles)
+                .WithMany(p => p.PublicationEditions)
                 .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasOne(e => e.SelectedCoverChapter)
-                .WithMany(chapter => chapter.CoverProfiles)
+                .WithMany(chapter => chapter.CoverEditions)
                 .HasForeignKey(e => e.SelectedCoverChapterId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
@@ -903,33 +917,91 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<PublishOutlineSelection>(entity =>
+        modelBuilder.Entity<PublicationEditionOutlineItem>(entity =>
         {
-            entity.HasIndex(e => new { e.ProjectId, e.TargetKind, e.TargetId }).IsUnique();
+            entity.HasIndex(e => new { e.EditionId, e.TargetKind, e.TargetId }).IsUnique();
+            entity.HasIndex(e => new { e.EditionId, e.SortOrder });
             entity.Property(e => e.TargetKind).HasConversion<string>();
 
-            entity.HasOne(e => e.Project)
-                .WithMany(p => p.PublishOutlineSelections)
-                .HasForeignKey(e => e.ProjectId)
+            entity.HasOne(e => e.Edition)
+                .WithMany(e => e.OutlineItems)
+                .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Act)
+                .WithMany()
+                .HasForeignKey(e => e.ActId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Chapter)
+                .WithMany()
+                .HasForeignKey(e => e.ChapterId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<PublishImagePlacement>(entity =>
+        modelBuilder.Entity<PublicationImagePlacement>(entity =>
         {
-            entity.HasIndex(e => new { e.ProjectId, e.TargetKind, e.TargetId, e.PlacementKind, e.SortOrder });
+            entity.HasIndex(e => new { e.EditionId, e.TargetKind, e.TargetId, e.PlacementKind, e.SortOrder });
             entity.HasIndex(e => e.AssetId);
             entity.Property(e => e.TargetKind).HasConversion<string>();
             entity.Property(e => e.PlacementKind).HasConversion<string>();
 
-            entity.HasOne(e => e.Project)
-                .WithMany(p => p.PublishImagePlacements)
-                .HasForeignKey(e => e.ProjectId)
+            entity.HasOne(e => e.Edition)
+                .WithMany(e => e.ImagePlacements)
+                .HasForeignKey(e => e.EditionId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasOne(e => e.Asset)
-                .WithMany(a => a.ImagePlacements)
+                .WithMany(a => a.PublicationPlacements)
                 .HasForeignKey(e => e.AssetId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Act)
+                .WithMany()
+                .HasForeignKey(e => e.ActId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Chapter)
+                .WithMany()
+                .HasForeignKey(e => e.ChapterId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationMatter>(entity =>
+        {
+            entity.HasIndex(e => new { e.EditionId, e.Location, e.SortOrder });
+            entity.Property(e => e.Location).HasConversion<string>();
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Edition)
+                .WithMany(e => e.Matter)
+                .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationEditionStyleMapping>(entity =>
+        {
+            entity.HasIndex(e => new { e.EditionId, e.ManuscriptStyleDefinitionId }).IsUnique();
+            entity.HasIndex(e => new { e.EditionId, e.SemanticRole }).IsUnique();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Edition)
+                .WithMany(e => e.StyleMappings)
+                .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.ManuscriptStyleDefinition)
+                .WithMany()
+                .HasForeignKey(e => e.ManuscriptStyleDefinitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationEditionAuditEntry>(entity =>
+        {
+            entity.HasIndex(e => new { e.EditionId, e.CreatedAt });
+            entity.HasOne(e => e.Edition)
+                .WithMany(e => e.AuditEntries)
+                .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationEditionMigrationJournal>(entity =>
+        {
+            entity.HasIndex(e => new { e.MigrationName, e.StartedAt });
         });
     }
 }

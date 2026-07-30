@@ -139,13 +139,19 @@ public sealed class ProjectImportExportService(
                     .Select(asset => ProjectImage(asset))
                     .ToListAsync(cancellationToken),
             EntityVisualExamples = exportedVisualExamples,
-            PublishProfiles = kind == ProjectExportKind.Full
-                ? await db.PublishProfiles
+            PublicationEditions = kind == ProjectExportKind.Full
+                ? (await db.PublicationEditions
                     .AsNoTracking()
+                    .Include(edition => edition.OutlineItems)
+                    .Include(edition => edition.Matter)
+                    .Include(edition => edition.StyleMappings)
+                    .Include(edition => edition.ImagePlacements)
                     .Where(profile => profile.ProjectId == projectId)
-                    .OrderBy(profile => profile.CreatedAt)
-                    .Select(profile => ProjectPublishProfile(profile))
-                    .ToListAsync(cancellationToken)
+                    .OrderByDescending(profile => profile.IsDefault)
+                    .ThenBy(profile => profile.CreatedAt)
+                    .ToListAsync(cancellationToken))
+                    .Select(ProjectPublicationEdition)
+                    .ToList()
                 : [],
             ManuscriptStyles = kind == ProjectExportKind.Full
                 ? (await db.ManuscriptStyleDefinitions
@@ -315,9 +321,16 @@ public sealed class ProjectImportExportService(
             asset.CreatedAt,
             asset.UpdatedAt);
 
-    private static ProjectExportPublishProfile ProjectPublishProfile(PublishProfile profile) =>
+    private static ProjectExportPublicationEdition ProjectPublicationEdition(PublicationEdition profile) =>
         new(
             profile.Id,
+            profile.Name,
+            profile.Format,
+            profile.Vendor,
+            profile.VendorProfileVersion,
+            profile.Status,
+            profile.IsDefault,
+            profile.Revision,
             profile.TitleOverride,
             profile.Subtitle,
             profile.Author,
@@ -326,9 +339,6 @@ public sealed class ProjectImportExportService(
             profile.Copyright,
             profile.Isbn,
             profile.Description,
-            profile.Dedication,
-            profile.Acknowledgments,
-            profile.References,
             profile.IncludeTableOfContents,
             profile.IncludeVisibleTableOfContents,
             profile.IncludeActSynopses,
@@ -345,7 +355,56 @@ public sealed class ProjectImportExportService(
             profile.PageMarginInches,
             profile.BodyFontSizePoints,
             profile.BodyLineHeight,
-            profile.SelectedCoverChapterId);
+            profile.SelectedCoverChapterId,
+            profile.Binding,
+            profile.Paper,
+            profile.Ink,
+            profile.Bleed,
+            profile.OutlineItems
+                .OrderBy(item => item.SortOrder)
+                .Select(item => new ProjectExportEditionOutlineItem(
+                    item.Id,
+                    item.TargetKind,
+                    item.TargetId,
+                    item.IsIncluded,
+                    item.SortOrder))
+                .ToList(),
+            profile.Matter
+                .OrderBy(item => item.Location)
+                .ThenBy(item => item.SortOrder)
+                .Select(item => new ProjectExportPublicationMatter(
+                    item.Id,
+                    item.Location,
+                    item.Kind,
+                    item.Title,
+                    item.ManuscriptJson,
+                    item.Revision,
+                    item.IsIncluded,
+                    item.SortOrder))
+                .ToList(),
+            profile.StyleMappings
+                .OrderBy(item => item.SemanticRole)
+                .Select(item => new ProjectExportEditionStyleMapping(
+                    item.Id,
+                    item.ManuscriptStyleDefinitionId,
+                    item.SemanticRole,
+                    ManuscriptStyleService.NormalizeDefinition(
+                        JsonSerializer.Deserialize<ManuscriptStyleProperties>(
+                            item.OverrideJson,
+                            ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties()),
+                    item.Revision))
+                .ToList(),
+            profile.ImagePlacements
+                .OrderBy(item => item.SortOrder)
+                .Select(item => new ProjectExportPublicationImagePlacement(
+                    item.Id,
+                    item.AssetId,
+                    item.TargetKind,
+                    item.TargetId,
+                    item.PlacementKind,
+                    item.Caption,
+                    item.SortOrder))
+                .ToList());
 
     private static ProjectExportChapter ProjectChapter(
         Chapter chapter,

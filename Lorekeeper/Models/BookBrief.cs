@@ -45,7 +45,7 @@ public enum BookBriefField
 
 /// <summary>
 /// Canonical project-level creative direction. Publication metadata and physical output
-/// geometry remain in <see cref="PublishProfile"/>; story canon remains in the outline,
+/// geometry remain in <see cref="PublicationEdition"/>; story canon remains in the outline,
 /// entities, links, beats, and project facts.
 /// </summary>
 public sealed class BookBrief

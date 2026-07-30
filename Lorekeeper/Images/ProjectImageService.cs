@@ -313,8 +313,10 @@ public sealed class ProjectImageService(
         }
         var entityIds = await AttachedEntityIdsAsync(projectId, imageId, cancellationToken);
 
-        foreach (var placement in await db.PublishImagePlacements.Where(placement => placement.ProjectId == projectId && placement.AssetId == imageId).ToListAsync(cancellationToken))
-            db.PublishImagePlacements.Remove(placement);
+        foreach (var placement in await db.PublicationImagePlacements
+            .Where(placement => placement.Edition.ProjectId == projectId && placement.AssetId == imageId)
+            .ToListAsync(cancellationToken))
+            db.PublicationImagePlacements.Remove(placement);
 
         await chapterVisuals.RemoveImageReferencesUnderProjectMutationLeaseAsync(
             projectId,

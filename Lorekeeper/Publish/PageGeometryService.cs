@@ -28,7 +28,7 @@ public interface IPageGeometryService
         ChapterPageLayoutKind layoutKind,
         CancellationToken cancellationToken = default);
 
-    BookPageGeometry Calculate(PublishProfile? profile, ChapterPageLayoutKind layoutKind);
+    BookPageGeometry Calculate(PublicationEdition? profile, ChapterPageLayoutKind layoutKind);
 
     BookPageGeometry Calculate(
         double pageWidthInches,
@@ -53,13 +53,15 @@ public sealed class PageGeometryService(AppDbContext db) : IPageGeometryService
         ChapterPageLayoutKind layoutKind,
         CancellationToken cancellationToken = default)
     {
-        var profile = await db.PublishProfiles
+        var profile = await db.PublicationEditions
             .AsNoTracking()
-            .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId, cancellationToken);
+            .FirstOrDefaultAsync(
+                candidate => candidate.ProjectId == projectId && candidate.IsDefault,
+                cancellationToken);
         return Calculate(profile, layoutKind);
     }
 
-    public BookPageGeometry Calculate(PublishProfile? profile, ChapterPageLayoutKind layoutKind)
+    public BookPageGeometry Calculate(PublicationEdition? profile, ChapterPageLayoutKind layoutKind)
         => CalculateValues(
             profile?.PageWidthInches,
             profile?.PageHeightInches,

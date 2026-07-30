@@ -186,17 +186,20 @@ revision; stale visual editors fail closed, reload the current layout, and show
 a visible conflict notice. Visual saves validate every referenced image under
 the same cross-process project mutation lease.
 `IPageGeometryService` provides the shared page/spread calculations used by the
-editor, image targets, diagnostics, previews, and exporters. Publishing services
-own metadata, outline selection, image placement, covers, and TXT, Markdown,
-EPUB, and browser/OS print-preview output. Do not duplicate page geometry or
-silently diverge editor and export rendering rules.
+editor, image targets, diagnostics, previews, and exporters.
+`IPublicationEditionService` owns the one-to-many edition aggregate: product
+settings and identifiers, independently ordered content, semantic front/back
+matter, named-style mappings, image placements, Picture Page cover selection,
+revision tokens, cloning, archival, comparison, audit history, and deterministic
+source fingerprints. `IPublishService` is now projection/export-only; UI and
+assistant mutations use the edition service rather than parallel publish logic.
+Project export v10 writes the edition aggregate and isolated v9-or-earlier import
+adapters translate the obsolete single-profile shape at the import boundary.
 
-The current Print/PDF path is an HTML print view handed to the browser or
-operating-system print dialog. It does not generate, parse, or certify PDF bytes,
-does not implement PDF/X, and does not represent vendor-specific preflight.
-`PublishProfile` is currently one project-owned profile rather than a
-multi-edition production model. These are current boundaries, not press-ready
-claims.
+The current Print/PDF path remains an edition-scoped HTML print view handed to
+the browser or operating-system print dialog. It does not yet generate, parse,
+or certify PDF bytes, implement PDF/X, or represent vendor-specific preflight.
+Those are the next publishing-roadmap features rather than current claims.
 
 `Lorekeeper.Press` proves only a local PDF 1.7 fixture path. Its versioned JSON
 protocol validates child job IDs, accepts semantic book content and explicit
@@ -225,13 +228,12 @@ the native notice bundle is incomplete. Acrobat/vendor/physical-proof evidence
 and cross-platform packaging also remain incomplete, so the spike returns no
 independently validated or claimed standard and is not a production runtime.
 
-The structured-manuscript boundary of the planned publishing architecture is
-implemented. Edition-specific projections, a production-contained press
-renderer, immutable artifacts/manifests, and their complete UI/assistant
-surfaces remain planned in the publishing roadmap and supporting research
-briefs. When implementation changes those boundaries, this architecture
-document must be updated in the same feature; the roadmap must not substitute
-for current technical documentation.
+The structured-manuscript and publication-edition boundaries of the planned
+publishing architecture are implemented. `PublishAssistantTools` exposes the
+complete edition/matter/style/placement service surface with the same IDs,
+validation, revisions, fingerprints, audit, and migration diagnostics used by
+the UI. A production-contained press renderer, immutable artifacts/manifests,
+and their UI/assistant surfaces remain the next planned boundary.
 
 ### Desktop and Release Behavior
 
@@ -279,6 +281,19 @@ backup, transaction, projection-hash, and journal boundary. Project export
 format v9 carries v2 manuscripts, stable visual references, and project named
 paragraph/character style definitions. The v8 manuscript-v1 adapter and v1-v7
 text adapters exist only at the import boundary.
+
+Startup then delegates the independent single-profile-to-editions cutover to
+`IPublicationEditionMigrationService`. Before applying the v10 forward
+migration it runs `quick_check`, creates an SQLite Online Backup snapshot under
+`.migration-backups/editions`, and hashes the normalized ownership mapping for
+profiles, selections, and placements. The migration creates a default paperback
+for each legacy profile and for profileless projects that already contain
+publishing rows, converts legacy dedication/acknowledgments/references into
+schema-v2 semantic matter, attaches every selection and placement to exactly
+one edition, removes the obsolete runtime tables, and validates row counts,
+foreign keys, matter documents, and an equal post-cutover mapping hash before
+recording its journal. A failure aborts startup and reports the protected backup
+path rather than permitting edits against a partially cut-over database.
 
 Manuscript v2 stores structural heading level separately from edition-independent
 style role, so assigning or removing a named paragraph style cannot change a

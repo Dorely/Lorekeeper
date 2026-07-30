@@ -13,6 +13,7 @@ namespace Lorekeeper.Publish;
 public sealed class PublishService(
     AppDbContext db,
     IChapterVisualService chapterVisuals,
+    IPublicationEditionService editions,
     IEnumerable<IPublishExportFormatter> formatters) : IPublishService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -20,10 +21,13 @@ public sealed class PublishService(
         WriteIndented = true,
     };
 
-    public async Task<PublishWorkspaceView> GetWorkspaceAsync(Guid projectId, CancellationToken cancellationToken = default)
+    public async Task<PublishWorkspaceView> GetWorkspaceAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken = default)
     {
         var project = await GetProjectAsync(projectId, cancellationToken);
-        var profile = await EnsureProfileAsync(project, cancellationToken);
+        var profile = await GetEditionAsync(projectId, editionId, cancellationToken);
         await ClearInvalidCoverChapterAsync(project, profile, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
@@ -37,13 +41,13 @@ public sealed class PublishService(
             .Where(chapter => chapter.ProjectId == projectId)
             .OrderBy(chapter => chapter.Order)
             .ToListAsync(cancellationToken);
-        var selections = await db.PublishOutlineSelections
+        var selections = await db.PublicationEditionOutlineItems
             .AsNoTracking()
-            .Where(selection => selection.ProjectId == projectId)
+            .Where(selection => selection.EditionId == editionId)
             .ToListAsync(cancellationToken);
-        var placementRows = await db.PublishImagePlacements
+        var placementRows = await db.PublicationImagePlacements
             .AsNoTracking()
-            .Where(placement => placement.ProjectId == projectId)
+            .Where(placement => placement.EditionId == editionId)
             .Select(placement => new PlacementRow(
                 placement.Id,
                 placement.AssetId,
@@ -62,334 +66,42 @@ public sealed class PublishService(
             .ThenBy(placement => placement.SortOrder)
             .ToList();
 
+        var matter = await db.PublicationMatter
+            .AsNoTracking()
+            .Where(item => item.EditionId == editionId)
+            .OrderBy(item => item.Location)
+            .ThenBy(item => item.SortOrder)
+            .Select(item => PublicationEditionService.MatterView(item))
+            .ToListAsync(cancellationToken);
+        var mappings = await db.PublicationEditionStyleMappings
+            .AsNoTracking()
+            .Where(mapping => mapping.EditionId == editionId)
+            .Include(mapping => mapping.ManuscriptStyleDefinition)
+            .OrderBy(mapping => mapping.SemanticRole)
+            .ToListAsync(cancellationToken);
+        var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         return new PublishWorkspaceView(
-            ProfileView(project, profile),
+            PublicationEditionService.View(project, profile),
+            await editions.ListAsync(projectId, cancellationToken),
             SectionViews(acts, chapters, selections, profile.SelectedCoverChapterId),
             CoverCandidateViews(projectId, acts, chapters),
-            placementViews);
+            placementViews,
+            matter,
+            mappings.Select(mapping => PublicationEditionService.StyleMappingView(
+                mapping,
+                mapping.ManuscriptStyleDefinition.Name)).ToList(),
+            fingerprint);
     }
 
-    public async Task SaveProfileAsync(Guid projectId, PublishProfileUpdate update, CancellationToken cancellationToken = default)
-    {
-        if (!Enum.IsDefined(update.TitlePageMode))
-            throw new ArgumentOutOfRangeException(nameof(update), "The title page mode is invalid.");
-        if (!Enum.IsDefined(update.PrintPicturePageSpreadMode))
-            throw new ArgumentOutOfRangeException(nameof(update), "The Print/PDF spread mode is invalid.");
-        if (!Enum.IsDefined(update.EpubPicturePageSpreadMode))
-            throw new ArgumentOutOfRangeException(nameof(update), "The EPUB spread mode is invalid.");
-        if (update.PageWidthInches is < 3 or > 24 || double.IsNaN(update.PageWidthInches) || double.IsInfinity(update.PageWidthInches))
-            throw new ArgumentOutOfRangeException(nameof(update), "Page width must be between 3 and 24 inches.");
-        if (update.PageHeightInches is < 3 or > 24 || double.IsNaN(update.PageHeightInches) || double.IsInfinity(update.PageHeightInches))
-            throw new ArgumentOutOfRangeException(nameof(update), "Page height must be between 3 and 24 inches.");
-        if (update.PageMarginInches < 0.125
-            || update.PageMarginInches > Math.Min(update.PageWidthInches, update.PageHeightInches) / 3
-            || double.IsNaN(update.PageMarginInches)
-            || double.IsInfinity(update.PageMarginInches))
-        {
-            throw new ArgumentOutOfRangeException(nameof(update), "Page margin must be at least 0.125 inches and no more than one third of the shorter page edge.");
-        }
-        if (update.BodyFontSizePoints is < 7 or > 72 || double.IsNaN(update.BodyFontSizePoints) || double.IsInfinity(update.BodyFontSizePoints))
-            throw new ArgumentOutOfRangeException(nameof(update), "Body font size must be between 7 and 72 points.");
-        if (update.BodyLineHeight is < 1 or > 2.4 || double.IsNaN(update.BodyLineHeight) || double.IsInfinity(update.BodyLineHeight))
-            throw new ArgumentOutOfRangeException(nameof(update), "Body line height must be between 1 and 2.4.");
-
-        var project = await GetProjectAsync(projectId, cancellationToken);
-        var profile = await EnsureProfileAsync(project, cancellationToken);
-        profile.TitleOverride = Clean(update.TitleOverride);
-        profile.Subtitle = Clean(update.Subtitle);
-        profile.Author = Clean(update.Author);
-        profile.Language = string.IsNullOrWhiteSpace(update.Language) ? "en" : Clean(update.Language);
-        profile.Publisher = Clean(update.Publisher);
-        profile.Copyright = Clean(update.Copyright);
-        profile.Isbn = Clean(update.Isbn);
-        profile.Description = Clean(update.Description);
-        profile.Dedication = Clean(update.Dedication);
-        profile.Acknowledgments = Clean(update.Acknowledgments);
-        profile.References = Clean(update.References);
-        profile.IncludeTableOfContents = update.IncludeTableOfContents;
-        profile.IncludeVisibleTableOfContents = update.IncludeVisibleTableOfContents;
-        profile.IncludeActSynopses = update.IncludeActSynopses;
-        profile.IncludeChapterSynopses = update.IncludeChapterSynopses;
-        profile.IncludeActHeadings = update.IncludeActHeadings;
-        profile.IncludeChapterHeadings = update.IncludeChapterHeadings;
-        profile.NumberActs = update.NumberActs;
-        profile.NumberChapters = update.NumberChapters;
-        profile.TitlePageMode = update.TitlePageMode;
-        profile.PrintPicturePageSpreadMode = update.PrintPicturePageSpreadMode;
-        profile.EpubPicturePageSpreadMode = update.EpubPicturePageSpreadMode;
-        profile.PageWidthInches = update.PageWidthInches;
-        profile.PageHeightInches = update.PageHeightInches;
-        profile.PageMarginInches = update.PageMarginInches;
-        profile.BodyFontSizePoints = update.BodyFontSizePoints;
-        profile.BodyLineHeight = update.BodyLineHeight;
-        Touch(profile, project);
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task SetCoverChapterAsync(Guid projectId, Guid? chapterId, CancellationToken cancellationToken = default)
-    {
-        var project = await GetProjectAsync(projectId, cancellationToken);
-        var profile = await EnsureProfileAsync(project, cancellationToken);
-        if (chapterId is Guid id)
-        {
-            var isPicturePage = await db.Chapters.AnyAsync(
-                chapter => chapter.ProjectId == projectId
-                    && chapter.Id == id
-                    && chapter.VisualMode == ChapterVisualMode.PicturePage,
-                cancellationToken);
-            if (!isPicturePage)
-                throw new InvalidOperationException("Cover chapter must be a Picture Page in this project.");
-        }
-
-        profile.SelectedCoverChapterId = chapterId;
-        Touch(profile, project);
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
-    public Task SetOutlineSelectionAsync(
+    public async Task<ProjectExportFile> ExportAsync(
         Guid projectId,
-        PublishOutlineTargetKind targetKind,
-        Guid targetId,
-        bool isIncluded,
-        CancellationToken cancellationToken = default) =>
-        SetOutlineSelectionsAsync(
-            projectId,
-            [new PublishOutlineSelectionUpdate(targetKind, targetId, isIncluded)],
-            cancellationToken);
-
-    public async Task SetOutlineSelectionsAsync(
-        Guid projectId,
-        IReadOnlyList<PublishOutlineSelectionUpdate> updates,
+        Guid editionId,
+        PublishExportFormat format,
         CancellationToken cancellationToken = default)
-    {
-        var project = await GetProjectAsync(projectId, cancellationToken);
-        if (updates.Count == 0) return;
-
-        var normalized = new Dictionary<(PublishOutlineTargetKind Kind, Guid TargetId), bool>();
-        foreach (var update in updates)
-        {
-            if (!Enum.IsDefined(update.TargetKind))
-                throw new InvalidOperationException("Outline target kind is invalid.");
-            normalized[(update.TargetKind, update.TargetId)] = update.IsIncluded;
-        }
-
-        var actIds = normalized.Keys
-            .Where(key => key.Kind == PublishOutlineTargetKind.Act)
-            .Select(key => key.TargetId)
-            .ToHashSet();
-        if (actIds.Count > 0)
-        {
-            var existingActIds = await db.Acts
-                .Where(act => act.ProjectId == projectId && actIds.Contains(act.Id))
-                .Select(act => act.Id)
-                .ToListAsync(cancellationToken);
-            if (existingActIds.Count != actIds.Count)
-                throw new InvalidOperationException("One or more publish acts were not found.");
-        }
-
-        var chapterIds = normalized.Keys
-            .Where(key => key.Kind == PublishOutlineTargetKind.Chapter)
-            .Select(key => key.TargetId)
-            .ToHashSet();
-        if (chapterIds.Count > 0)
-        {
-            var existingChapterIds = await db.Chapters
-                .Where(chapter => chapter.ProjectId == projectId && chapterIds.Contains(chapter.Id))
-                .Select(chapter => chapter.Id)
-                .ToListAsync(cancellationToken);
-            if (existingChapterIds.Count != chapterIds.Count)
-                throw new InvalidOperationException("One or more publish chapters were not found.");
-        }
-
-        var existing = await db.PublishOutlineSelections
-            .Where(selection => selection.ProjectId == projectId)
-            .ToListAsync(cancellationToken);
-        var existingByTarget = existing.ToDictionary(
-            selection => (selection.TargetKind, selection.TargetId));
-        var now = DateTime.UtcNow;
-        foreach (var (target, isIncluded) in normalized)
-        {
-            if (existingByTarget.TryGetValue(target, out var selection))
-            {
-                selection.IsIncluded = isIncluded;
-                selection.UpdatedAt = now;
-                continue;
-            }
-
-            await db.PublishOutlineSelections.AddAsync(new PublishOutlineSelection
-            {
-                ProjectId = projectId,
-                TargetKind = target.Kind,
-                TargetId = target.TargetId,
-                IsIncluded = isIncluded,
-                CreatedAt = now,
-                UpdatedAt = now,
-            }, cancellationToken);
-        }
-
-        project.UpdatedAt = now;
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task<PublishImagePlacementView> AddImagePlacementAsync(
-        Guid projectId,
-        PublishImagePlacementCreate request,
-        CancellationToken cancellationToken = default)
-    {
-        var project = await GetProjectAsync(projectId, cancellationToken);
-        var metadata = await ValidatePlacementRequestAsync(
-            projectId,
-            request.AssetId,
-            request.TargetKind,
-            request.TargetId,
-            request.PlacementKind,
-            cancellationToken);
-
-        var nextOrder = await db.PublishImagePlacements
-            .Where(placement => placement.ProjectId == projectId
-                && placement.TargetKind == request.TargetKind
-                && placement.TargetId == request.TargetId
-                && placement.PlacementKind == request.PlacementKind)
-            .Select(placement => (int?)placement.SortOrder)
-            .MaxAsync(cancellationToken) ?? -1;
-
-        var placement = new PublishImagePlacement
-        {
-            ProjectId = projectId,
-            AssetId = request.AssetId,
-            TargetKind = request.TargetKind,
-            TargetId = request.TargetId,
-            PlacementKind = request.PlacementKind,
-            SortOrder = nextOrder + 1,
-            Caption = Clean(request.Caption),
-        };
-        await db.PublishImagePlacements.AddAsync(placement, cancellationToken);
-        project.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
-
-        return PlacementView(projectId, placement, metadata.AssetFileName, metadata.TargetTitle);
-    }
-
-    public async Task<PublishImagePlacementView> UpdateImagePlacementAsync(
-        Guid projectId,
-        Guid placementId,
-        PublishImagePlacementUpdate request,
-        CancellationToken cancellationToken = default)
-    {
-        var project = await GetProjectAsync(projectId, cancellationToken);
-        var placement = await db.PublishImagePlacements.FirstOrDefaultAsync(
-            candidate => candidate.ProjectId == projectId && candidate.Id == placementId,
-            cancellationToken)
-            ?? throw new InvalidOperationException("Image placement was not found.");
-        var metadata = await ValidatePlacementRequestAsync(
-            projectId,
-            request.AssetId,
-            request.TargetKind,
-            request.TargetId,
-            request.PlacementKind,
-            cancellationToken);
-
-        var oldGroup = (placement.TargetKind, placement.TargetId, placement.PlacementKind);
-        var moved = oldGroup != (request.TargetKind, request.TargetId, request.PlacementKind);
-        if (moved)
-        {
-            var nextOrder = await db.PublishImagePlacements
-                .Where(candidate => candidate.ProjectId == projectId
-                    && candidate.Id != placementId
-                    && candidate.TargetKind == request.TargetKind
-                    && candidate.TargetId == request.TargetId
-                    && candidate.PlacementKind == request.PlacementKind)
-                .Select(candidate => (int?)candidate.SortOrder)
-                .MaxAsync(cancellationToken) ?? -1;
-            placement.SortOrder = nextOrder + 1;
-            await CompactPlacementGroupAsync(projectId, oldGroup.TargetKind, oldGroup.TargetId, oldGroup.PlacementKind, placementId, cancellationToken);
-        }
-
-        placement.AssetId = request.AssetId;
-        placement.TargetKind = request.TargetKind;
-        placement.TargetId = request.TargetId;
-        placement.PlacementKind = request.PlacementKind;
-        placement.Caption = Clean(request.Caption);
-        placement.UpdatedAt = DateTime.UtcNow;
-        project.UpdatedAt = placement.UpdatedAt;
-        await db.SaveChangesAsync(cancellationToken);
-
-        return PlacementView(projectId, placement, metadata.AssetFileName, metadata.TargetTitle);
-    }
-
-    public async Task ReorderImagePlacementsAsync(
-        Guid projectId,
-        IReadOnlyList<Guid> orderedPlacementIds,
-        CancellationToken cancellationToken = default)
-    {
-        var project = await GetProjectAsync(projectId, cancellationToken);
-        if (orderedPlacementIds.Count == 0) return;
-        if (orderedPlacementIds.Distinct().Count() != orderedPlacementIds.Count)
-            throw new InvalidOperationException("Placement reorder contains duplicate IDs.");
-
-        var placements = await db.PublishImagePlacements
-            .Where(placement => placement.ProjectId == projectId && orderedPlacementIds.Contains(placement.Id))
-            .ToListAsync(cancellationToken);
-        if (placements.Count != orderedPlacementIds.Count)
-            throw new InvalidOperationException("One or more image placements were not found.");
-
-        var first = placements[0];
-        if (placements.Any(placement => placement.TargetKind != first.TargetKind
-            || placement.TargetId != first.TargetId
-            || placement.PlacementKind != first.PlacementKind))
-        {
-            throw new InvalidOperationException("Only placements at the same target and position can be reordered together.");
-        }
-
-        var groupIds = await db.PublishImagePlacements
-            .Where(placement => placement.ProjectId == projectId
-                && placement.TargetKind == first.TargetKind
-                && placement.TargetId == first.TargetId
-                && placement.PlacementKind == first.PlacementKind)
-            .Select(placement => placement.Id)
-            .ToListAsync(cancellationToken);
-        if (!groupIds.ToHashSet().SetEquals(orderedPlacementIds))
-            throw new InvalidOperationException("Placement reorder must include every image at that target and position.");
-
-        var orderById = orderedPlacementIds
-            .Select((id, order) => (id, order))
-            .ToDictionary(item => item.id, item => item.order);
-        var now = DateTime.UtcNow;
-        foreach (var placement in placements)
-        {
-            placement.SortOrder = orderById[placement.Id];
-            placement.UpdatedAt = now;
-        }
-
-        project.UpdatedAt = now;
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task DeleteImagePlacementAsync(Guid projectId, Guid placementId, CancellationToken cancellationToken = default)
-    {
-        var project = await GetProjectAsync(projectId, cancellationToken);
-        var placement = await db.PublishImagePlacements.FirstOrDefaultAsync(
-            candidate => candidate.ProjectId == projectId && candidate.Id == placementId,
-            cancellationToken);
-        if (placement is null) return;
-
-        await CompactPlacementGroupAsync(
-            projectId,
-            placement.TargetKind,
-            placement.TargetId,
-            placement.PlacementKind,
-            placement.Id,
-            cancellationToken);
-        db.PublishImagePlacements.Remove(placement);
-        project.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task<ProjectExportFile> ExportAsync(Guid projectId, PublishExportFormat format, CancellationToken cancellationToken = default)
     {
         var formatter = formatters.FirstOrDefault(candidate => candidate.Format == format)
             ?? throw new InvalidOperationException($"No publish formatter is registered for {format}.");
-        var document = await GetDocumentAsync(projectId, cancellationToken);
+        var document = await GetDocumentAsync(projectId, editionId, cancellationToken);
         if (format == PublishExportFormat.Epub)
             document = await AttachRenderedPicturePagesAsync(document, cancellationToken);
 
@@ -399,10 +111,13 @@ public sealed class PublishService(
             Content: formatter.Render(document));
     }
 
-    public async Task<PublishDocument> GetDocumentAsync(Guid projectId, CancellationToken cancellationToken = default)
+    public async Task<PublishDocument> GetDocumentAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken = default)
     {
         var project = await GetProjectAsync(projectId, cancellationToken);
-        var profile = await EnsureProfileAsync(project, cancellationToken);
+        var profile = await GetEditionAsync(projectId, editionId, cancellationToken);
         await ClearInvalidCoverChapterAsync(project, profile, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
@@ -416,13 +131,19 @@ public sealed class PublishService(
             .Where(chapter => chapter.ProjectId == projectId)
             .OrderBy(chapter => chapter.Order)
             .ToListAsync(cancellationToken);
-        var selections = await db.PublishOutlineSelections
+        var selections = await db.PublicationEditionOutlineItems
             .AsNoTracking()
-            .Where(selection => selection.ProjectId == projectId)
+            .Where(selection => selection.EditionId == editionId)
             .ToListAsync(cancellationToken);
-        var placements = await db.PublishImagePlacements
+        var placements = await db.PublicationImagePlacements
             .AsNoTracking()
-            .Where(placement => placement.ProjectId == projectId)
+            .Where(placement => placement.EditionId == editionId)
+            .ToListAsync(cancellationToken);
+        var matter = await db.PublicationMatter
+            .AsNoTracking()
+            .Where(item => item.EditionId == editionId && item.IsIncluded)
+            .OrderBy(item => item.Location)
+            .ThenBy(item => item.SortOrder)
             .ToListAsync(cancellationToken);
 
         var sections = new List<PublishSectionDocument>();
@@ -503,7 +224,7 @@ public sealed class PublishService(
 
         var placementDocuments = validPlacements
             .Where(placement => assets.ContainsKey(placement.AssetId))
-            .Select(placement => new PublishImagePlacementDocument(
+            .Select(placement => new PublicationImagePlacementDocument(
                 placement.Id,
                 AssetDocument(assets[placement.AssetId]),
                 placement.TargetKind,
@@ -534,11 +255,12 @@ public sealed class PublishService(
             .ToList();
 
         return new PublishDocument(
+            editionId,
             project.Id,
             project.Name,
             project.Slug,
             DateTime.UtcNow,
-            ProfileDocument(profile),
+            ProfileDocument(profile, matter),
             cover,
             sections,
             assets.Values.Select(AssetDocument).ToList(),
@@ -612,25 +334,18 @@ public sealed class PublishService(
         await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
         ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
-    private async Task<PublishProfile> EnsureProfileAsync(Project project, CancellationToken cancellationToken)
-    {
-        var profile = await db.PublishProfiles.FirstOrDefaultAsync(candidate => candidate.ProjectId == project.Id, cancellationToken);
-        if (profile is not null)
-            return profile;
-
-        profile = new PublishProfile
-        {
-            ProjectId = project.Id,
-            TitleOverride = project.Name,
-            Language = "en",
-        };
-        await db.PublishProfiles.AddAsync(profile, cancellationToken);
-        return profile;
-    }
+    private async Task<PublicationEdition> GetEditionAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken) =>
+        await db.PublicationEditions.FirstOrDefaultAsync(
+            edition => edition.ProjectId == projectId && edition.Id == editionId,
+            cancellationToken)
+        ?? throw new InvalidOperationException("Publication edition was not found.");
 
     private async Task ClearInvalidCoverChapterAsync(
         Project project,
-        PublishProfile profile,
+        PublicationEdition profile,
         CancellationToken cancellationToken)
     {
         if (profile.SelectedCoverChapterId is not Guid coverChapterId) return;
@@ -643,83 +358,6 @@ public sealed class PublishService(
 
         profile.SelectedCoverChapterId = null;
         Touch(profile, project);
-    }
-
-    private async Task<PlacementMetadata> ValidatePlacementRequestAsync(
-        Guid projectId,
-        Guid assetId,
-        PublishOutlineTargetKind targetKind,
-        Guid targetId,
-        PublishImagePlacementKind placementKind,
-        CancellationToken cancellationToken)
-    {
-        ValidatePlacementKind(targetKind, placementKind);
-        var assetFileName = await db.PublishAssets
-            .Where(asset => asset.ProjectId == projectId && asset.Id == assetId)
-            .Select(asset => asset.FileName)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (assetFileName is null)
-            throw new InvalidOperationException("Project image was not found.");
-
-        var targetTitle = targetKind switch
-        {
-            PublishOutlineTargetKind.Act => await db.Acts
-                .Where(act => act.ProjectId == projectId && act.Id == targetId)
-                .Select(act => act.Title)
-                .FirstOrDefaultAsync(cancellationToken),
-            PublishOutlineTargetKind.Chapter => await db.Chapters
-                .Where(chapter => chapter.ProjectId == projectId && chapter.Id == targetId)
-                .Select(chapter => chapter.Title)
-                .FirstOrDefaultAsync(cancellationToken),
-            _ => throw new InvalidOperationException("Outline target kind is invalid."),
-        };
-        if (targetTitle is null)
-            throw new InvalidOperationException($"{targetKind} was not found.");
-
-        var isIncluded = await db.PublishOutlineSelections
-            .Where(selection => selection.ProjectId == projectId
-                && selection.TargetKind == targetKind
-                && selection.TargetId == targetId)
-            .Select(selection => (bool?)selection.IsIncluded)
-            .FirstOrDefaultAsync(cancellationToken) ?? true;
-        if (!isIncluded)
-            throw new InvalidOperationException("Images can only be placed on included publish targets.");
-
-        if (targetKind == PublishOutlineTargetKind.Chapter)
-        {
-            var isCover = await db.PublishProfiles.AnyAsync(
-                profile => profile.ProjectId == projectId && profile.SelectedCoverChapterId == targetId,
-                cancellationToken);
-            if (isCover)
-                throw new InvalidOperationException("The cover chapter cannot also have an interior image placement.");
-        }
-
-        return new PlacementMetadata(assetFileName, targetTitle);
-    }
-
-    private async Task CompactPlacementGroupAsync(
-        Guid projectId,
-        PublishOutlineTargetKind targetKind,
-        Guid targetId,
-        PublishImagePlacementKind placementKind,
-        Guid excludedPlacementId,
-        CancellationToken cancellationToken)
-    {
-        var siblings = await db.PublishImagePlacements
-            .Where(placement => placement.ProjectId == projectId
-                && placement.Id != excludedPlacementId
-                && placement.TargetKind == targetKind
-                && placement.TargetId == targetId
-                && placement.PlacementKind == placementKind)
-            .OrderBy(placement => placement.SortOrder)
-            .ThenBy(placement => placement.CreatedAt)
-            .ToListAsync(cancellationToken);
-        var now = DateTime.UtcNow;
-        for (var order = 0; order < siblings.Count; order++)
-        {
-            siblings[order].SortOrder = order;
-            siblings[order].UpdatedAt = now;
-        }
     }
 
     private async Task<PublishAssetDocument?> RenderCoverAsync(
@@ -746,41 +384,9 @@ public sealed class PublishService(
                 chapter.Title);
     }
 
-    private static PublishProfileView ProfileView(Project project, PublishProfile profile) =>
-        new(
-            profile.Id,
-            project.Name,
-            project.Slug,
-            profile.TitleOverride,
-            profile.Subtitle,
-            profile.Author,
-            profile.Language,
-            profile.Publisher,
-            profile.Copyright,
-            profile.Isbn,
-            profile.Description,
-            profile.Dedication,
-            profile.Acknowledgments,
-            profile.References,
-            profile.IncludeTableOfContents,
-            profile.IncludeVisibleTableOfContents,
-            profile.IncludeActSynopses,
-            profile.IncludeChapterSynopses,
-            profile.IncludeActHeadings,
-            profile.IncludeChapterHeadings,
-            profile.NumberActs,
-            profile.NumberChapters,
-            profile.TitlePageMode,
-            profile.PrintPicturePageSpreadMode,
-            profile.EpubPicturePageSpreadMode,
-            profile.PageWidthInches,
-            profile.PageHeightInches,
-            profile.PageMarginInches,
-            profile.BodyFontSizePoints,
-            profile.BodyLineHeight,
-            profile.SelectedCoverChapterId);
-
-    private static PublishDocumentProfile ProfileDocument(PublishProfile profile) =>
+    private static PublishDocumentProfile ProfileDocument(
+        PublicationEdition profile,
+        IReadOnlyList<PublicationMatter> matter) =>
         new(
             profile.TitleOverride,
             profile.Subtitle,
@@ -790,9 +396,9 @@ public sealed class PublishService(
             profile.Copyright,
             profile.Isbn,
             profile.Description,
-            profile.Dedication,
-            profile.Acknowledgments,
-            profile.References,
+            MatterText(matter, PublicationMatterKind.Dedication),
+            MatterText(matter, PublicationMatterKind.Acknowledgments),
+            MatterText(matter, PublicationMatterKind.References),
             profile.IncludeTableOfContents,
             profile.IncludeVisibleTableOfContents,
             profile.IncludeActSynopses,
@@ -810,7 +416,20 @@ public sealed class PublishService(
             profile.BodyFontSizePoints,
             profile.BodyLineHeight);
 
-    private static bool IncludeTitlePage(PublishProfile profile) => profile.TitlePageMode switch
+    private static string MatterText(
+        IReadOnlyList<PublicationMatter> matter,
+        PublicationMatterKind kind) =>
+        string.Join(
+            "\n\n",
+            matter
+                .Where(item => item.Kind == kind)
+                .Select(item => ManuscriptCodec.ProjectPlainText(
+                    item.ManuscriptJson,
+                    item.Id,
+                    item.Revision))
+                .Where(text => !string.IsNullOrWhiteSpace(text)));
+
+    private static bool IncludeTitlePage(PublicationEdition profile) => profile.TitlePageMode switch
     {
         PublishTitlePageMode.Include => true,
         PublishTitlePageMode.Omit => false,
@@ -820,7 +439,7 @@ public sealed class PublishService(
     private static List<PublishSectionView> SectionViews(
         IReadOnlyList<Act> acts,
         IReadOnlyList<Chapter> chapters,
-        IReadOnlyList<PublishOutlineSelection> selections,
+        IReadOnlyList<PublicationEditionOutlineItem> selections,
         Guid? coverChapterId)
     {
         var result = new List<PublishSectionView>();
@@ -852,7 +471,7 @@ public sealed class PublishService(
 
     private static PublishChapterView ChapterView(
         Chapter chapter,
-        IReadOnlyList<PublishOutlineSelection> selections,
+        IReadOnlyList<PublicationEditionOutlineItem> selections,
         Guid? coverChapterId) =>
         new(
             chapter.Id,
@@ -898,7 +517,7 @@ public sealed class PublishService(
             yield return chapter;
     }
 
-    private static PublishImagePlacementView PlacementView(
+    private static PublicationImagePlacementView PlacementView(
         Guid projectId,
         PlacementRow placement,
         IReadOnlyList<Act> acts,
@@ -911,23 +530,6 @@ public sealed class PublishService(
             placement.TargetKind,
             placement.TargetId,
             TargetTitle(placement.TargetKind, placement.TargetId, acts, chapters),
-            placement.PlacementKind,
-            placement.Caption,
-            placement.SortOrder);
-
-    private static PublishImagePlacementView PlacementView(
-        Guid projectId,
-        PublishImagePlacement placement,
-        string assetFileName,
-        string targetTitle) =>
-        new(
-            placement.Id,
-            placement.AssetId,
-            assetFileName,
-            AssetPreviewUrl(projectId, placement.AssetId),
-            placement.TargetKind,
-            placement.TargetId,
-            targetTitle,
             placement.PlacementKind,
             placement.Caption,
             placement.SortOrder);
@@ -971,17 +573,17 @@ public sealed class PublishService(
         return int.MaxValue;
     }
 
-    private static int PlacementKindOrder(PublishImagePlacementKind kind) =>
+    private static int PlacementKindOrder(PublicationImagePlacementKind kind) =>
         kind switch
         {
-            PublishImagePlacementKind.BeforeAct or PublishImagePlacementKind.BeforeChapter => 0,
-            PublishImagePlacementKind.ChapterOpening => 1,
-            PublishImagePlacementKind.ChapterEnding => 2,
-            PublishImagePlacementKind.AfterAct or PublishImagePlacementKind.AfterChapter => 3,
+            PublicationImagePlacementKind.BeforeAct or PublicationImagePlacementKind.BeforeChapter => 0,
+            PublicationImagePlacementKind.ChapterOpening => 1,
+            PublicationImagePlacementKind.ChapterEnding => 2,
+            PublicationImagePlacementKind.AfterAct or PublicationImagePlacementKind.AfterChapter => 3,
             _ => int.MaxValue,
         };
 
-    private static PublishChapterDocument ChapterDocument(Chapter chapter, PublishProfile profile, int chapterNumber)
+    private static PublishChapterDocument ChapterDocument(Chapter chapter, PublicationEdition profile, int chapterNumber)
     {
         var illustrationLayout = chapter.VisualMode == ChapterVisualMode.IllustratedProse
             ? ReadIllustrationLayout(chapter)
@@ -1043,7 +645,7 @@ public sealed class PublishService(
     }
 
     private static bool IsIncluded(
-        IReadOnlyList<PublishOutlineSelection> selections,
+        IReadOnlyList<PublicationEditionOutlineItem> selections,
         PublishOutlineTargetKind kind,
         Guid targetId) =>
         selections.FirstOrDefault(selection => selection.TargetKind == kind && selection.TargetId == targetId)?.IsIncluded ?? true;
@@ -1055,24 +657,6 @@ public sealed class PublishService(
         kind == PublishOutlineTargetKind.Act
             ? sections.Any(section => section.ActId == targetId && section.IncludePage)
             : sections.SelectMany(section => section.Chapters).Any(chapter => chapter.Id == targetId);
-
-    private static void ValidatePlacementKind(
-        PublishOutlineTargetKind targetKind,
-        PublishImagePlacementKind placementKind)
-    {
-        var valid = targetKind == PublishOutlineTargetKind.Act
-            ? placementKind is PublishImagePlacementKind.BeforeAct or PublishImagePlacementKind.AfterAct
-            : targetKind == PublishOutlineTargetKind.Chapter
-                && placementKind is PublishImagePlacementKind.BeforeChapter
-                    or PublishImagePlacementKind.ChapterOpening
-                    or PublishImagePlacementKind.ChapterEnding
-                    or PublishImagePlacementKind.AfterChapter;
-
-        if (!valid)
-            throw new InvalidOperationException($"{placementKind} cannot be used with a {targetKind} target.");
-    }
-
-    private static string Clean(string value) => value.Trim();
 
     private static string ExportFileName(PublishDocument document, string extension)
     {
@@ -1121,14 +705,12 @@ public sealed class PublishService(
         return builder.ToString().Trim('_', ' ', '.');
     }
 
-    private static void Touch(PublishProfile profile, Project project)
+    private static void Touch(PublicationEdition profile, Project project)
     {
         var now = DateTime.UtcNow;
         profile.UpdatedAt = now;
         project.UpdatedAt = now;
     }
-
-    private sealed record PlacementMetadata(string AssetFileName, string TargetTitle);
 
     private sealed record PlacementRow(
         Guid Id,
@@ -1136,7 +718,7 @@ public sealed class PublishService(
         string AssetFileName,
         PublishOutlineTargetKind TargetKind,
         Guid TargetId,
-        PublishImagePlacementKind PlacementKind,
+        PublicationImagePlacementKind PlacementKind,
         string Caption,
         int SortOrder);
 }

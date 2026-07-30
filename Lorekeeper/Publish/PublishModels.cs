@@ -14,13 +14,33 @@ public enum PublishExportFormat
 }
 
 public sealed record PublishWorkspaceView(
-    PublishProfileView Profile,
+    PublicationEditionView Edition,
+    IReadOnlyList<PublicationEditionSummary> Editions,
     IReadOnlyList<PublishSectionView> Sections,
     IReadOnlyList<PublishCoverCandidateView> CoverCandidates,
-    IReadOnlyList<PublishImagePlacementView> Placements);
+    IReadOnlyList<PublicationImagePlacementView> Placements,
+    IReadOnlyList<PublicationMatterView> Matter,
+    IReadOnlyList<PublicationEditionStyleMappingView> StyleMappings,
+    string SourceFingerprint);
 
-public sealed record PublishProfileView(
+public sealed record PublicationEditionSummary(
     Guid Id,
+    string Name,
+    PublicationEditionFormat Format,
+    PublicationVendor Vendor,
+    PublicationEditionStatus Status,
+    bool IsDefault,
+    long Revision);
+
+public sealed record PublicationEditionView(
+    Guid Id,
+    string Name,
+    PublicationEditionFormat Format,
+    PublicationVendor Vendor,
+    string VendorProfileVersion,
+    PublicationEditionStatus Status,
+    bool IsDefault,
+    long Revision,
     string ProjectName,
     string ProjectSlug,
     string TitleOverride,
@@ -31,9 +51,6 @@ public sealed record PublishProfileView(
     string Copyright,
     string Isbn,
     string Description,
-    string Dedication,
-    string Acknowledgments,
-    string References,
     bool IncludeTableOfContents,
     bool IncludeVisibleTableOfContents,
     bool IncludeActSynopses,
@@ -50,9 +67,13 @@ public sealed record PublishProfileView(
     double PageMarginInches,
     double BodyFontSizePoints,
     double BodyLineHeight,
-    Guid? SelectedCoverChapterId);
+    Guid? SelectedCoverChapterId,
+    PublicationBinding Binding,
+    PublicationPaper Paper,
+    PublicationInk Ink,
+    bool Bleed);
 
-public sealed record PublishProfileUpdate(
+public sealed record PublicationEditionUpdate(
     string TitleOverride,
     string Subtitle,
     string Author,
@@ -61,9 +82,6 @@ public sealed record PublishProfileUpdate(
     string Copyright,
     string Isbn,
     string Description,
-    string Dedication,
-    string Acknowledgments,
-    string References,
     bool IncludeTableOfContents,
     bool IncludeVisibleTableOfContents,
     bool IncludeActSynopses,
@@ -79,7 +97,68 @@ public sealed record PublishProfileUpdate(
     double PageHeightInches,
     double PageMarginInches,
     double BodyFontSizePoints,
-    double BodyLineHeight);
+    double BodyLineHeight,
+    long ExpectedRevision,
+    string Name,
+    PublicationEditionFormat Format,
+    PublicationVendor Vendor,
+    string VendorProfileVersion,
+    PublicationBinding Binding,
+    PublicationPaper Paper,
+    PublicationInk Ink,
+    bool Bleed);
+
+public sealed record PublicationEditionCreate(
+    string Name,
+    PublicationEditionFormat Format,
+    PublicationVendor Vendor = PublicationVendor.Generic);
+
+public sealed record PublicationEditionCompareView(
+    PublicationEditionSummary Left,
+    PublicationEditionSummary Right,
+    IReadOnlyList<string> Differences);
+
+public sealed record PublicationMatterView(
+    Guid Id,
+    PublicationMatterLocation Location,
+    PublicationMatterKind Kind,
+    string Title,
+    ManuscriptDocument Manuscript,
+    bool IsIncluded,
+    int SortOrder,
+    long Revision);
+
+public sealed record PublicationMatterInput(
+    Guid? Id,
+    PublicationMatterLocation Location,
+    PublicationMatterKind Kind,
+    string Title,
+    string ManuscriptJson,
+    bool IsIncluded,
+    int SortOrder,
+    long? ExpectedRevision = null);
+
+public sealed record PublicationEditionStyleMappingView(
+    Guid Id,
+    Guid ManuscriptStyleDefinitionId,
+    string StyleName,
+    string SemanticRole,
+    ManuscriptStyleProperties Override,
+    long Revision);
+
+public sealed record PublicationEditionStyleMappingInput(
+    Guid ManuscriptStyleDefinitionId,
+    ManuscriptStyleProperties Override,
+    long? ExpectedRevision = null);
+
+public sealed record PublicationEditionAuditView(
+    Guid Id,
+    string Action,
+    string Actor,
+    string BeforeHash,
+    string AfterHash,
+    string DetailJson,
+    DateTime CreatedAt);
 
 public sealed record PublishSectionView(
     Guid? ActId,
@@ -104,7 +183,7 @@ public sealed record PublishCoverCandidateView(
     ChapterPageLayoutKind PageLayoutKind,
     string PreviewUrl);
 
-public sealed record PublishImagePlacementView(
+public sealed record PublicationImagePlacementView(
     Guid Id,
     Guid AssetId,
     string AssetFileName,
@@ -112,30 +191,31 @@ public sealed record PublishImagePlacementView(
     PublishOutlineTargetKind TargetKind,
     Guid TargetId,
     string TargetTitle,
-    PublishImagePlacementKind PlacementKind,
+    PublicationImagePlacementKind PlacementKind,
     string Caption,
     int SortOrder);
 
-public sealed record PublishOutlineSelectionUpdate(
+public sealed record PublicationEditionOutlineItemUpdate(
     PublishOutlineTargetKind TargetKind,
     Guid TargetId,
     bool IsIncluded);
 
-public sealed record PublishImagePlacementCreate(
+public sealed record PublicationImagePlacementCreate(
     Guid AssetId,
     PublishOutlineTargetKind TargetKind,
     Guid TargetId,
-    PublishImagePlacementKind PlacementKind,
+    PublicationImagePlacementKind PlacementKind,
     string Caption);
 
-public sealed record PublishImagePlacementUpdate(
+public sealed record PublicationImagePlacementUpdate(
     Guid AssetId,
     PublishOutlineTargetKind TargetKind,
     Guid TargetId,
-    PublishImagePlacementKind PlacementKind,
+    PublicationImagePlacementKind PlacementKind,
     string Caption);
 
 public sealed record PublishDocument(
+    Guid EditionId,
     Guid ProjectId,
     string ProjectName,
     string ProjectSlug,
@@ -144,8 +224,9 @@ public sealed record PublishDocument(
     PublishAssetDocument? CoverAsset,
     IReadOnlyList<PublishSectionDocument> Sections,
     IReadOnlyList<PublishAssetDocument> Assets,
-    IReadOnlyList<PublishImagePlacementDocument> Placements)
+    IReadOnlyList<PublicationImagePlacementDocument> Placements)
 {
+    public string SourceFingerprint { get; init; } = string.Empty;
     public ChapterPageLayoutKind? CoverPageLayoutKind { get; init; }
     public IReadOnlyList<PublishManuscriptStyleDocument> NamedStyles { get; init; } = [];
 
@@ -233,11 +314,11 @@ public sealed record PublishAssetDocument(
     byte[] Data,
     string AltText);
 
-public sealed record PublishImagePlacementDocument(
+public sealed record PublicationImagePlacementDocument(
     Guid Id,
     PublishAssetDocument Asset,
     PublishOutlineTargetKind TargetKind,
     Guid TargetId,
-    PublishImagePlacementKind PlacementKind,
+    PublicationImagePlacementKind PlacementKind,
     string Caption,
     int SortOrder);

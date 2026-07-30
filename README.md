@@ -32,8 +32,12 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Project image generation and editing, canonical entity visual references,
   illustrated prose, Picture Page composition, font management, and layout
   diagnostics.
-- Versioned project import/export (current v9 manuscripts/styles, an isolated v8
-  manuscript adapter, and v1-v7 text adapters) plus TXT,
+- Independent paperback/EPUB publication editions with product/vendor settings,
+  identifiers, included content, semantic matter, named-style mappings, image
+  placements, Picture Page cover sources, clone/archive/compare/audit workflows,
+  deterministic staleness fingerprints, and matching Publish assistant tools.
+- Versioned project import/export (current v10 manuscripts/styles/editions,
+  isolated v8-v9 adapters, and v1-v7 text adapters) plus TXT,
   Markdown, mixed-layout EPUB, and a
   browser/operating-system print-preview workflow. The current print path is not
   a PDF-byte renderer, PDF/X conformance engine, or vendor preflight system.

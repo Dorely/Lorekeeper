@@ -1,18 +1,22 @@
 namespace Lorekeeper.Models;
 
-public class PublishImagePlacement
+public class PublicationImagePlacement
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    public Guid ProjectId { get; set; }
-    public Project Project { get; set; } = null!;
+    public Guid EditionId { get; set; }
+    public PublicationEdition Edition { get; set; } = null!;
 
     public Guid AssetId { get; set; }
     public PublishAsset Asset { get; set; } = null!;
 
     public PublishOutlineTargetKind TargetKind { get; set; }
     public Guid TargetId { get; set; }
-    public PublishImagePlacementKind PlacementKind { get; set; }
+    public Guid? ActId { get; set; }
+    public Act? Act { get; set; }
+    public Guid? ChapterId { get; set; }
+    public Chapter? Chapter { get; set; }
+    public PublicationImagePlacementKind PlacementKind { get; set; }
     public int SortOrder { get; set; }
     public string Caption { get; set; } = string.Empty;
 
@@ -20,7 +24,7 @@ public class PublishImagePlacement
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
-public enum PublishImagePlacementKind
+public enum PublicationImagePlacementKind
 {
     BeforeAct,
     AfterAct,

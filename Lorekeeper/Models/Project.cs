@@ -89,17 +89,13 @@ public class Project
 
     public ICollection<ProjectImportJob> ProjectImportJobs { get; set; } = [];
 
-    public ICollection<PublishProfile> PublishProfiles { get; set; } = [];
+    public ICollection<PublicationEdition> PublicationEditions { get; set; } = [];
 
     public ICollection<PublishAsset> PublishAssets { get; set; } = [];
 
     public ICollection<ProjectImageGenerationJob> ProjectImageGenerationJobs { get; set; } = [];
 
     public ICollection<ProjectImageMask> ProjectImageMasks { get; set; } = [];
-
-    public ICollection<PublishOutlineSelection> PublishOutlineSelections { get; set; } = [];
-
-    public ICollection<PublishImagePlacement> PublishImagePlacements { get; set; } = [];
 
     public ICollection<ProjectFontFamily> FontFamilies { get; set; } = [];
     public ICollection<ManuscriptStyleDefinition> ManuscriptStyles { get; set; } = [];

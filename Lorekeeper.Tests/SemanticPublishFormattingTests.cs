@@ -261,6 +261,7 @@ public sealed class SemanticPublishFormattingTests
     private static PublishDocument MinimalPublishDocument() =>
         new(
             Guid.NewGuid(),
+            Guid.NewGuid(),
             "Book",
             "book",
             DateTime.UtcNow,

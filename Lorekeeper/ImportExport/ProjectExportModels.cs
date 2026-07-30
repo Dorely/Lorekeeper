@@ -19,7 +19,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 9;
+    public const int CurrentFormatVersion = 10;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -30,7 +30,10 @@ public sealed record ProjectExportDocument
     public List<ProjectExportEntityType> EntityTypes { get; init; } = [];
     public List<ProjectExportImage> Images { get; init; } = [];
     public List<ProjectExportEntityVisualExample> EntityVisualExamples { get; init; } = [];
-    public List<ProjectExportPublishProfile> PublishProfiles { get; init; } = [];
+    public List<ProjectExportPublicationEdition> PublicationEditions { get; init; } = [];
+    [JsonPropertyName("publishProfiles")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ProjectExportLegacyPublishProfile>? LegacyPublishProfiles { get; init; }
     public List<ProjectExportManuscriptStyle> ManuscriptStyles { get; init; } = [];
     public List<ProjectExportAct> Acts { get; init; } = [];
     public List<ProjectExportChapter> Chapters { get; init; } = [];
@@ -121,7 +124,83 @@ public sealed record ProjectExportEntityVisualExample(
     string SourceUrl,
     string SourceLocator);
 
-public sealed record ProjectExportPublishProfile(
+public sealed record ProjectExportPublicationEdition(
+    Guid Id,
+    string Name,
+    PublicationEditionFormat Format,
+    PublicationVendor Vendor,
+    string VendorProfileVersion,
+    PublicationEditionStatus Status,
+    bool IsDefault,
+    long Revision,
+    string TitleOverride,
+    string Subtitle,
+    string Author,
+    string Language,
+    string Publisher,
+    string Copyright,
+    string Isbn,
+    string Description,
+    bool IncludeTableOfContents,
+    bool IncludeVisibleTableOfContents,
+    bool IncludeActSynopses,
+    bool IncludeChapterSynopses,
+    bool IncludeActHeadings,
+    bool IncludeChapterHeadings,
+    bool NumberActs,
+    bool NumberChapters,
+    PublishTitlePageMode TitlePageMode,
+    PrintPicturePageSpreadMode PrintPicturePageSpreadMode,
+    EpubPicturePageSpreadMode EpubPicturePageSpreadMode,
+    double PageWidthInches,
+    double PageHeightInches,
+    double PageMarginInches,
+    double BodyFontSizePoints,
+    double BodyLineHeight,
+    Guid? SelectedCoverChapterId,
+    PublicationBinding Binding,
+    PublicationPaper Paper,
+    PublicationInk Ink,
+    bool Bleed,
+    List<ProjectExportEditionOutlineItem> OutlineItems,
+    List<ProjectExportPublicationMatter> Matter,
+    List<ProjectExportEditionStyleMapping> StyleMappings,
+    List<ProjectExportPublicationImagePlacement> ImagePlacements);
+
+public sealed record ProjectExportEditionOutlineItem(
+    Guid Id,
+    PublishOutlineTargetKind TargetKind,
+    Guid TargetId,
+    bool IsIncluded,
+    int SortOrder);
+
+public sealed record ProjectExportPublicationMatter(
+    Guid Id,
+    PublicationMatterLocation Location,
+    PublicationMatterKind Kind,
+    string Title,
+    string ManuscriptJson,
+    long Revision,
+    bool IsIncluded,
+    int SortOrder);
+
+public sealed record ProjectExportEditionStyleMapping(
+    Guid Id,
+    Guid ManuscriptStyleDefinitionId,
+    string SemanticRole,
+    ManuscriptStyleProperties Override,
+    long Revision);
+
+public sealed record ProjectExportPublicationImagePlacement(
+    Guid Id,
+    Guid AssetId,
+    PublishOutlineTargetKind TargetKind,
+    Guid TargetId,
+    PublicationImagePlacementKind PlacementKind,
+    string Caption,
+    int SortOrder);
+
+public sealed record ProjectExportLegacyPublishProfile(
     Guid Id,
     string TitleOverride,
     string Subtitle,
