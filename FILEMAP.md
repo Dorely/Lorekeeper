@@ -9,8 +9,11 @@
 
 | File | Description |
 |------|-------------|
-| `VISION.md` | High-level project vision and success criteria. |
-| `README.md` | Project readme with web/Electron development, Windows packaging and install guidance, and local-data notes. |
+| `VISION.md` | High-level product vision, narrative-coherence goals, and durable scope. |
+| `README.md` | Project purpose, current capabilities, development, packaging, release/update guidance, and local-data behavior. |
+| `AGENTS.md` | Authoritative operating rules for agents and contributors. |
+| `CLAUDE.md` | Claude compatibility entry point that delegates all project guidance to `AGENTS.md`. |
+| `docs/architecture.md` | Current technical architecture, ownership boundaries, persistence/security constraints, platform scope, and validation commands. |
 | `FILEMAP.md` | This file — concise map of every source file. |
 | `Lorekeeper.sln` | Solution file containing the `Lorekeeper` project. |
 | `global.json` | Pins the .NET SDK version (`rollForward: latestFeature`). |
@@ -18,7 +21,6 @@
 | `.gitignore` | Standard .NET ignore patterns plus Lorekeeper local SQLite/temp data; publish output is scoped to the repo-root `/publish/` folder so source folders named `Publish` remain trackable. |
 | `.vscode/launch.json` | VS Code debug configurations; default F5 entry launches the Electron desktop shell, with a secondary web-hosted profile. |
 | `.vscode/tasks.json` | VS Code build task used by debug launch configurations. |
-| `.github/copilot-instructions.md` | Project guidelines for AI assistants. |
 | `.github/workflows/build-macos-release.yml` | Dispatch-only Apple Silicon/Intel macOS release builder and verifier; uploads one correlated DMG per architecture for the Windows release orchestrator. |
 | `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates tooling/version, audits NuGet plus shipped npm/Electron dependencies, rebuilds isolated staging/output, verifies installer/updater artifacts, and writes GitHub Release checksums. |
 | `scripts/build-macos-release.ps1` | Native macOS release builder for one RID: audits dependencies, packages an ad-hoc-signed DMG, verifies signatures/architectures, mounts and smoke-tests the app, and writes a checksum. |

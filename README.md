@@ -3,6 +3,28 @@
 Lorekeeper is a local Blazor Server proof-of-concept for AI-assisted long-form
 story planning, drafting, research, ingest, and publishing.
 
+See [VISION.md](VISION.md) for the product direction and
+[docs/architecture.md](docs/architecture.md) for the current technical
+boundaries, ownership model, and validation guidance.
+
+## Current Capabilities
+
+- Project-scoped outline, Book Brief, story-graph, project-fact, writing-sample,
+  and chapter workspaces.
+- Five persistent assistant surfaces for outline collaboration, chapter editing,
+  writing coaching, research, and project images, including streaming tools,
+  reviewable changes, visual context, and background revision agents.
+- Text, EPUB, PDF, image, and webpage ingest with structured source provenance,
+  canon extraction, graph synchronization, and combined lexical/semantic
+  retrieval.
+- Project image generation and editing, canonical entity visual references,
+  illustrated prose, Picture Page composition, font management, and layout
+  diagnostics.
+- Project import/export plus TXT, Markdown, mixed-layout EPUB, and print/PDF
+  publishing.
+- Configurable Codex/OpenAI-compatible chat and embedding providers, configurable
+  web search, and local SQLite persistence.
+
 ## Requirements
 
 - .NET 10 SDK
