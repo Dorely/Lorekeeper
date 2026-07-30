@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Lorekeeper.Chapters;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.Options;
@@ -68,7 +69,7 @@ public sealed class EditorRevisionAgentService(
                 ChapterTitle = chapter.Title,
                 Reason = assignment.Reason,
                 Instructions = assignment.Instructions,
-                OriginalChapterBody = chapter.Body,
+                OriginalManuscriptJson = chapter.ManuscriptJson,
                 Status = EditorRevisionSessionStatus.Queued,
             }, cancellationToken);
         }
@@ -287,10 +288,8 @@ public sealed class EditorRevisionAgentService(
         session.Status,
         session.Summary,
         session.Rationale,
-        session.MutationKind,
-        session.StartLine,
-        session.EndLine,
-        session.ReplacementText,
+        session.OperationFormat,
+        session.OperationsJson,
         session.Notes,
         session.ErrorMessage);
 
@@ -315,10 +314,8 @@ public sealed class EditorRevisionAgentService(
         session.Status,
         session.Summary,
         session.Rationale,
-        session.MutationKind,
-        session.StartLine,
-        session.EndLine,
-        session.ReplacementText,
+        session.OperationFormat,
+        session.OperationsJson,
         session.Notes,
         session.ErrorMessage,
         session.DurationMs,

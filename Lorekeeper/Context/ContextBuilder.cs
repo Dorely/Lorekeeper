@@ -458,15 +458,15 @@ public sealed class ContextBuilder(
         body.Append("Active visual mode: ").AppendLine(chapter.VisualMode.ToString());
         body.Append("Editing contract: ").AppendLine(chapter.VisualMode switch
         {
-            ChapterVisualMode.Prose => "This is a prose chapter. Edit body text with edit_chapter. It has no active visual layout; do not generate Picture Page art or change its mode unless the user explicitly requests that.",
-            ChapterVisualMode.IllustratedProse => "Edit body text with edit_chapter. Images, when requested, use anchored Illustrated Prose layout tools.",
-            ChapterVisualMode.PicturePage => "Text is managed through Picture Page text boxes and visual layout tools, not edit_chapter.",
+            ChapterVisualMode.Prose => "This is a prose chapter. Edit it through semantic manuscript operations. It has no active visual layout; do not generate Picture Page art or change its mode unless the user explicitly requests that.",
+            ChapterVisualMode.IllustratedProse => "Edit semantic manuscript blocks through revision-checked operations. Images, when requested, use anchors resolved to stable block IDs.",
+            ChapterVisualMode.PicturePage => "Text is managed through Picture Page text boxes backed by stable manuscript references and visual layout tools.",
             _ => "Respect the active visual mode before choosing editing tools.",
         });
         body.AppendLine("Body (line-numbered):");
-        body.Append(string.IsNullOrWhiteSpace(chapter.Body)
+        body.Append(string.IsNullOrWhiteSpace(chapter.PlainText)
             ? "(empty)"
-            : ChapterFormatting.WithLineNumbers(chapter.Body));
+            : ChapterFormatting.WithLineNumbers(chapter.PlainText));
         return body.ToString();
     }
 
@@ -623,7 +623,7 @@ public sealed class ContextBuilder(
         if (chapter.VisualMode != ChapterVisualMode.Prose)
             body.Append("Page layout: ").AppendLine(chapter.PageLayoutKind.ToString());
         body.AppendLine("Body (line-numbered):");
-        body.AppendLine(string.IsNullOrWhiteSpace(chapter.Body) ? "(empty)" : ChapterFormatting.WithLineNumbers(chapter.Body));
+        body.AppendLine(string.IsNullOrWhiteSpace(chapter.PlainText) ? "(empty)" : ChapterFormatting.WithLineNumbers(chapter.PlainText));
 
         return new ContextItem(
             Key: EditorContextKeys.ChapterReference(chapter.Id),

@@ -5,6 +5,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lorekeeper", "Lorekeeper\Lorekeeper.csproj", "{036D201A-E603-4CDA-87FC-6A43558DC45B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lorekeeper.Tests", "Lorekeeper.Tests\Lorekeeper.Tests.csproj", "{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,18 @@ Global
 		{036D201A-E603-4CDA-87FC-6A43558DC45B}.Release|x64.Build.0 = Release|Any CPU
 		{036D201A-E603-4CDA-87FC-6A43558DC45B}.Release|x86.ActiveCfg = Release|Any CPU
 		{036D201A-E603-4CDA-87FC-6A43558DC45B}.Release|x86.Build.0 = Release|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Debug|x64.Build.0 = Debug|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Debug|x86.Build.0 = Debug|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Release|x64.ActiveCfg = Release|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Release|x64.Build.0 = Release|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Release|x86.ActiveCfg = Release|Any CPU
+		{C6CCF117-B1CA-49F4-A27C-8B775AAA3110}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

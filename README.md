@@ -16,13 +16,17 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Five persistent assistant surfaces for outline collaboration, chapter editing,
   writing coaching, research, and project images, including streaming tools,
   reviewable changes, visual context, and background revision agents.
+- Versioned structured chapter manuscripts with stable block anchors,
+  revision-aware manual and assistant operations, and plain-text projections for
+  existing reading and publishing surfaces.
 - Text, EPUB, PDF, image, and webpage ingest with structured source provenance,
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval.
 - Project image generation and editing, canonical entity visual references,
   illustrated prose, Picture Page composition, font management, and layout
   diagnostics.
-- Project import/export plus TXT, Markdown, mixed-layout EPUB, and a
+- Versioned project import/export (v8 manuscripts with v1-v7 adapters) plus TXT,
+  Markdown, mixed-layout EPUB, and a
   browser/operating-system print-preview workflow. The current print path is not
   a PDF-byte renderer, PDF/X conformance engine, or vendor preflight system.
 - Configurable Codex/OpenAI-compatible chat and embedding providers, configurable
@@ -154,3 +158,11 @@ GitHub Actions minutes for its two hosted macOS jobs.
 
 SQLite databases, API keys, OAuth tokens, temporary verification databases, and
 publish output are local state and are ignored by git.
+
+When an older database first adopts structured manuscripts, Lorekeeper creates a
+WAL-consistent backup in `.migration-backups/manuscripts`, validates the
+conversion, and records a migration journal. **Settings > Data Recovery** shows
+the available backups and requires an explicit two-step confirmation before
+scheduling a restore. The selected backup is applied during the next startup,
+before normal app workers begin. Keep those backups with your other local-data
+backups; they are not included in project exports.

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.Outline;
@@ -13,7 +15,18 @@ public sealed record OutlineChapterChange(
     ChapterVisualMode VisualMode,
     ChapterPageLayoutKind PageLayoutKind);
 
-public sealed record ChapterBodyChange(Guid Id, string Title, string Body);
+public sealed record ChapterManuscriptChange(
+    Guid Id,
+    string Title,
+    long Revision,
+    string ManuscriptJson)
+{
+    [JsonIgnore]
+    public ManuscriptDocument Manuscript => ManuscriptCodec.Deserialize(ManuscriptJson, Id, Revision);
+
+    [JsonIgnore]
+    public string PlainText => ManuscriptCodec.ProjectPlainText(Manuscript);
+}
 
 public sealed record OutlineEntityChange(
     Guid Id,

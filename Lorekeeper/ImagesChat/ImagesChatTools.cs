@@ -307,9 +307,9 @@ public sealed class ImagesChatTools(
             order = chapter.Order + 1,
             chapter.Title,
             chapter.Synopsis,
-            lines = ChapterFormatting.SplitLines(chapter.Body).Count,
-            bodyChars = chapter.Body.Length,
-            readChapterPages = CountTextPages(ChapterFormatting.WithLineNumbers(chapter.Body), pageMaxChars),
+            lines = ChapterFormatting.SplitLines(chapter.PlainText).Count,
+            bodyChars = chapter.PlainText.Length,
+            readChapterPages = CountTextPages(ChapterFormatting.WithLineNumbers(chapter.PlainText), pageMaxChars),
         });
         return JsonSerializer.Serialize(payload, JsonOptions);
     }
@@ -320,7 +320,7 @@ public sealed class ImagesChatTools(
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
-        var text = ChapterFormatting.WithLineNumbers(chapter.Body);
+        var text = ChapterFormatting.WithLineNumbers(chapter.PlainText);
         var pageMaxChars = EffectiveReadChapterPageMaxChars();
         var pageCount = CountTextPages(text, pageMaxChars);
         var requestedPage = Math.Clamp(pageNumber ?? 1, 1, pageCount);

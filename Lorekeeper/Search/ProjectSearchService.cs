@@ -139,14 +139,14 @@ public sealed class ProjectSearchService(
         {
             foreach (var chapter in await chapters.ListByProjectAsync(projectId, cancellationToken))
             {
-                if (!Matches(chapter.Title, chapter.Synopsis, chapter.Body)) continue;
+                if (!Matches(chapter.Title, chapter.Synopsis, chapter.PlainText)) continue;
                 results.Add(new ProjectSearchSource(
                     ProjectSearchSourceTypes.Chapter,
                     chapter.Id,
                     null,
                     chapter.Title,
                     $"Chapter {chapter.Order + 1}",
-                    Preview(!string.IsNullOrWhiteSpace(chapter.Synopsis) ? chapter.Synopsis : chapter.Body)));
+                    Preview(!string.IsNullOrWhiteSpace(chapter.Synopsis) ? chapter.Synopsis : chapter.PlainText)));
             }
         }
 
@@ -345,7 +345,7 @@ public sealed class ProjectSearchService(
         var sb = new StringBuilder();
         sb.Append("# ").AppendLine(chapter.Title);
         AppendOptional(sb, "Synopsis", chapter.Synopsis);
-        AppendOptional(sb, "Body", ChapterFormatting.WithLineNumbers(chapter.Body));
+        AppendOptional(sb, "Body", ChapterFormatting.WithLineNumbers(chapter.PlainText));
         return (chapter.Title, null, sb.ToString().TrimEnd());
     }
 

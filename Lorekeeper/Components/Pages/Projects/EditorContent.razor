@@ -14,6 +14,7 @@
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IChapterService Chapters
+@inject IManuscriptService Manuscripts
 @inject IChapterVisualService Visuals
 @inject IProjectImageService Images
 @inject IEditorContextService EditorContext
@@ -75,7 +76,7 @@ else
                                  OnAiTurnCompleted="OnAiTurnCompletedAsync"
                                  OnAiTurnIdle="OnAiTurnIdleAsync"
                                  OnAiChangesApplied="OnAiChangesAppliedAsync"
-                                  OnActiveChapterBodyChangesReady="OpenReviewForActiveChapterChangesAsync"
+                                  OnActiveChapterManuscriptChangesReady="OpenReviewForActiveChapterChangesAsync"
                                   OnContestResultsReady="OpenReviewForContestResultsAsync" />
             </aside>
         }
@@ -457,7 +458,14 @@ else
                                 <div class="chapter-review-toolbar">
                                     <div class="chapter-review-summary">
                                         <strong>@_reviewProjection.PendingChangeCount</strong>
-                                        pending line change@(_reviewProjection.PendingChangeCount == 1 ? string.Empty : "s")
+                                        @if (_reviewProjection.Blocks.Count == 0)
+                                        {
+                                            <span> pending structured manuscript change@(_reviewProjection.PendingChangeCount == 1 ? string.Empty : "s") (formatting or style)</span>
+                                        }
+                                        else
+                                        {
+                                            <span> pending line change@(_reviewProjection.PendingChangeCount == 1 ? string.Empty : "s")</span>
+                                        }
                                     </div>
                                     <div class="chapter-review-toolbar-actions">
                                         <button type="button"
@@ -926,7 +934,7 @@ else
         _current = fresh;
         ReplaceCachedChapter(fresh);
         InstallEditorDocument(fresh);
-        UpdateChapterMetrics(_current.Body);
+        UpdateChapterMetrics(_current.PlainText);
         _saveState = SaveState.Idle;
         _saveError = null;
         await LoadVisualStateAsync();
@@ -1067,13 +1075,10 @@ else
         }
         if (_current is not null && _current.Id == state.ChapterId)
         {
+            _current.ManuscriptRevision = state.ManuscriptRevision;
             _current.VisualMode = state.VisualMode;
             if (state.VisualMode != ChapterVisualMode.Prose)
                 _current.PageLayoutKind = state.PageLayoutKind;
-            _current.Body = state.Body;
-            var cached = _chapters.FirstOrDefault(chapter => chapter.Id == state.ChapterId);
-            if (cached is not null)
-                cached.Body = state.Body;
             UpdateChapterMetrics(state.Body);
             SynchronizeExternalEditorDocument(state.ChapterId, state.Body);
         }
@@ -1361,7 +1366,13 @@ else
             _saveError = null;
             await InvokeAsync(StateHasChanged);
 
-            var updated = await Chapters.UpdateAsync(chapterId, body: body);
+            var expectedRevision = _current is { Id: var currentId } && currentId == chapterId
+                ? _current.ManuscriptRevision
+                : (await Manuscripts.GetManuscriptAsync(chapterId))?.Revision
+                    ?? throw new InvalidOperationException("The chapter manuscript no longer exists.");
+            await Manuscripts.ReplacePlainTextAsync(chapterId, expectedRevision, body);
+            var updated = await Chapters.ReloadFromStoreAsync(chapterId)
+                ?? throw new InvalidOperationException("The saved chapter could not be reloaded.");
             if (_current is not null && _current.Id == chapterId)
             {
                 _current = updated;
@@ -2014,10 +2025,10 @@ else
 
     private static ReviewProjection BuildReviewProjection(Chapter chapter, IReadOnlyList<AiChangeBatch> batches)
     {
-        var changes = CurrentChapterBodyChanges(batches, chapter.Id);
+        var changes = CurrentChapterManuscriptChanges(batches, chapter.Id);
         var proposedBody = changes.Count == 0
-            ? chapter.Body
-            : ReadChapterBodyChange(AiChangeReviewDrafts.EffectiveAfterJson(changes[^1]))?.Body ?? chapter.Body;
+            ? chapter.PlainText
+            : ReadChapterManuscriptChange(AiChangeReviewDrafts.EffectiveAfterJson(changes[^1]))?.PlainText ?? chapter.PlainText;
         var lines = ChapterFormatting.SplitLines(proposedBody);
         var displayLines = lines.Count == 0 && changes.Count > 0 ? [string.Empty] : lines;
         var width = Math.Max(4, displayLines.Count.ToString().Length);
@@ -2068,8 +2079,8 @@ else
             .ToList();
 
         return new ReviewProjection(
-            HasChanges: orderedBlocks.Count > 0,
-            PendingChangeCount: orderedBlocks.Count,
+            HasChanges: changes.Count > 0,
+            PendingChangeCount: orderedBlocks.Count > 0 ? orderedBlocks.Count : changes.Count,
             PendingChangeIds: changes.Select(change => change.Id).ToList(),
             LineNumberFormat: new string('0', width),
             Blocks: orderedBlocks,
@@ -2173,11 +2184,19 @@ else
             Id = candidate.Id,
             BatchId = fakeBatch.Id,
             Batch = fakeBatch,
-            ToolName = "edit_chapter",
+            ToolName = "apply_manuscript_operations",
             Summary = candidate.Summary,
-            BeforeJson = JsonSerializer.Serialize(new ChapterBodyChange(batch.ChapterId, batch.ChapterTitle, batch.OriginalChapterBody), ChangePayloadJsonOptions),
-            AfterJson = JsonSerializer.Serialize(new ChapterBodyChange(batch.ChapterId, batch.ChapterTitle, candidate.ProposedBody), ChangePayloadJsonOptions),
-            ResourceKind = "ChapterBody",
+            BeforeJson = JsonSerializer.Serialize(new ChapterManuscriptChange(
+                batch.ChapterId,
+                batch.ChapterTitle,
+                ManuscriptCodec.Deserialize(batch.OriginalManuscriptJson).Revision,
+                batch.OriginalManuscriptJson), ChangePayloadJsonOptions),
+            AfterJson = JsonSerializer.Serialize(new ChapterManuscriptChange(
+                batch.ChapterId,
+                batch.ChapterTitle,
+                ManuscriptCodec.Deserialize(candidate.ProposedManuscriptJson).Revision,
+                candidate.ProposedManuscriptJson), ChangePayloadJsonOptions),
+            ResourceKind = "ChapterManuscript",
             ResourceId = batch.ChapterId.ToString("N"),
             Status = AiChangeStatus.Pending,
         };
@@ -2188,7 +2207,13 @@ else
             Id = batch.ChapterId,
             ProjectId = batch.ProjectId,
             Title = batch.ChapterTitle,
-            Body = batch.OriginalChapterBody,
+            ManuscriptRevision = 1,
+            ManuscriptJson = ManuscriptCodec.Serialize(
+                ManuscriptCodec.FromPlainText(
+                    batch.ChapterId,
+                    batch.OriginalPlainText,
+                    revision: 1,
+                    deterministicIds: true)),
         };
         return BuildReviewProjection(chapter, [fakeBatch]);
     }
@@ -2395,33 +2420,31 @@ else
         }
     };
 
-    private static IReadOnlyList<AiChange> CurrentChapterBodyChanges(IReadOnlyList<AiChangeBatch> batches, Guid chapterId) => batches
+    private static IReadOnlyList<AiChange> CurrentChapterManuscriptChanges(IReadOnlyList<AiChangeBatch> batches, Guid chapterId) => batches
         .SelectMany(batch => batch.Changes)
-        .Where(change => change.Status == AiChangeStatus.Pending && IsChapterBodyChangeFor(change, chapterId))
+        .Where(change => change.Status == AiChangeStatus.Pending && IsChapterManuscriptChangeFor(change, chapterId))
         .OrderBy(change => change.Batch.CreatedAt)
         .ThenBy(change => change.Order)
         .ToList();
 
-    private static bool IsChapterBodyChangeFor(AiChange change, Guid chapterId)
+    private static bool IsChapterManuscriptChangeFor(AiChange change, Guid chapterId)
     {
-        if (!string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(change.ToolName, "edit_assigned_chapter", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(change.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        return ReadChapterBodyChange(change.BeforeJson)?.Id == chapterId
-            || ReadChapterBodyChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
+        return ReadChapterManuscriptChange(change.BeforeJson)?.Id == chapterId
+            || ReadChapterManuscriptChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
     }
 
-    private static ChapterBodyChange? ReadChapterBodyChange(string json)
+    private static ChapterManuscriptChange? ReadChapterManuscriptChange(string json)
     {
         if (string.IsNullOrWhiteSpace(json) || json == "null") return null;
 
         try
         {
-            return JsonSerializer.Deserialize<ChapterBodyChange>(json, ChangePayloadJsonOptions);
+            return JsonSerializer.Deserialize<ChapterManuscriptChange>(json, ChangePayloadJsonOptions);
         }
         catch (JsonException)
         {
@@ -2980,7 +3003,7 @@ else
 
     /// <summary>
     /// Called when the AI turn ends. Reload the chapter body (the AI may have edited
-    /// it via the edit_chapter tool) and unlock the editor.
+    /// it through semantic manuscript operations) and unlock the editor.
     /// </summary>
     private async Task OnAiTurnCompletedAsync()
     {
@@ -3085,8 +3108,8 @@ else
 
             _current = fresh;
             ReplaceCachedChapter(fresh);
-            SynchronizeExternalEditorDocument(fresh.Id, fresh.Body);
-            UpdateChapterMetrics(fresh.Body);
+            SynchronizeExternalEditorDocument(fresh.Id, fresh.PlainText);
+            UpdateChapterMetrics(fresh.PlainText);
 
             await LoadVisualStateAsync();
             await LoadChapterImagesAsync();
@@ -3105,7 +3128,7 @@ else
     private void InstallEditorDocument(Chapter chapter)
     {
         var revision = _editorDocument?.Revision ?? 0;
-        _editorDocument = new EditorDocumentState(chapter.Id, chapter.Body, revision);
+        _editorDocument = new EditorDocumentState(chapter.Id, chapter.PlainText, revision);
     }
 
     private void SynchronizeExternalEditorDocument(Guid chapterId, string body)

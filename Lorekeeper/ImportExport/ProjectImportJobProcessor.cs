@@ -7,6 +7,7 @@ using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -220,6 +221,8 @@ public sealed class ProjectImportJobProcessor(
                 throw new InvalidOperationException($"Import edge references missing target node '{edge.To.StableKey}'.");
         }
 
+        ValidateChapterPayloads(document);
+
         job.FormatId = document.FormatId;
         job.FormatVersion = document.FormatVersion;
         job.ExportKind = document.ExportKind.ToString();
@@ -236,6 +239,107 @@ public sealed class ProjectImportJobProcessor(
             cancellationToken: cancellationToken);
         await StepAsync(job, "Validated import file.", cancellationToken);
         return document;
+    }
+
+    internal static void ValidateChapterPayloads(ProjectExportDocument document)
+    {
+        var duplicateChapter = document.Chapters
+            .GroupBy(chapter => chapter.Id)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateChapter is not null)
+            throw new InvalidOperationException($"Import file contains duplicate chapter '{duplicateChapter.Key:N}'.");
+
+        foreach (var chapter in document.Chapters)
+        {
+            try
+            {
+                var manuscript = document.FormatVersion >= 8
+                    ? ReadCurrentManuscript(chapter)
+                    : ManuscriptCodec.FromPlainText(
+                        chapter.Id,
+                        chapter.Body,
+                        revision: 1,
+                        deterministicIds: true);
+                if (document.FormatVersion >= 8)
+                {
+                    ValidateCurrentPageLayout(chapter, manuscript);
+                    ValidateCurrentIllustrationLayout(chapter, manuscript);
+                }
+                else
+                {
+                    _ = ManuscriptMigrationService.MigrateLegacyPicturePage(
+                        chapter.Id,
+                        chapter.Body ?? string.Empty,
+                        chapter.PageLayoutJson,
+                        manuscript);
+                    _ = ManuscriptMigrationService.MigrateLegacyIllustrations(
+                        chapter.Id,
+                        chapter.Body ?? string.Empty,
+                        chapter.IllustrationLayoutJson,
+                        manuscript);
+                }
+            }
+            catch (Exception exception) when (exception is JsonException
+                or InvalidDataException
+                or InvalidOperationException)
+            {
+                throw new InvalidOperationException(
+                    $"Chapter {chapter.Id:N} contains invalid manuscript or visual-layout data: {exception.Message}",
+                    exception);
+            }
+        }
+    }
+
+    private static ManuscriptDocument ReadCurrentManuscript(ProjectExportChapter chapter)
+    {
+        if (string.IsNullOrWhiteSpace(chapter.ManuscriptJson))
+            throw new InvalidDataException("The v8 manuscript document is missing.");
+        return ManuscriptCodec.Deserialize(
+            chapter.ManuscriptJson,
+            chapter.Id,
+            chapter.ManuscriptRevision);
+    }
+
+    private static void ValidateCurrentPageLayout(
+        ProjectExportChapter chapter,
+        ManuscriptDocument manuscript)
+    {
+        if (string.IsNullOrWhiteSpace(chapter.PageLayoutJson))
+            return;
+        var layout = JsonSerializer.Deserialize<PicturePageLayout>(
+            chapter.PageLayoutJson,
+            ManuscriptCodec.JsonOptions)
+            ?? throw new InvalidDataException("The Picture Page layout is null.");
+        var hydrated = ChapterTextLayoutSynchronizer.Hydrate(layout, manuscript);
+        if (!string.Equals(
+            ManuscriptCodec.NormalizePlainText(ChapterTextLayoutSynchronizer.ProjectBody(hydrated)),
+            ManuscriptCodec.ProjectPlainText(manuscript),
+            StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("Picture Page references do not project the complete manuscript.");
+        }
+    }
+
+    private static void ValidateCurrentIllustrationLayout(
+        ProjectExportChapter chapter,
+        ManuscriptDocument manuscript)
+    {
+        if (string.IsNullOrWhiteSpace(chapter.IllustrationLayoutJson))
+            return;
+        _ = JsonSerializer.Deserialize<IllustratedProseLayout>(
+            chapter.IllustrationLayoutJson,
+            ManuscriptCodec.JsonOptions)
+            ?? throw new InvalidDataException("The illustrated-prose layout is null.");
+        var validationChapter = new Chapter
+        {
+            Id = chapter.Id,
+            ProjectId = Guid.Empty,
+            Title = chapter.Title,
+            ManuscriptJson = chapter.ManuscriptJson,
+            ManuscriptRevision = manuscript.Revision,
+            IllustrationLayoutJson = chapter.IllustrationLayoutJson,
+        };
+        ChapterTextLayoutSynchronizer.ValidateIllustrationReferences(validationChapter, manuscript);
     }
 
     private async Task SeedProjectNodeMapAsync(
@@ -339,16 +443,40 @@ public sealed class ProjectImportJobProcessor(
             var created = await chapters.CreateAsync(job.ProjectId, targetActId, importedChapter.Title, importedChapter.Synopsis, cancellationToken: cancellationToken);
             var tracked = await chapterRepo.GetByIdAsync(created.Id, cancellationToken)
                 ?? throw new InvalidOperationException($"Created chapter {created.Id} could not be reloaded.");
-            tracked.Body = importedChapter.Body;
+            var importedManuscript = document.FormatVersion >= 8
+                ? ImportCurrentManuscript(importedChapter, tracked.Id)
+                : ManuscriptCodec.FromPlainText(
+                    tracked.Id,
+                    importedChapter.Body,
+                    checked(tracked.ManuscriptRevision + 1),
+                    deterministicIds: true);
+            tracked.ManuscriptJson = ManuscriptCodec.Serialize(importedManuscript);
+            tracked.ManuscriptRevision = importedManuscript.Revision;
             tracked.VisualMode = importedChapter.VisualMode;
             tracked.PageLayoutKind = importedChapter.PageLayoutKind;
-            tracked.PageLayoutJson = RewritePageLayoutJson(importedChapter.PageLayoutJson, state.ImageMap);
-            tracked.IllustrationLayoutJson = RewriteIllustrationLayoutJson(importedChapter.IllustrationLayoutJson, state.ImageMap);
-            ChapterTextLayoutSynchronizer.SynchronizeFromBody(
+            var pageLayoutJson = document.FormatVersion >= 8
+                ? importedChapter.PageLayoutJson
+                : ManuscriptMigrationService.MigrateLegacyPicturePage(
+                    tracked.Id,
+                    importedChapter.Body ?? string.Empty,
+                    importedChapter.PageLayoutJson,
+                    importedManuscript);
+            var illustrationLayoutJson = document.FormatVersion >= 8
+                ? importedChapter.IllustrationLayoutJson
+                : ManuscriptMigrationService.MigrateLegacyIllustrations(
+                    tracked.Id,
+                    importedChapter.Body ?? string.Empty,
+                    importedChapter.IllustrationLayoutJson,
+                    importedManuscript);
+            tracked.PageLayoutJson = RewritePageLayoutJson(pageLayoutJson, state.ImageMap);
+            tracked.IllustrationLayoutJson = RewriteIllustrationLayoutJson(illustrationLayoutJson, state.ImageMap);
+            ChapterTextLayoutSynchronizer.SynchronizeFromManuscript(
                 tracked,
-                tracked.Body,
+                importedManuscript,
                 ensureLayout: tracked.VisualMode == ChapterVisualMode.PicturePage);
-            tracked.VectorIndexState = string.IsNullOrWhiteSpace(importedChapter.Body) ? VectorIndexState.UpToDate : VectorIndexState.Stale;
+            tracked.VectorIndexState = string.IsNullOrWhiteSpace(ManuscriptCodec.ProjectPlainText(importedManuscript))
+                ? VectorIndexState.UpToDate
+                : VectorIndexState.Stale;
             tracked.VectorIndexedAt = null;
             tracked.VectorIndexError = null;
             tracked.UpdatedAt = DateTime.UtcNow;
@@ -775,10 +903,20 @@ public sealed class ProjectImportJobProcessor(
                 .ToList();
             return JsonSerializer.Serialize(layout with { Images = images }, JsonOptions);
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
-            return layoutJson;
+            throw new InvalidDataException("The illustrated-prose layout is malformed.", exception);
         }
+    }
+
+    private static ManuscriptDocument ImportCurrentManuscript(
+        ProjectExportChapter chapter,
+        Guid localChapterId)
+    {
+        var imported = ReadCurrentManuscript(chapter);
+        var remapped = imported with { ManuscriptId = localChapterId };
+        ManuscriptCodec.Validate(remapped, localChapterId, remapped.Revision);
+        return remapped;
     }
 
     private static string RewritePageLayoutJson(
@@ -799,9 +937,9 @@ public sealed class ProjectImportJobProcessor(
                 .ToList();
             return JsonSerializer.Serialize(layout with { Images = images }, JsonOptions);
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
-            return layoutJson;
+            throw new InvalidDataException("The Picture Page layout is malformed.", exception);
         }
     }
 

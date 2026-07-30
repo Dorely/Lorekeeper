@@ -1,3 +1,6 @@
+using System.ComponentModel.DataAnnotations.Schema;
+using Lorekeeper.Manuscripts;
+
 namespace Lorekeeper.Models;
 
 public class ContestBatch
@@ -15,9 +18,17 @@ public class ContestBatch
 
     public string ChapterTitle { get; set; } = string.Empty;
 
-    public string OriginalChapterBody { get; set; } = string.Empty;
+    public string OriginalManuscriptJson { get; set; } = string.Empty;
 
-    public string AcceptedChapterBody { get; set; } = string.Empty;
+    public string AcceptedManuscriptJson { get; set; } = string.Empty;
+
+    [NotMapped]
+    public string OriginalPlainText =>
+        ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(OriginalManuscriptJson));
+
+    [NotMapped]
+    public string AcceptedPlainText =>
+        ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(AcceptedManuscriptJson));
 
     public Guid? WinningCandidateId { get; set; }
 

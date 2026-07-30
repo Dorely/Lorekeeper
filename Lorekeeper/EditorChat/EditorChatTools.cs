@@ -9,6 +9,7 @@ using Lorekeeper.Fonts;
 using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Llm;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Publish;
@@ -22,6 +23,8 @@ namespace Lorekeeper.EditorChat;
 public sealed class EditorChatTools(
     IActService acts,
     IChapterService chapters,
+    IManuscriptService manuscripts,
+    IManuscriptMigrationService manuscriptMigrations,
     IEntityService entities,
     IEntityTypeService entityTypes,
     IProjectFactService projectFacts,
@@ -56,8 +59,6 @@ public sealed class EditorChatTools(
         MaxTraversalPaths = 24,
         MaxLinksPerNode = 10,
     };
-
-    private const int EditChapterExcerptContextLines = 3;
 
     public async Task<IList<AITool>> BuildAsync(
         EditorChatContext context,
@@ -146,6 +147,37 @@ public sealed class EditorChatTools(
                     "Always returns content plus pagination metadata. If this turn already staged an edit to the chapter, returns the latest staged body for this turn."),
 
             AIFunctionFactory.Create(
+                method: (Guid chapterId, int startBlock = 0, int blockCount = 40) =>
+                    ReadManuscriptAsync(context, chapterId, startBlock, blockCount),
+                name: "read_manuscript",
+                description:
+                    "Read bounded semantic manuscript blocks with stable block IDs, inline marks, style roles, source hash, and the current revision token. " +
+                    "Use this before any manuscript mutation and pass the returned revision to preview_manuscript_operations or apply_manuscript_operations."),
+
+            AIFunctionFactory.Create(
+                method: (Guid chapterId, long expectedRevision, ManuscriptOperationInput[] operations) =>
+                    PreviewManuscriptOperationsAsync(context, chapterId, expectedRevision, operations),
+                name: "preview_manuscript_operations",
+                description:
+                    "Validate semantic insert, replace, delete, move, split, merge, block-style, and inline-mark operations without saving. " +
+                    "Returns the projected text, changed stable block IDs, and next revision. Stale revisions fail closed."),
+
+            AIFunctionFactory.Create(
+                method: (Guid chapterId, long expectedRevision, ManuscriptOperationInput[] operations) =>
+                    ApplyManuscriptOperationsAsync(context, chapterId, expectedRevision, operations),
+                name: "apply_manuscript_operations",
+                description:
+                    "Apply validated semantic manuscript operations through the same revision-checked service used by the editor. " +
+                    "Supports insertBlock, replaceBlockText, deleteBlock, moveBlock, splitBlock, mergeBlocks, setBlockStyle, and setInlineMark. " +
+                    "Returns changed stable block IDs, the new revision, and source hash; stale revisions and invalid ranges fail closed."),
+
+            AIFunctionFactory.Create(
+                method: () => ReadManuscriptMigrationStateAsync(context),
+                name: "read_manuscript_migration_state",
+                description:
+                    "Read structured-manuscript migration, validation journal, protected backup, and recovery state. Read-only; never treats an incomplete migration as successful."),
+
+            AIFunctionFactory.Create(
                 method: () => ListProjectImagesAsync(context),
                 name: "list_project_images",
                 description: "List the project image library with ids, filenames, alt text, source, prompt, model, size, and preview URL. Read-only and available in Contest preparation."),
@@ -192,21 +224,6 @@ public sealed class EditorChatTools(
                 name: "crop_project_image",
                 description: "Create a non-destructive project-library crop from an existing image using 0-100 percentage coordinates. Inspect the source first or use user-supplied coordinates and describe only the cropped subject in altText. Optionally attach the tight subject-only crop to one entity as its canonical reference; make separate crops for separate entities. Source associations are never inherited."),
         ]);
-
-        tools.Add(AIFunctionFactory.Create(
-            method: (Guid chapterId, string content, int? startLine = null, int? endLine = null) =>
-                EditChapterAsync(context, chapterId, content, startLine, endLine),
-            name: "edit_chapter",
-            description:
-                "Edit a chapter using line-based semantics. " +
-                "Requires a Prose or IllustratedProse chapter; PicturePage text must be edited with picture-page layout tools. " +
-                "To Append: Leave both startLine and endLine null: appends `content` to the end of the chapter. " +
-                "For an empty chapter, leave both startLine and endLine null to write the first content. " +
-                "To Insert: Provide only startLine and leave endLine null: insert `content` BEFORE that line (1-based). " +
-                "To Replace: Provide both startLine and endLine: replace the inclusive range of existing numbered lines with `content`. " +
-                "Lines are 1-based and match the numbering shown by read_chapter and the editor gutter. " +
-                "`content` should not contain line numbers. " +
-                "Returns a short change summary plus the edited line-numbered excerpt with nearby context lines."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid chapterId, string visualMode, string? pageLayoutKind = null) =>
@@ -409,8 +426,8 @@ public sealed class EditorChatTools(
         var sb = new StringBuilder();
         foreach (var chapter in list)
         {
-            var lineCount = ChapterFormatting.SplitLines(chapter.Body).Count;
-            var pageCount = CountReadChapterPages(chapter.Body, EffectiveReadChapterPageMaxChars());
+            var lineCount = ChapterFormatting.SplitLines(chapter.PlainText).Count;
+            var pageCount = CountReadChapterPages(chapter.PlainText, EffectiveReadChapterPageMaxChars());
 
             sb.Append(chapter.Order + 1).Append(". ").Append(chapter.Title)
               .Append(" - id=").Append(chapter.Id)
@@ -419,7 +436,7 @@ public sealed class EditorChatTools(
                 sb.Append(" - pageLayoutKind=").Append(chapter.PageLayoutKind);
             sb
               .Append(" - lines=").Append(lineCount)
-              .Append(" - bodyChars=").Append(chapter.Body.Length)
+              .Append(" - bodyChars=").Append(chapter.PlainText.Length)
               .Append(" - readChapterPages=").Append(pageCount);
             if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
                 sb.Append(" - ").Append(chapter.Synopsis);
@@ -468,7 +485,7 @@ public sealed class EditorChatTools(
         {
             ScoreText(candidate, "title", candidate.Chapter.Title, terms, 24);
             ScoreText(candidate, "synopsis", candidate.Chapter.Synopsis, terms, 30);
-            ScoreText(candidate, "body-keyword", candidate.Chapter.Body, terms, 18);
+            ScoreText(candidate, "body-keyword", candidate.Chapter.PlainText, terms, 18);
         }
 
         await ScoreProjectSearchHitsAsync(ctx.ProjectId, terms, candidates);
@@ -488,9 +505,9 @@ public sealed class EditorChatTools(
                 synopsis = candidate.Chapter.Synopsis,
                 bodyStats = new
                 {
-                    lines = ChapterFormatting.SplitLines(candidate.Chapter.Body).Count,
-                    chars = candidate.Chapter.Body.Length,
-                    readChapterPages = CountReadChapterPages(candidate.Chapter.Body, EffectiveReadChapterPageMaxChars()),
+                    lines = ChapterFormatting.SplitLines(candidate.Chapter.PlainText).Count,
+                    chars = candidate.Chapter.PlainText.Length,
+                    readChapterPages = CountReadChapterPages(candidate.Chapter.PlainText, EffectiveReadChapterPageMaxChars()),
                 },
                 score = candidate.Score,
                 impact = candidate.Score >= 90 ? "high" : candidate.Score >= 45 ? "medium" : "low",
@@ -951,7 +968,7 @@ public sealed class EditorChatTools(
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
-        var body = chapter.Body;
+        var body = chapter.PlainText;
         var source = "persisted";
         if (ctx.ReviewEdits && ctx.EditorStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
         {
@@ -1068,6 +1085,182 @@ public sealed class EditorChatTools(
                 ? new { chapterId = chapter.Id, pageNumber = requestedPageNumber + 1 }
                 : null,
             content,
+        });
+    }
+
+    private async Task<string> ReadManuscriptAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        int startBlock,
+        int blockCount)
+    {
+        var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId:N} was not found in this project.";
+        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken);
+        if (snapshot is null)
+            return $"Error: manuscript {chapterId:N} was not found.";
+        var document = ctx.ReviewEdits
+            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
+                ? staged
+                : snapshot.Document;
+        startBlock = Math.Clamp(startBlock, 0, document.Content.Count);
+        blockCount = Math.Clamp(blockCount, 1, 100);
+        var blocks = document.Content.Skip(startBlock).Take(blockCount).ToList();
+        return JsonSerializer.Serialize(new
+        {
+            chapter = new { chapter.Id, chapter.Title },
+            document.Revision,
+            sourceHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document)),
+            source = ReferenceEquals(document, snapshot.Document) ? "persisted" : "stagedDraft",
+            pagination = new
+            {
+                startBlock,
+                returnedBlockCount = blocks.Count,
+                totalBlockCount = document.Content.Count,
+                hasMore = startBlock + blocks.Count < document.Content.Count,
+                nextStartBlock = startBlock + blocks.Count,
+            },
+            blocks,
+        }, ManuscriptCodec.JsonOptions);
+    }
+
+    private async Task<string> PreviewManuscriptOperationsAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        long expectedRevision,
+        ManuscriptOperationInput[] operations)
+    {
+        var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId:N} was not found in this project.";
+        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken);
+        if (snapshot is null)
+            return $"Error: manuscript {chapterId:N} was not found.";
+        var source = ctx.ReviewEdits
+            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
+                ? staged
+                : snapshot.Document;
+        if (source.Revision != expectedRevision)
+            return $"Error: manuscript revision conflict; expected {expectedRevision}, current revision is {source.Revision}.";
+
+        try
+        {
+            var converted = ManuscriptOperationInput.ToOperations(operations);
+            var (document, changedBlockIds) = ManuscriptOperations.Apply(source, converted);
+            return JsonSerializer.Serialize(new
+            {
+                preview = true,
+                expectedRevision,
+                nextRevision = document.Revision,
+                changedBlockIds,
+                sourceHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document)),
+                plainText = ManuscriptCodec.ProjectPlainText(document),
+                document,
+            }, ManuscriptCodec.JsonOptions);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            return $"Error: {exception.Message}";
+        }
+    }
+
+    private async Task<string> ApplyManuscriptOperationsAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        long expectedRevision,
+        ManuscriptOperationInput[] operations)
+    {
+        var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return $"Error: chapter {chapterId:N} was not found in this project.";
+        try
+        {
+            var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
+                ?? throw new InvalidOperationException($"Manuscript {chapterId:N} was not found.");
+            var source = ctx.ReviewEdits
+                && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
+                    ? staged
+                    : snapshot.Document;
+            if (source.Revision != expectedRevision)
+                throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
+            var converted = ManuscriptOperationInput.ToOperations(operations);
+            if (ctx.ReviewEdits && ctx.EditorStaging is not null)
+            {
+                var (document, changedBlockIds) = ManuscriptOperations.Apply(source, converted);
+                var summary = $"Edit {changedBlockIds.Count} manuscript block(s)";
+                var payload = JsonSerializer.Serialize(new
+                {
+                    staged = true,
+                    expectedRevision,
+                    nextRevision = document.Revision,
+                    changedBlockIds,
+                });
+                await ctx.EditorStaging.StageChapterManuscriptEditAsync(
+                    chapter,
+                    source,
+                    document,
+                    summary,
+                    payload,
+                    ctx.TurnCancellationToken);
+                return payload;
+            }
+
+            var result = await manuscripts.ApplyAsync(
+                chapterId,
+                expectedRevision,
+                converted,
+                ctx.TurnCancellationToken);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                applied = true,
+                result.Snapshot.Revision,
+                result.Snapshot.SourceHash,
+                result.ChangedBlockIds,
+                result.Snapshot.PlainText,
+            });
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            return $"Error: {exception.Message}";
+        }
+    }
+
+    private async Task<string> ReadManuscriptMigrationStateAsync(EditorChatContext ctx)
+    {
+        var state = await manuscriptMigrations.GetStateAsync(ctx.TurnCancellationToken);
+        return JsonSerializer.Serialize(new
+        {
+            state.MigrationRequired,
+            state.RecoveryRequired,
+            journals = state.Journals.Select(journal => new
+            {
+                journal.Id,
+                journal.MigrationName,
+                journal.SourceSchemaVersion,
+                journal.TargetSchemaVersion,
+                journal.Phase,
+                journal.Status,
+                BackupFileName = Path.GetFileName(journal.BackupPath),
+                journal.ChapterCount,
+                journal.ContestBatchCount,
+                journal.ContestCandidateCount,
+                journal.RevisionSessionCount,
+                journal.SourceHash,
+                journal.TargetHash,
+                journal.ValidationReportJson,
+                journal.ErrorDetail,
+                journal.StartedAt,
+                journal.CompletedAt,
+            }),
+            backups = state.Backups.Select(backup => new
+            {
+                FileName = Path.GetFileName(backup.Path),
+                backup.SizeBytes,
+                backup.CreatedAtUtc,
+            }),
+            restorePolicy = "A restore requires an explicit, expiring user confirmation token and cannot be executed by this read tool.",
         });
     }
 
@@ -1197,7 +1390,7 @@ public sealed class EditorChatTools(
             state.IllustrationLayout,
             state.PageLayout,
             inventory = PicturePageInventoryPayload(state, geometry),
-            projectedBody = state.VisualMode == ChapterVisualMode.PicturePage ? chapter.Body : null,
+            projectedBody = state.VisualMode == ChapterVisualMode.PicturePage ? chapter.PlainText : null,
             manifest = chapterVisuals.BuildManifest(
                 state,
                 imageNames,
@@ -1696,7 +1889,7 @@ public sealed class EditorChatTools(
         {
             AnchorPosition = parsedAnchor ?? block.AnchorPosition,
             ParagraphIndex = paragraphIndex ?? block.ParagraphIndex,
-            ParagraphHash = movedAnchor ? string.Empty : block.ParagraphHash,
+            BlockId = movedAnchor ? string.Empty : block.BlockId,
             WidthPercent = widthPercent ?? block.WidthPercent,
             Alignment = parsedAlignment ?? block.Alignment,
             Caption = caption ?? block.Caption,
@@ -2088,7 +2281,7 @@ public sealed class EditorChatTools(
             canvas = PicturePageCanvasPayload(state, geometry),
             state.IllustrationLayout,
             state.PageLayout,
-            projectedBody = state.VisualMode == ChapterVisualMode.PicturePage ? chapter?.Body ?? string.Empty : null,
+            projectedBody = state.VisualMode == ChapterVisualMode.PicturePage ? chapter?.PlainText ?? string.Empty : null,
             manifest = chapterVisuals.BuildManifest(
                 state,
                 imageNames,
@@ -2302,253 +2495,6 @@ public sealed class EditorChatTools(
             ContentCharCount += lineNumberWidth + 2 + segment.Text.Length;
             Segments.Add(segment);
         }
-    }
-
-    private static string BuildEditChapterResult(
-        string summary,
-        string newBody,
-        int? affectedStartLine,
-        int? affectedEndLine,
-        int anchorLine,
-        string anchorDescription)
-    {
-        var newLines = ChapterFormatting.SplitLines(newBody);
-        var (snippetStartLine, snippetEndLine) = ResolveEditChapterSnippetRange(
-            newLines.Count,
-            affectedStartLine,
-            affectedEndLine,
-            anchorLine);
-
-        var sb = new StringBuilder();
-        sb.Append("OK. ").AppendLine(summary);
-        sb.AppendLine();
-
-        if (affectedStartLine is int startLine && affectedEndLine is int endLine)
-        {
-            sb.Append("Affected new lines: ")
-              .Append(startLine)
-              .Append('-')
-              .Append(endLine)
-              .AppendLine(".");
-        }
-        else
-        {
-            sb.Append("Affected new lines: none; deletion/empty-edit anchor: ")
-              .Append(anchorDescription)
-              .AppendLine(".");
-        }
-
-        if (snippetStartLine == 0)
-        {
-            sb.AppendLine("Returned excerpt lines: none.");
-            sb.AppendLine();
-            sb.AppendLine("New body excerpt:");
-            sb.Append("(empty)");
-            return sb.ToString();
-        }
-
-        sb.Append("Returned excerpt lines: ")
-          .Append(snippetStartLine)
-          .Append('-')
-          .Append(snippetEndLine)
-          .AppendLine(".");
-        sb.AppendLine();
-        sb.AppendLine("New body excerpt:");
-        sb.Append(FormatNumberedLines(newLines, snippetStartLine, snippetEndLine));
-        return sb.ToString();
-    }
-
-    private static (int StartLine, int EndLine) ResolveEditChapterSnippetRange(
-        int lineCount,
-        int? affectedStartLine,
-        int? affectedEndLine,
-        int anchorLine)
-    {
-        if (lineCount == 0)
-            return (0, 0);
-
-        if (affectedStartLine is int startLine && affectedEndLine is int endLine)
-        {
-            return (
-                Math.Max(1, startLine - EditChapterExcerptContextLines),
-                Math.Min(lineCount, endLine + EditChapterExcerptContextLines));
-        }
-
-        var clampedAnchorLine = Math.Clamp(anchorLine, 1, lineCount + 1);
-        if (clampedAnchorLine > lineCount)
-            return (Math.Max(1, lineCount - EditChapterExcerptContextLines + 1), lineCount);
-
-        return (
-            Math.Max(1, clampedAnchorLine - EditChapterExcerptContextLines),
-            Math.Min(lineCount, clampedAnchorLine + EditChapterExcerptContextLines - 1));
-    }
-
-    private static string FormatNumberedLines(IReadOnlyList<string> lines, int startLine, int endLine)
-    {
-        var lineNumberWidth = Math.Max(4, lines.Count.ToString().Length);
-        var sb = new StringBuilder();
-        for (var lineNumber = startLine; lineNumber <= endLine; lineNumber++)
-        {
-            sb.Append(lineNumber.ToString().PadLeft(lineNumberWidth, '0'));
-            sb.Append(": ");
-            sb.Append(lines[lineNumber - 1]);
-            if (lineNumber < endLine) sb.Append('\n');
-        }
-
-        return sb.ToString();
-    }
-
-    private async Task<string> EditChapterAsync(
-        EditorChatContext ctx,
-        Guid chapterId,
-        string content,
-        int? startLine,
-        int? endLine)
-    {
-        var chapter = await chapters.GetAsync(chapterId);
-        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
-            return $"Error: chapter {chapterId} not found in this project.";
-        if (chapter.VisualMode == ChapterVisualMode.PicturePage)
-            return "Error: edit_chapter cannot edit PicturePage chapters because their body is projected from layout text boxes. Use upsert_picture_page_text or other Picture Page visual layout tools.";
-
-        content ??= string.Empty;
-        var existingBody = chapter.Body;
-        if (ctx.ReviewEdits && ctx.EditorStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
-            existingBody = draftBody;
-
-        var existingLines = ChapterFormatting.SplitLines(existingBody);
-        var contentLines = ChapterFormatting.SplitLines(content);
-
-        string newBody;
-        string summary;
-        int? affectedStartLine = null;
-        int? affectedEndLine = null;
-        var anchorLine = 1;
-        var anchorDescription = "chapter start";
-
-        string InsertBeforeLine(int insertLine)
-        {
-            var merged = new List<string>(existingLines.Count + contentLines.Count);
-            merged.AddRange(existingLines.Take(insertLine - 1));
-            merged.AddRange(contentLines);
-            merged.AddRange(existingLines.Skip(insertLine - 1));
-            return ChapterFormatting.JoinLines(merged);
-        }
-
-        string InsertSummary(int insertLine) => insertLine == existingLines.Count + 1
-            ? existingLines.Count == 0
-                ? $"Inserted {contentLines.Count} line(s) into the empty chapter."
-                : $"Appended {contentLines.Count} line(s) after line {existingLines.Count}."
-            : $"Inserted {contentLines.Count} line(s) before line {insertLine}.";
-
-        if (startLine is null && endLine is null)
-        {
-            var appendLine = existingLines.Count + 1;
-            newBody = InsertBeforeLine(appendLine);
-            summary = existingLines.Count == 0
-                ? $"Appended {contentLines.Count} line(s) to the empty chapter."
-                : $"Appended {contentLines.Count} line(s) after line {existingLines.Count}.";
-            if (contentLines.Count > 0)
-            {
-                affectedStartLine = appendLine;
-                affectedEndLine = appendLine + contentLines.Count - 1;
-            }
-            else
-            {
-                anchorLine = appendLine;
-                anchorDescription = existingLines.Count == 0
-                    ? "chapter remains empty"
-                    : $"after line {existingLines.Count}";
-            }
-        }
-        else if (startLine is int insertLine && endLine is null)
-        {
-            if (insertLine < 1 || insertLine > existingLines.Count + 1)
-                return $"Error: startLine {insertLine} out of range (1..{existingLines.Count + 1}).";
-
-            newBody = InsertBeforeLine(insertLine);
-            summary = InsertSummary(insertLine);
-            if (contentLines.Count > 0)
-            {
-                affectedStartLine = insertLine;
-                affectedEndLine = insertLine + contentLines.Count - 1;
-            }
-            else
-            {
-                anchorLine = insertLine;
-                anchorDescription = insertLine == existingLines.Count + 1
-                    ? existingLines.Count == 0 ? "chapter remains empty" : $"after line {existingLines.Count}"
-                    : $"before line {insertLine}";
-            }
-        }
-        else if (startLine is int replaceStart && endLine is int replaceEnd)
-        {
-            if (existingLines.Count == 0 && replaceStart == 1 && replaceEnd == 1)
-            {
-                newBody = ChapterFormatting.JoinLines(contentLines);
-                summary = $"Wrote {contentLines.Count} line(s) into the empty chapter.";
-                if (contentLines.Count > 0)
-                {
-                    affectedStartLine = 1;
-                    affectedEndLine = contentLines.Count;
-                }
-                else
-                {
-                    anchorLine = 1;
-                    anchorDescription = "chapter is empty";
-                }
-            }
-            else
-            {
-                if (replaceStart < 1 || replaceStart > existingLines.Count)
-                    return $"Error: startLine {replaceStart} out of range (1..{existingLines.Count}).";
-                if (replaceEnd < replaceStart || replaceEnd > existingLines.Count)
-                    return $"Error: endLine {replaceEnd} out of range ({replaceStart}..{existingLines.Count}).";
-
-                var replacedCount = replaceEnd - replaceStart + 1;
-                var merged = new List<string>(existingLines.Count - replacedCount + contentLines.Count);
-                merged.AddRange(existingLines.Take(replaceStart - 1));
-                merged.AddRange(contentLines);
-                merged.AddRange(existingLines.Skip(replaceEnd));
-                newBody = ChapterFormatting.JoinLines(merged);
-                summary = replaceStart == 1 && replaceEnd == existingLines.Count
-                    ? $"Full rewrite ({existingLines.Count} -> {contentLines.Count} lines)."
-                    : $"Replaced lines {replaceStart}-{replaceEnd} ({replacedCount} -> {contentLines.Count} lines).";
-                if (contentLines.Count > 0)
-                {
-                    affectedStartLine = replaceStart;
-                    affectedEndLine = replaceStart + contentLines.Count - 1;
-                }
-                else
-                {
-                    var newLineCount = existingLines.Count - replacedCount;
-                    anchorLine = replaceStart;
-                    anchorDescription = newLineCount == 0
-                        ? "chapter is now empty"
-                        : replaceStart <= newLineCount
-                            ? $"before line {replaceStart}"
-                            : $"after line {newLineCount}";
-                }
-            }
-        }
-        else
-        {
-            return "Error: endLine provided without startLine.";
-        }
-
-        var result = BuildEditChapterResult(summary, newBody, affectedStartLine, affectedEndLine, anchorLine, anchorDescription);
-
-        if (ctx.ReviewEdits && ctx.EditorStaging is not null && !ctx.ShouldBypassReviewForChapterBody(chapter))
-        {
-            await ctx.EditorStaging.StageChapterBodyEditAsync(chapter, existingBody, newBody, summary, result);
-            return result;
-        }
-
-        await chapters.UpdateAsync(chapterId, body: newBody);
-        if (ctx.ReviewEdits)
-            ctx.MarkChapterBodyDirectlyEdited(chapterId);
-        ctx.OnMutated();
-        return result;
     }
 
     private async Task<string> StartContestAsync(

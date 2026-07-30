@@ -195,7 +195,7 @@ public sealed record PublishChapterDocument(
     Guid Id,
     Guid? ActId,
     string Title,
-    string Body,
+    string PlainText,
     string Synopsis,
     int Order,
     bool IncludeHeading,

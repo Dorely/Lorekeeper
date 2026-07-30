@@ -378,7 +378,7 @@ else if (_document is not null)
         var sequence = 0;
         builder.OpenElement(sequence++, "div");
         builder.AddAttribute(sequence++, "class", "manuscript-prose");
-        var paragraphs = SplitParagraphs(chapter.Body);
+        var paragraphs = SplitParagraphs(chapter.PlainText);
         var blocksByParagraph = chapter.IllustrationLayout.Images
             .GroupBy(block => (block.ParagraphIndex, block.AnchorPosition))
             .ToDictionary(group => group.Key, group => group.OrderBy(block => block.SortOrder).ToList());

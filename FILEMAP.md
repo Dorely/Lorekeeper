@@ -16,7 +16,7 @@
 | `docs/architecture.md` | Current technical architecture, ownership boundaries, persistence/security constraints, platform scope, and validation commands. |
 | `docs/publishing-roadmap.md` | Status-labeled five-phase route to end-to-end book production, including Phase 1 feature order, assistant parity, migration safety, and verification gates. |
 | `FILEMAP.md` | This file — concise map of every source file. |
-| `Lorekeeper.sln` | Solution file containing the `Lorekeeper` project. |
+| `Lorekeeper.sln` | Solution file containing the application and authorized fixture-test projects. |
 | `global.json` | Pins the .NET SDK version (`rollForward: latestFeature`). |
 | `.editorconfig` | C#/Razor formatting and naming rules. |
 | `.gitignore` | Standard .NET ignore patterns plus Lorekeeper local SQLite/temp data; publish output is scoped to the repo-root `/publish/` folder so source folders named `Publish` remain trackable. |
@@ -45,6 +45,18 @@
 | `docs/research/press-spike-license-inventory.json` | Generated exact-version/checksum/VCS/license-file inventory for every target-inclusive Rust spike dependency and bundled asset notice. |
 | `docs/decisions/0001-reject-typst-as-sole-press-renderer.md` | Accepted no-go decision for the first press renderer candidate and the WeasyPrint 69 fallback gate. |
 | `docs/decisions/0002-accept-weasyprint-for-preview-press-runtime.md` | Accepted reduced-scope decision for exact-pinned WeasyPrint as the future Preview press-runtime foundation. |
+| `docs/schemas/manuscript-v1.schema.json` | Published JSON Schema for canonical structured-manuscript v1 documents, blocks, inline nodes, marks, and semantic style roles. |
+
+## Lorekeeper.Tests/
+
+| File | Description |
+|------|-------------|
+| `Lorekeeper.Tests.csproj` / `Usings.cs` | Authorized xUnit fixture project and shared test imports. |
+| `ManuscriptCodecTests.cs` | Codec, stable-ID, revision, inline-mark, split, and merge fixtures. |
+| `ManuscriptMigrationIntegrationTests.cs` | Actual legacy-schema WAL database migration, backup/journal/hash, confirmation, and restore drill. |
+| `ChapterVisualMigrationTests.cs` | Picture Page multi-box and illustrated-prose stable-anchor migration fixtures. |
+| `EditorChatStagingTests.cs` | Review-mode fixture proving sequential semantic operations share one staged manuscript overlay. |
+| `ProjectExportV8Tests.cs` | v8 serialization and prevalidation fixtures for canonical manuscripts and stable visual references. |
 
 ## Lorekeeper.Press/ — Disposable renderer spike
 
@@ -230,6 +242,7 @@
 | `Providers.razor` (+ `.razor.css`) | Connection-card LLM configuration UI: Codex OAuth, grouped credential connections and nested models, per-model thinking effort, connection editing/deletion, readiness tests, working-only defaults, and expandable add flows. |
 | `Embeddings.razor` (+ `.razor.css`) | Active embedding summary and configuration workflow: test-before-save, dimensions, rebuild confirmation, and an explicit semantic-feature danger zone. |
 | `SearchProviders.razor` (+ `.razor.css`) | Card-based SerpApi/Brave configuration for Research: add/edit/test/activate providers, API keys, and confirmed deletion. |
+| `DataRecovery.razor` | Structured-manuscript migration journal and local backup recovery UI with explicit two-step restore confirmation. |
 
 ### Models/
 
@@ -243,9 +256,10 @@
 | `Project.cs` | EF project root with optional user-owned `ProjectGuidance`, stable slug/settings, one `BookBrief`, and navigation to conversations, images, fonts, jobs, publishing, and graph rows. |
 | `BookBrief.cs` | Canonical high-level authorial-direction model, `BookKind` enum, and partial-patch contract whose null values are unchanged and `ClearFields` explicitly removes values. |
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
-| `Chapter.cs` | EF entity for a chapter (Title/Body/Synopsis/Order) under a `Project`, optionally assigned to an `Act`; stores visual mode, page layout kind, and visual layout JSON for illustrated prose/picture pages. Tracks vector-index state and exposes `VectorSourceId`. |
+| `Chapter.cs` | EF chapter with canonical structured manuscript JSON/revision and computed plain-text/document projections, plus title/synopsis/order, optional act, visual state, and vector-index state. |
 | `ChapterVisualMode.cs` | Enums for chapter visual modes, page layout kinds, and reusable image/text layout choices such as image fit, alignment, anchor position, and text vertical alignment. |
-| `ChapterVisualLayouts.cs` | Serializable IllustratedProse/PicturePage layouts with explicit text roles, point-based type settings, alignment/shadow choices, and image placement roles. |
+| `ChapterVisualLayouts.cs` | Serializable IllustratedProse/PicturePage layouts using stable manuscript block/range references while preserving text roles, type settings, geometry, and image placement. |
+| `ManuscriptMigrationJournal.cs` | Durable structured-manuscript migration phase, counts, hashes, backup path, timing, and redacted failure state. |
 | `ProjectFontFamily.cs` / `ProjectFontFace.cs` | Project-scoped EF entities for imported font families and static face bytes, with weight/italic metadata and project cascade ownership. |
 | `EditorContextPreference.cs` | EF entity for per-chapter Context Feed include/exclude preferences keyed by context item kind + stable item key. |
 | `EditorConversation.cs` | EF entity — one persistent multi-turn editor chat per `Project` (unique on `ProjectId`). Owns ordered `EditorMessage`s; cascade-deleted with the project. |
@@ -253,7 +267,7 @@
 | `EditorMessageVisual.cs` | EF entity for Editor Chat visual attachments shown as thumbnails, including project-image references or optional stored bytes. |
 | `ChatMessageImageAttachment.cs` | Shared ordered association from a user chat message/surface to a reusable project image asset. |
 | `EditorRevisionJob.cs` | EF entity for one prose-only background revision job spawned by Editor Chat; owns per-chapter worker sessions and parent tool-call metadata. |
-| `EditorRevisionSession.cs` | EF entity for one chapter worker session: assignment, original body snapshot, provider/model, chapter-body edit payload, status, timing, and errors. |
+| `EditorRevisionSession.cs` | EF entity for one chapter worker session: assignment, original manuscript snapshot, provider/model, semantic operation payload, status, timing, and errors; migrated terminal line edits remain versioned audit data. |
 | `EditorRevisionMessage.cs` | EF entity for persisted worker transcript rows, including assistant tool-call manifests and read-only tool result rows. |
 | `OutlineConversation.cs` | EF entity — one persistent multi-turn collaborative chat per `Project` (unique on `ProjectId`). Owns ordered `OutlineMessage`s; cascade-deleted with the project. |
 | `OutlineMessage.cs` | EF entity for a single chat row in an `OutlineConversation`: monotonic `Order`, `OutlineMessageRole` (System/User/Assistant/Tool), text `Content`, JSON `ToolCallsJson` for assistant function-calls, `ToolCallId` + `ToolName` for tool results, `OutlineMessageStatus` (Pending/Completed/Failed/Cancelled), optional `ErrorMessage`. |
@@ -266,7 +280,7 @@
 | `AiChangeBatch.cs` | EF entity grouping AI-proposed tool mutations from one assistant turn while they await approval/resolution. Tracks whether the owning transcript is Outline, Editor, or Research chat. |
 | `AiChange.cs` | EF entity for one queued AI tool mutation: tool metadata, before/after/result JSON, dependency metadata, status, rejection/error notes, timestamps. |
 | `ContestBatch.cs` | EF entity for one Editor Contest Mode run: captured turn/context snapshot, target chapter/body snapshot, operation metadata, status, and model candidates. |
-| `ContestCandidate.cs` | EF entity for one model's contest proposal: provider/model labels, validated mutation JSON, proposed chapter body, raw response, status, timing, and errors. |
+| `ContestCandidate.cs` | EF entity for one model's contest proposal: provider/model labels, validated semantic operations, proposed manuscript, raw response, status, timing, and errors. |
 | `IngestSource.cs` | EF entity for one ingested source: full source text, rolling synopsis, source metadata/instructions, content hash, source page/block locators, optional webpage URL/fetch provenance, and independent vector-index state/source id. |
 | `IngestSourcePage.cs` | EF entity for PDF page-level provenance: page text, char bounds, extraction method, render/image hash metadata, vision provider/model, and diagnostics. |
 | `IngestSourceBlock.cs` | EF entity for source section/page/block locators with kind/title/locator, optional page link, char bounds, and metadata JSON. |
@@ -303,7 +317,7 @@
 | `AppDbContext.cs` | EF Core context for projects, providers, chats, writing, graph, ingest/import, publishing, chapter visuals, and project font families/faces. Configures relationships/indexes, JSON property bags, and transient SQLite lock retries. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | EF Core migrations including provider reasoning effort, Project Guidance/Book Brief/context provenance, structured image-prompt audits, and shared chat-image attachments; historical migrations remain immutable. |
+| `Migrations/` | Immutable EF history plus the structured-manuscript v1 forward schema migration and current model snapshot. |
 
 ### Persistence/Repositories/
 
@@ -496,13 +510,13 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | v7 portable DTOs for Project Guidance, Book Brief, stable graph refs, visuals/associations, publish geometry/presentation, chapter visuals, image context, and crop lineage; accepts legacy `systemPrompt` imports. |
+| `ProjectExportModels.cs` | v8 portable DTOs with canonical manuscripts/revisions and stable visual refs; retains isolated v1-v7 body and legacy-guidance input adapters. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job, preserving customized legacy guidance, merging Book Brief fields into blank targets, restoring v7 structure/visual/publish geometry, reporting actions, and refreshing indexes. |
+| `ProjectImportJobProcessor.cs` | Runs one import job, importing v8 manuscripts losslessly or adapting v1-v7 bodies/visual anchors at the boundary, then refreshing projections and indexes. |
 
 ### Images/
 
@@ -536,8 +550,8 @@
 | File | Description |
 |------|-------------|
 | `ChapterVisualModels.cs` | UI/service records for chapter visual state, role-aware PicturePage image placement with optional Freeform geometry, automatic text-fit results, rendered fit details, and structured layout diagnostics. |
-| `ChapterTextLayoutSynchronizer.cs` | Shared canonical-body synchronizer for persisted Picture Page text boxes, including deterministic single-box rebuilding when prose invalidates a multi-box text layout. |
-| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Mode-gated layout facade with profile-aware prose/PicturePage rendering, silent glyph fallback, text fitting, rendered contrast/overflow diagnostics, body synchronization, manifests, and publish surfaces. |
+| `ChapterTextLayoutSynchronizer.cs` | Attaches and hydrates stable manuscript ranges for Picture Page text boxes while preserving multiple boxes, identity, geometry, typography, z-order, and reading order. |
+| `IChapterVisualService.cs` / `ChapterVisualService.cs` | Mode-gated visual facade using canonical manuscript blocks/ranges for prose/PicturePage rendering, fitting, diagnostics, synchronization, manifests, and publish surfaces. |
 | `PicturePageImageGenerationGuidance.cs` | Shared-geometry full-page/slot image targets plus bleed, gutter, focal-detail, and buffered text-region prompt constraints. |
 | `PicturePageLayoutDiagnostics.cs` | Enriched trim/gutter, overlap, reading-order, role-aware typography, font-discipline, widow/orphan, and line-length diagnostics with measurements, thresholds, and corrections. |
 
@@ -584,7 +598,7 @@
 | `IEditorContestService.cs` / `EditorContestService.cs` | Contest Mode application service: persists project settings, starts terminal contest batches, runs selected models without tools, streams raw Candidate JSON, validates JSON chapter-body mutations, builds proposed bodies, and resolves inline candidate review decisions. |
 | `EditorRevisionAgentModels.cs` | DTOs for prose-only revision assignments, run results, job/session details, and transcript projections used by tools and UI. |
 | `IEditorRevisionAgentService.cs` / `EditorRevisionAgentService.cs` | Same-turn revision-agent orchestrator: validates chapter assignments, persists jobs/sessions, runs bounded-parallel workers, and returns completed/staged chapter-body edits to the coordinator. |
-| `EditorRevisionAgentProcessor.cs` | Per-session worker with paginated parent-history/entity/link grounding, counted compact discovery, filtered source reads, and terminal assigned-chapter body editing; persists its transcript/tool history. |
+| `EditorRevisionAgentProcessor.cs` | Per-session worker with paginated grounding and filtered source reads whose terminal tool applies revision-aware semantic manuscript operations and persists transcript/tool history. |
 | `IEditorRevisionJobNotifier.cs` | In-process pub/sub for revision job/session progress updates, matching other local background workflow notifiers. |
 
 ### Outline/
@@ -611,7 +625,17 @@
 
 | File | Description |
 |------|-------------|
-| `IChapterService.cs` / `ChapterService.cs` | Chapter CRUD facade with authoritative store reloads, act-bucket assignment/order, canonical body-to-Picture-Page text synchronization, graph/search indexing, auto mentions, and full delete cleanup. |
+| `IChapterService.cs` / `ChapterService.cs` | Chapter CRUD plus shared `IManuscriptService` implementation for revision-aware document/operation writes and all graph, search, vector, auto-mention, visual-reference, and delete side effects. |
+
+### Manuscripts/
+
+| File | Description |
+|------|-------------|
+| `ManuscriptModels.cs` | Versioned manuscript document/block/inline/mark model, style roles, semantic operation records, snapshots, and revision-conflict contract. |
+| `ManuscriptCodec.cs` | Plain-text normalization/projection, deterministic migration IDs, validation, serialization, hashing, and stable-ID reparsing. |
+| `ManuscriptOperations.cs` / `ManuscriptOperationInput.cs` | Transactional insert/replace/delete/move/split/merge/style/mark transformations and assistant-safe operation DTO conversion. |
+| `IManuscriptService.cs` | Canonical revision-aware chapter manuscript read, replace, and semantic-operation service contract. |
+| `ManuscriptMigrationService.cs` | Cross-process-serialized, WAL-safe Online Backup API migration/recovery owner for resumable schema/data transformation, atomic validation journaling, retention, and confirmed restore. |
 
 ### wwwroot/
 

@@ -1,0 +1,145 @@
+@page "/settings/data-recovery"
+@using Lorekeeper.Manuscripts
+@rendermode InteractiveServer
+@inject IManuscriptMigrationService Migration
+@inject IHostApplicationLifetime ApplicationLifetime
+
+<PageTitle>Data recovery - Lorekeeper</PageTitle>
+
+<ConfigurationShell Title="Migration &amp; recovery"
+                    Description="Review structured-manuscript migration evidence and restore a validated pre-migration backup.">
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger" role="alert">@_error</div>
+    }
+    @if (_message is not null)
+    {
+        <div class="alert alert-info" role="status">@_message</div>
+    }
+    @if (_state is null)
+    {
+        <p>Loading migration state…</p>
+    }
+    else
+    {
+        @if (_state.RecoveryRequired)
+        {
+            <div class="alert alert-danger" role="alert">
+                Lorekeeper is running in data-recovery mode. The active workspace is a safe, projectless current-schema shell; the original projects remain in the protected backup named by the failed journal below. Update Lorekeeper if needed, then explicitly restore that backup to retry on the next start.
+            </div>
+        }
+        <section class="lk-card mb-4">
+            <h2>Migration journal</h2>
+            @if (_state.Journals.Count == 0)
+            {
+                <p>No structured-manuscript migration has been required for this database.</p>
+            }
+            else
+            {
+                @foreach (var journal in _state.Journals)
+                {
+                    <article class="border rounded p-3 mb-3">
+                        <strong>@journal.MigrationName</strong>
+                        <div>Status: @journal.Status · phase @journal.Phase</div>
+                        <div>Records: @journal.ChapterCount chapters, @journal.ContestBatchCount contests, @journal.ContestCandidateCount candidates, @journal.RevisionSessionCount revision sessions</div>
+                        <div>Started @journal.StartedAt.ToLocalTime().ToString("g")</div>
+                        @if (journal.CompletedAt is { } completed)
+                        {
+                            <div>Completed @completed.ToLocalTime().ToString("g")</div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(journal.ErrorDetail))
+                        {
+                            <div class="text-danger mt-2">@journal.ErrorDetail</div>
+                        }
+                    </article>
+                }
+            }
+        </section>
+
+        <section class="lk-card">
+            <h2>Protected backups</h2>
+            <p>Backups can contain manuscripts and provider credentials. They stay in Lorekeeper's per-user data directory and are never included in project exports or publication packages.</p>
+            @if (_state.Backups.Count == 0)
+            {
+                <p>No migration backups are available.</p>
+            }
+            else
+            {
+                @foreach (var backup in _state.Backups)
+                {
+                    <article class="border rounded p-3 mb-3">
+                        <code>@backup.Path</code>
+                        <div>@FormatBytes(backup.SizeBytes) · @backup.CreatedAtUtc.ToLocalTime().ToString("g")</div>
+                        @if (_restoreRequest?.BackupPath == backup.Path)
+                        {
+                            <div class="alert alert-warning mt-3">
+                                Confirming schedules this restore and shuts Lorekeeper down without changing the live database. On the next start, Lorekeeper creates a diagnostic backup, restores this file before workers start, and validates/migrates it before normal use.
+                            </div>
+                            <button class="btn btn-danger" @onclick="ConfirmRestoreAsync" disabled="@_busy">Confirm restore</button>
+                            <button class="btn btn-secondary ms-2" @onclick="CancelRestore" disabled="@_busy">Cancel</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-outline-danger mt-2" @onclick="() => PrepareRestoreAsync(backup.Path)" disabled="@_busy">Prepare restore</button>
+                        }
+                    </article>
+                }
+            }
+        </section>
+    }
+</ConfigurationShell>
+
+@code {
+    private ManuscriptMigrationState? _state;
+    private ManuscriptRestoreRequest? _restoreRequest;
+    private string? _error;
+    private string? _message;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _state = await Migration.GetStateAsync();
+        _restoreRequest = null;
+    }
+
+    private async Task PrepareRestoreAsync(string path)
+    {
+        _error = null;
+        _message = null;
+        _restoreRequest = await Migration.PrepareRestoreAsync(path);
+    }
+
+    private async Task ConfirmRestoreAsync()
+    {
+        if (_restoreRequest is null)
+            return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Migration.RestoreAsync(_restoreRequest.BackupPath, _restoreRequest.ConfirmationToken);
+            _message = "The restore is scheduled. Lorekeeper is shutting down; reopen it to apply the backup safely.";
+            _restoreRequest = null;
+            await InvokeAsync(StateHasChanged);
+            ApplicationLifetime.StopApplication();
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void CancelRestore() => _restoreRequest = null;
+
+    private static string FormatBytes(long bytes) =>
+        bytes >= 1024 * 1024
+            ? $"{bytes / 1024d / 1024d:0.0} MB"
+            : $"{bytes / 1024d:0.0} KB";
+}

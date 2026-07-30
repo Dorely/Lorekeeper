@@ -19,6 +19,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<BookBrief> BookBriefs => Set<BookBrief>();
     public DbSet<Act> Acts => Set<Act>();
     public DbSet<Chapter> Chapters => Set<Chapter>();
+    public DbSet<ManuscriptMigrationJournal> ManuscriptMigrationJournals => Set<ManuscriptMigrationJournal>();
     public DbSet<GraphNode> GraphNodes => Set<GraphNode>();
     public DbSet<GraphEdge> GraphEdges => Set<GraphEdge>();
     public DbSet<GraphEntityType> GraphEntityTypes => Set<GraphEntityType>();
@@ -121,6 +122,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             v => JsonSerializer.Serialize(v, JsonSerializerOptions.Default).GetHashCode(),
             v => JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(v, JsonSerializerOptions.Default), JsonSerializerOptions.Default) ?? new Dictionary<string, object?>());
 
+        modelBuilder.Entity<ManuscriptMigrationJournal>(entity =>
+        {
+            entity.HasIndex(journal => new { journal.MigrationName, journal.StartedAt });
+            entity.Property(journal => journal.Phase).HasConversion<string>();
+            entity.Property(journal => journal.Status).HasConversion<string>();
+        });
+
         modelBuilder.Entity<Project>(entity =>
         {
             entity.HasIndex(e => e.Slug).IsUnique();
@@ -154,6 +162,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.Property(e => e.VectorIndexState).HasConversion<string>();
             entity.Property(e => e.VisualMode).HasConversion<string>();
             entity.Property(e => e.PageLayoutKind).HasConversion<string>();
+            entity.Property(e => e.ManuscriptRevision).IsConcurrencyToken();
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.Chapters)

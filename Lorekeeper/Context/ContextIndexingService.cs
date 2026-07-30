@@ -377,7 +377,7 @@ public sealed class ContextIndexingService(
         sb.Append("Type: Chapter\n");
         sb.Append("Title: ").AppendLine(chapter.Title);
         AppendOptional(sb, "Synopsis", chapter.Synopsis);
-        AppendOptional(sb, "Body", chapter.Body);
+        AppendOptional(sb, "Body", chapter.PlainText);
         return sb.ToString().TrimEnd();
     }
 

@@ -287,16 +287,20 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<Guid?>("ActId")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Body")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("IllustrationLayoutJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("ManuscriptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ManuscriptRevision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("Order")
                         .HasColumnType("INTEGER");
@@ -389,7 +393,7 @@ namespace Lorekeeper.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("AcceptedChapterBody")
+                    b.Property<string>("AcceptedManuscriptJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -419,7 +423,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("OriginalChapterBody")
+                    b.Property<string>("OriginalManuscriptJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -480,7 +484,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<int>("Order")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("ProposedBody")
+                    b.Property<string>("ProposedManuscriptJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -810,9 +814,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<double?>("DurationMs")
                         .HasColumnType("REAL");
 
-                    b.Property<int?>("EndLine")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("TEXT");
 
@@ -827,7 +828,7 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("MutationKind")
+                    b.Property<string>("OperationFormat")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -838,7 +839,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<int>("Order")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("OriginalChapterBody")
+                    b.Property<string>("OriginalManuscriptJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -865,12 +866,9 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ReplacementText")
+                    b.Property<string>("OperationsJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
-
-                    b.Property<int?>("StartLine")
-                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -1884,6 +1882,74 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("LlmProviders");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ManuscriptMigrationJournal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BackupPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ChapterCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ContestBatchCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ContestCandidateCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ErrorDetail")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MigrationName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Phase")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RevisionSessionCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourceHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SourceSchemaVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TargetSchemaVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ValidationReportJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MigrationName", "StartedAt");
+
+                    b.ToTable("ManuscriptMigrationJournals");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.OAuthToken", b =>

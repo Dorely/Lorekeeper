@@ -144,7 +144,7 @@ public sealed class ContextRecommendationService(
         var sb = new StringBuilder();
         sb.Append("Current chapter: ").AppendLine(chapter.Title);
         AppendOptional(sb, "Synopsis", chapter.Synopsis);
-        AppendOptional(sb, "Body", Truncate(chapter.Body, SemanticQueryBodyChars));
+        AppendOptional(sb, "Body", Truncate(chapter.PlainText, SemanticQueryBodyChars));
 
         foreach (var entityId in includedEntityIds.Take(12))
         {
@@ -372,7 +372,7 @@ public sealed class ContextRecommendationService(
             ContextItemKind.ChapterReference,
             "Chapter",
             chapter.Title,
-            Preview(!string.IsNullOrWhiteSpace(chapter.Synopsis) ? chapter.Synopsis : chapter.Body),
+            Preview(!string.IsNullOrWhiteSpace(chapter.Synopsis) ? chapter.Synopsis : chapter.PlainText),
             reasons,
             isSearchResult,
             distance);
@@ -465,7 +465,7 @@ public sealed class ContextRecommendationService(
             $"Chapter {chapter.Order + 1} {chapter.Title}");
         if (titleRank is not null) return titleRank.Value;
 
-        return Contains(chapter.Synopsis, query) || Contains(chapter.Body, query)
+        return Contains(chapter.Synopsis, query) || Contains(chapter.PlainText, query)
             ? DetailSearchRank
             : null;
     }

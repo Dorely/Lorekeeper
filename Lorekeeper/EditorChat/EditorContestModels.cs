@@ -1,6 +1,7 @@
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.EditorChat;
 
@@ -37,15 +38,9 @@ public sealed record EditorContestCompleted(Guid BatchId, ContestBatchStatus Sta
 
 public sealed record ContestCandidateResponse(
     string Summary,
-    IReadOnlyList<ContestChapterMutation> Mutations,
+    long ExpectedRevision,
+    IReadOnlyList<ManuscriptOperationInput> Operations,
     string? Notes = null);
-
-public sealed record ContestChapterMutation(
-    string MutationKind,
-    int? StartLine,
-    int? EndLine,
-    string ReplacementText,
-    string? Rationale = null);
 
 public sealed record ContestCandidateProvider(
     int Id,

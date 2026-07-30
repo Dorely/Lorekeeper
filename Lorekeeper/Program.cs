@@ -15,6 +15,7 @@ using Lorekeeper.ImportExport;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -169,7 +170,10 @@ builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
 builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>();
 
 // Chapters
-builder.Services.AddScoped<IChapterService, ChapterService>();
+builder.Services.AddScoped<ChapterService>();
+builder.Services.AddScoped<IChapterService>(services => services.GetRequiredService<ChapterService>());
+builder.Services.AddScoped<IManuscriptService>(services => services.GetRequiredService<ChapterService>());
+builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
 builder.Services.AddScoped<IChapterVisualService, ChapterVisualService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
 builder.Services.AddScoped<IProjectFontService, ProjectFontService>();
@@ -272,22 +276,8 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var startupLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 
-    var pending = db.Database.GetPendingMigrations().ToList();
-    if (pending.Count > 0)
-    {
-        // Defensive: SQLite + single-instance dev means a stranded row in
-        // __EFMigrationsLock from a previously killed/crashed migration will cause
-        // Migrate() to spin forever waiting for the (non-existent) other instance.
-        try
-        {
-            db.Database.ExecuteSqlRaw("DELETE FROM \"__EFMigrationsLock\";");
-        }
-        catch
-        {
-            // Table may not exist yet on a fresh DB; ignore.
-        }
-        db.Database.Migrate();
-    }
+    var manuscriptMigration = scope.ServiceProvider.GetRequiredService<IManuscriptMigrationService>();
+    await manuscriptMigration.ApplyPendingAsync(db);
 
     var embeddingConfiguration = await db.EmbeddingConfigurations.AsNoTracking().FirstOrDefaultAsync();
     var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();

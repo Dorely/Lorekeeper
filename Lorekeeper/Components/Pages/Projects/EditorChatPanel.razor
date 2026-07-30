@@ -105,7 +105,7 @@
     [Parameter] public EventCallback OnAiTurnCompleted { get; set; }
     [Parameter] public EventCallback OnAiTurnIdle { get; set; }
     [Parameter] public EventCallback OnAiChangesApplied { get; set; }
-    [Parameter] public EventCallback OnActiveChapterBodyChangesReady { get; set; }
+    [Parameter] public EventCallback OnActiveChapterManuscriptChangesReady { get; set; }
     [Parameter] public EventCallback OnContestResultsReady { get; set; }
 
     private int _forceScrollKey;
@@ -698,12 +698,12 @@
         _pendingBatches = (await Chat.ListPendingChangesAsync(ProjectId, cancellationToken)).ToList();
         if (openIfPending && PendingChangeCount > 0)
         {
-            var hasActiveChapterBodyChanges = HasActiveChapterBodyPendingChanges();
-            var hasOtherPendingChanges = HasOtherPendingChanges(hasActiveChapterBodyChanges);
-            if (routeActiveChapterBodyToParent && hasActiveChapterBodyChanges && OnActiveChapterBodyChangesReady.HasDelegate)
-                await OnActiveChapterBodyChangesReady.InvokeAsync();
+            var hasActiveChapterManuscriptChanges = HasActiveChapterBodyPendingChanges();
+            var hasOtherPendingChanges = HasOtherPendingChanges(hasActiveChapterManuscriptChanges);
+            if (routeActiveChapterBodyToParent && hasActiveChapterManuscriptChanges && OnActiveChapterManuscriptChangesReady.HasDelegate)
+                await OnActiveChapterManuscriptChangesReady.InvokeAsync();
 
-            if (!routeActiveChapterBodyToParent || hasOtherPendingChanges || !hasActiveChapterBodyChanges)
+            if (!routeActiveChapterBodyToParent || hasOtherPendingChanges || !hasActiveChapterManuscriptChanges)
             {
                 _showPendingChanges = true;
             }
@@ -848,39 +848,38 @@
         CurrentChapterId is { } chapterId
         && _pendingBatches
             .SelectMany(batch => batch.Changes)
-            .Any(change => change.Status == AiChangeStatus.Pending && IsChapterBodyChangeFor(change, chapterId));
+            .Any(change => change.Status == AiChangeStatus.Pending && IsChapterManuscriptChangeFor(change, chapterId));
 
-    private bool HasOtherPendingChanges(bool hasActiveChapterBodyChanges)
+    private bool HasOtherPendingChanges(bool hasActiveChapterManuscriptChanges)
     {
-        if (!hasActiveChapterBodyChanges)
+        if (!hasActiveChapterManuscriptChanges)
             return PendingChangeCount > 0;
         if (CurrentChapterId is not { } chapterId)
             return PendingChangeCount > 0;
 
         return _pendingBatches
             .SelectMany(batch => batch.Changes)
-            .Any(change => change.Status == AiChangeStatus.Pending && !IsChapterBodyChangeFor(change, chapterId));
+            .Any(change => change.Status == AiChangeStatus.Pending && !IsChapterManuscriptChangeFor(change, chapterId));
     }
 
-    private static bool IsChapterBodyChangeFor(AiChange change, Guid chapterId)
+    private static bool IsChapterManuscriptChangeFor(AiChange change, Guid chapterId)
     {
-        if (!string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(change.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        return ReadChapterBodyChange(change.BeforeJson)?.Id == chapterId
-            || ReadChapterBodyChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
+        return ReadChapterManuscriptChange(change.BeforeJson)?.Id == chapterId
+            || ReadChapterManuscriptChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
     }
 
-    private static ChapterBodyChange? ReadChapterBodyChange(string json)
+    private static ChapterManuscriptChange? ReadChapterManuscriptChange(string json)
     {
         if (string.IsNullOrWhiteSpace(json) || json == "null") return null;
 
         try
         {
-            return JsonSerializer.Deserialize<ChapterBodyChange>(json, ChangePayloadJsonOptions);
+            return JsonSerializer.Deserialize<ChapterManuscriptChange>(json, ChangePayloadJsonOptions);
         }
         catch (JsonException)
         {

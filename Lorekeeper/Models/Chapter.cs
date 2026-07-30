@@ -1,10 +1,9 @@
+using System.ComponentModel.DataAnnotations.Schema;
+using Lorekeeper.Manuscripts;
+
 namespace Lorekeeper.Models;
 
-/// <summary>
-/// A single chapter belonging to a <see cref="Project"/>. Body is the source of truth
-/// for vector indexing; <see cref="VectorIndexState"/> tracks whether the persisted
-/// chunks in the vector store are in sync with the current <see cref="Body"/>.
-/// </summary>
+/// <summary>A chapter whose canonical prose is a versioned semantic manuscript.</summary>
 public class Chapter
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -22,7 +21,18 @@ public class Chapter
 
     public required string Title { get; set; }
 
-    public string Body { get; set; } = string.Empty;
+    public string ManuscriptJson { get; set; } = string.Empty;
+
+    public long ManuscriptRevision { get; set; }
+
+    [NotMapped]
+    public ManuscriptDocument Manuscript => ManuscriptCodec.Deserialize(
+        ManuscriptJson,
+        Id,
+        ManuscriptRevision);
+
+    [NotMapped]
+    public string PlainText => ManuscriptCodec.ProjectPlainText(Manuscript);
 
     public string Synopsis { get; set; } = string.Empty;
 

@@ -113,7 +113,7 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
     {
         if (chapter.VisualMode == ChapterVisualMode.PicturePage)
         {
-            AppendText(sb, chapter.Body);
+            AppendText(sb, chapter.PlainText);
             foreach (var image in chapter.PageLayout.Images.OrderBy(image => image.ZIndex))
             {
                 if (FindAsset(document, image.ImageId) is { } asset)
@@ -122,7 +122,7 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
             return;
         }
 
-        AppendText(sb, chapter.Body);
+        AppendText(sb, chapter.PlainText);
         foreach (var image in chapter.IllustrationLayout.Images.OrderBy(image => image.SortOrder))
         {
             if (FindAsset(document, image.ImageId) is { } asset)
@@ -297,7 +297,7 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
             return;
         }
 
-        var paragraphs = SplitMarkdownParagraphs(chapter.Body);
+        var paragraphs = SplitMarkdownParagraphs(chapter.PlainText);
         var blocksByParagraph = chapter.IllustrationLayout.Images
             .GroupBy(block => (block.ParagraphIndex, block.AnchorPosition))
             .ToDictionary(group => group.Key, group => group.OrderBy(block => block.SortOrder).ToList());
@@ -736,7 +736,7 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
     private static void AppendVisualChapterBody(StringBuilder sb, PublishChapterDocument chapter, IReadOnlyList<EpubImageItem> imageItems)
     {
         sb.AppendLine("<div class=\"chapter-body\">");
-        var paragraphs = SplitParagraphs(chapter.Body);
+        var paragraphs = SplitParagraphs(chapter.PlainText);
         var blocksByParagraph = chapter.IllustrationLayout.Images
             .GroupBy(block => (block.ParagraphIndex, block.AnchorPosition))
             .ToDictionary(group => group.Key, group => group.OrderBy(block => block.SortOrder).ToList());

@@ -216,7 +216,17 @@ and
 
 #### 2. Structured manuscript schema and migration
 
-Status: `Planned`
+Status: `Implementation complete; release validation pending`
+
+Implemented in the application on 2026-07-30. The canonical chapter body is now manuscript schema
+v1 with stable block IDs and revisions; migration, recovery, visual-anchor,
+assistant-operation, contest/revision, import v8, and projection paths use the
+shared manuscript service. The authorized fixture suite covers codec and mark
+behavior, WAL migration/restore, Picture Page and illustrated-prose anchors, and
+v8 serialization. This status does not close the release gate below:
+production-like copied-database rehearsal and the remaining historical/export,
+permission, retention, failure-injection, and projection evidence are required
+before distributing this migration to existing users.
 
 Replace plain chapter-body runtime ownership with versioned semantic documents
 and a single manuscript application service.

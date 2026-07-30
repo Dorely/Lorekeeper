@@ -1,3 +1,6 @@
+using System.ComponentModel.DataAnnotations.Schema;
+using Lorekeeper.Manuscripts;
+
 namespace Lorekeeper.Models;
 
 public class EditorRevisionSession
@@ -17,7 +20,11 @@ public class EditorRevisionSession
 
     public string Instructions { get; set; } = string.Empty;
 
-    public string OriginalChapterBody { get; set; } = string.Empty;
+    public string OriginalManuscriptJson { get; set; } = string.Empty;
+
+    [NotMapped]
+    public string OriginalPlainText =>
+        ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(OriginalManuscriptJson));
 
     public int? ProviderId { get; set; }
 
@@ -31,13 +38,9 @@ public class EditorRevisionSession
 
     public string Rationale { get; set; } = string.Empty;
 
-    public string MutationKind { get; set; } = string.Empty;
+    public string OperationFormat { get; set; } = string.Empty;
 
-    public int? StartLine { get; set; }
-
-    public int? EndLine { get; set; }
-
-    public string ReplacementText { get; set; } = string.Empty;
+    public string OperationsJson { get; set; } = "[]";
 
     public string Notes { get; set; } = string.Empty;
 

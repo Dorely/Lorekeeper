@@ -31,7 +31,6 @@ public interface IChapterService
     Task<Chapter> UpdateAsync(
         Guid chapterId,
         string? title = null,
-        string? body = null,
         string? synopsis = null,
         ChapterActAssignment? actId = null,
         CancellationToken cancellationToken = default);

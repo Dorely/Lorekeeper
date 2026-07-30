@@ -4,9 +4,11 @@ using Lorekeeper.Context;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Graph;
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
+using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Chapters;
 
@@ -21,7 +23,7 @@ public class ChapterService(
     IOutlineGraphSync outlineGraphSync,
     IContextIndexingService contextIndexing,
     IVectorIndexWorkCoordinator indexWork,
-    ILogger<ChapterService> logger) : IChapterService
+    ILogger<ChapterService> logger) : IChapterService, IManuscriptService
 {
     public async Task<IReadOnlyList<Chapter>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await repo.ListByProjectAsync(projectId, cancellationToken);
@@ -48,10 +50,13 @@ public class ChapterService(
             ProjectId = projectId,
             ActId = actId,
             Title = resolvedTitle,
+            ManuscriptRevision = 0,
             Synopsis = synopsis ?? string.Empty,
             Order = nextOrder,
             VectorIndexState = VectorIndexState.UpToDate, // empty body == nothing to index
         };
+        chapter.ManuscriptJson = ManuscriptCodec.Serialize(
+            ManuscriptCodec.CreateEmpty(chapter.Id, chapter.ManuscriptRevision));
 
         await repo.AddAsync(chapter, cancellationToken);
         project.UpdatedAt = DateTime.UtcNow;
@@ -67,7 +72,6 @@ public class ChapterService(
     public async Task<Chapter> UpdateAsync(
         Guid chapterId,
         string? title = null,
-        string? body = null,
         string? synopsis = null,
         ChapterActAssignment? actId = null,
         CancellationToken cancellationToken = default)
@@ -76,7 +80,6 @@ public class ChapterService(
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
         var previousActId = chapter.ActId;
 
-        var bodyChanged = false;
         var titleOrSynopsisChanged = false;
         var actChanged = false;
         if (title is not null && title != chapter.Title)
@@ -89,13 +92,6 @@ public class ChapterService(
             chapter.Synopsis = synopsis;
             titleOrSynopsisChanged = true;
         }
-        if (body is not null && body != chapter.Body)
-        {
-            chapter.Body = body;
-            ChapterTextLayoutSynchronizer.SynchronizeFromBody(chapter, body);
-            bodyChanged = true;
-            chapter.VectorIndexState = VectorIndexState.Stale;
-        }
         if (actId is { } assignment && assignment.Value != chapter.ActId)
         {
             chapter.ActId = assignment.Value;
@@ -104,7 +100,7 @@ public class ChapterService(
             actChanged = true;
         }
 
-        if (!bodyChanged && !titleOrSynopsisChanged && !actChanged)
+        if (!titleOrSynopsisChanged && !actChanged)
             return chapter;
 
         chapter.UpdatedAt = DateTime.UtcNow;
@@ -121,10 +117,7 @@ public class ChapterService(
 
         await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
 
-        if (bodyChanged)
-            await TryReindexBodyAsync(chapter.Id, cancellationToken);
-        else
-            await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
+        await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
 
         var actIdsToReindex = new HashSet<Guid>();
         if (titleOrSynopsisChanged && chapter.ActId is Guid currentActId)
@@ -138,6 +131,125 @@ public class ChapterService(
             await contextIndexing.ReindexActAsync(actToReindex, cancellationToken);
 
         return chapter;
+    }
+
+    public async Task<ManuscriptSnapshot?> GetManuscriptAsync(
+        Guid chapterId,
+        CancellationToken cancellationToken = default)
+    {
+        var chapter = await repo.GetByIdAsync(chapterId, cancellationToken);
+        return chapter is null ? null : Snapshot(chapter);
+    }
+
+    public async Task<ManuscriptMutationResult> ReplacePlainTextAsync(
+        Guid chapterId,
+        long expectedRevision,
+        string plainText,
+        CancellationToken cancellationToken = default)
+    {
+        var chapter = await RequireRevisionAsync(chapterId, expectedRevision, cancellationToken);
+        var document = ManuscriptCodec.ReparsePreservingBlockIds(chapter.Manuscript, plainText);
+        var changed = document.Content.Select(block => block.Id).ToList();
+        return await SaveManuscriptAsync(chapter, document, changed, cancellationToken);
+    }
+
+    public async Task<ManuscriptMutationResult> ReplaceDocumentAsync(
+        Guid chapterId,
+        long expectedRevision,
+        ManuscriptDocument document,
+        CancellationToken cancellationToken = default)
+    {
+        var chapter = await RequireRevisionAsync(chapterId, expectedRevision, cancellationToken);
+        var replacement = document with
+        {
+            ManuscriptId = chapter.Id,
+            Revision = checked(chapter.ManuscriptRevision + 1),
+        };
+        ManuscriptCodec.Validate(replacement, chapter.Id, replacement.Revision);
+        return await SaveManuscriptAsync(
+            chapter,
+            replacement,
+            replacement.Content.Select(block => block.Id).ToList(),
+            cancellationToken);
+    }
+
+    public async Task<ManuscriptMutationResult> ApplyAsync(
+        Guid chapterId,
+        long expectedRevision,
+        IReadOnlyList<ManuscriptOperation> operations,
+        CancellationToken cancellationToken = default)
+    {
+        var chapter = await RequireRevisionAsync(chapterId, expectedRevision, cancellationToken);
+        var source = ManuscriptCodec.Deserialize(
+            chapter.ManuscriptJson,
+            chapter.Id,
+            chapter.ManuscriptRevision);
+        var (document, changed) = ManuscriptOperations.Apply(source, operations);
+        return await SaveManuscriptAsync(chapter, document, changed, cancellationToken);
+    }
+
+    private async Task<Chapter> RequireRevisionAsync(
+        Guid chapterId,
+        long expectedRevision,
+        CancellationToken cancellationToken)
+    {
+        var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
+            ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
+        if (chapter.ManuscriptRevision != expectedRevision)
+            throw new ManuscriptRevisionConflictException(expectedRevision, chapter.ManuscriptRevision);
+        return chapter;
+    }
+
+    private async Task<ManuscriptMutationResult> SaveManuscriptAsync(
+        Chapter chapter,
+        ManuscriptDocument document,
+        IReadOnlyList<string> changedBlockIds,
+        CancellationToken cancellationToken)
+    {
+        ChapterTextLayoutSynchronizer.ValidateIllustrationReferences(chapter, document);
+        chapter.ManuscriptJson = ManuscriptCodec.Serialize(document);
+        chapter.ManuscriptRevision = document.Revision;
+        chapter.UpdatedAt = DateTime.UtcNow;
+        chapter.VectorIndexState = VectorIndexState.Stale;
+        ChapterTextLayoutSynchronizer.SynchronizeFromManuscript(chapter, document);
+        repo.Update(chapter);
+
+        var project = await projects.GetByIdAsync(chapter.ProjectId, cancellationToken);
+        if (project is not null)
+        {
+            project.UpdatedAt = DateTime.UtcNow;
+            projects.Update(project);
+        }
+
+        try
+        {
+            await repo.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            var current = await repo.ReloadFromStoreAsync(chapter.Id, cancellationToken);
+            throw new ManuscriptRevisionConflictException(
+                checked(document.Revision - 1),
+                current?.ManuscriptRevision ?? document.Revision);
+        }
+        await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
+        await TryReindexBodyAsync(chapter.Id, cancellationToken);
+        return new ManuscriptMutationResult(Snapshot(chapter), changedBlockIds);
+    }
+
+    private static ManuscriptSnapshot Snapshot(Chapter chapter)
+    {
+        var document = ManuscriptCodec.Deserialize(
+            chapter.ManuscriptJson,
+            chapter.Id,
+            chapter.ManuscriptRevision);
+        var plainText = ManuscriptCodec.ProjectPlainText(document);
+        return new ManuscriptSnapshot(
+            chapter.Id,
+            chapter.ManuscriptRevision,
+            ManuscriptCodec.HashPlainText(plainText),
+            plainText,
+            document);
     }
 
     private async Task TryReindexBodyAsync(Guid chapterId, CancellationToken cancellationToken)
@@ -254,7 +366,7 @@ public class ChapterService(
                 return;
             }
 
-            var chunks = chunker.Chunk(chapter.Body);
+            var chunks = chunker.Chunk(chapter.PlainText);
             if (chunks.Count > 0)
             {
                 var contents = chunks.Select(c => c.Content).ToList();
@@ -312,8 +424,8 @@ public class ChapterService(
         };
         if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
             parts.Add($"Synopsis: {chapter.Synopsis}");
-        if (!string.IsNullOrWhiteSpace(chapter.Body))
-            parts.Add($"Body: {chapter.Body}");
+        if (!string.IsNullOrWhiteSpace(chapter.PlainText))
+            parts.Add($"Body: {chapter.PlainText}");
         return string.Join('\n', parts);
     }
 }

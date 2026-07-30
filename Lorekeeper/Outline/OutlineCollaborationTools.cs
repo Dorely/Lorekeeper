@@ -815,7 +815,7 @@ public sealed class OutlineCollaborationTools(
         var visual = ResolveChapterVisualArgs(existing.VisualMode, existing.PageLayoutKind, visualMode, pageLayoutKind);
         if (visual.Error is not null) return visual.Error;
 
-        var updated = await chapters.UpdateAsync(chapterId, title?.Trim(), body: null, synopsis?.Trim(), assignment);
+        var updated = await chapters.UpdateAsync(chapterId, title?.Trim(), synopsis?.Trim(), assignment);
         if (visual.ShouldApply
             && (updated.VisualMode != visual.Mode || updated.PageLayoutKind != visual.LayoutKind))
         {
@@ -835,7 +835,7 @@ public sealed class OutlineCollaborationTools(
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
-        var rangeError = FormatLineRange(chapter.Body, startLine, endLine, out var numbered, out var rangeLabel);
+        var rangeError = FormatLineRange(chapter.PlainText, startLine, endLine, out var numbered, out var rangeLabel);
         if (rangeError is not null)
             return rangeError;
 

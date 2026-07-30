@@ -38,7 +38,8 @@ current-runtime claims.
 - PdfPig, Docnet, and VersOne.Epub for source ingest and EPUB handling
 - Bootstrap and vis-network vendored under `Lorekeeper/wwwroot`
 
-The solution contains one application project. Standalone, non-production
+The solution contains the application and its authorized migration/format
+fixture test project. Standalone, non-production
 `Lorekeeper.Press` and `Lorekeeper.Press.Weasy` projects are retained as
 disposable renderer/conformance spikes; neither is referenced by the solution,
 packaged, or invoked by the application. The Rust candidate is the rejected PDF
@@ -156,7 +157,17 @@ to visual ownership or reference semantics must be traced through all of those
 consumers.
 
 Chapter visual services own illustrated-prose and Picture Page state, text
-synchronization, fonts, geometry, fitting, and layout diagnostics.
+synchronization, fonts, geometry, fitting, and layout diagnostics. Chapters now
+persist one versioned semantic manuscript JSON document plus a monotonic
+revision; stable block IDs are the canonical prose anchors for Picture Page text
+ranges and illustrated-prose images. `IManuscriptService` is the only runtime
+write boundary for manuscript content. The revision is an EF optimistic
+concurrency token, so simultaneous writers cannot silently overwrite one
+another. The temporary textarea edits a
+plain-text projection through revision-aware reparsing, while assistant,
+contest, revision-agent, approval, import, indexing, visual, and publishing
+paths consume the same document or projection. Direct chapter-body persistence
+is no longer a runtime path.
 `IPageGeometryService` provides the shared page/spread calculations used by the
 editor, image targets, diagnostics, previews, and exporters. Publishing services
 own metadata, outline selection, image placement, covers, and TXT, Markdown,
@@ -197,14 +208,13 @@ the native notice bundle is incomplete. Acrobat/vendor/physical-proof evidence
 and cross-platform packaging also remain incomplete, so the spike returns no
 independently validated or claimed standard and is not a production runtime.
 
-The planned publishing architecture is documented, but not implemented, in the
-publishing roadmap and supporting research briefs. Its intended boundaries are a
-versioned semantic manuscript, edition-specific projections, a separately
-contained press renderer, immutable artifacts and manifests, and complete UI/
-assistant access through shared application services. When implementation
-changes those boundaries, this architecture document must be updated in the
-same feature; the roadmap must not be used as a substitute for current technical
-documentation.
+The structured-manuscript boundary of the planned publishing architecture is
+implemented. Edition-specific projections, a production-contained press
+renderer, immutable artifacts/manifests, and their complete UI/assistant
+surfaces remain planned in the publishing roadmap and supporting research
+briefs. When implementation changes those boundaries, this architecture
+document must be updated in the same feature; the roadmap must not substitute
+for current technical documentation.
 
 ### Desktop and Release Behavior
 
@@ -230,6 +240,25 @@ import jobs, images and masks, entity visual links, fonts, publishing state, and
 binary assets. SQLite startup applies a busy timeout and WAL journal mode.
 sqlite-vec and internal FTS5 structures are initialized outside normal EF
 migrations.
+
+Startup delegates the structured-manuscript cutover to
+`IManuscriptMigrationService` before normal initialization. For a legacy
+database it runs `PRAGMA quick_check`, creates a consistent SQLite Online Backup
+API snapshot under `.migration-backups/manuscripts`, applies the forward schema,
+converts all live and historical prose and visual anchors transactionally,
+compares aggregate normalized-text hashes, and records a migration journal.
+Migration and restore scheduling share a crash-releasing cross-process file lock, and the
+transformed rows plus completed journal commit in one SQLite transaction so an
+interrupted schema-only startup resumes safely. Any transform failure preserves
+the pre-migration backup and starts a current-schema, projectless recovery shell
+whose failed journal keeps Settings > Data Recovery reachable. That screen
+exposes redacted journal/backup state and requires a short-lived, explicit
+confirmation token to schedule restore. The database is replaced only during
+the next startup, before normal workers start, and a diagnostic backup is made
+first. Backup files and their directory use owner-only ACLs/permissions.
+Project export format v8 carries canonical manuscript documents and
+stable visual references, while v1-v7 text adapters exist only at the import
+boundary.
 
 Applied EF Core migration files are immutable schema history. Never edit,
 reorder, or delete an applied migration to make the migration directory resemble
@@ -306,9 +335,16 @@ Documentation-only work must still validate every referenced path,
 configuration key, launch profile, and command, and should run broader checks
 when the documentation asserts that those checks work.
 
-The .NET solution still has no automated test project. The user explicitly
-authorized automated publishing fixtures on 2026-07-30, and the standalone
-press spike owns Rust fixture tests. Run its locked verification separately:
+The user explicitly authorized automated publishing fixtures on 2026-07-30.
+Run the application-level manuscript, migration, visual-anchor, and project
+export fixtures with:
+
+```powershell
+dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj
+```
+
+The standalone press spike owns separate Rust fixture tests. Run its locked
+verification separately:
 
 ```powershell
 cd Lorekeeper.Press

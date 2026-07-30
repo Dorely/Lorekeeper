@@ -976,7 +976,7 @@ public sealed class PublishService(
             chapter.Id,
             chapter.ActId,
             profile.NumberChapters ? $"Chapter {chapterNumber}: {chapter.Title}" : chapter.Title,
-            chapter.Body,
+            chapter.PlainText,
             chapter.Synopsis,
             chapterNumber - 1,
             profile.IncludeChapterHeadings,

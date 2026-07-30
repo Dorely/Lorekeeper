@@ -438,7 +438,7 @@ public sealed class OutlineToolStagingContext(
         if (IsDirectlyCreated(Resource("Chapter", chapterId)))
         {
             var assignment = moveChapter ? new ChapterActAssignment(newActId) : (ChapterActAssignment?)null;
-            var updated = await chapters.UpdateAsync(chapterId, title?.Trim(), body: null, synopsis?.Trim(), assignment, cancellationToken);
+            var updated = await chapters.UpdateAsync(chapterId, title?.Trim(), synopsis?.Trim(), assignment, cancellationToken);
             if (visual.ShouldApply
                 && (updated.VisualMode != visual.Mode || updated.PageLayoutKind != visual.LayoutKind))
             {

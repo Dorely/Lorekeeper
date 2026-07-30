@@ -45,4 +45,8 @@
     <PackageReference Include="VersOne.Epub" Version="3.3.6" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lorekeeper.Tests" />
+  </ItemGroup>
+
 </Project>

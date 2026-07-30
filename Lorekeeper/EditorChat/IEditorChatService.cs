@@ -70,7 +70,7 @@ public sealed class EditorChatContext(
 
     public bool ShouldBypassReviewForChapterBody(Chapter chapter) =>
         _directlyEditedChapterBodies.Contains(chapter.Id)
-        || string.IsNullOrWhiteSpace(chapter.Body);
+        || string.IsNullOrWhiteSpace(chapter.PlainText);
 
     public void MarkChapterBodyDirectlyEdited(Guid chapterId) =>
         _directlyEditedChapterBodies.Add(chapterId);

@@ -8,6 +8,7 @@ using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
@@ -19,6 +20,7 @@ namespace Lorekeeper.EditorChat;
 public sealed class EditorContestService(
     IProjectRepository projects,
     IChapterService chapters,
+    IManuscriptService manuscripts,
     ILlmProviderService providerService,
     IChatClientFactory chatClientFactory,
     IEntityVisualContextService entityVisualContext,
@@ -129,8 +131,8 @@ public sealed class EditorContestService(
             AssistantMessageId = assistantMessageId,
             ChapterId = chapter.Id,
             ChapterTitle = chapter.Title,
-            OriginalChapterBody = chapter.Body,
-            AcceptedChapterBody = chapter.Body,
+            OriginalManuscriptJson = chapter.ManuscriptJson,
+            AcceptedManuscriptJson = chapter.ManuscriptJson,
             ContextSnapshotJson = JsonSerializer.Serialize(snapshot, JsonOptions),
             Status = ContestBatchStatus.Running,
         };
@@ -241,8 +243,8 @@ public sealed class EditorContestService(
                 rawResponseBuffers[candidate.Id].Clear().Append(result.RawResponse);
                 candidate.Summary = result.Response.Summary.Trim();
                 candidate.Notes = string.IsNullOrWhiteSpace(result.Response.Notes) ? null : result.Response.Notes.Trim();
-                candidate.MutationsJson = JsonSerializer.Serialize(result.Response.Mutations, JsonOptions);
-                candidate.ProposedBody = result.ProposedBody;
+                candidate.MutationsJson = JsonSerializer.Serialize(result.Response.Operations, JsonOptions);
+                candidate.ProposedManuscriptJson = ManuscriptCodec.Serialize(result.ProposedDocument);
                 candidate.DurationMs = result.Duration.TotalMilliseconds;
                 candidate.Status = ContestCandidateStatus.Completed;
                 candidate.CompletedAt = DateTime.UtcNow;
@@ -305,7 +307,7 @@ public sealed class EditorContestService(
 
         var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {batch.ChapterId} not found.");
-        if (!string.Equals(chapter.Body, EffectiveAcceptedBody(batch), StringComparison.Ordinal))
+        if (!ManuscriptCodec.ContentEquals(chapter.Manuscript, EffectiveAcceptedManuscript(batch)))
             throw new InvalidOperationException("The chapter changed outside Contest Review. Finish or restart the contest before continuing.");
 
         if (!TryBuildCandidateDiff(batch, candidate, out var diff))
@@ -331,12 +333,19 @@ public sealed class EditorContestService(
         contests.UpdateCandidate(candidate);
 
         var acceptedBody = RebuildAcceptedBody(batch);
-        batch.AcceptedChapterBody = acceptedBody;
+        var acceptedSource = EffectiveAcceptedManuscript(batch);
+        batch.AcceptedManuscriptJson = ManuscriptCodec.Serialize(
+            ManuscriptCodec.ReparsePreservingBlockIds(acceptedSource, acceptedBody));
         batch.UpdatedAt = DateTime.UtcNow;
         contests.UpdateBatch(batch);
 
-        if (!string.Equals(chapter.Body, acceptedBody, StringComparison.Ordinal))
-            await chapters.UpdateAsync(chapter.Id, body: acceptedBody, cancellationToken: cancellationToken);
+        var acceptedDocument = ManuscriptCodec.Deserialize(batch.AcceptedManuscriptJson);
+        if (!ManuscriptCodec.ContentEquals(chapter.Manuscript, acceptedDocument))
+            await manuscripts.ReplaceDocumentAsync(
+                chapter.Id,
+                chapter.ManuscriptRevision,
+                acceptedDocument,
+                cancellationToken);
 
         await contests.SaveChangesAsync(cancellationToken);
     }
@@ -356,7 +365,7 @@ public sealed class EditorContestService(
 
         var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {batch.ChapterId} not found.");
-        if (!string.Equals(chapter.Body, EffectiveAcceptedBody(batch), StringComparison.Ordinal))
+        if (!ManuscriptCodec.ContentEquals(chapter.Manuscript, EffectiveAcceptedManuscript(batch)))
             throw new InvalidOperationException("The chapter changed outside Contest Review. Finish or restart the contest before continuing.");
 
         foreach (var batchCandidate in batch.Candidates)
@@ -366,13 +375,18 @@ public sealed class EditorContestService(
             contests.UpdateCandidate(batchCandidate);
         }
 
-        batch.AcceptedChapterBody = candidate.ProposedBody;
+        batch.AcceptedManuscriptJson = candidate.ProposedManuscriptJson;
         batch.WinningCandidateId = candidate.Id;
         batch.UpdatedAt = DateTime.UtcNow;
         contests.UpdateBatch(batch);
 
-        if (!string.Equals(chapter.Body, candidate.ProposedBody, StringComparison.Ordinal))
-            await chapters.UpdateAsync(chapter.Id, body: candidate.ProposedBody, cancellationToken: cancellationToken);
+        var proposedDocument = ManuscriptCodec.Deserialize(candidate.ProposedManuscriptJson);
+        if (!ManuscriptCodec.ContentEquals(chapter.Manuscript, proposedDocument))
+            await manuscripts.ReplaceDocumentAsync(
+                chapter.Id,
+                chapter.ManuscriptRevision,
+                proposedDocument,
+                cancellationToken);
 
         await contests.SaveChangesAsync(cancellationToken);
     }
@@ -409,21 +423,36 @@ public sealed class EditorContestService(
     }
 
     private static string EffectiveAcceptedBody(ContestBatch batch) =>
-        string.IsNullOrEmpty(batch.AcceptedChapterBody) && !string.IsNullOrEmpty(batch.OriginalChapterBody)
-            ? batch.OriginalChapterBody
-            : batch.AcceptedChapterBody;
+        string.IsNullOrEmpty(batch.AcceptedPlainText) && !string.IsNullOrEmpty(batch.OriginalPlainText)
+            ? batch.OriginalPlainText
+            : batch.AcceptedPlainText;
+
+    private static ManuscriptDocument EffectiveAcceptedManuscript(ContestBatch batch) =>
+        string.IsNullOrWhiteSpace(batch.AcceptedManuscriptJson)
+            ? ManuscriptCodec.Deserialize(batch.OriginalManuscriptJson)
+            : ManuscriptCodec.Deserialize(batch.AcceptedManuscriptJson);
 
     private static bool TryBuildCandidateDiff(ContestBatch batch, ContestCandidate candidate, out ReviewDiff diff)
     {
         var change = new AiChange
         {
-            ToolName = "edit_chapter",
-            ResourceKind = "ChapterBody",
-            BeforeJson = JsonSerializer.Serialize(new ChapterBodyChange(batch.ChapterId, batch.ChapterTitle, batch.OriginalChapterBody)),
-            AfterJson = JsonSerializer.Serialize(new ChapterBodyChange(batch.ChapterId, batch.ChapterTitle, candidate.ProposedBody)),
+            ToolName = "apply_manuscript_operations",
+            ResourceKind = "ChapterManuscript",
+            BeforeJson = JsonSerializer.Serialize(ContestChange(batch, batch.OriginalManuscriptJson)),
+            AfterJson = JsonSerializer.Serialize(ContestChange(batch, candidate.ProposedManuscriptJson)),
             Status = AiChangeStatus.Pending,
         };
         return AiChangeReviewDiffBuilder.TryBuild(change, out diff);
+    }
+
+    private static ChapterManuscriptChange ContestChange(ContestBatch batch, string manuscriptJson)
+    {
+        var manuscript = ManuscriptCodec.Deserialize(manuscriptJson);
+        return new ChapterManuscriptChange(
+            batch.ChapterId,
+            batch.ChapterTitle,
+            manuscript.Revision,
+            manuscriptJson);
     }
 
     private static ContestLineTarget? FindContestLineTarget(
@@ -622,7 +651,7 @@ public sealed class EditorContestService(
             acceptedOperations.Add(operation);
         }
 
-        var lines = ChapterFormatting.SplitLines(batch.OriginalChapterBody).ToList();
+        var lines = ChapterFormatting.SplitLines(batch.OriginalPlainText).ToList();
         foreach (var operation in acceptedOperations
             .OrderByDescending(operation => operation.StartIndex)
             .ThenByDescending(operation => operation.SortLine))
@@ -833,9 +862,18 @@ public sealed class EditorContestService(
             response = ParseCandidateResponse(raw);
         }
 
+        var source = ManuscriptCodec.Deserialize(batch.OriginalManuscriptJson);
+        if (response.ExpectedRevision != source.Revision)
+        {
+            throw new ContestCandidateInvalidException(
+                $"Candidate expected revision {response.ExpectedRevision}; the contest snapshot revision is {source.Revision}.",
+                raw);
+        }
+        var (proposedDocument, _) = ManuscriptOperations.Apply(
+            source,
+            ManuscriptOperationInput.ToOperations(response.Operations));
         stopwatch.Stop();
-        var proposedBody = ApplyMutations(batch.OriginalChapterBody, response.Mutations);
-        return new ContestCandidateResult(raw, response, proposedBody, stopwatch.Elapsed);
+        return new ContestCandidateResult(raw, response, proposedDocument, stopwatch.Elapsed);
     }
 
     private static async Task<string> RequestCandidateResponseAsync(
@@ -881,13 +919,21 @@ public sealed class EditorContestService(
         Return only valid JSON with this exact shape:
         {
           "summary": "short summary of the proposed edit",
-          "mutations": [
+          "expectedRevision": 12,
+          "operations": [
             {
-              "mutationKind": "replace_whole_body | replace_range | insert_before_line | insert_after_line",
-              "startLine": 1,
-              "endLine": 1,
-              "replacementText": "prose to place into the chapter",
-              "rationale": "brief reason this mutation satisfies the goal"
+              "operation": "insertBlock | replaceBlockText | deleteBlock | moveBlock | splitBlock | mergeBlocks | setBlockStyle | setInlineMark",
+              "blockId": "stable block id when required",
+              "secondBlockId": "second stable block id for mergeBlocks",
+              "index": 0,
+              "blockType": "Paragraph | Heading | SceneBreak | BlockQuote | ListItem",
+              "text": "text when required",
+              "styleRole": "semantic style role when required",
+              "startOffset": 0,
+              "endOffset": 1,
+              "mark": "Emphasis | Strong | Underline | Strikethrough | Code | Link | Language",
+              "enabled": true,
+              "value": "optional mark value"
             }
           ],
           "notes": "optional short note"
@@ -895,11 +941,9 @@ public sealed class EditorContestService(
 
         Rules:
         - Output JSON only. Do not wrap it in Markdown.
-        - Use replace_whole_body for full-chapter drafts or full-body rewrites.
-        - When the current chapter body is empty, use replace_whole_body for the first draft because there are no existing numbered lines.
-        - Use replace_range for exact inclusive line ranges.
-        - Use insert_before_line or insert_after_line for insertions.
-        - Use only chapter-body mutations. Do not propose outline, fact, entity, or relationship changes.
+        - Use the exact expectedRevision and stable block IDs from the supplied manuscript.
+        - For an empty manuscript, use insertBlock at index 0.
+        - Use only semantic manuscript operations. Do not propose outline, fact, entity, or relationship changes.
         - Preserve unrelated prose unless the user's request explicitly asks for a full rewrite.
         - Respect the supplied chat context, context feed, and read-only tool results as authoritative story evidence.
         """;
@@ -925,11 +969,9 @@ public sealed class EditorContestService(
             sb.AppendLine();
         }
 
-        sb.AppendLine("# Current Chapter Body With Line Numbers");
+        sb.AppendLine("# Current Semantic Manuscript");
         sb.AppendLine($"Chapter: {batch.ChapterTitle}");
-        sb.AppendLine(string.IsNullOrWhiteSpace(batch.OriginalChapterBody)
-            ? "(empty)"
-            : ChapterFormatting.WithLineNumbers(batch.OriginalChapterBody));
+        sb.AppendLine(batch.OriginalManuscriptJson);
 
         return sb.ToString();
     }
@@ -954,8 +996,8 @@ public sealed class EditorContestService(
                 throw new ContestCandidateInvalidException("Candidate returned empty JSON.", raw);
             if (string.IsNullOrWhiteSpace(response.Summary))
                 throw new ContestCandidateInvalidException("Candidate JSON is missing summary.", raw);
-            if (response.Mutations is null || response.Mutations.Count == 0)
-                throw new ContestCandidateInvalidException("Candidate JSON has no mutations.", raw);
+            if (response.Operations is null || response.Operations.Count == 0)
+                throw new ContestCandidateInvalidException("Candidate JSON has no semantic operations.", raw);
             return response;
         }
         catch (JsonException ex)
@@ -968,79 +1010,6 @@ public sealed class EditorContestService(
         }
     }
 
-    private static string ApplyMutations(string originalBody, IReadOnlyList<ContestChapterMutation> mutations)
-    {
-        var wholeBody = mutations.Where(IsWholeBodyMutation).ToList();
-        if (wholeBody.Count > 0)
-        {
-            if (mutations.Count != 1)
-                throw new ContestCandidateInvalidException("replace_whole_body cannot be combined with other mutations.", string.Empty);
-            return wholeBody[0].ReplacementText ?? string.Empty;
-        }
-
-        var lines = ChapterFormatting.SplitLines(originalBody).ToList();
-        var operations = mutations
-            .Select(NormalizeMutation)
-            .OrderByDescending(operation => operation.StartLine)
-            .ToList();
-
-        var lastStart = int.MaxValue;
-        foreach (var operation in operations)
-        {
-            if (operation.EndLine >= lastStart)
-                throw new ContestCandidateInvalidException("Candidate returned overlapping mutations.", string.Empty);
-            lastStart = operation.StartLine;
-
-            var replacementLines = ChapterFormatting.SplitLines(operation.ReplacementText ?? string.Empty);
-            switch (operation.Kind)
-            {
-                case "replace_range":
-                    if (lines.Count == 0 && operation.StartLine == 1 && operation.EndLine == 1)
-                    {
-                        lines.InsertRange(0, replacementLines);
-                        break;
-                    }
-
-                    if (operation.StartLine < 1 || operation.EndLine > lines.Count || operation.EndLine < operation.StartLine)
-                        throw new ContestCandidateInvalidException($"Invalid replace_range lines {operation.StartLine}-{operation.EndLine}.", string.Empty);
-                    lines.RemoveRange(operation.StartLine - 1, operation.EndLine - operation.StartLine + 1);
-                    lines.InsertRange(operation.StartLine - 1, replacementLines);
-                    break;
-                case "insert_before_line":
-                    if (operation.StartLine < 1 || operation.StartLine > lines.Count + 1)
-                        throw new ContestCandidateInvalidException($"Invalid insert_before_line target {operation.StartLine}.", string.Empty);
-                    lines.InsertRange(operation.StartLine - 1, replacementLines);
-                    break;
-                case "insert_after_line":
-                    if (operation.StartLine < 0 || operation.StartLine > lines.Count)
-                        throw new ContestCandidateInvalidException($"Invalid insert_after_line target {operation.StartLine}.", string.Empty);
-                    lines.InsertRange(operation.StartLine, replacementLines);
-                    break;
-            }
-        }
-
-        return ChapterFormatting.JoinLines(lines);
-    }
-
-    private static NormalizedMutation NormalizeMutation(ContestChapterMutation mutation)
-    {
-        var kind = NormalizeKind(mutation.MutationKind);
-        var start = mutation.StartLine ?? throw new ContestCandidateInvalidException($"{mutation.MutationKind} requires startLine.", string.Empty);
-        var end = mutation.EndLine ?? start;
-        return kind switch
-        {
-            "replace_range" => new NormalizedMutation(kind, start, end, mutation.ReplacementText),
-            "insert_before_line" => new NormalizedMutation(kind, start, start, mutation.ReplacementText),
-            "insert_after_line" => new NormalizedMutation(kind, start, start, mutation.ReplacementText),
-            _ => throw new ContestCandidateInvalidException($"Unsupported mutationKind '{mutation.MutationKind}'.", string.Empty),
-        };
-    }
-
-    private static bool IsWholeBodyMutation(ContestChapterMutation mutation) =>
-        string.Equals(NormalizeKind(mutation.MutationKind), "replace_whole_body", StringComparison.Ordinal);
-
-    private static string NormalizeKind(string? kind) =>
-        (kind ?? string.Empty).Trim().ToLowerInvariant().Replace('-', '_');
 
     private static string ExtractJson(string raw)
     {
@@ -1082,12 +1051,10 @@ public sealed class EditorContestService(
     private sealed record ContestCandidateResult(
         string RawResponse,
         ContestCandidateResponse Response,
-        string ProposedBody,
+        ManuscriptDocument ProposedDocument,
         TimeSpan Duration);
 
     private sealed record ContestCandidateRawProgress(Guid CandidateId, string Delta);
-
-    private sealed record NormalizedMutation(string Kind, int StartLine, int EndLine, string ReplacementText);
 
     private sealed record ContestLineTarget(
         string BlockId,

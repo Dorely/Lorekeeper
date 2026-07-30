@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.Models;
 
@@ -9,14 +10,17 @@ public sealed record IllustratedProseImageBlock(
     Guid Id,
     Guid ImageId,
     ChapterImageAnchorPosition AnchorPosition,
-    int ParagraphIndex,
-    string ParagraphHash,
+    string BlockId,
     double WidthPercent,
     ChapterImageAlignment Alignment,
     string Caption,
     string AltTextOverride,
     int SortOrder,
-    bool StartOnNewPage);
+    bool StartOnNewPage)
+{
+    [JsonIgnore]
+    public int ParagraphIndex { get; init; } = -1;
+}
 
 public sealed record PicturePageLayout(
     IReadOnlyList<PicturePageImageElement> Images,
@@ -36,7 +40,7 @@ public sealed record PicturePageImageElement(
 
 public sealed record PicturePageTextElement(
     Guid Id,
-    string Text,
+    [property: JsonIgnore] string Text,
     double XPercent,
     double YPercent,
     double WidthPercent,
@@ -55,7 +59,8 @@ public sealed record PicturePageTextElement(
     PicturePageTextAlign TextAlign,
     ChapterTextVerticalAlign VerticalAlign,
     PicturePageTextShadow Shadow,
-    PicturePageTextRole Role = PicturePageTextRole.Body);
+    PicturePageTextRole Role = PicturePageTextRole.Body,
+    IReadOnlyList<ManuscriptRangeReference>? ContentReferences = null);
 
 [JsonConverter(typeof(JsonStringEnumConverter<PicturePageTextRole>))]
 public enum PicturePageTextRole

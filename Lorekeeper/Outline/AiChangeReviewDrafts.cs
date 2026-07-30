@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.Outline;
@@ -25,8 +26,8 @@ public static class AiChangeReviewDrafts
         {
             case ReviewDraftPayloadKind.ChapterBody:
             {
-                if (!TryReadChange<ChapterBodyChange>(change.BeforeJson, out var before)
-                    || !TryReadChange<ChapterBodyChange>(EffectiveAfterJson(change), out var after))
+                if (!TryReadChange<ChapterManuscriptChange>(change.BeforeJson, out var before)
+                    || !TryReadChange<ChapterManuscriptChange>(EffectiveAfterJson(change), out var after))
                 {
                     return false;
                 }
@@ -34,7 +35,7 @@ public static class AiChangeReviewDrafts
                 payload = new AiChangeReviewEditablePayload(
                     "Chapter body",
                     after.Title,
-                    [new AiChangeReviewEditableField("Body", "Body", before.Body, after.Body, OldExists: true, NewExists: true)]);
+                    [new AiChangeReviewEditableField("Body", "Body", before.PlainText, after.PlainText, OldExists: true, NewExists: true)]);
                 return true;
             }
             case ReviewDraftPayloadKind.Act:
@@ -117,12 +118,17 @@ public static class AiChangeReviewDrafts
         {
             case ReviewDraftPayloadKind.ChapterBody:
             {
-                if (!TryReadChange<ChapterBodyChange>(EffectiveAfterJson(change), out var after))
+                if (!TryReadChange<ChapterManuscriptChange>(EffectiveAfterJson(change), out var after))
                     return Fail("Could not read the chapter-body draft.", out draftAfterJson, out error);
                 if (!FieldKeyEquals(fieldKey, "Body"))
                     return Fail($"Chapter body changes do not have a '{fieldKey}' field.", out draftAfterJson, out error);
 
-                draftAfterJson = Serialize(after with { Body = newText });
+                var document = ManuscriptCodec.ReparsePreservingBlockIds(after.Manuscript, newText);
+                draftAfterJson = Serialize(after with
+                {
+                    Revision = document.Revision,
+                    ManuscriptJson = ManuscriptCodec.Serialize(document),
+                });
                 return true;
             }
             case ReviewDraftPayloadKind.Act:
@@ -225,8 +231,8 @@ public static class AiChangeReviewDrafts
     private static bool ValidateChapterBody(AiChange change, string draftAfterJson, out string? error)
     {
         error = null;
-        if (!TryReadChange<ChapterBodyChange>(change.AfterJson, out var original)
-            || !TryReadChange<ChapterBodyChange>(draftAfterJson, out var draft))
+        if (!TryReadChange<ChapterManuscriptChange>(change.AfterJson, out var original)
+            || !TryReadChange<ChapterManuscriptChange>(draftAfterJson, out var draft))
         {
             error = "Could not read the chapter-body draft.";
             return false;
@@ -307,8 +313,7 @@ public static class AiChangeReviewDrafts
 
     private static ReviewDraftPayloadKind GetKind(AiChange change)
     {
-        if (string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(change.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
         {
             return ReviewDraftPayloadKind.ChapterBody;
         }

@@ -61,11 +61,22 @@ public static class AiChangeReviewDiffBuilder
             return true;
         }
 
-        if (string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(change.ResourceKind, "LegacyChapterBodyAudit", StringComparison.OrdinalIgnoreCase)
+            && TryReadLegacyAudit(change.BeforeJson, out var legacyBefore)
+            && TryReadLegacyAudit(change.AfterJson, out var legacyAfter))
         {
-            if (!TryReadChange<ChapterBodyChange>(change.BeforeJson, out var before)
-                || !TryReadChange<ChapterBodyChange>(AiChangeReviewDrafts.EffectiveAfterJson(change), out var after))
+            diff = Build(
+                "Legacy chapter-body audit",
+                legacyAfter.Title,
+                [new DiffFieldInput("Body", "Body", legacyBefore.Body, legacyAfter.Body, OwnerChangeId: null)],
+                showSingleFieldLabel: false);
+            return true;
+        }
+
+        if (string.Equals(change.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryReadChange<ChapterManuscriptChange>(change.BeforeJson, out var before)
+                || !TryReadChange<ChapterManuscriptChange>(AiChangeReviewDrafts.EffectiveAfterJson(change), out var after))
             {
                 return false;
             }
@@ -73,7 +84,7 @@ public static class AiChangeReviewDiffBuilder
             diff = Build(
                 "Chapter body",
                 after.Title,
-                [new DiffFieldInput("Body", before.Body, after.Body, EditableOwnerChangeId(change, hasAfterPayload: true))],
+                [new DiffFieldInput("Body", before.PlainText, after.PlainText, EditableOwnerChangeId(change, hasAfterPayload: true))],
                 showSingleFieldLabel: false);
             return true;
         }
@@ -179,18 +190,17 @@ public static class AiChangeReviewDiffBuilder
         ref string title,
         ref string subtitle)
     {
-        if (string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(change.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
         {
-            if (!TryReadChange<ChapterBodyChange>(change.BeforeJson, out var before)
-                || !TryReadChange<ChapterBodyChange>(AiChangeReviewDrafts.EffectiveAfterJson(change), out var after))
+            if (!TryReadChange<ChapterManuscriptChange>(change.BeforeJson, out var before)
+                || !TryReadChange<ChapterManuscriptChange>(AiChangeReviewDrafts.EffectiveAfterJson(change), out var after))
             {
                 return false;
             }
 
             SetTitle(ref title, "Chapter changes");
             SetSubtitle(ref subtitle, after.Title);
-            AddOrUpdateField(fields, "Body", before.Body, after.Body, EditableOwnerChangeId(change, hasAfterPayload: true));
+            AddOrUpdateField(fields, "Body", before.PlainText, after.PlainText, EditableOwnerChangeId(change, hasAfterPayload: true));
             return true;
         }
 
@@ -354,6 +364,27 @@ public static class AiChangeReviewDiffBuilder
             return true;
         }
         catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadLegacyAudit(string json, out LegacyChapterBody payload)
+    {
+        payload = null!;
+        try
+        {
+            var snapshot = JsonSerializer.Deserialize<LegacyAuditSnapshot>(json, ChangePayloadJsonOptions);
+            if (snapshot is null
+                || !string.Equals(snapshot.Format, "legacy-chapter-body-v7", StringComparison.Ordinal)
+                || snapshot.Payload.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+            payload = snapshot.Payload.Deserialize<LegacyChapterBody>(ChangePayloadJsonOptions)!;
+            return payload is not null;
+        }
+        catch (JsonException)
         {
             return false;
         }
@@ -1116,6 +1147,8 @@ public static class AiChangeReviewDiffBuilder
     private sealed record LineRef(int Index, string Text);
     private sealed record DiffToken(string Text, string Key, DiffTokenKind Kind);
     private sealed record ModifiedSegments(IReadOnlyList<DiffSegment> OldSegments, IReadOnlyList<DiffSegment> NewSegments);
+    private sealed record LegacyAuditSnapshot(string Format, string Field, JsonElement Payload);
+    private sealed record LegacyChapterBody(Guid Id, string Title, string Body);
 
     private enum LineEditKind
     {

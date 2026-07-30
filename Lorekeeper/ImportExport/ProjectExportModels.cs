@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.ImportExport;
@@ -18,7 +19,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 7;
+    public const int CurrentFormatVersion = 8;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -155,7 +156,10 @@ public sealed record ProjectExportChapter
     public Guid Id { get; init; }
     public Guid? ActId { get; init; }
     public string Title { get; init; } = string.Empty;
-    public string Body { get; init; } = string.Empty;
+    public string ManuscriptJson { get; init; } = string.Empty;
+    public long ManuscriptRevision { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Body { get; init; }
     public string Synopsis { get; init; } = string.Empty;
     public int Order { get; init; }
     public ChapterVisualMode VisualMode { get; init; } = ChapterVisualMode.Prose;

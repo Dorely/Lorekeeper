@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Lorekeeper.Chapters;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
@@ -13,7 +14,7 @@ public sealed class EditorChatChangeStagingContext(
 {
     private AiChangeBatch? _batch;
     private readonly List<AiChange> _newChanges = [];
-    private readonly Dictionary<Guid, string> _chapterBodyDrafts = [];
+    private readonly Dictionary<Guid, ManuscriptDocument> _chapterManuscriptDrafts = [];
     private Guid? _assistantMessageId;
     private string _toolCallId = string.Empty;
     private string _toolName = string.Empty;
@@ -35,8 +36,20 @@ public sealed class EditorChatChangeStagingContext(
         return result;
     }
 
-    public bool TryGetChapterBodyDraft(Guid chapterId, out string body) =>
-        _chapterBodyDrafts.TryGetValue(chapterId, out body!);
+    public bool TryGetChapterBodyDraft(Guid chapterId, out string body)
+    {
+        if (TryGetChapterManuscriptDraft(chapterId, out var document))
+        {
+            body = ManuscriptCodec.ProjectPlainText(document);
+            return true;
+        }
+
+        body = string.Empty;
+        return false;
+    }
+
+    public bool TryGetChapterManuscriptDraft(Guid chapterId, out ManuscriptDocument document) =>
+        _chapterManuscriptDrafts.TryGetValue(chapterId, out document!);
 
     public async Task StageChapterBodyEditAsync(
         Chapter chapter,
@@ -46,18 +59,50 @@ public sealed class EditorChatChangeStagingContext(
         string result,
         CancellationToken cancellationToken = default)
     {
-        var before = new ChapterBodyChange(chapter.Id, chapter.Title, beforeBody);
-        var after = new ChapterBodyChange(chapter.Id, chapter.Title, newBody);
+        var beforeDocument = TryGetChapterManuscriptDraft(chapter.Id, out var staged)
+            ? staged
+            : string.Equals(chapter.PlainText, beforeBody, StringComparison.Ordinal)
+                ? chapter.Manuscript
+                : ManuscriptCodec.FromPlainText(chapter.Id, beforeBody, chapter.ManuscriptRevision);
+        var afterDocument = ManuscriptCodec.ReparsePreservingBlockIds(beforeDocument, newBody);
+        await StageChapterManuscriptEditAsync(
+            chapter,
+            beforeDocument,
+            afterDocument,
+            summary,
+            result,
+            cancellationToken);
+    }
+
+    public async Task StageChapterManuscriptEditAsync(
+        Chapter chapter,
+        ManuscriptDocument beforeDocument,
+        ManuscriptDocument afterDocument,
+        string summary,
+        string result,
+        CancellationToken cancellationToken = default)
+    {
+        if (TryGetChapterManuscriptDraft(chapter.Id, out var currentDraft)
+            && (beforeDocument.Revision != currentDraft.Revision
+                || !ManuscriptCodec.ContentEquals(beforeDocument, currentDraft)))
+        {
+            throw new ManuscriptRevisionConflictException(beforeDocument.Revision, currentDraft.Revision);
+        }
+
+        var before = new ChapterManuscriptChange(
+            chapter.Id, chapter.Title, beforeDocument.Revision, ManuscriptCodec.Serialize(beforeDocument));
+        var after = new ChapterManuscriptChange(
+            chapter.Id, chapter.Title, afterDocument.Revision, ManuscriptCodec.Serialize(afterDocument));
         await StageChangeAsync(
             summary,
             before,
             after,
             result,
-            resourceKind: "ChapterBody",
+            resourceKind: "ChapterManuscript",
             resourceId: Resource("Chapter", chapter.Id),
             referencedResources: [Resource("Chapter", chapter.Id)],
             cancellationToken);
-        _chapterBodyDrafts[chapter.Id] = newBody;
+        _chapterManuscriptDrafts[chapter.Id] = afterDocument;
     }
 
     private async Task StageChangeAsync(
@@ -120,4 +165,5 @@ public sealed class EditorChatChangeStagingContext(
 
     private static string Serialize(object? value) =>
         JsonSerializer.Serialize(value, JsonSerializerOptions.Default);
+
 }

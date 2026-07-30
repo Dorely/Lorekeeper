@@ -6,6 +6,7 @@ using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 
@@ -18,6 +19,7 @@ public sealed class AiChangeApprovalService(
     IResearchConversationRepository researchConversations,
     IActService acts,
     IChapterService chapters,
+    IManuscriptService manuscripts,
     IChapterVisualService chapterVisuals,
     IEntityService entities,
     IVectorIndexWorkCoordinator indexWork,
@@ -73,13 +75,13 @@ public sealed class AiChangeApprovalService(
             throw new InvalidOperationException("The selected chapter does not belong to this project.");
 
         var pendingBatches = await changes.ListPendingBatchesAsync(projectId, cancellationToken);
-        var chapterBodyChanges = CurrentPendingChapterBodyChanges(pendingBatches, chapterId);
+        var chapterBodyChanges = CurrentPendingChapterManuscriptChanges(pendingBatches, chapterId);
         if (chapterBodyChanges.Count == 0) return;
 
         EnsureNoExternalPendingDependencies(chapterBodyChanges, pendingBatches);
 
         var aggregate = chapterBodyChanges[^1];
-        var finalAfter = ReadOptional<ChapterBodyChange>(AiChangeReviewDrafts.EffectiveAfterJson(aggregate))
+        var finalAfter = ReadOptional<ChapterManuscriptChange>(AiChangeReviewDrafts.EffectiveAfterJson(aggregate))
             ?? throw new InvalidOperationException("The active chapter body review change no longer has a proposed body.");
 
         var now = DateTime.UtcNow;
@@ -93,11 +95,18 @@ public sealed class AiChangeApprovalService(
             changes.UpdateChange(folded);
         }
 
-        var rebasedBefore = new ChapterBodyChange(chapter.Id, chapter.Title, chapter.Body);
+        var rebasedBefore = Change(chapter);
+        var proposedDocument = finalAfter.Manuscript with
+        {
+            ManuscriptId = chapter.Id,
+            Revision = checked(chapter.ManuscriptRevision + 1),
+        };
         var rebasedAfter = finalAfter with
         {
             Id = chapter.Id,
             Title = chapter.Title,
+            Revision = proposedDocument.Revision,
+            ManuscriptJson = ManuscriptCodec.Serialize(proposedDocument),
         };
 
         aggregate.BeforeJson = Serialize(rebasedBefore);
@@ -105,7 +114,7 @@ public sealed class AiChangeApprovalService(
         aggregate.DraftAfterJson = null;
         aggregate.ReviewStateJson = BuildReviewStateJson();
         aggregate.DependsOnChangeIdsJson = "[]";
-        aggregate.Status = BodiesEqualByLines(chapter.Body, rebasedAfter.Body)
+        aggregate.Status = ManuscriptCodec.ContentEquals(chapter.Manuscript, rebasedAfter.Manuscript)
             ? AiChangeStatus.Resolved
             : AiChangeStatus.Pending;
         aggregate.UpdatedAt = now;
@@ -127,7 +136,7 @@ public sealed class AiChangeApprovalService(
         await PrepareChapterBodyLineReviewAsync(projectId, chapterId, cancellationToken);
 
         var pendingBatches = await changes.ListPendingBatchesAsync(projectId, cancellationToken);
-        var chapterBodyChanges = CurrentPendingChapterBodyChanges(pendingBatches, chapterId);
+        var chapterBodyChanges = CurrentPendingChapterManuscriptChanges(pendingBatches, chapterId);
         if (chapterBodyChanges.Count == 0)
             throw new InvalidOperationException("There are no pending chapter-body lines left to review.");
 
@@ -143,7 +152,7 @@ public sealed class AiChangeApprovalService(
         if (chapter.ProjectId != projectId)
             throw new InvalidOperationException("The selected chapter does not belong to this project.");
 
-        var proposed = ReadOptional<ChapterBodyChange>(AiChangeReviewDrafts.EffectiveAfterJson(aggregate))
+        var proposed = ReadOptional<ChapterManuscriptChange>(AiChangeReviewDrafts.EffectiveAfterJson(aggregate))
             ?? throw new InvalidOperationException("The active chapter body review change no longer has a proposed body.");
 
         if (!AiChangeReviewDiffBuilder.TryBuild(aggregate, out var diff))
@@ -152,8 +161,8 @@ public sealed class AiChangeApprovalService(
         var target = FindChapterBodyReviewLineTarget(aggregate.Id, diff, request)
             ?? throw new InvalidOperationException("This review line changed. Refresh Review mode and try again.");
 
-        var currentLines = ChapterFormatting.SplitLines(chapter.Body);
-        var proposedLines = ChapterFormatting.SplitLines(proposed.Body);
+        var currentLines = ChapterFormatting.SplitLines(chapter.PlainText);
+        var proposedLines = ChapterFormatting.SplitLines(proposed.PlainText);
         var editedText = request.Action == ChapterBodyReviewLineAction.Edit
             ? NormalizeSingleLineEditText(request.EditedText)
             : null;
@@ -161,24 +170,38 @@ public sealed class AiChangeApprovalService(
         ResolveLineTarget(target, request.Action, editedText, currentLines, proposedLines);
 
         var newCurrentBody = ChapterFormatting.JoinLines(currentLines);
-        var newProposedBody = ChapterFormatting.JoinLines(proposedLines);
+        var newProposedPlainText = ChapterFormatting.JoinLines(proposedLines);
 
-        if (!string.Equals(newCurrentBody, chapter.Body, StringComparison.Ordinal))
-            chapter = await chapters.UpdateAsync(chapter.Id, body: newCurrentBody, cancellationToken: cancellationToken);
+        if (!string.Equals(newCurrentBody, chapter.PlainText, StringComparison.Ordinal))
+        {
+            await manuscripts.ReplacePlainTextAsync(
+                chapter.Id,
+                chapter.ManuscriptRevision,
+                newCurrentBody,
+                cancellationToken);
+            chapter = await chapters.ReloadFromStoreAsync(chapter.Id, cancellationToken)
+                ?? throw new InvalidOperationException($"Chapter {chapter.Id} not found after review save.");
+        }
 
-        aggregate.BeforeJson = Serialize(new ChapterBodyChange(chapter.Id, chapter.Title, chapter.Body));
+        aggregate.BeforeJson = Serialize(Change(chapter));
+        var reparsedProposal = ManuscriptCodec.ReparsePreservingBlockIds(proposed.Manuscript, newProposedPlainText) with
+        {
+            ManuscriptId = chapter.Id,
+            Revision = checked(chapter.ManuscriptRevision + 1),
+        };
         aggregate.AfterJson = Serialize(proposed with
         {
             Id = chapter.Id,
             Title = chapter.Title,
-            Body = newProposedBody,
+            Revision = reparsedProposal.Revision,
+            ManuscriptJson = ManuscriptCodec.Serialize(reparsedProposal),
         });
         aggregate.DraftAfterJson = null;
         aggregate.ReviewStateJson = BuildReviewStateJson();
         aggregate.UpdatedAt = DateTime.UtcNow;
         aggregate.ResolvedAt = null;
 
-        if (BodiesEqualByLines(chapter.Body, newProposedBody))
+        if (ManuscriptCodec.ContentEquals(chapter.Manuscript, reparsedProposal))
         {
             aggregate.Status = AiChangeStatus.Resolved;
             aggregate.ResolvedAt = DateTime.UtcNow;
@@ -399,23 +422,28 @@ public sealed class AiChangeApprovalService(
             case "update_chapter":
             {
                 var after = ReadRequired<OutlineChapterChange>(afterJson);
-                var chapter = await chapters.UpdateAsync(after.Id, after.Title, body: null, after.Synopsis, new ChapterActAssignment(after.ActId), cancellationToken);
+                var chapter = await chapters.UpdateAsync(after.Id, after.Title, after.Synopsis, new ChapterActAssignment(after.ActId), cancellationToken);
                 await ApplyChapterVisualAsync(chapter, after.VisualMode, after.PageLayoutKind, cancellationToken);
                 break;
             }
-            case "edit_chapter":
-            case "edit_assigned_chapter":
+            case "apply_manuscript_operations":
+            case "apply_assigned_manuscript_operations":
             {
-                var before = ReadOptional<ChapterBodyChange>(change.BeforeJson);
-                var after = ReadRequired<ChapterBodyChange>(afterJson);
+                var before = ReadOptional<ChapterManuscriptChange>(change.BeforeJson);
+                var after = ReadRequired<ChapterManuscriptChange>(afterJson);
                 if (before is not null)
                 {
                     var current = await chapters.GetAsync(after.Id, cancellationToken)
                         ?? throw new InvalidOperationException($"Chapter {after.Id} not found.");
-                    if (!string.Equals(current.Body, before.Body, StringComparison.Ordinal))
+                    if (current.ManuscriptRevision != before.Revision
+                        || !string.Equals(current.ManuscriptJson, before.ManuscriptJson, StringComparison.Ordinal))
                         throw new InvalidOperationException("The chapter body changed after this AI edit was staged. Reject this change and rerun the edit against the current chapter text.");
                 }
-                await chapters.UpdateAsync(after.Id, body: after.Body, cancellationToken: cancellationToken);
+                await manuscripts.ReplaceDocumentAsync(
+                    after.Id,
+                    before?.Revision ?? checked(after.Revision - 1),
+                    after.Manuscript,
+                    cancellationToken);
                 break;
             }
             case "delete_chapter":
@@ -503,32 +531,30 @@ public sealed class AiChangeApprovalService(
         }
     }
 
-    private static IReadOnlyList<AiChange> CurrentPendingChapterBodyChanges(IReadOnlyList<AiChangeBatch> batches, Guid chapterId) =>
+    private static IReadOnlyList<AiChange> CurrentPendingChapterManuscriptChanges(IReadOnlyList<AiChangeBatch> batches, Guid chapterId) =>
         batches
             .SelectMany(batch => batch.Changes)
-            .Where(change => change.Status == AiChangeStatus.Pending && IsChapterBodyChangeFor(change, chapterId))
+            .Where(change => change.Status == AiChangeStatus.Pending && IsChapterManuscriptChangeFor(change, chapterId))
             .OrderBy(change => change.Batch.CreatedAt)
             .ThenBy(change => change.Order)
             .ToList();
 
-    private static bool IsChapterBodyChangeFor(AiChange change, Guid chapterId)
+    private static bool IsChapterManuscriptChangeFor(AiChange change, Guid chapterId)
     {
-        if (!string.Equals(change.ResourceKind, "ChapterBody", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(change.ToolName, "edit_chapter", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(change.ToolName, "edit_assigned_chapter", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(change.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        return TryReadChapterBodyChange(change.BeforeJson)?.Id == chapterId
-            || TryReadChapterBodyChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
+        return TryReadChapterManuscriptChange(change.BeforeJson)?.Id == chapterId
+            || TryReadChapterManuscriptChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
     }
 
-    private static ChapterBodyChange? TryReadChapterBodyChange(string json)
+    private static ChapterManuscriptChange? TryReadChapterManuscriptChange(string json)
     {
         try
         {
-            return ReadOptional<ChapterBodyChange>(json);
+            return ReadOptional<ChapterManuscriptChange>(json);
         }
         catch (JsonException)
         {
@@ -1091,6 +1117,9 @@ public sealed class AiChangeApprovalService(
 
     private static string Serialize(object value) =>
         JsonSerializer.Serialize(value, JsonSerializerOptions.Default);
+
+    private static ChapterManuscriptChange Change(Chapter chapter) =>
+        new(chapter.Id, chapter.Title, chapter.ManuscriptRevision, chapter.ManuscriptJson);
 
     private sealed record ChapterBodyReviewLineTarget(
         Guid ChangeId,

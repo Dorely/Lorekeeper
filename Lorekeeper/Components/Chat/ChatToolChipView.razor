@@ -319,10 +319,8 @@
     private static string FormatChange(EditorRevisionSessionDetail session) =>
         JsonSerializer.Serialize(new
         {
-            session.MutationKind,
-            session.StartLine,
-            session.EndLine,
-            session.ReplacementText,
+            session.OperationFormat,
+            session.OperationsJson,
             session.Notes,
         }, new JsonSerializerOptions { WriteIndented = true });
 

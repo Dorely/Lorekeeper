@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lorekeeper.local/schemas/manuscript-v1.schema.json",
+  "title": "Lorekeeper manuscript v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "manuscriptId", "revision", "content"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "manuscriptId": { "type": "string", "format": "uuid" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "content": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/block" }
+    }
+  },
+  "$defs": {
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "styleRole", "content"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": {
+          "enum": ["paragraph", "heading", "sceneBreak", "blockQuote", "listItem"]
+        },
+        "styleRole": { "type": "string", "minLength": 1 },
+        "content": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/inline" }
+        }
+      }
+    },
+    "inline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "text", "marks"],
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "type": "string" },
+        "marks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/mark" }
+        }
+      }
+    },
+    "mark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["emphasis", "strong", "underline", "strikethrough", "code", "link", "language"]
+        },
+        "value": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

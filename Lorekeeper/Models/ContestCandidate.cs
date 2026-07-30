@@ -1,3 +1,6 @@
+using System.ComponentModel.DataAnnotations.Schema;
+using Lorekeeper.Manuscripts;
+
 namespace Lorekeeper.Models;
 
 public class ContestCandidate
@@ -21,7 +24,11 @@ public class ContestCandidate
 
     public string MutationsJson { get; set; } = "[]";
 
-    public string ProposedBody { get; set; } = string.Empty;
+    public string ProposedManuscriptJson { get; set; } = string.Empty;
+
+    [NotMapped]
+    public string ProposedPlainText =>
+        ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(ProposedManuscriptJson));
 
     public string RawResponse { get; set; } = string.Empty;
 

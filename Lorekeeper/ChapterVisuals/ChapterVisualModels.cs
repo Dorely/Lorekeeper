@@ -4,6 +4,7 @@ namespace Lorekeeper.ChapterVisuals;
 
 public sealed record ChapterVisualState(
     Guid ChapterId,
+    long ManuscriptRevision,
     ChapterVisualMode VisualMode,
     ChapterPageLayoutKind PageLayoutKind,
     IllustratedProseLayout IllustrationLayout,

@@ -7,6 +7,7 @@ using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
 using Lorekeeper.Llm;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
@@ -19,6 +20,7 @@ namespace Lorekeeper.EditorChat;
 public sealed class EditorRevisionAgentProcessor(
     IProjectRepository projects,
     IChapterService chapters,
+    IManuscriptService manuscripts,
     IEditorConversationRepository conversations,
     IEditorRevisionRepository revisions,
     IContextBuilder contextBuilder,
@@ -211,7 +213,7 @@ public sealed class EditorRevisionAgentProcessor(
                         toolResult = $"Error: {ex.Message}";
                     }
 
-                    if (string.Equals(pendingCall.Name, "edit_assigned_chapter", StringComparison.Ordinal) && toolError is null)
+                    if (string.Equals(pendingCall.Name, "apply_assigned_manuscript_operations", StringComparison.Ordinal) && toolError is null)
                         toolResult = await ApplyCapturedEditAsync(project, session, edit, pendingCall, stopwatch, cancellationToken);
 
                     await revisions.AddMessageAsync(new EditorRevisionMessage
@@ -229,7 +231,7 @@ public sealed class EditorRevisionAgentProcessor(
                     NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
 
                     resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult));
-                    if (string.Equals(pendingCall.Name, "edit_assigned_chapter", StringComparison.Ordinal))
+                    if (string.Equals(pendingCall.Name, "apply_assigned_manuscript_operations", StringComparison.Ordinal))
                     {
                         if (toolError is not null)
                         {
@@ -355,20 +357,22 @@ public sealed class EditorRevisionAgentProcessor(
                 description: "Read the explicitly paginated parent Editor conversation. Every page reports complete message IDs, roles, order, tool names, character counts, and history-window completeness; follow nextPageArguments."),
 
             AIFunctionFactory.Create(
+                method: () => ReadAssignedManuscriptAsync(assignedChapterId),
+                name: "read_assigned_manuscript",
+                description: "Read the assigned chapter's complete semantic manuscript, stable block IDs, inline marks, style roles, source hash, and required revision token."),
+
+            AIFunctionFactory.Create(
                 method: (
                     string summary,
                     string rationale,
-                    string mutationKind,
-                    string replacementText,
-                    int? startLine = null,
-                    int? endLine = null,
+                    long expectedRevision,
+                    ManuscriptOperationInput[] operations,
                     string? notes = null) =>
-                    EditAssignedChapterAsync(edit, assignedChapterId, summary, rationale, mutationKind, replacementText, startLine, endLine, notes),
-                name: "edit_assigned_chapter",
+                    CaptureAssignedManuscriptOperationsAsync(edit, assignedChapterId, summary, rationale, expectedRevision, operations, notes),
+                name: "apply_assigned_manuscript_operations",
                 description:
-                    "Terminal mutating tool. Edit only the assigned chapter body. " +
-                    "mutationKind must be replace_whole_body, replace_range, insert_before_line, or insert_after_line. " +
-                    "Use line numbers from read_chapter or the Context Feed. replacementText must be prose only with no line numbers. " +
+                    "Terminal mutating tool. Edit only the assigned chapter through semantic insert, replace, delete, move, split, merge, block-style, or inline-mark operations. " +
+                    "Use stable block IDs and expectedRevision from read_assigned_manuscript. " +
                     "Do not call any more tools after this."),
         };
 
@@ -380,7 +384,7 @@ public sealed class EditorRevisionAgentProcessor(
         var history = await conversations.LoadMessagesAsync(job.ConversationId, cancellationToken);
         var sb = new StringBuilder();
         sb.AppendLine("# Chapter Revision Assignment");
-        sb.AppendLine("You are one prose-only worker. Edit the assigned chapter body directly with edit_assigned_chapter; do not mutate any other project state.");
+        sb.AppendLine("You are one prose-only worker. Read the assigned semantic manuscript, then edit it with apply_assigned_manuscript_operations; do not mutate any other project state.");
         sb.AppendLine();
         sb.AppendLine("Assigned chapter:");
         sb.AppendLine($"- {session.ChapterTitle} (id={session.ChapterId})");
@@ -397,7 +401,7 @@ public sealed class EditorRevisionAgentProcessor(
         sb.AppendLine();
 
         sb.AppendLine("# Output Requirement");
-        sb.AppendLine("Call edit_assigned_chapter exactly once when ready. The coordinator will review the completed/staged change and decide whether any follow-up action is needed.");
+        sb.AppendLine("Call apply_assigned_manuscript_operations exactly once when ready. The coordinator will review the completed/staged change and decide whether any follow-up action is needed.");
         return sb.ToString().TrimEnd();
     }
 
@@ -496,12 +500,12 @@ public sealed class EditorRevisionAgentProcessor(
         var sb = new StringBuilder();
         foreach (var chapter in list)
         {
-            var lineCount = ChapterFormatting.SplitLines(chapter.Body).Count;
+            var lineCount = ChapterFormatting.SplitLines(chapter.PlainText).Count;
             sb.Append(chapter.Order + 1).Append(". ").Append(chapter.Title)
               .Append(" - id=").Append(chapter.Id)
               .Append(" - lines=").Append(lineCount)
-              .Append(" - bodyChars=").Append(chapter.Body.Length)
-              .Append(" - readChapterPages=").Append(CountReadChapterPages(chapter.Body, EffectiveReadChapterPageMaxChars()));
+              .Append(" - bodyChars=").Append(chapter.PlainText.Length)
+              .Append(" - readChapterPages=").Append(CountReadChapterPages(chapter.PlainText, EffectiveReadChapterPageMaxChars()));
             if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
                 sb.Append(" - ").Append(chapter.Synopsis);
             sb.AppendLine();
@@ -521,7 +525,7 @@ public sealed class EditorRevisionAgentProcessor(
             return "Error: pageNumber must be 1 or greater.";
 
         var pageMaxChars = EffectiveReadChapterPageMaxChars();
-        var lines = ChapterFormatting.SplitLines(chapter.Body);
+        var lines = ChapterFormatting.SplitLines(chapter.PlainText);
         if (lines.Count == 0)
         {
             if (requestedPageNumber > 1)
@@ -545,7 +549,7 @@ public sealed class EditorRevisionAgentProcessor(
         return JsonSerializer.Serialize(new
         {
             chapter = new { id = chapter.Id, chapter.Title, chapter.Synopsis },
-            chapterStats = new { totalChapterLines = lines.Count, totalChapterChars = chapter.Body.Length },
+            chapterStats = new { totalChapterLines = lines.Count, totalChapterChars = chapter.PlainText.Length },
             pagination = new
             {
                 pageStartLine = selectedPage.PageStartLine,
@@ -718,26 +722,35 @@ public sealed class EditorRevisionAgentProcessor(
             pageNumber);
     }
 
-    private Task<string> EditAssignedChapterAsync(
+    private async Task<string> ReadAssignedManuscriptAsync(Guid chapterId)
+    {
+        var snapshot = await manuscripts.GetManuscriptAsync(chapterId)
+            ?? throw new InvalidOperationException($"Assigned manuscript {chapterId:N} was not found.");
+        return JsonSerializer.Serialize(new
+        {
+            snapshot.ChapterId,
+            snapshot.Revision,
+            snapshot.SourceHash,
+            blocks = snapshot.Document.Content,
+        }, ManuscriptCodec.JsonOptions);
+    }
+
+    private Task<string> CaptureAssignedManuscriptOperationsAsync(
         CapturedChapterEdit edit,
         Guid assignedChapterId,
         string summary,
         string rationale,
-        string mutationKind,
-        string replacementText,
-        int? startLine,
-        int? endLine,
+        long expectedRevision,
+        ManuscriptOperationInput[] operations,
         string? notes)
     {
         edit.ChapterId = assignedChapterId;
         edit.Summary = summary?.Trim() ?? string.Empty;
         edit.Rationale = rationale?.Trim() ?? string.Empty;
-        edit.MutationKind = NormalizeMutationKind(mutationKind);
-        edit.ReplacementText = replacementText ?? string.Empty;
-        edit.StartLine = startLine;
-        edit.EndLine = endLine;
+        edit.ExpectedRevision = expectedRevision;
+        edit.Operations = operations ?? [];
         edit.Notes = notes?.Trim() ?? string.Empty;
-        return Task.FromResult("Chapter edit recorded. The system is applying or staging it now. Do not call any more tools.");
+        return Task.FromResult("Semantic manuscript operations recorded. The system is applying or staging them now. Do not call any more tools.");
     }
 
     private async Task<string> ApplyCapturedEditAsync(
@@ -759,38 +772,41 @@ public sealed class EditorRevisionAgentProcessor(
 
         var chapter = await chapters.GetAsync(session.ChapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {session.ChapterId} not found.");
-        if (!string.Equals(chapter.Body, session.OriginalChapterBody, StringComparison.Ordinal))
+        if (chapter.ManuscriptRevision != edit.ExpectedRevision
+            || !string.Equals(chapter.ManuscriptJson, session.OriginalManuscriptJson, StringComparison.Ordinal))
         {
-            var error = "The assigned chapter body changed after this worker session started. No worker edit was applied.";
+            var error = "The assigned manuscript changed after this worker session started. No worker edit was applied.";
             MarkInvalid(session, error, JsonSerializer.Serialize(edit, JsonOptions), stopwatch);
             revisions.UpdateSession(session);
             await revisions.SaveChangesAsync(cancellationToken);
             return $"Error: {error}";
         }
 
-        var newBody = BuildEditedBody(session.OriginalChapterBody, edit);
-        var result = BuildEditResult(session.ChapterTitle, session.OriginalChapterBody, newBody, edit);
+        var source = ManuscriptCodec.Deserialize(session.OriginalManuscriptJson);
+        var operations = ManuscriptOperationInput.ToOperations(edit.Operations);
+        var (proposedDocument, changedBlockIds) = ManuscriptOperations.Apply(source, operations);
+        var newBody = ManuscriptCodec.ProjectPlainText(proposedDocument);
+        var result = BuildEditResult(session.ChapterTitle, session.OriginalPlainText, newBody, edit);
 
         if (project.AiChangeApprovalEnabled)
         {
-            var changeId = await StageChapterBodyEditAsync(project, session, edit, pendingCall, newBody, result, cancellationToken);
+            var changeId = await StageChapterBodyEditAsync(
+                project, session, edit, pendingCall, proposedDocument, result, cancellationToken);
             edit.Notes = AppendNote(edit.Notes, $"Staged pending change {changeId:N} for review.");
             result = AppendResultLine(result, $"Staged pending change {changeId:N} for review.");
         }
         else
         {
-            await chapters.UpdateAsync(session.ChapterId, body: newBody, cancellationToken: cancellationToken);
-            edit.Notes = AppendNote(edit.Notes, "Applied directly to the chapter body.");
-            result = AppendResultLine(result, "Applied directly to the chapter body.");
+            await manuscripts.ApplyAsync(session.ChapterId, edit.ExpectedRevision, operations, cancellationToken);
+            edit.Notes = AppendNote(edit.Notes, $"Applied directly to {changedBlockIds.Count} manuscript block(s).");
+            result = AppendResultLine(result, $"Applied directly to {changedBlockIds.Count} manuscript block(s).");
         }
 
         session.Status = EditorRevisionSessionStatus.Completed;
         session.Summary = edit.Summary;
         session.Rationale = edit.Rationale;
-        session.MutationKind = edit.MutationKind;
-        session.StartLine = edit.StartLine;
-        session.EndLine = edit.EndLine;
-        session.ReplacementText = edit.ReplacementText;
+        session.OperationFormat = "semantic_operations";
+        session.OperationsJson = JsonSerializer.Serialize(edit.Operations, JsonOptions);
         session.Notes = edit.Notes;
         session.ProposalJson = JsonSerializer.Serialize(edit, JsonOptions);
         session.RawResponse = result;
@@ -807,7 +823,7 @@ public sealed class EditorRevisionAgentProcessor(
         EditorRevisionSession session,
         CapturedChapterEdit edit,
         PendingToolCall pendingCall,
-        string newBody,
+        ManuscriptDocument proposedDocument,
         string result,
         CancellationToken cancellationToken)
     {
@@ -826,13 +842,21 @@ public sealed class EditorRevisionAgentProcessor(
             BatchId = batch.Id,
             Order = 0,
             ToolCallId = pendingCall.CallId,
-            ToolName = "edit_assigned_chapter",
+            ToolName = "apply_assigned_manuscript_operations",
             ArgumentsJson = pendingCall.ArgumentsJson,
             Summary = edit.Summary,
-            BeforeJson = JsonSerializer.Serialize(new ChapterBodyChange(session.ChapterId, session.ChapterTitle, session.OriginalChapterBody)),
-            AfterJson = JsonSerializer.Serialize(new ChapterBodyChange(session.ChapterId, session.ChapterTitle, newBody)),
+            BeforeJson = JsonSerializer.Serialize(new ChapterManuscriptChange(
+                session.ChapterId,
+                session.ChapterTitle,
+                ManuscriptCodec.Deserialize(session.OriginalManuscriptJson).Revision,
+                session.OriginalManuscriptJson)),
+            AfterJson = JsonSerializer.Serialize(new ChapterManuscriptChange(
+                session.ChapterId,
+                session.ChapterTitle,
+                proposedDocument.Revision,
+                ManuscriptCodec.Serialize(proposedDocument))),
             ResultJson = JsonSerializer.Serialize(new { result }),
-            ResourceKind = "ChapterBody",
+            ResourceKind = "ChapterManuscript",
             ResourceId = Resource("Chapter", session.ChapterId),
             CreatedResourceIdsJson = "[]",
             ReferencedResourceIdsJson = JsonSerializer.Serialize(new[] { Resource("Chapter", session.ChapterId) }),
@@ -851,80 +875,31 @@ public sealed class EditorRevisionAgentProcessor(
             return "Edit summary is required.";
         if (string.IsNullOrWhiteSpace(edit.Rationale))
             return "Edit rationale is required.";
-        if (string.IsNullOrWhiteSpace(edit.MutationKind))
-            return "mutationKind is required.";
-
-        var lines = ChapterFormatting.SplitLines(session.OriginalChapterBody);
-        return edit.MutationKind switch
+        var original = ManuscriptCodec.Deserialize(session.OriginalManuscriptJson);
+        if (edit.ExpectedRevision != original.Revision)
+            return $"expectedRevision must be {original.Revision}.";
+        if (edit.Operations.Length == 0)
+            return "At least one semantic manuscript operation is required.";
+        try
         {
-            "replace_whole_body" when edit.StartLine is not null || edit.EndLine is not null
-                => "replace_whole_body must not specify startLine or endLine.",
-            "replace_whole_body" => null,
-            "replace_range" when edit.StartLine is null || edit.EndLine is null
-                => "replace_range requires startLine and endLine.",
-            "replace_range" when edit.StartLine < 1 || edit.EndLine < edit.StartLine || edit.EndLine > Math.Max(1, lines.Count)
-                => $"replace_range line range must fit the assigned chapter (1..{Math.Max(1, lines.Count)}).",
-            "replace_range" => null,
-            "insert_before_line" when edit.StartLine is null || edit.EndLine is not null
-                => "insert_before_line requires startLine and must not specify endLine.",
-            "insert_before_line" when edit.StartLine < 1 || edit.StartLine > lines.Count + 1
-                => $"insert_before_line target must be in range 1..{lines.Count + 1}.",
-            "insert_before_line" => null,
-            "insert_after_line" when edit.StartLine is null || edit.EndLine is not null
-                => "insert_after_line requires startLine and must not specify endLine.",
-            "insert_after_line" when edit.StartLine < 0 || edit.StartLine > lines.Count
-                => $"insert_after_line target must be in range 0..{lines.Count}.",
-            "insert_after_line" => null,
-            _ => "mutationKind must be replace_whole_body, replace_range, insert_before_line, or insert_after_line.",
-        };
-    }
-
-    private static string BuildEditedBody(string originalBody, CapturedChapterEdit edit)
-    {
-        var originalLines = ChapterFormatting.SplitLines(originalBody);
-        var replacementLines = ChapterFormatting.SplitLines(edit.ReplacementText);
-
-        return edit.MutationKind switch
+            _ = ManuscriptOperations.Apply(original, ManuscriptOperationInput.ToOperations(edit.Operations));
+            return null;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
-            "replace_whole_body" => ChapterFormatting.JoinLines(replacementLines),
-            "replace_range" => ReplaceRange(originalLines, replacementLines, edit.StartLine!.Value, edit.EndLine!.Value),
-            "insert_before_line" => InsertBefore(originalLines, replacementLines, edit.StartLine!.Value),
-            "insert_after_line" => InsertBefore(originalLines, replacementLines, edit.StartLine!.Value + 1),
-            _ => originalBody,
-        };
-    }
-
-    private static string ReplaceRange(IReadOnlyList<string> originalLines, IReadOnlyList<string> replacementLines, int startLine, int endLine)
-    {
-        if (originalLines.Count == 0 && startLine == 1 && endLine == 1)
-            return ChapterFormatting.JoinLines(replacementLines);
-
-        var merged = new List<string>(originalLines.Count - (endLine - startLine + 1) + replacementLines.Count);
-        merged.AddRange(originalLines.Take(startLine - 1));
-        merged.AddRange(replacementLines);
-        merged.AddRange(originalLines.Skip(endLine));
-        return ChapterFormatting.JoinLines(merged);
-    }
-
-    private static string InsertBefore(IReadOnlyList<string> originalLines, IReadOnlyList<string> replacementLines, int insertLine)
-    {
-        var clampedInsertLine = Math.Clamp(insertLine, 1, originalLines.Count + 1);
-        var merged = new List<string>(originalLines.Count + replacementLines.Count);
-        merged.AddRange(originalLines.Take(clampedInsertLine - 1));
-        merged.AddRange(replacementLines);
-        merged.AddRange(originalLines.Skip(clampedInsertLine - 1));
-        return ChapterFormatting.JoinLines(merged);
+            return exception.Message;
+        }
     }
 
     private static string BuildEditResult(string chapterTitle, string originalBody, string newBody, CapturedChapterEdit edit)
     {
-        var beforeLines = ChapterFormatting.SplitLines(originalBody).Count;
-        var afterLines = ChapterFormatting.SplitLines(newBody).Count;
+        var beforeBlocks = ManuscriptCodec.FromPlainText(Guid.Empty, originalBody).Content.Count;
+        var afterBlocks = ManuscriptCodec.FromPlainText(Guid.Empty, newBody).Content.Count;
         var sb = new StringBuilder();
         sb.Append("Edited ").Append(chapterTitle)
             .Append(": ").Append(edit.Summary)
-            .Append(" (").Append(edit.MutationKind)
-            .Append(", ").Append(beforeLines).Append(" -> ").Append(afterLines).AppendLine(" lines).");
+            .Append(" (").Append(edit.Operations.Length).Append(" semantic operation(s), ")
+            .Append(beforeBlocks).Append(" -> ").Append(afterBlocks).AppendLine(" blocks).");
         sb.AppendLine("Rationale:");
         sb.AppendLine(edit.Rationale);
         if (!string.IsNullOrWhiteSpace(edit.Notes))
@@ -1155,9 +1130,6 @@ public sealed class EditorRevisionAgentProcessor(
             call.Name,
             ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson))).ToList();
 
-    private static string NormalizeMutationKind(string? mutationKind) =>
-        (mutationKind ?? string.Empty).Trim().ToLowerInvariant().Replace('-', '_');
-
     private sealed record PendingToolCall(
         FunctionCallContent Content,
         string CallId,
@@ -1189,10 +1161,8 @@ public sealed class EditorRevisionAgentProcessor(
         public Guid ChapterId { get; set; }
         public string Summary { get; set; } = string.Empty;
         public string Rationale { get; set; } = string.Empty;
-        public string MutationKind { get; set; } = string.Empty;
-        public int? StartLine { get; set; }
-        public int? EndLine { get; set; }
-        public string ReplacementText { get; set; } = string.Empty;
+        public long ExpectedRevision { get; set; }
+        public ManuscriptOperationInput[] Operations { get; set; } = [];
         public string Notes { get; set; } = string.Empty;
     }
 }

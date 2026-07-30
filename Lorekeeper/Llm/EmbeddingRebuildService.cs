@@ -78,7 +78,7 @@ public sealed class EmbeddingRebuildService(
     {
         foreach (var chapter in await chapters.ListByProjectAsync(projectId, cancellationToken))
         {
-            chapter.VectorIndexState = string.IsNullOrWhiteSpace(chapter.Body)
+            chapter.VectorIndexState = string.IsNullOrWhiteSpace(chapter.PlainText)
                 ? VectorIndexState.UpToDate
                 : VectorIndexState.Stale;
             chapter.VectorIndexedAt = null;

@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Lorekeeper.Chapters;
 using Lorekeeper.Fonts;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Publish;
@@ -13,7 +13,7 @@ namespace Lorekeeper.ChapterVisuals;
 
 public sealed class ChapterVisualService(
     AppDbContext db,
-    IChapterService chapters,
+    IManuscriptService manuscripts,
     IProjectFontService fonts,
     IPageGeometryService pageGeometry) : IChapterVisualService
 {
@@ -144,8 +144,10 @@ public sealed class ChapterVisualService(
             chapter.VisualMode = ChapterVisualMode.IllustratedProse;
             var layout = ReadIllustrationLayout(chapter);
             elementId = Guid.NewGuid();
-            var paragraphs = SplitParagraphs(chapter.Body);
-            var paragraphIndex = Math.Max(0, paragraphs.Count - 1);
+            var anchorBlocks = AnchorBlocks(chapter.Manuscript);
+            if (anchorBlocks.Count == 0)
+                throw new InvalidOperationException("Add manuscript text before anchoring an illustration.");
+            var paragraphIndex = anchorBlocks.Count - 1;
             layout = layout with
             {
                 Images = layout.Images
@@ -153,17 +155,19 @@ public sealed class ChapterVisualService(
                         elementId,
                         imageId,
                         ChapterImageAnchorPosition.AfterParagraph,
-                        paragraphIndex,
-                        ParagraphHash(paragraphs.ElementAtOrDefault(paragraphIndex) ?? string.Empty),
+                        anchorBlocks[paragraphIndex].Id,
                         WidthPercent: 70,
                         Alignment: ChapterImageAlignment.Center,
                         Caption: string.Empty,
                         AltTextOverride: string.Empty,
                         SortOrder: NextSortOrder(layout.Images),
-                        StartOnNewPage: false))
+                        StartOnNewPage: false)
+                    {
+                        ParagraphIndex = paragraphIndex,
+                    })
                     .ToList(),
             };
-            chapter.IllustrationLayoutJson = JsonSerializer.Serialize(NormalizeIllustrationLayout(layout, chapter.Body), JsonOptions);
+            chapter.IllustrationLayoutJson = JsonSerializer.Serialize(NormalizeIllustrationLayout(layout, chapter.Manuscript), JsonOptions);
         }
 
         chapter.UpdatedAt = DateTime.UtcNow;
@@ -181,7 +185,7 @@ public sealed class ChapterVisualService(
         chapter.VisualMode = chapter.VisualMode == ChapterVisualMode.Prose && layout.Images.Count > 0
             ? ChapterVisualMode.IllustratedProse
             : chapter.VisualMode;
-        chapter.IllustrationLayoutJson = JsonSerializer.Serialize(NormalizeIllustrationLayout(layout, chapter.Body), JsonOptions);
+        chapter.IllustrationLayoutJson = JsonSerializer.Serialize(NormalizeIllustrationLayout(layout, chapter.Manuscript), JsonOptions);
         chapter.UpdatedAt = DateTime.UtcNow;
         await TouchProjectAsync(chapter.ProjectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
@@ -196,15 +200,23 @@ public sealed class ChapterVisualService(
         var chapter = await GetChapterAsync(chapterId, cancellationToken);
         chapter.VisualMode = ChapterVisualMode.PicturePage;
         var normalized = NormalizePageLayout(layout);
-        chapter.PageLayoutJson = JsonSerializer.Serialize(normalized, JsonOptions);
         var projectedBody = ChapterTextLayoutSynchronizer.ProjectBody(normalized);
-        var bodyChanged = !string.Equals(chapter.Body, projectedBody, StringComparison.Ordinal);
+        var bodyChanged = !string.Equals(chapter.PlainText, projectedBody, StringComparison.Ordinal);
 
+        if (bodyChanged)
+        {
+            await manuscripts.ReplacePlainTextAsync(
+                chapterId,
+                chapter.ManuscriptRevision,
+                projectedBody,
+                cancellationToken);
+            chapter = await GetChapterAsync(chapterId, cancellationToken);
+        }
+        var referenced = ChapterTextLayoutSynchronizer.AttachReferences(normalized, chapter.Manuscript);
+        chapter.PageLayoutJson = JsonSerializer.Serialize(referenced, JsonOptions);
         chapter.UpdatedAt = DateTime.UtcNow;
         await TouchProjectAsync(chapter.ProjectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
-        if (bodyChanged)
-            chapter = await chapters.UpdateAsync(chapterId, body: projectedBody, cancellationToken: cancellationToken);
         return State(chapter);
     }
 
@@ -482,7 +494,7 @@ public sealed class ChapterVisualService(
         builder.AppendLine($"Visual mode: {state.VisualMode}");
         if (state.VisualMode == ChapterVisualMode.Prose)
         {
-            builder.AppendLine("No visual layout is active. Edit chapter text with edit_chapter; change visual mode explicitly before placing images.");
+            builder.AppendLine("No visual layout is active. Edit semantic manuscript blocks with manuscript operations; change visual mode explicitly before placing images.");
             return builder.ToString();
         }
 
@@ -545,9 +557,9 @@ public sealed class ChapterVisualService(
         var repaired = 0;
         foreach (var chapter in candidates)
         {
-            if (!ChapterTextLayoutSynchronizer.SynchronizeFromBody(
+            if (!ChapterTextLayoutSynchronizer.SynchronizeFromManuscript(
                     chapter,
-                    chapter.Body,
+                    chapter.Manuscript,
                     ensureLayout: chapter.VisualMode == ChapterVisualMode.PicturePage))
             {
                 continue;
@@ -1541,7 +1553,7 @@ public sealed class ChapterVisualService(
     private static ChapterVisualState State(Chapter chapter)
     {
         var illustrationLayout = chapter.VisualMode == ChapterVisualMode.IllustratedProse
-            ? NormalizeIllustrationLayout(ReadIllustrationLayout(chapter), chapter.Body)
+            ? NormalizeIllustrationLayout(ReadIllustrationLayout(chapter), chapter.Manuscript)
             : new IllustratedProseLayout([]);
         var pageLayout = chapter.VisualMode == ChapterVisualMode.PicturePage
             ? NormalizePageLayout(ReadPageLayout(chapter))
@@ -1551,11 +1563,12 @@ public sealed class ChapterVisualService(
             : NormalizePageLayoutKind(chapter.PageLayoutKind);
         return new ChapterVisualState(
             chapter.Id,
+            chapter.ManuscriptRevision,
             chapter.VisualMode,
             pageLayoutKind,
             illustrationLayout,
             pageLayout,
-            chapter.Body);
+            chapter.PlainText);
     }
 
     private static IllustratedProseLayout ReadIllustrationLayout(Chapter chapter)
@@ -1581,8 +1594,9 @@ public sealed class ChapterVisualService(
 
         try
         {
-            return JsonSerializer.Deserialize<PicturePageLayout>(chapter.PageLayoutJson, JsonOptions)
+            var layout = JsonSerializer.Deserialize<PicturePageLayout>(chapter.PageLayoutJson, JsonOptions)
                 ?? new PicturePageLayout([], []);
+            return ChapterTextLayoutSynchronizer.Hydrate(layout, chapter.Manuscript);
         }
         catch (JsonException)
         {
@@ -1592,30 +1606,52 @@ public sealed class ChapterVisualService(
 
     private static PicturePageLayout EnsurePictureText(Chapter chapter)
     {
-        ChapterTextLayoutSynchronizer.SynchronizeFromBody(chapter, chapter.Body, ensureLayout: true);
+        ChapterTextLayoutSynchronizer.SynchronizeFromManuscript(
+            chapter,
+            chapter.Manuscript,
+            ensureLayout: true);
         return NormalizePageLayout(ReadPageLayout(chapter));
     }
 
-    private static IllustratedProseLayout NormalizeIllustrationLayout(IllustratedProseLayout? layout, string body)
+    private static IllustratedProseLayout NormalizeIllustrationLayout(
+        IllustratedProseLayout? layout,
+        ManuscriptDocument manuscript)
     {
-        var paragraphs = SplitParagraphs(body);
-        var maxParagraphIndex = Math.Max(0, paragraphs.Count - 1);
+        var anchorBlocks = AnchorBlocks(manuscript);
+        var indexById = anchorBlocks
+            .Select((block, index) => (block.Id, index))
+            .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
         var images = (layout?.Images ?? [])
             .Where(image => image.ImageId != Guid.Empty)
-            .Select((image, index) => image with
+            .Select((image, index) =>
             {
-                Id = image.Id == Guid.Empty ? Guid.NewGuid() : image.Id,
-                ParagraphIndex = Math.Clamp(image.ParagraphIndex, 0, maxParagraphIndex),
-                ParagraphHash = string.IsNullOrWhiteSpace(image.ParagraphHash)
-                    ? ParagraphHash(paragraphs.ElementAtOrDefault(Math.Clamp(image.ParagraphIndex, 0, maxParagraphIndex)) ?? string.Empty)
-                    : image.ParagraphHash,
-                WidthPercent = Clamp(image.WidthPercent, 10, 100, 70),
-                Alignment = Enum.IsDefined(image.Alignment) ? image.Alignment : ChapterImageAlignment.Center,
-                AnchorPosition = Enum.IsDefined(image.AnchorPosition) ? image.AnchorPosition : ChapterImageAnchorPosition.AfterParagraph,
-                Caption = image.Caption.Trim(),
-                AltTextOverride = image.AltTextOverride.Trim(),
-                SortOrder = image.SortOrder < 0 ? index : image.SortOrder,
+                var requestedIndex = image.ParagraphIndex < 0 ? 0 : image.ParagraphIndex;
+                var blockId = image.BlockId;
+                if (!string.IsNullOrWhiteSpace(blockId) && !indexById.ContainsKey(blockId))
+                {
+                    throw new InvalidDataException(
+                        $"Illustration {image.Id:N} references missing manuscript block {blockId}.");
+                }
+                if (string.IsNullOrWhiteSpace(blockId))
+                {
+                    blockId = anchorBlocks.ElementAtOrDefault(
+                        Math.Clamp(requestedIndex, 0, Math.Max(0, anchorBlocks.Count - 1)))?.Id
+                        ?? string.Empty;
+                }
+                return image with
+                {
+                    Id = image.Id == Guid.Empty ? Guid.NewGuid() : image.Id,
+                    BlockId = blockId,
+                    ParagraphIndex = indexById.GetValueOrDefault(blockId, -1),
+                    WidthPercent = Clamp(image.WidthPercent, 10, 100, 70),
+                    Alignment = Enum.IsDefined(image.Alignment) ? image.Alignment : ChapterImageAlignment.Center,
+                    AnchorPosition = Enum.IsDefined(image.AnchorPosition) ? image.AnchorPosition : ChapterImageAnchorPosition.AfterParagraph,
+                    Caption = image.Caption.Trim(),
+                    AltTextOverride = image.AltTextOverride.Trim(),
+                    SortOrder = image.SortOrder < 0 ? index : image.SortOrder,
+                };
             })
+            .Where(image => !string.IsNullOrWhiteSpace(image.BlockId))
             .OrderBy(image => image.SortOrder)
             .ToList();
 
@@ -1702,11 +1738,8 @@ public sealed class ChapterVisualService(
         }
     }
 
-    private static string ParagraphHash(string text)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text.Trim()));
-        return Convert.ToHexString(bytes)[..16].ToLowerInvariant();
-    }
+    private static IReadOnlyList<ManuscriptBlock> AnchorBlocks(ManuscriptDocument manuscript) =>
+        manuscript.Content;
 
     private static int NextSortOrder(IReadOnlyList<IllustratedProseImageBlock> images) =>
         images.Count == 0 ? 0 : images.Max(image => image.SortOrder) + 1;

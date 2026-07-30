@@ -1,26 +1,26 @@
 # Structured manuscripts and safe migration
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-07-30
 Research access date: 2026-07-29
-Decision state: Phase 1 migration design; no schema change has yet been made.
+Decision state: Phase 1 structured-manuscript contract and application cutover
+implemented; the required-evidence checklist remains an open release gate.
 
 ## Executive conclusion
 
-`Chapter.Body` is currently a plain string used by editing, assistant review,
-search/indexing, graph auto-linking, image/page composition, import/export,
-contests, revision agents, and publishing. Replacing it in place would risk both
-data loss and silent behavioral divergence.
+Before this cutover, `Chapter.Body` was a plain string used by editing,
+assistant review, search/indexing, graph auto-linking, image/page composition,
+import/export, contests, revision agents, and publishing. Replacing it in place
+would have risked both data loss and silent behavioral divergence.
 
-Phase 1 must use an expand–migrate–validate–contract transition:
+Phase 1 uses an expand–migrate–validate–contract transition:
 
 1. create a recoverable SQLite backup;
-2. add the structured representation and migration journal without removing
-   existing text;
+2. apply the forward rename/add migration while the backup retains the
+   recoverable legacy representation;
 3. convert every live and historical body-bearing record through one codec;
 4. verify counts, normalized text, hashes, references, and consumers;
 5. switch all runtime reads/writes atomically to the new services;
-6. remove the obsolete runtime columns and paths in a later forward migration
-   within the same completed feature;
+6. remove obsolete runtime columns and paths in the same completed feature;
 7. retain the backup and a readable migration report.
 
 There must be no indefinite dual-write compatibility mode.
@@ -148,7 +148,13 @@ Add:
   counts, hashes, and error detail;
 - temporary source identifiers only where they are required to prove mapping.
 
-Do not drop `Chapter.Body` or historical body fields yet.
+Implementation note: the forward migration renames legacy prose columns into
+their canonical manuscript JSON columns, then the application-owned migration
+service transforms and validates the rows before startup continues. A failure
+preserves the complete pre-migration database and opens a current-schema,
+projectless recovery shell. The user can schedule that backup for offline
+replacement at the next startup, so the runtime never enters an indefinite
+dual-write or partially migrated state.
 
 ### Stage C — transform
 
@@ -158,6 +164,8 @@ Use one deterministic codec for all current and historical prose:
 - preserve Unicode text exactly apart from documented normalization;
 - map blank-line-separated paragraphs and established scene-break conventions
   using explicit, tested rules;
+- treat whitespace-only blank lines as paragraph separators and canonicalize
+  `***`, `* * *`, and `###` scene-break aliases to `***`;
 - preserve leading/trailing intent where it is meaningful;
 - produce stable block IDs from a recorded migration namespace and source ID;
 - convert live chapters, accepted/original contest bodies, contest candidates,
@@ -231,13 +239,15 @@ converting pending work:
 - persisted revision/contest messages or raw responses whose display semantics
   depend on numbered lines.
 
-Active pending records that can still be applied are converted to semantic
-operations and stable anchors, with line ranges remapped and verified against the
-original text hash. Resolved, applied, rejected, failed, or otherwise terminal
-records may remain immutable audit evidence when replay is neither safe nor
-required, but must be wrapped in an explicit version-labeled legacy snapshot
-that preserves its original JSON/text and renders read-only. No terminal audit
-record is silently rewritten into an operation with different meaning.
+Pending AI review changes that remain safely applicable are converted to
+semantic manuscripts and stable anchors. In-flight contest and revision-worker
+jobs cannot resume across this application migration, so their batches,
+sessions, candidates, and parent jobs are terminalized with an explicit
+migration error and completion timestamp. Resolved, applied, rejected, failed,
+or otherwise terminal records remain immutable audit evidence when replay is
+neither safe nor required, wrapped in an explicit version-labeled legacy
+snapshot that preserves original JSON/text and renders read-only. No terminal
+audit record is silently rewritten into an operation with different meaning.
 
 Malformed JSON, stale line ranges, or a hash mismatch fails the transition and
 is named in the migration report. Fixtures cover every status, finished
@@ -309,14 +319,15 @@ older-version import adapter and recovery evidence.
 If any step before cutover fails:
 
 - roll back the active transaction;
-- leave the old database usable;
+- preserve the old database as a protected backup and start a projectless
+  current-schema recovery shell;
 - retain journal/error detail and the validated backup;
 - show the exact backup path and failure phase;
-- do not start workers or permit edits on a partially migrated database.
+- do not start workers or permit edits against the preserved legacy database.
 
-If post-commit verification fails, startup enters a recovery screen that can
-restore the backup after explicit user confirmation. Restoration itself first
-backs up the failed database for diagnosis.
+The recovery screen can schedule the backup after explicit user confirmation.
+Replacement happens at the start of the next process, before workers start, and
+first backs up the failed database for diagnosis.
 
 ## EF Core implementation rules
 

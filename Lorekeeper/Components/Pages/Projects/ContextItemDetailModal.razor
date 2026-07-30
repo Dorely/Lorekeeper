@@ -470,7 +470,7 @@
 
             <section class="context-detail-section">
                 <h6>Body</h6>
-                <pre class="context-detail-text"><code>@(string.IsNullOrWhiteSpace(_chapter.Body) ? "(empty)" : ChapterFormatting.WithLineNumbers(_chapter.Body))</code></pre>
+                <pre class="context-detail-text"><code>@(string.IsNullOrWhiteSpace(_chapter.PlainText) ? "(empty)" : ChapterFormatting.WithLineNumbers(_chapter.PlainText))</code></pre>
             </section>
         }
     </div>;
