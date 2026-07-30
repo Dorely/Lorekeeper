@@ -69,6 +69,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<PublicationRenderJob> PublicationRenderJobs => Set<PublicationRenderJob>();
     public DbSet<PublicationArtifact> PublicationArtifacts => Set<PublicationArtifact>();
     public DbSet<PublicationPageMapEntry> PublicationPageMapEntries => Set<PublicationPageMapEntry>();
+    public DbSet<PublicationCoverDesign> PublicationCoverDesigns => Set<PublicationCoverDesign>();
     public DbSet<PublishAsset> PublishAssets => Set<PublishAsset>();
     public DbSet<ProjectImageGenerationJob> ProjectImageGenerationJobs => Set<ProjectImageGenerationJob>();
     public DbSet<ProjectImageMask> ProjectImageMasks => Set<ProjectImageMask>();
@@ -1010,6 +1011,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Edition)
                 .WithMany(e => e.RenderJobs)
                 .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationCoverDesign>(entity =>
+        {
+            entity.HasIndex(e => e.EditionId).IsUnique();
+            entity.Property(e => e.BarcodeMode).HasConversion<string>();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Edition)
+                .WithOne(e => e.CoverDesign)
+                .HasForeignKey<PublicationCoverDesign>(e => e.EditionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

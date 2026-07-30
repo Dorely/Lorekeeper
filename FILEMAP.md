@@ -317,6 +317,7 @@
 | `PublicationImagePlacement.cs` | Edition-owned interior image placements before/after acts or chapters and at chapter openings/endings. |
 | `PublishAsset.cs` | EF entity for uploaded/generated/edited/cropped project images with bytes, crop lineage/coordinates, alt text, prompt/source metadata, masks, and placement navigation. |
 | `PublicationRender.cs` | Edition render jobs, immutable artifact bytes/provenance, statuses, and stable manuscript-block page-map persistence. |
+| `PublicationCoverDesign.cs` | Revisioned edition cover copy, color/focal intent, barcode behavior, and template acknowledgement state. |
 | `EntityVisualExample.cs` | Ordered labeled many-to-many link between an eligible graph entity and project image, with origin and source provenance. |
 | `SourceVisualCandidate.cs` | Cached normalized Research/Ingest image bytes and artifact/web provenance before project-library promotion. |
 | `ProjectImageConversation.cs` | EF entity for the separate project-scoped Images Chat transcript. |
@@ -596,6 +597,7 @@
 | `PublishAssistantTools.cs` | Dedicated Publish assistant tool catalog exposing the complete edition mutation/read surface and migration diagnostics through owning services. |
 | `PublishAssistantService.cs` | Visible dedicated Publish assistant one-turn orchestration using the configured chat provider and the shared Publish tool catalog. |
 | `PublicationRenderService.cs` | Persisted/recoverable render queue, contained press adapter, immutable verified artifacts, semantic page maps, stale-state derivation, and render comparison. |
+| `PublicationCoverService.cs` | Edition full-wrap template calculation, revisioned cover design, ISBN-13/vendor/spine diagnostics, and acknowledgement invalidation. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade for edition-scoped TXT, Markdown, EPUB, and print-preview documents. |
 | `PublishEndpoints.cs` | Cacheable/range HTTP endpoints for validated cover/Picture Page surfaces and project-scoped immutable publication artifact viewing/download. |
 | `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus a mixed-layout EPUB writer using Publish Profile type metrics and shared geometry for reflowable prose and accessible fixed cover/Picture Page items. |

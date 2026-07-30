@@ -427,6 +427,7 @@ public sealed class PublicationRenderProcessor(
     AppDbContext db,
     IPublishService publishing,
     IPublicationEditionService editions,
+    IPublicationCoverService covers,
     IOptions<PublicationPressOptions> options,
     IWebHostEnvironment environment)
 {
@@ -463,7 +464,11 @@ public sealed class PublicationRenderProcessor(
                 ChapterId: chapter.Id,
                 BlockId: Guid.Parse(block.Id))))
             .ToHashSet();
-        var request = BuildRequest(job, document);
+        var coverDesign = await covers.GetAsync(job.Edition.ProjectId, job.EditionId, cancellationToken);
+        if (coverDesign.Diagnostics.Any(diagnostic => diagnostic.Contains("requires", StringComparison.OrdinalIgnoreCase)
+            || diagnostic.Contains("must contain", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException(string.Join(" ", coverDesign.Diagnostics));
+        var request = BuildRequest(job, document, coverDesign);
         job.ProgressPercent = 30;
         job.ProgressMessage = "Typesetting interior and cover";
         await db.SaveChangesAsync(cancellationToken);
@@ -569,7 +574,10 @@ public sealed class PublicationRenderProcessor(
         Cleanup(job.Id);
     }
 
-    private object BuildRequest(PublicationRenderJob job, PublishDocument document)
+    private object BuildRequest(
+        PublicationRenderJob job,
+        PublishDocument document,
+        PublicationCoverDesignView coverDesign)
     {
         var chapters = document.Sections.SelectMany(section => section.Chapters).Select(chapter => new
         {
@@ -617,7 +625,14 @@ public sealed class PublicationRenderProcessor(
             {
                 bleedInches = job.Edition.Bleed ? 0.125 : 0,
                 paperCaliperInchesPerPage = job.Edition.Paper == PublicationPaper.Cream ? 0.0025 : 0.002252,
-                backCopy = document.Profile.Description,
+                backCopy = coverDesign.BackCopy,
+                title = coverDesign.Title,
+                subtitle = coverDesign.Subtitle,
+                author = coverDesign.Author,
+                spineText = coverDesign.SpineText,
+                backgroundColor = coverDesign.BackgroundColor,
+                isbn = job.Edition.Isbn,
+                barcodeMode = coverDesign.BarcodeMode.ToString(),
             },
         };
     }

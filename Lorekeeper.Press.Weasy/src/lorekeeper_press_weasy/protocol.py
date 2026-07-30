@@ -248,9 +248,10 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
 
     cover = value.get("cover")
     if isinstance(cover, dict):
-        _exact_keys(
+        _keys(
             cover,
             {"bleedInches", "paperCaliperInchesPerPage", "backCopy"},
+            {"title", "subtitle", "author", "spineText", "backgroundColor", "isbn", "barcodeMode"},
             "cover",
             diagnostics,
         )
@@ -263,6 +264,9 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
             diagnostics,
         )
         _bounded_text(cover.get("backCopy"), "cover.backCopy", 0, 10_000, diagnostics)
+        for field_name in ("title", "subtitle", "author", "spineText", "backgroundColor", "isbn", "barcodeMode"):
+            if field_name in cover:
+                _bounded_text(cover.get(field_name), f"cover.{field_name}", 0, 500, diagnostics)
     else:
         diagnostics.append(_error("PRESS_COVER_INVALID", "cover must be an object."))
 

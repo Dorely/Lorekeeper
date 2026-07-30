@@ -92,12 +92,27 @@ public sealed class PublicationEditionService(
         await db.Entry(source).Collection(edition => edition.Matter).LoadAsync(cancellationToken);
         await db.Entry(source).Collection(edition => edition.StyleMappings).LoadAsync(cancellationToken);
         await db.Entry(source).Collection(edition => edition.ImagePlacements).LoadAsync(cancellationToken);
+        await db.Entry(source).Reference(edition => edition.CoverDesign).LoadAsync(cancellationToken);
         var clone = CopyEdition(source, cleanName);
         clone.Isbn = string.Empty;
         clone.OutlineItems = source.OutlineItems.Select(CopyOutlineItem).ToList();
         clone.Matter = source.Matter.Select(CopyMatter).ToList();
         clone.StyleMappings = source.StyleMappings.Select(CopyStyleMapping).ToList();
         clone.ImagePlacements = source.ImagePlacements.Select(CopyPlacement).ToList();
+        if (source.CoverDesign is not null)
+            clone.CoverDesign = new PublicationCoverDesign
+            {
+                EditionId = clone.Id,
+                Title = source.CoverDesign.Title,
+                Subtitle = source.CoverDesign.Subtitle,
+                Author = source.CoverDesign.Author,
+                SpineText = source.CoverDesign.SpineText,
+                BackCopy = source.CoverDesign.BackCopy,
+                BackgroundColor = source.CoverDesign.BackgroundColor,
+                BarcodeMode = source.CoverDesign.BarcodeMode,
+                ImageFocalXPercent = source.CoverDesign.ImageFocalXPercent,
+                ImageFocalYPercent = source.CoverDesign.ImageFocalYPercent,
+            };
         db.PublicationEditions.Add(clone);
         await SaveWithAuditAsync(clone, "clone", string.Empty, new { sourceEditionId = source.Id }, cancellationToken);
         return View(project, clone);
@@ -741,6 +756,22 @@ public sealed class PublicationEditionService(
                 style.Revision,
             })
             .ToListAsync(cancellationToken);
+        var coverDesign = await db.PublicationCoverDesigns.AsNoTracking()
+            .Where(design => design.EditionId == editionId)
+            .Select(design => new
+            {
+                design.Title,
+                design.Subtitle,
+                design.Author,
+                design.SpineText,
+                design.BackCopy,
+                design.BackgroundColor,
+                design.BarcodeMode,
+                design.ImageFocalXPercent,
+                design.ImageFocalYPercent,
+                design.Revision,
+            })
+            .SingleOrDefaultAsync(cancellationToken);
         var canonical = JsonSerializer.Serialize(new
         {
             Project = project,
@@ -789,6 +820,7 @@ public sealed class PublicationEditionService(
             Placements = placements,
             Assets = assets,
             Styles = styles,
+            CoverDesign = coverDesign,
         }, ManuscriptCodec.JsonOptions);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }

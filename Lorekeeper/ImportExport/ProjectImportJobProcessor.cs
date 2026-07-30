@@ -406,6 +406,20 @@ public sealed class ProjectImportJobProcessor(
                 && document.Chapters.FirstOrDefault(chapter => chapter.Id == coverId)
                     is not { VisualMode: ChapterVisualMode.PicturePage })
                 throw new InvalidOperationException($"Publication edition {edition.Id:N} references a missing cover chapter.");
+            if (edition.CoverDesign is { } cover
+                && (!Enum.IsDefined(cover.BarcodeMode)
+                    || cover.Title.Trim().Length is < 1 or > 500
+                    || cover.Subtitle.Trim().Length > 500
+                    || cover.Author.Trim().Length > 500
+                    || cover.SpineText.Trim().Length > 500
+                    || cover.BackCopy.Trim().Length > 10_000
+                    || !System.Text.RegularExpressions.Regex.IsMatch(cover.BackgroundColor, "^#[0-9a-fA-F]{6}$")
+                    || !double.IsFinite(cover.ImageFocalXPercent)
+                    || !double.IsFinite(cover.ImageFocalYPercent)
+                    || cover.ImageFocalXPercent is < 0 or > 100
+                    || cover.ImageFocalYPercent is < 0 or > 100
+                    || cover.Revision < 0))
+                throw new InvalidOperationException($"Publication edition {edition.Id:N} has an invalid cover design.");
             if (edition.OutlineItems.GroupBy(item => (item.TargetKind, item.TargetId)).Any(group => group.Count() > 1)
                 || edition.Matter.GroupBy(item => item.Id).Any(group => group.Count() > 1)
                 || edition.StyleMappings.GroupBy(item => item.ManuscriptStyleDefinitionId).Any(group => group.Count() > 1)
@@ -646,7 +660,8 @@ public sealed class ProjectImportJobProcessor(
                 [],
                 matter,
                 [],
-                []);
+                [],
+                null);
         }).ToList();
         return document with { PublicationEditions = editions, LegacyPublishProfiles = null };
     }
@@ -1156,6 +1171,21 @@ public sealed class ProjectImportJobProcessor(
         {
             edition.SelectedCoverChapterId = localCoverChapterId;
         }
+        if (importedEdition.CoverDesign is { } cover)
+            edition.CoverDesign = new PublicationCoverDesign
+            {
+                EditionId = edition.Id,
+                Title = cover.Title,
+                Subtitle = cover.Subtitle,
+                Author = cover.Author,
+                SpineText = cover.SpineText,
+                BackCopy = cover.BackCopy,
+                BackgroundColor = cover.BackgroundColor,
+                BarcodeMode = cover.BarcodeMode,
+                ImageFocalXPercent = cover.ImageFocalXPercent,
+                ImageFocalYPercent = cover.ImageFocalYPercent,
+                Revision = cover.Revision,
+            };
         foreach (var imported in importedEdition.OutlineItems)
         {
             var mappedTarget = imported.TargetKind == PublishOutlineTargetKind.Act

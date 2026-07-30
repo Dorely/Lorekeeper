@@ -39,8 +39,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Preview paperback press jobs with cancellation/restart recovery, immutable
   SHA-256-verified interior and cover PDFs, actual in-app PDF viewing, semantic
   block-to-page maps, render comparisons, and matching assistant controls.
-- Versioned project import/export (current v10 manuscripts/styles/editions,
-  isolated v8-v9 adapters, and v1-v7 text adapters) plus TXT,
+- Edition-aware full-wrap cover design with page-count/paper-caliper geometry,
+  copy and background controls, template acknowledgement, ISBN-13/EAN-13
+  barcode or KDP overlay-reserve behavior, cover PDF output, and assistant parity.
+- Versioned project import/export (current v11 manuscripts/styles/editions/covers,
+  isolated v8-v10 adapters, and v1-v7 text adapters) plus TXT,
   Markdown, mixed-layout EPUB, and a
   browser/operating-system print-preview workflow. Generated press PDFs are
   explicitly Preview artifacts, not PDF/X conformance or vendor-preflight claims.

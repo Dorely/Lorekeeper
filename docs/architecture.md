@@ -238,6 +238,13 @@ paths, and verifies every returned length/hash before persistence. Project-
 scoped range endpoints serve actual PDF bytes, and source-fingerprint mismatch
 marks immutable artifacts stale.
 
+`PublicationCoverService` owns the one-to-one revisioned cover design and derives
+the wrap template from the latest interior page count plus edition trim, bleed,
+paper, vendor, and profile. The template fingerprint forces explicit
+acknowledgement after geometry changes. ISBN-13 validation is shared by UI,
+assistant, and render gating; the contained renderer emits the EAN-13 symbol or
+the permitted KDP overlay reserve and suppresses unsafe narrow-spine text.
+
 Development resolves the exact-locked Python project and fingerprinted native
 payload. Packaged releases must configure a frozen renderer and ship controlled
 fonts/notices. This remains Preview, not a PDF/X or vendor-conformance claim.

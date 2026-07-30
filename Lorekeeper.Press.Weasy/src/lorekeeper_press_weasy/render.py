@@ -319,37 +319,88 @@ def _cover_html(
     trim = request["trim"]
     cover = request["cover"]
     spine_width = page_count * cover["paperCaliperInchesPerPage"]
+    spine_text = cover.get("spineText", "") if spine_width >= 0.24 else ""
     width = trim["widthInches"] * 2 + spine_width + cover["bleedInches"] * 2
     height = trim["heightInches"] + cover["bleedInches"] * 2
     body = f"""
       <main class="cover">
-        <section class="back"><p>{html.escape(cover["backCopy"])}</p></section>
-        <section class="spine"></section>
+        <section class="back"><p>{html.escape(cover["backCopy"])}</p>{_barcode_html(cover, request["profile"] == INGRAM_PROFILE)}</section>
+        <section class="spine"><span>{html.escape(spine_text)}</span></section>
         <section class="front">
-          <h1>{html.escape(request["document"]["title"])}</h1>
-          <p>{html.escape(request["document"]["author"])}</p>
+          <h1>{html.escape(cover.get("title") or request["document"]["title"])}</h1>
+          <h2>{html.escape(cover.get("subtitle", ""))}</h2>
+          <p>{html.escape(cover.get("author") or request["document"]["author"])}</p>
         </section>
       </main>
     """
     if request["profile"] == INGRAM_PROFILE:
-        panel_color = "device-cmyk(0.55 0.35 0 0.05)"
-        spine_color = "device-cmyk(0.6 0.4 0 0.1)"
+        panel_color = _hex_to_device_cmyk(cover.get("backgroundColor", "#5c7ca5"))
+        spine_color = panel_color
         text_color = "device-cmyk(0 0 0 0)"
+        barcode_black = "device-cmyk(0 0 0 1)"
+        barcode_white = "device-cmyk(0 0 0 0)"
     else:
-        panel_color = "#5c7ca5"
-        spine_color = "#526f94"
+        panel_color = cover.get("backgroundColor", "#5c7ca5")
+        spine_color = panel_color
         text_color = "#ffffff"
+        barcode_black = "#000000"
+        barcode_white = "#ffffff"
     css = f"""
       @page {{ size: {width}in {height}in; margin: 0; }}
       html, body {{ margin: 0; width: 100%; height: 100%; font-family: "Liberation Serif", serif; }}
       .cover {{ display: grid; grid-template-columns: {trim["widthInches"] + cover["bleedInches"]}in {spine_width}in {trim["widthInches"] + cover["bleedInches"]}in; width: 100%; height: 100%; }}
       .back, .front {{ box-sizing: border-box; padding: 0.75in; background: {panel_color}; color: {text_color}; }}
       .spine {{ background: {spine_color}; }}
+      .spine {{ align-items: center; color: {text_color}; display: flex; justify-content: center; overflow: hidden; }}
+      .spine span {{ font-size: 9pt; transform: rotate(90deg); white-space: nowrap; }}
       .front {{ display: flex; flex-direction: column; justify-content: center; text-align: center; }}
       .front h1 {{ font-size: 28pt; }}
       .back {{ display: flex; align-items: center; font-size: 12pt; line-height: 1.4; }}
+      .barcode {{ background: {barcode_white}; bottom: 0.375in; box-sizing: border-box; color: {barcode_black}; font: 8pt sans-serif; height: 1.2in; padding: 0.12in; position: absolute; right: 0.375in; text-align: center; width: 2in; }}
+      .barcode svg {{ display: block; height: 0.82in; width: 100%; }}
+      .back {{ position: relative; }}
     """
     return _html_document(request, profile_path, css, body), spine_width
+
+
+def _hex_to_device_cmyk(value: str) -> str:
+    if len(value) != 7 or not value.startswith("#"):
+        return "device-cmyk(0.55 0.35 0 0.05)"
+    red, green, blue = (int(value[index:index + 2], 16) / 255 for index in (1, 3, 5))
+    black = 1 - max(red, green, blue)
+    if black >= 0.999999:
+        return "device-cmyk(0 0 0 1)"
+    cyan = (1 - red - black) / (1 - black)
+    magenta = (1 - green - black) / (1 - black)
+    yellow = (1 - blue - black) / (1 - black)
+    return f"device-cmyk({cyan:.6f} {magenta:.6f} {yellow:.6f} {black:.6f})"
+
+
+def _barcode_html(cover: dict[str, Any], cmyk: bool) -> str:
+    digits = "".join(character for character in cover.get("isbn", "") if character.isdigit())
+    if cover.get("barcodeMode") == "VendorOverlay":
+        return '<div class="barcode">VENDOR BARCODE RESERVED</div>'
+    if len(digits) != 13:
+        return ""
+    left_odd = ("0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011")
+    left_even = ("0100111", "0110011", "0011011", "0100001", "0011101", "0111001", "0000101", "0010001", "0001001", "0010111")
+    right = ("1110010", "1100110", "1101100", "1000010", "1011100", "1001110", "1010000", "1000100", "1001000", "1110100")
+    parity = ("OOOOOO", "OOEOEE", "OOEEOE", "OOEEEO", "OEOOEE", "OEEOOE", "OEEEOO", "OEOEOE", "OEOEEO", "OEEOEO")
+    bits = "101"
+    for index, digit in enumerate(digits[1:7]):
+        bits += (left_odd if parity[int(digits[0])][index] == "O" else left_even)[int(digit)]
+    bits += "01010"
+    bits += "".join(right[int(digit)] for digit in digits[7:])
+    bits += "101"
+    black = "device-cmyk(0 0 0 1)" if cmyk else "#000000"
+    white = "device-cmyk(0 0 0 0)" if cmyk else "#ffffff"
+    bars = "".join(
+        f'<rect x="{index}" y="0" width="1" height="72" fill="{black}"/>'
+        for index, bit in enumerate(bits)
+        if bit == "1"
+    )
+    svg = f'<svg viewBox="-11 0 113 82" role="img" aria-label="ISBN {digits} barcode"><rect x="-11" width="113" height="82" fill="{white}"/>{bars}</svg>'
+    return f'<div class="barcode">{svg}<span>{html.escape(digits)}</span></div>'
 
 
 def _html_document(

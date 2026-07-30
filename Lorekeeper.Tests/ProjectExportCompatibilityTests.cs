@@ -9,12 +9,12 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V10WritesEditionsWithoutLegacyPublishProfiles()
+    public void V11WritesEditionsWithoutLegacyPublishProfiles()
     {
         var document = Document(new ProjectExportChapter());
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(10, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(11, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"publishProfiles\"", json, StringComparison.Ordinal);
     }

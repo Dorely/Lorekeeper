@@ -19,7 +19,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 10;
+    public const int CurrentFormatVersion = 11;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -165,7 +165,20 @@ public sealed record ProjectExportPublicationEdition(
     List<ProjectExportEditionOutlineItem> OutlineItems,
     List<ProjectExportPublicationMatter> Matter,
     List<ProjectExportEditionStyleMapping> StyleMappings,
-    List<ProjectExportPublicationImagePlacement> ImagePlacements);
+    List<ProjectExportPublicationImagePlacement> ImagePlacements,
+    ProjectExportCoverDesign? CoverDesign);
+
+public sealed record ProjectExportCoverDesign(
+    string Title,
+    string Subtitle,
+    string Author,
+    string SpineText,
+    string BackCopy,
+    string BackgroundColor,
+    PublicationBarcodeMode BarcodeMode,
+    double ImageFocalXPercent,
+    double ImageFocalYPercent,
+    long Revision);
 
 public sealed record ProjectExportEditionOutlineItem(
     Guid Id,

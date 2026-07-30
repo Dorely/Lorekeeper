@@ -6,6 +6,7 @@
 @inject IPublishService Publishing
 @inject IPublicationEditionService Editions
 @inject IPublicationRenderService Renders
+@inject IPublicationCoverService CoverDesigns
 @inject IManuscriptStyleService ManuscriptStyles
 @inject IPublishAssistantService PublishAssistant
 @inject IProjectImageService ProjectImages
@@ -616,6 +617,35 @@ else
                         <div class="alert alert-danger py-2" role="alert">@_coverError</div>
                     }
 
+                    @if (_coverDesign is not null)
+                    {
+                        <div class="publish-form-grid mb-3">
+                            <label class="publish-field"><span>Cover title</span><input class="form-control" @bind="_coverTitle" /></label>
+                            <label class="publish-field"><span>Cover subtitle</span><input class="form-control" @bind="_coverSubtitle" /></label>
+                            <label class="publish-field"><span>Cover author</span><input class="form-control" @bind="_coverAuthor" /></label>
+                            <label class="publish-field"><span>Spine text</span><input class="form-control" @bind="_coverSpineText" /></label>
+                            <label class="publish-field publish-field-wide"><span>Back copy</span><textarea class="form-control" rows="4" @bind="_coverBackCopy"></textarea></label>
+                            <label class="publish-field"><span>Background</span><input class="form-control form-control-color" type="color" @bind="_coverBackground" /></label>
+                            <label class="publish-field"><span>Barcode behavior</span>
+                                <select class="form-select" @bind="_coverBarcodeMode">
+                                    <option value="@PublicationBarcodeMode.LorekeeperBarcode">Generate ISBN-13 barcode</option>
+                                    <option value="@PublicationBarcodeMode.VendorOverlay">Reserve vendor overlay area</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="small text-muted mb-2">
+                            Full wrap @_coverDesign.Template.FullWidthInches.ToString("0.###") Ã— @_coverDesign.Template.FullHeightInches.ToString("0.###") in Â·
+                            spine @_coverDesign.Template.SpineWidthInches.ToString("0.###") in Â· @_coverDesign.Template.PageCount pages
+                        </div>
+                        @foreach (var diagnostic in _coverDesign.Diagnostics)
+                        {
+                            <div class="small text-warning-emphasis">@diagnostic</div>
+                        }
+                        <button type="button" class="btn btn-sm btn-primary mt-2" disabled="@_coverDesignSaving" @onclick="SaveCoverDesignAsync">
+                            @(_coverDesignSaving ? "Savingâ€¦" : "Save and acknowledge template")
+                        </button>
+                    }
+
                     @if (_workspace.CoverCandidates.Count == 0)
                     {
                         <div class="publish-empty-state">
@@ -1110,6 +1140,7 @@ else
     private IReadOnlyList<ManuscriptStyleView> _namedStyles = [];
     private IReadOnlyList<PublicationEditionAuditView> _editionAudit = [];
     private IReadOnlyList<PublicationRenderJobView> _renderJobs = [];
+    private PublicationCoverDesignView? _coverDesign;
     private EditionDraft _editionDraft = new();
     private Guid? _loadedProjectId;
     private Guid? _selectedEditionId;
@@ -1131,6 +1162,7 @@ else
     private bool _creatingEdition;
     private bool _assistantBusy;
     private bool _renderBusy;
+    private bool _coverDesignSaving;
     private string? _loadError;
     private string? _editionDraftError;
     private string? _coverError;
@@ -1142,6 +1174,13 @@ else
     private string? _editionActionError;
     private string? _renderError;
     private string? _renderComparison;
+    private string _coverTitle = string.Empty;
+    private string _coverSubtitle = string.Empty;
+    private string _coverAuthor = string.Empty;
+    private string _coverSpineText = string.Empty;
+    private string _coverBackCopy = string.Empty;
+    private string _coverBackground = "#5c7ca5";
+    private PublicationBarcodeMode _coverBarcodeMode;
     private string _newEditionName = "Paperback";
     private PublicationEditionFormat _newEditionFormat = PublicationEditionFormat.Paperback;
     private string _printDialogUrl = string.Empty;
@@ -1573,6 +1612,7 @@ else
             _namedStyles = await ManuscriptStyles.ListAsync(Project.Id);
             _editionAudit = await Editions.GetAuditAsync(Project.Id, _selectedEditionId.Value);
             _renderJobs = await Renders.ListAsync(Project.Id, _selectedEditionId.Value);
+            await LoadCoverDesignAsync(Project.Id, _selectedEditionId.Value);
             _placements = OrderPlacementViews(workspace.Placements);
             if (resetProfile)
             {
@@ -1604,10 +1644,57 @@ else
         _workspace = workspace;
         _editionAudit = await Editions.GetAuditAsync(Project.Id, editionId);
         _renderJobs = await Renders.ListAsync(Project.Id, editionId);
+        await LoadCoverDesignAsync(Project.Id, editionId);
         _editionDraft.Revision = workspace.Edition.Revision;
         _editionSummaries = workspace.Editions;
         _placements = OrderPlacementViews(workspace.Placements);
         PrunePlacementDraft();
+    }
+
+    private async Task LoadCoverDesignAsync(Guid projectId, Guid editionId)
+    {
+        _coverDesign = await CoverDesigns.GetAsync(projectId, editionId);
+        _coverTitle = _coverDesign.Title;
+        _coverSubtitle = _coverDesign.Subtitle;
+        _coverAuthor = _coverDesign.Author;
+        _coverSpineText = _coverDesign.SpineText;
+        _coverBackCopy = _coverDesign.BackCopy;
+        _coverBackground = _coverDesign.BackgroundColor;
+        _coverBarcodeMode = _coverDesign.BarcodeMode;
+    }
+
+    private async Task SaveCoverDesignAsync()
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId || _coverDesign is null) return;
+        _coverDesignSaving = true;
+        _coverError = null;
+        try
+        {
+            _coverDesign = await CoverDesigns.UpdateAsync(
+                Project.Id,
+                editionId,
+                new PublicationCoverDesignUpdate(
+                    _coverTitle,
+                    _coverSubtitle,
+                    _coverAuthor,
+                    _coverSpineText,
+                    _coverBackCopy,
+                    _coverBackground,
+                    _coverBarcodeMode,
+                    _coverDesign.ImageFocalXPercent,
+                    _coverDesign.ImageFocalYPercent,
+                    _coverDesign.Revision,
+                    AcknowledgeTemplate: true));
+            _liveMessage = "Cover design saved and current template acknowledged.";
+        }
+        catch (Exception exception)
+        {
+            _coverError = exception.Message;
+        }
+        finally
+        {
+            _coverDesignSaving = false;
+        }
     }
 
     private async Task RequestRenderAsync()

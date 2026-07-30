@@ -146,6 +146,7 @@ public sealed class ProjectImportExportService(
                     .Include(edition => edition.Matter)
                     .Include(edition => edition.StyleMappings)
                     .Include(edition => edition.ImagePlacements)
+                    .Include(edition => edition.CoverDesign)
                     .Where(profile => profile.ProjectId == projectId)
                     .OrderByDescending(profile => profile.IsDefault)
                     .ThenBy(profile => profile.CreatedAt)
@@ -404,7 +405,18 @@ public sealed class ProjectImportExportService(
                     item.PlacementKind,
                     item.Caption,
                     item.SortOrder))
-                .ToList());
+                .ToList(),
+            profile.CoverDesign is null ? null : new ProjectExportCoverDesign(
+                profile.CoverDesign.Title,
+                profile.CoverDesign.Subtitle,
+                profile.CoverDesign.Author,
+                profile.CoverDesign.SpineText,
+                profile.CoverDesign.BackCopy,
+                profile.CoverDesign.BackgroundColor,
+                profile.CoverDesign.BarcodeMode,
+                profile.CoverDesign.ImageFocalXPercent,
+                profile.CoverDesign.ImageFocalYPercent,
+                profile.CoverDesign.Revision));
 
     private static ProjectExportChapter ProjectChapter(
         Chapter chapter,

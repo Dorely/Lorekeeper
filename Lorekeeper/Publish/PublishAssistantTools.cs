@@ -11,7 +11,8 @@ public sealed class PublishAssistantTools(
     IPublicationEditionService editions,
     IPublishService publishing,
     IPublicationEditionMigrationService migrations,
-    IPublicationRenderService renders)
+    IPublicationRenderService renders,
+    IPublicationCoverService covers)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -142,6 +143,15 @@ public sealed class PublishAssistantTools(
                     CompareRendersAsync(context, editionId, leftJobId, rightJobId),
                 name: "compare_publication_renders",
                 description: "Explain page-count and block-pagination changes between two renders."),
+            AIFunctionFactory.Create(
+                method: (Guid editionId) => ReadCoverAsync(context, editionId),
+                name: "read_publication_cover_design",
+                description: "Read full-wrap cover copy, barcode behavior, focal controls, calculated vendor geometry, acknowledgement, and diagnostics."),
+            AIFunctionFactory.Create(
+                method: (Guid editionId, PublicationCoverDesignUpdate update) =>
+                    UpdateCoverAsync(context, editionId, update),
+                name: "update_publication_cover_design",
+                description: "Update every editable cover property and optionally acknowledge the current calculated template."),
         ];
         return Task.FromResult(tools);
     }
@@ -300,6 +310,15 @@ public sealed class PublishAssistantTools(
         Guid leftJobId,
         Guid rightJobId) =>
         Serialize(await renders.CompareAsync(context.ProjectId, editionId, leftJobId, rightJobId));
+
+    private async Task<string> ReadCoverAsync(PublishAssistantContext context, Guid editionId) =>
+        Serialize(await covers.GetAsync(context.ProjectId, editionId));
+
+    private async Task<string> UpdateCoverAsync(
+        PublishAssistantContext context,
+        Guid editionId,
+        PublicationCoverDesignUpdate update) =>
+        Serialize(await covers.UpdateAsync(context.ProjectId, editionId, update));
 
     private static string Serialize<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
 }

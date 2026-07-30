@@ -253,6 +253,7 @@ builder.Services.Configure<PublicationPressOptions>(
     builder.Configuration.GetSection(PublicationPressOptions.SectionName));
 builder.Services.AddSingleton<IPublicationRenderQueue, PublicationRenderQueue>();
 builder.Services.AddScoped<IPublicationRenderService, PublicationRenderService>();
+builder.Services.AddScoped<IPublicationCoverService, PublicationCoverService>();
 builder.Services.AddScoped<PublicationRenderProcessor>();
 builder.Services.AddHostedService<PublicationRenderWorker>();
 builder.Services.AddScoped<PublishAssistantTools>();

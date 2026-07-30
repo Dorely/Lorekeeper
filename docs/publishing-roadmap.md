@@ -380,7 +380,18 @@ on every packaged runtime.
 
 #### 6. Full-wrap cover builder
 
-Status: `Planned`
+Status: `Preview; proof validation pending`
+
+Implemented in the application on 2026-07-30 for the initial prose-paperback
+scope. Each edition owns revision-checked cover copy, background, focal intent,
+barcode behavior, and a calculated template derived from the latest interior
+page count, trim, paper caliper, bleed, vendor/profile version, safety zone, and
+barcode reserve. Geometry changes invalidate acknowledgement. ISBN-13 checksum
+validation, true EAN-13 bars/quiet zones, separate KDP overlay and Ingram
+embedded-barcode behavior, conditional spine text, actual cover PDF artifacts,
+and complete assistant reads/writes are wired through shared services. Physical
+template/proof measurements, cover-image compositing, font-license clearance,
+and vendor acceptance remain release validation gates.
 
 Turn existing project images/Picture Pages into edition-aware cover sources.
 
