@@ -1,0 +1,106 @@
+{
+    "schemaVersion":  1,
+    "platform":  "windows-x64",
+    "executable":  {
+                       "byteLength":  30753243,
+                       "sha256":  "be7e6918feaa19abc3b4f2ee7c203b34e8200e1d8a0fd0e4f8e6a0167d439ce7"
+                   },
+    "profileSha256":  "b424c77f40c3423c925536f8ae08634985ccd0fe80eb253d5d229197ded7e886",
+    "buildEvidenceSha256":  "b51e0fb7359251c6ce6c09929310bd76a4d77f827f087990c960dfc55cc9bd5f",
+    "binaryInventory":  {
+                            "sha256":  "d4b2f5c96fc62db68ac3218325d8d9a29630c21eade178a5937b5c1d6a6a0aa2",
+                            "binaryCount":  105,
+                            "releaseLicenseGatePassed":  false
+                        },
+    "nativeSource":  {
+                         "sha256":  "56a284531e4da7f448822f8c77b2190f2e87edb62e3976f67d298f173a2ad5a7",
+                         "binaryCount":  204
+                     },
+    "fixtureSha256":  {
+                          "pdfx":  "dc67ceb0e57b01ce39934e08f51b0503bd67c59874bf614cf41890017b9ff5bb",
+                          "kdp":  "6c9ce5723e6f2fcd9ae63fde32ca6eb5cdaf76170f092bf1479c57d3447f746b"
+                      },
+    "elapsedMilliseconds":  {
+                                "pdfxA":  2197,
+                                "pdfxB":  2156,
+                                "kdp":  1459
+                            },
+    "artifacts":  [
+                      {
+                          "run":  "pdfxRunA",
+                          "kind":  "interior-pdf",
+                          "sha256":  "73a406827eb6116756f2d0a6440976323da1b51cd9a4dd390f89cef6fe9387e9",
+                          "byteLength":  1265338,
+                          "pageCount":  1,
+                          "widthPoints":  432.0,
+                          "heightPoints":  648.0,
+                          "textExtracted":  true
+                      },
+                      {
+                          "run":  "pdfxRunA",
+                          "kind":  "cover-pdf",
+                          "sha256":  "f7b017a1a31a669ff20a4ff8de1251fa77a84ac10995ba9e6180039bbb9eb7fe",
+                          "byteLength":  1265302,
+                          "pageCount":  1,
+                          "widthPoints":  882.18,
+                          "heightPoints":  666.0,
+                          "textExtracted":  true
+                      },
+                      {
+                          "run":  "pdfxRunB",
+                          "kind":  "interior-pdf",
+                          "sha256":  "73a406827eb6116756f2d0a6440976323da1b51cd9a4dd390f89cef6fe9387e9",
+                          "byteLength":  1265338,
+                          "pageCount":  1,
+                          "widthPoints":  432.0,
+                          "heightPoints":  648.0,
+                          "textExtracted":  true
+                      },
+                      {
+                          "run":  "pdfxRunB",
+                          "kind":  "cover-pdf",
+                          "sha256":  "f7b017a1a31a669ff20a4ff8de1251fa77a84ac10995ba9e6180039bbb9eb7fe",
+                          "byteLength":  1265302,
+                          "pageCount":  1,
+                          "widthPoints":  882.18,
+                          "heightPoints":  666.0,
+                          "textExtracted":  true
+                      },
+                      {
+                          "run":  "kdpRun",
+                          "kind":  "interior-pdf",
+                          "sha256":  "b8e4d3f5c4a88d42268e1e7837ab32bbc222d2ddf5e394b57698d1a9c2e3a23c",
+                          "byteLength":  446344,
+                          "pageCount":  3,
+                          "widthPoints":  432.0,
+                          "heightPoints":  648.0,
+                          "textExtracted":  true
+                      },
+                      {
+                          "run":  "kdpRun",
+                          "kind":  "cover-pdf",
+                          "sha256":  "e64a94a31dd0812f370865c2304058e14d5c614929365c2cb48168957419b9f7",
+                          "byteLength":  445085,
+                          "pageCount":  1,
+                          "widthPoints":  882.54,
+                          "heightPoints":  666.0,
+                          "textExtracted":  true
+                      }
+                  ],
+    "checks":  {
+                   "sourceUnitFixtures":  "run separately",
+                   "startupEnvelope":  true,
+                   "wrongProfileRejected":  true,
+                   "immutableCollisionRejected":  true,
+                   "byteDeterministic":  true,
+                   "missingFontEnvironmentRejected":  true,
+                   "hostileFontEnvironmentRejected":  true,
+                   "tamperedFontBundleRejected":  true,
+                   "independentParseAndTextExtraction":  true,
+                   "internalStructuralInspection":  true,
+                   "externalPdfxValidation":  false,
+                   "vendorUpload":  false,
+                   "physicalProof":  false,
+                   "releaseLicenseGate":  false
+               }
+}

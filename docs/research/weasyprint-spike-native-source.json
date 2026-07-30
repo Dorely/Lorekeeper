@@ -1,0 +1,1027 @@
+{
+  "schemaVersion": 1,
+  "sourceExecutableSha256": "f9bc7d33fca891929aeeedcdf3a553fb1a26a7a45d9ee868fe6ec13dd10c514e",
+  "binaryCount": 204,
+  "binaries": [
+    {
+      "path": "MSVCP140.dll",
+      "byteLength": 575056,
+      "sha256": "a4c2229bdc2a2a630acdc095b4d86008e5c3e3bc7773174354f3da4f5beb9cde"
+    },
+    {
+      "path": "PIL/_avif.cp313-win_amd64.pyd",
+      "byteLength": 7895552,
+      "sha256": "027afbd926563178d311edb21c5bc6c55fe9ae8b9737071582a21dfc7a74018c"
+    },
+    {
+      "path": "PIL/_imaging.cp313-win_amd64.pyd",
+      "byteLength": 2589696,
+      "sha256": "34b9fbd040c46776f343c65b9ecd252c1cf30e84def79294d7e2675feef1a363"
+    },
+    {
+      "path": "PIL/_imagingcms.cp313-win_amd64.pyd",
+      "byteLength": 269824,
+      "sha256": "18b473d87bf685753f55511c1575c1f251532ced5bf3e946febee8471a7e0658"
+    },
+    {
+      "path": "PIL/_imagingmath.cp313-win_amd64.pyd",
+      "byteLength": 25600,
+      "sha256": "ab6d05aa56c34a7166ecba97fc004e4c33f97bcd47929eb4c8ffa415df215712"
+    },
+    {
+      "path": "PIL/_imagingtk.cp313-win_amd64.pyd",
+      "byteLength": 14848,
+      "sha256": "1bbf546dd6d04edfe1b80626a0410309b2bab33de6650995744e1a20b1b67c9f"
+    },
+    {
+      "path": "PIL/_webp.cp313-win_amd64.pyd",
+      "byteLength": 409600,
+      "sha256": "dc41772037866fff5198597764f8baff0e382b8c5de5c80d0a8f34f2ccf911bd"
+    },
+    {
+      "path": "VCRUNTIME140.dll",
+      "byteLength": 120400,
+      "sha256": "052ad6a20d375957e82aa6a3c441ea548d89be0981516ca7eb306e063d5027f4"
+    },
+    {
+      "path": "VCRUNTIME140_1.dll",
+      "byteLength": 49776,
+      "sha256": "6a99bc0128e0c7d6cbbf615fcc26909565e17d4ca3451b97f8987f9c6acbc6c8"
+    },
+    {
+      "path": "_asyncio.pyd",
+      "byteLength": 73048,
+      "sha256": "423007b8c7d63b4cb5f23665a761dd5de1c7e15a65c8013391de0d18c89ce417"
+    },
+    {
+      "path": "_brotli.cp313-win_amd64.pyd",
+      "byteLength": 856576,
+      "sha256": "a7f83086a999a01db0ca8cba6d476b4aa74ec2f96292cf4e17446dd30c085c61"
+    },
+    {
+      "path": "_bz2.pyd",
+      "byteLength": 86872,
+      "sha256": "1bf985b54f529a3cbb3e52532791cc4d4c64009142d37b54eb3521adec203d5c"
+    },
+    {
+      "path": "_cffi_backend.cp313-win_amd64.pyd",
+      "byteLength": 180224,
+      "sha256": "d5b09da2e726b4e90cf0edad5d2a0ec52f369dfd060e14d3807a32b2205031fa"
+    },
+    {
+      "path": "_ctypes.pyd",
+      "byteLength": 134488,
+      "sha256": "96b07339d52c74f2a1dd043df5eb931e4072eed90a3a8715ffec751d818e4117"
+    },
+    {
+      "path": "_decimal.pyd",
+      "byteLength": 287064,
+      "sha256": "398117a6af493e34f56ec0d78ced9901b20b8e895686ce5966edeadb23507056"
+    },
+    {
+      "path": "_elementtree.pyd",
+      "byteLength": 136536,
+      "sha256": "fbce9a1190a228c59767bde785c27cc4d18ee3a1f6b46e9da042fc86f8d0def7"
+    },
+    {
+      "path": "_hashlib.pyd",
+      "byteLength": 69464,
+      "sha256": "50f3ce7a2281fd32f378f3ba5067bdd13e18ee95877db5199c6a0babdc9c516a"
+    },
+    {
+      "path": "_lzma.pyd",
+      "byteLength": 159576,
+      "sha256": "51815b6474d4216c6a2aeaffdae5d2ff4acb7a0236254f2cfe43247022f3d781"
+    },
+    {
+      "path": "_multiprocessing.pyd",
+      "byteLength": 38232,
+      "sha256": "4df0d8f9da454831e96389c145ac9ea0093e09749627a3717ff60d21218670c8"
+    },
+    {
+      "path": "_overlapped.pyd",
+      "byteLength": 57688,
+      "sha256": "53fe68819f23fea7f6deb0054623e936cc2500241061f29bd5288cf4a511278f"
+    },
+    {
+      "path": "_queue.pyd",
+      "byteLength": 35160,
+      "sha256": "b5b5368026c33ade7651fb4cf4c6c1ca7eecc9c8cdad0af007da8a3ac0e067f7"
+    },
+    {
+      "path": "_socket.pyd",
+      "byteLength": 86872,
+      "sha256": "8676f3cebd9d01c7ad51a29b3f7ff429c0a8f6bc564cab21eb6cdaa2e26fd259"
+    },
+    {
+      "path": "_ssl.pyd",
+      "byteLength": 182104,
+      "sha256": "b8118580b461801df12ec12d3d666aa0ebc2b3750bcf92b90b92789b152bf856"
+    },
+    {
+      "path": "_uuid.pyd",
+      "byteLength": 27992,
+      "sha256": "0116497261edadfe42ba7daf367c8a9ea27a1db210c8384943c890f532e3ce72"
+    },
+    {
+      "path": "_wmi.pyd",
+      "byteLength": 39768,
+      "sha256": "9a7255064ea143895b28efea6d78e9e518bac290900aec52a6a0435c36a172fb"
+    },
+    {
+      "path": "api-ms-win-core-console-l1-1-0.dll",
+      "byteLength": 22072,
+      "sha256": "88ace577a9c51061cb7d1a36babbbefa48212fadc838ffde98fdfff60de18386"
+    },
+    {
+      "path": "api-ms-win-core-datetime-l1-1-0.dll",
+      "byteLength": 22056,
+      "sha256": "1bd81dfd19204b44662510d9054852fb77c9f25c1088d647881c9b976cc16818"
+    },
+    {
+      "path": "api-ms-win-core-debug-l1-1-0.dll",
+      "byteLength": 21944,
+      "sha256": "591358eb4d1531e9563ee0813e4301c552ce364c912ce684d16576eabf195dc3"
+    },
+    {
+      "path": "api-ms-win-core-errorhandling-l1-1-0.dll",
+      "byteLength": 22096,
+      "sha256": "d56ce7b1cd76108ad6c137326ec694a14c99d48c3d7b0ace8c3ff4d9bcee3ce8"
+    },
+    {
+      "path": "api-ms-win-core-fibers-l1-1-0.dll",
+      "byteLength": 22072,
+      "sha256": "91d249d7bc0e38ef6bcb17158b1fdc6dd8888dc086615c9b8b750b87e52a5fb3"
+    },
+    {
+      "path": "api-ms-win-core-fibers-l1-1-1.dll",
+      "byteLength": 22072,
+      "sha256": "fc9d86cec621383eab636ebc87ddd3f5c19a3cb2a33d97be112c051d0b275429"
+    },
+    {
+      "path": "api-ms-win-core-file-l1-1-0.dll",
+      "byteLength": 26152,
+      "sha256": "1ca895aba4e7435563a6b43e85eba67a0f8c74aa6a6a94d0fc48fa35535e2585"
+    },
+    {
+      "path": "api-ms-win-core-file-l1-2-0.dll",
+      "byteLength": 22056,
+      "sha256": "4cadbc0c39da7c6722206fdcebd670abe5b8d261e7b041dd94f9397a89d1990d"
+    },
+    {
+      "path": "api-ms-win-core-file-l2-1-0.dll",
+      "byteLength": 21960,
+      "sha256": "93c624b366ba16c643fc8933070a26f03b073ad0cf7f80173266d67536c61989"
+    },
+    {
+      "path": "api-ms-win-core-handle-l1-1-0.dll",
+      "byteLength": 21944,
+      "sha256": "39095f59c41d76ec81bb2723d646fde4c148e7cc3402f4980d2ade95cb9c84f9"
+    },
+    {
+      "path": "api-ms-win-core-heap-l1-1-0.dll",
+      "byteLength": 22072,
+      "sha256": "8f105771b236dbcb859de271f0a6822ce1cb79c36988dd42c9e3f6f55c5f7eb9"
+    },
+    {
+      "path": "api-ms-win-core-interlocked-l1-1-0.dll",
+      "byteLength": 22072,
+      "sha256": "53b25e753ca785bf8b695d89dde5818a318890211dc992a89146f16658f0b606"
+    },
+    {
+      "path": "api-ms-win-core-kernel32-legacy-l1-1-1.dll",
+      "byteLength": 22080,
+      "sha256": "a9b13a1cd1b8c19b0c6b4afcd5bb0dd29c0e2288231ac9e6db8510094ce68ba6"
+    },
+    {
+      "path": "api-ms-win-core-libraryloader-l1-1-0.dll",
+      "byteLength": 22056,
+      "sha256": "7f39ba298b41e4963047341288cab36b6a241835ee11ba4ad70f44dacd40906c"
+    },
+    {
+      "path": "api-ms-win-core-localization-l1-2-0.dll",
+      "byteLength": 22080,
+      "sha256": "6ee44dd0d8510dc024c9f7c79b1b9fa88c987b26b6beb6653ddd11751c34e5dc"
+    },
+    {
+      "path": "api-ms-win-core-memory-l1-1-0.dll",
+      "byteLength": 22056,
+      "sha256": "0512a35316ec9180437f86696a84c5c06a7e4e82e050055a656e5bf9fca206f9"
+    },
+    {
+      "path": "api-ms-win-core-namedpipe-l1-1-0.dll",
+      "byteLength": 22096,
+      "sha256": "c05f1fffe3b5a2738ea54ce9485cca026fb9635f982626fba1e1dcc531897273"
+    },
+    {
+      "path": "api-ms-win-core-processenvironment-l1-1-0.dll",
+      "byteLength": 21968,
+      "sha256": "c4eca98c3c67b6395d5b005b00ac1eb0318b86b23aa71035a44c2b1602befba9"
+    },
+    {
+      "path": "api-ms-win-core-processthreads-l1-1-0.dll",
+      "byteLength": 22096,
+      "sha256": "5ccb89e93d67bc3288d4e84649c5346e66e15e3d7cd65d989daf3f4cb584be9a"
+    },
+    {
+      "path": "api-ms-win-core-processthreads-l1-1-1.dll",
+      "byteLength": 22072,
+      "sha256": "4ad565a8ba3ef0ea8ab87221ad11f83ee0bc844ce236607958406663b407333e"
+    },
+    {
+      "path": "api-ms-win-core-profile-l1-1-0.dll",
+      "byteLength": 22080,
+      "sha256": "7809160932f44e59b021699f5bc68799eb7293ee1fa926d6fcca3c3445302e61"
+    },
+    {
+      "path": "api-ms-win-core-rtlsupport-l1-1-0.dll",
+      "byteLength": 21960,
+      "sha256": "9dc1e91e71c7c054854bd1487cb4e6946d82c9f463430f1c4e8d1471005172b1"
+    },
+    {
+      "path": "api-ms-win-core-string-l1-1-0.dll",
+      "byteLength": 22056,
+      "sha256": "60fc31d2a0c634412f529dba76af3b9bf991352877c6dae528186d3935704cfd"
+    },
+    {
+      "path": "api-ms-win-core-synch-l1-1-0.dll",
+      "byteLength": 22056,
+      "sha256": "3a72b4f29f39a265d32ad12f0ce15dbf60129c840e10d84d427829ede45e78ad"
+    },
+    {
+      "path": "api-ms-win-core-synch-l1-2-0.dll",
+      "byteLength": 22080,
+      "sha256": "efc1e4460984a73cf47a3def033af1c8f3b1dbc1a56cd27781d3aacf3e3330cb"
+    },
+    {
+      "path": "api-ms-win-core-sysinfo-l1-1-0.dll",
+      "byteLength": 22072,
+      "sha256": "b203d862ddef1dd62bf623fc866c7f7a9c317c1c2ae30d1f52cb41f955b5698e"
+    },
+    {
+      "path": "api-ms-win-core-sysinfo-l1-2-0.dll",
+      "byteLength": 22080,
+      "sha256": "2703635d835396afd0f138d7c73751afe7e33a24f4225d08c1690b0a371932c0"
+    },
+    {
+      "path": "api-ms-win-core-timezone-l1-1-0.dll",
+      "byteLength": 22056,
+      "sha256": "33f4fddc181066fce06b2227bded813f95e94ed1f3d785e982c6b6b56c510c57"
+    },
+    {
+      "path": "api-ms-win-core-util-l1-1-0.dll",
+      "byteLength": 21944,
+      "sha256": "6eda016742a6171205a387a14b3c0b331841567740376f56768f8c151724207d"
+    },
+    {
+      "path": "api-ms-win-crt-conio-l1-1-0.dll",
+      "byteLength": 22056,
+      "sha256": "b762061b688aae679afe788904d2c9970f74a7dac98f3b42463d08f25e483d3f"
+    },
+    {
+      "path": "api-ms-win-crt-convert-l1-1-0.dll",
+      "byteLength": 26056,
+      "sha256": "ebb2ae5535a64f65daeab8235585114fc9dd2cf1a49f5852d446250b998b6ae4"
+    },
+    {
+      "path": "api-ms-win-crt-environment-l1-1-0.dll",
+      "byteLength": 22080,
+      "sha256": "17d63275d00bdd8670422b95bd264c532998e0a1b041079e54fce4b6b7a55819"
+    },
+    {
+      "path": "api-ms-win-crt-filesystem-l1-1-0.dll",
+      "byteLength": 22056,
+      "sha256": "9a9e2a65a281644e368d0f272b95ba5f6b445d1c35910d06056c5ebeb77402db"
+    },
+    {
+      "path": "api-ms-win-crt-heap-l1-1-0.dll",
+      "byteLength": 22096,
+      "sha256": "bab9ac3ec83e380ae51e4295ef3bf2c738627812d3a49d1e713661abbc8dc57a"
+    },
+    {
+      "path": "api-ms-win-crt-locale-l1-1-0.dll",
+      "byteLength": 22080,
+      "sha256": "bd14c67ea28e21d6257ad780a37122c9b5773f69e693f5db6bffaee4d839526e"
+    },
+    {
+      "path": "api-ms-win-crt-math-l1-1-0.dll",
+      "byteLength": 30248,
+      "sha256": "606d66d82db562ea7979179d06486a0f94d079941d26b80a1e2c49d29959df6f"
+    },
+    {
+      "path": "api-ms-win-crt-process-l1-1-0.dll",
+      "byteLength": 22096,
+      "sha256": "f6156b1020380ec4f0e48577ebedaaef5fb1ab1f337d8b4e72e6a33a7567a9cc"
+    },
+    {
+      "path": "api-ms-win-crt-runtime-l1-1-0.dll",
+      "byteLength": 26152,
+      "sha256": "c5902934d026d7e15fbe9917d474f3322846a41a25e66f4b2b1f758801879f4b"
+    },
+    {
+      "path": "api-ms-win-crt-stdio-l1-1-0.dll",
+      "byteLength": 26168,
+      "sha256": "a9c5a153d8c0286f9b41a2b1c65854ad9e6471b8755b7de87bae4470e60bcab6"
+    },
+    {
+      "path": "api-ms-win-crt-string-l1-1-0.dll",
+      "byteLength": 26176,
+      "sha256": "25b8f83a7767211b11132775a0e27a45aa4ec8ab4e6572599f9c172ae3606b40"
+    },
+    {
+      "path": "api-ms-win-crt-time-l1-1-0.dll",
+      "byteLength": 22096,
+      "sha256": "7c7f6393f06de11750adb09cc5698ae55cd9fb27b2e51e207286feb1b5b2b156"
+    },
+    {
+      "path": "api-ms-win-crt-utility-l1-1-0.dll",
+      "byteLength": 21952,
+      "sha256": "d8ba5f17b9ffcbf3aeaf3fa1da226832d2fa90f81acce0cd669464e76ce434ac"
+    },
+    {
+      "path": "base_library.zip",
+      "byteLength": 1402481,
+      "sha256": "eefc71c8d9948ae8d532681f300bb47aff6783e4dd1d253ab64c411c39071c40"
+    },
+    {
+      "path": "etc/fonts/conf.d/README",
+      "byteLength": 983,
+      "sha256": "51aaefca8c7b589bfd32a746c122082ca8eec80b18f1e71686d0bc591f74e643"
+    },
+    {
+      "path": "etc/fonts/fonts.conf",
+      "byteLength": 2703,
+      "sha256": "f141c1b89b172d22f213531646c21e288f0ebf3ec46484698896e1b33c626756"
+    },
+    {
+      "path": "fontTools/misc/bezierTools.cp313-win_amd64.pyd",
+      "byteLength": 317952,
+      "sha256": "514a5779bb7496ae7eebea1fa72d3132ed57672402f8e1f394d009d870ac5587"
+    },
+    {
+      "path": "fontTools/varLib/iup.cp313-win_amd64.pyd",
+      "byteLength": 129024,
+      "sha256": "67c99f42023db28e3d896ed0d3d8d46f2b5960c8b20176ccf498aad32a5ed3ce"
+    },
+    {
+      "path": "libbrotlicommon.dll",
+      "byteLength": 143429,
+      "sha256": "ca7bc06ead80259971badf2cd0bfc688db9154dad65f139f49a38b4be9976f97"
+    },
+    {
+      "path": "libbrotlidec.dll",
+      "byteLength": 62461,
+      "sha256": "a142dc6cfa77cb907028aa9426f486f3d8de37855e8db2ae2894147908121881"
+    },
+    {
+      "path": "libbz2-1.dll",
+      "byteLength": 100964,
+      "sha256": "b79cd3a7102e359ef6324e98966a67939e58ec2b651ae2847cae84a4dfa453f7"
+    },
+    {
+      "path": "libcrypto-3.dll",
+      "byteLength": 5231984,
+      "sha256": "eaf6d613b95b61a39558d84c50e72630a66c99914292df88e7b54ebd60c5bd34"
+    },
+    {
+      "path": "libdatrie-1.dll",
+      "byteLength": 35033,
+      "sha256": "2f784872e6404e57847201fe1e7e591bd5b5be4a319ef38ebcb36014ac7f385d"
+    },
+    {
+      "path": "libexpat-1.dll",
+      "byteLength": 235012,
+      "sha256": "8ba8728e1da218d6a1fbaf4d361f01c74666c0c42b6bbc12bb86099efc2d82e3"
+    },
+    {
+      "path": "libffi-8.dll",
+      "byteLength": 35245,
+      "sha256": "50dfc57a84732fd606bd8e77c9966072b4fb0d33dc62167b13db195560d0bb47"
+    },
+    {
+      "path": "libfontconfig-1.dll",
+      "byteLength": 385617,
+      "sha256": "af0a31131dd9e72db6a4a7fa7409cf6c11d15a4e91832a5088cd9b7584281749"
+    },
+    {
+      "path": "libfreetype-6.dll",
+      "byteLength": 790651,
+      "sha256": "bbb3e6390ee229c867ef31f10e42a49a61a92e434a11d40c6139a2608ebc6194"
+    },
+    {
+      "path": "libfribidi-0.dll",
+      "byteLength": 156403,
+      "sha256": "84930fd86a3b46b62794a3bbaff21fbbaeaade5ff7cdc70be7f717ad29af87ed"
+    },
+    {
+      "path": "libgcc_s_seh-1.dll",
+      "byteLength": 151732,
+      "sha256": "278f1101f2371c58b6b412a3206718e22343940a5164aceb4fb75f2bf3b38ed4"
+    },
+    {
+      "path": "libgio-2.0-0.dll",
+      "byteLength": 1914647,
+      "sha256": "39d25f5149a0b7de6dd113dd1c9b987f85c344b35d70871d62611bbc3d15b820"
+    },
+    {
+      "path": "libglib-2.0-0.dll",
+      "byteLength": 1567161,
+      "sha256": "716845eedea56a2f5274e0b64a994a6291ebd5b8e7f0a22b6265dfde5508dc3a"
+    },
+    {
+      "path": "libgmodule-2.0-0.dll",
+      "byteLength": 26748,
+      "sha256": "3c3bd9e0297e5d45fe6deaae5fec21f49a732d011a0579532321a2a3ece2f6c0"
+    },
+    {
+      "path": "libgobject-2.0-0.dll",
+      "byteLength": 359987,
+      "sha256": "3aa808ff8b908f46a39b3f26ea09baa17cecacd027b68ec99ae090162ef601fd"
+    },
+    {
+      "path": "libgraphite2.dll",
+      "byteLength": 152538,
+      "sha256": "f927efecd958f0e54a24ae297f86cd6aed05e7fc20e5da0882050ab9ec464395"
+    },
+    {
+      "path": "libharfbuzz-0.dll",
+      "byteLength": 1547589,
+      "sha256": "0664a1a918a60349668b88635f1024281c611d4488ae4fadebaea1fb6dc35b66"
+    },
+    {
+      "path": "libharfbuzz-subset-0.dll",
+      "byteLength": 1739202,
+      "sha256": "9d0b6c72238c518e8fdde58a5e62624b750ef643b85cdb924ddb2cfaba7565f5"
+    },
+    {
+      "path": "libiconv-2.dll",
+      "byteLength": 1143148,
+      "sha256": "7a282a854e01be726c6cccfe46f548c716aa45b3014818468253aaa4efbcd067"
+    },
+    {
+      "path": "libintl-8.dll",
+      "byteLength": 298731,
+      "sha256": "0537c3dd2378218508ebe3cc416d72a99ee2d24ae1c5525e23458f32544ef861"
+    },
+    {
+      "path": "libpango-1.0-0.dll",
+      "byteLength": 432197,
+      "sha256": "16db44eb7d0c32e1f43337a70100869ff2984395f5d069065a1aedcb19badaa8"
+    },
+    {
+      "path": "libpangoft2-1.0-0.dll",
+      "byteLength": 112017,
+      "sha256": "f2fc06cd3f5698afb149cf096bd0033313dba3b4c544cd16558c16377c7a749c"
+    },
+    {
+      "path": "libpcre2-8-0.dll",
+      "byteLength": 717955,
+      "sha256": "a499fb8a7eff453d6e4f0842576bc5171d40a1505d8f7f13fff6cee51b738a62"
+    },
+    {
+      "path": "libpng16-16.dll",
+      "byteLength": 264269,
+      "sha256": "3737838ee8d6b893df7bdabf7439775371a57dce7e17ee6b35586023c64bd9ab"
+    },
+    {
+      "path": "libssl-3.dll",
+      "byteLength": 794992,
+      "sha256": "cf1a5fdcefa3daf69041f31f98ece1d7911ca4fcb8e9f1043b4d0f459ae4c936"
+    },
+    {
+      "path": "libstdc++-6.dll",
+      "byteLength": 2667040,
+      "sha256": "3529d11c422b2aaf0bbad7221bf62ba7b5a39f854e89a015bb58b6b55a677da1"
+    },
+    {
+      "path": "libthai-0.dll",
+      "byteLength": 72294,
+      "sha256": "5d741974fdec19e0f6cddbcdb539428af0c7392740a056634714c2884157fdb9"
+    },
+    {
+      "path": "libwinpthread-1.dll",
+      "byteLength": 64930,
+      "sha256": "961bf868110e487f28357bd77705bd38701fe503b3ab80f5c65fb3ef80254b36"
+    },
+    {
+      "path": "pyexpat.pyd",
+      "byteLength": 217944,
+      "sha256": "b5f57327418750229656c30a809308669797cf30d7da3705f8cd584c2b8a038b"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_NO.txt",
+      "byteLength": 341,
+      "sha256": "cf122e25bfa6f1694023a8afeb6e034197d46e78fb41df27cc45f9f23edcfdad"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_be_BY.txt",
+      "byteLength": 300,
+      "sha256": "ba3c76d7e9926426ecf93250db3f393c11bc372ec3a64fc49b9639291e809bf3"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_bg_BG.txt",
+      "byteLength": 3924,
+      "sha256": "26ca94269f58ad71be0985dbab8ed58e735bd9fffee4a17c6ae24575e1d16abf"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_ca.txt",
+      "byteLength": 636,
+      "sha256": "e053a287e45e5c655effa0cfc3e731832a824eded1d19ede0648a1f15e6d6a09"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_cs_CZ.txt",
+      "byteLength": 631,
+      "sha256": "adc50a58231a94ab7f225d9913da331f9dc2049128c9742cf60d0c32a8b04028"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_da_DK.txt",
+      "byteLength": 482,
+      "sha256": "600759b9f68b57a8432b9647bb132bb00a91953cf52b35c5daf65b7956b06501"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_de.txt",
+      "byteLength": 1738,
+      "sha256": "be7b3c67a66ea7185a69a3ce3b1e712cd6bb904dce8ac0eecdefd2f1a948baf3"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_el_GR.txt",
+      "byteLength": 525,
+      "sha256": "0b3e117f4ab079e7cbcdd7f4645f9a4f193ae123e6c781928597b27d22706aa7"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_en_GB.txt",
+      "byteLength": 4569,
+      "sha256": "6f3d1dddcf62d2d452801bd86289ad5826a30d15a502c0825f5c73715372db50"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_en_US.txt",
+      "byteLength": 1888,
+      "sha256": "9bcae072bff45cc0333d6b3c508c92d85b9065fc861c743c1506b303eba3f4a1"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_es.txt",
+      "byteLength": 1752,
+      "sha256": "0053b520c70ef49fdaa5beddf9bf4c76fcefb422748601a2f18a33ed923bcf8c"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_et_EE.txt",
+      "byteLength": 52957,
+      "sha256": "da273b8ec03e35774a426e9df047ad85253ec9e61a5c056f019d57c1395ef1cb"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_eu.txt",
+      "byteLength": 3697,
+      "sha256": "b0dcf82345f4a6a74e290cd7e7b43b73f8612e14ed5cec53ee736edaeb1d16b5"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_fr.txt",
+      "byteLength": 3738,
+      "sha256": "6951d9806c65c7f757d303061ca49cd7a1ddeddc552147f5c29de6540821f2cf"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_gl.txt",
+      "byteLength": 600,
+      "sha256": "2830f43a0a7e503765d59cc553a32bf1d342fee4e5dd7f0f19136b07e63e371b"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_hr_HR.txt",
+      "byteLength": 3598,
+      "sha256": "2ba15b47f64eba01489d2962a8c04c6e457a33bba418d6384bda30dfe9e23b65"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_hu_HU.txt",
+      "byteLength": 544,
+      "sha256": "17b76931dcd1936dcc3eb40fa69883c67a87dfe5134dd28a4fbf05c866a8cf9f"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_is.txt",
+      "byteLength": 34266,
+      "sha256": "64edf9fc3871e109a0b0d3a12d1ace5f7830b76d6de220e3d68679254e7969c7"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_it_IT.txt",
+      "byteLength": 949,
+      "sha256": "e6f356c3c49bc6016b6a635c20b468468eef6d011953a7051bbdfd56e17f0d3b"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_lt_LT.txt",
+      "byteLength": 780,
+      "sha256": "f21502551d0f668b6f1e7c76d6c6afa2e152b6c397a7049e2fea03776a5d1d52"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_lv_LV.txt",
+      "byteLength": 5782,
+      "sha256": "5e2cfa2c9a2b0ea1500c8cafca40256cbfec7de5dc46c5e4ca45950f76fd8659"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_pl_PL.txt",
+      "byteLength": 1526,
+      "sha256": "99df1756a8d42e035e6ad6e79d2176a31ff71607a09300c9ace259895cc87403"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_pt_BR.txt",
+      "byteLength": 19284,
+      "sha256": "07400608865ce4c964cc443a9f354c733ca7f3f7d31f4463222b927cb7c54b87"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_pt_PT.txt",
+      "byteLength": 486,
+      "sha256": "62f19b9d8b42f2b0ff165ab434f40cfb4210a464f0662c31f6f99d77d0306e06"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_ro_RO.txt",
+      "byteLength": 488,
+      "sha256": "4808da6b026988000dd0943e86b77f312901e2759f11b1621e6512bddcbbe986"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_sk_SK.txt",
+      "byteLength": 252,
+      "sha256": "17b8f471cf1ec7b177d4a74bcd09e63cb4f122412b43d80489df6551985bdf27"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_sl_SI.txt",
+      "byteLength": 2765,
+      "sha256": "76e518bc5426ac5e3954f5168e7737a549ad7a3b6d3f81d6fd4473a1679940da"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_sq_AL.txt",
+      "byteLength": 423,
+      "sha256": "e4175731cfc7881f595d6d1753e061c36752ff191ac7030757ea00edd0a59359"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_sr.txt",
+      "byteLength": 284,
+      "sha256": "c552643a0490b8a68e4c5fb25cf3fb4b6605c2f5e8c9cfdf8dbc1a3c2845bd62"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_sv.txt",
+      "byteLength": 650,
+      "sha256": "eee15b8d93b2413256ae1cb8af7d1489935571e0eaf15d9b27bab1203d3aafc2"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_te_IN.txt",
+      "byteLength": 860,
+      "sha256": "fca0ff51f3bf572f9f6a408cd820e43e34c4d7d298e38169b32fbf5baac59c24"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_th_TH.txt",
+      "byteLength": 410,
+      "sha256": "32164b4ee0e25b3a46a7370a1b7370ab712bbe4d8abe1443965eec7f7edc30f4"
+    },
+    {
+      "path": "pyphen/dictionaries/README_hyph_uk_UA.txt",
+      "byteLength": 957,
+      "sha256": "b5866714694f0e9a7c9d044984b4b39ec6289ade07fa7d2a083a31f5072f3529"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_af_ZA.dic",
+      "byteLength": 62925,
+      "sha256": "541a45d73d92c69445613ec558c2c1a6829550d1a1ad8aa9dc6dfb752db87da1"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_as_IN.dic",
+      "byteLength": 1642,
+      "sha256": "321ffb692c12792dddb4294ab5857821fc1ab8f2d0a8c0fcdced00200602ead6"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_be_BY.dic",
+      "byteLength": 31963,
+      "sha256": "e4339b5a53d2f0fb4179c1060173788d5b6ed3f07bbbccb8b74f5cea614a809e"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_bg_BG.dic",
+      "byteLength": 59388,
+      "sha256": "7dad4f2ccfce1909b27f53082cf57c7914809a8ba31ccbcee3dc817dcd7c7994"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_ca.dic",
+      "byteLength": 28602,
+      "sha256": "4a4816e93a92df35819c5f4775106577aa279739a12c687291d747a3ce767b8b"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_cs_CZ.dic",
+      "byteLength": 20049,
+      "sha256": "a378d024438b446ac0524237dc6d728dc520550db5fe0fb1fdbb47c2ee0ca525"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_da_DK.dic",
+      "byteLength": 6049,
+      "sha256": "44d0dd1d85bcdb1e63003c97cd08924f10a8a8127380b1b07ac2e75a950c216b"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_de_AT.dic",
+      "byteLength": 1093611,
+      "sha256": "3e0b4687479d25099e37ebd946998c08fcccc12a0acf9380d8b19319a50b9f3a"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_de_CH.dic",
+      "byteLength": 1093611,
+      "sha256": "825159436515ab150d3da0ddf5eedb814c0ec6c7eec98fbd53e3ba5b2a4a1443"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_de_DE.dic",
+      "byteLength": 1093611,
+      "sha256": "2e2f5ffea6bc53f67ffe8c076921c7b1b34a2ec2b9ec57a4608374bb65a1a1e1"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_el_GR.dic",
+      "byteLength": 3205,
+      "sha256": "f2284153c3f9a809b959dcaeb349e00d90b4c4cf37c3d3a338b371c32f10e89d"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_en_GB.dic",
+      "byteLength": 107031,
+      "sha256": "9fdc97f7faabcda30c15a9d53bc7fbf21daec795fb3c9a9588f7bdb30c563f41"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_en_US.dic",
+      "byteLength": 106414,
+      "sha256": "486fb6840b1049d5d252ef784be11cd4dc2be0bf296568b74b41e4f4e17cba7d"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_eo.dic",
+      "byteLength": 29876,
+      "sha256": "f2feb4cabe54b696affec72960b1670cfd9e4eae007854944bd02c0d348f59d7"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_es.dic",
+      "byteLength": 5699,
+      "sha256": "b2e170c3c25f5de25447ca0acf6bc8baf9dd761e228e9646e2c25f2e7c47f4f6"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_et_EE.dic",
+      "byteLength": 22637,
+      "sha256": "2ee13914fcd9e9b110e9e3d56e1d6acc28bf792c15b1b69efc2e71ac96c23c74"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_eu.dic",
+      "byteLength": 1152,
+      "sha256": "5f499f513435a8432961750fae7b31bc5d3989b686a744c331bb75471a14b71b"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_fr.dic",
+      "byteLength": 23631,
+      "sha256": "476ca60b958400c8b3fbe55764b4900df87acf60394ef62362705d9c701db191"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_gl.dic",
+      "byteLength": 1420,
+      "sha256": "357355b82eb82ed081433503327ac4ba5b4f3606b6a3e50d69091d57eef4d5b8"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_hr_HR.dic",
+      "byteLength": 7789,
+      "sha256": "77613ff6e907d2e9ffd93d45bfb16873aa9182e2215df276dbf850d1b0e28f65"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_hu_HU.dic",
+      "byteLength": 937807,
+      "sha256": "354939e518b838dbfe01ab617c25c94586b1accc2d5bdcf57ba07406e8d1fee9"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_id_ID.dic",
+      "byteLength": 104072,
+      "sha256": "ac53214620527f8a145ce4d70f0a3a5d336a145643b52547375aedacef558dc0"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_is.dic",
+      "byteLength": 50011,
+      "sha256": "690ed04b72b60d05f66971ad9fd799656419228bfa8df00190adf02e27c0b1ef"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_it_IT.dic",
+      "byteLength": 2308,
+      "sha256": "8c25b6fb62c2fb97586c6f7c6fb48f29f49e90a5c33c09ac9112dba6942b50cd"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_kn_IN.dic",
+      "byteLength": 1592,
+      "sha256": "a15acb05a834979904330afda768accfa7fee10da386cc534d7944144eb1997f"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_lt.dic",
+      "byteLength": 7817,
+      "sha256": "376e9fbdc09db5feb0025181d84242b6e01e02f413301f7d059fd99dc0597316"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_lv_LV.dic",
+      "byteLength": 79409,
+      "sha256": "775d9a539fd8e98fabbfefd87af5887bb24eb4700b47ed5f8e360b0bab75b078"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_mn_MN.dic",
+      "byteLength": 13486,
+      "sha256": "c49d5ead63948d84c75d43245d837a9d7c8dc36c2a97dc5e8a7ade031c7a00e9"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_mr_IN.dic",
+      "byteLength": 2482,
+      "sha256": "740707cd6d149d1339e921e126a25dcea889712f4889fbc72434d753324409ed"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_nb_NO.dic",
+      "byteLength": 186678,
+      "sha256": "c6c9b07d9f2c60bb47857fd629d9a453026312c894665d22c72e8e1699420f6c"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_nl_NL.dic",
+      "byteLength": 116507,
+      "sha256": "0a97b76b259ed4165d094dedf9b6fb98c57734a437df0b5b263ee13e262d5f8f"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_nn_NO.dic",
+      "byteLength": 186678,
+      "sha256": "c6c9b07d9f2c60bb47857fd629d9a453026312c894665d22c72e8e1699420f6c"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_or_IN.dic",
+      "byteLength": 1535,
+      "sha256": "264b3a880fc7dc9f477abac80708172144ec3bb28baa8266539fe7ffff7a8a30"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_pa_IN.dic",
+      "byteLength": 1534,
+      "sha256": "87b2e3d7dc8cc4e4f0bb1d6f4265e8d8eefa478fbc890a60839868af4f5c2c06"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_pl_PL.dic",
+      "byteLength": 37931,
+      "sha256": "9fe3917ec1fb09b7ffa560e85fb810e098d45a9a45ad6d5c08311544dd92a100"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_pt_BR.dic",
+      "byteLength": 11260,
+      "sha256": "a8eb1a64e4af4649c739211b397fa37b01f9d5774cf558fe3895fc3f26fd33a4"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_pt_PT.dic",
+      "byteLength": 1288,
+      "sha256": "6f18ee89de6db21d9b06120a5527ec41d8132514fc112ccfe7d289ba91649840"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_ro_RO.dic",
+      "byteLength": 34597,
+      "sha256": "24adbfe7cc2267ea5ce4afd34f7d69da5a9163ef3dd57b158bbb196b9d651e94"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_ru_RU.dic",
+      "byteLength": 35415,
+      "sha256": "e9a6ae92765fc7e63d879f2ccf3f50f2b95bc8ed7618a6f31c34ce7d39844c83"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_sa_IN.dic",
+      "byteLength": 1171,
+      "sha256": "e7f21be6f039cef24a3643ca7bc6d196bee1ee2661e53514f2c7e1392655d733"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_sk_SK.dic",
+      "byteLength": 18205,
+      "sha256": "7359863ec5d5dbbf35c7d4f38faca1af7b43bc4aa643871e63f2dc0dfac4f922"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_sl_SI.dic",
+      "byteLength": 8245,
+      "sha256": "3d9026755aa0936e9331595a08bb65c295ccac84acefe58cb6c9fe2ff11ceef8"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_sq_AL.dic",
+      "byteLength": 127201,
+      "sha256": "99fbce3b0e60cc500e45643dd40903dfa71cfc1605a5b139cfb22129bd665dbe"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_sr.dic",
+      "byteLength": 27355,
+      "sha256": "ce785026592f525c38e67152699224d47a4cdf555a1a4eb65d50458c5548f69f"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_sr_Latn.dic",
+      "byteLength": 28392,
+      "sha256": "b423f910400472979a2b0fe1c95965c940e927f7588dace0e42c17f7b0663376"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_sv.dic",
+      "byteLength": 102979,
+      "sha256": "44c5a59f1ef8a17b9433e4510a1abcac753d34ac875dc27ea95427f1e581f17b"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_te_IN.dic",
+      "byteLength": 1592,
+      "sha256": "2ad470071dfd9bb3ad5101d528e1fb0090d96c841c4f2bb07b325476b3c853fe"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_th_TH.dic",
+      "byteLength": 66279,
+      "sha256": "fbd19d561c19a13d1901a0b9653e24b4c0c2c81177064266e2acb23bac68145b"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_uk_UA.dic",
+      "byteLength": 20222,
+      "sha256": "ae80645b757d6b57e5cdf34ab6cf7441a2414c60bff2352c7e815c1c12baad3d"
+    },
+    {
+      "path": "pyphen/dictionaries/hyph_zu_ZA.dic",
+      "byteLength": 1956,
+      "sha256": "e75802e08127877d38891c140e8989af559665bae82f94d33c340cba2aa9de20"
+    },
+    {
+      "path": "pyphen/dictionaries/update.sh",
+      "byteLength": 251,
+      "sha256": "a9c1a8bf18ec6283ec7ffe10f5c65cc38119aae0be6b5d7711a6a7e3f9d9bd0b"
+    },
+    {
+      "path": "python3.dll",
+      "byteLength": 72536,
+      "sha256": "cbc4876275178244905ee45a9ee6ec9fa4bfb9aad6209a03b756d38a186f80d1"
+    },
+    {
+      "path": "python313.dll",
+      "byteLength": 6129496,
+      "sha256": "6964e590037c41d631fd1215f05af154f7fa68105993c6f573a20689b473f1ac"
+    },
+    {
+      "path": "select.pyd",
+      "byteLength": 33112,
+      "sha256": "ddf1221851814943a82ed8a986d228463404da2ada969661bdd69223f14fc050"
+    },
+    {
+      "path": "setuptools/_vendor/importlib_metadata-8.7.1.dist-info/INSTALLER",
+      "byteLength": 2,
+      "sha256": "e6184ce10e266134fdcfa401e8f1a95005bcd4f18d16b62b757323e2833fe9a9"
+    },
+    {
+      "path": "setuptools/_vendor/importlib_metadata-8.7.1.dist-info/METADATA",
+      "byteLength": 4670,
+      "sha256": "a3e38b9ee4326289d4864704f30e299ee769e2309ce9f4a75f0de1a50ad0a356"
+    },
+    {
+      "path": "setuptools/_vendor/importlib_metadata-8.7.1.dist-info/RECORD",
+      "byteLength": 1868,
+      "sha256": "52a6b8ee0de15cf7fd99625f43b97cd2e3942ac86f16054ea90de48e66f29355"
+    },
+    {
+      "path": "setuptools/_vendor/importlib_metadata-8.7.1.dist-info/REQUESTED",
+      "byteLength": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "setuptools/_vendor/importlib_metadata-8.7.1.dist-info/WHEEL",
+      "byteLength": 91,
+      "sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b"
+    },
+    {
+      "path": "setuptools/_vendor/importlib_metadata-8.7.1.dist-info/licenses/LICENSE",
+      "byteLength": 10278,
+      "sha256": "458502e12d97bbf64438606a20044aa85eb05fb0a8a807bb35dbec253fd1fc04"
+    },
+    {
+      "path": "setuptools/_vendor/importlib_metadata-8.7.1.dist-info/top_level.txt",
+      "byteLength": 19,
+      "sha256": "08eddf0fdcb29403625e4acca38a872d5fe6a972f6b02e4914a82dd725804fe0"
+    },
+    {
+      "path": "setuptools/_vendor/jaraco/text/Lorem ipsum.txt",
+      "byteLength": 1335,
+      "sha256": "37fedcffbf73c4eb9f058f47677cb33203a436ff9390e4d38a8e01c9dad28e0b"
+    },
+    {
+      "path": "ucrtbase.dll",
+      "byteLength": 1361448,
+      "sha256": "2e5fb14b7bf8540278f3614a12f0226e56a7cc9e64b81cbd976c6fcf2f71cbfb"
+    },
+    {
+      "path": "unicodedata.pyd",
+      "byteLength": 712536,
+      "sha256": "b965a80346ee95dbec0b147faab329f3276ba24fceb8df5df171367649f116f3"
+    },
+    {
+      "path": "weasyprint/css/html5_ph.css",
+      "byteLength": 4572,
+      "sha256": "e06bc94d27efeb8226e8caca76d27da0872b9214456502d27f84d312b43743a7"
+    },
+    {
+      "path": "weasyprint/css/html5_ua.css",
+      "byteLength": 18658,
+      "sha256": "af020d2821f0e8e338bab7133205d84a80a2f177a92886ef14497d77384b8fa9"
+    },
+    {
+      "path": "weasyprint/css/html5_ua_form.css",
+      "byteLength": 315,
+      "sha256": "be20de61c0d0745642f2b17daf62cf8376ae1707768758c9003f0f04ea7c510f"
+    },
+    {
+      "path": "weasyprint/pdf/sRGB2014.icc",
+      "byteLength": 3024,
+      "sha256": "384b832de3412066743b52a75ee906b6fb9fb8d9e09e936fc2c43223815c6e0a"
+    },
+    {
+      "path": "zlib1.dll",
+      "byteLength": 128488,
+      "sha256": "93e9243a44c29200eeacaf9658efe2558581770e4b11ca4b500e18e424a6e3b5"
+    },
+    {
+      "path": "zopfli/zopfli.pyd",
+      "byteLength": 186368,
+      "sha256": "b84a1f0c40a407ac1b3990ffe658b196febe4c10f4aaeae5a9ed0f4cc9350a25"
+    }
+  ]
+}

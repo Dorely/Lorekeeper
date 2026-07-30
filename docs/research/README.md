@@ -30,6 +30,26 @@ These briefs are engineering references for Lorekeeper's prompts, automation, co
 - [Press renderer and conformance spike](press-renderer-conformance-spike.md)
   — executable Typst/krilla/moxcms evidence, fail-closed PDF/X result,
   dependency/license inventory, and the WeasyPrint fallback decision.
+- [WeasyPrint PDF/X fallback spike](weasyprint-pdfx-fallback-spike.md)
+  — executable PDF/X-1a:2001 declaration and inspection evidence, contained
+  input/output design, ICC fingerprint and rights, packaging gaps, and the
+  reduced `Preview` acceptance decision.
+- [WeasyPrint fallback license inventory](weasyprint-spike-license-inventory.json)
+  — generated locked-package source/checksum/metadata and installed
+  license-file hashes for the Windows fallback fixture, with target-native
+  release obligations left explicit.
+- [WeasyPrint controlled build evidence](weasyprint-spike-build-evidence.json)
+  — exact interpreter, native archive, fonts, source files, executable, and
+  binary-inventory fingerprints for the accepted Windows fixture.
+- [WeasyPrint upstream native source](weasyprint-spike-native-source.json)
+  — per-payload hashes extracted directly from the verified official portable
+  executable before the controlled build selects its native dependencies.
+- [WeasyPrint frozen binary inventory](weasyprint-spike-binary-inventory.json)
+  — source-classified final PyInstaller binary inputs with per-file hashes and
+  an explicitly closed release-license gate.
+- [WeasyPrint verification evidence](weasyprint-spike-verification-evidence.json)
+  — repeatability, isolation, immutable-output, independent parse, geometry,
+  text-extraction, and artifact-hash results for the controlled fixture.
 
 ## Scope and evidence policy
 

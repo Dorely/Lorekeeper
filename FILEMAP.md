@@ -36,8 +36,15 @@
 | `docs/research/open-source-publishing-stack.md` | Preliminary editor/renderer/color/validation license screen, release-audit requirements, rejected licenses, proposed press sidecar, and PDF/X spike gate. |
 | `docs/research/structured-manuscripts-and-safe-migration.md` | Semantic manuscript design plus WAL-safe backup, data conversion, validation, recovery, legacy import, and assistant-parity plan. |
 | `docs/research/press-renderer-conformance-spike.md` | Executable Typst/krilla/moxcms spike evidence, fail-closed PDF/X result, external-gate disposition, and free fallback comparison. |
+| `docs/research/weasyprint-pdfx-fallback-spike.md` | Executable WeasyPrint PDF/X declaration/inspection evidence, ICC rights and fingerprint, containment, packaging gaps, and reduced Preview acceptance. |
+| `docs/research/weasyprint-spike-license-inventory.json` | Generated locked Python source/checksum/license-file inventory for the Windows fallback fixture plus explicit target-native release gaps. |
+| `docs/research/weasyprint-spike-build-evidence.json` | Controlled Windows fallback interpreter, archive, font, source, executable, and binary-inventory fingerprints. |
+| `docs/research/weasyprint-spike-native-source.json` | Archive-derived per-payload hash manifest tying frozen native inputs to the verified official portable executable. |
+| `docs/research/weasyprint-spike-binary-inventory.json` | Source-classified hashes for every binary collected into the frozen fallback, with its release-license gate explicitly closed. |
+| `docs/research/weasyprint-spike-verification-evidence.json` | Recorded deterministic-output, containment, parse, text, geometry, and artifact-hash checks for the frozen fallback. |
 | `docs/research/press-spike-license-inventory.json` | Generated exact-version/checksum/VCS/license-file inventory for every target-inclusive Rust spike dependency and bundled asset notice. |
 | `docs/decisions/0001-reject-typst-as-sole-press-renderer.md` | Accepted no-go decision for the first press renderer candidate and the WeasyPrint 69 fallback gate. |
+| `docs/decisions/0002-accept-weasyprint-for-preview-press-runtime.md` | Accepted reduced-scope decision for exact-pinned WeasyPrint as the future Preview press-runtime foundation. |
 
 ## Lorekeeper.Press/ — Disposable renderer spike
 
@@ -53,6 +60,23 @@
 | `fixtures/*.json` | Representative PDF 1.7 book request and deliberate unsupported PDF/X request. |
 | `scripts/verify-spike.ps1` | Locked tests, optimized build, process fixtures, timing/size evidence, and optional independent Poppler checks. |
 | `scripts/generate-license-report.ps1` | Deterministic Cargo metadata, checksum, upstream VCS, license expression, and license/notice hash inventory generator. |
+
+## Lorekeeper.Press.Weasy/ — Disposable PDF/X fallback spike
+
+| File | Description |
+|------|-------------|
+| `pyproject.toml` / `uv.lock` | Exact direct pins and hash-locked transitive Python resolution for WeasyPrint 69, pypdf, cffi, and the PyInstaller build harness. |
+| `launcher.py` / `src/lorekeeper_press_weasy/startup.py` / `main.py` | Pre-native font environment/bundle fingerprint validation followed by the bounded stdin/stdout JSON process envelope. |
+| `assets/fonts.conf` | Minimal sibling-font-only Fontconfig policy copied beside the frozen executable with pinned Liberation Serif files. |
+| `src/lorekeeper_press_weasy/protocol.py` | Strict versioned request/response, diagnostic, artifact, and conformance-evidence contracts shared with the first spike. |
+| `src/lorekeeper_press_weasy/pdfx.py` | Exact-pinned PDF/X-1a:2001/PDF 1.3 adapter required because WeasyPrint 69's stock name targets the 2003 revision. |
+| `src/lorekeeper_press_weasy/render.py` | Generated/escaped paged HTML, restricted ICC fetcher, interior/wrap-cover rendering, hashing, and internal checks. |
+| `src/lorekeeper_press_weasy/inspect.py` | Independent pypdf inspection for PDF version, page boxes, fonts, colors, images, output intents, transparency, annotations, encryption, and actions. |
+| `src/lorekeeper_press_weasy/geometry.py` / `storage.py` | Measured PDF box geometry plus exclusive-lock, staged, fsynced, immutable job publication. |
+| `tests/*.py` | Authorized protocol, recursive PDF inspection, measured geometry, and concurrent immutable-publication fixtures. |
+| `scripts/build-windows-spike.ps1` / `scripts/extract-pyinstaller-native.py` / `scripts/audit-pyinstaller-binaries.py` | Archive-owned native extraction, controlled frozen Windows build, and fail-closed source classification/hashing of collected binaries. |
+| `scripts/verify-spike.ps1` / `scripts/verify-artifacts.py` | Frozen-process adversarial/repeatability harness plus independent PDF parse, text, box, and hash verification. |
+| `scripts/generate-license-inventory.py` | Deterministic uv-lock/package-metadata/license-file hash inventory generator for the active fallback environment. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
 

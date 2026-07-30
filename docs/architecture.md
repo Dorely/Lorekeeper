@@ -38,10 +38,14 @@ current-runtime claims.
 - PdfPig, Docnet, and VersOne.Epub for source ingest and EPUB handling
 - Bootstrap and vis-network vendored under `Lorekeeper/wwwroot`
 
-The solution contains one application project. A standalone,
-non-production `Lorekeeper.Press` Rust 2024 crate is retained as a disposable
-renderer/conformance spike; it is not referenced by the solution, packaged, or
-invoked by the application. `Program.cs` owns host startup,
+The solution contains one application project. Standalone, non-production
+`Lorekeeper.Press` and `Lorekeeper.Press.Weasy` projects are retained as
+disposable renderer/conformance spikes; neither is referenced by the solution,
+packaged, or invoked by the application. The Rust candidate is the rejected PDF
+1.7 comparison implementation. The exact-pinned Python/WeasyPrint 69 candidate
+is accepted only as the foundation for a future `Preview` press runtime; it is
+not current application behavior or independently verified PDF/X output.
+`Program.cs` owns host startup,
 dependency registration, middleware, local media and OAuth endpoints, database
 migration, interrupted-work reconciliation, desktop update setup, and Electron
 window creation. Blazor interactivity is opted into per page or component with
@@ -175,6 +179,24 @@ reviewed CMYK press profile is bundled. This spike is not a production renderer,
 KDP/Ingram compatibility claim, or substitute for the future application
 service and assistant boundary.
 
+`Lorekeeper.Press.Weasy` retains that protocol shape and proves a contained
+Windows x64 fixture that emits PDF 1.3 files declaring PDF/X-1a:2001 with a
+fingerprinted CMYK output intent. Generated HTML/CSS is code-owned, external
+resource reads are restricted to the exact profile URI, and output is atomically
+published into immutable child job directories. Its internal pypdf inspection
+does not establish standards conformance. The adapter uses an exact-version
+internal WeasyPrint API because the stock `pdf/x-1a` variant declares the wrong
+2003 revision. Its controlled Windows fixture carries pinned Liberation Serif
+files and requires the future owning application service to set the sibling
+Fontconfig environment before native process startup. Its launcher verifies that
+environment and the sibling font/config/license hashes before importing
+WeasyPrint. Native payloads are extracted into a fresh build-owned directory
+from the fingerprinted official portable executable, then the final collected
+binaries are source-classified. The release-license gate remains closed because
+the native notice bundle is incomplete. Acrobat/vendor/physical-proof evidence
+and cross-platform packaging also remain incomplete, so the spike returns no
+independently validated or claimed standard and is not a production runtime.
+
 The planned publishing architecture is documented, but not implemented, in the
 publishing roadmap and supporting research briefs. Its intended boundaries are a
 versioned semantic manuscript, edition-specific projections, a separately
@@ -247,6 +269,8 @@ Requirements:
 - .NET 10 SDK, pinned by `global.json`
 - Node.js 22.12 or later for Electron.NET desktop builds and packaging
 - Rust 1.92 or later only when building the disposable `Lorekeeper.Press` spike
+- Python 3.13 or 3.14 plus uv only when exercising the disposable
+  `Lorekeeper.Press.Weasy` fallback spike
 
 Build and start the browser-hosted development app:
 
@@ -291,6 +315,18 @@ cd Lorekeeper.Press
 cargo test --locked
 .\scripts\verify-spike.ps1 -PopplerBin <poppler-bin-directory>
 ```
+
+Run the fallback source fixtures separately:
+
+```powershell
+cd Lorekeeper.Press.Weasy
+uv run --locked python -m unittest discover -s tests -v
+```
+
+The frozen fallback verification additionally requires an explicitly supplied,
+fingerprinted CMYK profile and a controlled native Pango/Fontconfig stack; see
+`Lorekeeper.Press.Weasy/scripts/build-windows-spike.ps1` and
+`Lorekeeper.Press.Weasy/scripts/verify-spike.ps1`.
 
 Successful compilation does not validate OAuth, provider calls,
 embeddings, web search, image generation, publication output, packaging,

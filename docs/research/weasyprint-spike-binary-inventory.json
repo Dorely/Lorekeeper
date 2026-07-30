@@ -1,0 +1,958 @@
+{
+  "schemaVersion": 1,
+  "allowedRootClasses": [
+    "native",
+    "python",
+    "environment",
+    "system"
+  ],
+  "binaryCount": 105,
+  "releaseLicenseGatePassed": false,
+  "binaries": [
+    {
+      "destination": "PIL/_avif.cp313-win_amd64.pyd",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/PIL/_avif.cp313-win_amd64.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 7890944,
+      "sha256": "2e3e5cce3aea38c603680ca3da5d161fad123ce23a803bb692a56aff608989be",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "PIL/_imaging.cp313-win_amd64.pyd",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/PIL/_imaging.cp313-win_amd64.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 2632704,
+      "sha256": "88756e8e0e3f6180e518da25d379597c861e2d20d716ef001894789b515c1777",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "PIL/_imagingcms.cp313-win_amd64.pyd",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/PIL/_imagingcms.cp313-win_amd64.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 272384,
+      "sha256": "7ecb50b954d13d72b7a0ff565872332443cdbc83a36e58a56b2b949a56f32549",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "PIL/_imagingmath.cp313-win_amd64.pyd",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/PIL/_imagingmath.cp313-win_amd64.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 21504,
+      "sha256": "9d5bbea6a877a48ed7995a0640ecb0a5567d9fad544a4a1fbf9f22d507029b57",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "PIL/_imagingtk.cp313-win_amd64.pyd",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/PIL/_imagingtk.cp313-win_amd64.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 14848,
+      "sha256": "8ccd6128481d5a3a15993c2f8a69585694ff972652a6b06dcaee276fc65633a7",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "PIL/_webp.cp313-win_amd64.pyd",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/PIL/_webp.cp313-win_amd64.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 416256,
+      "sha256": "9918faf8d90faa86e03e48479c6a62383be71da759254afded18591a406a92fe",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "VCRUNTIME140.dll",
+      "sourceClass": "python",
+      "sourceRelativePath": "vcruntime140.dll",
+      "kind": "BINARY",
+      "byteLength": 120400,
+      "sha256": "052ad6a20d375957e82aa6a3c441ea548d89be0981516ca7eb306e063d5027f4",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "VCRUNTIME140_1.dll",
+      "sourceClass": "python",
+      "sourceRelativePath": "vcruntime140_1.dll",
+      "kind": "BINARY",
+      "byteLength": 49776,
+      "sha256": "6a99bc0128e0c7d6cbbf615fcc26909565e17d4ca3451b97f8987f9c6acbc6c8",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_asyncio.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_asyncio.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 73048,
+      "sha256": "1360e10537aab8535f8025ad0ded35295372c0e43ce6c77a38090ac5a4ee2028",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_brotli.cp313-win_amd64.pyd",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/_brotli.cp313-win_amd64.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 856576,
+      "sha256": "a7f83086a999a01db0ca8cba6d476b4aa74ec2f96292cf4e17446dd30c085c61",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_bz2.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_bz2.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 86864,
+      "sha256": "a19f9a70f8ce7e6f3beae4b798ca25cb7c7dc0a198c29d510a384f2b1b40c842",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_cffi_backend.cp313-win_amd64.pyd",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/_cffi_backend.cp313-win_amd64.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 180224,
+      "sha256": "d5b09da2e726b4e90cf0edad5d2a0ec52f369dfd060e14d3807a32b2205031fa",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_ctypes.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_ctypes.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 133464,
+      "sha256": "6659251ad06965e0cfd8cd90c654fbff4081e93fceeca84e5d544f436217550c",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_decimal.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_decimal.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 283104,
+      "sha256": "39b9ad652c4f2df15a8050fa7d90e12f8b335275635396f19f7671f98d2bc833",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_elementtree.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_elementtree.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 137048,
+      "sha256": "0633f783fe721adbc74593c1cb377ed2fba3e000489910d25ac7e382166dbf5b",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_hashlib.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_hashlib.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 69464,
+      "sha256": "a78d0d7dea3a455af1df7a4890dbbf3dde6739cf4efc0386078539e7295d41dd",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_lzma.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_lzma.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 159576,
+      "sha256": "54f528329302bc3030695d90f22d887a5e275f3a4a7ae6180d05af3a7fefcdbc",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_multiprocessing.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_multiprocessing.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 38232,
+      "sha256": "2256ce1a464f02bcb66d66483e8736c784f822967f62cc417b92b834ac17f243",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_overlapped.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_overlapped.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 56800,
+      "sha256": "2152e8ea9353088bed5ea7d623d9117c1eb013eeb94cdf71a4994e08d4706505",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_queue.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_queue.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 35160,
+      "sha256": "3d601a2313c13b1489cfa7838eae8c0ab31ca99f07c62d21a6152203d3e33864",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_socket.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_socket.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 86360,
+      "sha256": "682dfbb04d0183c34a1cf2f174125f8372b9aaed8110e21be1060e3297b43838",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_ssl.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_ssl.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 182104,
+      "sha256": "9d963eece703d3c5e6df0725bc7c9049b4b05485b330f9f6cbe6b7fd7ab9b202",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_uuid.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_uuid.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 27992,
+      "sha256": "ad0f94754c606b6c7ea8133935b9c7345ef79e9dcc37772dc04554a11598a11a",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "_wmi.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/_wmi.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 39768,
+      "sha256": "7a73d404e78ad02d7a5c4818e502a4981a5f8b62b67e374298438d502b0e90e1",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-console-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-console-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22072,
+      "sha256": "88ace577a9c51061cb7d1a36babbbefa48212fadc838ffde98fdfff60de18386",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-datetime-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-datetime-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22056,
+      "sha256": "1bd81dfd19204b44662510d9054852fb77c9f25c1088d647881c9b976cc16818",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-debug-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-debug-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 21944,
+      "sha256": "591358eb4d1531e9563ee0813e4301c552ce364c912ce684d16576eabf195dc3",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-errorhandling-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-errorhandling-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22096,
+      "sha256": "d56ce7b1cd76108ad6c137326ec694a14c99d48c3d7b0ace8c3ff4d9bcee3ce8",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-fibers-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-fibers-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22072,
+      "sha256": "91d249d7bc0e38ef6bcb17158b1fdc6dd8888dc086615c9b8b750b87e52a5fb3",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-fibers-l1-1-1.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-fibers-l1-1-1.dll",
+      "kind": "BINARY",
+      "byteLength": 22072,
+      "sha256": "fc9d86cec621383eab636ebc87ddd3f5c19a3cb2a33d97be112c051d0b275429",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-file-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-file-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 26152,
+      "sha256": "1ca895aba4e7435563a6b43e85eba67a0f8c74aa6a6a94d0fc48fa35535e2585",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-file-l1-2-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-file-l1-2-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22056,
+      "sha256": "4cadbc0c39da7c6722206fdcebd670abe5b8d261e7b041dd94f9397a89d1990d",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-file-l2-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-file-l2-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 21960,
+      "sha256": "93c624b366ba16c643fc8933070a26f03b073ad0cf7f80173266d67536c61989",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-handle-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-handle-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 21944,
+      "sha256": "39095f59c41d76ec81bb2723d646fde4c148e7cc3402f4980d2ade95cb9c84f9",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-heap-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-heap-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22072,
+      "sha256": "8f105771b236dbcb859de271f0a6822ce1cb79c36988dd42c9e3f6f55c5f7eb9",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-interlocked-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-interlocked-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22072,
+      "sha256": "53b25e753ca785bf8b695d89dde5818a318890211dc992a89146f16658f0b606",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-kernel32-legacy-l1-1-1.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-kernel32-legacy-l1-1-1.dll",
+      "kind": "BINARY",
+      "byteLength": 22080,
+      "sha256": "a9b13a1cd1b8c19b0c6b4afcd5bb0dd29c0e2288231ac9e6db8510094ce68ba6",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-libraryloader-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-libraryloader-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22056,
+      "sha256": "7f39ba298b41e4963047341288cab36b6a241835ee11ba4ad70f44dacd40906c",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-localization-l1-2-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-localization-l1-2-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22080,
+      "sha256": "6ee44dd0d8510dc024c9f7c79b1b9fa88c987b26b6beb6653ddd11751c34e5dc",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-memory-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-memory-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22056,
+      "sha256": "0512a35316ec9180437f86696a84c5c06a7e4e82e050055a656e5bf9fca206f9",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-namedpipe-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-namedpipe-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22096,
+      "sha256": "c05f1fffe3b5a2738ea54ce9485cca026fb9635f982626fba1e1dcc531897273",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-processenvironment-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-processenvironment-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 21968,
+      "sha256": "c4eca98c3c67b6395d5b005b00ac1eb0318b86b23aa71035a44c2b1602befba9",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-processthreads-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-processthreads-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22096,
+      "sha256": "5ccb89e93d67bc3288d4e84649c5346e66e15e3d7cd65d989daf3f4cb584be9a",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-processthreads-l1-1-1.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-processthreads-l1-1-1.dll",
+      "kind": "BINARY",
+      "byteLength": 22072,
+      "sha256": "4ad565a8ba3ef0ea8ab87221ad11f83ee0bc844ce236607958406663b407333e",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-profile-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-profile-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22080,
+      "sha256": "7809160932f44e59b021699f5bc68799eb7293ee1fa926d6fcca3c3445302e61",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-rtlsupport-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-rtlsupport-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 21960,
+      "sha256": "9dc1e91e71c7c054854bd1487cb4e6946d82c9f463430f1c4e8d1471005172b1",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-string-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-string-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22056,
+      "sha256": "60fc31d2a0c634412f529dba76af3b9bf991352877c6dae528186d3935704cfd",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-synch-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-synch-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22056,
+      "sha256": "3a72b4f29f39a265d32ad12f0ce15dbf60129c840e10d84d427829ede45e78ad",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-synch-l1-2-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-synch-l1-2-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22080,
+      "sha256": "efc1e4460984a73cf47a3def033af1c8f3b1dbc1a56cd27781d3aacf3e3330cb",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-sysinfo-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-sysinfo-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22072,
+      "sha256": "b203d862ddef1dd62bf623fc866c7f7a9c317c1c2ae30d1f52cb41f955b5698e",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-sysinfo-l1-2-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-sysinfo-l1-2-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22080,
+      "sha256": "2703635d835396afd0f138d7c73751afe7e33a24f4225d08c1690b0a371932c0",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-timezone-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-timezone-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22056,
+      "sha256": "33f4fddc181066fce06b2227bded813f95e94ed1f3d785e982c6b6b56c510c57",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-core-util-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-core-util-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 21944,
+      "sha256": "6eda016742a6171205a387a14b3c0b331841567740376f56768f8c151724207d",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-conio-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-conio-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22056,
+      "sha256": "b762061b688aae679afe788904d2c9970f74a7dac98f3b42463d08f25e483d3f",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-convert-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-convert-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 26056,
+      "sha256": "ebb2ae5535a64f65daeab8235585114fc9dd2cf1a49f5852d446250b998b6ae4",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-environment-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-environment-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22080,
+      "sha256": "17d63275d00bdd8670422b95bd264c532998e0a1b041079e54fce4b6b7a55819",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-filesystem-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-filesystem-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22056,
+      "sha256": "9a9e2a65a281644e368d0f272b95ba5f6b445d1c35910d06056c5ebeb77402db",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-heap-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-heap-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22096,
+      "sha256": "bab9ac3ec83e380ae51e4295ef3bf2c738627812d3a49d1e713661abbc8dc57a",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-locale-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-locale-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22080,
+      "sha256": "bd14c67ea28e21d6257ad780a37122c9b5773f69e693f5db6bffaee4d839526e",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-math-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-math-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 30248,
+      "sha256": "606d66d82db562ea7979179d06486a0f94d079941d26b80a1e2c49d29959df6f",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-process-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-process-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22096,
+      "sha256": "f6156b1020380ec4f0e48577ebedaaef5fb1ab1f337d8b4e72e6a33a7567a9cc",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-runtime-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-runtime-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 26152,
+      "sha256": "c5902934d026d7e15fbe9917d474f3322846a41a25e66f4b2b1f758801879f4b",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-stdio-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-stdio-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 26168,
+      "sha256": "a9c5a153d8c0286f9b41a2b1c65854ad9e6471b8755b7de87bae4470e60bcab6",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-string-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-string-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 26176,
+      "sha256": "25b8f83a7767211b11132775a0e27a45aa4ec8ab4e6572599f9c172ae3606b40",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-time-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-time-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 22096,
+      "sha256": "7c7f6393f06de11750adb09cc5698ae55cd9fb27b2e51e207286feb1b5b2b156",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "api-ms-win-crt-utility-l1-1-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "api-ms-win-crt-utility-l1-1-0.dll",
+      "kind": "BINARY",
+      "byteLength": 21952,
+      "sha256": "d8ba5f17b9ffcbf3aeaf3fa1da226832d2fa90f81acce0cd669464e76ce434ac",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "fontTools/misc/bezierTools.cp313-win_amd64.pyd",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/fontTools/misc/bezierTools.cp313-win_amd64.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 317952,
+      "sha256": "514a5779bb7496ae7eebea1fa72d3132ed57672402f8e1f394d009d870ac5587",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "fontTools/varLib/iup.cp313-win_amd64.pyd",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/fontTools/varLib/iup.cp313-win_amd64.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 129024,
+      "sha256": "67c99f42023db28e3d896ed0d3d8d46f2b5960c8b20176ccf498aad32a5ed3ce",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libbrotlicommon.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libbrotlicommon.dll",
+      "kind": "BINARY",
+      "byteLength": 143429,
+      "sha256": "ca7bc06ead80259971badf2cd0bfc688db9154dad65f139f49a38b4be9976f97",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libbrotlidec.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libbrotlidec.dll",
+      "kind": "BINARY",
+      "byteLength": 62461,
+      "sha256": "a142dc6cfa77cb907028aa9426f486f3d8de37855e8db2ae2894147908121881",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libbz2-1.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libbz2-1.dll",
+      "kind": "BINARY",
+      "byteLength": 100964,
+      "sha256": "b79cd3a7102e359ef6324e98966a67939e58ec2b651ae2847cae84a4dfa453f7",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libcrypto-3.dll",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/libcrypto-3.dll",
+      "kind": "BINARY",
+      "byteLength": 5231472,
+      "sha256": "ccfffddcd3defb8d899026298af9af43bc186130f8483d77e97c93233d5f27d7",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libdatrie-1.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libdatrie-1.dll",
+      "kind": "BINARY",
+      "byteLength": 35033,
+      "sha256": "2f784872e6404e57847201fe1e7e591bd5b5be4a319ef38ebcb36014ac7f385d",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libexpat-1.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libexpat-1.dll",
+      "kind": "BINARY",
+      "byteLength": 235012,
+      "sha256": "8ba8728e1da218d6a1fbaf4d361f01c74666c0c42b6bbc12bb86099efc2d82e3",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libffi-8.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libffi-8.dll",
+      "kind": "BINARY",
+      "byteLength": 35245,
+      "sha256": "50dfc57a84732fd606bd8e77c9966072b4fb0d33dc62167b13db195560d0bb47",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libfontconfig-1.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libfontconfig-1.dll",
+      "kind": "BINARY",
+      "byteLength": 385617,
+      "sha256": "af0a31131dd9e72db6a4a7fa7409cf6c11d15a4e91832a5088cd9b7584281749",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libfreetype-6.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libfreetype-6.dll",
+      "kind": "BINARY",
+      "byteLength": 790651,
+      "sha256": "bbb3e6390ee229c867ef31f10e42a49a61a92e434a11d40c6139a2608ebc6194",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libfribidi-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libfribidi-0.dll",
+      "kind": "BINARY",
+      "byteLength": 156403,
+      "sha256": "84930fd86a3b46b62794a3bbaff21fbbaeaade5ff7cdc70be7f717ad29af87ed",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libgcc_s_seh-1.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libgcc_s_seh-1.dll",
+      "kind": "BINARY",
+      "byteLength": 151732,
+      "sha256": "278f1101f2371c58b6b412a3206718e22343940a5164aceb4fb75f2bf3b38ed4",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libgio-2.0-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libgio-2.0-0.dll",
+      "kind": "BINARY",
+      "byteLength": 1914647,
+      "sha256": "39d25f5149a0b7de6dd113dd1c9b987f85c344b35d70871d62611bbc3d15b820",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libglib-2.0-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libglib-2.0-0.dll",
+      "kind": "BINARY",
+      "byteLength": 1567161,
+      "sha256": "716845eedea56a2f5274e0b64a994a6291ebd5b8e7f0a22b6265dfde5508dc3a",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libgmodule-2.0-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libgmodule-2.0-0.dll",
+      "kind": "BINARY",
+      "byteLength": 26748,
+      "sha256": "3c3bd9e0297e5d45fe6deaae5fec21f49a732d011a0579532321a2a3ece2f6c0",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libgobject-2.0-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libgobject-2.0-0.dll",
+      "kind": "BINARY",
+      "byteLength": 359987,
+      "sha256": "3aa808ff8b908f46a39b3f26ea09baa17cecacd027b68ec99ae090162ef601fd",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libgraphite2.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libgraphite2.dll",
+      "kind": "BINARY",
+      "byteLength": 152538,
+      "sha256": "f927efecd958f0e54a24ae297f86cd6aed05e7fc20e5da0882050ab9ec464395",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libharfbuzz-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libharfbuzz-0.dll",
+      "kind": "BINARY",
+      "byteLength": 1547589,
+      "sha256": "0664a1a918a60349668b88635f1024281c611d4488ae4fadebaea1fb6dc35b66",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libharfbuzz-subset-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libharfbuzz-subset-0.dll",
+      "kind": "BINARY",
+      "byteLength": 1739202,
+      "sha256": "9d0b6c72238c518e8fdde58a5e62624b750ef643b85cdb924ddb2cfaba7565f5",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libiconv-2.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libiconv-2.dll",
+      "kind": "BINARY",
+      "byteLength": 1143148,
+      "sha256": "7a282a854e01be726c6cccfe46f548c716aa45b3014818468253aaa4efbcd067",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libintl-8.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libintl-8.dll",
+      "kind": "BINARY",
+      "byteLength": 298731,
+      "sha256": "0537c3dd2378218508ebe3cc416d72a99ee2d24ae1c5525e23458f32544ef861",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libpango-1.0-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libpango-1.0-0.dll",
+      "kind": "BINARY",
+      "byteLength": 432197,
+      "sha256": "16db44eb7d0c32e1f43337a70100869ff2984395f5d069065a1aedcb19badaa8",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libpangoft2-1.0-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libpangoft2-1.0-0.dll",
+      "kind": "BINARY",
+      "byteLength": 112017,
+      "sha256": "f2fc06cd3f5698afb149cf096bd0033313dba3b4c544cd16558c16377c7a749c",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libpcre2-8-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libpcre2-8-0.dll",
+      "kind": "BINARY",
+      "byteLength": 717955,
+      "sha256": "a499fb8a7eff453d6e4f0842576bc5171d40a1505d8f7f13fff6cee51b738a62",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libpng16-16.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libpng16-16.dll",
+      "kind": "BINARY",
+      "byteLength": 264269,
+      "sha256": "3737838ee8d6b893df7bdabf7439775371a57dce7e17ee6b35586023c64bd9ab",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libssl-3.dll",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/libssl-3.dll",
+      "kind": "BINARY",
+      "byteLength": 794992,
+      "sha256": "007142039f04d04e0ed607bda53de095e5bc6a8a10d26ecedde94ea7d2d7eefe",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libstdc++-6.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libstdc++-6.dll",
+      "kind": "BINARY",
+      "byteLength": 2667040,
+      "sha256": "3529d11c422b2aaf0bbad7221bf62ba7b5a39f854e89a015bb58b6b55a677da1",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libthai-0.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libthai-0.dll",
+      "kind": "BINARY",
+      "byteLength": 72294,
+      "sha256": "5d741974fdec19e0f6cddbcdb539428af0c7392740a056634714c2884157fdb9",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "libwinpthread-1.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "libwinpthread-1.dll",
+      "kind": "BINARY",
+      "byteLength": 64930,
+      "sha256": "961bf868110e487f28357bd77705bd38701fe503b3ab80f5c65fb3ef80254b36",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "pyexpat.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/pyexpat.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 205280,
+      "sha256": "a824463ce25e7d4d00c2a7f5a162dcfeb857aac9ae3a0be6132095c74f21c8f7",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "python3.dll",
+      "sourceClass": "python",
+      "sourceRelativePath": "python3.dll",
+      "kind": "BINARY",
+      "byteLength": 72536,
+      "sha256": "dc725058ee9c23a8ba3d4a99435f7e3115b08eeea58fbc347cdb73327cad4b72",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "python313.dll",
+      "sourceClass": "python",
+      "sourceRelativePath": "python313.dll",
+      "kind": "BINARY",
+      "byteLength": 6124376,
+      "sha256": "dd05f134a2f8126a8cfe8d797b87fa966537b894dd49f93336566f9e8d21d4bd",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "select.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/select.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 33112,
+      "sha256": "9d3a0041948ad362a3db15a83fa163ad71bfd6283b7461b7fd9fafa27dc7106f",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "ucrtbase.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "ucrtbase.dll",
+      "kind": "BINARY",
+      "byteLength": 1361448,
+      "sha256": "2e5fb14b7bf8540278f3614a12f0226e56a7cc9e64b81cbd976c6fcf2f71cbfb",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "unicodedata.pyd",
+      "sourceClass": "python",
+      "sourceRelativePath": "DLLs/unicodedata.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 712024,
+      "sha256": "9ce0fc32072769ccb8efcb7c0da10619e4fae5c5eee87b95c79b42024f9aa899",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "zlib1.dll",
+      "sourceClass": "native",
+      "sourceRelativePath": "zlib1.dll",
+      "kind": "BINARY",
+      "byteLength": 128488,
+      "sha256": "93e9243a44c29200eeacaf9658efe2558581770e4b11ca4b500e18e424a6e3b5",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "zopfli.libs/msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/zopfli.libs/msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll",
+      "kind": "BINARY",
+      "byteLength": 575056,
+      "sha256": "a4c2229bdc2a2a630acdc095b4d86008e5c3e3bc7773174354f3da4f5beb9cde",
+      "licenseStatus": "release-review-required"
+    },
+    {
+      "destination": "zopfli/zopfli.pyd",
+      "sourceClass": "environment",
+      "sourceRelativePath": "Lib/site-packages/zopfli/zopfli.pyd",
+      "kind": "EXTENSION",
+      "byteLength": 186368,
+      "sha256": "1f26ea1db2160e928f3cf0a2f07beb3a694ba82a0249005e3cdc24fbf03f7f18",
+      "licenseStatus": "release-review-required"
+    }
+  ]
+}

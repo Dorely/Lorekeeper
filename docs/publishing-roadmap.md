@@ -177,7 +177,7 @@ and
 
 #### 1a. PDF/X fallback conformance spike
 
-Status: `Planned`
+Status: `Preview` — reduced-scope renderer accepted on 2026-07-30
 
 Repeat Feature 1's conformance and release gates with WeasyPrint 69 as the lead
 free fallback. Its current BSD-licensed API exposes PDF/X-1a, PDF/X-3, PDF/X-4,
@@ -199,6 +199,20 @@ Additional deliverables:
 
 Gate: Feature 2 remains blocked until this fallback passes or a subsequent
 candidate is explicitly accepted with a reduced certified scope.
+
+Outcome: exact-pinned WeasyPrint 69 generated a contained Windows x64 PDF 1.3
+interior and wrap cover that declare PDF/X-1a:2001 and pass Lorekeeper's
+structural inspection. The stock WeasyPrint PDF/X-1a mode targets the wrong
+2003 revision, so the accepted adapter is exact-version-pinned and must be
+revalidated on every renderer change. The redistributable basICColor fixture
+profile and dependency graph are fingerprinted. External Acrobat/vendor,
+physical-proof, macOS packaging, and complete native-notice gates remain open;
+therefore no conformance or vendor claim is made. This explicit reduced
+`Preview` acceptance unblocks Feature 2 while reserving `Verified` for Feature
+7's external evidence. See
+[`research/weasyprint-pdfx-fallback-spike.md`](research/weasyprint-pdfx-fallback-spike.md)
+and
+[`decisions/0002-accept-weasyprint-for-preview-press-runtime.md`](decisions/0002-accept-weasyprint-for-preview-press-runtime.md).
 
 #### 2. Structured manuscript schema and migration
 

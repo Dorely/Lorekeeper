@@ -1,0 +1,114 @@
+{
+    "schemaVersion":  1,
+    "pythonVersion":  "3.13.6",
+    "pythonExecutableSha256":  "91566dc8bb9a336c36c607ee0d5a5135e54ddce2418e2cd7728a49c8f098904a",
+    "weasyPrintVersion":  "69.0",
+    "pyInstallerVersion":  "6.21.0",
+    "nativeArchiveSha256":  "330101ff3ea50ebde4abf805283b6d703d5f3d71c77c983db94357ec4524a3ef",
+    "nativeSourceManifest":  {
+                                 "sha256":  "56a284531e4da7f448822f8c77b2190f2e87edb62e3976f67d298f173a2ad5a7",
+                                 "binaryCount":  204
+                             },
+    "executable":  {
+                       "byteLength":  30753243,
+                       "sha256":  "be7e6918feaa19abc3b4f2ee7c203b34e8200e1d8a0fd0e4f8e6a0167d439ce7"
+                   },
+    "binaryInventory":  {
+                            "sha256":  "d4b2f5c96fc62db68ac3218325d8d9a29630c21eade178a5937b5c1d6a6a0aa2",
+                            "binaryCount":  105,
+                            "uncontrolledBinaryCount":  0,
+                            "releaseLicenseGatePassed":  false
+                        },
+    "fontInputs":  [
+                       {
+                           "name":  "LiberationSerif-Regular.ttf",
+                           "sha256":  "a82e5f4350d6b66d44d1c77f718d7c658a23ae6097c115748f5ab58c0723af59"
+                       },
+                       {
+                           "name":  "LiberationSerif-Bold.ttf",
+                           "sha256":  "1226cecb60336d5ab5401c8ecb608cd93fe2576df85ec1f2410eac524878323c"
+                       },
+                       {
+                           "name":  "Liberation Fonts LICENSE",
+                           "sha256":  "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b"
+                       }
+                   ],
+    "sourceFiles":  [
+                        {
+                            "path":  "assets/fonts.conf",
+                            "sha256":  "822f71fffd907de7a445c93c5ea00148e3561107bd1ae390081fee4cb6ea2d06"
+                        },
+                        {
+                            "path":  "launcher.py",
+                            "sha256":  "642215ff9abc9f32ab2ec052d2734034a22e934fc088b905689d1a9d1adebf32"
+                        },
+                        {
+                            "path":  "pyproject.toml",
+                            "sha256":  "bec77aaaa0fc2d889244578893268007fc005b9a066c74dc2f0f010fefdac697"
+                        },
+                        {
+                            "path":  "scripts/audit-pyinstaller-binaries.py",
+                            "sha256":  "f8c37a18e72be8c6aede07026b006050e02ef9195808022655b72f975b4cc743"
+                        },
+                        {
+                            "path":  "scripts/build-windows-spike.ps1",
+                            "sha256":  "9fa47f091bbf1cb91fb14f12b8fcf3ce2b5c2cb9f18c128f821e6eed9cfd0ad2"
+                        },
+                        {
+                            "path":  "scripts/extract-pyinstaller-native.py",
+                            "sha256":  "fcd41ee47247c9c5899d8ace04827eb90057be83097c981daa62584509ea1739"
+                        },
+                        {
+                            "path":  "scripts/generate-license-inventory.py",
+                            "sha256":  "923a9978ff838591e8baee379c1ac8c914851260f0e3520696675d1503414d76"
+                        },
+                        {
+                            "path":  "scripts/verify-artifacts.py",
+                            "sha256":  "462459fdd663c2397cc12f856a89eaf4b7e2c3dac37ee900ff10acdfdebe141a"
+                        },
+                        {
+                            "path":  "scripts/verify-spike.ps1",
+                            "sha256":  "fff0d692dad19a56f1175241544e46aa8ee40bfe5fa69fbb73748807b68916ca"
+                        },
+                        {
+                            "path":  "src/lorekeeper_press_weasy/__init__.py",
+                            "sha256":  "9519501f93f4d2305fbc0dde6a16ee6746127813d4a479043ad72981029aa312"
+                        },
+                        {
+                            "path":  "src/lorekeeper_press_weasy/geometry.py",
+                            "sha256":  "c8f3c209b494386e37812627cf88ac0a9476e5b7354101b84a79276925cfa71d"
+                        },
+                        {
+                            "path":  "src/lorekeeper_press_weasy/inspect.py",
+                            "sha256":  "dccbda6de827d471411bd1e1f63ed599d8ae3eedb3026679cd47839f26c47a3e"
+                        },
+                        {
+                            "path":  "src/lorekeeper_press_weasy/main.py",
+                            "sha256":  "ae635fc35942e79941cf4c59c1ee940b17e592996c34af5bd14db06d528c46c8"
+                        },
+                        {
+                            "path":  "src/lorekeeper_press_weasy/pdfx.py",
+                            "sha256":  "3b635d5ec029b9ff615d6176a15ad5f5e48150ef78dbff2fbc1f0d9ea044b640"
+                        },
+                        {
+                            "path":  "src/lorekeeper_press_weasy/protocol.py",
+                            "sha256":  "5ff7cda32f80229c197c4ec1118c7d1face0e100ccba9a141c02f7c77c8e03a9"
+                        },
+                        {
+                            "path":  "src/lorekeeper_press_weasy/render.py",
+                            "sha256":  "acb185eae32cdf9eadc18db1700d1146b8aaef9a985e6b16b2abf55ba810f73d"
+                        },
+                        {
+                            "path":  "src/lorekeeper_press_weasy/startup.py",
+                            "sha256":  "d4f899c25c79b5702a7972e2ae2826a50d0a82ad7adffd876aec19ca0bb65e86"
+                        },
+                        {
+                            "path":  "src/lorekeeper_press_weasy/storage.py",
+                            "sha256":  "b5ea401691c4e792d4634a87469c97ac55d0f636d3986d8468c6e2ade45130f1"
+                        },
+                        {
+                            "path":  "uv.lock",
+                            "sha256":  "2c6f435e9a6802fe2f9896a9f85b8b515eb30d846ee34dd74565f337fbca3a6f"
+                        }
+                    ]
+}

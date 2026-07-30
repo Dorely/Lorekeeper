@@ -1,0 +1,776 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "Lorekeeper.Press.Weasy/uv.lock",
+  "scope": "Locked Python packages and license files installed for the Windows x64 fallback fixture; conditional non-Windows packages remain listed but require target-native release inventory.",
+  "legalAdvice": false,
+  "packages": [
+    {
+      "name": "altgraph",
+      "version": "0.17.5",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/7e/f8/97fdf103f38fed6792a1601dbc16cc8aac56e7459a9fff08c812d8ae177a/altgraph-0.17.5.tar.gz",
+        "hash": "sha256:c87b395dd12fabde9c99573a9749d67da8d29ef9de0125c7f536699b4a9bc9e7",
+        "size": 48428,
+        "upload-time": "2025-11-21T20:35:50.583Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": "MIT",
+      "projectUrl": "https://altgraph.readthedocs.io",
+      "projectUrls": [
+        "Documentation, https://altgraph.readthedocs.io/en/latest/",
+        "Issue tracker, https://github.com/ronaldoussoren/altgraph/issues",
+        "Repository, https://github.com/ronaldoussoren/altgraph"
+      ],
+      "licenseFiles": [
+        {
+          "path": "altgraph-0.17.5.dist-info/LICENSE",
+          "sha256": "6c194d6db0c64d45535d10c95142b9b0cda7b7dcc7f1ddee302b3d536f3dbe46",
+          "byteLength": 1002
+        }
+      ]
+    },
+    {
+      "name": "brotli",
+      "version": "1.2.0",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/f7/16/c92ca344d646e71a43b8bb353f0a6490d7f6e06210f8554c8f874e454285/brotli-1.2.0.tar.gz",
+        "hash": "sha256:e310f77e41941c13340a95976fe66a8a95b01e783d430eeaf7a2f87e0a57dd0a",
+        "size": 7388632,
+        "upload-time": "2025-11-05T18:39:42.86Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": "MIT",
+      "projectUrl": "https://github.com/google/brotli",
+      "projectUrls": [],
+      "licenseFiles": [
+        {
+          "path": "brotli-1.2.0.dist-info/licenses/LICENSE",
+          "sha256": "60ae0f13e76cc2eaaa108677eefa4ce16b647f6bbe8cf0a1ac9429d82eca7248",
+          "byteLength": 1103
+        }
+      ]
+    },
+    {
+      "name": "brotlicffi",
+      "version": "1.2.0.1",
+      "installedInWindowsFixture": false,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/8a/b6/017dc5f852ed9b8735af77774509271acbf1de02d238377667145fcee01d/brotlicffi-1.2.0.1.tar.gz",
+        "hash": "sha256:c20d5c596278307ad06414a6d95a892377ea274a5c6b790c2548c009385d621c",
+        "size": 478156,
+        "upload-time": "2026-03-05T19:54:11.547Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [],
+      "licenseFiles": []
+    },
+    {
+      "name": "cffi",
+      "version": "2.0.0",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz",
+        "hash": "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529",
+        "size": 523588,
+        "upload-time": "2025-09-08T23:24:04.541Z"
+      },
+      "licenseExpression": "MIT",
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Changelog, https://cffi.readthedocs.io/en/latest/whatsnew.html",
+        "Contact, https://groups.google.com/forum/#!forum/python-cffi",
+        "Documentation, https://cffi.readthedocs.io/",
+        "Downloads, https://github.com/python-cffi/cffi/releases",
+        "Issue Tracker, https://github.com/python-cffi/cffi/issues",
+        "Source Code, https://github.com/python-cffi/cffi"
+      ],
+      "licenseFiles": [
+        {
+          "path": "cffi-2.0.0.dist-info/licenses/AUTHORS",
+          "sha256": "2a67a60bbfb33759d67d645ff131b8e6d6bc4cafc232d751fcac3eda4d314cc8",
+          "byteLength": 208
+        },
+        {
+          "path": "cffi-2.0.0.dist-info/licenses/LICENSE",
+          "sha256": "5ba24ddc57067f9249add644c3afc41a5d6dc37e23433ef759d95df370b0af63",
+          "byteLength": 1123
+        }
+      ]
+    },
+    {
+      "name": "cssselect2",
+      "version": "0.9.0",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/e0/20/92eaa6b0aec7189fa4b75c890640e076e9e793095721db69c5c81142c2e1/cssselect2-0.9.0.tar.gz",
+        "hash": "sha256:759aa22c216326356f65e62e791d66160a0f9c91d1424e8d8adc5e74dddfc6fb",
+        "size": 35595,
+        "upload-time": "2026-02-12T17:16:39.614Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Changelog, https://github.com/Kozea/cssselect2/releases",
+        "Code, https://github.com/Kozea/cssselect2/",
+        "Documentation, https://doc.courtbouillon.org/cssselect2/",
+        "Donation, https://opencollective.com/courtbouillon",
+        "Homepage, https://doc.courtbouillon.org/cssselect2/",
+        "Issues, https://github.com/Kozea/cssselect2/issues"
+      ],
+      "licenseFiles": [
+        {
+          "path": "cssselect2-0.9.0.dist-info/licenses/LICENSE",
+          "sha256": "6fd97229a1d1b0f6a8b41e109f413426dbc0874b1e03746d66cc33282601c2c2",
+          "byteLength": 1548
+        }
+      ]
+    },
+    {
+      "name": "fonttools",
+      "version": "4.63.0",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/84/69/c97f2c18e0db87d2c7b15da1974dace76ae938f1cfa22e2727a648b7ed43/fonttools-4.63.0.tar.gz",
+        "hash": "sha256:caeb583deeb5168e694b65cda8b4ee62abedfa66cf88488734466f2366b9c4e0",
+        "size": 3597189,
+        "upload-time": "2026-05-14T12:04:30.958Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": "MIT",
+      "projectUrl": "http://github.com/fonttools/fonttools",
+      "projectUrls": [],
+      "licenseFiles": [
+        {
+          "path": "fonttools-4.63.0.dist-info/licenses/LICENSE",
+          "sha256": "22bef80697ecfaa17f97e62b9a26dfa12820be05583e8dd12ad169b241274c99",
+          "byteLength": 1093
+        },
+        {
+          "path": "fonttools-4.63.0.dist-info/licenses/LICENSE.external",
+          "sha256": "b082a5f86775b2641f01bccb8b9c82908481de5f502bb254b1e13bfc2a9f303d",
+          "byteLength": 20410
+        }
+      ]
+    },
+    {
+      "name": "macholib",
+      "version": "1.16.4",
+      "installedInWindowsFixture": false,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/10/2f/97589876ea967487978071c9042518d28b958d87b17dceb7cdc1d881f963/macholib-1.16.4.tar.gz",
+        "hash": "sha256:f408c93ab2e995cd2c46e34fe328b130404be143469e41bc366c807448979362",
+        "size": 59427,
+        "upload-time": "2025-11-22T08:28:38.373Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [],
+      "licenseFiles": []
+    },
+    {
+      "name": "packaging",
+      "version": "26.2",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz",
+        "hash": "sha256:ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661",
+        "size": 228134,
+        "upload-time": "2026-04-24T20:15:23.917Z"
+      },
+      "licenseExpression": "Apache-2.0 OR BSD-2-Clause",
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Documentation, https://packaging.pypa.io/",
+        "Source, https://github.com/pypa/packaging"
+      ],
+      "licenseFiles": [
+        {
+          "path": "packaging-26.2.dist-info/licenses/LICENSE",
+          "sha256": "cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48",
+          "byteLength": 197
+        },
+        {
+          "path": "packaging-26.2.dist-info/licenses/LICENSE.APACHE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "byteLength": 10174
+        },
+        {
+          "path": "packaging-26.2.dist-info/licenses/LICENSE.BSD",
+          "sha256": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5",
+          "byteLength": 1344
+        }
+      ]
+    },
+    {
+      "name": "pefile",
+      "version": "2024.8.26",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/03/4f/2750f7f6f025a1507cd3b7218691671eecfd0bbebebe8b39aa0fe1d360b8/pefile-2024.8.26.tar.gz",
+        "hash": "sha256:3ff6c5d8b43e8c37bb6e6dd5085658d658a7a0bdcd20b6a07b1fcfc1c4e9d632",
+        "size": 76008,
+        "upload-time": "2024-08-26T20:58:38.155Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": "MIT",
+      "projectUrl": "https://github.com/erocarrera/pefile",
+      "projectUrls": [],
+      "licenseFiles": [
+        {
+          "path": "pefile-2024.8.26.dist-info/LICENSE",
+          "sha256": "b44409c067c6da52bfb54bb6624fb11a7b52157c3a13ae1400232f8196e86ad3",
+          "byteLength": 1083
+        }
+      ]
+    },
+    {
+      "name": "pillow",
+      "version": "12.3.0",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/1c/3d/bb7fca845737cf9d7dbde16ed1843984665ff2e0a518f5db43e77ec540b9/pillow-12.3.0.tar.gz",
+        "hash": "sha256:3b8182a766685eaa002637e28b4ec8d6b18819a0c71f579bf0dbaa5830297cce",
+        "size": 47025035,
+        "upload-time": "2026-07-01T11:56:38.965Z"
+      },
+      "licenseExpression": "MIT-CMU",
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Changelog, https://github.com/python-pillow/Pillow/releases",
+        "Documentation, https://pillow.readthedocs.io",
+        "Funding, https://tidelift.com/subscription/pkg/pypi-pillow?utm_source=pypi-pillow&utm_medium=pypi",
+        "Homepage, https://python-pillow.github.io",
+        "Mastodon, https://fosstodon.org/@pillow",
+        "Release notes, https://pillow.readthedocs.io/en/stable/releasenotes/index.html",
+        "Source, https://github.com/python-pillow/Pillow"
+      ],
+      "licenseFiles": [
+        {
+          "path": "pillow-12.3.0.dist-info/licenses/LICENSE",
+          "sha256": "4f7866a74802c6326f81faff59a56546b6aec2b10b91973e0e9308de95e79857",
+          "byteLength": 78016
+        }
+      ]
+    },
+    {
+      "name": "pycparser",
+      "version": "3.0",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/1b/7d/92392ff7815c21062bea51aa7b87d45576f649f16458d78b7cf94b9ab2e6/pycparser-3.0.tar.gz",
+        "hash": "sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29",
+        "size": 103492,
+        "upload-time": "2026-01-21T14:26:51.89Z"
+      },
+      "licenseExpression": "BSD-3-Clause",
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Homepage, https://github.com/eliben/pycparser"
+      ],
+      "licenseFiles": [
+        {
+          "path": "pycparser-3.0.dist-info/licenses/LICENSE",
+          "sha256": "0c846399369ea76ddd7b5c44fe6d16497415fcf015f5cbb508c24bf98b81c5b1",
+          "byteLength": 1543
+        }
+      ]
+    },
+    {
+      "name": "pydyf",
+      "version": "0.12.1",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/36/ee/fb410c5c854b6a081a49077912a9765aeffd8e07cbb0663cfda310b01fb4/pydyf-0.12.1.tar.gz",
+        "hash": "sha256:fbd7e759541ac725c29c506612003de393249b94310ea78ae44cb1d04b220095",
+        "size": 17716,
+        "upload-time": "2025-12-02T14:52:14.244Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Changelog, https://github.com/CourtBouillon/pydyf/releases",
+        "Code, https://github.com/CourtBouillon/pydyf",
+        "Documentation, https://doc.courtbouillon.org/pydyf/",
+        "Donation, https://opencollective.com/courtbouillon",
+        "Homepage, https://www.courtbouillon.org/pydyf",
+        "Issues, https://github.com/CourtBouillon/pydyf/issues"
+      ],
+      "licenseFiles": [
+        {
+          "path": "pydyf-0.12.1.dist-info/licenses/LICENSE",
+          "sha256": "75461e438973e1ba0f93a7de9e3fe5b2f49e1ab49251d392878a9cdae8ce7e47",
+          "byteLength": 1521
+        }
+      ]
+    },
+    {
+      "name": "pyinstaller",
+      "version": "6.21.0",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/d5/4d/ec706c3fcf39e26888c35b39615ff4d5865d184069666c47492cff1fbe50/pyinstaller-6.21.0.tar.gz",
+        "hash": "sha256:bb9fab705983e393a2d1cac77d6972513057ad800215fd861dc15ff5272e98fd",
+        "size": 4061519,
+        "upload-time": "2026-06-13T14:15:06.25Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": "GPLv2-or-later with a special exception which allows to use PyInstaller to build and distribute non-free programs (including commercial ones)",
+      "projectUrl": null,
+      "projectUrls": [
+        "Documentation, https://pyinstaller.org",
+        "Homepage, https://pyinstaller.org",
+        "Release Notes, https://pyinstaller.org/en/stable/CHANGES.html",
+        "Source Code, https://github.com/pyinstaller/pyinstaller"
+      ],
+      "licenseFiles": [
+        {
+          "path": "pyinstaller-6.21.0.dist-info/licenses/COPYING.txt",
+          "sha256": "dcf75fdb959db1e3b41c0f8505069d2ece781b5ec6b3d0a4d30975cfc6580245",
+          "byteLength": 32138
+        }
+      ]
+    },
+    {
+      "name": "pyinstaller-hooks-contrib",
+      "version": "2026.6",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/94/5b/c9fe0db5e83ee1c39b2258fa21d23b15e1a60786b6c5990ee5074ead8bb6/pyinstaller_hooks_contrib-2026.6.tar.gz",
+        "hash": "sha256:bef5002c32f4f50bd55b005da12cff64eca8783e7eaf86a06a62410164bab725",
+        "size": 173354,
+        "upload-time": "2026-06-08T22:37:16.152Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": null,
+      "projectUrl": "https://github.com/pyinstaller/pyinstaller-hooks-contrib",
+      "projectUrls": [],
+      "licenseFiles": [
+        {
+          "path": "pyinstaller_hooks_contrib-2026.6.dist-info/licenses/LICENSE",
+          "sha256": "91d0baaff00773038e72c0a1fc9d5d2d38706b7a2b9c04f34296608f931b9cd0",
+          "byteLength": 27666
+        }
+      ]
+    },
+    {
+      "name": "pypdf",
+      "version": "6.14.2",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/03/72/7dfd5ff1c9c37de97a731701f51af091325f123d9d4270361c9c69e4431f/pypdf-6.14.2.tar.gz",
+        "hash": "sha256:7873f502fe4385e79539b21d872392dc0c4e3714327c15881cbc7fbfd1f95b25",
+        "size": 6491182,
+        "upload-time": "2026-06-23T14:18:30.859Z"
+      },
+      "licenseExpression": "BSD-3-Clause",
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Bug Reports, https://github.com/py-pdf/pypdf/issues",
+        "Changelog, https://pypdf.readthedocs.io/en/latest/meta/CHANGELOG.html",
+        "Documentation, https://pypdf.readthedocs.io/en/latest/",
+        "Source, https://github.com/py-pdf/pypdf"
+      ],
+      "licenseFiles": [
+        {
+          "path": "pypdf-6.14.2.dist-info/licenses/LICENSE",
+          "sha256": "a97ac230e5f33ef10a5367a850eb01f91f1a0b064e34742c7794d2294557f524",
+          "byteLength": 1605
+        }
+      ]
+    },
+    {
+      "name": "pyphen",
+      "version": "0.17.2",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/69/56/e4d7e1bd70d997713649c5ce530b2d15a5fc2245a74ca820fc2d51d89d4d/pyphen-0.17.2.tar.gz",
+        "hash": "sha256:f60647a9c9b30ec6c59910097af82bc5dd2d36576b918e44148d8b07ef3b4aa3",
+        "size": 2079470,
+        "upload-time": "2025-01-20T13:18:36.296Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Changelog, https://github.com/Kozea/Pyphen/releases",
+        "Code, https://github.com/Kozea/Pyphen",
+        "Documentation, https://pyphen.org/",
+        "Donation, https://opencollective.com/courtbouillon",
+        "Homepage, https://www.courtbouillon.org/pyphen",
+        "Issues, https://github.com/Kozea/Pyphen/issues"
+      ],
+      "licenseFiles": [
+        {
+          "path": "pyphen-0.17.2.dist-info/COPYING.GPL",
+          "sha256": "2233a3eecf299bc271f1a9f57f0b3198343ad4ab16571d70320133002c51496b",
+          "byteLength": 18325
+        },
+        {
+          "path": "pyphen-0.17.2.dist-info/COPYING.LGPL",
+          "sha256": "5bbcbb737e60fe9deba08ecbd00920cfcc3403ba2e534c64fdeea49d6bb87509",
+          "byteLength": 26532
+        },
+        {
+          "path": "pyphen-0.17.2.dist-info/COPYING.MPL",
+          "sha256": "ad192a67649aa23ac9681939840f4f241643a98da9cd8aec8de28c3b8c6ee854",
+          "byteLength": 25754
+        },
+        {
+          "path": "pyphen-0.17.2.dist-info/LICENSE",
+          "sha256": "4fd1c78fcec632bc872ba7b42ba04be330029cfffa411039b48a4f2262bb8240",
+          "byteLength": 384
+        }
+      ]
+    },
+    {
+      "name": "pywin32-ctypes",
+      "version": "0.2.3",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/85/9f/01a1a99704853cb63f253eea009390c88e7131c67e66a0a02099a8c917cb/pywin32-ctypes-0.2.3.tar.gz",
+        "hash": "sha256:d162dc04946d704503b2edc4d55f3dba5c1d539ead017afa00142c38b9885755",
+        "size": 29471,
+        "upload-time": "2024-08-14T10:15:34.626Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": "BSD-3-Clause",
+      "projectUrl": "https://github.com/enthought/pywin32-ctypes",
+      "projectUrls": [],
+      "licenseFiles": [
+        {
+          "path": "pywin32_ctypes-0.2.3.dist-info/LICENSE.txt",
+          "sha256": "dfa83b3e2709adfcdb838d9ad55823ca674abb780e60563d9dd9544ccbf785e9",
+          "byteLength": 1644
+        }
+      ]
+    },
+    {
+      "name": "setuptools",
+      "version": "83.0.0",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/34/26/f5d29e25ffdb535afef2d35cdb55b325298f96debd670da4c325e08d70f4/setuptools-83.0.0.tar.gz",
+        "hash": "sha256:025bccbbf0fa05b6192bc64ae1e7b16e001fd6d6d4d5de03c97b1c1ade523bef",
+        "size": 1154254,
+        "upload-time": "2026-07-04T15:31:22.699Z"
+      },
+      "licenseExpression": "MIT",
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Changelog, https://setuptools.pypa.io/en/stable/history.html",
+        "Documentation, https://setuptools.pypa.io/",
+        "Source, https://github.com/pypa/setuptools"
+      ],
+      "licenseFiles": [
+        {
+          "path": "setuptools-83.0.0.dist-info/licenses/LICENSE",
+          "sha256": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+          "byteLength": 1023
+        },
+        {
+          "path": "setuptools/_vendor/autocommand-2.2.2.dist-info/LICENSE",
+          "sha256": "ade78d04982d69972d444a8e14a94f87a2334dd3855cc80348ea8e240aa0df2d",
+          "byteLength": 7634
+        },
+        {
+          "path": "setuptools/_vendor/backports.tarfile-1.2.0.dist-info/LICENSE",
+          "sha256": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+          "byteLength": 1023
+        },
+        {
+          "path": "setuptools/_vendor/importlib_metadata-8.7.1.dist-info/licenses/LICENSE",
+          "sha256": "458502e12d97bbf64438606a20044aa85eb05fb0a8a807bb35dbec253fd1fc04",
+          "byteLength": 10278
+        },
+        {
+          "path": "setuptools/_vendor/jaraco.text-4.0.0.dist-info/LICENSE",
+          "sha256": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+          "byteLength": 1023
+        },
+        {
+          "path": "setuptools/_vendor/jaraco_context-6.1.0.dist-info/licenses/LICENSE",
+          "sha256": "9755a18519666e5f0f4cae3daad3d7012bcae48a600b31237d75e9fe134e6683",
+          "byteLength": 1076
+        },
+        {
+          "path": "setuptools/_vendor/jaraco_functools-4.4.0.dist-info/licenses/LICENSE",
+          "sha256": "5a57cb4db85e2a2dd88c290628908add57e3451449e0a9a71fdfb38776fd759d",
+          "byteLength": 1076
+        },
+        {
+          "path": "setuptools/_vendor/more_itertools-10.8.0.dist-info/licenses/LICENSE",
+          "sha256": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+          "byteLength": 1053
+        },
+        {
+          "path": "setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE",
+          "sha256": "cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48",
+          "byteLength": 197
+        },
+        {
+          "path": "setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE.APACHE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "byteLength": 10174
+        },
+        {
+          "path": "setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE.BSD",
+          "sha256": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5",
+          "byteLength": 1344
+        },
+        {
+          "path": "setuptools/_vendor/platformdirs-4.4.0.dist-info/licenses/LICENSE",
+          "sha256": "29e0fd62e929850e86eb28c3fdccf0cefdf4fa94879011cffb3d0d4bed6d4db6",
+          "byteLength": 1089
+        },
+        {
+          "path": "setuptools/_vendor/tomli-2.4.0.dist-info/licenses/LICENSE",
+          "sha256": "b80816b0d530b8accb4c2211783790984a6e3b61922c2b5ee92f3372ab2742fe",
+          "byteLength": 1072
+        },
+        {
+          "path": "setuptools/_vendor/wheel-0.46.3.dist-info/licenses/LICENSE.txt",
+          "sha256": "30c23618679108f3e8ea1d2a658c7ca417bdfc891c98ef1a89fa4ff0c9828654",
+          "byteLength": 1107
+        },
+        {
+          "path": "setuptools/_vendor/zipp-3.23.0.dist-info/licenses/LICENSE",
+          "sha256": "5a57cb4db85e2a2dd88c290628908add57e3451449e0a9a71fdfb38776fd759d",
+          "byteLength": 1076
+        },
+        {
+          "path": "setuptools/config/_validate_pyproject/NOTICE",
+          "sha256": "09c9bcea95ca086f8bc5bed174e40bc835b297d40fb5f86bbbb570fe0a5581a7",
+          "byteLength": 18737
+        },
+        {
+          "path": "setuptools/config/NOTICE",
+          "sha256": "2dddf08818297a3b89d43d95ff659d8da85741108c9136dfa3a4d856c0623bd8",
+          "byteLength": 493
+        }
+      ]
+    },
+    {
+      "name": "tinycss2",
+      "version": "1.5.1",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/a3/ae/2ca4913e5c0f09781d75482874c3a95db9105462a92ddd303c7d285d3df2/tinycss2-1.5.1.tar.gz",
+        "hash": "sha256:d339d2b616ba90ccce58da8495a78f46e55d4d25f9fd71dfd526f07e7d53f957",
+        "size": 88195,
+        "upload-time": "2025-11-23T10:29:10.082Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Changelog, https://github.com/Kozea/tinycss2/releases",
+        "Code, https://github.com/Kozea/tinycss2/",
+        "Documentation, https://doc.courtbouillon.org/tinycss2/",
+        "Donation, https://opencollective.com/courtbouillon",
+        "Homepage, https://www.courtbouillon.org/tinycss2",
+        "Issues, https://github.com/Kozea/tinycss2/issues"
+      ],
+      "licenseFiles": [
+        {
+          "path": "tinycss2-1.5.1.dist-info/licenses/LICENSE",
+          "sha256": "6b94acee20ec9f2709333134f3ba70322535fb420af0ce8c1455d9cbe297f1d5",
+          "byteLength": 1534
+        }
+      ]
+    },
+    {
+      "name": "tinyhtml5",
+      "version": "2.1.0",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/b1/1f/cfe2f6b30557c92b3f31d41707e09cef5c1efbd87392bc6c0430c46b0e4d/tinyhtml5-2.1.0.tar.gz",
+        "hash": "sha256:60a50ec3d938a37e491efa01af895853060943dcebb5627de5b10d188b338a67",
+        "size": 179242,
+        "upload-time": "2026-03-05T17:06:30.704Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Changelog, https://github.com/CourtBouillon/tinyhtml5/releases",
+        "Code, https://github.com/CourtBouillon/tinyhtml5",
+        "Documentation, https://doc.courtbouillon.org/tinyhtml5/",
+        "Donation, https://opencollective.com/courtbouillon",
+        "Homepage, https://github.com/CourtBouillon/tinyhtml5",
+        "Issues, https://github.com/CourtBouillon/tinyhtml5/issues"
+      ],
+      "licenseFiles": [
+        {
+          "path": "tinyhtml5-2.1.0.dist-info/licenses/LICENSE",
+          "sha256": "16a39991619e92f18680932da2a9199fdf7d95df3ecaedc52ea06218aabafd6f",
+          "byteLength": 1084
+        }
+      ]
+    },
+    {
+      "name": "weasyprint",
+      "version": "69.0",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/59/53/dcc3885c2f7a47faa45f6b8b801412f5f9e055173a52801ef01c09943c5a/weasyprint-69.0.tar.gz",
+        "hash": "sha256:a7a32f39ca16bd82ef11de99c92ea4b5f14951c9033af035e451ce4f4ee0a88c",
+        "size": 1549834,
+        "upload-time": "2026-06-02T14:42:17.765Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": null,
+      "projectUrl": null,
+      "projectUrls": [
+        "Changelog, https://github.com/Kozea/WeasyPrint/releases",
+        "Code, https://github.com/Kozea/WeasyPrint",
+        "Documentation, https://doc.courtbouillon.org/weasyprint/",
+        "Donation, https://opencollective.com/courtbouillon",
+        "Homepage, https://weasyprint.org/",
+        "Issues, https://github.com/Kozea/WeasyPrint/issues"
+      ],
+      "licenseFiles": [
+        {
+          "path": "weasyprint-69.0.dist-info/licenses/LICENSE",
+          "sha256": "bfd14eccfa6100575460e685556b183399d4bd335904e3c9521b0116d21c54da",
+          "byteLength": 1534
+        }
+      ]
+    },
+    {
+      "name": "webencodings",
+      "version": "0.5.1",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/0b/02/ae6ceac1baeda530866a85075641cec12989bd8d31af6d5ab4a3e8c92f47/webencodings-0.5.1.tar.gz",
+        "hash": "sha256:b36a1c245f2d304965eb4e0a82848379241dc04b865afcc4aab16748587e1923",
+        "size": 9721,
+        "upload-time": "2017-04-05T20:21:34.189Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": "BSD",
+      "projectUrl": "https://github.com/SimonSapin/python-webencodings",
+      "projectUrls": [],
+      "licenseFiles": []
+    },
+    {
+      "name": "zopfli",
+      "version": "0.4.3",
+      "installedInWindowsFixture": true,
+      "source": {
+        "registry": "https://pypi.org/simple"
+      },
+      "sdist": {
+        "url": "https://files.pythonhosted.org/packages/74/21/3b6af43a663b22b00e738bb0642931a2579e15da6852613d56c6aa535d28/zopfli-0.4.3.tar.gz",
+        "hash": "sha256:d3a50f91a13cea9bafe025de8fd87a005eb26de02a4f0c193127ddbf23ac8ebe",
+        "size": 179156,
+        "upload-time": "2026-06-10T09:10:19.96Z"
+      },
+      "licenseExpression": null,
+      "legacyLicense": "Apache-2.0",
+      "projectUrl": "https://github.com/fonttools/py-zopfli",
+      "projectUrls": [],
+      "licenseFiles": [
+        {
+          "path": "zopfli-0.4.3.dist-info/licenses/COPYING",
+          "sha256": "675fc1c25ad23d5e14255152262598b591a6e3fc65f0871655f5f6585f120acd",
+          "byteLength": 11542
+        }
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "name": "ISOcoated_v2_300_bas.ICC",
+      "version": "icc-profiles-basiccolor-printing2009-1.2.0",
+      "sha256": "b424c77f40c3423c925536f8ae08634985ccd0fe80eb253d5d229197ded7e886",
+      "archiveSha256": "0d1ab5cb8a72ab76a02c67f07708e94a5794397eeac0acdb7503e2c11b515707",
+      "license": "Zlib",
+      "copyright": "Copyright (c) 2007-2010, basICColor GmbH",
+      "redistributionStatus": "Accepted with preserved notice"
+    }
+  ],
+  "openReleaseObligations": [
+    "Inventory each native Pango, Fontconfig, HarfBuzz, GLib, Cairo, and transitively shipped library per target.",
+    "Assemble and verify the distributable third-party notice/source-offer bundle.",
+    "Repeat the inventory on Windows x64, macOS x64, and macOS arm64 final artifacts."
+  ]
+}
