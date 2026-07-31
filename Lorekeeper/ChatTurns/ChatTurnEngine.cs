@@ -232,35 +232,25 @@ public sealed class ChatTurnEngine(ILogger<ChatTurnEngine> logger)
 
     public static List<AIContent> BuildAssistantContents(
         string text,
-        IReadOnlyList<ChatToolCallManifest> calls)
+        IReadOnlyList<ChatPendingToolCall> calls)
     {
         if (calls.Count == 0)
             return string.IsNullOrEmpty(text) ? [new TextContent(string.Empty)] : [new TextContent(text)];
-
-        if (calls.Any(call => call.TextOffset is null))
-        {
-            var fallback = new List<AIContent>();
-            if (!string.IsNullOrEmpty(text))
-                fallback.Add(new TextContent(text));
-            foreach (var call in calls)
-                fallback.Add(ToFunctionCallContent(call));
-            return fallback;
-        }
 
         var contents = new List<AIContent>();
         var cursor = 0;
         foreach (var item in calls
             .Select((call, index) => new { Call = call, Index = index })
-            .OrderBy(item => item.Call.TextOffset!.Value)
+            .OrderBy(item => item.Call.TextOffset)
             .ThenBy(item => item.Index))
         {
-            var offset = Math.Clamp(item.Call.TextOffset!.Value, 0, text.Length);
+            var offset = Math.Clamp(item.Call.TextOffset, 0, text.Length);
             if (offset > cursor)
             {
                 contents.Add(new TextContent(text[cursor..offset]));
                 cursor = offset;
             }
-            contents.Add(ToFunctionCallContent(item.Call));
+            contents.Add(item.Call.Content);
         }
 
         if (cursor < text.Length)
@@ -269,7 +259,4 @@ public sealed class ChatTurnEngine(ILogger<ChatTurnEngine> logger)
             contents.Add(new TextContent(string.Empty));
         return contents;
     }
-
-    private static FunctionCallContent ToFunctionCallContent(ChatToolCallManifest call) =>
-        new(call.CallId, call.Name, ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson));
 }

@@ -110,6 +110,13 @@ tool instructions must not be persisted as editable project guidance.
 The five user-facing assistant surfaces are Outline, Editor, Writing Coach,
 Research, and Images. Their adapters use the shared `ChatTurnEngine` protocol
 and feature-specific tools, prompts, repositories, and streaming update records.
+Tool rounds keep the provider-originated `FunctionCallContent` in memory until
+the correlated tool result has been submitted. OpenAI-compatible clients retain
+unknown tool-call `extra_content` from both buffered and streaming responses and
+restore it on that assistant message; this is required by providers such as
+Gemini that validate thought signatures on the immediate tool-result round.
+Persisted cross-turn history remains text-only and does not persist or replay
+provider tool protocol metadata.
 `ChatTurnRuntime` and the singleton feature turn runners keep active turns alive
 across component disposal, buffer updates for reopened panels, and preserve
 explicit Stop as the cancellation path. Do not move active-turn ownership into a

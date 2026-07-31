@@ -404,7 +404,7 @@ public sealed class EditorChatService(
 
             messages.Add(new ChatMessage(
                 ChatRole.Assistant,
-                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), manifest)));
+                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls)));
 
             var resultContents = new List<AIContent>();
             var modelOnlyImagesForNextRound = new List<EditorChatModelImageAttachment>();

@@ -82,7 +82,8 @@ public class ChatClientFactory(
         // Local OpenAI-compatible providers (e.g. Ollama) don't require auth; use a placeholder.
         var credential = new ApiKeyCredential(apiKey ?? "ollama");
         var client = new OpenAIClient(credential, options);
-        var chatClient = client.GetChatClient(provider.ModelId).AsIChatClient();
+        IChatClient chatClient = new OpenAIChatToolMetadataClient(
+            client.GetChatClient(provider.ModelId).AsIChatClient());
         return ConfigureReasoningEffort(chatClient, provider.ReasoningEffort);
     }
 

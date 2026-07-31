@@ -399,7 +399,7 @@ they commit to a direction, act on it without a second confirmation.
 
             // Append to in-memory message list as a single assistant message with tool calls,
             // matching what the model emitted (text + FunctionCallContent[]).
-            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), manifest)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls)));
 
             var resultContents = new List<AIContent>();
             foreach (var pendingCall in pendingCalls)

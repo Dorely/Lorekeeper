@@ -403,7 +403,7 @@ public sealed class ResearchService(
             activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
             activeAssistant.Status = ResearchMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
-            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), manifest)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls)));
 
             var resultContents = new List<AIContent>();
             foreach (var pendingCall in pendingCalls)

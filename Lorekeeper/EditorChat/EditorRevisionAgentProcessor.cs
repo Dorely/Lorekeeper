@@ -1173,10 +1173,7 @@ public sealed class EditorRevisionAgentProcessor(
         && !string.Equals(type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
     private static List<AIContent> BuildAssistantToolCallContents(IReadOnlyList<PendingToolCall> calls) =>
-        calls.Select(call => (AIContent)new FunctionCallContent(
-            call.CallId,
-            call.Name,
-            ToolCallArguments.ParseObjectOrNull(call.ArgumentsJson))).ToList();
+        calls.Select(call => (AIContent)call.Content).ToList();
 
     private sealed record PendingToolCall(
         FunctionCallContent Content,
