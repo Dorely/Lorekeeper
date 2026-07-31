@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -98,7 +97,8 @@ public sealed class PublicationRenderQueue : IPublicationRenderQueue
 {
     private readonly Channel<Guid> _jobs = Channel.CreateUnbounded<Guid>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _cancellations = new();
+    private readonly Dictionary<Guid, CancellationTokenSource> _cancellations = [];
+    private readonly object _cancellationLock = new();
 
     public ValueTask EnqueueAsync(Guid jobId, CancellationToken cancellationToken) =>
         _jobs.Writer.WriteAsync(jobId, cancellationToken);
@@ -106,19 +106,35 @@ public sealed class PublicationRenderQueue : IPublicationRenderQueue
     public IAsyncEnumerable<Guid> ReadAllAsync(CancellationToken cancellationToken) =>
         _jobs.Reader.ReadAllAsync(cancellationToken);
 
-    public CancellationToken Register(Guid jobId) =>
-        _cancellations.GetOrAdd(jobId, _ => new CancellationTokenSource()).Token;
+    public CancellationToken Register(Guid jobId)
+    {
+        lock (_cancellationLock)
+        {
+            if (!_cancellations.TryGetValue(jobId, out var source))
+            {
+                source = new CancellationTokenSource();
+                _cancellations.Add(jobId, source);
+            }
+            return source.Token;
+        }
+    }
 
     public void Cancel(Guid jobId)
     {
-        if (_cancellations.TryGetValue(jobId, out var source))
-            source.Cancel();
+        lock (_cancellationLock)
+        {
+            if (_cancellations.TryGetValue(jobId, out var source))
+                source.Cancel();
+        }
     }
 
     public void Complete(Guid jobId)
     {
-        if (_cancellations.TryRemove(jobId, out var source))
-            source.Dispose();
+        lock (_cancellationLock)
+        {
+            if (_cancellations.Remove(jobId, out var source))
+                source.Dispose();
+        }
     }
 }
 
@@ -371,34 +387,66 @@ public sealed class PublicationRenderWorker(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Recovering publication render queue.");
-        await RecoverInterruptedJobsAsync(stoppingToken);
-        logger.LogInformation("Publication render queue is ready.");
-        await foreach (var jobId in queue.ReadAllAsync(stoppingToken))
+        try
         {
-            var jobCancellation = queue.Register(jobId);
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, jobCancellation);
-            try
+            logger.LogInformation("Recovering publication render queue.");
+            await RecoverInterruptedJobsAsync(stoppingToken);
+            logger.LogInformation("Publication render queue is ready.");
+            await foreach (var jobId in queue.ReadAllAsync(stoppingToken))
             {
-                await using var scope = scopeFactory.CreateAsyncScope();
-                await scope.ServiceProvider.GetRequiredService<PublicationRenderProcessor>()
-                    .ProcessAsync(jobId, linked.Token);
-            }
-            catch (OperationCanceledException) when (linked.IsCancellationRequested)
-            {
-                await MarkCancelledAsync(jobId, stoppingToken);
-            }
-            catch (Exception exception)
-            {
-                logger.LogError(exception, "Publication render {JobId} failed.", jobId);
-                await MarkFailedAsync(jobId, exception, stoppingToken);
-            }
-            finally
-            {
-                PublicationRenderProcessor.Cleanup(jobId);
-                queue.Complete(jobId);
+                var jobCancellation = queue.Register(jobId);
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, jobCancellation);
+                try
+                {
+                    await using var scope = scopeFactory.CreateAsyncScope();
+                    await scope.ServiceProvider.GetRequiredService<PublicationRenderProcessor>()
+                        .ProcessAsync(jobId, linked.Token);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    // Leave the durable Queued/Rendering state for restart recovery.
+                }
+                catch (OperationCanceledException exception)
+                {
+                    if (jobCancellation.IsCancellationRequested
+                        || await IsCancellationRequestedAsync(jobId, CancellationToken.None))
+                    {
+                        await MarkCancelledAsync(jobId, CancellationToken.None);
+                    }
+                    else
+                    {
+                        logger.LogError(exception, "Publication render {JobId} was cancelled unexpectedly.", jobId);
+                        await MarkFailedAsync(jobId, exception, CancellationToken.None);
+                    }
+                }
+                catch (Exception exception)
+                {
+                    logger.LogError(exception, "Publication render {JobId} failed.", jobId);
+                    await MarkFailedAsync(jobId, exception, stoppingToken);
+                }
+                finally
+                {
+                    PublicationRenderProcessor.Cleanup(jobId);
+                    queue.Complete(jobId);
+                }
             }
         }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task<bool> IsCancellationRequestedAsync(
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.PublicationRenderJobs.AsNoTracking()
+            .Where(job => job.Id == jobId)
+            .Select(job => job.CancellationRequested
+                || job.Status == PublicationRenderStatus.Cancelled)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
     private async Task RecoverInterruptedJobsAsync(CancellationToken cancellationToken)

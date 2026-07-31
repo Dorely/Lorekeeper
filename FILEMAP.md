@@ -65,6 +65,7 @@
 | `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
 | `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, render/source drift, language/ISBN/profile/color rejection, product-form proof isolation, and assistant-authorization fixtures. |
 | `PublicationEditionServiceTests.cs` | Preview defaults, archived assistant/service mutation guards, cover-focal UI mapping, shared-ISBN identity, product-form output gating, and hostile semantic-matter ownership fixtures. |
+| `PublicationRenderTests.cs` | Artifact-integrity/staleness fixtures plus clean publication-worker cancellation during host shutdown. |
 | `DatabaseMigrationRecoveryTests.cs` | Shared migration-recovery pruning fixture proving protected failed/running backup references survive automatic retention. |
 
 ## tools/semantic-editor/
