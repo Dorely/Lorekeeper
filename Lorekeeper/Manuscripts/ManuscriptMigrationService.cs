@@ -32,21 +32,19 @@ public sealed record ManuscriptRestoreRequest(string BackupPath, string Confirma
 
 public sealed class ManuscriptMigrationService(
     IConfiguration configuration,
+    IDatabaseMigrationRecoveryService recovery,
     ILogger<ManuscriptMigrationService> logger) : IManuscriptMigrationService
 {
     public const string MigrationName = "structured-manuscript-v1";
     public const string SchemaV2MigrationName = "semantic-manuscript-v2";
     public const string SchemaV2EfMigrationId = "20260730180725_SemanticManuscriptV2";
     private const int MaxAutomaticBackups = 5;
-    private static readonly TimeSpan RestoreTokenLifetime = TimeSpan.FromMinutes(10);
-    private readonly Dictionary<string, (string Path, DateTime ExpiresAt)> _restoreTokens = [];
-    private readonly object _restoreTokenLock = new();
     private readonly string _connectionString = SqliteConnectionSettings.BuildConnectionString(configuration);
 
     public async Task ApplyPendingAsync(AppDbContext db, CancellationToken cancellationToken = default)
     {
         await using var migrationLock = await AcquireExclusiveLockAsync(cancellationToken);
-        if (await ApplyScheduledRestoreAsync(cancellationToken))
+        if (await recovery.ApplyScheduledRestoreAsync(cancellationToken))
             db.ChangeTracker.Clear();
         var needsDataMigration = await HasColumnAsync("Chapters", "Body", cancellationToken);
         var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
@@ -70,7 +68,10 @@ public sealed class ManuscriptMigrationService(
             if (await DatabaseHasUserSchemaAsync(cancellationToken))
             {
                 await EnsureHealthyAsync(_connectionString, cancellationToken);
-                backupPath = await CreateBackupAsync("pre-manuscript", cancellationToken);
+                backupPath = await recovery.CreateBackupAsync(
+                    "manuscripts",
+                    "pre-manuscript",
+                    cancellationToken);
             }
 
             await ClearStrandedMigrationLockAsync(db, cancellationToken);
@@ -101,15 +102,23 @@ public sealed class ManuscriptMigrationService(
             }
 
             await EnsureHealthyAsync(_connectionString, cancellationToken);
-            PruneAutomaticBackups();
+            var protectedBackupPaths = await db.ManuscriptMigrationJournals.AsNoTracking()
+                .Where(journal => journal.Status != ManuscriptMigrationStatus.Completed
+                    && journal.BackupPath != string.Empty)
+                .Select(journal => journal.BackupPath)
+                .ToListAsync(cancellationToken);
+            await recovery.PruneAutomaticBackupsAsync(
+                "manuscripts",
+                MaxAutomaticBackups,
+                protectedBackupPaths,
+                cancellationToken);
         }
         catch (Exception exception)
         {
             logger.LogError(exception, "Structured manuscript migration failed.");
             if (backupPath is not null)
             {
-                await RestoreDatabaseFileAsync(backupPath, createDiagnosticBackup: false, cancellationToken);
-                await CreateRecoveryShellAsync(
+                await recovery.EnterRecoveryModeAsync(
                     db,
                     backupPath,
                     activeMigrationName,
@@ -126,40 +135,6 @@ public sealed class ManuscriptMigrationService(
                 "Structured manuscript migration failed before a backup could be created.",
                 exception);
         }
-    }
-
-    private async Task CreateRecoveryShellAsync(
-        AppDbContext db,
-        string backupPath,
-        string migrationName,
-        int sourceVersion,
-        int targetVersion,
-        Exception exception,
-        CancellationToken cancellationToken)
-    {
-        db.ChangeTracker.Clear();
-        await ClearStrandedMigrationLockAsync(db, cancellationToken);
-        await MigrateManuscriptSchemaAsync(db, cancellationToken);
-        await db.Database.ExecuteSqlRawAsync("DELETE FROM Projects;", cancellationToken);
-        db.ChangeTracker.Clear();
-        db.ManuscriptMigrationJournals.Add(new ManuscriptMigrationJournal
-        {
-            MigrationName = migrationName,
-            SourceSchemaVersion = sourceVersion,
-            TargetSchemaVersion = targetVersion,
-            Phase = ManuscriptMigrationPhase.Validate,
-            Status = ManuscriptMigrationStatus.Failed,
-            BackupPath = backupPath,
-            ValidationReportJson = JsonSerializer.Serialize(new
-            {
-                recoveryMode = true,
-                message = "The original database is protected in the referenced backup.",
-            }),
-            ErrorDetail = $"{exception.GetType().Name}: {exception.Message}",
-            CompletedAt = DateTime.UtcNow,
-        });
-        await db.SaveChangesAsync(cancellationToken);
-        await EnsureHealthyAsync(_connectionString, cancellationToken);
     }
 
     private static Task MigrateManuscriptSchemaAsync(
@@ -211,23 +186,17 @@ public sealed class ManuscriptMigrationService(
 
         return new ManuscriptMigrationState(
             await HasColumnAsync("Chapters", "Body", cancellationToken),
-            File.Exists(RestoreMarkerPath())
+            await recovery.IsRecoveryRequiredAsync(cancellationToken)
                 || journals.FirstOrDefault() is { Status: ManuscriptMigrationStatus.Failed },
             journals,
-            ListBackups());
+            await recovery.ListBackupsAsync(cancellationToken));
     }
 
     public Task<ManuscriptRestoreRequest> PrepareRestoreAsync(
         string backupPath,
         CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        var resolved = ValidateBackupPath(backupPath);
-        var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(24));
-        var expires = DateTime.UtcNow.Add(RestoreTokenLifetime);
-        lock (_restoreTokenLock)
-            _restoreTokens[token] = (resolved, expires);
-        return Task.FromResult(new ManuscriptRestoreRequest(resolved, token, expires));
+        return recovery.PrepareRestoreAsync(backupPath, cancellationToken);
     }
 
     public async Task RestoreAsync(
@@ -235,53 +204,7 @@ public sealed class ManuscriptMigrationService(
         string confirmationToken,
         CancellationToken cancellationToken = default)
     {
-        var resolved = ValidateBackupPath(backupPath);
-        lock (_restoreTokenLock)
-        {
-            if (!_restoreTokens.Remove(confirmationToken, out var request)
-                || request.ExpiresAt < DateTime.UtcNow
-                || !string.Equals(request.Path, resolved, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("The restore confirmation is invalid or expired.");
-            }
-        }
-
-        await using var migrationLock = await AcquireExclusiveLockAsync(cancellationToken);
-        await EnsureHealthyAsync($"Data Source={resolved}", cancellationToken);
-        var markerPath = RestoreMarkerPath();
-        var temporaryPath = markerPath + ".tmp";
-        await File.WriteAllTextAsync(
-            temporaryPath,
-            JsonSerializer.Serialize(new ScheduledRestore(resolved)),
-            cancellationToken);
-        RestrictFile(temporaryPath);
-        File.Move(temporaryPath, markerPath, overwrite: true);
-        RestrictFile(markerPath);
-    }
-
-    private async Task<bool> ApplyScheduledRestoreAsync(CancellationToken cancellationToken)
-    {
-        var markerPath = RestoreMarkerPath();
-        if (!File.Exists(markerPath))
-            return false;
-
-        ScheduledRestore request;
-        try
-        {
-            request = JsonSerializer.Deserialize<ScheduledRestore>(
-                await File.ReadAllTextAsync(markerPath, cancellationToken))
-                ?? throw new InvalidDataException("The scheduled restore marker is empty.");
-        }
-        catch (JsonException exception)
-        {
-            throw new InvalidDataException("The scheduled restore marker is malformed.", exception);
-        }
-
-        var backupPath = ValidateBackupPath(request.BackupPath);
-        await EnsureHealthyAsync($"Data Source={backupPath}", cancellationToken);
-        await RestoreDatabaseFileAsync(backupPath, createDiagnosticBackup: true, cancellationToken);
-        File.Delete(markerPath);
-        return true;
+        await recovery.ScheduleRestoreAsync(backupPath, confirmationToken, cancellationToken);
     }
 
     private async Task<FileStream> AcquireExclusiveLockAsync(CancellationToken cancellationToken)
@@ -936,34 +859,6 @@ public sealed class ManuscriptMigrationService(
         return JsonSerializer.Serialize(new IllustratedProseLayout(migrated), ManuscriptCodec.JsonOptions);
     }
 
-    private async Task<string> CreateBackupAsync(string purpose, CancellationToken cancellationToken)
-    {
-        var directory = BackupDirectory();
-        Directory.CreateDirectory(directory);
-        RestrictDirectory(directory);
-        var path = Path.Combine(directory, $"{DateTime.UtcNow:yyyyMMdd-HHmmssfff}-{purpose}.db");
-        await using var source = await OpenAsync(_connectionString, cancellationToken);
-        await using var destination = await OpenAsync($"Data Source={path}", cancellationToken);
-        source.BackupDatabase(destination);
-        RestrictFile(path);
-        await EnsureHealthyAsync($"Data Source={path}", cancellationToken);
-        return path;
-    }
-
-    private async Task RestoreDatabaseFileAsync(
-        string backupPath,
-        bool createDiagnosticBackup,
-        CancellationToken cancellationToken)
-    {
-        if (createDiagnosticBackup && File.Exists(DatabasePath()))
-            await CreateBackupAsync("pre-restore-diagnostic", cancellationToken);
-        SqliteConnection.ClearAllPools();
-        await using var source = await OpenAsync($"Data Source={backupPath};Mode=ReadOnly", cancellationToken);
-        await using var destination = await OpenAsync(_connectionString, cancellationToken);
-        source.BackupDatabase(destination);
-        await EnsureHealthyAsync(_connectionString, cancellationToken);
-    }
-
     private async Task<bool> ContainsUnstructuredManuscriptsAsync(CancellationToken cancellationToken)
     {
         if (!await TableExistsAsync("Chapters", cancellationToken))
@@ -1454,40 +1349,6 @@ public sealed class ManuscriptMigrationService(
     private string BackupDirectory() =>
         Path.Combine(Path.GetDirectoryName(DatabasePath())!, ".migration-backups", "manuscripts");
 
-    private string RestoreMarkerPath() =>
-        Path.Combine(BackupDirectory(), "scheduled-restore.json");
-
-    private string ValidateBackupPath(string path)
-    {
-        var resolved = Path.GetFullPath(path);
-        var root = Path.GetFullPath(BackupDirectory()) + Path.DirectorySeparatorChar;
-        if (!resolved.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(resolved))
-            throw new InvalidOperationException("The requested file is not a protected Lorekeeper migration backup.");
-        return resolved;
-    }
-
-    private IReadOnlyList<ManuscriptBackupInfo> ListBackups()
-    {
-        var directory = BackupDirectory();
-        if (!Directory.Exists(directory))
-            return [];
-        return Directory.EnumerateFiles(directory, "*.db", SearchOption.TopDirectoryOnly)
-            .Select(path => new FileInfo(path))
-            .OrderByDescending(file => file.CreationTimeUtc)
-            .Select(file => new ManuscriptBackupInfo(file.FullName, file.Length, file.CreationTimeUtc))
-            .ToList();
-    }
-
-    private void PruneAutomaticBackups()
-    {
-        var automatic = ListBackups()
-            .Where(backup => !Path.GetFileName(backup.Path).Contains("diagnostic", StringComparison.OrdinalIgnoreCase))
-            .Skip(MaxAutomaticBackups)
-            .ToList();
-        foreach (var backup in automatic)
-            File.Delete(backup.Path);
-    }
-
     private static void RestrictDirectory(string path)
     {
         if (OperatingSystem.IsWindows())
@@ -1633,8 +1494,6 @@ public sealed class ManuscriptMigrationService(
         string ProposalJson);
 
     private sealed record LegacyChapterChange(Guid Id, string Title, string Body);
-
-    private sealed record ScheduledRestore(string BackupPath);
 
     private sealed record SchemaUpgradeColumnSet(
         string Table,

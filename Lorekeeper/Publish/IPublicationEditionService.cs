@@ -12,6 +12,7 @@ public interface IPublicationEditionService
     Task<PublicationEditionView> SetDefaultAsync(Guid projectId, Guid editionId, long expectedRevision, CancellationToken cancellationToken = default);
     Task<PublicationEditionView> SetCoverChapterAsync(Guid projectId, Guid editionId, Guid? chapterId, long expectedRevision, CancellationToken cancellationToken = default);
     Task<PublicationEditionView> SetOutlineSelectionsAsync(Guid projectId, Guid editionId, IReadOnlyList<PublicationEditionOutlineItemUpdate> updates, long expectedRevision, CancellationToken cancellationToken = default);
+    Task<PublicationEditionView> ReorderOutlineAsync(Guid projectId, Guid editionId, IReadOnlyList<PublicationEditionOutlineItemOrder> orderedItems, long expectedRevision, CancellationToken cancellationToken = default);
     Task<PublicationMatterView> UpsertMatterAsync(Guid projectId, Guid editionId, PublicationMatterInput input, long expectedEditionRevision, CancellationToken cancellationToken = default);
     Task DeleteMatterAsync(Guid projectId, Guid editionId, Guid matterId, long expectedEditionRevision, CancellationToken cancellationToken = default);
     Task<PublicationEditionStyleMappingView> UpsertStyleMappingAsync(Guid projectId, Guid editionId, PublicationEditionStyleMappingInput input, long expectedEditionRevision, CancellationToken cancellationToken = default);

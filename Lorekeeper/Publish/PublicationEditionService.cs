@@ -40,7 +40,6 @@ public sealed class PublicationEditionService(
         {
             throw new InvalidOperationException($"A publication edition named '{name}' already exists.");
         }
-
         var isFirst = !await db.PublicationEditions.AnyAsync(
             edition => edition.ProjectId == projectId,
             cancellationToken);
@@ -61,6 +60,12 @@ public sealed class PublicationEditionService(
             Ink = input.Format == PublicationEditionFormat.Epub
                 ? PublicationInk.Digital
                 : PublicationInk.BlackAndWhite,
+            PageWidthInches = input.Format == PublicationEditionFormat.Paperback ? 6 : 8.5,
+            PageHeightInches = input.Format == PublicationEditionFormat.Paperback ? 9 : 11,
+            PageMarginInches = 0.75,
+            BodyFontSizePoints = input.Format == PublicationEditionFormat.Paperback ? 11 : 12,
+            BodyLineHeight = input.Format == PublicationEditionFormat.Paperback ? 1.4 : 1.55,
+            Bleed = false,
         };
         db.PublicationEditions.Add(edition);
         await MaterializeOutlineAsync(edition, cancellationToken);
@@ -129,8 +134,10 @@ public sealed class PublicationEditionService(
         var project = await GetProjectAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, input.ExpectedRevision);
+        EnsureDraft(edition);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         var name = input.Name.Trim();
+        var normalizedIsbn = PublicationIsbn.NormalizeValidOrEmpty(input.Isbn);
         if (!string.Equals(name, edition.Name, StringComparison.Ordinal)
             && await db.PublicationEditions.AnyAsync(
                 candidate => candidate.ProjectId == projectId
@@ -139,6 +146,35 @@ public sealed class PublicationEditionService(
                 cancellationToken))
         {
             throw new InvalidOperationException($"A publication edition named '{name}' already exists.");
+        }
+        var sharedIsbnEditions = normalizedIsbn.Length == 0
+            ? []
+            : await db.PublicationEditions.AsNoTracking()
+                .Where(candidate => candidate.ProjectId == projectId
+                    && candidate.Id != editionId
+                    && candidate.Isbn == normalizedIsbn)
+                .ToListAsync(cancellationToken);
+        if (sharedIsbnEditions.Any(candidate =>
+            candidate.Format != input.Format
+            || !BibliographicProductSettingsMatch(candidate, input)))
+        {
+            throw new InvalidOperationException(
+                "An ISBN-13 can be shared only by vendor editions with matching bibliographic content and product-form settings.");
+        }
+        if (sharedIsbnEditions.Count > 0)
+        {
+            var contentHash = await BibliographicContentHashAsync(editionId, cancellationToken);
+            foreach (var candidate in sharedIsbnEditions)
+            {
+                if (!string.Equals(
+                    contentHash,
+                    await BibliographicContentHashAsync(candidate.Id, cancellationToken),
+                    StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Vendor editions sharing an ISBN-13 must contain the same ordered manuscript and publication matter.");
+                }
+            }
         }
 
         edition.Name = name;
@@ -155,7 +191,7 @@ public sealed class PublicationEditionService(
         edition.Language = string.IsNullOrWhiteSpace(input.Language) ? "en" : Clean(input.Language);
         edition.Publisher = Clean(input.Publisher);
         edition.Copyright = Clean(input.Copyright);
-        edition.Isbn = Clean(input.Isbn);
+        edition.Isbn = normalizedIsbn;
         edition.Description = Clean(input.Description);
         edition.IncludeTableOfContents = input.IncludeTableOfContents;
         edition.IncludeVisibleTableOfContents = input.IncludeVisibleTableOfContents;
@@ -186,6 +222,7 @@ public sealed class PublicationEditionService(
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedRevision);
+        EnsureDraft(edition);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         edition.Status = PublicationEditionStatus.Archived;
         if (edition.IsDefault)
@@ -217,8 +254,7 @@ public sealed class PublicationEditionService(
         var project = await GetProjectAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedRevision);
-        if (edition.Status == PublicationEditionStatus.Archived)
-            throw new InvalidOperationException("An archived edition cannot be the default design edition.");
+        EnsureDraft(edition);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         var current = await db.PublicationEditions.FirstOrDefaultAsync(
             candidate => candidate.ProjectId == projectId && candidate.IsDefault,
@@ -245,6 +281,7 @@ public sealed class PublicationEditionService(
         var project = await GetProjectAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedRevision);
+        EnsureDraft(edition);
         if (chapterId is Guid id && !await db.Chapters.AnyAsync(
             chapter => chapter.ProjectId == projectId
                 && chapter.Id == id
@@ -270,6 +307,8 @@ public sealed class PublicationEditionService(
         var project = await GetProjectAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedRevision);
+        EnsureDraft(edition);
+        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
         await EnsureTargetsAsync(projectId, updates, cancellationToken);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         var existing = await db.PublicationEditionOutlineItems
@@ -294,6 +333,94 @@ public sealed class PublicationEditionService(
         return View(project, edition);
     }
 
+    public async Task<PublicationEditionView> ReorderOutlineAsync(
+        Guid projectId,
+        Guid editionId,
+        IReadOnlyList<PublicationEditionOutlineItemOrder> orderedItems,
+        long expectedRevision,
+        CancellationToken cancellationToken = default)
+    {
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var project = await GetProjectAsync(projectId, cancellationToken);
+        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
+        EnsureRevision(edition, expectedRevision);
+        EnsureDraft(edition);
+        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
+
+        var acts = await db.Acts.AsNoTracking()
+            .Where(act => act.ProjectId == projectId)
+            .Select(act => act.Id)
+            .ToListAsync(cancellationToken);
+        var chapters = await db.Chapters.AsNoTracking()
+            .Where(chapter => chapter.ProjectId == projectId)
+            .Select(chapter => new { chapter.Id, chapter.ActId })
+            .ToListAsync(cancellationToken);
+        var chapterParents = chapters.ToDictionary(chapter => chapter.Id, chapter => chapter.ActId);
+        ValidateOutlineOrder(orderedItems, acts, chapterParents);
+        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
+        var existing = await db.PublicationEditionOutlineItems
+            .Where(item => item.EditionId == editionId)
+            .ToListAsync(cancellationToken);
+        for (var sortOrder = 0; sortOrder < orderedItems.Count; sortOrder++)
+        {
+            var ordered = orderedItems[sortOrder];
+            var item = existing.FirstOrDefault(candidate =>
+                candidate.TargetKind == ordered.TargetKind && candidate.TargetId == ordered.TargetId);
+            if (item is null)
+            {
+                item = NewOutlineItem(editionId, ordered.TargetKind, ordered.TargetId, sortOrder);
+                db.PublicationEditionOutlineItems.Add(item);
+                existing.Add(item);
+            }
+            item.SortOrder = sortOrder;
+            item.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await SaveWithAuditAsync(edition, "reorder-content", before, new { count = orderedItems.Count }, cancellationToken);
+        return View(project, edition);
+    }
+
+    internal static void ValidateOutlineOrder(
+        IReadOnlyList<PublicationEditionOutlineItemOrder> orderedItems,
+        IReadOnlyCollection<Guid> actIds,
+        IReadOnlyDictionary<Guid, Guid?> chapterParents)
+    {
+        var expected = actIds
+            .Select(id => new PublicationEditionOutlineItemOrder(PublishOutlineTargetKind.Act, id))
+            .Concat(chapterParents.Keys.Select(id =>
+                new PublicationEditionOutlineItemOrder(PublishOutlineTargetKind.Chapter, id)))
+            .ToHashSet();
+        if (orderedItems.Count != expected.Count
+            || orderedItems.Distinct().Count() != orderedItems.Count
+            || !orderedItems.All(expected.Contains))
+        {
+            throw new InvalidOperationException("Edition content order must contain every current act and chapter exactly once.");
+        }
+        Guid? currentActId = null;
+        var reachedUnassigned = false;
+        foreach (var ordered in orderedItems)
+        {
+            if (ordered.TargetKind == PublishOutlineTargetKind.Act)
+            {
+                if (reachedUnassigned)
+                    throw new InvalidOperationException("Act groups cannot appear after unassigned chapters.");
+                currentActId = ordered.TargetId;
+                continue;
+            }
+
+            var parentActId = chapterParents[ordered.TargetId];
+            if (parentActId is null)
+            {
+                reachedUnassigned = true;
+                currentActId = null;
+            }
+            else if (reachedUnassigned || currentActId != parentActId)
+            {
+                throw new InvalidOperationException("Every chapter must remain contiguous beneath its owning act.");
+            }
+        }
+    }
+
     public async Task<PublicationMatterView> UpsertMatterAsync(
         Guid projectId,
         Guid editionId,
@@ -303,6 +430,16 @@ public sealed class PublicationEditionService(
     {
         if (!Enum.IsDefined(input.Location) || !Enum.IsDefined(input.Kind))
             throw new InvalidOperationException("Publication matter kind or location is invalid.");
+        PublicationMatterFormatting.EnsureUserAuthoredKind(input.Kind);
+        if (string.IsNullOrWhiteSpace(input.Title)
+            || input.Title.Trim().Length > 500
+            || input.Title.Contains('\r')
+            || input.Title.Contains('\n'))
+        {
+            throw new InvalidOperationException("Publication matter title must contain 1 to 500 characters on one line.");
+        }
+        if (input.SortOrder < 0)
+            throw new InvalidOperationException("Publication matter order cannot be negative.");
         var document = ManuscriptCodec.Deserialize(
             input.ManuscriptJson,
             input.Id ?? Guid.Empty,
@@ -310,6 +447,36 @@ public sealed class PublicationEditionService(
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedEditionRevision);
+        EnsureDraft(edition);
+        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
+        var styleEntities = await db.ManuscriptStyleDefinitions.AsNoTracking()
+            .Where(style => style.ProjectId == projectId)
+            .ToListAsync(cancellationToken);
+        ManuscriptStyleService.ValidateDocumentReferences(
+            document,
+            styleEntities.Select(style => new ManuscriptStyleView(
+                style.Id,
+                style.Name,
+                style.Kind,
+                style.SemanticRole,
+                ManuscriptStyleService.NormalizeDefinition(
+                    JsonSerializer.Deserialize<ManuscriptStyleProperties>(
+                        style.DefinitionJson,
+                        ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties()),
+                style.Revision)).ToList());
+        var figureImageIds = document.Content
+            .Where(block => block.Type == ManuscriptBlockType.Figure && block.ImageId is not null)
+            .Select(block => block.ImageId!.Value)
+            .Distinct()
+            .ToList();
+        if (figureImageIds.Count > 0
+            && await db.PublishAssets.AsNoTracking().CountAsync(
+                image => image.ProjectId == projectId && figureImageIds.Contains(image.Id),
+                cancellationToken) != figureImageIds.Count)
+        {
+            throw new InvalidOperationException(
+                "Publication matter figures must reference images owned by this project.");
+        }
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         PublicationMatter matter;
         if (input.Id is Guid id)
@@ -349,6 +516,8 @@ public sealed class PublicationEditionService(
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedEditionRevision);
+        EnsureDraft(edition);
+        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
         var matter = await db.PublicationMatter.FirstOrDefaultAsync(
             candidate => candidate.EditionId == editionId && candidate.Id == matterId,
             cancellationToken);
@@ -365,15 +534,17 @@ public sealed class PublicationEditionService(
         long expectedEditionRevision,
         CancellationToken cancellationToken = default)
     {
-        var normalized = ManuscriptStyleService.NormalizeDefinition(input.Override);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedEditionRevision);
+        EnsureDraft(edition);
+        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
         var style = await db.ManuscriptStyleDefinitions.FirstOrDefaultAsync(
             candidate => candidate.ProjectId == projectId
                 && candidate.Id == input.ManuscriptStyleDefinitionId,
             cancellationToken)
             ?? throw new InvalidOperationException("Named manuscript style was not found.");
+        var normalized = ManuscriptStyleService.NormalizeOverride(style.Kind, input.Override);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         var mapping = await db.PublicationEditionStyleMappings.FirstOrDefaultAsync(
             candidate => candidate.EditionId == editionId
@@ -411,6 +582,8 @@ public sealed class PublicationEditionService(
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedEditionRevision);
+        EnsureDraft(edition);
+        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
         var mapping = await db.PublicationEditionStyleMappings.FirstOrDefaultAsync(
             candidate => candidate.EditionId == editionId && candidate.Id == mappingId,
             cancellationToken);
@@ -430,6 +603,8 @@ public sealed class PublicationEditionService(
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedEditionRevision);
+        EnsureDraft(edition);
+        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
         var metadata = await ValidatePlacementAsync(projectId, editionId, input.AssetId, input.TargetKind, input.TargetId, input.PlacementKind, cancellationToken);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         var order = await db.PublicationImagePlacements
@@ -467,6 +642,8 @@ public sealed class PublicationEditionService(
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedEditionRevision);
+        EnsureDraft(edition);
+        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
         var placement = await db.PublicationImagePlacements.FirstOrDefaultAsync(
             candidate => candidate.EditionId == editionId && candidate.Id == placementId,
             cancellationToken)
@@ -518,6 +695,8 @@ public sealed class PublicationEditionService(
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedEditionRevision);
+        EnsureDraft(edition);
+        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
         var placements = await db.PublicationImagePlacements
             .Where(placement => placement.EditionId == editionId && orderedPlacementIds.Contains(placement.Id))
             .ToListAsync(cancellationToken);
@@ -558,6 +737,8 @@ public sealed class PublicationEditionService(
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedEditionRevision);
+        EnsureDraft(edition);
+        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
         var placement = await db.PublicationImagePlacements.FirstOrDefaultAsync(
             candidate => candidate.EditionId == editionId && candidate.Id == placementId,
             cancellationToken);
@@ -711,6 +892,7 @@ public sealed class PublicationEditionService(
             .Select(chapter => new
             {
                 chapter.Id,
+                chapter.ActId,
                 chapter.Title,
                 chapter.Synopsis,
                 chapter.Order,
@@ -741,7 +923,15 @@ public sealed class PublicationEditionService(
         var assets = await db.PublishAssets.AsNoTracking()
             .Where(asset => asset.ProjectId == projectId)
             .OrderBy(asset => asset.Id)
-            .Select(asset => new { asset.Id, asset.Data, asset.SourceMetadataJson })
+            .Select(asset => new
+            {
+                asset.Id,
+                asset.FileName,
+                asset.ContentType,
+                asset.AltText,
+                asset.Data,
+                asset.SourceMetadataJson,
+            })
             .ToListAsync(cancellationToken);
         var styles = await db.ManuscriptStyleDefinitions.AsNoTracking()
             .Where(style => style.ProjectId == projectId)
@@ -754,6 +944,27 @@ public sealed class PublicationEditionService(
                 style.SemanticRole,
                 style.DefinitionJson,
                 style.Revision,
+            })
+            .ToListAsync(cancellationToken);
+        var fonts = await db.ProjectFontFamilies.AsNoTracking()
+            .Where(family => family.ProjectId == projectId)
+            .OrderBy(family => family.Id)
+            .Select(family => new
+            {
+                family.Id,
+                family.Name,
+                Faces = family.Faces
+                    .OrderBy(face => face.Id)
+                    .Select(face => new
+                    {
+                        face.Id,
+                        face.SubfamilyName,
+                        face.FileName,
+                        face.ContentType,
+                        face.Weight,
+                        face.Italic,
+                        face.Data,
+                    }),
             })
             .ToListAsync(cancellationToken);
         var coverDesign = await db.PublicationCoverDesigns.AsNoTracking()
@@ -769,7 +980,6 @@ public sealed class PublicationEditionService(
                 design.BarcodeMode,
                 design.ImageFocalXPercent,
                 design.ImageFocalYPercent,
-                design.Revision,
             })
             .SingleOrDefaultAsync(cancellationToken);
         var canonical = JsonSerializer.Serialize(new
@@ -820,10 +1030,118 @@ public sealed class PublicationEditionService(
             Placements = placements,
             Assets = assets,
             Styles = styles,
+            Fonts = fonts,
             CoverDesign = coverDesign,
         }, ManuscriptCodec.JsonOptions);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
+
+    private async Task<string> BibliographicContentHashAsync(
+        Guid editionId,
+        CancellationToken cancellationToken)
+    {
+        var outline = await db.PublicationEditionOutlineItems.AsNoTracking()
+            .Where(item => item.EditionId == editionId)
+            .OrderBy(item => item.SortOrder)
+            .Select(item => new { item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder })
+            .ToListAsync(cancellationToken);
+        var matter = await db.PublicationMatter.AsNoTracking()
+            .Where(item => item.EditionId == editionId)
+            .OrderBy(item => item.Location).ThenBy(item => item.SortOrder).ThenBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+        var mappings = await db.PublicationEditionStyleMappings.AsNoTracking()
+            .Where(mapping => mapping.EditionId == editionId)
+            .OrderBy(mapping => mapping.ManuscriptStyleDefinitionId)
+            .Select(mapping => new
+            {
+                mapping.ManuscriptStyleDefinitionId,
+                mapping.SemanticRole,
+                mapping.OverrideJson,
+            })
+            .ToListAsync(cancellationToken);
+        var placements = await db.PublicationImagePlacements.AsNoTracking()
+            .Where(placement => placement.EditionId == editionId)
+            .OrderBy(placement => placement.TargetKind)
+            .ThenBy(placement => placement.TargetId)
+            .ThenBy(placement => placement.PlacementKind)
+            .ThenBy(placement => placement.SortOrder)
+            .Select(placement => new
+            {
+                placement.AssetId,
+                placement.TargetKind,
+                placement.TargetId,
+                placement.PlacementKind,
+                placement.Caption,
+                placement.SortOrder,
+            })
+            .ToListAsync(cancellationToken);
+        var canonicalMatter = matter.Select(item => new
+        {
+            item.Location,
+            item.Kind,
+            item.Title,
+            Content = CanonicalManuscriptContent(
+                ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision)),
+            item.IsIncluded,
+            item.SortOrder,
+        });
+        var canonical = JsonSerializer.Serialize(
+            new { Outline = outline, Matter = canonicalMatter, Mappings = mappings, Placements = placements },
+            ManuscriptCodec.JsonOptions);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+
+    private async Task EnsureSharedIsbnContentMutableAsync(
+        PublicationEdition edition,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(edition.Isbn))
+            return;
+        if (await db.PublicationEditions.AsNoTracking().AnyAsync(candidate =>
+            candidate.ProjectId == edition.ProjectId
+            && candidate.Id != edition.Id
+            && candidate.Format == edition.Format
+            && candidate.Isbn == edition.Isbn,
+            cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "This edition shares an ISBN-13 with another vendor edition. Clear the shared ISBN before changing ordered content or publication matter, then synchronize the vendor editions before reassigning it.");
+        }
+    }
+
+    private static bool BibliographicProductSettingsMatch(
+        PublicationEdition edition,
+        PublicationEditionUpdate input) =>
+        string.Equals(edition.TitleOverride, Clean(input.TitleOverride), StringComparison.Ordinal)
+        && string.Equals(edition.Subtitle, Clean(input.Subtitle), StringComparison.Ordinal)
+        && string.Equals(edition.Author, Clean(input.Author), StringComparison.Ordinal)
+        && string.Equals(edition.Language, string.IsNullOrWhiteSpace(input.Language) ? "en" : Clean(input.Language), StringComparison.OrdinalIgnoreCase)
+        && string.Equals(edition.Publisher, Clean(input.Publisher), StringComparison.Ordinal)
+        && string.Equals(edition.Copyright, Clean(input.Copyright), StringComparison.Ordinal)
+        && string.Equals(edition.Description, Clean(input.Description), StringComparison.Ordinal)
+        && edition.IncludeTableOfContents == input.IncludeTableOfContents
+        && edition.IncludeVisibleTableOfContents == input.IncludeVisibleTableOfContents
+        && edition.IncludeActSynopses == input.IncludeActSynopses
+        && edition.IncludeChapterSynopses == input.IncludeChapterSynopses
+        && edition.IncludeActHeadings == input.IncludeActHeadings
+        && edition.IncludeChapterHeadings == input.IncludeChapterHeadings
+        && edition.NumberActs == input.NumberActs
+        && edition.NumberChapters == input.NumberChapters
+        && edition.TitlePageMode == input.TitlePageMode
+        && edition.PrintPicturePageSpreadMode == input.PrintPicturePageSpreadMode
+        && edition.EpubPicturePageSpreadMode == input.EpubPicturePageSpreadMode
+        && edition.Binding == input.Binding
+        && edition.Paper == input.Paper
+        && edition.Ink == input.Ink
+        && edition.Bleed == input.Bleed
+        && edition.PageWidthInches.Equals(input.PageWidthInches)
+        && edition.PageHeightInches.Equals(input.PageHeightInches)
+        && edition.PageMarginInches.Equals(input.PageMarginInches)
+        && edition.BodyFontSizePoints.Equals(input.BodyFontSizePoints)
+        && edition.BodyLineHeight.Equals(input.BodyLineHeight);
+
+    internal static IReadOnlyList<ManuscriptBlock> CanonicalManuscriptContent(ManuscriptDocument document) =>
+        document.Content.Select(block => block with { Id = string.Empty }).ToList();
 
     private async Task MaterializeOutlineAsync(PublicationEdition edition, CancellationToken cancellationToken)
     {
@@ -925,6 +1243,23 @@ public sealed class PublicationEditionService(
             || !Enum.IsDefined(input.PrintPicturePageSpreadMode)
             || !Enum.IsDefined(input.EpubPicturePageSpreadMode))
             throw new InvalidOperationException("One or more edition settings are invalid.");
+        var boundedFields = new (string Label, string? Value, int Maximum)[]
+        {
+            ("Vendor profile version", input.VendorProfileVersion, 120),
+            ("Title", input.TitleOverride, 500),
+            ("Subtitle", input.Subtitle, 500),
+            ("Author", input.Author, 500),
+            ("Language", input.Language, 40),
+            ("Publisher", input.Publisher, 500),
+            ("Copyright", input.Copyright, 100_000),
+            ("Description", input.Description, 100_000),
+        };
+        foreach (var (label, value, maximum) in boundedFields)
+        {
+            if ((value?.Trim().Length ?? 0) > maximum)
+                throw new InvalidOperationException($"{label} cannot exceed {maximum:N0} characters.");
+        }
+        _ = PublicationIsbn.NormalizeValidOrEmpty(input.Isbn);
         if (!double.IsFinite(input.PageWidthInches)
             || !double.IsFinite(input.PageHeightInches)
             || !double.IsFinite(input.PageMarginInches)
@@ -960,6 +1295,12 @@ public sealed class PublicationEditionService(
         if (edition.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException(
                 $"Publication edition changed in another editor (expected revision {expectedRevision}, current {edition.Revision}).");
+    }
+
+    internal static void EnsureDraft(PublicationEdition edition)
+    {
+        if (edition.Status != PublicationEditionStatus.Draft)
+            throw new InvalidOperationException("Archived publication editions are read-only. Clone this edition to make changes.");
     }
 
     internal static PublicationEditionSummary Summary(PublicationEdition edition) =>

@@ -12,6 +12,7 @@ public sealed class SemanticPublishFormattingTests
     public void EveryIncludedMatterKindRendersInOrderIntoEpub()
     {
         var matter = Enum.GetValues<PublicationMatterKind>()
+            .Where(kind => !PublicationMatterFormatting.IsGeneratedPageKind(kind))
             .Select((kind, index) => new PublishMatterDocument(
                 Guid.NewGuid(),
                 index < 5 ? PublicationMatterLocation.Front : PublicationMatterLocation.Back,
@@ -36,6 +37,191 @@ public sealed class SemanticPublishFormattingTests
             Assert.Contains($"Matter {index:D2}", xhtml, StringComparison.Ordinal);
             Assert.Contains($"Body {index:D2}", xhtml, StringComparison.Ordinal);
         }
+    }
+
+    [Theory]
+    [InlineData(PublicationMatterKind.TitlePage)]
+    [InlineData(PublicationMatterKind.Copyright)]
+    [InlineData(PublicationMatterKind.Contents)]
+    public void EpubRejectsMatterThatDuplicatesGeneratedPages(PublicationMatterKind kind)
+    {
+        var document = MinimalPublishDocument() with
+        {
+            Matter =
+            [
+                new PublishMatterDocument(
+                    Guid.NewGuid(),
+                    PublicationMatterLocation.Front,
+                    kind,
+                    kind.ToString(),
+                    0,
+                    ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Duplicate", revision: 1)),
+            ],
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => new EpubPublishFormatter(new PageGeometryService(null!)).Render(document));
+
+        Assert.Contains("generated from edition settings", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EpubFallbackIdentifierIsEditionSpecific()
+    {
+        var first = MinimalPublishDocument();
+        var second = first with { EditionId = Guid.NewGuid() };
+
+        var formatter = new EpubPublishFormatter(new PageGeometryService(null!));
+        var firstOpf = ReadEpubEntry(formatter.Render(first), "OEBPS/package.opf");
+        var secondOpf = ReadEpubEntry(formatter.Render(second), "OEBPS/package.opf");
+
+        Assert.Contains($"urn:uuid:{first.EditionId}", firstOpf, StringComparison.Ordinal);
+        Assert.Contains($"urn:uuid:{second.EditionId}", secondOpf, StringComparison.Ordinal);
+        Assert.DoesNotContain($"urn:uuid:{first.ProjectId}", firstOpf, StringComparison.Ordinal);
+        Assert.NotEqual(firstOpf, secondOpf);
+    }
+
+    [Fact]
+    public void EpubPackagesOrdinaryChapterSemanticFigureAssets()
+    {
+        var chapterId = Guid.NewGuid();
+        var imageId = Guid.NewGuid();
+        var manuscript = ManuscriptCodec.FromPlainText(chapterId, "Caption", revision: 1);
+        manuscript.Content[0] = manuscript.Content[0] with
+        {
+            Type = ManuscriptBlockType.Figure,
+            StyleRole = ManuscriptStyleRoles.FigureCaption,
+            ImageId = imageId,
+            AltText = "A city map",
+        };
+        var asset = new PublishAssetDocument(
+            imageId,
+            "map.png",
+            "image/png",
+            [1, 2, 3],
+            "A city map");
+        var chapter = new PublishChapterDocument(
+            chapterId,
+            null,
+            "Map",
+            "Caption",
+            string.Empty,
+            0,
+            true,
+            ChapterVisualMode.Prose,
+            ChapterPageLayoutKind.SinglePortrait,
+            new IllustratedProseLayout([]),
+            new PicturePageLayout([], []),
+            manuscript);
+        var document = MinimalPublishDocument() with
+        {
+            Assets = [asset],
+            Sections =
+            [
+                new PublishSectionDocument(
+                    null,
+                    "Unassigned",
+                    string.Empty,
+                    true,
+                    false,
+                    false,
+                    0,
+                    [chapter]),
+            ],
+        };
+
+        var epub = new EpubPublishFormatter(new PageGeometryService(null!)).Render(document);
+        var imagePath = $"OEBPS/images/{imageId:N}.png";
+        using var archive = new ZipArchive(new MemoryStream(epub), ZipArchiveMode.Read);
+
+        Assert.NotNull(archive.GetEntry(imagePath));
+        Assert.Contains($"images/{imageId:N}.png", ReadEpubEntry(epub, "OEBPS/package.opf"), StringComparison.Ordinal);
+        var chapterXhtml = ReadEpubEntry(epub, "OEBPS/chapter-1.xhtml");
+        Assert.Contains($"src=\"images/{imageId:N}.png\"", chapterXhtml, StringComparison.Ordinal);
+        Assert.Contains("alt=\"A city map\"", chapterXhtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MarkdownFormatterPreservesSemanticMatterWithoutDoubleEscaping()
+    {
+        var imageId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var manuscript = new ManuscriptDocument
+        {
+            ManuscriptId = matterId,
+            Revision = 1,
+            Content =
+            [
+                new ManuscriptBlock
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Type = ManuscriptBlockType.Heading,
+                    StyleRole = ManuscriptStyleRoles.Subheading,
+                    HeadingLevel = 3,
+                    Content = [new ManuscriptInline { Text = "Matter heading" }],
+                },
+                new ManuscriptBlock
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Type = ManuscriptBlockType.Paragraph,
+                    StyleRole = ManuscriptStyleRoles.Body,
+                    Content =
+                    [
+                        new ManuscriptInline
+                        {
+                            Text = "Strong",
+                            Marks = [new ManuscriptMark { Type = ManuscriptMarkType.Strong }],
+                        },
+                        new ManuscriptInline { Text = "\n" },
+                        new ManuscriptInline
+                        {
+                            Text = "Link",
+                            Marks =
+                            [
+                                new ManuscriptMark
+                                {
+                                    Type = ManuscriptMarkType.Link,
+                                    Value = "https://example.com",
+                                },
+                            ],
+                        },
+                    ],
+                },
+                new ManuscriptBlock
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Type = ManuscriptBlockType.Figure,
+                    StyleRole = ManuscriptStyleRoles.FigureCaption,
+                    ImageId = imageId,
+                    AltText = "Map",
+                    Content = [new ManuscriptInline { Text = "Caption" }],
+                },
+            ],
+        };
+        var asset = new PublishAssetDocument(imageId, "map.png", "image/png", [1, 2, 3], "Map");
+        var document = MinimalPublishDocument() with
+        {
+            Matter =
+            [
+                new PublishMatterDocument(
+                    matterId,
+                    PublicationMatterLocation.Front,
+                    PublicationMatterKind.Custom,
+                    "Appendix [A]",
+                    0,
+                    manuscript),
+            ],
+            Assets = [asset],
+        };
+
+        var markdown = Encoding.UTF8.GetString(new MarkdownPublishFormatter().Render(document));
+
+        Assert.Contains("## Appendix \\[A\\]", markdown, StringComparison.Ordinal);
+        Assert.Contains("### Matter heading", markdown, StringComparison.Ordinal);
+        Assert.Contains("**Strong**<br />", markdown, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"https://example.com\">Link</a>", markdown, StringComparison.Ordinal);
+        Assert.Contains("![Map](data:image/png;base64,", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\#\\#\\# Matter heading", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -215,7 +401,7 @@ public sealed class SemanticPublishFormattingTests
         var html = SemanticPublishFormatting.Html(document, _ => null);
 
         Assert.Contains(
-            "<hr class=\"scene-break\" data-style-role=\"ornamental-break\" />",
+            "class=\"scene-break\" data-style-role=\"ornamental-break\" />",
             html,
             StringComparison.Ordinal);
     }
@@ -326,4 +512,11 @@ public sealed class SemanticPublishFormattingTests
             Sections: [],
             Assets: [],
             Placements: []);
+
+    private static string ReadEpubEntry(byte[] epub, string path)
+    {
+        using var archive = new ZipArchive(new MemoryStream(epub), ZipArchiveMode.Read);
+        using var reader = new StreamReader(archive.GetEntry(path)!.Open(), Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
 }

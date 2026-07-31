@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Lorekeeper.Context;
 using Lorekeeper.Models;
@@ -145,6 +146,7 @@ public sealed class ProjectImportExportService(
                     .Include(edition => edition.OutlineItems)
                     .Include(edition => edition.Matter)
                     .Include(edition => edition.StyleMappings)
+                        .ThenInclude(mapping => mapping.ManuscriptStyleDefinition)
                     .Include(edition => edition.ImagePlacements)
                     .Include(edition => edition.CoverDesign)
                     .Where(profile => profile.ProjectId == projectId)
@@ -171,6 +173,31 @@ public sealed class ProjectImportExportService(
                                 style.DefinitionJson,
                                 ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties()),
                         style.Revision))
+                    .ToList()
+                : [],
+            FontFamilies = kind == ProjectExportKind.Full
+                ? (await db.ProjectFontFamilies
+                    .AsNoTracking()
+                    .Include(family => family.Faces)
+                    .Where(family => family.ProjectId == projectId)
+                    .OrderBy(family => family.Name)
+                    .ToListAsync(cancellationToken))
+                    .Select(family => new ProjectExportFontFamily(
+                        family.Id,
+                        family.Name,
+                        family.Faces
+                            .OrderBy(face => face.Weight)
+                            .ThenBy(face => face.Italic)
+                            .Select(face => new ProjectExportFontFace(
+                                face.Id,
+                                face.SubfamilyName,
+                                face.FileName,
+                                face.ContentType,
+                                face.Weight,
+                                face.Italic,
+                                face.Data,
+                                Convert.ToHexStringLower(SHA256.HashData(face.Data))))
+                            .ToList()))
                     .ToList()
                 : [],
             Acts = kind == ProjectExportKind.Full
@@ -389,7 +416,8 @@ public sealed class ProjectImportExportService(
                     item.Id,
                     item.ManuscriptStyleDefinitionId,
                     item.SemanticRole,
-                    ManuscriptStyleService.NormalizeDefinition(
+                    ManuscriptStyleService.NormalizeOverride(
+                        item.ManuscriptStyleDefinition.Kind,
                         JsonSerializer.Deserialize<ManuscriptStyleProperties>(
                             item.OverrideJson,
                             ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties()),

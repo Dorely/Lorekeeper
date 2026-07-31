@@ -11,7 +11,7 @@ from .protocol import Diagnostic, response
 from .render import render_request
 
 
-MAX_REQUEST_BYTES = 12 * 1024 * 1024
+MAX_REQUEST_BYTES = 96 * 1024 * 1024
 
 
 class ProtocolArgumentParser(argparse.ArgumentParser):
@@ -40,7 +40,7 @@ def main() -> int:
         result = response(
             "",
             "failed",
-            [Diagnostic("error", "PRESS_REQUEST_TOO_LARGE", "The request exceeds 12 MiB.")],
+            [Diagnostic("error", "PRESS_REQUEST_TOO_LARGE", "The request exceeds 96 MiB.")],
         )
     else:
         try:

@@ -311,12 +311,30 @@ public sealed class ProjectImageService(
                 + string.Join(", ", figureChapters)
                 + ". Remove or replace those figures before deleting the image.");
         }
-        var entityIds = await AttachedEntityIdsAsync(projectId, imageId, cancellationToken);
-
-        foreach (var placement in await db.PublicationImagePlacements
-            .Where(placement => placement.Edition.ProjectId == projectId && placement.AssetId == imageId)
+        var figureMatter = (await db.PublicationMatter
+            .AsNoTracking()
+            .Where(matter => matter.Edition.ProjectId == projectId)
+            .Select(matter => new { matter.Title, EditionName = matter.Edition.Name, matter.ManuscriptJson })
             .ToListAsync(cancellationToken))
-            db.PublicationImagePlacements.Remove(placement);
+            .Where(matter => ManuscriptCodec.Deserialize(matter.ManuscriptJson).Content.Any(
+                block => block.Type == ManuscriptBlockType.Figure && block.ImageId == imageId))
+            .Select(matter => $"{matter.EditionName} / {matter.Title}")
+            .ToList();
+        if (figureMatter.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Image '{asset.FileName}' is used by a semantic publication-matter figure in: "
+                + string.Join(", ", figureMatter)
+                + ". Remove or replace those figures before deleting the image.");
+        }
+        var entityIds = await AttachedEntityIdsAsync(projectId, imageId, cancellationToken);
+        if (await db.PublicationImagePlacements.AsNoTracking().AnyAsync(
+            placement => placement.Edition.ProjectId == projectId && placement.AssetId == imageId,
+            cancellationToken))
+        {
+            throw new InvalidOperationException(
+                $"Image '{asset.FileName}' is used by a publication-edition placement. Remove the placement in Publish before deleting the image.");
+        }
 
         await chapterVisuals.RemoveImageReferencesUnderProjectMutationLeaseAsync(
             projectId,

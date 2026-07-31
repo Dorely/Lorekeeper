@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+from io import BytesIO
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
+from PIL import Image
 from . import __version__
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 KDP_PROFILE = "kdp-paperback-6x9-preview-v1"
 INGRAM_PROFILE = "ingram-pdf-x1a-preview-v1"
 SUPPORTED_PROFILES = frozenset((KDP_PROFILE, INGRAM_PROFILE))
+MAX_DOCUMENT_CHARACTERS = 10_000_000
+MAX_COVER_IMAGE_BYTES = 20_000_000
+MAX_COVER_IMAGE_DATA_URI_CHARACTERS = 26_666_691
 
 
 @dataclass(slots=True)
@@ -118,7 +125,7 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
         diagnostics,
     )
     if value.get("protocolVersion") != PROTOCOL_VERSION:
-        diagnostics.append(_error("PRESS_PROTOCOL_UNSUPPORTED", "Only protocol version 1 is supported."))
+        diagnostics.append(_error("PRESS_PROTOCOL_UNSUPPORTED", f"Only protocol version {PROTOCOL_VERSION} is supported."))
 
     job_id = value.get("jobId")
     if (
@@ -137,7 +144,7 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
     if isinstance(document, dict):
         _keys(
             document,
-            {"title", "author", "chapters", "matter"},
+            {"title", "author", "sections", "matter", "styles"},
             {
                 "language",
                 "subtitle",
@@ -159,51 +166,70 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
         for field_name in ("includeTitlePage", "includeVisibleTableOfContents"):
             if field_name in document and not isinstance(document.get(field_name), bool):
                 diagnostics.append(_error("PRESS_BOOLEAN_INVALID", f"document.{field_name} must be a boolean."))
-        total_characters = 0
+        total_characters = sum(
+            len(value)
+            for value in (
+                document.get("title"),
+                document.get("author"),
+                document.get("language"),
+                document.get("subtitle"),
+                document.get("publisher"),
+                document.get("copyright"),
+            )
+            if isinstance(value, str)
+        )
         total_blocks = 0
-        chapters = document.get("chapters")
-        if not isinstance(chapters, list) or not 1 <= len(chapters) <= 500:
-            diagnostics.append(_error("PRESS_CHAPTERS_INVALID", "document.chapters must contain 1-500 chapters."))
+        total_chapters = 0
+        sections = document.get("sections")
+        if not isinstance(sections, list) or not 1 <= len(sections) <= 500:
+            diagnostics.append(_error("PRESS_SECTIONS_INVALID", "document.sections must contain 1-500 sections."))
         else:
-            for index, chapter in enumerate(chapters):
-                if not isinstance(chapter, dict):
-                    diagnostics.append(_error("PRESS_CHAPTER_INVALID", f"document.chapters[{index}] must be an object."))
+            for section_index, section in enumerate(sections):
+                section_path = f"document.sections[{section_index}]"
+                if not isinstance(section, dict):
+                    diagnostics.append(_error("PRESS_SECTION_INVALID", f"{section_path} must be an object."))
                     continue
-                _keys(
-                    chapter,
-                    {"title", "body"},
-                    {"id", "blocks"},
-                    f"document.chapters[{index}]",
+                _exact_keys(
+                    section,
+                    {"id", "title", "synopsis", "includePage", "includeHeading", "chapters"},
+                    section_path,
                     diagnostics,
                 )
-                _bounded_text(chapter.get("title"), f"document.chapters[{index}].title", 1, 500, diagnostics)
-                body = chapter.get("body")
-                _bounded_text(body, f"document.chapters[{index}].body", 1, 2_000_000, diagnostics)
-                if isinstance(body, str):
-                    total_characters += len(body)
-                if "id" in chapter:
-                    _bounded_text(chapter.get("id"), f"document.chapters[{index}].id", 1, 80, diagnostics)
-                    _uuid(chapter.get("id"), f"document.chapters[{index}].id", diagnostics)
-                blocks = chapter.get("blocks")
-                if blocks is not None:
-                    if not isinstance(blocks, list) or len(blocks) > 100_000:
-                        diagnostics.append(_error("PRESS_BLOCKS_INVALID", f"document.chapters[{index}].blocks must be a list."))
-                    else:
-                        total_blocks += len(blocks)
-                        for block_index, block in enumerate(blocks):
-                            if not isinstance(block, dict):
-                                diagnostics.append(_error("PRESS_BLOCK_INVALID", f"document.chapters[{index}].blocks[{block_index}] must be an object."))
-                                continue
-                            _exact_keys(
-                                block,
-                                {"id", "type", "text"},
-                                f"document.chapters[{index}].blocks[{block_index}]",
-                                diagnostics,
-                            )
-                            _bounded_text(block.get("id"), f"document.chapters[{index}].blocks[{block_index}].id", 1, 80, diagnostics)
-                            _uuid(block.get("id"), f"document.chapters[{index}].blocks[{block_index}].id", diagnostics)
-                            _bounded_text(block.get("type"), f"document.chapters[{index}].blocks[{block_index}].type", 1, 40, diagnostics)
-                            _bounded_text(block.get("text"), f"document.chapters[{index}].blocks[{block_index}].text", 0, 2_000_000, diagnostics)
+                if section.get("id") is not None:
+                    _uuid(section.get("id"), f"{section_path}.id", diagnostics)
+                _bounded_text(section.get("title"), f"{section_path}.title", 1, 500, diagnostics)
+                _bounded_text(section.get("synopsis"), f"{section_path}.synopsis", 0, 2_000_000, diagnostics)
+                total_characters += _text_length(section.get("title")) + _text_length(section.get("synopsis"))
+                for field_name in ("includePage", "includeHeading"):
+                    if not isinstance(section.get(field_name), bool):
+                        diagnostics.append(_error("PRESS_BOOLEAN_INVALID", f"{section_path}.{field_name} must be a boolean."))
+                chapters = section.get("chapters")
+                if not isinstance(chapters, list) or len(chapters) > 500:
+                    diagnostics.append(_error("PRESS_CHAPTERS_INVALID", f"{section_path}.chapters must be a list."))
+                    continue
+                total_chapters += len(chapters)
+                for chapter_index, chapter in enumerate(chapters):
+                    chapter_path = f"{section_path}.chapters[{chapter_index}]"
+                    if not isinstance(chapter, dict):
+                        diagnostics.append(_error("PRESS_CHAPTER_INVALID", f"{chapter_path} must be an object."))
+                        continue
+                    _exact_keys(
+                        chapter,
+                        {"id", "title", "synopsis", "includeHeading", "blocks"},
+                        chapter_path,
+                        diagnostics,
+                    )
+                    _uuid(chapter.get("id"), f"{chapter_path}.id", diagnostics)
+                    _bounded_text(chapter.get("title"), f"{chapter_path}.title", 1, 500, diagnostics)
+                    _bounded_text(chapter.get("synopsis"), f"{chapter_path}.synopsis", 0, 2_000_000, diagnostics)
+                    total_characters += _text_length(chapter.get("title")) + _text_length(chapter.get("synopsis"))
+                    if not isinstance(chapter.get("includeHeading"), bool):
+                        diagnostics.append(_error("PRESS_BOOLEAN_INVALID", f"{chapter_path}.includeHeading must be a boolean."))
+                    characters, blocks = _validate_blocks(chapter.get("blocks"), f"{chapter_path}.blocks", diagnostics)
+                    total_characters += characters
+                    total_blocks += blocks
+        if total_chapters == 0 or total_chapters > 500:
+            diagnostics.append(_error("PRESS_CHAPTERS_INVALID", "document.sections must contain 1-500 chapters in total."))
         matter = document.get("matter")
         if not isinstance(matter, list) or len(matter) > 500:
             diagnostics.append(_error("PRESS_MATTER_INVALID", "document.matter must be a list with at most 500 items."))
@@ -213,17 +239,14 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
                 if not isinstance(item, dict):
                     diagnostics.append(_error("PRESS_MATTER_INVALID", f"{path} must be an object."))
                     continue
-                _exact_keys(item, {"id", "location", "kind", "title", "body", "blocks"}, path, diagnostics)
+                _exact_keys(item, {"id", "location", "kind", "title", "blocks"}, path, diagnostics)
                 _bounded_text(item.get("id"), f"{path}.id", 1, 80, diagnostics)
                 _uuid(item.get("id"), f"{path}.id", diagnostics)
                 if item.get("location") not in {"Front", "Back"}:
                     diagnostics.append(_error("PRESS_MATTER_LOCATION_INVALID", f"{path}.location is invalid."))
                 if item.get("kind") not in {
-                    "TitlePage",
-                    "Copyright",
                     "Dedication",
                     "Epigraph",
-                    "Contents",
                     "Acknowledgments",
                     "AboutAuthor",
                     "AlsoBy",
@@ -232,25 +255,12 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
                 }:
                     diagnostics.append(_error("PRESS_MATTER_KIND_INVALID", f"{path}.kind is invalid."))
                 _bounded_text(item.get("title"), f"{path}.title", 1, 500, diagnostics)
-                _bounded_text(item.get("body"), f"{path}.body", 0, 2_000_000, diagnostics)
-                if isinstance(item.get("body"), str):
-                    total_characters += len(item["body"])
-                blocks = item.get("blocks")
-                if not isinstance(blocks, list) or len(blocks) > 100_000:
-                    diagnostics.append(_error("PRESS_BLOCKS_INVALID", f"{path}.blocks must be a list."))
-                else:
-                    total_blocks += len(blocks)
-                    for block_index, block in enumerate(blocks):
-                        block_path = f"{path}.blocks[{block_index}]"
-                        if not isinstance(block, dict):
-                            diagnostics.append(_error("PRESS_BLOCK_INVALID", f"{block_path} must be an object."))
-                            continue
-                        _exact_keys(block, {"id", "type", "text"}, block_path, diagnostics)
-                        _bounded_text(block.get("id"), f"{block_path}.id", 1, 80, diagnostics)
-                        _uuid(block.get("id"), f"{block_path}.id", diagnostics)
-                        _bounded_text(block.get("type"), f"{block_path}.type", 1, 40, diagnostics)
-                        _bounded_text(block.get("text"), f"{block_path}.text", 0, 2_000_000, diagnostics)
-        if total_characters > 10_000_000 or total_blocks > 100_000:
+                total_characters += _text_length(item.get("title"))
+                characters, blocks = _validate_blocks(item.get("blocks"), f"{path}.blocks", diagnostics)
+                total_characters += characters
+                total_blocks += blocks
+        _validate_styles(document.get("styles"), diagnostics)
+        if total_characters > MAX_DOCUMENT_CHARACTERS or total_blocks > 100_000:
             diagnostics.append(
                 _error(
                     "PRESS_DOCUMENT_TOO_LARGE",
@@ -301,7 +311,10 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
         _keys(
             cover,
             {"bleedInches", "paperCaliperInchesPerPage", "backCopy"},
-            {"title", "subtitle", "author", "spineText", "backgroundColor", "isbn", "barcodeMode"},
+            {
+                "title", "subtitle", "author", "spineText", "backgroundColor", "isbn",
+                "barcodeMode", "imageDataUri", "imageFocalXPercent", "imageFocalYPercent",
+            },
             "cover",
             diagnostics,
         )
@@ -313,14 +326,189 @@ def validate_request(value: Any) -> tuple[dict[str, Any] | None, list[Diagnostic
             0.01,
             diagnostics,
         )
-        _bounded_text(cover.get("backCopy"), "cover.backCopy", 0, 10_000, diagnostics)
+        _bounded_text(cover.get("backCopy"), "cover.backCopy", 0, 1_800, diagnostics)
         for field_name in ("title", "subtitle", "author", "spineText", "backgroundColor", "isbn", "barcodeMode"):
             if field_name in cover:
-                _bounded_text(cover.get(field_name), f"cover.{field_name}", 0, 500, diagnostics)
+                maximum = {
+                    "title": 160,
+                    "subtitle": 240,
+                    "author": 160,
+                    "spineText": 120,
+                }.get(field_name, 500)
+                _bounded_text(cover.get(field_name), f"cover.{field_name}", 0, maximum, diagnostics)
+        if "imageDataUri" in cover:
+            _bounded_text(
+                cover.get("imageDataUri"),
+                "cover.imageDataUri",
+                0,
+                MAX_COVER_IMAGE_DATA_URI_CHARACTERS,
+                diagnostics,
+            )
+            image_uri = cover.get("imageDataUri")
+            if image_uri:
+                if not isinstance(image_uri, str) or not image_uri.startswith("data:image/png;base64,"):
+                    diagnostics.append(_error("PRESS_COVER_IMAGE_INVALID", "cover.imageDataUri must be a base64 PNG data URI."))
+                else:
+                    try:
+                        image_data = base64.b64decode(image_uri.partition(",")[2], validate=True)
+                        width = int.from_bytes(image_data[16:20], "big") if len(image_data) >= 24 else 0
+                        height = int.from_bytes(image_data[20:24], "big") if len(image_data) >= 24 else 0
+                        if (
+                            len(image_data) > MAX_COVER_IMAGE_BYTES
+                            or image_data[:8] != b"\x89PNG\r\n\x1a\n"
+                            or image_data[12:16] != b"IHDR"
+                            or image_data[24] != 8
+                            or image_data[25] not in (2, 6)
+                            or image_data[28] not in (0, 1)
+                            or width < 1
+                            or height < 1
+                            or width * height > 16_000_000
+                        ):
+                            diagnostics.append(_error("PRESS_COVER_IMAGE_INVALID", "cover image PNG data or dimensions are invalid."))
+                        else:
+                            with Image.open(BytesIO(image_data)) as decoded:
+                                decoded.verify()
+                    except (binascii.Error, ValueError):
+                        diagnostics.append(_error("PRESS_COVER_IMAGE_INVALID", "cover image base64 is invalid."))
+                    except Exception:
+                        diagnostics.append(_error("PRESS_COVER_IMAGE_INVALID", "cover image PNG could not be decoded safely."))
+                if value.get("profile") == INGRAM_PROFILE:
+                    diagnostics.append(_error(
+                        "PRESS_COVER_IMAGE_CMYK_UNSUPPORTED",
+                        "Selected cover images are not yet supported by the contained Ingram CMYK Preview profile.",
+                    ))
+        for field_name in ("imageFocalXPercent", "imageFocalYPercent"):
+            if field_name in cover:
+                _bounded_number(cover.get(field_name), f"cover.{field_name}", 0, 100, diagnostics)
     else:
         diagnostics.append(_error("PRESS_COVER_INVALID", "cover must be an object."))
 
     return (value if not diagnostics else None), diagnostics
+
+
+def _text_length(value: Any) -> int:
+    return len(value) if isinstance(value, str) else 0
+
+
+def _validate_blocks(
+    blocks: Any,
+    path: str,
+    diagnostics: list[Diagnostic],
+) -> tuple[int, int]:
+    if not isinstance(blocks, list) or len(blocks) > 100_000:
+        diagnostics.append(_error("PRESS_BLOCKS_INVALID", f"{path} must be a list."))
+        return 0, 0
+    characters = 0
+    allowed_block_types = {"Paragraph", "Heading", "SceneBreak", "BlockQuote", "ListItem", "Figure"}
+    allowed_mark_types = {
+        "Emphasis",
+        "Strong",
+        "Underline",
+        "Strikethrough",
+        "Code",
+        "Link",
+        "Language",
+        "SmallCaps",
+        "Superscript",
+        "Subscript",
+        "CharacterStyle",
+    }
+    for block_index, block in enumerate(blocks):
+        block_path = f"{path}[{block_index}]"
+        if not isinstance(block, dict):
+            diagnostics.append(_error("PRESS_BLOCK_INVALID", f"{block_path} must be an object."))
+            continue
+        _exact_keys(block, {"id", "type", "styleRole", "headingLevel", "content"}, block_path, diagnostics)
+        _bounded_text(block.get("id"), f"{block_path}.id", 1, 80, diagnostics)
+        _uuid(block.get("id"), f"{block_path}.id", diagnostics)
+        if block.get("type") not in allowed_block_types:
+            diagnostics.append(_error("PRESS_BLOCK_TYPE_INVALID", f"{block_path}.type is invalid."))
+        _bounded_text(block.get("styleRole"), f"{block_path}.styleRole", 1, 80, diagnostics)
+        heading_level = block.get("headingLevel")
+        if heading_level is not None and (
+            not isinstance(heading_level, int)
+            or isinstance(heading_level, bool)
+            or not 1 <= heading_level <= 6
+        ):
+            diagnostics.append(_error("PRESS_HEADING_LEVEL_INVALID", f"{block_path}.headingLevel is invalid."))
+        content = block.get("content")
+        if not isinstance(content, list) or len(content) > 100_000:
+            diagnostics.append(_error("PRESS_INLINE_INVALID", f"{block_path}.content must be a list."))
+            continue
+        for inline_index, inline in enumerate(content):
+            inline_path = f"{block_path}.content[{inline_index}]"
+            if not isinstance(inline, dict):
+                diagnostics.append(_error("PRESS_INLINE_INVALID", f"{inline_path} must be an object."))
+                continue
+            _exact_keys(inline, {"type", "text", "marks"}, inline_path, diagnostics)
+            if inline.get("type") != "Text":
+                diagnostics.append(_error("PRESS_INLINE_TYPE_INVALID", f"{inline_path}.type is invalid."))
+            _bounded_text(inline.get("text"), f"{inline_path}.text", 0, 2_000_000, diagnostics)
+            if isinstance(inline.get("text"), str):
+                characters += len(inline["text"])
+            marks = inline.get("marks")
+            if not isinstance(marks, list) or len(marks) > 100:
+                diagnostics.append(_error("PRESS_MARKS_INVALID", f"{inline_path}.marks must be a list."))
+                continue
+            for mark_index, mark in enumerate(marks):
+                mark_path = f"{inline_path}.marks[{mark_index}]"
+                if not isinstance(mark, dict):
+                    diagnostics.append(_error("PRESS_MARK_INVALID", f"{mark_path} must be an object."))
+                    continue
+                _exact_keys(mark, {"type", "value"}, mark_path, diagnostics)
+                if mark.get("type") not in allowed_mark_types:
+                    diagnostics.append(_error("PRESS_MARK_TYPE_INVALID", f"{mark_path}.type is invalid."))
+                value = mark.get("value")
+                if value is not None:
+                    _bounded_text(value, f"{mark_path}.value", 1, 2_000, diagnostics)
+    return characters, len(blocks)
+
+
+def _validate_styles(styles: Any, diagnostics: list[Diagnostic]) -> None:
+    if not isinstance(styles, list) or len(styles) > 500:
+        diagnostics.append(_error("PRESS_STYLES_INVALID", "document.styles must be a list with at most 500 items."))
+        return
+    definition_keys = {
+        "fontFamilyKey",
+        "fontSizePoints",
+        "fontWeight",
+        "italic",
+        "smallCaps",
+        "lineHeight",
+        "spaceBeforePoints",
+        "spaceAfterPoints",
+        "keepWithNext",
+        "textAlign",
+    }
+    for index, style in enumerate(styles):
+        path = f"document.styles[{index}]"
+        if not isinstance(style, dict):
+            diagnostics.append(_error("PRESS_STYLE_INVALID", f"{path} must be an object."))
+            continue
+        _exact_keys(style, {"name", "kind", "semanticRole", "definition"}, path, diagnostics)
+        _bounded_text(style.get("name"), f"{path}.name", 1, 80, diagnostics)
+        if style.get("kind") not in {"Paragraph", "Character"}:
+            diagnostics.append(_error("PRESS_STYLE_KIND_INVALID", f"{path}.kind is invalid."))
+        _bounded_text(style.get("semanticRole"), f"{path}.semanticRole", 1, 80, diagnostics)
+        definition = style.get("definition")
+        if not isinstance(definition, dict):
+            diagnostics.append(_error("PRESS_STYLE_INVALID", f"{path}.definition must be an object."))
+            continue
+        _exact_keys(definition, definition_keys, f"{path}.definition", diagnostics)
+        for key in ("italic", "smallCaps", "keepWithNext"):
+            if definition.get(key) is not None and not isinstance(definition.get(key), bool):
+                diagnostics.append(_error("PRESS_STYLE_INVALID", f"{path}.definition.{key} must be boolean or null."))
+        for key in ("fontSizePoints", "lineHeight", "spaceBeforePoints", "spaceAfterPoints"):
+            if definition.get(key) is not None:
+                _bounded_number(definition.get(key), f"{path}.definition.{key}", 0.0, 288.0, diagnostics)
+        if definition.get("fontWeight") is not None:
+            weight = definition["fontWeight"]
+            if not isinstance(weight, int) or isinstance(weight, bool) or weight < 100 or weight > 900 or weight % 100:
+                diagnostics.append(_error("PRESS_STYLE_INVALID", f"{path}.definition.fontWeight is invalid."))
+        if definition.get("fontFamilyKey") not in {None, "serif", "sans", "mono"}:
+            diagnostics.append(_error("PRESS_STYLE_INVALID", f"{path}.definition.fontFamilyKey is invalid."))
+        if definition.get("textAlign") not in {None, "left", "right", "center", "justify"}:
+            diagnostics.append(_error("PRESS_STYLE_INVALID", f"{path}.definition.textAlign is invalid."))
 
 
 def _keys(

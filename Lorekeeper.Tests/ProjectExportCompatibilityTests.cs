@@ -9,12 +9,12 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V11WritesEditionsWithoutLegacyPublishProfiles()
+    public void V12WritesEditionsWithoutLegacyPublishProfiles()
     {
         var document = Document(new ProjectExportChapter());
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(11, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(12, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"publishProfiles\"", json, StringComparison.Ordinal);
     }
@@ -392,6 +392,58 @@ public sealed class ProjectExportCompatibilityTests
 
         Assert.Contains("Picture Page", exception.Message, StringComparison.Ordinal);
         Assert.Contains("not included", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void V11PrevalidationRejectsCustomFontReferencesBecauseTheBackupOmittedFontBinaries()
+    {
+        var chapterId = Guid.NewGuid();
+        var missingFamilyId = Guid.NewGuid();
+        var manuscript = ManuscriptCodec.FromPlainText(chapterId, "Custom type", revision: 2);
+        var layout = new PicturePageLayout(
+            [],
+            [
+                new PicturePageTextElement(
+                    Guid.NewGuid(),
+                    "Custom type",
+                    0,
+                    0,
+                    100,
+                    100,
+                    0,
+                    0,
+                    $"project:{missingFamilyId:N}",
+                    400,
+                    false,
+                    12,
+                    0,
+                    1.4,
+                    "#000000",
+                    "#ffffff",
+                    0,
+                    PicturePageTextAlign.Left,
+                    ChapterTextVerticalAlign.Top,
+                    PicturePageTextShadow.None,
+                    PicturePageTextRole.Body,
+                    [new ManuscriptRangeReference(manuscript.Content[0].Id)]),
+            ]);
+        var document = Document(new ProjectExportChapter
+        {
+            Id = chapterId,
+            Title = "Picture Page",
+            ManuscriptJson = ManuscriptCodec.Serialize(manuscript),
+            ManuscriptRevision = manuscript.Revision,
+            PageLayoutJson = JsonSerializer.Serialize(layout, ManuscriptCodec.JsonOptions),
+        }) with
+        {
+            FormatVersion = 11,
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => ProjectImportJobProcessor.ValidateChapterPayloads(document));
+
+        Assert.Contains("pre-v12 backup", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("font binary", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

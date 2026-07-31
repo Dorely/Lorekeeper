@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import html
 import logging
@@ -13,7 +14,7 @@ from weasyprint.logger import LOGGER
 
 from .geometry import POINTS_PER_INCH, geometry_errors, measured_dimensions
 from .inspect import PdfInspection, inspect_pdf, pdfx_2001_errors
-from .markup import interior_content
+from .markup import interior_content, style_rules
 from .pdfx import DECLARED_STANDARD, PROFILE_NAME, register_pdfx_2001_profile
 from .protocol import (
     INGRAM_PROFILE,
@@ -86,10 +87,28 @@ def render_request(
             profile_path,
             profile_data,
             request["profile"],
+            request["cover"].get("imageDataUri") or None,
+            validate_cover_layout=True,
         )
+        cover_layout_errors = [
+            warning.removeprefix("COVER_LAYOUT: ")
+            for warning in cover_warnings
+            if warning.startswith("COVER_LAYOUT: ")
+        ]
+        if cover_layout_errors:
+            return response(
+                request["jobId"],
+                "rejected",
+                [
+                    Diagnostic("error", "PRESS_COVER_COPY_OVERFLOW", message, "cover-pdf")
+                    for message in cover_layout_errors
+                ],
+            )
         if cover_warnings:
             raise ValueError("WeasyPrint warnings: " + " | ".join(cover_warnings))
         cover_inspection = inspect_pdf(cover_data)
+        if cover_inspection.page_count != 1:
+            raise ValueError("The full-wrap cover must render as exactly one PDF page.")
 
         artifact_geometry_errors = geometry_errors(
             request,
@@ -169,11 +188,19 @@ def _compile(
     profile_path: Path | None,
     profile_data: bytes | None,
     press_profile: str,
+    allowed_image_uri: str | None = None,
+    validate_cover_layout: bool = False,
 ) -> tuple[bytes, list[str], list[dict[str, Any]]]:
     register_pdfx_2001_profile()
     profile_uri = profile_path.resolve().as_uri() if profile_path is not None else None
 
     def fetch(url: str, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        if allowed_image_uri is not None and url == allowed_image_uri:
+            return {
+                "string": base64.b64decode(allowed_image_uri.partition(",")[2], validate=True),
+                "mime_type": "image/png",
+                "redirected_url": allowed_image_uri,
+            }
         if profile_uri is None or profile_data is None or url != profile_uri:
             raise ValueError(f"External resource access is blocked: {url}")
         return {
@@ -199,6 +226,11 @@ def _compile(
         else:
             options.update(pdf_version="1.7", output_intent="srgb")
         document = HTML(string=source, url_fetcher=fetch).render()
+        if validate_cover_layout:
+            capture.messages.extend(
+                f"COVER_LAYOUT: {message}"
+                for message in _cover_layout_errors(document)
+            )
         page_map = []
         for page_number, page in enumerate(document.pages, start=1):
             for anchor in page.anchors:
@@ -219,6 +251,43 @@ def _compile(
         LOGGER.removeHandler(capture)
 
 
+def _cover_layout_errors(document: Any) -> list[str]:
+    errors: list[str] = []
+    if len(document.pages) != 1:
+        return ["Cover copy does not fit on the single full-wrap cover page."]
+    descendants = list(document.pages[0]._page_box.descendants())
+
+    def class_box(class_name: str) -> Any | None:
+        return next(
+            (
+                box
+                for box in descendants
+                if getattr(box, "element", None) is not None
+                and class_name in (box.element.get("class") or "").split()
+            ),
+            None,
+        )
+
+    back_copy = class_box("back-copy")
+    barcode = class_box("barcode")
+    if back_copy is None or barcode is None:
+        return errors
+    copy_descendants = list(back_copy.descendants())
+    content_bottom = max(
+        (
+            box.position_y + box.height
+            for box in copy_descendants
+            if getattr(box, "element_tag", None) in {"p", "div"}
+        ),
+        default=back_copy.position_y + back_copy.height,
+    )
+    if content_bottom > barcode.position_y - 1:
+        errors.append(
+            "Back-cover copy enters the protected barcode reserve; shorten the copy or reduce its typography."
+        )
+    return errors
+
+
 def _interior_html(request: dict[str, Any], profile_path: Path | None) -> str:
     document = request["document"]
     return _html_document(
@@ -230,13 +299,14 @@ def _interior_html(request: dict[str, Any], profile_path: Path | None) -> str:
           margin: {request["trim"].get("marginInches", 0.75)}in;
           @bottom-center {{ content: counter(page); font-family: "Liberation Serif", serif; font-size: 9pt; }}
         }}
-        @page :left {{ margin-left: 0.625in; margin-right: 0.75in; }}
-        @page :right {{ margin-left: 0.75in; margin-right: 0.625in; }}
+        @page :left {{ margin-left: {request["trim"].get("marginInches", 0.75)}in; margin-right: {request["trim"].get("marginInches", 0.75)}in; }}
+        @page :right {{ margin-left: {request["trim"].get("marginInches", 0.75)}in; margin-right: {request["trim"].get("marginInches", 0.75)}in; }}
         @page :left {{ @top-center {{ content: string(chapter-title); font-size: 8.5pt; }} }}
-        @page :right {{ @top-center {{ content: "{html.escape(document["title"])}"; font-size: 8.5pt; }} }}
+        @page :right {{ @top-center {{ content: "{_css_string(document["title"])}"; font-size: 8.5pt; }} }}
         @page front {{ @bottom-center {{ content: counter(page, lower-roman); }} }}
         @page chapter:first {{ @top-center {{ content: none; }} }}
         body {{ font-family: "Liberation Serif", serif; font-size: {request["trim"].get("bodyFontSizePoints", 11)}pt; line-height: {request["trim"].get("bodyLineHeight", 1.32)}; }}
+        .part {{ page: chapter; break-before: right; }}
         .chapter {{ page: chapter; break-before: right; }}
         .front {{ page: front; break-after: page; }}
         .matter {{ break-before: page; break-after: page; }}
@@ -246,10 +316,13 @@ def _interior_html(request: dict[str, Any], profile_path: Path | None) -> str:
         .copyright-page {{ display: flex; flex-direction: column; justify-content: end; font-size: 9pt; }}
         .dedication {{ display: flex; align-items: center; justify-content: center; text-align: center; }}
         .contents li {{ margin-bottom: 0.12in; }}
+        .underline {{ text-decoration: underline; }}
+        .small-caps {{ font-variant-caps: small-caps; }}
+        .print-link {{ text-decoration: underline; }}
         h1 {{ string-set: chapter-title content(); text-align: center; margin: 1.25in 0 0.55in; }}
         p {{ margin: 0; text-align: justify; text-indent: 1.25em; hyphens: auto; orphans: 3; widows: 3; }}
         h1 + p {{ text-indent: 0; }}
-        """,
+        """ + style_rules(document["styles"]),
         interior_content(document),
     )
 
@@ -265,14 +338,24 @@ def _cover_html(
     spine_text = cover.get("spineText", "") if spine_width >= 0.24 else ""
     width = trim["widthInches"] * 2 + spine_width + cover["bleedInches"] * 2
     height = trim["heightInches"] + cover["bleedInches"] * 2
+    image = (
+        f'<img class="front-image" src="{html.escape(cover["imageDataUri"], quote=True)}" alt="" />'
+        if cover.get("imageDataUri")
+        else ""
+    )
+    barcode = _barcode_html(cover, request["profile"] == INGRAM_PROFILE)
+    back_class = "back has-barcode" if barcode else "back"
     body = f"""
       <main class="cover">
-        <section class="back"><p>{html.escape(cover["backCopy"])}</p>{_barcode_html(cover, request["profile"] == INGRAM_PROFILE)}</section>
+        <section class="{back_class}"><div class="back-copy">{_paragraph_html(cover["backCopy"])}</div>{barcode}</section>
         <section class="spine"><span>{html.escape(spine_text)}</span></section>
         <section class="front">
-          <h1>{html.escape(cover.get("title") or request["document"]["title"])}</h1>
-          <h2>{html.escape(cover.get("subtitle", ""))}</h2>
-          <p>{html.escape(cover.get("author") or request["document"]["author"])}</p>
+          {image}
+          <div class="front-copy">
+            <h1>{html.escape(cover.get("title") or request["document"]["title"])}</h1>
+            <h2>{html.escape(cover.get("subtitle", ""))}</h2>
+            <p>{html.escape(cover.get("author") or request["document"]["author"])}</p>
+          </div>
         </section>
       </main>
     """
@@ -282,12 +365,14 @@ def _cover_html(
         text_color = "device-cmyk(0 0 0 0)"
         barcode_black = "device-cmyk(0 0 0 1)"
         barcode_white = "device-cmyk(0 0 0 0)"
+        copy_background = "device-cmyk(0 0 0 1)"
     else:
         panel_color = cover.get("backgroundColor", "#5c7ca5")
         spine_color = panel_color
         text_color = "#ffffff"
         barcode_black = "#000000"
         barcode_white = "#ffffff"
+        copy_background = "#000000"
     css = f"""
       @page {{ size: {width}in {height}in; margin: 0; }}
       html, body {{ margin: 0; width: 100%; height: 100%; font-family: "Liberation Serif", serif; }}
@@ -296,12 +381,16 @@ def _cover_html(
       .spine {{ background: {spine_color}; }}
       .spine {{ align-items: center; color: {text_color}; display: flex; justify-content: center; overflow: hidden; }}
       .spine span {{ font-size: 9pt; transform: rotate(90deg); white-space: nowrap; }}
-      .front {{ display: flex; flex-direction: column; justify-content: center; text-align: center; }}
+      .front {{ display: flex; flex-direction: column; justify-content: center; overflow: hidden; position: relative; text-align: center; }}
+      .front-image {{ height: 100%; inset: 0; object-fit: cover; object-position: {cover.get("imageFocalXPercent", 50)}% {cover.get("imageFocalYPercent", 50)}%; position: absolute; width: 100%; }}
+      .front-copy {{ background: {copy_background}; box-sizing: border-box; padding: 0.25in; position: relative; z-index: 1; }}
       .front h1 {{ font-size: 28pt; }}
       .back {{ display: flex; align-items: center; font-size: 12pt; line-height: 1.4; }}
-      .barcode {{ background: {barcode_white}; bottom: 0.375in; box-sizing: border-box; color: {barcode_black}; font: 8pt sans-serif; height: 1.2in; padding: 0.12in; position: absolute; right: 0.375in; text-align: center; width: 2in; }}
+      .back.has-barcode {{ align-items: stretch; display: grid; grid-template-rows: minmax(0, 1fr) 1.575in; }}
+      .back.has-barcode .back-copy {{ align-self: center; grid-row: 1; }}
+      .back-copy p {{ margin: 0 0 0.8em; text-indent: 0; }}
+      .barcode {{ align-self: end; background: {barcode_white}; box-sizing: border-box; color: {barcode_black}; font: 8pt sans-serif; grid-row: 2; height: 1.2in; justify-self: end; padding: 0.12in; text-align: center; width: 2in; }}
       .barcode svg {{ display: block; height: 0.82in; width: 100%; }}
-      .back {{ position: relative; }}
     """
     return _html_document(request, profile_path, css, body), spine_width
 
@@ -319,10 +408,20 @@ def _hex_to_device_cmyk(value: str) -> str:
     return f"device-cmyk({cyan:.6f} {magenta:.6f} {yellow:.6f} {black:.6f})"
 
 
+def _css_string(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r\n", "\\A ")
+        .replace("\r", "\\A ")
+        .replace("\n", "\\A ")
+    )
+
+
 def _barcode_html(cover: dict[str, Any], cmyk: bool) -> str:
     digits = "".join(character for character in cover.get("isbn", "") if character.isdigit())
     if cover.get("barcodeMode") == "VendorOverlay":
-        return '<div class="barcode">VENDOR BARCODE RESERVED</div>'
+        return '<div class="barcode" aria-hidden="true"></div>'
     if len(digits) != 13:
         return ""
     left_odd = ("0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011")
@@ -344,6 +443,15 @@ def _barcode_html(cover: dict[str, Any], cmyk: bool) -> str:
     )
     svg = f'<svg viewBox="-11 0 113 82" role="img" aria-label="ISBN {digits} barcode"><rect x="-11" width="113" height="82" fill="{white}"/>{bars}</svg>'
     return f'<div class="barcode">{svg}<span>{html.escape(digits)}</span></div>'
+
+
+def _paragraph_html(value: str) -> str:
+    normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+    return "".join(
+        f"<p>{html.escape(paragraph).replace(chr(10), '<br />')}</p>"
+        for paragraph in normalized.split("\n\n")
+        if paragraph
+    )
 
 
 def _html_document(

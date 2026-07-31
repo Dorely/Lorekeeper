@@ -125,6 +125,7 @@ public sealed class PublicationRenderQueue : IPublicationRenderQueue
 public sealed class PublicationRenderService(
     AppDbContext db,
     IPublicationEditionService editions,
+    IPublishService publishing,
     IPublicationRenderQueue queue,
     IProjectMutationCoordinator projectMutations) : IPublicationRenderService
 {
@@ -143,6 +144,17 @@ public sealed class PublicationRenderService(
             throw new InvalidOperationException("Archived editions cannot be rendered.");
         if (edition.Format != PublicationEditionFormat.Paperback)
             throw new InvalidOperationException("PDF rendering is available only for paperback editions.");
+        var document = await publishing.GetDocumentAsync(projectId, editionId, cancellationToken);
+        if (HasUnsupportedInteriorVisuals(document))
+        {
+            throw new InvalidOperationException(
+                "The installed prose-only Preview press runtime cannot render Picture Pages, illustrated-prose images, semantic figures, or edition image placements. Remove them from this paperback edition or use EPUB export.");
+        }
+        if (edition.Vendor == PublicationVendor.IngramSpark && document.CoverAsset is not null)
+        {
+            throw new InvalidOperationException(
+                "Selected cover images are not yet supported by the contained Ingram CMYK Preview profile.");
+        }
         var active = await db.PublicationRenderJobs.AnyAsync(
             job => job.EditionId == editionId
                 && (job.Status == PublicationRenderStatus.Queued || job.Status == PublicationRenderStatus.Rendering),
@@ -161,6 +173,15 @@ public sealed class PublicationRenderService(
         await queue.EnqueueAsync(job.Id, CancellationToken.None);
         return View(job, [], job.SourceFingerprint);
     }
+
+    private static bool HasUnsupportedInteriorVisuals(PublishDocument document) =>
+        document.Placements.Count > 0
+        || document.Matter.Any(item =>
+            item.Manuscript.Content.Any(block => block.Type == ManuscriptBlockType.Figure))
+        || document.Sections.SelectMany(section => section.Chapters).Any(chapter =>
+            chapter.VisualMode != ChapterVisualMode.Prose
+            || chapter.IllustrationLayout.Images.Count > 0
+            || chapter.Manuscript.Content.Any(block => block.Type == ManuscriptBlockType.Figure));
 
     public async Task<PublicationRenderJobView> CancelAsync(
         Guid projectId,
@@ -261,13 +282,25 @@ public sealed class PublicationRenderService(
         return new(leftJobId, rightJobId, leftPages, rightPages, delta, movements.Count, movements, explanation);
     }
 
-    public Task<PublicationArtifact?> GetArtifactAsync(
+    public async Task<PublicationArtifact?> GetArtifactAsync(
         Guid projectId,
         Guid artifactId,
-        CancellationToken cancellationToken = default) =>
-        db.PublicationArtifacts.AsNoTracking().FirstOrDefaultAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var artifact = await db.PublicationArtifacts.AsNoTracking().FirstOrDefaultAsync(
             artifact => artifact.Id == artifactId && artifact.Edition.ProjectId == projectId,
             cancellationToken);
+        if (artifact is null
+            || artifact.ByteLength != artifact.Data.LongLength
+            || !string.Equals(
+                artifact.Sha256,
+                Convert.ToHexStringLower(SHA256.HashData(artifact.Data)),
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+        return artifact;
+    }
 
     private async Task<PublicationRenderJob> GetTrackedAsync(
         Guid projectId,
@@ -475,7 +508,7 @@ public sealed class PublicationRenderProcessor(
 
         Cleanup(job.Id);
         var result = await InvokeAsync(job.Id, request, cancellationToken);
-        if (result.ProtocolVersion != 1
+        if (result.ProtocolVersion != 2
             || !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a mismatched protocol or job identity.");
         var resultArtifacts = result.Artifacts
@@ -484,8 +517,11 @@ public sealed class PublicationRenderProcessor(
         if (!resultKinds.SequenceEqual(new[] { "cover-pdf", "interior-pdf" }, StringComparer.Ordinal))
             throw new InvalidOperationException("The press renderer must return exactly one interior and one cover PDF.");
         var interiorResult = resultArtifacts.Single(artifact => artifact.Kind == "interior-pdf");
+        var coverResult = resultArtifacts.Single(artifact => artifact.Kind == "cover-pdf");
         if (interiorResult.PageCount is not > 0 or > 100_000)
             throw new InvalidOperationException("The renderer returned an invalid interior page count.");
+        if (coverResult.PageCount != 1)
+            throw new InvalidOperationException("The renderer must return a one-page full-wrap cover.");
         job.RendererVersion = result.RendererVersion ?? string.Empty;
         job.DiagnosticsJson = JsonSerializer.Serialize(result.Diagnostics ?? [], JsonOptions);
         job.EvidenceJson = result.Evidence.ValueKind == JsonValueKind.Undefined ? "{}" : result.Evidence.GetRawText();
@@ -579,16 +615,20 @@ public sealed class PublicationRenderProcessor(
         PublishDocument document,
         PublicationCoverDesignView coverDesign)
     {
-        var chapters = document.Sections.SelectMany(section => section.Chapters).Select(chapter => new
+        var sections = document.Sections.Select(section => new
         {
-            id = chapter.Id,
-            title = string.IsNullOrWhiteSpace(chapter.Title) ? "Untitled chapter" : chapter.Title,
-            body = string.IsNullOrWhiteSpace(chapter.PlainText) ? " " : chapter.PlainText,
-            blocks = chapter.Manuscript.Content.Select(block => new
+            id = section.ActId,
+            section.Title,
+            synopsis = document.Profile.IncludeActSynopses ? section.Synopsis : string.Empty,
+            section.IncludePage,
+            section.IncludeHeading,
+            chapters = section.Chapters.Select(chapter => new
             {
-                id = block.Id,
-                type = block.Type.ToString(),
-                text = PlainText(block),
+                id = chapter.Id,
+                title = string.IsNullOrWhiteSpace(chapter.Title) ? "Untitled chapter" : chapter.Title,
+                synopsis = document.Profile.IncludeChapterSynopses ? chapter.Synopsis : string.Empty,
+                chapter.IncludeHeading,
+                blocks = chapter.Manuscript.Content.Select(BlockPayload).ToArray(),
             }).ToArray(),
         }).ToArray();
         var matter = document.Matter
@@ -601,22 +641,14 @@ public sealed class PublicationRenderProcessor(
                 location = item.Location.ToString(),
                 kind = item.Kind.ToString(),
                 title = PublicationMatterFormatting.Title(item),
-                body = SemanticPublishFormatting.PlainText(
-                    item.Manuscript,
-                    imageId => document.Assets.FirstOrDefault(asset => asset.Id == imageId)),
-                blocks = item.Manuscript.Content.Select(block => new
-                {
-                    id = block.Id,
-                    type = block.Type.ToString(),
-                    text = PlainText(block),
-                }).ToArray(),
+                blocks = item.Manuscript.Content.Select(BlockPayload).ToArray(),
             })
             .ToArray();
-        if (chapters.Length == 0)
+        if (sections.Sum(section => section.chapters.Length) == 0)
             throw new InvalidOperationException("Include at least one non-empty chapter before rendering.");
         return new
         {
-            protocolVersion = 1,
+            protocolVersion = 2,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
             document = new
@@ -630,7 +662,14 @@ public sealed class PublicationRenderProcessor(
                 matter,
                 includeTitlePage = document.Profile.IncludeTitlePage,
                 includeVisibleTableOfContents = document.Profile.IncludeVisibleTableOfContents,
-                chapters,
+                sections,
+                styles = document.NamedStyles.Select(style => new
+                {
+                    style.Name,
+                    kind = style.Kind.ToString(),
+                    style.SemanticRole,
+                    definition = style.Definition,
+                }).ToArray(),
             },
             trim = new
             {
@@ -652,6 +691,11 @@ public sealed class PublicationRenderProcessor(
                 backgroundColor = coverDesign.BackgroundColor,
                 isbn = job.Edition.Isbn,
                 barcodeMode = coverDesign.BarcodeMode.ToString(),
+                imageDataUri = document.CoverAsset is null
+                    ? string.Empty
+                    : $"data:{document.CoverAsset.ContentType};base64,{Convert.ToBase64String(document.CoverAsset.Data)}",
+                imageFocalXPercent = coverDesign.ImageFocalXPercent,
+                imageFocalYPercent = coverDesign.ImageFocalYPercent,
             },
         };
     }
@@ -737,8 +781,23 @@ public sealed class PublicationRenderProcessor(
         "press-jobs",
         jobId.ToString("N")));
 
-    private static string PlainText(ManuscriptBlock block) =>
-        string.Concat(block.Content.Select(inline => inline.Text));
+    private static object BlockPayload(ManuscriptBlock block) => new
+    {
+        id = block.Id,
+        type = block.Type.ToString(),
+        block.StyleRole,
+        block.HeadingLevel,
+        content = block.Content.Select(inline => new
+        {
+            type = inline.Type.ToString(),
+            inline.Text,
+            marks = inline.Marks.Select(mark => new
+            {
+                type = mark.Type.ToString(),
+                mark.Value,
+            }).ToArray(),
+        }).ToArray(),
+    };
 
     private static PublicationArtifactKind ParseKind(string kind) => kind switch
     {

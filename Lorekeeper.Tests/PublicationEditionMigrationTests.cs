@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Persistence;
 using Lorekeeper.Publish;
 using Microsoft.EntityFrameworkCore;
@@ -61,6 +62,9 @@ public sealed class PublicationEditionMigrationTests
                 .Build();
             var migration = new PublicationEditionMigrationService(
                 configuration,
+                new DatabaseMigrationRecoveryService(
+                    configuration,
+                    NullLogger<DatabaseMigrationRecoveryService>.Instance),
                 NullLogger<PublicationEditionMigrationService>.Instance);
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
                 await migration.ApplyPendingAsync(db);

@@ -39,13 +39,14 @@ current-runtime claims.
 - Bootstrap and vis-network vendored under `Lorekeeper/wwwroot`
 
 The solution contains the application and its authorized migration/format
-fixture test project. Standalone, non-production
-`Lorekeeper.Press` and `Lorekeeper.Press.Weasy` projects are retained as
-disposable renderer/conformance spikes; neither is referenced by the solution,
-packaged, or invoked by the application. The Rust candidate is the rejected PDF
-1.7 comparison implementation. The exact-pinned Python/WeasyPrint 69 candidate
-is accepted only as the foundation for a future `Preview` press runtime; it is
-not current application behavior or independently verified PDF/X output.
+fixture test project. `Lorekeeper.Press` is retained as the rejected,
+non-production Rust renderer/conformance comparison and is not invoked by the
+application. `Lorekeeper.Press.Weasy` remains outside the .NET solution because
+it is an independently locked Python/native sidecar, but it is the current
+integrated `Preview` press runtime invoked and contained by
+`PublicationRenderService`. It is not yet included in a production desktop
+package and its internal PDF inspection is not independent PDF/X or vendor
+conformance evidence.
 `Program.cs` owns host startup,
 dependency registration, middleware, local media and OAuth endpoints, database
 migration, interrupted-work reconciliation, desktop update setup, and Electron
@@ -193,13 +194,34 @@ matter, named-style mappings, image placements, Picture Page cover selection,
 revision tokens, cloning, archival, comparison, audit history, and deterministic
 source fingerprints. `IPublishService` is now projection/export-only; UI and
 assistant mutations use the edition service rather than parallel publish logic.
-Project export v10 writes the edition aggregate and isolated v9-or-earlier import
-adapters translate the obsolete single-profile shape at the import boundary.
+Archived editions are immutable at every owning mutation boundary, including
+cover, package-build, and proof writes; their existing artifacts remain readable
+and exportable, and cloning creates the editable continuation. New paperback
+editions use the installed Preview profile defaults of 6 × 9 in, 0.75 in
+margins, 11 pt body text, and 1.4 line height.
+Project export v12 writes the complete edition aggregate, semantic manuscripts,
+named styles, visual references, and project-owned font families/faces with
+binary hashes. Isolated v8-v11 adapters handle older structured exports and the
+v1-v7 adapters handle legacy plain text. A pre-v12 backup that references a
+project font fails closed because those formats did not carry the required font
+binary; a foreign custom-font key is never persisted. Each coherent database
+import is transactional across project direction, images, fonts, styles,
+structure, editions, and graph state; validation failure rolls back the entire
+destination mutation before the failed job/report is recorded. The Completed
+job state commits in that same transaction. Service-triggered context/vector
+index work is deferred for the transaction and discarded at its boundary;
+explicit post-commit indexing rebuilds the committed state instead. That
+post-commit work is best-effort and can add warnings, but cannot relabel
+committed imported data as a failed import.
 
-The current Print/PDF path remains an edition-scoped HTML print view handed to
-the browser or operating-system print dialog. It does not yet generate, parse,
-or certify PDF bytes, implement PDF/X, or represent vendor-specific preflight.
-Those are the next publishing-roadmap features rather than current claims.
+Paperback editions have two distinct output paths. The browser/operating-system
+Print/Save-PDF view is a paperback-only convenience preview. The contained
+press runtime generates, parses, fingerprints, and stores actual interior and
+full-wrap cover PDF bytes and feeds versioned vendor-specific internal
+preflight. EPUB editions cannot use either print path, and paperback editions
+cannot export EPUB, preventing product-form identifiers and metadata from
+crossing formats. Neither the browser path nor internal press inspection is an
+independent PDF/X or vendor-acceptance claim.
 
 `Lorekeeper.Press` proves only a local PDF 1.7 fixture path. Its versioned JSON
 protocol validates child job IDs, accepts semantic book content and explicit
@@ -210,8 +232,9 @@ reviewed CMYK press profile is bundled. This spike is not a production renderer,
 KDP/Ingram compatibility claim, or substitute for the future application
 service and assistant boundary.
 
-`Lorekeeper.Press.Weasy` retains that protocol shape and proves a contained
-Windows x64 fixture that emits PDF 1.3 files declaring PDF/X-1a:2001 with a
+`Lorekeeper.Press.Weasy` is the integrated Preview press sidecar behind that
+protocol. Its controlled Windows x64 fixture emits PDF 1.3 files declaring
+PDF/X-1a:2001 with a
 fingerprinted CMYK output intent. Generated HTML/CSS is code-owned, external
 resource reads are restricted to the exact profile URI, and output is atomically
 published into immutable child job directories. Its internal pypdf inspection
@@ -225,7 +248,7 @@ WeasyPrint. Native payloads are extracted into a fresh build-owned directory
 from the fingerprinted official portable executable, then the final collected
 binaries are source-classified. The release-license gate remains closed because
 the native notice bundle is incomplete. Acrobat/vendor/physical-proof evidence
-and cross-platform packaging also remain incomplete, so the spike returns no
+and cross-platform packaging also remain incomplete, so the runtime returns no
 independently validated or claimed standard and is not a production runtime.
 
 The structured-manuscript, publication-edition, and Preview press-runtime
@@ -235,15 +258,24 @@ diagnostics, and stable block-to-page mappings. `PublicationRenderWorker`
 recovers interrupted jobs and owns cancellation; `PublicationRenderProcessor`
 contains the child process, clears its environment, bounds its lifetime and
 paths, and verifies every returned length/hash before persistence. Project-
-scoped range endpoints serve actual PDF bytes, and source-fingerprint mismatch
-marks immutable artifacts stale.
+scoped range endpoints serve actual PDF/package bytes only after recomputing
+their stored length and SHA-256; corrupt rows fail closed before an ETag or body
+is returned. Source-fingerprint mismatch marks otherwise valid immutable
+artifacts stale.
 
 `PublicationCoverService` owns the one-to-one revisioned cover design and derives
 the wrap template from the latest interior page count plus edition trim, bleed,
 paper, vendor, and profile. The template fingerprint forces explicit
-acknowledgement after geometry changes. ISBN-13 validation is shared by UI,
+acknowledgement after geometry changes. Acknowledgement-only revision changes
+are deliberately excluded from the render source fingerprint so acknowledging
+the geometry produced by a completed first render does not stale that render.
+ISBN-13 validation is shared by UI,
 assistant, and render gating; the contained renderer emits the EAN-13 symbol or
-the permitted KDP overlay reserve and suppresses unsafe narrow-spine text.
+the permitted KDP overlay reserve, prevents back copy from entering that
+reserve, and suppresses unsafe narrow-spine text. KDP Preview covers can
+composite the selected normalized PNG with edition focal coordinates. The
+Ingram Preview profile rejects selected cover images until a reviewed CMYK
+conversion path exists.
 
 `PublicationPackageService` owns the versioned Preview preflight and final
 artifact-assembly boundary. It verifies current source fingerprints, correlated
@@ -271,9 +303,21 @@ the source immediately before each package/proof write, so a concurrent
 fingerprint-affecting mutation cannot be mislabeled. Digital and
 physical proof confirmations are explicit user UI actions; assistant tools may
 read preflight/proof state and build an eligible package but cannot approve a
-proof. External EPUBCheck, Acrobat, vendor-upload, reader/device, and
+proof. Physical-proof state and approval apply only to paperback editions; EPUB
+reports it as not applicable. Title, copyright, and visible contents pages are
+generated exclusively from edition settings, so user-authored semantic matter
+cannot claim those reserved kinds and duplicate generated output. External
+EPUBCheck, Acrobat, vendor-upload, reader/device, and
 physical-production evidence remains a release gate, so all output stays
 `Preview`.
+
+ISBN values are strict, checksum-validated, and stored in canonical ISBN-13
+form. The same ISBN may be shared only by same-format vendor editions whose
+bibliographic metadata, visible content settings, physical product settings,
+ordered outline, semantic matter, style mappings, and image placements match.
+Vendor/profile production settings may differ. Once shared, content-affecting
+edition mutations fail closed until the ISBN is cleared and the editions are
+synchronized.
 
 Development resolves the exact-locked Python project and fingerprinted native
 payload. Packaged releases must configure a frozen renderer and ship controlled
@@ -308,6 +352,13 @@ binary assets. SQLite startup applies a busy timeout and WAL journal mode.
 sqlite-vec and internal FTS5 structures are initialized outside normal EF
 migrations.
 
+`IDatabaseMigrationRecoveryService` owns provider-specific backup paths,
+owner-only permissions, SQLite Online Backup creation, expiring restore
+confirmations, scheduled restore markers, recovery-shell creation, recursive
+backup discovery, and protected pruning for every guarded migration. It never
+prunes a backup referenced by a running/failed journal, scheduled restore, or
+active recovery state.
+
 Startup delegates the structured-manuscript cutover to
 `IManuscriptMigrationService` before normal initialization. For a legacy
 database it runs `PRAGMA quick_check`, creates a consistent SQLite Online Backup
@@ -316,9 +367,10 @@ converts all live and historical prose and visual anchors transactionally,
 compares aggregate normalized-text hashes, and records a migration journal.
 Migration and restore scheduling share a crash-releasing cross-process file lock, and the
 transformed rows plus completed journal commit in one SQLite transaction so an
-interrupted schema-only startup resumes safely. Any transform failure preserves
-the pre-migration backup and starts a current-schema, projectless recovery shell
-whose failed journal keeps Settings > Data Recovery reachable. That screen
+interrupted schema-only startup resumes safely. Any transform failure delegates
+to the database recovery service, preserves the pre-migration backup, and
+starts a current-schema, projectless recovery shell. Settings > Data Recovery
+remains reachable. That screen
 exposes redacted journal/backup state and requires a short-lived, explicit
 confirmation token to schedule restore. The database is replaced only during
 the next startup, before normal workers start, and a diagnostic backup is made
@@ -326,9 +378,10 @@ first. Backup files and their directory use owner-only ACLs/permissions.
 The current manuscript schema is v2. Startup safely upgrades v1 documents in
 live chapters and every historical/review JSON payload under the same protected
 backup, transaction, projection-hash, and journal boundary. Project export
-format v9 carries v2 manuscripts, stable visual references, and project named
-paragraph/character style definitions. The v8 manuscript-v1 adapter and v1-v7
-text adapters exist only at the import boundary.
+format v12 carries v2 manuscripts, stable visual references, project named
+paragraph/character style definitions, publication editions, and complete
+project font binaries. The v8-v11 structured adapters and v1-v7 text adapters
+exist only at the import boundary.
 
 Startup then delegates the independent single-profile-to-editions cutover to
 `IPublicationEditionMigrationService`. Before applying the v10 forward
@@ -340,14 +393,15 @@ publishing rows, converts legacy dedication/acknowledgments/references into
 schema-v2 semantic matter, attaches every selection and placement to exactly
 one edition, removes the obsolete runtime tables, and validates row counts,
 foreign keys, matter documents, and an equal post-cutover mapping hash before
-recording its journal. A failure aborts startup and reports the protected backup
-path rather than permitting edits against a partially cut-over database.
+recording its journal. A failure delegates to the shared database recovery
+service and opens only the projectless recovery shell rather than permitting
+edits against a partially cut-over database.
 
 Manuscript v2 stores structural heading level separately from edition-independent
 style role, so assigning or removing a named paragraph style cannot change a
 chapter heading into a subheading. Figure blocks own a project image ID,
 alternative text, and caption content. Manuscript saves and assistant previews
-validate image ownership; image deletion refuses live figure references; v9
+validate image ownership; image deletion refuses live figure references; v12
 imports preflight and remap figure asset IDs. Current Markdown and EPUB
 publication projections consume the structured manuscript rather than flattening
 these blocks and marks through the plain-text projection.
@@ -412,8 +466,8 @@ Requirements:
 - .NET 10 SDK, pinned by `global.json`
 - Node.js 22.12 or later for Electron.NET desktop builds and packaging
 - Rust 1.92 or later only when building the disposable `Lorekeeper.Press` spike
-- Python 3.13 or 3.14 plus uv only when exercising the disposable
-  `Lorekeeper.Press.Weasy` fallback spike
+- Python 3.13 or 3.14 plus uv when exercising the
+  `Lorekeeper.Press.Weasy` Preview sidecar source/runtime fixtures
 
 Build and start the browser-hosted development app:
 
@@ -469,14 +523,14 @@ cargo test --locked
 .\scripts\verify-spike.ps1 -PopplerBin <poppler-bin-directory>
 ```
 
-Run the fallback source fixtures separately:
+Run the Preview press-sidecar source fixtures separately:
 
 ```powershell
 cd Lorekeeper.Press.Weasy
 uv run --locked python -m unittest discover -s tests -v
 ```
 
-The frozen fallback verification additionally requires an explicitly supplied,
+The frozen Preview-runtime verification additionally requires an explicitly supplied,
 fingerprinted CMYK profile and a controlled native Pango/Fontconfig stack; see
 `Lorekeeper.Press.Weasy/scripts/build-windows-spike.ps1` and
 `Lorekeeper.Press.Weasy/scripts/verify-spike.ps1`.

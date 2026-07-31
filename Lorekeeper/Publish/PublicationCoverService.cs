@@ -80,6 +80,7 @@ public sealed class PublicationCoverService(
         Validate(update);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetEditionAsync(projectId, editionId, cancellationToken);
+        PublicationEditionService.EnsureDraft(edition);
         var design = await db.PublicationCoverDesigns
             .FirstOrDefaultAsync(candidate => candidate.EditionId == editionId, cancellationToken);
         if (design is null)
@@ -191,11 +192,11 @@ public sealed class PublicationCoverService(
     {
         if (!Enum.IsDefined(update.BarcodeMode))
             throw new ArgumentException("Barcode mode is invalid.");
-        if (update.Title.Trim().Length is < 1 or > 500
-            || update.Subtitle.Trim().Length > 500
-            || update.Author.Trim().Length > 500
-            || update.SpineText.Trim().Length > 500
-            || update.BackCopy.Trim().Length > 10_000)
+        if (update.Title.Trim().Length is < 1 or > 160
+            || update.Subtitle.Trim().Length > 240
+            || update.Author.Trim().Length > 160
+            || update.SpineText.Trim().Length > 120
+            || update.BackCopy.Trim().Length > 1_800)
             throw new ArgumentException("Cover copy exceeds its allowed length.");
         if (!System.Text.RegularExpressions.Regex.IsMatch(update.BackgroundColor, "^#[0-9a-fA-F]{6}$"))
             throw new ArgumentException("Background color must be a six-digit hex color.");
@@ -211,10 +212,35 @@ public static class PublicationIsbn
 {
     public static bool IsValidIsbn13(string value)
     {
-        var digits = new string(value.Where(char.IsDigit).ToArray());
-        if (digits.Length != 13)
+        if (!TryNormalizeIsbn13(value, out var digits))
             return false;
         var sum = digits.Take(12).Select((digit, index) => (digit - '0') * (index % 2 == 0 ? 1 : 3)).Sum();
         return (10 - sum % 10) % 10 == digits[12] - '0';
     }
+
+    public static bool TryNormalizeIsbn13(string? value, out string normalized)
+    {
+        normalized = string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+        var trimmed = value.Trim();
+        if (trimmed.Any(character => !char.IsAsciiDigit(character) && character is not '-' and not ' '))
+            return false;
+        normalized = new string(trimmed.Where(char.IsAsciiDigit).ToArray());
+        return normalized.Length == 13;
+    }
+
+    public static string NormalizeValidOrEmpty(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+        if (!TryNormalizeIsbn13(value, out var normalized) || !IsValidIsbn13(normalized))
+            throw new InvalidOperationException("ISBN must be a valid ISBN-13 containing only digits, spaces, or hyphens.");
+        return normalized;
+    }
+
+    public static string CanonicalForOutput(string? value) =>
+        TryNormalizeIsbn13(value, out var normalized) && IsValidIsbn13(normalized)
+            ? normalized
+            : value?.Trim() ?? string.Empty;
 }

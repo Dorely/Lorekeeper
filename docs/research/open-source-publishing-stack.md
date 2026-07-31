@@ -3,7 +3,8 @@
 Last reviewed: 2026-07-30
 Research access date: 2026-07-30
 Decision state: the first renderer candidate was implemented and rejected;
-WeasyPrint 69 is the next unapproved fallback spike.
+WeasyPrint 69 completed the fallback spike and is accepted as the contained
+Preview sidecar, with release licensing and external conformance still gated.
 
 ## Executive conclusion
 
@@ -34,9 +35,11 @@ The 2026-07-30 conformance spike proved the PDF 1.7 layout path and rejected
 this stack as the sole Phase 1 renderer because it cannot emit PDF/X-1a. The
 executable evidence and no-go decision are in
 [`press-renderer-conformance-spike.md`](press-renderer-conformance-spike.md).
-WeasyPrint 69 is now the lead free fallback because its current BSD-licensed API
-exposes PDF/X-1a/-3/-4, CMYK colors, and custom ICC output intents. Those API
-features remain unapproved until the same external conformance, license,
+WeasyPrint 69 became the contained Preview fallback because its BSD-licensed API
+exposes PDF/X-1a/-3/-4, CMYK colors, and custom ICC output intents. The exact
+pin now renders and internally inspects deterministic Preview artifacts behind
+a bounded process protocol. Those artifacts remain unapproved for release
+claims until the external conformance, complete native-license, cross-platform
 packaging, and vendor gates pass.
 
 ## Evidence boundary
@@ -178,7 +181,7 @@ Source: [EPUBCheck repository](https://github.com/w3c/epubcheck).
 | [GoPdfSuit v6](https://pkg.go.dev/github.com/chinmay-sawant/gopdfsuit/v6) | MIT, Go; v6 published 2026-06-16 | Monitor | An actively developed AI-assisted entrant, but it has not demonstrated the required book-pagination and PDF/X certification scope |
 | [PDFluent](https://pdfluent.com/) | Desktop editor is free; developer SDK is separately licensed and paid | Reject as a free runtime dependency; commercial fallback | The SDK is not open source or royalty-free merely because the editor is free |
 | [Paged.js](https://github.com/pagedjs/pagedjs/) | MIT, JavaScript; moving repository evidence | Spike comparison | Strong CSS Paged Media/book preview fit, but its Chromium print path does not establish PDF/X, color, or deterministic cross-platform output |
-| [WeasyPrint 69](https://doc.courtbouillon.org/weasyprint/latest/api_reference.html) | BSD-3-Clause, Python plus native/transitive dependencies | **Next fallback spike** | Current API lists PDF/X-1a/-3/-4 plus CMYK and custom output-intent controls; pagination, native packaging, ICC rights, Acrobat, and vendor evidence remain unproven |
+| [WeasyPrint 69](https://doc.courtbouillon.org/weasyprint/latest/api_reference.html) | BSD-3-Clause, Python plus native/transitive dependencies | **Accepted and integrated for Preview** | The exact-pinned Windows fixture now powers contained Preview render jobs; cross-platform packaging, complete native notices, independent Acrobat/PDF-X evidence, and vendor acceptance remain open gates |
 | [Vivliostyle Core 2.44.1](https://www.npmjs.com/package/%40vivliostyle/core) | AGPL-3.0 | Reject for shipped runtime | Strong web-publication layout, but the core license does not meet the default |
 | [SILE](https://github.com/sile-typesetter/sile) | MIT, Lua/native toolchain; moving repository evidence | Spike comparison | Book-focused typesetting is promising, but integration, packaging, and PDF/X still require proof |
 | [Chromium](https://chromium.googlesource.com/chromium/src/+/main/LICENSE) | BSD-style root license with a large mixed-license dependency inventory | Existing preview only | Lorekeeper already receives Chromium through Electron, but browser print is not PDF/X or vendor preflight; a separate full inventory would be required for any new renderer use |
@@ -193,8 +196,10 @@ earlier before a spike or adoption.
 
 ## Proposed renderer boundary
 
-Lorekeeper sends a canonical publication document to `Lorekeeper.Press`; it
-never sends arbitrary user-authored Typst code.
+Lorekeeper sends a canonical publication document to the integrated
+`Lorekeeper.Press.Weasy` sidecar; it never sends arbitrary user-authored HTML,
+CSS, Python, or renderer code. `Lorekeeper.Press` remains the rejected Rust
+comparison implementation.
 
 Minimum request envelope:
 
@@ -292,11 +297,11 @@ shown to fail closed.
 | Decision | Status |
 |---|---|
 | Semantic editor based on ProseMirror | Implemented with exact-pinned MIT dependencies and an owned Lorekeeper schema/adapter |
-| Versioned JSON press-process protocol | Proven as a disposable fixture; production boundary not adopted |
+| Versioned JSON press-process protocol | Adopted for the contained Preview sidecar; production certification remains gated |
 | Typst for high-level layout | Rejected as the sole Phase 1 renderer; retained as benchmark |
 | krilla extension for PDF writing/conformance | Last-resort fallback, not selected |
 | moxcms for ICC transforms | sRGB path exercised; CMYK/profile path unproven |
-| WeasyPrint 69 fallback | Planned for the next conformance spike |
+| WeasyPrint 69 fallback | Integrated as the exact-pinned Preview sidecar; native notices, cross-platform packaging, Acrobat/vendor evidence, and physical proofs remain open |
 | EPUBCheck in shipped runtime | Evaluate |
 | Claim PDF/X-1a support | Blocked until independent and vendor validation |
 | Ship copyleft or revenue-restricted PDF dependencies | Rejected by default |

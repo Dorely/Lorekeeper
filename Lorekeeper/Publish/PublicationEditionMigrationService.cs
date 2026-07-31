@@ -4,6 +4,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Persistence;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,7 @@ public interface IPublicationEditionMigrationService
 
 public sealed class PublicationEditionMigrationService(
     IConfiguration configuration,
+    IDatabaseMigrationRecoveryService recovery,
     ILogger<PublicationEditionMigrationService> logger) : IPublicationEditionMigrationService
 {
     public const string MigrationName = "publication-editions-v10";
@@ -97,9 +99,21 @@ public sealed class PublicationEditionMigrationService(
                     exception,
                     "Publication-edition migration failed. The protected source backup is {BackupPath}.",
                     backupPath);
-                throw new InvalidOperationException(
-                    $"Publication-edition migration failed. The original publishing data is protected at '{backupPath}'.",
-                    exception);
+                db.ChangeTracker.Clear();
+                await db.Database.CloseConnectionAsync();
+                await recovery.EnterRecoveryModeAsync(
+                    db,
+                    backupPath,
+                    MigrationName,
+                    sourceVersion: 9,
+                    targetVersion: 10,
+                    exception,
+                    cancellationToken);
+                File.Delete(MarkerPath());
+                logger.LogWarning(
+                    "Publication-edition migration entered the recoverable projectless shell. Restore {BackupPath} from Data Recovery.",
+                    backupPath);
+                return;
             }
         }
         finally

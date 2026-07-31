@@ -161,7 +161,7 @@ public sealed class PublicationPackageTests
     }
 
     [Fact]
-    public async Task ProofsRemainOrderedAndBoundToTheExactCurrentPackage()
+    public async Task EpubProofsRemainPackageBoundAndRejectPhysicalApproval()
     {
         var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -223,6 +223,12 @@ public sealed class PublicationPackageTests
 
             var preflight = await packages.PreflightAsync(project.Id, edition.Id);
             Assert.True(preflight.CanPackage);
+            Assert.Equal("Not applicable", preflight.PhysicalProof.Status);
+            Assert.Empty(preflight.PhysicalProof.Checklist);
+            Assert.Contains(preflight.DigitalProof.Checklist, item =>
+                item.Contains("EPUB", StringComparison.Ordinal));
+            Assert.DoesNotContain(preflight.DigitalProof.Checklist, item =>
+                item.Contains("PDF", StringComparison.Ordinal));
             edition.Isbn = "not-an-isbn";
             await db.SaveChangesAsync();
             var invalidOptionalIsbn = await packages.PreflightAsync(project.Id, edition.Id);
@@ -465,17 +471,15 @@ public sealed class PublicationPackageTests
                 PublicationProofKind.Digital,
                 string.Empty);
             Assert.Equal("Recorded", digital.DigitalProof.Status);
-            Assert.Equal("Pending", digital.PhysicalProof.Status);
+            Assert.Equal("Not applicable", digital.PhysicalProof.Status);
 
-            var physical = await packages.RecordProofAsync(
-                project.Id,
-                edition.Id,
-                package.Id,
-                PublicationProofKind.Physical,
-                "Printed proof inspected.");
-            Assert.Equal("Recorded", physical.DigitalProof.Status);
-            Assert.Equal("Recorded", physical.PhysicalProof.Status);
-            Assert.Equal(package.Sha256, physical.PhysicalProof.PackageSha256);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                packages.RecordProofAsync(
+                    project.Id,
+                    edition.Id,
+                    package.Id,
+                    PublicationProofKind.Physical,
+                    "Printed proof inspected."));
 
             var replacementData = "different package"u8.ToArray();
             db.PublicationArtifacts.Add(new PublicationArtifact
@@ -487,7 +491,7 @@ public sealed class PublicationPackageTests
                 Data = replacementData,
                 Sha256 = Convert.ToHexStringLower(SHA256.HashData(replacementData)),
                 ByteLength = replacementData.Length,
-                SourceFingerprint = physical.SourceFingerprint,
+                SourceFingerprint = digital.SourceFingerprint,
                 RendererVersion = package.RendererVersion,
                 ProfileId = package.ProfileId,
                 CreatedAt = DateTime.UtcNow.AddSeconds(1),
@@ -497,7 +501,7 @@ public sealed class PublicationPackageTests
             var replaced = await packages.PreflightAsync(project.Id, edition.Id);
             Assert.NotEqual(package.Id, replaced.CurrentPackage?.Id);
             Assert.Equal("Pending", replaced.DigitalProof.Status);
-            Assert.Equal("Pending", replaced.PhysicalProof.Status);
+            Assert.Equal("Not applicable", replaced.PhysicalProof.Status);
 
             edition.VendorProfileVersion = "preview-2";
             await db.SaveChangesAsync();
@@ -515,10 +519,21 @@ public sealed class PublicationPackageTests
     [Fact]
     public async Task PublishAssistantCannotApproveProofs()
     {
-        var tools = new PublishAssistantTools(null!, null!, null!, null!, null!, null!);
+        var tools = new PublishAssistantTools(
+            null!,
+            null!,
+            null!,
+            null!,
+            null!,
+            null!,
+            null!,
+            null!,
+            null!);
 
         var catalog = await tools.BuildAsync(new PublishAssistantContext(Guid.NewGuid()));
 
+        Assert.Contains(catalog, tool => tool.Name == "list_publication_named_styles");
+        Assert.Contains(catalog, tool => tool.Name == "list_publication_project_images");
         Assert.DoesNotContain(catalog, tool =>
             tool.Name.Contains("proof", StringComparison.OrdinalIgnoreCase)
             && (tool.Name.Contains("approve", StringComparison.OrdinalIgnoreCase)
@@ -626,6 +641,10 @@ public sealed class PublicationPackageTests
             var preflight = await packages.PreflightAsync(project.Id, edition.Id);
             Assert.True(preflight.CanPackage);
             Assert.Equal(2, preflight.ValidatedArtifacts.Count);
+            Assert.Contains(preflight.DigitalProof.Checklist, item =>
+                item.Contains("PDF", StringComparison.Ordinal));
+            Assert.DoesNotContain(preflight.DigitalProof.Checklist, item =>
+                item.Contains("EPUB", StringComparison.Ordinal));
 
             var built = await packages.BuildAsync(project.Id, edition.Id);
             Assert.Equal(0, publishing.ExportCallCount);
@@ -683,7 +702,7 @@ public sealed class PublicationPackageTests
             EditionId = editionId,
             Status = PublicationRenderStatus.Completed,
             SourceFingerprint = fingerprint,
-            RendererVersion = "test-renderer-v1",
+            RendererVersion = "0.2.0",
             ProfileId = "kdp-paperback-6x9-preview-v1",
             DiagnosticsJson = "[]",
             ProgressPercent = 100,
@@ -916,6 +935,12 @@ public sealed class PublicationPackageTests
             }
             return Document;
         }
+
+        public Task<PublishDocument> GetPrintDocumentAsync(
+            Guid projectId,
+            Guid editionId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Document);
 
         public async Task<ProjectExportFile> ExportAsync(
             Guid projectId,

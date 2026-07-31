@@ -1,6 +1,8 @@
 using System.Text.Json;
+using Lorekeeper.Images;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.Publish;
@@ -13,7 +15,10 @@ public sealed class PublishAssistantTools(
     IPublicationEditionMigrationService migrations,
     IPublicationRenderService renders,
     IPublicationCoverService covers,
-    IPublicationPackageService packages)
+    IPublicationPackageService packages,
+    IManuscriptStyleService manuscriptStyles,
+    IProjectImageService projectImages,
+    IDatabaseMigrationRecoveryService recovery)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -35,6 +40,14 @@ public sealed class PublishAssistantTools(
                 method: (Guid editionId) => ReadWorkspaceAsync(context, editionId),
                 name: "read_publication_edition",
                 description: "Read one complete edition workspace including settings, content, matter, style mappings, image placements, and source fingerprint."),
+            AIFunctionFactory.Create(
+                method: () => ListNamedStylesAsync(context),
+                name: "list_publication_named_styles",
+                description: "List every available project named style with the stable style ID, kind, semantic role, definition, and revision required for edition style mappings."),
+            AIFunctionFactory.Create(
+                method: () => ListProjectImagesAsync(context),
+                name: "list_publication_project_images",
+                description: "List every available project image with the stable asset ID, file metadata, alt text, source, and preview URL required for matter figures and edition placements."),
             AIFunctionFactory.Create(
                 method: (string name, PublicationEditionFormat format, PublicationVendor vendor) =>
                     CreateEditionAsync(context, name, format, vendor),
@@ -70,6 +83,11 @@ public sealed class PublishAssistantTools(
                     SetContentAsync(context, editionId, updates, expectedRevision),
                 name: "set_publication_content",
                 description: "Include or exclude acts and chapters for one edition through stable IDs and an expected revision."),
+            AIFunctionFactory.Create(
+                method: (Guid editionId, PublicationEditionOutlineItemOrder[] orderedItems, long expectedRevision) =>
+                    ReorderContentAsync(context, editionId, orderedItems, expectedRevision),
+                name: "reorder_publication_content",
+                description: "Set the complete edition-specific reading order of acts and chapters using stable IDs and an expected revision."),
             AIFunctionFactory.Create(
                 method: (Guid editionId, PublicationMatterInput input, long expectedRevision) =>
                     UpsertMatterAsync(context, editionId, input, expectedRevision),
@@ -158,9 +176,14 @@ public sealed class PublishAssistantTools(
                 name: "preflight_publication_edition",
                 description: "Run the same versioned metadata, content, PDF, cover, barcode, staleness, and scope checks as the UI."),
             AIFunctionFactory.Create(
+                method: (Guid editionId, PublishExportFormat format) =>
+                    ExportAsync(context, editionId, format),
+                name: "export_publication_edition",
+                description: "Prepare a TXT, Markdown, or EPUB download and return safe metadata, the bound source fingerprint, and its in-app regeneration URL."),
+            AIFunctionFactory.Create(
                 method: (Guid editionId) => BuildPackageAsync(context, editionId),
                 name: "build_publication_package",
-                description: "Build Preview EPUB, manifest, report, cover image when available, and downloadable package only when preflight has no errors."),
+                description: "Build the selected product-form Preview package (EPUB or validated paperback PDFs), manifest, report, and cover image when available only when preflight has no errors."),
         ];
         return Task.FromResult(tools);
     }
@@ -170,6 +193,12 @@ public sealed class PublishAssistantTools(
 
     private async Task<string> ReadWorkspaceAsync(PublishAssistantContext context, Guid editionId) =>
         Serialize(await publishing.GetWorkspaceAsync(context.ProjectId, editionId));
+
+    private async Task<string> ListNamedStylesAsync(PublishAssistantContext context) =>
+        Serialize(await manuscriptStyles.ListAsync(context.ProjectId));
+
+    private async Task<string> ListProjectImagesAsync(PublishAssistantContext context) =>
+        Serialize(await projectImages.ListAsync(context.ProjectId));
 
     private async Task<string> CreateEditionAsync(
         PublishAssistantContext context,
@@ -213,6 +242,17 @@ public sealed class PublishAssistantTools(
         PublicationEditionOutlineItemUpdate[] updates,
         long expectedRevision) =>
         Serialize(await editions.SetOutlineSelectionsAsync(context.ProjectId, editionId, updates, expectedRevision));
+
+    private async Task<string> ReorderContentAsync(
+        PublishAssistantContext context,
+        Guid editionId,
+        PublicationEditionOutlineItemOrder[] orderedItems,
+        long expectedRevision) =>
+        Serialize(await editions.ReorderOutlineAsync(
+            context.ProjectId,
+            editionId,
+            orderedItems,
+            expectedRevision));
 
     private async Task<string> UpsertMatterAsync(
         PublishAssistantContext context,
@@ -298,8 +338,26 @@ public sealed class PublishAssistantTools(
     private async Task<string> ReadAuditAsync(PublishAssistantContext context, Guid editionId) =>
         Serialize(await editions.GetAuditAsync(context.ProjectId, editionId));
 
-    private async Task<string> ReadMigrationAsync() =>
-        Serialize(await migrations.GetHistoryAsync());
+    private async Task<string> ReadMigrationAsync()
+    {
+        var recoveryState = await recovery.GetStateAsync();
+        return Serialize(new
+        {
+            History = await migrations.GetHistoryAsync(),
+            Recovery = new
+            {
+                recoveryState.RecoveryRequired,
+                recoveryState.MigrationName,
+                recoveryState.SourceVersion,
+                recoveryState.TargetVersion,
+                BackupFileName = recoveryState.BackupPath is null
+                    ? null
+                    : Path.GetFileName(recoveryState.BackupPath),
+                recoveryState.Error,
+                recoveryState.CreatedAtUtc,
+            },
+        });
+    }
 
     private async Task<string> RequestRenderAsync(PublishAssistantContext context, Guid editionId) =>
         Serialize(await renders.RequestAsync(context.ProjectId, editionId));
@@ -331,6 +389,23 @@ public sealed class PublishAssistantTools(
 
     private async Task<string> PreflightAsync(PublishAssistantContext context, Guid editionId) =>
         Serialize(await packages.PreflightAsync(context.ProjectId, editionId));
+
+    private async Task<string> ExportAsync(
+        PublishAssistantContext context,
+        Guid editionId,
+        PublishExportFormat format)
+    {
+        var file = await publishing.ExportAsync(context.ProjectId, editionId, format);
+        var workspace = await publishing.GetWorkspaceAsync(context.ProjectId, editionId);
+        return Serialize(new
+        {
+            file.FileName,
+            file.ContentType,
+            workspace.SourceFingerprint,
+            RegeneratedAtDownload = true,
+            DownloadUrl = $"/projects/{context.ProjectId:N}/publish/editions/{editionId:N}/exports/{format}",
+        });
+    }
 
     private async Task<string> BuildPackageAsync(PublishAssistantContext context, Guid editionId) =>
         Serialize(await packages.BuildAsync(context.ProjectId, editionId));

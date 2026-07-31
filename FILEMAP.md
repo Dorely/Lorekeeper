@@ -44,7 +44,7 @@
 | `docs/research/weasyprint-spike-verification-evidence.json` | Recorded deterministic-output, containment, parse, text, geometry, and artifact-hash checks for the frozen fallback. |
 | `docs/research/press-spike-license-inventory.json` | Generated exact-version/checksum/VCS/license-file inventory for every target-inclusive Rust spike dependency and bundled asset notice. |
 | `docs/decisions/0001-reject-typst-as-sole-press-renderer.md` | Accepted no-go decision for the first press renderer candidate and the WeasyPrint 69 fallback gate. |
-| `docs/decisions/0002-accept-weasyprint-for-preview-press-runtime.md` | Accepted reduced-scope decision for exact-pinned WeasyPrint as the future Preview press-runtime foundation. |
+| `docs/decisions/0002-accept-weasyprint-for-preview-press-runtime.md` | Accepted reduced-scope decision that governs the exact-pinned WeasyPrint runtime now integrated for Preview output. |
 | `docs/schemas/manuscript-v1.schema.json` | Published JSON Schema for canonical structured-manuscript v1 documents, blocks, inline nodes, marks, and semantic style roles. |
 | `docs/schemas/manuscript-v2.schema.json` | Current semantic-manuscript schema with figure blocks and expanded character marks. |
 
@@ -58,12 +58,14 @@
 | `ChapterVisualMigrationTests.cs` | Picture Page multi-box and illustrated-prose stable-anchor migration fixtures. |
 | `EditorChatStagingTests.cs` | Review-mode fixture proving sequential semantic operations share one staged manuscript overlay. |
 | `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
-| `ProjectExportCompatibilityTests.cs` | Current v9 named-style/manuscript fixtures plus v8 import-boundary and visual-layout compatibility checks. |
-| `ProjectImportJobIntegrationTests.cs` | Real v9 SQLite import-job round trip for marked/figured manuscripts, named styles, and final image-ID remapping. |
-| `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, image-backed figures, and every ordered matter kind survive Markdown/EPUB-oriented publication rendering. |
-| `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, and in-use deletion fixtures. |
+| `ProjectExportCompatibilityTests.cs` | Current v12 manuscript/style/edition/font fixtures plus v8-v11 fail-closed import-boundary and visual-layout compatibility checks. |
+| `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trip for marked/figured manuscripts and image remapping, plus whole-import rollback on late publication conflicts. |
+| `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, image-backed figures, ordered user-authored matter, and generated-page conflict rejection in Markdown/EPUB publication rendering. |
+| `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, content-use, and edition-mapping deletion guards. |
 | `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
-| `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, render/source drift, language/ISBN/profile/color rejection, exact-package proof isolation, and assistant-authorization fixtures. |
+| `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, render/source drift, language/ISBN/profile/color rejection, product-form proof isolation, and assistant-authorization fixtures. |
+| `PublicationEditionServiceTests.cs` | Preview defaults, archived assistant/service mutation guards, cover-focal UI mapping, shared-ISBN identity, product-form output gating, and hostile semantic-matter ownership fixtures. |
+| `DatabaseMigrationRecoveryTests.cs` | Shared migration-recovery pruning fixture proving protected failed/running backup references survive automatic retention. |
 
 ## tools/semantic-editor/
 
@@ -101,7 +103,7 @@
 | `src/lorekeeper_press_weasy/markup.py` / `render.py` | Pure ordered semantic-matter/chapter markup plus generated paged HTML, restricted ICC fetcher, interior/wrap-cover rendering, hashing, and internal checks. |
 | `src/lorekeeper_press_weasy/inspect.py` | Independent pypdf inspection for PDF version, page boxes, fonts, colors, images, output intents, transparency, annotations, encryption, and actions. |
 | `src/lorekeeper_press_weasy/geometry.py` / `storage.py` | Measured PDF box geometry plus exclusive-lock, staged, fsynced, immutable job publication. |
-| `tests/*.py` | Authorized protocol/semantic-block/matter-order, recursive PDF inspection, measured geometry, and concurrent immutable-publication fixtures. |
+| `tests/*.py` | Authorized protocol/semantic-block/matter-order, bounded maximum-request, recursive PDF inspection, measured geometry, and concurrent immutable-publication fixtures. |
 | `scripts/build-windows-spike.ps1` / `scripts/extract-pyinstaller-native.py` / `scripts/audit-pyinstaller-binaries.py` | Archive-owned native extraction, controlled frozen Windows build, and fail-closed source classification/hashing of collected binaries. |
 | `scripts/verify-spike.ps1` / `scripts/verify-artifacts.py` | Frozen-process adversarial/repeatability harness plus independent PDF parse, text, box, and hash verification. |
 | `scripts/generate-license-inventory.py` | Deterministic uv-lock/package-metadata/license-file hash inventory generator for the active fallback environment. |
@@ -194,7 +196,7 @@
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
 | `ImagesPage.razor` | Images tab at `/projects/{Slug}/images`; wraps `ProjectLayout` and hosts `Images.ImagesContent`. |
 | `PublishPage.razor` | Publish tab at `/projects/{Slug}/publish`; wraps `ProjectLayout` and hosts `Publish.PublishContent`. |
-| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Edition-scoped embedded Print/PDF preview carrying ordered semantic matter and mixed-layout chapters; derives sheet/spread dimensions and body type from edition geometry and waits for decoded assets before printing. |
+| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Paperback-only embedded Print/PDF preview carrying ordered semantic matter and mixed-layout chapters; derives sheet/spread dimensions and body type from edition geometry and waits for decoded assets before printing. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
 
@@ -228,7 +230,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Responsive edition workspace for metadata, content/matter/style/cover design, deterministic press previews, product-form preflight/package downloads, and explicit exact-package proof records. |
+| `PublishContent.razor` (+ `.razor.css`) | Responsive edition workspace for metadata, content/matter/style/cover and focal design, deterministic press previews, product-form preflight/package downloads, proof records, and read-only archived editions. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -336,6 +338,7 @@
 | File | Description |
 |------|-------------|
 | `AppDbContext.cs` | EF Core context for projects, providers, chats, writing, graph, ingest/import, publishing, chapter visuals, fonts, and named manuscript styles. Configures relationships/indexes, JSON property bags, and transient SQLite lock retries. |
+| `DatabaseMigrationRecoveryService.cs` | Shared protected SQLite backup/restore, recovery-shell, expiring confirmation, backup discovery, and reference-aware pruning boundary for guarded migrations. |
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
@@ -532,13 +535,13 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | Current v9 portable DTOs with v2 manuscripts, named styles, revisions, and stable visual refs; retains isolated older input adapters. |
+| `ProjectExportModels.cs` | Current v12 portable DTOs with v2 manuscripts, named styles, editions/covers, stable visual refs, and complete custom-font binaries; retains isolated older input adapters. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job, importing v9 manuscripts/styles, adapting v8 manuscript-v1 or v1-v7 text only at the boundary, then refreshing projections and indexes. |
+| `ProjectImportJobProcessor.cs` | Runs one import job, importing v12 manuscripts/styles/editions/fonts, adapting v8-v11 structured or v1-v7 text only at the boundary, then refreshing projections and indexes. |
 
 ### Images/
 
@@ -597,10 +600,10 @@
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
 | `PublishAssistantTools.cs` | Dedicated Publish assistant tool catalog exposing the complete edition, render, cover, preflight, and package surface through owning services. |
 | `PublishAssistantService.cs` | Visible dedicated Publish assistant one-turn orchestration using the configured chat provider and the shared Publish tool catalog. |
-| `PublicationRenderService.cs` | Persisted/recoverable render queue, contained ordered-matter press adapter, immutable verified artifacts, semantic page maps, stale-state derivation, and render comparison. |
+| `PublicationRenderService.cs` | Persisted/recoverable render queue, contained ordered-matter press adapter, hash-verified artifact download boundary, semantic page maps, stale-state derivation, and render comparison. |
 | `PublicationCoverService.cs` | Edition full-wrap template calculation, revisioned cover design, ISBN-13/vendor/spine diagnostics, and acknowledgement invalidation. |
 | `PublicationPackageService.cs` | Versioned fail-closed Preview preflight, product-form-specific deterministic package assembly, manifests, reports, and exact-package proof records. |
-| `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying every included ordered semantic-matter document into edition-scoped TXT, Markdown, EPUB, press, and print-preview output. |
+| `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying every included ordered semantic-matter document into edition-scoped TXT, Markdown, EPUB, press, and paperback-only print-preview output with reciprocal product-form guards. |
 | `PublishEndpoints.cs` | Cacheable/range HTTP endpoints for validated cover/Picture Page surfaces and project-scoped immutable publication artifact viewing/download. |
 | `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus an ordered semantic-matter, mixed-layout EPUB writer using shared geometry for reflowable prose and accessible fixed cover/Picture Page items. |
 

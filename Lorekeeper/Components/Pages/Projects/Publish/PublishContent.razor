@@ -2,6 +2,7 @@
 @using Lorekeeper.Manuscripts
 @using Lorekeeper.Models
 @using Lorekeeper.Publish
+@using Microsoft.EntityFrameworkCore
 @implements IAsyncDisposable
 @inject IPublishService Publishing
 @inject IPublicationEditionService Editions
@@ -43,7 +44,7 @@ else if (_editionSummaries.Count == 0)
                 <option value="@PublicationEditionFormat.Epub">EPUB</option>
             </select>
             <button type="button" class="btn btn-primary" disabled="@_creatingEdition" @onclick="CreateEditionAsync">
-                @(_creatingEdition ? "Creatingâ€¦" : "Create edition")
+                @(_creatingEdition ? "Creating..." : "Create edition")
             </button>
         </div>
         @if (!string.IsNullOrWhiteSpace(_editionActionError))
@@ -82,7 +83,7 @@ else
                 <div class="d-flex flex-wrap gap-2 mt-2">
                     <button type="button" class="btn btn-sm btn-outline-secondary"
                             disabled="@HasBusyMutation" @onclick="CloneEditionAsync">Clone</button>
-                    @if (!_workspace.Edition.IsDefault)
+                    @if (!_workspace.Edition.IsDefault && !IsArchivedEdition)
                     {
                         <button type="button" class="btn btn-sm btn-outline-secondary"
                                 disabled="@HasBusyMutation" @onclick="SetDefaultEditionAsync">Make default</button>
@@ -91,8 +92,11 @@ else
                     {
                         <button type="button" class="btn btn-sm btn-outline-secondary"
                                 disabled="@HasBusyMutation" @onclick="CompareEditionAsync">Compare</button>
-                        <button type="button" class="btn btn-sm btn-outline-danger"
-                                disabled="@HasBusyMutation" @onclick="ArchiveEditionAsync">Archive</button>
+                        @if (!IsArchivedEdition)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-danger"
+                                    disabled="@HasBusyMutation" @onclick="ArchiveEditionAsync">Archive</button>
+                        }
                     }
                 </div>
                 @if (!string.IsNullOrWhiteSpace(_editionActionError))
@@ -130,6 +134,13 @@ else
                         <div class="alert alert-secondary mt-2 mb-0">@_assistantResponse</div>
                     }
                 </section>
+                @if (IsArchivedEdition)
+                {
+                    <div class="alert alert-secondary" role="status">
+                        This edition is archived and read-only. Existing exports and artifacts remain available; clone it to make changes.
+                    </div>
+                }
+                <fieldset class="publish-readonly-boundary" disabled="@IsArchivedEdition">
                 <section class="publish-card" aria-labelledby="edition-settings-title">
                     <div class="publish-card-heading">
                         <div>
@@ -302,7 +313,8 @@ else
                                     </select></label>
                                 <label class="publish-field"><span>Kind</span>
                                     <select class="form-select" @bind="_matterKind">
-                                        @foreach (var kind in Enum.GetValues<PublicationMatterKind>())
+                                        @foreach (var kind in Enum.GetValues<PublicationMatterKind>()
+                                            .Where(kind => !PublicationMatterFormatting.IsGeneratedPageKind(kind)))
                                         {
                                             <option value="@kind">@kind</option>
                                         }
@@ -311,9 +323,17 @@ else
                                     <input class="form-control" type="number" @bind="_matterSortOrder" /></label>
                                 <label class="publish-field"><span><input type="checkbox" @bind="_matterIncluded" /> Include</span></label>
                                 <label class="publish-field publish-field-wide">
-                                    <span>Semantic document JSON</span>
-                                    <textarea class="form-control font-monospace" rows="10" @bind="_matterJson"></textarea>
-                                    <small>All blocks, marks, styles, links, and figures are preserved and schema-validated on save.</small>
+                                    <span>Matter content</span>
+                                    <div class="publish-matter-editor">
+                                        <ChapterBodyEditor @ref="_matterEditor"
+                                                           @key="@_editingMatterId.Value"
+                                                           ChapterId="@_editingMatterId.Value"
+                                                           ProjectId="@Project.Id"
+                                                           InitialManuscriptJson="@_matterJson"
+                                                           IsReadOnly="@IsArchivedEdition"
+                                                           SaveAsync="SaveMatterDocumentAsync" />
+                                    </div>
+                                    <small>Use the semantic toolbar for headings, named styles, marks, links, special characters, and project-image figures.</small>
                                 </label>
                                 <div class="d-flex gap-2">
                                     <button class="btn btn-sm btn-primary" @onclick="SaveMatterAsync">Save matter</button>
@@ -349,8 +369,8 @@ else
                             <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteStyleMappingAsync(mapping)">Remove</button>
                         </div>
                     }
-                    <div class="d-flex gap-2 mt-2">
-                        <select class="form-select" @bind="_styleMappingStyleId">
+                    <div class="publish-form-grid mt-2">
+                        <select class="form-select" value="@_styleMappingStyleId" @onchange="SelectStyleMapping">
                             <option value="">Choose named style</option>
                             @foreach (var style in _namedStyles)
                             {
@@ -359,9 +379,41 @@ else
                         </select>
                         <input class="form-control" type="number" step="0.1" placeholder="Font pt"
                                title="Override font size in points" @bind="_styleFontSize" />
+                        <select class="form-select" title="Font family override" @bind="_styleFontFamily">
+                            <option value="">Inherit font family</option>
+                            <option value="serif">Serif</option>
+                            <option value="sans">Sans</option>
+                            <option value="mono">Monospace</option>
+                        </select>
+                        <input class="form-control" type="number" min="100" max="900" step="100" placeholder="Font weight"
+                               title="Override font weight" @bind="_styleFontWeight" />
                         <input class="form-control" type="number" step="0.05" placeholder="Line height"
                                title="Override line height" @bind="_styleLineHeight" />
-                        <button class="btn btn-sm btn-outline-secondary" @onclick="AddStyleMappingAsync">Map style</button>
+                        <input class="form-control" type="number" step="0.1" placeholder="Space before pt"
+                               title="Override paragraph space before" @bind="_styleSpaceBefore" />
+                        <input class="form-control" type="number" step="0.1" placeholder="Space after pt"
+                               title="Override paragraph space after" @bind="_styleSpaceAfter" />
+                        <select class="form-select" title="Text alignment override" @bind="_styleTextAlign">
+                            <option value="">Inherit alignment</option>
+                            <option value="left">Left</option>
+                            <option value="right">Right</option>
+                            <option value="center">Center</option>
+                            <option value="justify">Justify</option>
+                        </select>
+                        @foreach (var boolean in StyleBooleanControls)
+                        {
+                            <label class="publish-field">
+                                <span>@boolean.Label</span>
+                                <select class="form-select" value="@boolean.Value()" @onchange="eventArgs => boolean.Set(eventArgs.Value?.ToString() ?? string.Empty)">
+                                    <option value="">Inherit</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </label>
+                        }
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="AddStyleMappingAsync">
+                            @(_styleMappingRevision.HasValue ? "Save mapping" : "Map style")
+                        </button>
                     </div>
                     @if (_editionAudit.Count > 0)
                     {
@@ -525,7 +577,7 @@ else
                                     disabled="@_renderBusy" @onclick="RefreshRendersAsync">Refresh</button>
                             <button type="button" class="btn btn-sm btn-primary"
                                     disabled="@(!CanRenderPdf)" @onclick="RequestRenderAsync">
-                                @(_renderBusy ? "Workingâ€¦" : "Render PDFs")
+                                @(_renderBusy ? "Working..." : "Render PDFs")
                             </button>
                         </div>
                     </div>
@@ -542,7 +594,7 @@ else
                         var latestRender = _renderJobs[0];
                         <div class="publish-render-status" aria-live="polite">
                             <strong>@latestRender.Status</strong>
-                            <span>@latestRender.ProgressPercent% Â· @latestRender.ProgressMessage</span>
+                            <span>@latestRender.ProgressPercent% &middot; @latestRender.ProgressMessage</span>
                             @if (latestRender.Status is PublicationRenderStatus.Queued or PublicationRenderStatus.Rendering)
                             {
                                 <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => CancelRenderAsync(latestRender.Id)">Cancel</button>
@@ -559,7 +611,7 @@ else
                             <div class="publish-artifact-heading">
                                 <div>
                                     <strong>@interior.FileName</strong>
-                                    <span>@interior.PageCount pages Â· SHA-256 @interior.Sha256[..12]â€¦</span>
+                                    <span>@interior.PageCount pages &middot; SHA-256 @interior.Sha256[..12]...</span>
                                     @if (interior.IsStale)
                                     {
                                         <span class="badge text-bg-warning">Stale</span>
@@ -578,7 +630,7 @@ else
                         {
                             <div class="publish-artifact-heading">
                                 <div>
-                                    <strong>Cover PDF</strong><span>SHA-256 @coverPdf.Sha256[..12]â€¦</span>
+                                    <strong>Cover PDF</strong><span>SHA-256 @coverPdf.Sha256[..12]...</span>
                                     <span class="badge @(coverPdf.IsStale ? "text-bg-warning" : "text-bg-success")">
                                         @(coverPdf.IsStale ? "Stale" : "Current")
                                     </span>
@@ -655,26 +707,35 @@ else
                                     Confirm digital proof
                                 </button>
                             </div>
-                            <div class="col-lg-6">
-                                <strong class="small">Physical proof: @_preflight.PhysicalProof.Status</strong>
-                                <ul class="small mb-2">
-                                    @foreach (var check in _preflight.PhysicalProof.Checklist)
-                                    {
-                                        <li>@check</li>
-                                    }
-                                </ul>
-                                <textarea class="form-control form-control-sm mb-2"
-                                          rows="2"
-                                          maxlength="2000"
-                                          placeholder="Required: record the inspected physical proof and any corrections."
-                                          @bind="_physicalProofNote"></textarea>
-                                <button type="button"
-                                        class="btn btn-sm btn-outline-success"
-                                        disabled="@(_packageBusy || !CanRecordPhysicalProof || string.IsNullOrWhiteSpace(_physicalProofNote))"
-                                        @onclick="RecordPhysicalProofAsync">
-                                    Record physical proof
-                                </button>
-                            </div>
+                            @if (_workspace.Edition.Format == PublicationEditionFormat.Paperback)
+                            {
+                                <div class="col-lg-6">
+                                    <strong class="small">Physical proof: @_preflight.PhysicalProof.Status</strong>
+                                    <ul class="small mb-2">
+                                        @foreach (var check in _preflight.PhysicalProof.Checklist)
+                                        {
+                                            <li>@check</li>
+                                        }
+                                    </ul>
+                                    <textarea class="form-control form-control-sm mb-2"
+                                              rows="2"
+                                              maxlength="2000"
+                                              placeholder="Required: record the inspected physical proof and any corrections."
+                                              @bind="_physicalProofNote"></textarea>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-success"
+                                            disabled="@(_packageBusy || !CanRecordPhysicalProof || string.IsNullOrWhiteSpace(_physicalProofNote))"
+                                            @onclick="RecordPhysicalProofAsync">
+                                        Record physical proof
+                                    </button>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="col-lg-6">
+                                    <strong class="small">Physical proof: not applicable to EPUB</strong>
+                                </div>
+                            }
                         </div>
                     }
                     @if (_packageArtifacts.Count > 0)
@@ -717,6 +778,18 @@ else
                             <label class="publish-field"><span>Spine text</span><input class="form-control" @bind="_coverSpineText" /></label>
                             <label class="publish-field publish-field-wide"><span>Back copy</span><textarea class="form-control" rows="4" @bind="_coverBackCopy"></textarea></label>
                             <label class="publish-field"><span>Background</span><input class="form-control form-control-color" type="color" @bind="_coverBackground" /></label>
+                            <label class="publish-field"><span>Image focal point X (%)</span>
+                                <input class="form-range" type="range" min="0" max="100" step="1" @bind="_coverFocalXPercent" />
+                                <span class="small text-muted">@_coverFocalXPercent.ToString("0")% from the left</span>
+                            </label>
+                            <label class="publish-field"><span>Image focal point Y (%)</span>
+                                <input class="form-range" type="range" min="0" max="100" step="1" @bind="_coverFocalYPercent" />
+                                <span class="small text-muted">@_coverFocalYPercent.ToString("0")% from the top</span>
+                            </label>
+                            <div class="publish-field">
+                                <span>Focal point default</span>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CenterCoverFocalPoint">Center at 50% / 50%</button>
+                            </div>
                             <label class="publish-field"><span>Barcode behavior</span>
                                 <select class="form-select" @bind="_coverBarcodeMode">
                                     <option value="@PublicationBarcodeMode.LorekeeperBarcode">Generate ISBN-13 barcode</option>
@@ -725,15 +798,15 @@ else
                             </label>
                         </div>
                         <div class="small text-muted mb-2">
-                            Full wrap @_coverDesign.Template.FullWidthInches.ToString("0.###") Ã— @_coverDesign.Template.FullHeightInches.ToString("0.###") in Â·
-                            spine @_coverDesign.Template.SpineWidthInches.ToString("0.###") in Â· @_coverDesign.Template.PageCount pages
+                            Full wrap @_coverDesign.Template.FullWidthInches.ToString("0.###") x @_coverDesign.Template.FullHeightInches.ToString("0.###") in &middot;
+                            spine @_coverDesign.Template.SpineWidthInches.ToString("0.###") in &middot; @_coverDesign.Template.PageCount pages
                         </div>
                         @foreach (var diagnostic in _coverDesign.Diagnostics)
                         {
                             <div class="small text-warning-emphasis">@diagnostic</div>
                         }
                         <button type="button" class="btn btn-sm btn-primary mt-2" disabled="@_coverDesignSaving" @onclick="SaveCoverDesignAsync">
-                            @(_coverDesignSaving ? "Savingâ€¦" : "Save and acknowledge template")
+                            @(_coverDesignSaving ? "Saving..." : "Save and acknowledge template")
                         </button>
                     }
 
@@ -835,6 +908,15 @@ else
                                         <span class="publish-outline-kicker">@(publishSection.IsUnassigned ? "Ungrouped chapters" : "Act")</span>
                                         <h3>@publishSection.Title</h3>
                                     </div>
+                                    @if (publishSection.ActId is Guid sectionActId)
+                                    {
+                                        <div class="btn-group btn-group-sm" aria-label="Reorder @publishSection.Title">
+                                            <button type="button" class="btn btn-outline-secondary" disabled="@OutlineBusy"
+                                                    title="Move act earlier" @onclick="() => MoveOutlineSectionAsync(sectionActId, -1)">↑</button>
+                                            <button type="button" class="btn btn-outline-secondary" disabled="@OutlineBusy"
+                                                    title="Move act later" @onclick="() => MoveOutlineSectionAsync(sectionActId, 1)">↓</button>
+                                        </div>
+                                    }
                                     @if (publishSection.ActId is Guid actId)
                                     {
                                         <label class="publish-outline-act-toggle">
@@ -851,6 +933,12 @@ else
                                     {
                                         var isCover = IsCoverChapter(chapter.Id);
                                         <div class="publish-chapter-row @(isCover ? "is-cover" : null)">
+                                            <div class="btn-group btn-group-sm" aria-label="Reorder @chapter.Title">
+                                                <button type="button" class="btn btn-outline-secondary" disabled="@OutlineBusy"
+                                                        title="Move chapter earlier" @onclick="() => MoveOutlineChapterAsync(publishSection.ActId, chapter.Id, -1)">↑</button>
+                                                <button type="button" class="btn btn-outline-secondary" disabled="@OutlineBusy"
+                                                        title="Move chapter later" @onclick="() => MoveOutlineChapterAsync(publishSection.ActId, chapter.Id, 1)">↓</button>
+                                            </div>
                                             <div class="publish-chapter-control">
                                                 @if (isCover)
                                                 {
@@ -968,6 +1056,7 @@ else
                         </ol>
                     }
                 </section>
+                </fieldset>
             </div>
 
             <aside class="publish-sidebar" aria-labelledby="summary-title">
@@ -1022,7 +1111,7 @@ else
                     }
 
                     <div class="publish-export-actions" aria-label="Export formats">
-                        <button type="button" class="btn btn-primary" disabled="@(!CanExport)" @onclick="() => ExportAsync(PublishExportFormat.Epub)">
+                        <button type="button" class="btn btn-primary" disabled="@(!CanExportEpub)" @onclick="() => ExportAsync(PublishExportFormat.Epub)">
                             <span>EPUB</span>
                             <small>@ExportButtonDetail(PublishExportFormat.Epub, "For e-readers")</small>
                         </button>
@@ -1277,6 +1366,8 @@ else
     private string _coverBackCopy = string.Empty;
     private string _coverBackground = "#5c7ca5";
     private PublicationBarcodeMode _coverBarcodeMode;
+    private double _coverFocalXPercent = 50;
+    private double _coverFocalYPercent = 50;
     private string _newEditionName = "Paperback";
     private PublicationEditionFormat _newEditionFormat = PublicationEditionFormat.Paperback;
     private string _printDialogUrl = string.Empty;
@@ -1288,8 +1379,19 @@ else
     private string _styleMappingStyleId = string.Empty;
     private double? _styleFontSize;
     private double? _styleLineHeight;
+    private string _styleFontFamily = string.Empty;
+    private int? _styleFontWeight;
+    private double? _styleSpaceBefore;
+    private double? _styleSpaceAfter;
+    private string _styleTextAlign = string.Empty;
+    private string _styleItalic = string.Empty;
+    private string _styleSmallCaps = string.Empty;
+    private string _styleKeepWithNext = string.Empty;
+    private long? _styleMappingRevision;
     private string _matterTitle = string.Empty;
     private string _matterJson = string.Empty;
+    private long _editingMatterRevision;
+    private ChapterBodyEditor? _matterEditor;
     private PublicationMatterLocation _matterLocation;
     private PublicationMatterKind _matterKind;
     private int _matterSortOrder;
@@ -1324,6 +1426,7 @@ else
         && _placementAssetId is not null
         && ValidPlacementKinds.Contains(_placementKind);
     private bool HasPlacementTargets => PlacementTargets.Count > 0;
+    private bool IsArchivedEdition => _workspace?.Edition.Status == PublicationEditionStatus.Archived;
     private bool HasBusyMutation => _coverBusy || _outlineBusy || _placementActionBusy || _placementSaving;
     private bool CanExport => _downloadModule is not null
         && _exportingFormat is null
@@ -1331,9 +1434,12 @@ else
         && !HasBusyMutation
         && _editionSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
         && !HasPendingEditionSave;
+    private bool CanExportEpub => CanExport
+        && _editionDraft.Format == PublicationEditionFormat.Epub;
     private bool CanPrint => _exportingFormat is null
         && !_printing
         && !HasBusyMutation
+        && _editionDraft.Format == PublicationEditionFormat.Paperback
         && _editionSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
         && !HasPendingEditionSave;
     private bool CanRenderPdf => !_renderBusy
@@ -1765,6 +1871,14 @@ else
         _coverBackCopy = _coverDesign.BackCopy;
         _coverBackground = _coverDesign.BackgroundColor;
         _coverBarcodeMode = _coverDesign.BarcodeMode;
+        _coverFocalXPercent = _coverDesign.ImageFocalXPercent;
+        _coverFocalYPercent = _coverDesign.ImageFocalYPercent;
+    }
+
+    private void CenterCoverFocalPoint()
+    {
+        _coverFocalXPercent = 50;
+        _coverFocalYPercent = 50;
     }
 
     private async Task SaveCoverDesignAsync()
@@ -1777,7 +1891,8 @@ else
             _coverDesign = await CoverDesigns.UpdateAsync(
                 Project.Id,
                 editionId,
-                new PublicationCoverDesignUpdate(
+                CreateCoverDesignUpdate(
+                    _coverDesign,
                     _coverTitle,
                     _coverSubtitle,
                     _coverAuthor,
@@ -1785,10 +1900,8 @@ else
                     _coverBackCopy,
                     _coverBackground,
                     _coverBarcodeMode,
-                    _coverDesign.ImageFocalXPercent,
-                    _coverDesign.ImageFocalYPercent,
-                    _coverDesign.Revision,
-                    AcknowledgeTemplate: true));
+                    _coverFocalXPercent,
+                    _coverFocalYPercent));
             InvalidatePackageState();
             _liveMessage = "Cover design saved and current template acknowledged.";
         }
@@ -1801,6 +1914,30 @@ else
             _coverDesignSaving = false;
         }
     }
+
+    internal static PublicationCoverDesignUpdate CreateCoverDesignUpdate(
+        PublicationCoverDesignView current,
+        string title,
+        string subtitle,
+        string author,
+        string spineText,
+        string backCopy,
+        string background,
+        PublicationBarcodeMode barcodeMode,
+        double focalXPercent,
+        double focalYPercent) =>
+        new(
+            title,
+            subtitle,
+            author,
+            spineText,
+            backCopy,
+            background,
+            barcodeMode,
+            focalXPercent,
+            focalYPercent,
+            current.Revision,
+            AcknowledgeTemplate: true);
 
     private async Task RunPreflightAsync()
     {
@@ -2042,7 +2179,7 @@ else
 
     private void ScheduleEditionAutosave()
     {
-        if (_loadedProjectId is null && Project is null) return;
+        if (IsArchivedEdition || (_loadedProjectId is null && Project is null)) return;
         _editionDraftVersion++;
         _editionDraftError = null;
         _editionSaveState = SaveState.Dirty;
@@ -2205,6 +2342,7 @@ else
         _editingMatterId = item.Id;
         _matterTitle = item.Title;
         _matterJson = ManuscriptCodec.Serialize(item.Manuscript);
+        _editingMatterRevision = item.Revision;
         _matterLocation = item.Location;
         _matterKind = item.Kind;
         _matterSortOrder = item.SortOrder;
@@ -2221,11 +2359,13 @@ else
             return;
         try
         {
+            if (_matterEditor is not null && !await _matterEditor.FlushAsync())
+                throw new InvalidOperationException("Matter content could not be saved yet.");
             var document = ManuscriptCodec.Deserialize(
                 _matterJson,
                 current.Id,
-                current.Revision);
-            _ = await Editions.UpsertMatterAsync(
+                _editingMatterRevision);
+            var saved = await Editions.UpsertMatterAsync(
                 Project.Id,
                 editionId,
                 new PublicationMatterInput(
@@ -2236,8 +2376,9 @@ else
                     ManuscriptCodec.Serialize(document),
                     _matterIncluded,
                     _matterSortOrder,
-                    current.Revision),
+                    _editingMatterRevision),
                 _editionDraft.Revision);
+            _editingMatterRevision = saved.Revision;
             _editingMatterId = null;
             await RefreshWorkspaceAsync();
             _liveMessage = "Publication matter saved.";
@@ -2245,6 +2386,58 @@ else
         catch (Exception exception)
         {
             _editionActionError = exception.Message;
+        }
+    }
+
+    private async Task<ChapterBodyEditor.SemanticEditorSaveResult> SaveMatterDocumentAsync(
+        Guid matterId,
+        long expectedRevision,
+        string manuscriptJson)
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId)
+            return new(false, expectedRevision);
+        try
+        {
+            var current = _workspace?.Matter.FirstOrDefault(item => item.Id == matterId)
+                ?? throw new InvalidOperationException("Publication matter was not found.");
+            var document = ManuscriptCodec.Deserialize(manuscriptJson, matterId, expectedRevision);
+            var saved = await Editions.UpsertMatterAsync(
+                Project.Id,
+                editionId,
+                new PublicationMatterInput(
+                    matterId,
+                    _matterLocation,
+                    _matterKind,
+                    _matterTitle,
+                    ManuscriptCodec.Serialize(document),
+                    _matterIncluded,
+                    _matterSortOrder,
+                    expectedRevision),
+                _editionDraft.Revision);
+            _matterJson = ManuscriptCodec.Serialize(saved.Manuscript);
+            _editingMatterRevision = saved.Revision;
+            var summary = (await Editions.ListAsync(Project.Id))
+                .First(edition => edition.Id == editionId);
+            _editionDraft.Revision = summary.Revision;
+            return new(true, saved.Revision);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            var currentWorkspace = await Publishing.GetWorkspaceAsync(Project.Id, editionId);
+            var current = currentWorkspace.Matter.FirstOrDefault(item => item.Id == matterId);
+            return new(
+                false,
+                expectedRevision,
+                Conflict: true,
+                CurrentManuscriptJson: current is null
+                    ? ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(matterId))
+                    : ManuscriptCodec.Serialize(current.Manuscript));
+        }
+        catch (Exception exception)
+        {
+            _editionActionError = exception.Message;
+            await InvokeAsync(StateHasChanged);
+            return new(false, expectedRevision);
         }
     }
 
@@ -2312,12 +2505,19 @@ else
                 new PublicationEditionStyleMappingInput(
                     styleId,
                     new ManuscriptStyleProperties(
+                        FontFamilyKey: EmptyToNull(_styleFontFamily),
                         FontSizePoints: _styleFontSize,
-                        LineHeight: _styleLineHeight)),
+                        FontWeight: _styleFontWeight,
+                        Italic: NullableBoolean(_styleItalic),
+                        SmallCaps: NullableBoolean(_styleSmallCaps),
+                        LineHeight: _styleLineHeight,
+                        SpaceBeforePoints: _styleSpaceBefore,
+                        SpaceAfterPoints: _styleSpaceAfter,
+                        KeepWithNext: NullableBoolean(_styleKeepWithNext),
+                        TextAlign: EmptyToNull(_styleTextAlign)),
+                    _styleMappingRevision),
                 _editionDraft.Revision);
-            _styleMappingStyleId = string.Empty;
-            _styleFontSize = null;
-            _styleLineHeight = null;
+            ResetStyleMappingDraft();
             await RefreshWorkspaceAsync();
         }
         catch (Exception exception)
@@ -2325,6 +2525,57 @@ else
             _editionActionError = exception.Message;
         }
     }
+
+    private void SelectStyleMapping(ChangeEventArgs eventArgs)
+    {
+        _styleMappingStyleId = eventArgs.Value?.ToString() ?? string.Empty;
+        var mapping = Guid.TryParse(_styleMappingStyleId, out var styleId)
+            ? _workspace?.StyleMappings.FirstOrDefault(item => item.ManuscriptStyleDefinitionId == styleId)
+            : null;
+        _styleMappingRevision = mapping?.Revision;
+        _styleFontFamily = mapping?.Override.FontFamilyKey ?? string.Empty;
+        _styleFontSize = mapping?.Override.FontSizePoints;
+        _styleFontWeight = mapping?.Override.FontWeight;
+        _styleItalic = BooleanMode(mapping?.Override.Italic);
+        _styleSmallCaps = BooleanMode(mapping?.Override.SmallCaps);
+        _styleLineHeight = mapping?.Override.LineHeight;
+        _styleSpaceBefore = mapping?.Override.SpaceBeforePoints;
+        _styleSpaceAfter = mapping?.Override.SpaceAfterPoints;
+        _styleKeepWithNext = BooleanMode(mapping?.Override.KeepWithNext);
+        _styleTextAlign = mapping?.Override.TextAlign ?? string.Empty;
+    }
+
+    private void ResetStyleMappingDraft()
+    {
+        _styleMappingStyleId = string.Empty;
+        _styleMappingRevision = null;
+        _styleFontFamily = string.Empty;
+        _styleFontSize = null;
+        _styleFontWeight = null;
+        _styleItalic = string.Empty;
+        _styleSmallCaps = string.Empty;
+        _styleLineHeight = null;
+        _styleSpaceBefore = null;
+        _styleSpaceAfter = null;
+        _styleKeepWithNext = string.Empty;
+        _styleTextAlign = string.Empty;
+    }
+
+    private IReadOnlyList<StyleBooleanControl> StyleBooleanControls =>
+    [
+        new("Italic", () => _styleItalic, value => _styleItalic = value),
+        new("Small caps", () => _styleSmallCaps, value => _styleSmallCaps = value),
+        new("Keep with next", () => _styleKeepWithNext, value => _styleKeepWithNext = value),
+    ];
+
+    private static string BooleanMode(bool? value) => value?.ToString().ToLowerInvariant() ?? string.Empty;
+    private static bool? NullableBoolean(string value) => value switch
+    {
+        "true" => true,
+        "false" => false,
+        _ => null,
+    };
+    private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private async Task DeleteStyleMappingAsync(PublicationEditionStyleMappingView mapping)
     {
@@ -2391,6 +2642,75 @@ else
         {
             _outlineBusy = false;
         }
+    }
+
+    private async Task MoveOutlineSectionAsync(Guid actId, int offset)
+    {
+        if (_workspace is null) return;
+        var sections = _workspace.Sections.ToList();
+        var index = sections.FindIndex(section => section.ActId == actId);
+        var target = index + offset;
+        if (index < 0 || target < 0 || target >= sections.Count || sections[target].IsUnassigned)
+            return;
+        (sections[index], sections[target]) = (sections[target], sections[index]);
+        await ApplyOutlineOrderAsync(FlattenOutline(sections));
+    }
+
+    private async Task MoveOutlineChapterAsync(Guid? actId, Guid chapterId, int offset)
+    {
+        if (_workspace is null) return;
+        var sections = _workspace.Sections.ToList();
+        var sectionIndex = sections.FindIndex(section => section.ActId == actId);
+        if (sectionIndex < 0) return;
+        var chapters = sections[sectionIndex].Chapters.ToList();
+        var index = chapters.FindIndex(chapter => chapter.Id == chapterId);
+        var target = index + offset;
+        if (index < 0 || target < 0 || target >= chapters.Count)
+            return;
+        (chapters[index], chapters[target]) = (chapters[target], chapters[index]);
+        sections[sectionIndex] = sections[sectionIndex] with { Chapters = chapters };
+        await ApplyOutlineOrderAsync(FlattenOutline(sections));
+    }
+
+    private async Task ApplyOutlineOrderAsync(IReadOnlyList<PublicationEditionOutlineItemOrder> orderedItems)
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        _outlineBusy = true;
+        _outlineError = null;
+        try
+        {
+            var updated = await Editions.ReorderOutlineAsync(
+                Project.Id,
+                editionId,
+                orderedItems,
+                _editionDraft.Revision);
+            _editionDraft.Revision = updated.Revision;
+            await RefreshWorkspaceAsync();
+            _liveMessage = "Edition reading order updated.";
+        }
+        catch (Exception ex)
+        {
+            _outlineError = ex.Message;
+            _liveMessage = $"Edition reading order could not be updated. {ex.Message}";
+        }
+        finally
+        {
+            _outlineBusy = false;
+        }
+    }
+
+    private static IReadOnlyList<PublicationEditionOutlineItemOrder> FlattenOutline(
+        IReadOnlyList<PublishSectionView> sections)
+    {
+        var result = new List<PublicationEditionOutlineItemOrder>();
+        foreach (var section in sections)
+        {
+            if (section.ActId is Guid actId)
+                result.Add(new(PublishOutlineTargetKind.Act, actId));
+            result.AddRange(section.Chapters.Select(chapter =>
+                new PublicationEditionOutlineItemOrder(PublishOutlineTargetKind.Chapter, chapter.Id)));
+        }
+        return result;
     }
 
     private Task OpenAddPlacementAsync() => OpenPlacementDialogAsync(null);
@@ -2923,4 +3243,6 @@ else
             Ink,
             Bleed);
     }
+
+    private sealed record StyleBooleanControl(string Label, Func<string> Value, Action<string> Set);
 }

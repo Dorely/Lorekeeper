@@ -200,6 +200,10 @@ public sealed record PublicationEditionOutlineItemUpdate(
     Guid TargetId,
     bool IsIncluded);
 
+public sealed record PublicationEditionOutlineItemOrder(
+    PublishOutlineTargetKind TargetKind,
+    Guid TargetId);
+
 public sealed record PublicationImagePlacementCreate(
     Guid AssetId,
     PublishOutlineTargetKind TargetKind,

@@ -341,6 +341,10 @@ public sealed class ManuscriptStyleService(
                 .AsNoTracking()
                 .Where(chapter => chapter.ProjectId == projectId)
                 .Select(chapter => chapter.ManuscriptJson)
+                .Concat(db.PublicationMatter
+                    .AsNoTracking()
+                    .Where(matter => matter.Edition.ProjectId == projectId)
+                    .Select(matter => matter.ManuscriptJson))
                 .ToListAsync(cancellationToken);
             isUsed = manuscripts
                 .Select(ManuscriptCodec.Deserialize)
@@ -353,7 +357,21 @@ public sealed class ManuscriptStyleService(
                             && string.Equals(mark.Value, style.SemanticRole, StringComparison.OrdinalIgnoreCase)));
         }
         if (isUsed)
-            throw new InvalidOperationException("The named style is still used by manuscript content.");
+            throw new InvalidOperationException("The named style is still used by manuscript or publication-matter content.");
+        var mappedEditionNames = await db.PublicationEditionStyleMappings
+            .AsNoTracking()
+            .Where(mapping =>
+                mapping.ManuscriptStyleDefinitionId == styleId
+                && mapping.Edition.ProjectId == projectId)
+            .Select(mapping => mapping.Edition.Name)
+            .Distinct()
+            .OrderBy(name => name)
+            .ToListAsync(cancellationToken);
+        if (mappedEditionNames.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Remove this named style's edition mappings before deleting it. Referenced by: {string.Join(", ", mappedEditionNames)}.");
+        }
         return style;
     }
 
@@ -452,6 +470,18 @@ public sealed class ManuscriptStyleService(
             Italic = definition.Italic is true ? true : null,
             SmallCaps = definition.SmallCaps is true ? true : null,
             KeepWithNext = definition.KeepWithNext is true ? true : null,
+        };
+    }
+
+    public static ManuscriptStyleProperties NormalizeOverride(
+        ManuscriptStyleKind kind,
+        ManuscriptStyleProperties? definition)
+    {
+        ValidateDefinition(kind, definition);
+        return definition! with
+        {
+            FontFamilyKey = definition.FontFamilyKey?.Trim().ToLowerInvariant(),
+            TextAlign = definition.TextAlign?.Trim().ToLowerInvariant(),
         };
     }
 }

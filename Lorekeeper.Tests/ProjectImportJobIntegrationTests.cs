@@ -20,6 +20,190 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectImportJobIntegrationTests
 {
     [Fact]
+    public async Task IncompatibleImportedIsbnRollsBackTheEntireImport()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+
+        var project = new Project
+        {
+            Name = "Import target",
+            Slug = $"import-atomic-{Guid.NewGuid():N}",
+        };
+        var existingEdition = new PublicationEdition
+        {
+            ProjectId = project.Id,
+            Name = "Existing paperback",
+            Format = PublicationEditionFormat.Paperback,
+            Vendor = PublicationVendor.Generic,
+            VendorProfileVersion = "preview-1",
+            TitleOverride = "Existing",
+            Author = "Author",
+            Language = "en",
+            Isbn = "9780306406157",
+            Binding = PublicationBinding.PerfectBound,
+            Paper = PublicationPaper.White,
+            Ink = PublicationInk.BlackAndWhite,
+            PageWidthInches = 6,
+            PageHeightInches = 9,
+            PageMarginInches = 0.75,
+            BodyFontSizePoints = 11,
+            BodyLineHeight = 1.4,
+        };
+        db.AddRange(project, existingEdition);
+        await db.SaveChangesAsync();
+
+        var projectRepo = new ProjectRepository(db);
+        var chapterRepo = new ChapterRepository(db);
+        var nodeRepo = new GraphNodeRepository(db);
+        var edgeRepo = new GraphEdgeRepository(db);
+        var entityTypeRepo = new GraphEntityTypeRepository(db);
+        var actRepo = new ActRepository(db);
+        var graph = new RelationalGraphStore(nodeRepo, edgeRepo);
+        var entityTypeService = new EntityTypeService(entityTypeRepo, nodeRepo);
+        var outline = new OutlineGraphSync(
+            graph,
+            nodeRepo,
+            edgeRepo,
+            projectRepo,
+            actRepo,
+            chapterRepo,
+            entityTypeService);
+        await outline.EnsureProjectAsync(project);
+        var imageId = Guid.NewGuid();
+        var export = new ProjectExportDocument
+        {
+            ExportKind = ProjectExportKind.Full,
+            Project = new ProjectExportProject(
+                Guid.NewGuid(),
+                "Exported",
+                "exported",
+                "This guidance must roll back.",
+                true,
+                true),
+            Images =
+            [
+                new ProjectExportImage(
+                    imageId,
+                    "map.png",
+                    "image/png",
+                    [1, 2, 3, 4],
+                    "Map",
+                    PublishAssetSource.Uploaded,
+                    string.Empty,
+                    string.Empty,
+                    "{}",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    DateTime.UtcNow,
+                    DateTime.UtcNow),
+            ],
+            PublicationEditions =
+            [
+                new ProjectExportPublicationEdition(
+                    Id: Guid.NewGuid(),
+                    Name: "Conflicting EPUB",
+                    Format: PublicationEditionFormat.Epub,
+                    Vendor: PublicationVendor.Generic,
+                    VendorProfileVersion: "preview-1",
+                    Status: PublicationEditionStatus.Draft,
+                    IsDefault: false,
+                    Revision: 0,
+                    TitleOverride: "Imported",
+                    Subtitle: string.Empty,
+                    Author: "Author",
+                    Language: "en",
+                    Publisher: string.Empty,
+                    Copyright: string.Empty,
+                    Isbn: "9780306406157",
+                    Description: string.Empty,
+                    IncludeTableOfContents: true,
+                    IncludeVisibleTableOfContents: true,
+                    IncludeActSynopses: false,
+                    IncludeChapterSynopses: false,
+                    IncludeActHeadings: true,
+                    IncludeChapterHeadings: true,
+                    NumberActs: false,
+                    NumberChapters: false,
+                    TitlePageMode: PublishTitlePageMode.Automatic,
+                    PrintPicturePageSpreadMode: PrintPicturePageSpreadMode.WholeSpread,
+                    EpubPicturePageSpreadMode: EpubPicturePageSpreadMode.RequestLandscape,
+                    PageWidthInches: 8.5,
+                    PageHeightInches: 11,
+                    PageMarginInches: 0.75,
+                    BodyFontSizePoints: 12,
+                    BodyLineHeight: 1.55,
+                    SelectedCoverChapterId: null,
+                    Binding: PublicationBinding.Digital,
+                    Paper: PublicationPaper.Digital,
+                    Ink: PublicationInk.Digital,
+                    Bleed: false,
+                    OutlineItems: [],
+                    Matter: [],
+                    StyleMappings: [],
+                    ImagePlacements: [],
+                    CoverDesign: null),
+            ],
+        };
+        var job = new ProjectImportJob
+        {
+            ProjectId = project.Id,
+            FileName = "atomic-fixture.lorekeeper.json",
+            ContentJson = JsonSerializer.Serialize(
+                export,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+        };
+        db.ProjectImportJobs.Add(job);
+        await db.SaveChangesAsync();
+        var mutations = new ProjectMutationCoordinator();
+        var indexWork = new VectorIndexWorkCoordinator(NullLogger<VectorIndexWorkCoordinator>.Instance);
+        var processor = new ProjectImportJobProcessor(
+            new ProjectImportRepository(db),
+            db,
+            projectRepo,
+            nodeRepo,
+            edgeRepo,
+            entityTypeRepo,
+            graph,
+            DefaultProxy<IActService>(),
+            new ImportChapterService(chapterRepo),
+            chapterRepo,
+            DefaultProxy<IProjectFactService>(),
+            entityTypeService,
+            outline,
+            DefaultProxy<IContextIndexingService>(),
+            DefaultProxy<IEntityVisualExampleService>(),
+            new BookBriefService(db),
+            new ManuscriptStyleService(db, mutations),
+            indexWork,
+            mutations,
+            new ProjectImportJobNotifier(),
+            NullLogger<ProjectImportJobProcessor>.Instance);
+
+        await processor.RunAsync(job.Id);
+
+        db.ChangeTracker.Clear();
+        var failed = await db.ProjectImportJobs.AsNoTracking().SingleAsync();
+        Assert.Equal(ProjectImportJobStatus.Failed, failed.Status);
+        Assert.Contains("ISBN-13 conflicts", failed.ErrorMessage, StringComparison.Ordinal);
+        Assert.Empty(await db.PublishAssets.AsNoTracking().ToListAsync());
+        Assert.Empty(await db.Chapters.AsNoTracking().ToListAsync());
+        Assert.Single(await db.PublicationEditions.AsNoTracking().ToListAsync());
+        Assert.Equal(
+            string.Empty,
+            await db.Projects.AsNoTracking()
+                .Where(candidate => candidate.Id == project.Id)
+                .Select(candidate => candidate.ProjectGuidance)
+                .SingleAsync());
+    }
+
+    [Fact]
     public async Task V9JobImportsMarkedFigureManuscriptStylesAndRemapsTheAsset()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -55,6 +239,8 @@ public sealed class ProjectImportJobIntegrationTests
         await outline.EnsureProjectAsync(project);
         var mutations = new ProjectMutationCoordinator();
         var gatedMutations = new GateMutationCoordinator(mutations);
+        var indexWork = new VectorIndexWorkCoordinator(NullLogger<VectorIndexWorkCoordinator>.Instance);
+        var contextIndexing = new ObservingContextIndexingService(indexWork, db);
 
         var exportedChapterId = Guid.NewGuid();
         var exportedImageId = Guid.NewGuid();
@@ -175,15 +361,16 @@ public sealed class ProjectImportJobIntegrationTests
             entityTypeRepo,
             graph,
             DefaultProxy<IActService>(),
-            new ImportChapterService(chapterRepo),
+            new ImportChapterService(chapterRepo, contextIndexing),
             chapterRepo,
             DefaultProxy<IProjectFactService>(),
             entityTypeService,
             outline,
-            DefaultProxy<IContextIndexingService>(),
+            contextIndexing,
             DefaultProxy<IEntityVisualExampleService>(),
             new BookBriefService(db),
             new ManuscriptStyleService(db, gatedMutations),
+            indexWork,
             gatedMutations,
             new ProjectImportJobNotifier(),
             NullLogger<ProjectImportJobProcessor>.Instance);
@@ -203,6 +390,9 @@ public sealed class ProjectImportJobIntegrationTests
         Assert.True(
             completed.Status == ProjectImportJobStatus.Completed,
             completed.ErrorMessage);
+        Assert.True(completed.WarningCount > 0);
+        Assert.True(contextIndexing.ExecutionCount > 0);
+        Assert.DoesNotContain(true, contextIndexing.ExecutedDuringTransaction);
         var imported = await db.Chapters.AsNoTracking().SingleAsync();
         var importedFigure = Assert.Single(
             imported.Manuscript.Content,
@@ -259,6 +449,94 @@ public sealed class ProjectImportJobIntegrationTests
         }
     }
 
+    private sealed class ObservingContextIndexingService(
+        IVectorIndexWorkCoordinator indexWork,
+        AppDbContext db) : IContextIndexingService
+    {
+        public int ExecutionCount { get; private set; }
+        public List<bool> ExecutedDuringTransaction { get; } = [];
+
+        public Task ReindexEntityAsync(
+            Guid projectId,
+            Guid entityId,
+            CancellationToken cancellationToken = default) =>
+            QueueAsync(
+                VectorIndexWorkKind.ContextEntity,
+                $"{projectId:N}:{entityId:N}",
+                cancellationToken);
+
+        public Task DeleteEntityAsync(
+            Guid projectId,
+            Guid entityId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task ReindexChapterAsync(
+            Guid chapterId,
+            CancellationToken cancellationToken = default) =>
+            QueueAsync(
+                VectorIndexWorkKind.ContextChapter,
+                chapterId.ToString("N"),
+                cancellationToken);
+
+        public Task DeleteChapterAsync(
+            Guid projectId,
+            Guid chapterId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task ReindexActAsync(
+            Guid actId,
+            CancellationToken cancellationToken = default) =>
+            QueueAsync(
+                VectorIndexWorkKind.ContextAct,
+                actId.ToString("N"),
+                cancellationToken);
+
+        public Task DeleteActAsync(
+            Guid projectId,
+            Guid actId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task ReindexIngestSourceAsync(
+            Guid sourceId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task DeleteIngestSourceAsync(
+            Guid projectId,
+            Guid sourceId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task ReindexIngestSourceChunkAsync(
+            Guid sourceChunkId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task DeleteIngestSourceChunkAsync(
+            Guid projectId,
+            Guid sourceChunkId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        private Task QueueAsync(
+            VectorIndexWorkKind kind,
+            string resourceKey,
+            CancellationToken cancellationToken) =>
+            indexWork.QueueOrRunAsync(
+                kind,
+                resourceKey,
+                _ =>
+                {
+                    ExecutionCount++;
+                    ExecutedDuringTransaction.Add(db.Database.CurrentTransaction is not null);
+                    throw new InvalidOperationException("Injected post-commit indexing failure.");
+                },
+                cancellationToken);
+    }
+
     public class DefaultDispatchProxy : DispatchProxy
     {
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
@@ -279,7 +557,9 @@ public sealed class ProjectImportJobIntegrationTests
         }
     }
 
-    private sealed class ImportChapterService(IChapterRepository chapters) : IChapterService
+    private sealed class ImportChapterService(
+        IChapterRepository chapters,
+        IContextIndexingService? contextIndexing = null) : IChapterService
     {
         public Task<IReadOnlyList<Chapter>> ListAsync(
             Guid projectId,
@@ -318,6 +598,8 @@ public sealed class ProjectImportJobIntegrationTests
                 ManuscriptCodec.CreateEmpty(chapter.Id, chapter.ManuscriptRevision));
             await chapters.AddAsync(chapter, cancellationToken);
             await chapters.SaveChangesAsync(cancellationToken);
+            if (contextIndexing is not null)
+                await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
             return chapter;
         }
 

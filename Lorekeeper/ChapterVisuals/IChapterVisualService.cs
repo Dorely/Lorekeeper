@@ -28,6 +28,12 @@ public interface IChapterVisualService
         int physicalPageLongEdgePixels = 2400,
         ChapterPicturePageSurfaceRotation rotation = ChapterPicturePageSurfaceRotation.None,
         CancellationToken cancellationToken = default);
+    Task<IReadOnlyDictionary<Guid, ChapterPicturePageSurface>> RenderPicturePageSurfacesAsync(
+        IReadOnlyCollection<Guid> chapterIds,
+        int physicalPageLongEdgePixels,
+        ChapterPicturePageSurfaceRotation rotation,
+        ChapterPicturePageGeometryProfile geometry,
+        CancellationToken cancellationToken = default);
     Task RemoveImageReferencesAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default);
     Task RemoveImageReferencesUnderProjectMutationLeaseAsync(
         Guid projectId,
@@ -54,6 +60,13 @@ public sealed record ChapterPicturePageSurface(
     string ContentType,
     byte[] Data,
     string AccessibleText);
+
+public sealed record ChapterPicturePageGeometryProfile(
+    double PageWidthInches,
+    double PageHeightInches,
+    double PageMarginInches,
+    double BodyFontSizePoints,
+    double BodyLineHeight);
 
 public enum ChapterPicturePageSurfaceRotation
 {

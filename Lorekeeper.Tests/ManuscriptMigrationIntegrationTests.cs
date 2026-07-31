@@ -261,11 +261,11 @@ public sealed class ManuscriptMigrationIntegrationTests
 
         await using var recoveryDb = fixture.CreateDbContext();
         Assert.Empty(await recoveryDb.Projects.AsNoTracking().ToListAsync());
-        var journal = await recoveryDb.ManuscriptMigrationJournals.AsNoTracking().SingleAsync();
-        Assert.Equal(ManuscriptMigrationStatus.Failed, journal.Status);
-        Assert.NotNull(journal.ErrorDetail);
-        Assert.True(File.Exists(journal.BackupPath));
-        Assert.True((await service.GetStateAsync()).RecoveryRequired);
+        var state = await service.GetStateAsync();
+        Assert.True(state.RecoveryRequired);
+        Assert.Contains(state.Backups, backup =>
+            File.Exists(backup.Path)
+            && Path.GetFileName(backup.Path).Contains("pre-manuscript", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -423,6 +423,9 @@ public sealed class ManuscriptMigrationIntegrationTests
                 .Build();
             return new ManuscriptMigrationService(
                 configuration,
+                new DatabaseMigrationRecoveryService(
+                    configuration,
+                    NullLogger<DatabaseMigrationRecoveryService>.Instance),
                 NullLogger<ManuscriptMigrationService>.Instance);
         }
 

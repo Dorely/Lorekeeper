@@ -288,8 +288,9 @@ Deliverables:
 - named paragraph/character styles with edition-independent semantics;
 - semantic Markdown/EPUB projection so authored block/mark/figure intent is not
   flattened at the existing publishing boundary;
-- project export v9 that round-trips semantic style definitions, with an
-  isolated v8 import adapter;
+- project export introduced semantic style round-tripping in v9; the current
+  v12 format also carries editions, covers, and complete custom-font binaries,
+  with isolated v8-v11 adapters;
 - removal of the temporary textarea adapter after every editor workflow uses
   schema-driven transactions (implemented);
 - paste/import normalization with warnings;
@@ -325,15 +326,20 @@ Deliverables:
   default edition when a project has publishing rows but no profile;
 - format, vendor/profile version, trim, binding, paper, ink, bleed, margins,
   metadata, identifier, and status;
+- installed-profile defaults for new paperbacks (6 × 9 in, 0.75 in margins,
+  11 pt body text, and 1.4 line height);
 - edition-specific included content and order;
-- front/back-matter builder for title, copyright, dedication, epigraph,
-  contents, acknowledgments, about-author, also-by, and custom matter;
+- generated title, copyright, and contents pages plus a front/back-matter
+  builder for dedication, epigraph, acknowledgments, about-author, also-by,
+  references, and custom matter; generated page kinds are reserved so they
+  cannot be duplicated by user-authored matter;
 - named-style mappings and overrides per edition;
 - artifact/proof staleness derived from content, settings, assets, renderer, and
   profile versions;
-- edition clone, archive, compare, and audit history.
-- project export v10 for editions and edition-style mappings, with isolated
-  v9-or-earlier import adapters.
+- edition clone, immutable archive, compare, and audit history; archived
+  artifacts remain readable/exportable and changes continue through a clone.
+- project export introduced editions and edition-style mappings in v10; the
+  current v12 format retains isolated older import adapters.
 
 Assistant parity: a dedicated Publish assistant can read and operate the entire
 edition/matter/style surface through the owning services, including edition-
@@ -392,8 +398,10 @@ barcode reserve. Geometry changes invalidate acknowledgement. ISBN-13 checksum
 validation, true EAN-13 bars/quiet zones, separate KDP overlay and Ingram
 embedded-barcode behavior, conditional spine text, actual cover PDF artifacts,
 and complete assistant reads/writes are wired through shared services. Physical
-template/proof measurements, cover-image compositing, font-license clearance,
-and vendor acceptance remain release validation gates.
+template/proof measurements, font-license clearance, and vendor acceptance
+remain release validation gates. KDP Preview output now composites a selected
+normalized PNG with focal controls; the Ingram Preview profile fails closed on
+selected cover images until a reviewed CMYK conversion path exists.
 
 Turn existing project images/Picture Pages into edition-aware cover sources.
 
@@ -449,7 +457,8 @@ persistence. ISBN rules distinguish optional supplied identifiers,
 Ingram requirements, Lorekeeper-generated barcodes, and KDP overlay reserves.
 Exact-package digital and physical proof records are explicit
 user actions; the Publish assistant can run/explain preflight and build packages
-through the same service but cannot approve proofs. The in-app structural EPUB
+through the same service but cannot approve proofs. Physical proofs are
+paperback-only; EPUB reports that proof stage as not applicable. The in-app structural EPUB
 check is not EPUBCheck, the press evidence is not Acrobat conformance, and no
 vendor upload, reader matrix, packaged-runtime matrix, or physical-production
 proof has been completed. Those gates keep the feature and Phase 1 output
@@ -481,8 +490,9 @@ multiple reader/viewer checks, and documented physical-proof review.
 
 - Existing local data migrates without content loss and can be restored.
 - The old chapter-body and single-profile runtime paths are gone.
-- A user can complete the certified workflow without a separate production
-  application.
+- A user can complete the end-to-end Preview workflow without a separate
+  production application; certified/vendor-verified release claims remain
+  gated below.
 - All UI capabilities have complete assistant parity.
 - Artifacts identify source revision, edition, renderer, profile, and hashes.
 - Documentation clearly separates implemented, preview, and verified claims.

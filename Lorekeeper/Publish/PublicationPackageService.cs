@@ -95,16 +95,22 @@ public sealed class PublicationPackageService(
     IProjectMutationCoordinator projectMutations) : IPublicationPackageService
 {
     private const string AssemblerVersion = "lorekeeper-package-v1";
-    private const string EpubExporterVersion = "lorekeeper-epub-v1";
+    private const string EpubExporterVersion = "lorekeeper-epub-v2";
+    private const string PressRendererVersion = "0.2.0";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
     };
-    private static readonly string[] DigitalProofChecklist =
+    private static readonly string[] PaperbackDigitalProofChecklist =
     [
         "Inspect the complete interior and cover PDFs at page level.",
         "Confirm title, author, identifiers, page order, and intentional blank pages.",
-        "Check EPUB navigation, links, reflow, images, and alternative text in representative readers.",
+        "Confirm the package manifest hashes match the files being approved.",
+    ];
+    private static readonly string[] EpubDigitalProofChecklist =
+    [
+        "Open the exact packaged EPUB in representative readers and inspect navigation, links, reflow, images, and alternative text.",
+        "Confirm title, author, identifiers, reading order, landmarks, and intentional page breaks.",
         "Confirm the package manifest hashes match the files being approved.",
     ];
     private static readonly string[] PhysicalProofChecklist =
@@ -223,6 +229,17 @@ public sealed class PublicationPackageService(
         {
             ValidatePdf(interior, fingerprint, PublicationArtifactKind.InteriorPdf, "INTERIOR", items);
             ValidatePdf(coverArtifact, fingerprint, PublicationArtifactKind.CoverPdf, "COVER", items);
+            if (coverArtifact is not null && coverArtifact.PageCount != 1)
+                items.Add(Error("COVER_PAGE_COUNT_INVALID", "The full-wrap cover PDF must contain exactly one page.", PublicationArtifactKind.CoverPdf));
+            if (interior is not null
+                && coverArtifact is not null
+                && (!string.Equals(interior.RendererVersion, PressRendererVersion, StringComparison.Ordinal)
+                    || !string.Equals(coverArtifact.RendererVersion, PressRendererVersion, StringComparison.Ordinal)))
+            {
+                items.Add(Error(
+                    "PRESS_RENDERER_VERSION_STALE",
+                    $"Render the paperback again with press runtime {PressRendererVersion}."));
+            }
             coverDesign = await covers.GetAsync(projectId, editionId, cancellationToken);
             items.AddRange(coverDesign.Diagnostics.Select(message =>
                 new PublicationPreflightItem(
@@ -254,6 +271,12 @@ public sealed class PublicationPackageService(
             .OrderBy(item => item.Location)
             .ThenBy(item => item.SortOrder)
             .ToListAsync(cancellationToken);
+        foreach (var item in matter.Where(item => PublicationMatterFormatting.IsGeneratedPageKind(item.Kind)))
+        {
+            items.Add(Error(
+                "MATTER_GENERATED_PAGE_CONFLICT",
+                $"{item.Kind} is generated from edition settings and cannot also be included as publication matter."));
+        }
         ValidateLanguageScope(document, coverDesign, matter, items);
         if (!string.Equals(edition.Language, "en", StringComparison.OrdinalIgnoreCase)
             && !edition.Language.StartsWith("en-", StringComparison.OrdinalIgnoreCase))
@@ -281,14 +304,19 @@ public sealed class PublicationPackageService(
             editionId,
             fingerprint,
             currentPackageEntity,
+            edition.Format,
             cancellationToken);
+        if (edition.Format == PublicationEditionFormat.Epub)
+            physicalProof = NotApplicableProofStatus();
         var finalFingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         if (!string.Equals(finalFingerprint, fingerprint, StringComparison.Ordinal))
         {
             items.Add(Error("PREFLIGHT_SOURCE_CHANGED", "The edition changed during preflight. Run it again."));
             currentPackage = null;
-            digitalProof = ProofStatus(null, DigitalProofChecklist);
-            physicalProof = ProofStatus(null, PhysicalProofChecklist);
+            digitalProof = ProofStatus(null, DigitalProofChecklist(edition.Format));
+            physicalProof = edition.Format == PublicationEditionFormat.Paperback
+                ? ProofStatus(null, PhysicalProofChecklist)
+                : NotApplicableProofStatus();
         }
         return new(
             profile.Id,
@@ -336,6 +364,7 @@ public sealed class PublicationPackageService(
         var edition = await db.PublicationEditions.AsNoTracking().SingleAsync(
             candidate => candidate.Id == editionId && candidate.ProjectId == projectId,
             cancellationToken);
+        PublicationEditionService.EnsureDraft(edition);
         var validatedArtifactIds = report.ValidatedArtifactIds;
         var sourceArtifacts = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
@@ -375,8 +404,10 @@ public sealed class PublicationPackageService(
         var packagedReport = report with
         {
             CurrentPackage = null,
-            DigitalProof = ProofStatus(null, DigitalProofChecklist),
-            PhysicalProof = ProofStatus(null, PhysicalProofChecklist),
+            DigitalProof = ProofStatus(null, DigitalProofChecklist(edition.Format)),
+            PhysicalProof = edition.Format == PublicationEditionFormat.Paperback
+                ? ProofStatus(null, PhysicalProofChecklist)
+                : NotApplicableProofStatus(),
         };
         var reportData = JsonSerializer.SerializeToUtf8Bytes(packagedReport, JsonOptions);
         files["preflight.json"] = (PublicationArtifactKind.PreflightReport, "application/json", reportData);
@@ -456,8 +487,10 @@ public sealed class PublicationPackageService(
             report with
             {
                 CurrentPackage = packageView,
-                DigitalProof = ProofStatus(null, DigitalProofChecklist),
-                PhysicalProof = ProofStatus(null, PhysicalProofChecklist),
+                DigitalProof = ProofStatus(null, DigitalProofChecklist(edition.Format)),
+                PhysicalProof = edition.Format == PublicationEditionFormat.Paperback
+                    ? ProofStatus(null, PhysicalProofChecklist)
+                    : NotApplicableProofStatus(),
             },
             generated.Select(artifact => new PublicationArtifactView(
                 artifact.Id,
@@ -491,6 +524,15 @@ public sealed class PublicationPackageService(
             throw new ArgumentException("Record a physical-proof note.", nameof(note));
 
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var edition = await db.PublicationEditions.AsNoTracking().FirstOrDefaultAsync(
+            candidate => candidate.Id == editionId && candidate.ProjectId == projectId,
+            cancellationToken) ?? throw new KeyNotFoundException("Publication edition not found.");
+        PublicationEditionService.EnsureDraft(edition);
+        if (kind == PublicationProofKind.Physical
+            && edition.Format != PublicationEditionFormat.Paperback)
+        {
+            throw new InvalidOperationException("Physical proof approval applies only to paperback editions.");
+        }
         var report = await PreflightAsync(projectId, editionId, cancellationToken);
         if (!report.CanPackage)
             throw new InvalidOperationException("The edition no longer passes preflight.");
@@ -509,6 +551,7 @@ public sealed class PublicationPackageService(
                 editionId,
                 fingerprint,
                 package,
+                edition.Format,
                 cancellationToken))
                 .Digital.PackageSha256;
             if (!string.Equals(digitalRecorded, package.Sha256, StringComparison.Ordinal))
@@ -715,6 +758,15 @@ public sealed class PublicationPackageService(
         }
         foreach (var (path, content) in xhtmlDocuments.ToList())
         {
+            foreach (var anchor in content.Descendants(xhtml + "a"))
+            {
+                ValidateXhtmlReference(
+                    path,
+                    anchor.Attribute("href")?.Value,
+                    entries,
+                    xhtmlDocuments,
+                    allowExternal: true);
+            }
             foreach (var source in content.Descendants().Attributes("src"))
                 ValidateXhtmlReference(path, source.Value, entries, xhtmlDocuments, requireXhtml: false);
             foreach (var stylesheet in content.Descendants(xhtml + "link").Where(link =>
@@ -766,8 +818,15 @@ public sealed class PublicationPackageService(
         string? href,
         IReadOnlyDictionary<string, ZipArchiveEntry> entries,
         IDictionary<string, XDocument> xhtmlDocuments,
-        bool requireXhtml = true)
+        bool requireXhtml = true,
+        bool allowExternal = false)
     {
+        if (allowExternal
+            && Uri.TryCreate(href, UriKind.Absolute, out var external)
+            && external.Scheme is "http" or "https" or "mailto" or "tel")
+        {
+            return;
+        }
         if (string.IsNullOrWhiteSpace(href)
             || Uri.TryCreate(href, UriKind.Absolute, out _)
             || href.Contains('?')
@@ -1127,12 +1186,13 @@ public sealed class PublicationPackageService(
         Guid editionId,
         string fingerprint,
         PublicationArtifact? currentPackage,
+        PublicationEditionFormat format,
         CancellationToken cancellationToken)
     {
         if (currentPackage is null)
         {
             return (
-                ProofStatus(null, DigitalProofChecklist),
+                ProofStatus(null, DigitalProofChecklist(format)),
                 ProofStatus(null, PhysicalProofChecklist));
         }
         var records = await db.PublicationArtifacts.AsNoTracking()
@@ -1163,15 +1223,25 @@ public sealed class PublicationPackageService(
             }
         }
         return (
-            ProofStatus(parsed.FirstOrDefault(record => record.Kind == PublicationProofKind.Digital), DigitalProofChecklist),
+            ProofStatus(
+                parsed.FirstOrDefault(record => record.Kind == PublicationProofKind.Digital),
+                DigitalProofChecklist(format)),
             ProofStatus(parsed.FirstOrDefault(record => record.Kind == PublicationProofKind.Physical), PhysicalProofChecklist));
     }
+
+    private static IReadOnlyList<string> DigitalProofChecklist(PublicationEditionFormat format) =>
+        format == PublicationEditionFormat.Epub
+            ? EpubDigitalProofChecklist
+            : PaperbackDigitalProofChecklist;
 
     private static PublicationProofStatus ProofStatus(
         PublicationProofRecord? record,
         IReadOnlyList<string> checklist) => record is null
             ? new("Pending", null, null, null, checklist)
             : new("Recorded", record.PackageSha256, record.RecordedAtUtc, record.Note, checklist);
+
+    private static PublicationProofStatus NotApplicableProofStatus() =>
+        new("Not applicable", null, null, null, []);
 
     private static string RuntimeVersion(PublicationEditionFormat format) =>
         format == PublicationEditionFormat.Epub

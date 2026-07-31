@@ -3,7 +3,6 @@ using Lorekeeper.Llm;
 using Lorekeeper.Context;
 using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Graph;
-using Lorekeeper.Images;
 using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Outline;
@@ -25,7 +24,7 @@ public class ChapterService(
     IOutlineGraphSync outlineGraphSync,
     IContextIndexingService contextIndexing,
     IVectorIndexWorkCoordinator indexWork,
-    IProjectImageService projectImages,
+    AppDbContext db,
     IManuscriptStyleService manuscriptStyles,
     IProjectMutationCoordinator projectMutations,
     ILogger<ChapterService> logger) : IChapterService, IManuscriptService
@@ -317,14 +316,13 @@ public class ChapterService(
             .ToList();
         if (imageIds.Count == 0)
             return;
-        var found = (await projectImages.ListByIdsAsync(projectId, imageIds, cancellationToken))
-            .Select(image => image.Id)
-            .ToHashSet();
-        var missing = imageIds.Where(imageId => !found.Contains(imageId)).ToList();
-        if (missing.Count > 0)
+        var foundCount = await db.PublishAssets
+            .AsNoTracking()
+            .CountAsync(image => image.ProjectId == projectId && imageIds.Contains(image.Id), cancellationToken);
+        if (foundCount != imageIds.Count)
         {
             throw new InvalidOperationException(
-                $"Figure image {missing[0]:N} was not found in this project.");
+                "One or more figure images were not found in this project.");
         }
     }
 

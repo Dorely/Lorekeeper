@@ -175,6 +175,7 @@ builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>(
 builder.Services.AddScoped<ChapterService>();
 builder.Services.AddScoped<IChapterService>(services => services.GetRequiredService<ChapterService>());
 builder.Services.AddScoped<IManuscriptService>(services => services.GetRequiredService<ChapterService>());
+builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
 builder.Services.AddScoped<IChapterVisualService, ChapterVisualService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();

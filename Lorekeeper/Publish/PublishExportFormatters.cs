@@ -265,9 +265,9 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
     private static void AppendMatter(StringBuilder sb, string title, string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
-        sb.AppendLine().Append("## ").AppendLine(title).AppendLine();
+        sb.AppendLine().Append("## ").AppendLine(EscapeHeading(title)).AppendLine();
         foreach (var line in SplitLines(text.TrimEnd()))
-            sb.AppendLine(EscapeInline(line));
+            sb.AppendLine(line);
     }
 
     private static void AppendMatter(
@@ -441,6 +441,8 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
 
     public byte[] Render(PublishDocument document)
     {
+        foreach (var item in document.Matter)
+            PublicationMatterFormatting.EnsureUserAuthoredKind(item.Kind);
         var imageItems = BuildImageItems(document);
         var xhtmlItems = BuildXhtmlItems(document, imageItems);
         using var stream = new MemoryStream();
@@ -552,6 +554,15 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
             {
                 if (document.Assets.FirstOrDefault(asset => asset.Id == block.ImageId) is { } asset)
                     assets[asset.Id] = asset;
+            }
+            foreach (var block in chapter.Manuscript.Content.Where(block =>
+                block.Type == ManuscriptBlockType.Figure))
+            {
+                if (block.ImageId is Guid imageId
+                    && document.Assets.FirstOrDefault(asset => asset.Id == imageId) is { } asset)
+                {
+                    assets[asset.Id] = asset;
+                }
             }
         }
         foreach (var block in document.Matter.SelectMany(item => item.Manuscript.Content))
@@ -960,9 +971,15 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
         sb.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
         sb.AppendLine("""<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">""");
         sb.AppendLine("""  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">""");
-        sb.Append("    <dc:identifier id=\"book-id\">urn:uuid:").Append(document.ProjectId).AppendLine("</dc:identifier>");
-        if (!string.IsNullOrWhiteSpace(document.Profile.Isbn))
-            sb.Append("    <dc:identifier id=\"isbn\">urn:isbn:").Append(Html(document.Profile.Isbn)).AppendLine("</dc:identifier>");
+        if (string.IsNullOrWhiteSpace(document.Profile.Isbn))
+        {
+            sb.Append("    <dc:identifier id=\"book-id\">urn:uuid:").Append(document.EditionId).AppendLine("</dc:identifier>");
+        }
+        else
+        {
+            sb.Append("    <dc:identifier id=\"book-id\">urn:isbn:").Append(Html(document.Profile.Isbn)).AppendLine("</dc:identifier>");
+            sb.Append("    <dc:identifier id=\"edition-id\">urn:uuid:").Append(document.EditionId).AppendLine("</dc:identifier>");
+        }
         sb.Append("    <dc:title>").Append(Html(document.DisplayTitle)).AppendLine("</dc:title>");
         if (!string.IsNullOrWhiteSpace(document.Profile.Author))
             sb.Append("    <dc:creator>").Append(Html(document.Profile.Author)).AppendLine("</dc:creator>");
@@ -1369,6 +1386,20 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
 
 internal static class PublicationMatterFormatting
 {
+    public static bool IsGeneratedPageKind(PublicationMatterKind kind) =>
+        kind is PublicationMatterKind.TitlePage
+            or PublicationMatterKind.Copyright
+            or PublicationMatterKind.Contents;
+
+    public static void EnsureUserAuthoredKind(PublicationMatterKind kind)
+    {
+        if (IsGeneratedPageKind(kind))
+        {
+            throw new InvalidOperationException(
+                $"{kind} is generated from edition settings and cannot be added as publication matter.");
+        }
+    }
+
     public static string Title(PublishMatterDocument item)
     {
         if (!string.IsNullOrWhiteSpace(item.Title))
@@ -1474,18 +1505,19 @@ internal static class SemanticPublishFormatting
     {
         var content = string.Concat(block.Content.Select(HtmlInline));
         var role = WebUtility.HtmlEncode(block.StyleRole);
+        var anchor = $"block-{block.Id:N}";
         return block.Type switch
         {
             ManuscriptBlockType.Heading =>
-                $"<h{block.HeadingLevel ?? 2} data-style-role=\"{role}\">{content}</h{block.HeadingLevel ?? 2}>",
+                $"<h{block.HeadingLevel ?? 2} id=\"{anchor}\" data-style-role=\"{role}\">{content}</h{block.HeadingLevel ?? 2}>",
             ManuscriptBlockType.SceneBreak =>
-                $"<hr class=\"scene-break\" data-style-role=\"{role}\" />",
+                $"<hr id=\"{anchor}\" class=\"scene-break\" data-style-role=\"{role}\" />",
             ManuscriptBlockType.BlockQuote =>
-                $"<blockquote data-style-role=\"{role}\">{content}</blockquote>",
+                $"<blockquote id=\"{anchor}\" data-style-role=\"{role}\">{content}</blockquote>",
             ManuscriptBlockType.ListItem =>
-                $"<ul><li data-style-role=\"{role}\">{content}</li></ul>",
-            ManuscriptBlockType.Figure => HtmlFigure(block, content, role, imageHref),
-            _ => $"<p data-style-role=\"{role}\">{content}</p>",
+                $"<ul><li id=\"{anchor}\" data-style-role=\"{role}\">{content}</li></ul>",
+            ManuscriptBlockType.Figure => HtmlFigure(block, content, role, anchor, imageHref),
+            _ => $"<p id=\"{anchor}\" data-style-role=\"{role}\">{content}</p>",
         };
     }
 
@@ -1493,6 +1525,7 @@ internal static class SemanticPublishFormatting
         ManuscriptBlock block,
         string content,
         string role,
+        string anchor,
         Func<Guid, string?> imageHref)
     {
         var href = imageHref(block.ImageId!.Value)
@@ -1501,7 +1534,7 @@ internal static class SemanticPublishFormatting
         var caption = string.IsNullOrWhiteSpace(content)
             ? string.Empty
             : $"<figcaption>{content}</figcaption>";
-        return $"<figure data-style-role=\"{role}\"><img src=\"{WebUtility.HtmlEncode(href)}\" "
+        return $"<figure id=\"{anchor}\" data-style-role=\"{role}\"><img src=\"{WebUtility.HtmlEncode(href)}\" "
             + $"alt=\"{WebUtility.HtmlEncode(block.AltText)}\" />{caption}</figure>";
     }
 

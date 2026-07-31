@@ -357,7 +357,13 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
         if (await db.EditorContextPreferences.AnyAsync(preference => preference.ProjectId == projectId && (preference.Key.Contains(idN) || preference.Key.Contains(idD)), cancellationToken)) return true;
         if (await db.Chapters.AnyAsync(chapter => chapter.ProjectId == projectId
             && (chapter.PageLayoutJson.Contains(idN) || chapter.PageLayoutJson.Contains(idD)
-                || chapter.IllustrationLayoutJson.Contains(idN) || chapter.IllustrationLayoutJson.Contains(idD)), cancellationToken)) return true;
+                || chapter.IllustrationLayoutJson.Contains(idN) || chapter.IllustrationLayoutJson.Contains(idD)
+                || chapter.ManuscriptJson.Contains(idN) || chapter.ManuscriptJson.Contains(idD)), cancellationToken)) return true;
+        if (await db.PublicationMatter.AnyAsync(matter => matter.Edition.ProjectId == projectId
+            && (matter.ManuscriptJson.Contains(idN) || matter.ManuscriptJson.Contains(idD)), cancellationToken)) return true;
+        if (await db.PublicationImagePlacements.AnyAsync(placement =>
+            placement.Edition.ProjectId == projectId && placement.AssetId == imageId,
+            cancellationToken)) return true;
         return await db.ProjectImageGenerationJobs.AnyAsync(job => job.ProjectId == projectId
             && (job.SourceImageId == imageId || job.OutputImageIdsJson.Contains(idN) || job.OutputImageIdsJson.Contains(idD)
                 || job.ReferenceImageIdsJson.Contains(idN) || job.ReferenceImageIdsJson.Contains(idD)), cancellationToken);

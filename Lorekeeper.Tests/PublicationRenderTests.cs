@@ -1,10 +1,55 @@
+using System.Security.Cryptography;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Publish;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Lorekeeper.Tests;
 
 public sealed class PublicationRenderTests
 {
+    [Fact]
+    public async Task CorruptedStoredArtifactCannotCrossTheDownloadBoundary()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.EnsureCreatedAsync();
+        var project = new Project { Name = "Book", Slug = $"book-{Guid.NewGuid():N}" };
+        var edition = new PublicationEdition { ProjectId = project.Id, Name = "Paperback" };
+        var validData = "%PDF-valid"u8.ToArray();
+        var valid = new PublicationArtifact
+        {
+            EditionId = edition.Id,
+            Kind = PublicationArtifactKind.InteriorPdf,
+            FileName = "valid.pdf",
+            MediaType = "application/pdf",
+            Data = validData,
+            Sha256 = Convert.ToHexStringLower(SHA256.HashData(validData)),
+            ByteLength = validData.Length,
+        };
+        var corrupt = new PublicationArtifact
+        {
+            EditionId = edition.Id,
+            Kind = PublicationArtifactKind.CoverPdf,
+            FileName = "corrupt.pdf",
+            MediaType = "application/pdf",
+            Data = "%PDF-corrupt"u8.ToArray(),
+            Sha256 = valid.Sha256,
+            ByteLength = valid.ByteLength,
+        };
+        db.AddRange(project, edition, valid, corrupt);
+        await db.SaveChangesAsync();
+        var service = new PublicationRenderService(db, null!, null!, null!, null!);
+
+        Assert.NotNull(await service.GetArtifactAsync(project.Id, valid.Id));
+        Assert.Null(await service.GetArtifactAsync(project.Id, corrupt.Id));
+        Assert.Null(await service.GetArtifactAsync(Guid.NewGuid(), valid.Id));
+    }
+
     [Fact]
     public void ArtifactStalenessUsesTheCurrentEditionFingerprint()
     {

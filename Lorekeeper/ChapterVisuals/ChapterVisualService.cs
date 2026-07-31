@@ -66,20 +66,19 @@ public sealed class ChapterVisualService(
         }
         else
         {
+            if (await db.PublicationEditions.AsNoTracking().AnyAsync(
+                edition => edition.SelectedCoverChapterId == chapter.Id,
+                cancellationToken))
+            {
+                throw new InvalidOperationException(
+                    "This Picture Page is selected as a publication cover. Clear it from every publication edition before changing the chapter visual mode.");
+            }
             if (previousMode == ChapterVisualMode.PicturePage)
             {
                 var layout = ReadPageLayout(chapter);
                 chapter.PageLayoutJson = JsonSerializer.Serialize(
                     layout with { Revision = checked(layout.Revision + 1) },
                     JsonOptions);
-            }
-            var coverEditions = await db.PublicationEditions
-                .Where(edition => edition.SelectedCoverChapterId == chapter.Id)
-                .ToListAsync(cancellationToken);
-            foreach (var profile in coverEditions)
-            {
-                profile.SelectedCoverChapterId = null;
-                profile.UpdatedAt = DateTime.UtcNow;
             }
         }
         if (previousMode == ChapterVisualMode.IllustratedProse
@@ -614,7 +613,33 @@ public sealed class ChapterVisualService(
         IReadOnlyCollection<Guid> chapterIds,
         int physicalPageLongEdgePixels = 2400,
         ChapterPicturePageSurfaceRotation rotation = ChapterPicturePageSurfaceRotation.None,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await RenderPicturePageSurfacesCoreAsync(
+            chapterIds,
+            physicalPageLongEdgePixels,
+            rotation,
+            geometry: null,
+            cancellationToken);
+
+    public async Task<IReadOnlyDictionary<Guid, ChapterPicturePageSurface>> RenderPicturePageSurfacesAsync(
+        IReadOnlyCollection<Guid> chapterIds,
+        int physicalPageLongEdgePixels,
+        ChapterPicturePageSurfaceRotation rotation,
+        ChapterPicturePageGeometryProfile geometry,
+        CancellationToken cancellationToken = default) =>
+        await RenderPicturePageSurfacesCoreAsync(
+            chapterIds,
+            physicalPageLongEdgePixels,
+            rotation,
+            geometry,
+            cancellationToken);
+
+    private async Task<IReadOnlyDictionary<Guid, ChapterPicturePageSurface>> RenderPicturePageSurfacesCoreAsync(
+        IReadOnlyCollection<Guid> chapterIds,
+        int physicalPageLongEdgePixels,
+        ChapterPicturePageSurfaceRotation rotation,
+        ChapterPicturePageGeometryProfile? geometry,
+        CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(rotation))
             throw new ArgumentOutOfRangeException(nameof(rotation), rotation, "The picture page surface rotation is invalid.");
@@ -663,7 +688,15 @@ public sealed class ChapterVisualService(
         var surfaces = new Dictionary<Guid, ChapterPicturePageSurface>(chapterStates.Count);
         foreach (var request in chapterStates)
         {
-            var metrics = await pageGeometry.GetAsync(request.ProjectId, request.State.PageLayoutKind, cancellationToken);
+            var metrics = geometry is null
+                ? await pageGeometry.GetAsync(request.ProjectId, request.State.PageLayoutKind, cancellationToken)
+                : pageGeometry.Calculate(
+                    geometry.PageWidthInches,
+                    geometry.PageHeightInches,
+                    geometry.PageMarginInches,
+                    geometry.BodyFontSizePoints,
+                    geometry.BodyLineHeight,
+                    request.State.PageLayoutKind);
             var (pageWidth, pageHeight) = ScaledPagePixels(
                 metrics.PageWidthInches,
                 metrics.PageHeightInches,

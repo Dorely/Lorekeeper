@@ -247,7 +247,7 @@ else if (_document is not null)
                 return;
             }
 
-            _document = await Publishing.GetDocumentAsync(project.Id, EditionId);
+            _document = await Publishing.GetPrintDocumentAsync(project.Id, EditionId);
         }
         catch (Exception ex)
         {

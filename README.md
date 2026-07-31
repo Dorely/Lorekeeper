@@ -35,7 +35,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Independent paperback/EPUB publication editions with product/vendor settings,
   identifiers, included content, semantic matter, named-style mappings, image
   placements, Picture Page cover sources, clone/archive/compare/audit workflows,
-  deterministic staleness fingerprints, and matching Publish assistant tools.
+  deterministic staleness fingerprints, read-only archived editions, and
+  matching Publish assistant tools. New paperback editions start on the
+  installed 6 × 9 in Preview profile.
 - Preview paperback press jobs with cancellation/restart recovery, immutable
   SHA-256-verified interior and cover PDFs, actual in-app PDF viewing, semantic
   block-to-page maps, render comparisons, and matching assistant controls.
@@ -44,13 +46,16 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   barcode or KDP overlay-reserve behavior, cover PDF output, and assistant parity.
 - Versioned Preview publication preflight with renderer-evidence checks,
   deterministic EPUB 3/package assembly, downloadable manifests and reports,
-  exact-package digital/physical proof records, and matching assistant
-  preflight/package controls. Independent EPUBCheck, Acrobat, vendor-upload, and
+  exact-package digital proof records plus paperback-only physical-proof
+  records, and matching assistant preflight/package controls. Independent
+  EPUBCheck, Acrobat, vendor-upload, and
   physical-production validation remain release gates.
-- Versioned project import/export (current v11 manuscripts/styles/editions/covers,
-  isolated v8-v10 adapters, and v1-v7 text adapters) plus TXT,
+- Versioned project import/export (current v12
+  manuscripts/styles/editions/covers/custom-font binaries, isolated v8-v11
+  structured adapters, and v1-v7 text adapters) plus TXT,
   Markdown, mixed-layout EPUB, and a
-  browser/operating-system print-preview workflow. Generated press PDFs are
+  paperback-only browser/operating-system print-preview workflow. EPUB export
+  is restricted to EPUB editions, and generated press PDFs are
   explicitly Preview artifacts, not PDF/X conformance or vendor-preflight claims.
 - Configurable Codex/OpenAI-compatible chat and embedding providers, configurable
   web search, and local SQLite persistence.
