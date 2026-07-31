@@ -68,6 +68,7 @@
 | `PublicationRenderTests.cs` | Artifact-integrity/staleness fixtures plus clean publication-worker cancellation during host shutdown. |
 | `DatabaseMigrationRecoveryTests.cs` | Shared migration-recovery pruning fixture proving protected failed/running backup references survive automatic retention. |
 | `OpenAIChatToolMetadataClientTests.cs` | OpenAI-compatible streaming fixture proving Gemini tool-call extension metadata survives the assistant/tool-result round trip. |
+| `CodexAuthServiceTests.cs` | OAuth refresh fixtures for reconnect rejection, cross-scope serialization/cache replacement, rotation preservation, and fail-loud server errors. |
 
 ## tools/semantic-editor/
 
@@ -352,7 +353,7 @@
 |------|-------------|
 | `ILlmProviderRepository.cs` / `LlmProviderRepository.cs` | CRUD + atomic `SetDefaultAsync` for `LlmProvider`. |
 | `IEmbeddingConfigurationRepository.cs` / `EmbeddingConfigurationRepository.cs` | Persistence for the singleton active embedding configuration, eager-loading its selected provider connection. |
-| `IOAuthTokenRepository.cs` / `OAuthTokenRepository.cs` | Latest/valid token lookup + replace-for-provider. |
+| `IOAuthTokenRepository.cs` / `OAuthTokenRepository.cs` | Fresh no-tracking latest/valid OAuth token reads plus atomic replace-for-provider persistence. |
 | `IProjectRepository.cs` / `ProjectRepository.cs` | Project CRUD plus fresh no-tracking UI lists/slug reads and an explicit id snapshot; slug uniqueness check; ordered list by `UpdatedAt`. |
 | `IGraphNodeRepository.cs` / `GraphNodeRepository.cs` | Node CRUD plus tracked command lookups and fresh no-tracking project/type/id-list projections for graph/entity/fact/beat UI reads. |
 | `IGraphEdgeRepository.cs` / `GraphEdgeRepository.cs` | Edge CRUD plus fresh no-tracking directional/project read projections. Defines `EdgeDirection` enum. |
@@ -399,7 +400,7 @@
 | `EmbeddingRebuildService.cs` | Bulk rebuild service: recreates sqlite-vec dimensions, marks indexes stale, reindexes chapter bodies, ingest source fragments, and context vectors with batch delay and retry backoff. |
 | `ILlmProviderService.cs` / `LlmProviderService.cs` | Provider/model CRUD, connection-wide shared-field propagation and grouped deletion, credential resolution, persisted chat/vision readiness, working-default selection, and Codex connection checks. |
 | `CodexProvider.cs` | Shared Codex provider name/endpoints/defaults plus OAuth JWT account-id parsing for Codex chat, images, and embeddings. |
-| `ICodexAuthService.cs` / `CodexAuthService.cs` | OpenAI Codex PKCE OAuth flow (start, configured local redirect callback, refresh, revoke). Uses in-process pending state map. |
+| `ICodexAuthService.cs` / `CodexAuthService.cs` | OpenAI Codex PKCE OAuth flow with configured local callback, serialized refresh, non-destructive reconnect handling for rejected sessions, and explicit revoke. |
 | `ReasoningContent.cs` | `AIContent` subclass for Codex reasoning summary streaming. |
 | `ToolCallStreamingContent.cs` | `AIContent` subclasses for provider-level function-call start and argument-delta streaming. |
 | `ToolCallArguments.cs` | Shared parser/normalizer for tool-call argument JSON and SDK argument dictionaries before `AIFunction` invocation. |

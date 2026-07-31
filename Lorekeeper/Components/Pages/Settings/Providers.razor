@@ -9,6 +9,7 @@
 @inject IChatClientFactory ChatClientFactory
 @inject IVisionModelClientFactory VisionModelClientFactory
 @inject NavigationManager Nav
+@inject ILogger<Providers> Logger
 @implements IDisposable
 
 <PageTitle>LLM Providers</PageTitle>
@@ -299,8 +300,25 @@
         _oauthStatus = new Dictionary<int, bool>();
         foreach (var p in _parents.Where(p => p.AuthType == AuthType.OAuth))
         {
-            var token = await CodexAuth.GetValidTokenAsync(p.Id);
-            _oauthStatus[p.Id] = token is not null;
+            try
+            {
+                var token = await CodexAuth.GetValidTokenAsync(p.Id);
+                _oauthStatus[p.Id] = token is not null;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Unable to validate OAuth connection {ProviderId}", p.Id);
+                _oauthStatus[p.Id] = false;
+                if (_statusMessage is null)
+                {
+                    _statusMessage = "An OAuth connection could not be checked. Retry or reconnect the account.";
+                    _statusKind = "warning";
+                }
+            }
         }
 
         _chatReadyStatus = new Dictionary<int, bool>();

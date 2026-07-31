@@ -7,12 +7,14 @@ public class OAuthTokenRepository(AppDbContext db) : IOAuthTokenRepository
 {
     public Task<OAuthToken?> GetLatestForProviderAsync(int providerId, CancellationToken cancellationToken = default) =>
         db.OAuthTokens
+            .AsNoTracking()
             .Where(t => t.ProviderId == providerId)
             .OrderByDescending(t => t.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
     public Task<OAuthToken?> GetLatestValidForProviderAsync(int providerId, CancellationToken cancellationToken = default) =>
         db.OAuthTokens
+            .AsNoTracking()
             .Where(t => t.ProviderId == providerId && t.ExpiresAt > DateTime.UtcNow)
             .OrderByDescending(t => t.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);

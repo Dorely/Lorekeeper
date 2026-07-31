@@ -16,7 +16,8 @@ namespace Lorekeeper.Llm;
 public class CodexAuthService(
     IOAuthTokenRepository tokens,
     IHttpClientFactory httpClientFactory,
-    IConfiguration configuration) : ICodexAuthService
+    IConfiguration configuration,
+    ILogger<CodexAuthService> logger) : ICodexAuthService
 {
     private const string AuthEndpoint = "https://auth.openai.com/oauth/authorize";
     private const string TokenEndpoint = "https://auth.openai.com/oauth/token";
@@ -28,8 +29,25 @@ public class CodexAuthService(
     // In-process PKCE state. Single-user POC; if Lorekeeper ever runs multi-instance
     // this needs to move to a shared cache.
     private static readonly ConcurrentDictionary<string, PkceState> _pendingFlows = new();
+    private static readonly ConcurrentDictionary<int, SemaphoreSlim> _providerLocks = new();
+    private static readonly ConcurrentDictionary<RejectedRefreshToken, byte> _rejectedRefreshTokens = new();
 
     private sealed record PkceState(int ProviderId, string CodeVerifier, DateTime CreatedAt);
+    private sealed record RejectedRefreshToken(
+        int ProviderId,
+        int TokenId,
+        DateTime CreatedAt,
+        DateTime ExpiresAt,
+        string RefreshTokenFingerprint)
+    {
+        public static RejectedRefreshToken From(OAuthToken token) =>
+            new(
+                token.ProviderId,
+                token.Id,
+                token.CreatedAt,
+                token.ExpiresAt,
+                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token.RefreshToken!))));
+    }
 
     public (string AuthorizationUrl, string State) StartPkceFlow(int providerId)
     {
@@ -62,58 +80,104 @@ public class CodexAuthService(
         if (DateTime.UtcNow - pkce.CreatedAt > TimeSpan.FromMinutes(10))
             throw new InvalidOperationException("OAuth flow has expired.");
 
-        var client = httpClientFactory.CreateClient();
-
-        var tokenRequest = new Dictionary<string, string>
+        var providerLock = _providerLocks.GetOrAdd(pkce.ProviderId, _ => new SemaphoreSlim(1, 1));
+        await providerLock.WaitAsync(cancellationToken);
+        try
         {
-            ["grant_type"] = "authorization_code",
-            ["client_id"] = ClientId,
-            ["code"] = code,
-            ["redirect_uri"] = _redirectUri,
-            ["code_verifier"] = pkce.CodeVerifier
-        };
+            var client = httpClientFactory.CreateClient();
 
-        var response = await client.PostAsync(TokenEndpoint, new FormUrlEncodedContent(tokenRequest), cancellationToken);
-        response.EnsureSuccessStatusCode();
+            var tokenRequest = new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["client_id"] = ClientId,
+                ["code"] = code,
+                ["redirect_uri"] = _redirectUri,
+                ["code_verifier"] = pkce.CodeVerifier
+            };
 
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+            using var response = await client.PostAsync(TokenEndpoint, new FormUrlEncodedContent(tokenRequest), cancellationToken);
+            response.EnsureSuccessStatusCode();
 
-        var accessToken = json.GetProperty("access_token").GetString()!;
-        var expiresIn = json.GetProperty("expires_in").GetInt32();
-        var refreshToken = json.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null;
-        var scope = json.TryGetProperty("scope", out var sc) ? sc.GetString() : null;
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
 
-        await tokens.ReplaceForProviderAsync(pkce.ProviderId, new OAuthToken
+            var accessToken = json.GetProperty("access_token").GetString()!;
+            var expiresIn = json.GetProperty("expires_in").GetInt32();
+            var refreshToken = json.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null;
+            var scope = json.TryGetProperty("scope", out var sc) ? sc.GetString() : null;
+
+            await tokens.ReplaceForProviderAsync(pkce.ProviderId, new OAuthToken
+            {
+                ProviderId = pkce.ProviderId,
+                AccessToken = accessToken,
+                RefreshToken = refreshToken,
+                ExpiresAt = DateTime.UtcNow.AddSeconds(expiresIn),
+                Scope = scope
+            }, cancellationToken);
+            await tokens.SaveChangesAsync(cancellationToken);
+            ClearRejectedRefreshTokens(pkce.ProviderId);
+
+            return pkce.ProviderId;
+        }
+        finally
         {
-            ProviderId = pkce.ProviderId,
-            AccessToken = accessToken,
-            RefreshToken = refreshToken,
-            ExpiresAt = DateTime.UtcNow.AddSeconds(expiresIn),
-            Scope = scope
-        }, cancellationToken);
-        await tokens.SaveChangesAsync(cancellationToken);
-
-        return pkce.ProviderId;
+            providerLock.Release();
+        }
     }
 
     public async Task<string?> GetValidTokenAsync(int providerId, CancellationToken cancellationToken = default)
     {
-        var token = await tokens.GetLatestForProviderAsync(providerId, cancellationToken);
-        if (token is null) return null;
+        var providerLock = _providerLocks.GetOrAdd(providerId, _ => new SemaphoreSlim(1, 1));
+        await providerLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Serialize the scoped repository read with refresh so concurrent callers
+            // cannot race a rotating refresh token or use the DbContext concurrently.
+            var token = await tokens.GetLatestForProviderAsync(providerId, cancellationToken);
+            if (token is null)
+                return null;
+            if (token.ExpiresAt > DateTime.UtcNow)
+                return token.AccessToken;
+            if (token.RefreshToken is null)
+                return null;
 
-        if (token.ExpiresAt <= DateTime.UtcNow && token.RefreshToken is not null)
-            token = await RefreshTokenAsync(token, cancellationToken);
+            var rejected = RejectedRefreshToken.From(token);
+            ClearRejectedRefreshTokens(providerId, rejected);
+            if (_rejectedRefreshTokens.ContainsKey(rejected))
+                return null;
 
-        return token.ExpiresAt > DateTime.UtcNow ? token.AccessToken : null;
+            var refreshed = await RefreshTokenAsync(token, cancellationToken);
+            if (refreshed is null)
+            {
+                _rejectedRefreshTokens.TryAdd(rejected, 0);
+                return null;
+            }
+
+            _rejectedRefreshTokens.TryRemove(rejected, out _);
+            return refreshed.ExpiresAt > DateTime.UtcNow ? refreshed.AccessToken : null;
+        }
+        finally
+        {
+            providerLock.Release();
+        }
     }
 
     public async Task RevokeTokenAsync(int providerId, CancellationToken cancellationToken = default)
     {
-        await tokens.DeleteForProviderAsync(providerId, cancellationToken);
-        await tokens.SaveChangesAsync(cancellationToken);
+        var providerLock = _providerLocks.GetOrAdd(providerId, _ => new SemaphoreSlim(1, 1));
+        await providerLock.WaitAsync(cancellationToken);
+        try
+        {
+            await tokens.DeleteForProviderAsync(providerId, cancellationToken);
+            await tokens.SaveChangesAsync(cancellationToken);
+            ClearRejectedRefreshTokens(providerId);
+        }
+        finally
+        {
+            providerLock.Release();
+        }
     }
 
-    private async Task<OAuthToken> RefreshTokenAsync(OAuthToken token, CancellationToken cancellationToken)
+    private async Task<OAuthToken?> RefreshTokenAsync(OAuthToken token, CancellationToken cancellationToken)
     {
         var client = httpClientFactory.CreateClient();
 
@@ -124,19 +188,80 @@ public class CodexAuthService(
             ["refresh_token"] = token.RefreshToken!
         };
 
-        var response = await client.PostAsync(TokenEndpoint, new FormUrlEncodedContent(refreshRequest), cancellationToken);
+        using var response = await client.PostAsync(TokenEndpoint, new FormUrlEncodedContent(refreshRequest), cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorCode = await ReadOAuthErrorCodeAsync(response, cancellationToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                || (response.StatusCode == System.Net.HttpStatusCode.BadRequest
+                    && errorCode is "invalid_grant" or "invalid_token"))
+            {
+                logger.LogWarning(
+                    "Codex OAuth refresh was rejected for provider {ProviderId}; reconnect is required. StatusCode={StatusCode}, OAuthError={OAuthError}",
+                    token.ProviderId,
+                    (int)response.StatusCode,
+                    errorCode ?? "unavailable");
+                return null;
+            }
+        }
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
 
-        token.AccessToken = json.GetProperty("access_token").GetString()!;
-        token.ExpiresAt = DateTime.UtcNow.AddSeconds(json.GetProperty("expires_in").GetInt32());
-        if (json.TryGetProperty("refresh_token", out var rt))
-            token.RefreshToken = rt.GetString();
-        token.CreatedAt = DateTime.UtcNow;
+        var refreshToken = token.RefreshToken;
+        if (json.TryGetProperty("refresh_token", out var rt)
+            && rt.ValueKind == JsonValueKind.String
+            && !string.IsNullOrWhiteSpace(rt.GetString()))
+        {
+            refreshToken = rt.GetString();
+        }
 
+        var refreshed = new OAuthToken
+        {
+            ProviderId = token.ProviderId,
+            AccessToken = json.GetProperty("access_token").GetString()!,
+            RefreshToken = refreshToken,
+            ExpiresAt = DateTime.UtcNow.AddSeconds(json.GetProperty("expires_in").GetInt32()),
+            Scope = json.TryGetProperty("scope", out var scope)
+                && scope.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(scope.GetString())
+                    ? scope.GetString()
+                    : token.Scope,
+            CreatedAt = DateTime.UtcNow,
+        };
+        await tokens.ReplaceForProviderAsync(token.ProviderId, refreshed, cancellationToken);
         await tokens.SaveChangesAsync(cancellationToken);
-        return token;
+        return refreshed;
+    }
+
+    private static void ClearRejectedRefreshTokens(
+        int providerId,
+        RejectedRefreshToken? except = null)
+    {
+        foreach (var rejected in _rejectedRefreshTokens.Keys.Where(item =>
+            item.ProviderId == providerId && item != except))
+        {
+            _rejectedRefreshTokens.TryRemove(rejected, out _);
+        }
+    }
+
+    private static async Task<string?> ReadOAuthErrorCodeAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            return document.RootElement.TryGetProperty("error", out var error)
+                && error.ValueKind == JsonValueKind.String
+                    ? error.GetString()
+                    : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static string GenerateCodeVerifier()

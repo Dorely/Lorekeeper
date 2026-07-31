@@ -453,6 +453,14 @@ refresh tokens are stored in dedicated SQLite rows. This is local persistence,
 not an operating-system credential vault, encryption-at-rest claim, or permission
 to expose credentials. Never log secrets, authorization codes, access tokens,
 refresh tokens, or sensitive provider payloads.
+Codex refresh, callback replacement, and revoke operations are serialized per
+provider across the application process and use fresh persisted-token reads. A
+token endpoint `401`, or an `invalid_grant`/`invalid_token` rejection, marks
+that exact persisted token unusable in memory and presents the account as
+disconnected without deleting it; a new PKCE connection replaces it.
+Transport, server, and malformed-response failures remain errors, while
+Settings catches them at the provider-card boundary so one unavailable OAuth
+service cannot break page rendering.
 
 Desktop development stores its database in the repository by default. Packaged
 release builds resolve per-user application-data storage so installed,
