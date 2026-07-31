@@ -725,15 +725,15 @@ public sealed class PublishService(
         }
     }
 
-    private static PicturePageLayout ReadPageLayout(Chapter chapter)
+    internal static PicturePageLayout ReadPageLayout(Chapter chapter)
     {
         if (string.IsNullOrWhiteSpace(chapter.PageLayoutJson))
             return new PicturePageLayout([], []);
 
         try
         {
-            return JsonSerializer.Deserialize<PicturePageLayout>(chapter.PageLayoutJson, JsonOptions)
-                ?? new PicturePageLayout([], []);
+            var layout = ChapterTextLayoutSynchronizer.DeserializePersistedLayout(chapter.PageLayoutJson);
+            return ChapterTextLayoutSynchronizer.Hydrate(layout, chapter.Manuscript);
         }
         catch (JsonException)
         {

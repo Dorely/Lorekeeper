@@ -16,6 +16,38 @@ namespace Lorekeeper.Tests;
 public sealed class ChapterVisualMigrationTests
 {
     [Fact]
+    public void EmptyPicturePageLayoutCanBeRepairedAcrossRestarts()
+    {
+        var chapter = new Chapter
+        {
+            Id = Guid.NewGuid(),
+            Title = "Empty picture page",
+            VisualMode = ChapterVisualMode.PicturePage,
+        };
+        var manuscript = ManuscriptCodec.FromPlainText(
+            chapter.Id,
+            string.Empty,
+            revision: 1,
+            deterministicIds: true);
+
+        Assert.True(ChapterTextLayoutSynchronizer.SynchronizeFromManuscript(
+            chapter,
+            manuscript,
+            ensureLayout: true));
+        var persisted = chapter.PageLayoutJson;
+
+        var exception = Record.Exception(() =>
+            ChapterTextLayoutSynchronizer.SynchronizeFromManuscript(
+                chapter,
+                manuscript,
+                ensureLayout: true));
+
+        Assert.Null(exception);
+        Assert.Equal(persisted, chapter.PageLayoutJson);
+        Assert.Equal(string.Empty, ChapterTextLayoutSynchronizer.ReadLayout(persisted).TextElements[0].Text);
+    }
+
+    [Fact]
     public void PicturePageReferencesPreserveMultipleTextBoxesAndGeometry()
     {
         var manuscript = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "First box\n\nSecond box", deterministicIds: true);

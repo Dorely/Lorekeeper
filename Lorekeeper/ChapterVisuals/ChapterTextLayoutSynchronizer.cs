@@ -283,13 +283,26 @@ public static class ChapterTextLayoutSynchronizer
 
         try
         {
-            return JsonSerializer.Deserialize<PicturePageLayout>(json, JsonOptions)
-                ?? new PicturePageLayout([], []);
+            return DeserializePersistedLayout(json);
         }
         catch (JsonException)
         {
             return new PicturePageLayout([], []);
         }
+    }
+
+    public static PicturePageLayout DeserializePersistedLayout(string json)
+    {
+        var layout = JsonSerializer.Deserialize<PicturePageLayout>(json, JsonOptions)
+            ?? throw new JsonException("The Picture Page layout is null.");
+        return new PicturePageLayout(
+            layout.Images ?? [],
+            (layout.TextElements ?? [])
+                .Select(element => element with { Text = element.Text ?? string.Empty })
+                .ToList())
+        {
+            Revision = layout.Revision,
+        };
     }
 
     private static PicturePageTextElement DefaultTextElement(string body) =>

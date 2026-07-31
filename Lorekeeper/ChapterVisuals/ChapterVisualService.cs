@@ -1971,8 +1971,7 @@ public sealed class ChapterVisualService(
 
         try
         {
-            var layout = JsonSerializer.Deserialize<PicturePageLayout>(chapter.PageLayoutJson, JsonOptions)
-                ?? new PicturePageLayout([], []);
+            var layout = ChapterTextLayoutSynchronizer.DeserializePersistedLayout(chapter.PageLayoutJson);
             return ChapterTextLayoutSynchronizer.Hydrate(layout, chapter.Manuscript);
         }
         catch (JsonException)

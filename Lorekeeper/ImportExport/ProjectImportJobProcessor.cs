@@ -911,10 +911,7 @@ public sealed class ProjectImportJobProcessor(
     {
         if (string.IsNullOrWhiteSpace(chapter.PageLayoutJson))
             return;
-        var layout = JsonSerializer.Deserialize<PicturePageLayout>(
-            chapter.PageLayoutJson,
-            ManuscriptCodec.JsonOptions)
-            ?? throw new InvalidDataException("The Picture Page layout is null.");
+        var layout = ChapterTextLayoutSynchronizer.DeserializePersistedLayout(chapter.PageLayoutJson);
         var missingImage = layout.Images.FirstOrDefault(
             image => !exportedImageIds.Contains(image.ImageId));
         if (missingImage is not null)
@@ -1792,8 +1789,7 @@ public sealed class ProjectImportJobProcessor(
 
         try
         {
-            var layout = JsonSerializer.Deserialize<PicturePageLayout>(layoutJson, JsonOptions)
-                ?? new PicturePageLayout([], []);
+            var layout = ChapterTextLayoutSynchronizer.DeserializePersistedLayout(layoutJson);
             var images = layout.Images
                 .Select(image => imageMap.TryGetValue(image.ImageId, out var localImageId)
                     ? image with { ImageId = localImageId }

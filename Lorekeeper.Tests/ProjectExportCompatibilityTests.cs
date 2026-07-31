@@ -304,6 +304,49 @@ public sealed class ProjectExportCompatibilityTests
     }
 
     [Fact]
+    public void CurrentImportPrevalidationAcceptsPersistedEmptyPicturePageText()
+    {
+        var chapterId = Guid.NewGuid();
+        var manuscript = ManuscriptCodec.CreateEmpty(chapterId, revision: 1);
+        var layout = new PicturePageLayout(
+            [],
+            [
+                new PicturePageTextElement(
+                    Guid.NewGuid(),
+                    string.Empty,
+                    0,
+                    0,
+                    100,
+                    100,
+                    0,
+                    0,
+                    PicturePageFontKeys.Default,
+                    400,
+                    false,
+                    12,
+                    0,
+                    1.4,
+                    "#000000",
+                    "#ffffff",
+                    0,
+                    PicturePageTextAlign.Left,
+                    ChapterTextVerticalAlign.Top,
+                    PicturePageTextShadow.None),
+            ]);
+        var document = Document(new ProjectExportChapter
+        {
+            Id = chapterId,
+            Title = "Empty Picture Page",
+            ManuscriptJson = ManuscriptCodec.Serialize(manuscript),
+            ManuscriptRevision = manuscript.Revision,
+            VisualMode = ChapterVisualMode.PicturePage,
+            PageLayoutJson = JsonSerializer.Serialize(layout, ManuscriptCodec.JsonOptions),
+        });
+
+        ProjectImportJobProcessor.ValidateChapterPayloads(document);
+    }
+
+    [Fact]
     public void V9PrevalidationRejectsMissingFigureAssetsAndDuplicateImageIds()
     {
         var chapterId = Guid.NewGuid();

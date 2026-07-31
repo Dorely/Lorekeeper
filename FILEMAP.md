@@ -55,12 +55,12 @@
 | `Lorekeeper.Tests.csproj` / `Usings.cs` | Authorized xUnit fixture project and shared test imports. |
 | `ManuscriptCodecTests.cs` | Codec, stable-ID, revision, inline-mark, split, and merge fixtures. |
 | `ManuscriptMigrationIntegrationTests.cs` | Actual legacy-schema WAL migration with plain-text audit compatibility, backup/journal/hash validation, confirmation, and restore drills. |
-| `ChapterVisualMigrationTests.cs` | Picture Page multi-box and illustrated-prose stable-anchor migration fixtures. |
+| `ChapterVisualMigrationTests.cs` | Picture Page multi-box/restart compatibility and illustrated-prose stable-anchor migration fixtures. |
 | `EditorChatStagingTests.cs` | Review-mode fixture proving sequential semantic operations share one staged manuscript overlay. |
 | `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
 | `ProjectExportCompatibilityTests.cs` | Current v12 manuscript/style/edition/font fixtures plus v8-v11 fail-closed import-boundary and visual-layout compatibility checks. |
 | `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trip for marked/figured manuscripts and image remapping, plus whole-import rollback on late publication conflicts. |
-| `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, image-backed figures, ordered user-authored matter, and generated-page conflict rejection in Markdown/EPUB publication rendering. |
+| `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, image-backed figures, persisted Picture Page text hydration, ordered user-authored matter, and generated-page conflict rejection in Markdown/EPUB publication rendering. |
 | `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, content-use, and edition-mapping deletion guards. |
 | `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
 | `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, render/source drift, language/ISBN/profile/color rejection, product-form proof isolation, and assistant-authorization fixtures. |
@@ -576,7 +576,7 @@
 | File | Description |
 |------|-------------|
 | `ChapterVisualModels.cs` | UI/service records for chapter visual state, role-aware PicturePage image placement with optional Freeform geometry, automatic text-fit results, rendered fit details, and structured layout diagnostics. |
-| `ChapterTextLayoutSynchronizer.cs` | Attaches and hydrates stable manuscript ranges for Picture Page text boxes while preserving multiple boxes, identity, geometry, typography, z-order, and reading order. |
+| `ChapterTextLayoutSynchronizer.cs` | Attaches and hydrates stable manuscript ranges for Picture Page text boxes, normalizing persisted text projections across restarts while preserving identity, geometry, typography, z-order, and reading order. |
 | `IChapterVisualService.cs` / `ChapterVisualService.cs` | Mode-gated visual facade using canonical manuscript blocks/ranges for prose/PicturePage rendering, fitting, diagnostics, synchronization, manifests, and publish surfaces. |
 | `PicturePageImageGenerationGuidance.cs` | Shared-geometry full-page/slot image targets plus bleed, gutter, focal-detail, and buffered text-region prompt constraints. |
 | `PicturePageLayoutDiagnostics.cs` | Enriched trim/gutter, overlap, reading-order, role-aware typography, font-discipline, widow/orphan, and line-length diagnostics with measurements, thresholds, and corrections. |

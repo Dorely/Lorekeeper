@@ -1,5 +1,7 @@
 using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
+using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Publish;
@@ -8,6 +10,86 @@ namespace Lorekeeper.Tests;
 
 public sealed class SemanticPublishFormattingTests
 {
+    [Fact]
+    public void MarkdownExportHydratesPersistedPicturePageTextFromManuscript()
+    {
+        var chapterId = Guid.NewGuid();
+        var manuscript = ManuscriptCodec.FromPlainText(
+            chapterId,
+            "Referenced Picture Page Prose",
+            revision: 1,
+            deterministicIds: true);
+        var referencedLayout = ChapterTextLayoutSynchronizer.AttachReferences(
+            new PicturePageLayout(
+                [],
+                [
+                    new PicturePageTextElement(
+                        Guid.NewGuid(),
+                        "Referenced Picture Page Prose",
+                        0,
+                        0,
+                        100,
+                        100,
+                        0,
+                        0,
+                        PicturePageFontKeys.Default,
+                        400,
+                        false,
+                        12,
+                        0,
+                        1.4,
+                        "#000000",
+                        "#ffffff",
+                        0,
+                        PicturePageTextAlign.Left,
+                        ChapterTextVerticalAlign.Top,
+                        PicturePageTextShadow.None),
+                ]),
+            manuscript);
+        var chapter = new Chapter
+        {
+            Id = chapterId,
+            Title = "Picture Page",
+            VisualMode = ChapterVisualMode.PicturePage,
+            ManuscriptJson = ManuscriptCodec.Serialize(manuscript),
+            ManuscriptRevision = manuscript.Revision,
+            PageLayoutJson = JsonSerializer.Serialize(referencedLayout, ManuscriptCodec.JsonOptions),
+        };
+        var pageLayout = PublishService.ReadPageLayout(chapter);
+        var chapterDocument = new PublishChapterDocument(
+            chapterId,
+            ActId: null,
+            chapter.Title,
+            chapter.PlainText,
+            chapter.Synopsis,
+            Order: 0,
+            IncludeHeading: true,
+            chapter.VisualMode,
+            chapter.PageLayoutKind,
+            new IllustratedProseLayout([]),
+            pageLayout,
+            manuscript);
+        var document = MinimalPublishDocument() with
+        {
+            Sections =
+            [
+                new PublishSectionDocument(
+                    ActId: null,
+                    "Unassigned",
+                    string.Empty,
+                    IsUnassigned: true,
+                    IncludePage: false,
+                    IncludeHeading: false,
+                    Order: 0,
+                    [chapterDocument]),
+            ],
+        };
+
+        var markdown = Encoding.UTF8.GetString(new MarkdownPublishFormatter().Render(document));
+
+        Assert.Contains("Referenced Picture Page Prose", markdown, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void EveryIncludedMatterKindRendersInOrderIntoEpub()
     {
