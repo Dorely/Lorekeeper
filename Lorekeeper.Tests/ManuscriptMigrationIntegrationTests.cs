@@ -246,7 +246,19 @@ public sealed class ManuscriptMigrationIntegrationTests
         Assert.Equal("After", after.PlainText);
         Assert.Equal("LegacyChapterBodyAudit", changes[1].ResourceKind);
         Assert.Equal("legacy_chapter_body_audit", changes[1].ToolName);
-        Assert.Contains("legacy-chapter-body-v7", changes[1].BeforeJson);
+        using var arguments = System.Text.Json.JsonDocument.Parse(changes[1].ArgumentsJson);
+        Assert.Equal(
+            System.Text.Json.JsonValueKind.Object,
+            arguments.RootElement.GetProperty("payload").ValueKind);
+        using var terminalBefore = System.Text.Json.JsonDocument.Parse(changes[1].BeforeJson);
+        var beforePayload = terminalBefore.RootElement.GetProperty("payload");
+        Assert.Equal(System.Text.Json.JsonValueKind.Object, beforePayload.ValueKind);
+        Assert.Equal(chapterId, beforePayload.GetProperty("Id").GetGuid());
+        Assert.Equal("Before", beforePayload.GetProperty("Body").GetString());
+        using var result = System.Text.Json.JsonDocument.Parse(changes[1].ResultJson);
+        Assert.Equal(
+            "OK. Replaced legacy lines.\nPreserved Ω and → exactly.",
+            result.RootElement.GetProperty("payload").GetString());
     }
 
     [Fact]
@@ -642,8 +654,13 @@ public sealed class ManuscriptMigrationIntegrationTests
                 new { Id = chapterId, Title = "Chapter", Body = "After" });
             foreach (var item in new[]
                      {
-                         new { Order = 0, Status = "Pending" },
-                         new { Order = 1, Status = "Applied" },
+                         new { Order = 0, Status = "Pending", Result = "{}" },
+                         new
+                         {
+                             Order = 1,
+                             Status = "Applied",
+                             Result = "OK. Replaced legacy lines.\nPreserved Ω and → exactly.",
+                         },
                      })
             {
                 await using var change = connection.CreateCommand();
@@ -657,7 +674,7 @@ public sealed class ManuscriptMigrationIntegrationTests
                          RejectionMessage, ErrorMessage, CreatedAt, UpdatedAt, ResolvedAt)
                     VALUES
                         ($id, $batchId, $order, 'tool-call', 'edit_chapter', '{}', 'Edit',
-                         $before, $after, NULL, NULL, '{}', 'ChapterBody', $resourceId,
+                         $before, $after, NULL, NULL, $result, 'ChapterBody', $resourceId,
                          '[]', '[]', '[]', $status, NULL, NULL, $now, $now, NULL);
                     """;
                 change.Parameters.AddWithValue("$id", Guid.NewGuid().ToString().ToUpperInvariant());
@@ -667,6 +684,7 @@ public sealed class ManuscriptMigrationIntegrationTests
                 change.Parameters.AddWithValue("$after", afterJson);
                 change.Parameters.AddWithValue("$resourceId", $"Chapter:{chapterId:N}");
                 change.Parameters.AddWithValue("$status", item.Status);
+                change.Parameters.AddWithValue("$result", item.Result);
                 change.Parameters.AddWithValue("$now", now);
                 await change.ExecuteNonQueryAsync();
             }

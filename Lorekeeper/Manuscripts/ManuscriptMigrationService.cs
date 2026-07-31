@@ -708,7 +708,7 @@ public sealed class ManuscriptMigrationService(
                 reviewStateJson = string.IsNullOrWhiteSpace(row.ReviewStateJson)
                     ? null
                     : LegacySnapshot("reviewState", row.ReviewStateJson);
-                resultJson = LegacySnapshot("result", row.ResultJson);
+                resultJson = LegacySnapshot("result", row.ResultJson, allowPlainText: true);
                 targetHashes.Add(ManuscriptCodec.HashPlainText(
                     ManuscriptCodec.CanonicalizePlainText(before.Body)));
                 targetHashes.Add(ManuscriptCodec.HashPlainText(
@@ -775,13 +775,31 @@ public sealed class ManuscriptMigrationService(
         return SerializeChange(draft, document);
     }
 
-    private static string LegacySnapshot(string field, string json) =>
+    private static string LegacySnapshot(
+        string field,
+        string value,
+        bool allowPlainText = false) =>
         JsonSerializer.Serialize(new
         {
             format = "legacy-chapter-body-v7",
             field,
-            payload = JsonDocument.Parse(json).RootElement.Clone(),
+            payload = ReadLegacySnapshotPayload(value, allowPlainText),
         });
+
+    private static JsonElement ReadLegacySnapshotPayload(
+        string value,
+        bool allowPlainText)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException) when (allowPlainText)
+        {
+            return JsonSerializer.SerializeToElement(value);
+        }
+    }
 
     internal static string MigrateLegacyPicturePage(
         Guid chapterId,

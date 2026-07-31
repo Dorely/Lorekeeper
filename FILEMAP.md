@@ -54,7 +54,7 @@
 |------|-------------|
 | `Lorekeeper.Tests.csproj` / `Usings.cs` | Authorized xUnit fixture project and shared test imports. |
 | `ManuscriptCodecTests.cs` | Codec, stable-ID, revision, inline-mark, split, and merge fixtures. |
-| `ManuscriptMigrationIntegrationTests.cs` | Actual legacy-schema WAL database migration, backup/journal/hash, confirmation, and restore drill. |
+| `ManuscriptMigrationIntegrationTests.cs` | Actual legacy-schema WAL migration with plain-text audit compatibility, backup/journal/hash validation, confirmation, and restore drills. |
 | `ChapterVisualMigrationTests.cs` | Picture Page multi-box and illustrated-prose stable-anchor migration fixtures. |
 | `EditorChatStagingTests.cs` | Review-mode fixture proving sequential semantic operations share one staged manuscript overlay. |
 | `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
