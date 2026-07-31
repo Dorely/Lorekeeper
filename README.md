@@ -18,7 +18,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   reviewable changes, visual context, and background revision agents.
 - Versioned structured chapter manuscripts with stable block anchors,
   revision-aware manual and assistant operations, plain-text reading projections,
-  and semantic Markdown/EPUB publication projections.
+  and semantic Markdown/EPUB publication projections. Editor Chat validates and
+  stages each operation payload once, then applies it by an opaque one-use preview
+  ID instead of retransmitting or echoing the manuscript.
 - Schema-driven semantic chapter editing with persistent heading levels 1-6,
   intentional line breaks, scene
   breaks, quotations, list items, project-image figures with alt text and

@@ -57,6 +57,8 @@
 | `ManuscriptMigrationIntegrationTests.cs` | Actual legacy-schema WAL migration with plain-text audit compatibility, backup/journal/hash validation, confirmation, and restore drills. |
 | `ChapterVisualMigrationTests.cs` | Picture Page multi-box/restart compatibility and illustrated-prose stable-anchor migration fixtures. |
 | `EditorChatStagingTests.cs` | Review-mode fixture proving sequential semantic operations share one staged manuscript overlay. |
+| `EditorManuscriptPreviewServiceTests.cs` | Direct and Review-edits fixtures for compact one-use previews, exact projected-document persistence, stale rejection, and approval payloads. |
+| `EditorRevisionAgentResultTests.cs` | Compact coordinator-result fixture proving persisted worker operations and raw payloads do not re-enter the main chat. |
 | `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
 | `ProjectExportCompatibilityTests.cs` | Current v12 manuscript/style/edition/font fixtures plus v8-v11 fail-closed import-boundary and visual-layout compatibility checks. |
 | `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trip for marked/figured manuscripts and image remapping, plus whole-import rollback on late publication conflicts. |
@@ -624,18 +626,19 @@
 
 | File | Description |
 |------|-------------|
-| `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, staging helpers, persisted/model-visible visuals, and pending PicturePage render-verification state. |
+| `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, opaque one-use manuscript previews, staging helpers, persisted/model-visible visuals, and pending PicturePage render-verification state. |
 | `EditorChatService.cs` | Editor adapter using one composed system prompt, persisted turn-context trace, vision-provider-agnostic page snapshots, post-PicturePage render verification, Review edits, contests, workers, and image-job progress. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific paginated chapter reads and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor tools for grounded reads, explicit canonical-reference mutations/single-subject crops, unattached structured image generation/editing, Book Brief updates, PicturePage layout, revision agents, and Contest preparation. |
+| `EditorChatTools.cs` | Editor tools for grounded reads, one-payload staged manuscript preview/apply, explicit canonical-reference mutations/single-subject crops, unattached structured image generation/editing, Book Brief updates, PicturePage layout, revision agents, and Contest preparation. |
+| `EditorManuscriptPreviewService.cs` | Turn-local manuscript preview/apply protocol: validates once, returns compact opaque IDs, rejects stale/reused previews, and persists or review-stages the exact projected document. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
 | `EditorChatTurnRunner.cs` | Background turn runner for Editor Chat: preserves active turns across tab changes while leaving explicit Stop as the cancellation path. |
 | `EditorContestModels.cs` | DTOs and helper records for Contest Mode settings, start requests, captured chat-context snapshots, model responses, mutation JSON, and streaming contest status/raw-response updates. |
 | `IEditorContestService.cs` / `EditorContestService.cs` | Contest Mode application service: persists project settings, starts terminal contest batches, runs selected models without tools, streams raw Candidate JSON, validates JSON chapter-body mutations, builds proposed bodies, and resolves inline candidate review decisions. |
-| `EditorRevisionAgentModels.cs` | DTOs for prose-only revision assignments, run results, job/session details, and transcript projections used by tools and UI. |
-| `IEditorRevisionAgentService.cs` / `EditorRevisionAgentService.cs` | Same-turn revision-agent orchestrator: validates chapter assignments, persists jobs/sessions, runs bounded-parallel workers, and returns completed/staged chapter-body edits to the coordinator. |
-| `EditorRevisionAgentProcessor.cs` | Per-session worker with paginated grounding and filtered source reads whose terminal tool applies revision-aware semantic manuscript operations and persists transcript/tool history. |
+| `EditorRevisionAgentModels.cs` | DTOs for prose-only revision assignments, compact coordinator run results, full job/session details, and transcript projections used by tools and UI. |
+| `IEditorRevisionAgentService.cs` / `EditorRevisionAgentService.cs` | Same-turn revision-agent orchestrator: validates chapter assignments, persists full jobs/sessions, runs bounded-parallel workers, and returns only compact status/summary results to the coordinator. |
+| `EditorRevisionAgentProcessor.cs` | Per-session worker with paginated grounding and filtered source reads whose terminal tool applies revision-aware semantic manuscript operations, enforces model-facing style/scene-break format guidance, and persists transcript/tool history. |
 | `IEditorRevisionJobNotifier.cs` | In-process pub/sub for revision job/session progress updates, matching other local background workflow notifiers. |
 
 ### Outline/
@@ -671,7 +674,7 @@
 | `ManuscriptModels.cs` | Versioned manuscript document/block/inline/mark model, style roles, semantic operation records, snapshots, and revision-conflict contract. |
 | `ManuscriptSemanticRoles.cs` | Safe semantic-role identifier validation plus deterministic normalization for manuscript-v1 migration and v8 import. |
 | `ManuscriptCodec.cs` | Plain-text normalization/projection, deterministic migration IDs, validation, serialization, hashing, and stable-ID reparsing. |
-| `ManuscriptOperations.cs` / `ManuscriptOperationInput.cs` | Transactional insert/replace/delete/move/split/merge/type/style/mark transformations and assistant-safe operation DTO conversion. |
+| `ManuscriptOperations.cs` / `ManuscriptOperationInput.cs` | Transactional insert/replace/delete/move/split/merge/type/style/mark transformations and assistant-safe DTO conversion with canonical built-in style/scene-break aliases. |
 | `ManuscriptInspection.cs` | Shared schema validation, normalization diagnostics, and structural block search used by Editor and revision-worker assistants. |
 | `ManuscriptSchemaUpgrade.cs` | Strict lossless v1-to-v2 document and nested historical-payload upgrader used by startup migration and the isolated v8 import adapter. |
 | `ManuscriptStyleService.cs` | Revision-checked named paragraph/character style ownership, validation, immutable semantic keys, and usage-safe deletion. |

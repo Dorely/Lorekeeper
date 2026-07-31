@@ -10,6 +10,54 @@ namespace Lorekeeper.Tests;
 public sealed class EditorChatStagingTests
 {
     [Fact]
+    public void ManuscriptPreviewStoresTheValidatedDocumentWithoutRepeatingOperations()
+    {
+        var context = CreateTurnContext();
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Before", revision: 2);
+        var (projected, changedBlockIds) = ManuscriptOperations.Apply(
+            source,
+            [new ReplaceManuscriptBlockText(source.Content[0].Id, "After")]);
+
+        var preview = context.StageManuscriptPreview(
+            source.ManuscriptId,
+            source,
+            projected,
+            changedBlockIds);
+
+        Assert.True(context.TryTakeManuscriptPreview(preview.Id, out var staged));
+        Assert.Same(projected, staged.ProjectedDocument);
+        Assert.Equal(changedBlockIds, staged.ChangedBlockIds);
+        Assert.False(context.TryTakeManuscriptPreview(preview.Id, out _));
+    }
+
+    [Fact]
+    public void NewManuscriptPreviewSupersedesThePreviousPreviewForThatChapterOnly()
+    {
+        var context = CreateTurnContext();
+        var firstSource = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "First", revision: 1);
+        var secondSource = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Second", revision: 3);
+        var first = context.StageManuscriptPreview(
+            firstSource.ManuscriptId,
+            firstSource,
+            firstSource with { Revision = 2 },
+            []);
+        var otherChapter = context.StageManuscriptPreview(
+            secondSource.ManuscriptId,
+            secondSource,
+            secondSource with { Revision = 4 },
+            []);
+        var replacement = context.StageManuscriptPreview(
+            firstSource.ManuscriptId,
+            firstSource,
+            firstSource with { Revision = 2 },
+            []);
+
+        Assert.False(context.TryTakeManuscriptPreview(first.Id, out _));
+        Assert.True(context.TryTakeManuscriptPreview(otherChapter.Id, out _));
+        Assert.True(context.TryTakeManuscriptPreview(replacement.Id, out _));
+    }
+
+    [Fact]
     public async Task SequentialReviewOperationsBuildOneStructuredOverlay()
     {
         var repository = new MemoryAiChangeRepository();
@@ -123,6 +171,20 @@ public sealed class EditorChatStagingTests
         Assert.Null(afterPayload.After);
         Assert.NotEqual(change.BeforeJson, change.AfterJson);
     }
+
+    private static EditorChatContext CreateTurnContext() =>
+        new(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            currentChapterId: null,
+            providerId: 1,
+            visionReady: false,
+            onMutated: () => { },
+            reviewEdits: false,
+            autoPinReadEntities: false,
+            outlineStaging: null,
+            editorStaging: null,
+            CancellationToken.None);
 
     private sealed class MemoryAiChangeRepository : IAiChangeRepository
     {

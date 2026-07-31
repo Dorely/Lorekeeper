@@ -382,6 +382,7 @@ public sealed class EditorRevisionAgentProcessor(
                 description:
                     "Terminal mutating tool. Edit only the assigned chapter through semantic insert, replace, delete, move, split, merge, block-type, block-style, or inline-mark operations. " +
                     "Use stable block IDs and expectedRevision from read_assigned_manuscript. " +
+                    "Semantic styleRole values must be lowercase hyphenated identifiers (for example body or scene-break), and sceneBreak insertions must use an empty text value rather than a visible separator such as ***. " +
                     "Do not call any more tools after this."),
         };
 
@@ -410,6 +411,7 @@ public sealed class EditorRevisionAgentProcessor(
         sb.AppendLine();
 
         sb.AppendLine("# Output Requirement");
+        sb.AppendLine("Use lowercase hyphenated semantic styleRole values. A sceneBreak insertion must have empty text (not ***); use styleRole scene-break or omit it so the default is used.");
         sb.AppendLine("Call apply_assigned_manuscript_operations exactly once when ready. The coordinator will review the completed/staged change and decide whether any follow-up action is needed.");
         return sb.ToString().TrimEnd();
     }
@@ -933,7 +935,7 @@ public sealed class EditorRevisionAgentProcessor(
             _ = ManuscriptOperations.Apply(original, ManuscriptOperationInput.ToOperations(edit.Operations));
             return null;
         }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or KeyNotFoundException or InvalidDataException)
         {
             return exception.Message;
         }

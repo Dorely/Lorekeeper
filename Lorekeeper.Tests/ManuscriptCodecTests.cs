@@ -117,6 +117,57 @@ public sealed class ManuscriptCodecTests
     }
 
     [Fact]
+    public void AssistantOperationInputsNormalizeKnownSceneBreakRepresentations()
+    {
+        var operations = ManuscriptOperationInput.ToOperations(
+            [new ManuscriptOperationInput(
+                "insertBlock",
+                Index: 0,
+                BlockType: "sceneBreak",
+                Text: "***",
+                StyleRole: "sceneBreak")]);
+
+        var insert = Assert.IsType<InsertManuscriptBlock>(Assert.Single(operations));
+        Assert.Equal(string.Empty, insert.Text);
+        Assert.Equal(ManuscriptStyleRoles.SceneBreak, insert.StyleRole);
+        var result = ManuscriptOperations.Apply(
+            ManuscriptCodec.FromPlainText(Guid.NewGuid(), string.Empty),
+            operations).Document;
+        Assert.Equal(ManuscriptBlockType.SceneBreak, Assert.Single(result.Content).Type);
+    }
+
+    [Fact]
+    public void AssistantOperationInputsKeepInvalidCustomStyleRolesFailClosed()
+    {
+        var operations = ManuscriptOperationInput.ToOperations(
+            [new ManuscriptOperationInput(
+                "insertBlock",
+                Index: 0,
+                BlockType: "paragraph",
+                Text: "Text",
+                StyleRole: "Invalid Custom Role")]);
+
+        Assert.Throws<InvalidDataException>(() => ManuscriptOperations.Apply(
+            ManuscriptCodec.FromPlainText(Guid.NewGuid(), string.Empty),
+            operations));
+    }
+
+    [Fact]
+    public void AssistantOperationInputsPreserveValidCustomRolesThatResembleBuiltIns()
+    {
+        var operations = ManuscriptOperationInput.ToOperations(
+            [new ManuscriptOperationInput(
+                "insertBlock",
+                Index: 0,
+                BlockType: "paragraph",
+                Text: "Text",
+                StyleRole: "blockquote")]);
+
+        var insert = Assert.IsType<InsertManuscriptBlock>(Assert.Single(operations));
+        Assert.Equal("blockquote", insert.StyleRole);
+    }
+
+    [Fact]
     public void ManuscriptValidationRejectsUnknownFieldsAndNegativeRevisions()
     {
         var document = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Text", revision: 1);

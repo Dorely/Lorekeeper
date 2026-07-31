@@ -42,6 +42,7 @@ public sealed class EditorChatTools(
     IChapterVisualService chapterVisuals,
     IPageGeometryService pageGeometry,
     IProjectFontService projectFonts,
+    EditorManuscriptPreviewService manuscriptPreviews,
     IOptions<EditorChatOptions> editorOptions,
     IOptions<ProjectImageGenerationOptions> imageOptions)
 {
@@ -153,7 +154,7 @@ public sealed class EditorChatTools(
                 name: "read_manuscript",
                 description:
                     "Read bounded semantic manuscript blocks with stable block IDs, inline marks, style roles, source hash, and the current revision token. " +
-                    "Use this before any manuscript mutation and pass the returned revision to preview_manuscript_operations or apply_manuscript_operations."),
+                    "Use this before any manuscript mutation, pass the returned revision and operations once to preview_manuscript_operations, then pass only its previewId to apply_manuscript_operations."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
@@ -165,22 +166,18 @@ public sealed class EditorChatTools(
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, long expectedRevision, ManuscriptOperationInput[] operations) =>
-                    PreviewManuscriptOperationsAsync(context, chapterId, expectedRevision, operations),
+                    manuscriptPreviews.PreviewAsync(context, chapterId, expectedRevision, operations),
                 name: "preview_manuscript_operations",
                 description:
-                    "Validate semantic insert, replace, delete, move, split, merge, block-type, block-style, and inline-mark operations without saving. " +
-                    "Returns the projected text, changed stable block IDs, and next revision. Stale revisions fail closed."),
+                    "Validate and stage semantic insert, replace, delete, move, split, merge, block-type, block-style, and inline-mark operations without saving. " +
+                    "Submit the operation payload here exactly once. Returns a compact opaque previewId, changed stable block IDs, projected counts, hashes, and next revision; it does not echo the manuscript. Stale revisions fail closed."),
 
             AIFunctionFactory.Create(
-                method: (Guid chapterId, long expectedRevision, ManuscriptOperationInput[] operations) =>
-                    ApplyManuscriptOperationsAsync(context, chapterId, expectedRevision, operations),
+                method: (Guid previewId) => manuscriptPreviews.ApplyAsync(context, previewId),
                 name: "apply_manuscript_operations",
                 description:
-                    "Apply validated semantic manuscript operations through the same revision-checked service used by the editor. " +
-                    "Supports insertBlock, replaceBlockText, deleteBlock, moveBlock, splitBlock, mergeBlocks, setBlockType, setBlockStyle, and setInlineMark. " +
-                    "Block types include paragraph, heading, sceneBreak, blockQuote, listItem, and figure; marks include emphasis, strong, underline, strikethrough, code, link, language, smallCaps, superscript, subscript, and characterStyle. " +
-                    "Heading operations persist headingLevel (1-6) separately from styleRole. Figure insert/type operations require an existing project imageId and non-empty altText; text is the caption. " +
-                    "Returns changed stable block IDs, the new revision, and source hash; stale revisions and invalid ranges fail closed."),
+                    "Persist the exact document already validated and staged by preview_manuscript_operations. Pass only that call's opaque previewId; never repeat chapterId, expectedRevision, or operations. " +
+                    "Preview IDs are turn-local, chapter-specific, one-use tokens. Returns changed stable block IDs, the new revision, and source hash; missing, superseded, reused, or stale previews fail closed."),
 
             AIFunctionFactory.Create(
                 method: () => ReadManuscriptMigrationStateAsync(context),
@@ -1315,56 +1312,6 @@ public sealed class EditorChatTools(
         }, ManuscriptCodec.JsonOptions);
     }
 
-    private async Task<string> PreviewManuscriptOperationsAsync(
-        EditorChatContext ctx,
-        Guid chapterId,
-        long expectedRevision,
-        ManuscriptOperationInput[] operations)
-    {
-        var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken);
-        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
-            return $"Error: chapter {chapterId:N} was not found in this project.";
-        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken);
-        if (snapshot is null)
-            return $"Error: manuscript {chapterId:N} was not found.";
-        var source = ctx.ReviewEdits
-            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
-                ? staged
-                : snapshot.Document;
-        if (source.Revision != expectedRevision)
-            return $"Error: manuscript revision conflict; expected {expectedRevision}, current revision is {source.Revision}.";
-
-        try
-        {
-            var converted = ManuscriptOperationInput.ToOperations(operations);
-            var (document, changedBlockIds) = ManuscriptOperations.Apply(source, converted);
-            var styleCatalog = ctx.ReviewEdits && ctx.EditorStaging is not null
-                ? await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
-                    manuscriptStyles,
-                    ctx.TurnCancellationToken)
-                : null;
-            await manuscripts.ValidateDocumentReferencesAsync(
-                chapterId,
-                document,
-                styleCatalog,
-                ctx.TurnCancellationToken);
-            return JsonSerializer.Serialize(new
-            {
-                preview = true,
-                expectedRevision,
-                nextRevision = document.Revision,
-                changedBlockIds,
-                sourceHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document)),
-                plainText = ManuscriptCodec.ProjectPlainText(document),
-                document,
-            }, ManuscriptCodec.JsonOptions);
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return $"Error: {exception.Message}";
-        }
-    }
-
     private async Task<string> InspectManuscriptAsync(
         EditorChatContext ctx,
         Guid chapterId,
@@ -1392,76 +1339,6 @@ public sealed class EditorChatTools(
                 inspection = ManuscriptInspection.Inspect(document, query, blockType, styleRole, start, count),
             },
             ManuscriptCodec.JsonOptions);
-    }
-
-    private async Task<string> ApplyManuscriptOperationsAsync(
-        EditorChatContext ctx,
-        Guid chapterId,
-        long expectedRevision,
-        ManuscriptOperationInput[] operations)
-    {
-        var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken);
-        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
-            return $"Error: chapter {chapterId:N} was not found in this project.";
-        try
-        {
-            var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
-                ?? throw new InvalidOperationException($"Manuscript {chapterId:N} was not found.");
-            var source = ctx.ReviewEdits
-                && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
-                    ? staged
-                    : snapshot.Document;
-            if (source.Revision != expectedRevision)
-                throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
-            var converted = ManuscriptOperationInput.ToOperations(operations);
-            if (ctx.ReviewEdits && ctx.EditorStaging is not null)
-            {
-                var (document, changedBlockIds) = ManuscriptOperations.Apply(source, converted);
-                var styleCatalog = await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
-                    manuscriptStyles,
-                    ctx.TurnCancellationToken);
-                await manuscripts.ValidateDocumentReferencesAsync(
-                    chapterId,
-                    document,
-                    styleCatalog,
-                    ctx.TurnCancellationToken);
-                var summary = $"Edit {changedBlockIds.Count} manuscript block(s)";
-                var payload = JsonSerializer.Serialize(new
-                {
-                    staged = true,
-                    expectedRevision,
-                    nextRevision = document.Revision,
-                    changedBlockIds,
-                });
-                await ctx.EditorStaging.StageChapterManuscriptEditAsync(
-                    chapter,
-                    source,
-                    document,
-                    summary,
-                    payload,
-                    ctx.TurnCancellationToken);
-                return payload;
-            }
-
-            var result = await manuscripts.ApplyAsync(
-                chapterId,
-                expectedRevision,
-                converted,
-                ctx.TurnCancellationToken);
-            ctx.OnMutated();
-            return JsonSerializer.Serialize(new
-            {
-                applied = true,
-                result.Snapshot.Revision,
-                result.Snapshot.SourceHash,
-                result.ChangedBlockIds,
-                result.Snapshot.PlainText,
-            });
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return $"Error: {exception.Message}";
-        }
     }
 
     private async Task<string> ReadManuscriptMigrationStateAsync(EditorChatContext ctx)

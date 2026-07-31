@@ -1,6 +1,7 @@
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Images;
+using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.EditorChat;
 
@@ -41,6 +42,7 @@ public sealed class EditorChatContext(
     private Guid? _currentImageGenerationJobId;
     private readonly HashSet<Guid> _directlyEditedChapterBodies = [];
     private readonly HashSet<Guid> _picturePageChaptersAwaitingVerification = [];
+    private readonly Dictionary<Guid, EditorManuscriptPreview> _manuscriptPreviews = [];
     private readonly List<EditorChatVisualAttachment> _visuals = [];
     private readonly List<EditorChatModelImageAttachment> _modelOnlyImages = [];
 
@@ -74,6 +76,37 @@ public sealed class EditorChatContext(
 
     public void MarkChapterBodyDirectlyEdited(Guid chapterId) =>
         _directlyEditedChapterBodies.Add(chapterId);
+
+    public EditorManuscriptPreview StageManuscriptPreview(
+        Guid chapterId,
+        ManuscriptDocument sourceDocument,
+        ManuscriptDocument projectedDocument,
+        IReadOnlyList<string> changedBlockIds)
+    {
+        foreach (var obsoleteId in _manuscriptPreviews
+            .Where(item => item.Value.ChapterId == chapterId)
+            .Select(item => item.Key)
+            .ToList())
+        {
+            _manuscriptPreviews.Remove(obsoleteId);
+        }
+
+        var preview = new EditorManuscriptPreview(
+            Guid.NewGuid(),
+            chapterId,
+            sourceDocument,
+            projectedDocument,
+            changedBlockIds.ToList());
+        _manuscriptPreviews.Add(preview.Id, preview);
+        return preview;
+    }
+
+    public bool TryTakeManuscriptPreview(Guid previewId, out EditorManuscriptPreview preview)
+    {
+        if (!_manuscriptPreviews.Remove(previewId, out preview!))
+            return false;
+        return true;
+    }
 
     public void MarkPicturePageMutation(Guid chapterId) =>
         _picturePageChaptersAwaitingVerification.Add(chapterId);
@@ -183,3 +216,10 @@ public sealed record EditorChatModelImageAttachment(
     string FileName,
     string ContentType,
     byte[]? Data);
+
+public sealed record EditorManuscriptPreview(
+    Guid Id,
+    Guid ChapterId,
+    ManuscriptDocument SourceDocument,
+    ManuscriptDocument ProjectedDocument,
+    IReadOnlyList<string> ChangedBlockIds);

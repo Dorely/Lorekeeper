@@ -125,9 +125,12 @@ single Razor component or circuit.
 Assistant tool mutations that require review are stored as `AiChange` batches
 and applied through `IAiChangeApprovalService`. Editor Contest Mode captures a
 terminal context snapshot and stores independent model candidates. Editor
-revision agents persist one worker session per assigned chapter and return
-prose-only edits to the coordinating Editor turn. Tool contracts, prompts,
-persistence, review UI, and approval behavior must evolve together.
+revision agents persist one worker session per assigned chapter and return only
+compact IDs, statuses, summaries, and errors to the coordinating Editor turn.
+Full instructions, operations, proposals, raw responses, and transcripts remain
+in durable session detail for the review UI and never enter the parent model
+result. Tool contracts, prompts, persistence, review UI, and approval behavior
+must evolve together.
 
 ### Ingest, Research, and Background Work
 
@@ -183,6 +186,16 @@ The
 ProseMirror editor, assistant, contest, revision-agent, approval,
 import, indexing, visual, and publishing paths consume the same document or
 projection. Direct chapter-body persistence is no longer a runtime path.
+Editor Chat submits each semantic operation payload only to
+`preview_manuscript_operations`. That tool validates and retains the exact
+projected document in turn-local memory behind an opaque, chapter-specific
+preview ID. `apply_manuscript_operations` accepts only that one-use ID, verifies
+that the source document is still identical, then writes the retained document
+through `IManuscriptService` (or stages it in the Review-edits overlay). Preview
+results intentionally return only IDs, hashes, revisions, and counts; full
+manuscript text and operations are never echoed into the apply round. Preview
+IDs do not persist across turns, and a newer preview for the same chapter
+supersedes the older one.
 Picture Page text edits resolve whole-block references into move/insert/delete/
 replace manuscript operations, preserving block identity when text boxes move
 in reading order. Partial-block range text edits fail closed and must be made
@@ -419,7 +432,9 @@ Lorekeeper manuscript JSON and cross `IManuscriptService.ReplaceDocumentAsync`
 with an expected revision; neither DOM nor HTML is persisted. Paste is
 constrained by the owned schema and reports removed elements. Manual edits and
 Editor/revision-worker tools share block, mark, style, validation, and
-structural-inspection semantics. Named style semantic roles and
+structural-inspection semantics. Assistant operation conversion canonicalizes
+known built-in role aliases and the visible `***` scene-break representation;
+unknown custom roles still fail closed. Named style semantic roles and
 paragraph/character kinds are immutable stable keys; definitions are
 revision-checked and semantic roles are unique per project and kind.
 

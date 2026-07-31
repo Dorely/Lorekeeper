@@ -283,14 +283,8 @@ public sealed class EditorRevisionAgentService(
         session.Order,
         session.ChapterId,
         session.ChapterTitle,
-        session.Reason,
-        session.Instructions,
         session.Status,
         session.Summary,
-        session.Rationale,
-        session.OperationFormat,
-        session.OperationsJson,
-        session.Notes,
         session.ErrorMessage);
 
     private static EditorRevisionJobDetail ToDetail(EditorRevisionJob job) => new(

@@ -53,14 +53,8 @@ public sealed record EditorRevisionSessionResult(
     int Order,
     Guid ChapterId,
     string ChapterTitle,
-    string Reason,
-    string Instructions,
     EditorRevisionSessionStatus Status,
     string Summary,
-    string Rationale,
-    string OperationFormat,
-    string OperationsJson,
-    string Notes,
     string? ErrorMessage);
 
 public sealed record EditorRevisionJobDetail(

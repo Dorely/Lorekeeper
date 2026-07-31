@@ -22,14 +22,7 @@ public sealed record ManuscriptOperationInput(
         operations.Select<ManuscriptOperationInput, ManuscriptOperation>(
             operation => operation.Operation.Trim().ToLowerInvariant() switch
             {
-                "insertblock" => new InsertManuscriptBlock(
-                    Required(operation.Index, "index"),
-                    ParseEnum<ManuscriptBlockType>(operation.BlockType, "blockType"),
-                    operation.Text ?? string.Empty,
-                    operation.StyleRole,
-                    operation.ImageId,
-                    operation.AltText,
-                    operation.HeadingLevel),
+                "insertblock" => InsertBlock(operation),
                 "replaceblocktext" => new ReplaceManuscriptBlockText(
                     Required(operation.BlockId, "blockId"),
                     operation.Text ?? string.Empty),
@@ -43,16 +36,10 @@ public sealed record ManuscriptOperationInput(
                 "mergeblocks" => new MergeManuscriptBlocks(
                     Required(operation.BlockId, "blockId"),
                     Required(operation.SecondBlockId, "secondBlockId")),
-                "setblocktype" => new SetManuscriptBlockType(
-                    Required(operation.BlockId, "blockId"),
-                    ParseEnum<ManuscriptBlockType>(operation.BlockType, "blockType"),
-                    operation.StyleRole,
-                    operation.ImageId,
-                    operation.AltText,
-                    operation.HeadingLevel),
+                "setblocktype" => SetBlockType(operation),
                 "setblockstyle" => new SetManuscriptBlockStyle(
                     Required(operation.BlockId, "blockId"),
-                    Required(operation.StyleRole, "styleRole")),
+                    NormalizeStyleRole(Required(operation.StyleRole, "styleRole"))!),
                 "setinlinemark" => new SetManuscriptInlineMark(
                     Required(operation.BlockId, "blockId"),
                     Required(operation.StartOffset, "startOffset"),
@@ -63,6 +50,64 @@ public sealed record ManuscriptOperationInput(
                 _ => throw new ArgumentException($"Unsupported manuscript operation '{operation.Operation}'."),
             })
             .ToList();
+
+    private static InsertManuscriptBlock InsertBlock(ManuscriptOperationInput operation)
+    {
+        var blockType = ParseEnum<ManuscriptBlockType>(operation.BlockType, "blockType");
+        return new InsertManuscriptBlock(
+            Required(operation.Index, "index"),
+            blockType,
+            NormalizeBlockText(blockType, operation.Text),
+            NormalizeStyleRole(operation.StyleRole),
+            operation.ImageId,
+            operation.AltText,
+            operation.HeadingLevel);
+    }
+
+    private static SetManuscriptBlockType SetBlockType(ManuscriptOperationInput operation)
+    {
+        var blockType = ParseEnum<ManuscriptBlockType>(operation.BlockType, "blockType");
+        return new SetManuscriptBlockType(
+            Required(operation.BlockId, "blockId"),
+            blockType,
+            NormalizeStyleRole(operation.StyleRole),
+            operation.ImageId,
+            operation.AltText,
+            operation.HeadingLevel);
+    }
+
+    private static string NormalizeBlockText(ManuscriptBlockType blockType, string? text)
+    {
+        var value = text ?? string.Empty;
+        return blockType == ManuscriptBlockType.SceneBreak
+            && (string.IsNullOrWhiteSpace(value)
+                || string.Equals(value.Trim(), "***", StringComparison.Ordinal))
+            ? string.Empty
+            : value;
+    }
+
+    private static string? NormalizeStyleRole(string? styleRole)
+    {
+        if (string.IsNullOrWhiteSpace(styleRole))
+            return styleRole;
+
+        var trimmed = styleRole.Trim();
+        if (ManuscriptSemanticRoles.IsValid(trimmed))
+            return trimmed;
+
+        return trimmed.ToLowerInvariant() switch
+        {
+            "body" => ManuscriptStyleRoles.Body,
+            "heading" => ManuscriptStyleRoles.Heading,
+            "chapterheading" or "chapter-heading" => ManuscriptStyleRoles.ChapterHeading,
+            "subheading" => ManuscriptStyleRoles.Subheading,
+            "scenebreak" or "scene-break" => ManuscriptStyleRoles.SceneBreak,
+            "blockquote" or "block-quote" => ManuscriptStyleRoles.BlockQuote,
+            "listitem" or "list-item" => ManuscriptStyleRoles.ListItem,
+            "figurecaption" or "figure-caption" => ManuscriptStyleRoles.FigureCaption,
+            _ => trimmed,
+        };
+    }
 
     private static T Required<T>(T? value, string name) where T : struct =>
         value ?? throw new ArgumentException($"{name} is required.");
