@@ -200,6 +200,8 @@ public sealed class ContextBuilder(
             ContextBuildPurpose.Images => AssistantWorkflowInstructions.VisualCreationWorkflow,
             ContextBuildPurpose.Research =>
                 "Use the supplied research tools to gather, attribute, compare, and synthesize evidence. Distinguish sourced facts from editorial inference and never fabricate a source.",
+            ContextBuildPurpose.Publish =>
+                "Use the supplied publication tools to inspect and prepare editions while preserving human control over proof approval.",
             _ => throw new ArgumentOutOfRangeException(nameof(purpose)),
         };
     }
@@ -210,6 +212,7 @@ public sealed class ContextBuilder(
         ContextBuildPurpose.EditorRevision => SystemPromptAgentRole.RevisionWorker,
         ContextBuildPurpose.Images => SystemPromptAgentRole.Images,
         ContextBuildPurpose.Research => SystemPromptAgentRole.Research,
+        ContextBuildPurpose.Publish => SystemPromptAgentRole.Publish,
         _ => throw new ArgumentOutOfRangeException(nameof(purpose)),
     };
 

@@ -65,6 +65,8 @@ public class Project
 
     public ICollection<ResearchConversation> ResearchConversations { get; set; } = [];
 
+    public ICollection<PublishConversation> PublishConversations { get; set; } = [];
+
     public ICollection<ProjectImageConversation> ProjectImageConversations { get; set; } = [];
 
     public ICollection<ProjectImageChatAttachment> ProjectImageChatAttachments { get; set; } = [];

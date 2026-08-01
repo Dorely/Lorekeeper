@@ -13,7 +13,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 
 - Project-scoped outline, Book Brief, story-graph, project-fact, writing-sample,
   and chapter workspaces.
-- Five persistent assistant surfaces for outline collaboration, chapter editing,
+- Six persistent assistant surfaces for outline collaboration, chapter editing,
   writing coaching, research, and project images, including streaming tools,
   reviewable changes, visual context, and background revision agents.
 - Versioned structured chapter manuscripts with stable block anchors,
@@ -38,7 +38,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   identifiers, included content, semantic matter, named-style mappings, image
   placements, Picture Page cover sources, clone/archive/compare/audit workflows,
   deterministic staleness fingerprints, read-only archived editions, and
-  matching Publish assistant tools. New paperback editions start on the
+  a full-height conversational Publish assistant with streaming, persistent
+  history, image attachments, Stop/Reset, and matching tools. New paperback editions start on the
   installed 6 × 9 in Preview profile.
 - Preview paperback press jobs with cancellation/restart recovery, immutable
   SHA-256-verified interior and cover PDFs, actual in-app PDF viewing, semantic
@@ -55,9 +56,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Versioned project import/export (current v12
   manuscripts/styles/editions/covers/custom-font binaries, isolated v8-v11
   structured adapters, and v1-v7 text adapters) plus TXT,
-  Markdown, mixed-layout EPUB, and a
-  paperback-only browser/operating-system print-preview workflow. EPUB export
-  is restricted to EPUB editions, and generated press PDFs are
+  Markdown, mixed-layout EPUB, and artifact-backed Generate/Regenerate plus
+  separate interior/cover PDF saves. EPUB export is restricted to EPUB editions,
+  and generated press PDFs are
   explicitly Preview artifacts, not PDF/X conformance or vendor-preflight claims.
 - Configurable Codex/OpenAI-compatible chat and embedding providers, configurable
   web search, and local SQLite persistence.

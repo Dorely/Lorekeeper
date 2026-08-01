@@ -18,8 +18,8 @@ The implemented workbench includes project and outline management, graph-backed
 story state, semantic and lexical retrieval, source ingest, web research,
 writing samples and coaching, context-aware chapter editing, assistant review
 and contest workflows, project image generation and editing, illustrated and
-picture-page composition, import/export, TXT, Markdown, EPUB, and a browser/OS
-print-preview workflow. `VISION.md` remains the product direction and is not
+picture-page composition, import/export, TXT, Markdown, EPUB, and immutable
+Preview PDF generation/view/download. `VISION.md` remains the product direction and is not
 proof that every future bookmaking goal is complete. The researched delivery
 sequence and verification gates are documented in
 `docs/publishing-roadmap.md`; roadmap statuses do not change this document's
@@ -107,8 +107,8 @@ tool instructions must not be persisted as editable project guidance.
 
 ### Assistant Conversations and Review
 
-The five user-facing assistant surfaces are Outline, Editor, Writing Coach,
-Research, and Images. Their adapters use the shared `ChatTurnEngine` protocol
+The six user-facing assistant surfaces are Outline, Editor, Writing Coach,
+Research, Images, and Publish. Their adapters use the shared `ChatTurnEngine` protocol
 and feature-specific tools, prompts, repositories, and streaming update records.
 Tool rounds keep the provider-originated `FunctionCallContent` in memory until
 the correlated tool result has been submitted. OpenAI-compatible clients retain
@@ -120,7 +120,8 @@ provider tool protocol metadata.
 `ChatTurnRuntime` and the singleton feature turn runners keep active turns alive
 across component disposal, buffer updates for reopened panels, and preserve
 explicit Stop as the cancellation path. Do not move active-turn ownership into a
-single Razor component or circuit.
+single Razor component or circuit. Surface-scoped maintenance leases make
+conversation reset atomic against active or newly starting turns across windows.
 
 Assistant tool mutations that require review are stored as `AiChange` batches
 and applied through `IAiChangeApprovalService`. Editor Contest Mode captures a
@@ -236,14 +237,16 @@ explicit post-commit indexing rebuilds the committed state instead. That
 post-commit work is best-effort and can add warnings, but cannot relabel
 committed imported data as a failed import.
 
-Paperback editions have two distinct output paths. The browser/operating-system
-Print/Save-PDF view is a paperback-only convenience preview. The contained
-press runtime generates, parses, fingerprints, and stores actual interior and
-full-wrap cover PDF bytes and feeds versioned vendor-specific internal
-preflight. EPUB editions cannot use either print path, and paperback editions
-cannot export EPUB, preventing product-form identifiers and metadata from
-crossing formats. Neither the browser path nor internal press inspection is an
-independent PDF/X or vendor-acceptance claim.
+Paperback PDF output exists only through the contained press runtime, which
+generates, parses, fingerprints, and stores immutable interior and full-wrap
+cover bytes and feeds versioned vendor-specific internal preflight. The Publish
+workspace selects Generate, active/cancel, Retry, Regenerate, or separate Save
+interior/cover actions from current render and artifact state; Save uses the
+hash-verifying immutable artifact endpoints and never invokes browser print.
+EPUB editions cannot request press output, and paperback editions cannot export
+EPUB, preventing product-form identifiers and metadata from crossing formats.
+Internal press inspection is not an independent PDF/X or vendor-acceptance
+claim.
 
 `Lorekeeper.Press` proves only a local PDF 1.7 fixture path. Its versioned JSON
 protocol validates child job IDs, accepts semantic book content and explicit
@@ -312,8 +315,8 @@ XHTML, TOC/landmark, and navigation relationships, and writes deterministic
 product-form-specific package bytes. EPUB editions contain the normalized EPUB;
 paperback editions contain only their validated interior/cover PDFs, so a print
 identifier is never copied into a digital artifact. Every included ordered
-semantic-matter document is projected into TXT, Markdown, EPUB, browser print,
-and contained press output. The service persists SHA-256-addressed EPUB,
+semantic-matter document is projected into TXT, Markdown, EPUB, and contained
+press output. The service persists SHA-256-addressed EPUB,
 front-cover, report, manifest, package, and
 exact-package proof records as edition artifacts. Package freshness combines
 the source fingerprint, stable applicable input hashes/runtime provenance,
@@ -344,10 +347,19 @@ synchronized.
 Development resolves the exact-locked Python project and fingerprinted native
 payload. Packaged releases must configure a frozen renderer and ship controlled
 fonts/notices. This remains Preview, not a PDF/X or vendor-conformance claim.
-`PublishAssistantTools` exposes the full edition, render, cover, preflight, and
-package service surfaces
+`PublishChatService` owns one persisted, ordered, project-scoped Publish
+conversation and uses the shared turn runtime for streaming, cancellation,
+reconnection, image attachments, and text-only cross-turn replay. The two-column
+Publish workspace flushes pending manual autosaves before each turn and refreshes
+its selected edition and artifact state from structured mutation notices. Manual
+publishing mutations are locked for the duration of a Publish turn, render state
+is re-read after autosave, and assistant render/package changes reconnect polling,
+preflight, and current artifact downloads.
+`PublishAssistantTools` exposes the full edition, matter, style, placement,
+render, cover, preflight, package, audit, comparison, and export service surfaces
 with the same IDs, validation, revisions, fingerprints, and diagnostics as the
-UI.
+UI. Artifact results include current/stale state and safe view/download URLs;
+proof-attestation writes remain unavailable to the assistant.
 
 ### Desktop and Release Behavior
 

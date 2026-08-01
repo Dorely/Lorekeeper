@@ -443,7 +443,7 @@ relationship-checked EPUB 3; both include a front-cover image when available, a
 SHA-256 manifest, and the complete preflight report. Print packages never
 synthesize a digital artifact from print-edition metadata or its ISBN. Every
 included semantic front/back-matter row is preserved in explicit order through
-TXT, Markdown, browser print, EPUB, and contained press rendering. The EPUB path
+TXT, Markdown, EPUB, and contained press rendering. The EPUB path
 emits and validates TOC and landmark navigation,
 spine XHTML, internal resources, and alternative text; mixed unsupported
 scripts and language marks fail closed for the initial English/Latin scope,

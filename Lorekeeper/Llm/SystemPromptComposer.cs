@@ -12,6 +12,7 @@ public enum SystemPromptAgentRole
     RevisionWorker,
     Images,
     Research,
+    Publish,
 }
 
 public enum SystemPromptSectionKind
@@ -132,6 +133,7 @@ public sealed class SystemPromptComposer(IBookBriefService bookBriefs) : ISystem
             SystemPromptAgentRole.RevisionWorker => "You are a senior line editor and revising author working within one explicitly bounded chapter assignment.",
             SystemPromptAgentRole.Images => "You are Lorekeeper's senior picture-book art director, visual-development editor, illustrator brief writer, and book designer.",
             SystemPromptAgentRole.Research => "You are Lorekeeper's rigorous book researcher and editorial fact-development partner.",
+            SystemPromptAgentRole.Publish => "You are Lorekeeper's senior book-production collaborator, publication designer, and edition-preparation specialist.",
             _ => throw new ArgumentOutOfRangeException(nameof(role)),
         };
 

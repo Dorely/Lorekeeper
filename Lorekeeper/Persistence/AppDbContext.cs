@@ -33,6 +33,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<WritingCoachMessage> WritingCoachMessages => Set<WritingCoachMessage>();
     public DbSet<ResearchConversation> ResearchConversations => Set<ResearchConversation>();
     public DbSet<ResearchMessage> ResearchMessages => Set<ResearchMessage>();
+    public DbSet<PublishConversation> PublishConversations => Set<PublishConversation>();
+    public DbSet<PublishMessage> PublishMessages => Set<PublishMessage>();
     public DbSet<ProjectImageConversation> ProjectImageConversations => Set<ProjectImageConversation>();
     public DbSet<ProjectImageMessage> ProjectImageMessages => Set<ProjectImageMessage>();
     public DbSet<ProjectImageMessageVisual> ProjectImageMessageVisuals => Set<ProjectImageMessageVisual>();
@@ -283,6 +285,28 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
         });
 
         modelBuilder.Entity<ResearchMessage>(entity =>
+        {
+            entity.HasIndex(e => new { e.ConversationId, e.Order });
+            entity.Property(e => e.Role).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+
+            entity.HasOne(e => e.Conversation)
+                .WithMany(c => c.Messages)
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublishConversation>(entity =>
+        {
+            entity.HasIndex(e => e.ProjectId).IsUnique();
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.PublishConversations)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublishMessage>(entity =>
         {
             entity.HasIndex(e => new { e.ConversationId, e.Order });
             entity.Property(e => e.Role).HasConversion<string>();

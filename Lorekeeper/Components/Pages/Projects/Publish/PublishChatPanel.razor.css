@@ -1,0 +1,18 @@
+.publish-chat-reset {
+    padding: 0;
+}
+
+.publish-chat-context {
+    align-items: center;
+    border-top: 1px solid var(--lk-line);
+    color: var(--lk-muted);
+    display: flex;
+    font-size: 0.72rem;
+    gap: 0.4rem;
+    padding: 0.45rem 0.7rem;
+}
+
+.publish-chat-context code {
+    color: var(--lk-accent);
+    font-size: 0.7rem;
+}

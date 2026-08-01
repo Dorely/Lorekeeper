@@ -532,8 +532,45 @@ public sealed class PublicationPackageTests
 
         var catalog = await tools.BuildAsync(new PublishAssistantContext(Guid.NewGuid()));
 
-        Assert.Contains(catalog, tool => tool.Name == "list_publication_named_styles");
-        Assert.Contains(catalog, tool => tool.Name == "list_publication_project_images");
+        var names = catalog.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
+        string[] requiredTools =
+        [
+            "list_publication_editions",
+            "read_publication_edition",
+            "list_publication_named_styles",
+            "list_publication_project_images",
+            "create_publication_edition",
+            "clone_publication_edition",
+            "update_publication_edition",
+            "set_default_publication_edition",
+            "archive_publication_edition",
+            "set_publication_cover_source",
+            "set_publication_content",
+            "reorder_publication_content",
+            "upsert_publication_matter",
+            "delete_publication_matter",
+            "upsert_publication_style_mapping",
+            "delete_publication_style_mapping",
+            "add_publication_image_placement",
+            "update_publication_image_placement",
+            "reorder_publication_image_placements",
+            "delete_publication_image_placement",
+            "compare_publication_editions",
+            "read_publication_audit",
+            "read_publication_migration_state",
+            "request_publication_render",
+            "list_publication_renders",
+            "list_publication_downloads",
+            "cancel_publication_render",
+            "read_publication_page_map",
+            "compare_publication_renders",
+            "read_publication_cover_design",
+            "update_publication_cover_design",
+            "preflight_publication_edition",
+            "export_publication_edition",
+            "build_publication_package",
+        ];
+        Assert.All(requiredTools, name => Assert.Contains(name, names));
         Assert.DoesNotContain(catalog, tool =>
             tool.Name.Contains("proof", StringComparison.OrdinalIgnoreCase)
             && (tool.Name.Contains("approve", StringComparison.OrdinalIgnoreCase)
@@ -935,12 +972,6 @@ public sealed class PublicationPackageTests
             }
             return Document;
         }
-
-        public Task<PublishDocument> GetPrintDocumentAsync(
-            Guid projectId,
-            Guid editionId,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(Document);
 
         public async Task<ProjectExportFile> ExportAsync(
             Guid projectId,

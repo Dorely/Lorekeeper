@@ -9,6 +9,7 @@ public enum ChatTurnSurface
     Research,
     Images,
     WritingCoach,
+    Publish,
 }
 
 public readonly record struct ChatTurnKey(Guid ProjectId, ChatTurnSurface Surface);
@@ -37,6 +38,7 @@ public sealed class ChatTurnRuntime
 {
     private readonly object _lock = new();
     private readonly Dictionary<ChatTurnKey, IActiveTurn> _activeTurns = [];
+    private readonly HashSet<ChatTurnKey> _maintenanceKeys = [];
 
     public ChatTurnSnapshot? GetActiveTurn(ChatTurnKey key)
     {
@@ -57,7 +59,7 @@ public sealed class ChatTurnRuntime
         ActiveTurn<TUpdate> turn;
         lock (_lock)
         {
-            if (_activeTurns.ContainsKey(key))
+            if (_activeTurns.ContainsKey(key) || _maintenanceKeys.Contains(key))
                 return false;
 
             turn = new ActiveTurn<TUpdate>(key, userText, images ?? [], RemoveSubscription);
@@ -68,6 +70,20 @@ public sealed class ChatTurnRuntime
             () => RunTurnAsync(turn, run, errorUpdateFactory, isTerminalUpdate),
             CancellationToken.None);
         return true;
+    }
+
+    /// <summary>
+    /// Reserves an idle surface for an asynchronous lifecycle operation such as
+    /// transcript reset. New turns are rejected until the returned lease is disposed.
+    /// </summary>
+    public IDisposable? TryBeginMaintenance(ChatTurnKey key)
+    {
+        lock (_lock)
+        {
+            if (_activeTurns.ContainsKey(key) || !_maintenanceKeys.Add(key))
+                return null;
+        }
+        return new MaintenanceLease(this, key);
     }
 
     public IChatTurnSubscription<TUpdate>? Subscribe<TUpdate>(ChatTurnKey key)
@@ -148,6 +164,19 @@ public sealed class ChatTurnRuntime
                 active.RemoveSubscription(subscriptionId);
             }
         }
+    }
+
+    private void EndMaintenance(ChatTurnKey key)
+    {
+        lock (_lock)
+            _maintenanceKeys.Remove(key);
+    }
+
+    private sealed class MaintenanceLease(ChatTurnRuntime owner, ChatTurnKey key) : IDisposable
+    {
+        private ChatTurnRuntime? _owner = owner;
+
+        public void Dispose() => Interlocked.Exchange(ref _owner, null)?.EndMaintenance(key);
     }
 
     private interface IActiveTurn

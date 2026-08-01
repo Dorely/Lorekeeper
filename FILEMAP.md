@@ -66,8 +66,11 @@
 | `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, content-use, and edition-mapping deletion guards. |
 | `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
 | `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, render/source drift, language/ISBN/profile/color rejection, product-form proof isolation, and assistant-authorization fixtures. |
-| `PublicationEditionServiceTests.cs` | Preview defaults, archived assistant/service mutation guards, cover-focal UI mapping, shared-ISBN identity, product-form output gating, and hostile semantic-matter ownership fixtures. |
+| `PublicationEditionServiceTests.cs` | Preview defaults, archived assistant/service mutation guards, cover-focal UI mapping, shared-ISBN identity, and hostile semantic-matter ownership fixtures. |
 | `PublicationRenderTests.cs` | Artifact-integrity/staleness fixtures plus clean publication-worker cancellation during host shutdown. |
+| `PublicationPdfActionStateTests.cs` | Missing/active/failed/stale/current PDF action-state fixtures plus immutable assistant artifact-link metadata. |
+| `PublishChatServiceTests.cs` | Publish conversation persistence/reset, streaming completion/failure/cancellation, selected-edition prompt, non-replayed tools, mutation notices, and active-turn reconnection fixtures. |
+| `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
 | `DatabaseMigrationRecoveryTests.cs` | Shared migration-recovery pruning fixture proving protected failed/running backup references survive automatic retention. |
 | `OpenAIChatToolMetadataClientTests.cs` | OpenAI-compatible streaming fixture proving Gemini tool-call extension metadata survives the assistant/tool-result round trip. |
 | `CodexAuthServiceTests.cs` | OAuth refresh fixtures for reconnect rejection, cross-scope serialization/cache replacement, rotation preservation, and fail-loud server errors. |
@@ -152,11 +155,11 @@
 
 | File | Description |
 |------|-------------|
-| `ChatTurnRuntime.cs` | App-wide active-turn coordinator keyed by project and chat surface, with buffered subscriber replay and explicit cancellation separate from component disposal. |
+| `ChatTurnRuntime.cs` | App-wide active-turn coordinator keyed by project and chat surface, with buffered subscriber replay, explicit cancellation, and idle-surface maintenance leases for reset safety across windows. |
 | `ChatTurnEngine.cs` | Shared user-facing chat protocol engine for streaming text/tool parsing, default tool invocation, assistant tool envelopes, and common message persistence operations. |
 | `ChatModelHistory.cs` | Canonical cross-turn replay policy: retains non-empty system/user/assistant text while excluding persisted tool calls, tool results, and model-only attachments. |
-| `IChatMessageStore.cs` | Common message persistence boundary implemented by the five existing feature-specific transcript repositories. |
-| `ChatImageAttachmentService.cs` | Shared project-image attachment resolver/persistence and current-turn multimodal message builder for all five user-facing chats. |
+| `IChatMessageStore.cs` | Common message persistence boundary implemented by the six existing feature-specific transcript repositories. |
+| `ChatImageAttachmentService.cs` | Shared project-image attachment resolver/persistence and current-turn multimodal message builder for all six user-facing chats. |
 
 ### Components/Layout/
 
@@ -201,7 +204,6 @@
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
 | `ImagesPage.razor` | Images tab at `/projects/{Slug}/images`; wraps `ProjectLayout` and hosts `Images.ImagesContent`. |
 | `PublishPage.razor` | Publish tab at `/projects/{Slug}/publish`; wraps `ProjectLayout` and hosts `Publish.PublishContent`. |
-| `ManuscriptPrintPage.razor` (+ `.razor.css`, `.razor.js`) | Paperback-only embedded Print/PDF preview carrying ordered semantic matter and mixed-layout chapters; derives sheet/spread dimensions and body type from edition geometry and waits for decoded assets before printing. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
 | `WritingSamplePage.razor` | Writing Sample tab at `/projects/{Slug}/writing-sample`; wraps `ProjectLayout` + `WritingSample.WritingSampleContent`. |
 
@@ -235,7 +237,8 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Responsive edition workspace for metadata, content/matter/style/cover and focal design, deterministic press previews, product-form preflight/package downloads, proof records, and read-only archived editions. |
+| `PublishContent.razor` (+ `.razor.css`) | Two-column edition workspace with a full-height assistant, autosave-safe mutation refresh, metadata/content/matter/style/cover controls, state-driven PDF generation and immutable interior/cover saves, preflight/packages, proof records, and archived-edition reads. |
+| `PublishChatPanel.razor` (+ `.razor.css`) | Publish adapter over shared `ChatSurface` with persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/
 
@@ -302,6 +305,7 @@
 | `SearchProvider.cs` | EF entity for configured web search providers used by Research Mode. Supports SerpApi and Brave in v1, stores API key/config JSON, and tracks the single active provider. |
 | `ResearchConversation.cs` | EF entity — one persistent project research chat per `Project` (unique on `ProjectId`). Owns ordered `ResearchMessage`s; cascade-deleted with the project. |
 | `ResearchMessage.cs` | EF entity for a single Research chat row with monotonic `Order`, role (`System`/`User`/`Assistant`/`Tool`), text content, assistant tool-call JSON, tool result metadata, status, optional error, and creation timestamp. |
+| `PublishConversation.cs` / `PublishMessage.cs` | One project-scoped persistent Publish conversation and ordered role/status/content/tool/error transcript rows, cascade-owned by the project. |
 | `AiChangeBatch.cs` | EF entity grouping AI-proposed tool mutations from one assistant turn while they await approval/resolution. Tracks whether the owning transcript is Outline, Editor, or Research chat. |
 | `AiChange.cs` | EF entity for one queued AI tool mutation: tool metadata, before/after/result JSON, dependency metadata, status, rejection/error notes, timestamps. |
 | `ContestBatch.cs` | EF entity for one Editor Contest Mode run: captured turn/context snapshot, target chapter/body snapshot, operation metadata, status, and model candidates. |
@@ -369,6 +373,7 @@
 | `IWritingCoachConversationRepository.cs` / `WritingCoachConversationRepository.cs` | Persistence for the resettable project-level Writing Coach conversation + ordered messages, including assistant tool-call manifests and tool result rows. |
 | `ISearchProviderRepository.cs` / `SearchProviderRepository.cs` | CRUD plus active-provider selection for Research Mode search providers. |
 | `IResearchConversationRepository.cs` / `ResearchConversationRepository.cs` | Persistence for project-wide Research conversation + ordered messages, including assistant tool-call manifests and tool result rows. |
+| `IPublishConversationRepository.cs` / `PublishConversationRepository.cs` | Persistence for the unique project-wide Publish conversation and ordered shared-chat message contract. |
 | `IProjectImageConversationRepository.cs` / `ProjectImageConversationRepository.cs` | Persistence for project-wide Images Chat conversations, ordered messages, tool result rows, and message visuals. |
 | `IAiChangeRepository.cs` / `AiChangeRepository.cs` | Persistence for pending AI change batches and changes, including eager-loaded pending batch listing and change lookup for approval actions. |
 | `IContestRepository.cs` / `ContestRepository.cs` | Persistence for Editor Contest Mode batches and candidates, including current/history project batch listing, detail loading, candidate lookup, and status updates. |
@@ -604,12 +609,13 @@
 | `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning application boundary for edition lifecycle, settings, content, matter, style mappings, placements, audit history, comparison, and deterministic source fingerprints. |
 | `PublicationEditionMigrationService.cs` | Independent v10 online-backup, mapping-hash, validation, and journal boundary for losslessly replacing legacy single-profile publishing state. |
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
-| `PublishAssistantTools.cs` | Dedicated Publish assistant tool catalog exposing the complete edition, render, cover, preflight, and package surface through owning services. |
-| `PublishAssistantService.cs` | Visible dedicated Publish assistant one-turn orchestration using the configured chat provider and the shared Publish tool catalog. |
+| `PublishAssistantTools.cs` | Publish tool catalog for editions, matter, styles, placements, covers, renders, preflight, packages, audits, comparisons, exports, and artifact view/download metadata; proof approval is intentionally absent. |
+| `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration, shared active-turn streaming/reconnection, collaborative prompt policy, tool activity, and structured mutation notices. |
+| `PublicationPdfActionState.cs` | Deterministic Generate/active/failed/Regenerate/current selector and correlated current interior/cover artifact projection for the Publish summary. |
 | `PublicationRenderService.cs` | Persisted/recoverable render queue, contained ordered-matter press adapter, hash-verified artifact download boundary, semantic page maps, stale-state derivation, and render comparison. |
 | `PublicationCoverService.cs` | Edition full-wrap template calculation, revisioned cover design, ISBN-13/vendor/spine diagnostics, and acknowledgement invalidation. |
 | `PublicationPackageService.cs` | Versioned fail-closed Preview preflight, product-form-specific deterministic package assembly, manifests, reports, and exact-package proof records. |
-| `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying every included ordered semantic-matter document into edition-scoped TXT, Markdown, EPUB, press, and paperback-only print-preview output with reciprocal product-form guards. |
+| `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying every included ordered semantic-matter document into edition-scoped TXT, Markdown, EPUB, and contained press output with reciprocal product-form guards. |
 | `PublishEndpoints.cs` | Cacheable/range HTTP endpoints for validated cover/Picture Page surfaces and project-scoped immutable publication artifact viewing/download. |
 | `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus an ordered semantic-matter, mixed-layout EPUB writer using shared geometry for reflowable prose and accessible fixed cover/Picture Page items. |
 

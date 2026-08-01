@@ -81,6 +81,7 @@ public interface IPublicationRenderService
     Task<PublicationRenderJobView> GetAsync(Guid projectId, Guid editionId, Guid jobId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PublicationPageMapView>> GetPageMapAsync(Guid projectId, Guid editionId, Guid jobId, CancellationToken cancellationToken = default);
     Task<PublicationRenderComparison> CompareAsync(Guid projectId, Guid editionId, Guid leftJobId, Guid rightJobId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PublicationArtifactView>> ListArtifactsAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
     Task<PublicationArtifact?> GetArtifactAsync(Guid projectId, Guid artifactId, CancellationToken cancellationToken = default);
 }
 
@@ -318,6 +319,20 @@ public sealed class PublicationRenderService(
         return artifact;
     }
 
+    public async Task<IReadOnlyList<PublicationArtifactView>> ListArtifactsAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken = default)
+    {
+        var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
+        return (await db.PublicationArtifacts.AsNoTracking()
+                .Where(artifact => artifact.EditionId == editionId && artifact.Edition.ProjectId == projectId)
+                .OrderByDescending(artifact => artifact.CreatedAt)
+                .ToListAsync(cancellationToken))
+            .Select(artifact => ArtifactView(artifact, fingerprint))
+            .ToList();
+    }
+
     private async Task<PublicationRenderJob> GetTrackedAsync(
         Guid projectId,
         Guid editionId,
@@ -350,22 +365,25 @@ public sealed class PublicationRenderService(
             job.ProgressMessage,
             job.CancellationRequested,
             DeserializeDiagnostics(job.DiagnosticsJson),
-            artifacts.Select(artifact => new PublicationArtifactView(
-                artifact.Id,
-                artifact.Kind,
-                artifact.FileName,
-                artifact.MediaType,
-                artifact.Sha256,
-                artifact.ByteLength,
-                artifact.PageCount,
-                artifact.SourceFingerprint,
-                artifact.RendererVersion,
-                artifact.ProfileId,
-                artifact.CreatedAt,
-                !string.Equals(artifact.SourceFingerprint, currentFingerprint, StringComparison.Ordinal))).ToList(),
+            artifacts.Select(artifact => ArtifactView(artifact, currentFingerprint)).ToList(),
             job.CreatedAt,
             job.StartedAt,
             job.CompletedAt);
+
+    private static PublicationArtifactView ArtifactView(PublicationArtifact artifact, string currentFingerprint) =>
+        new(
+            artifact.Id,
+            artifact.Kind,
+            artifact.FileName,
+            artifact.MediaType,
+            artifact.Sha256,
+            artifact.ByteLength,
+            artifact.PageCount,
+            artifact.SourceFingerprint,
+            artifact.RendererVersion,
+            artifact.ProfileId,
+            artifact.CreatedAt,
+            !string.Equals(artifact.SourceFingerprint, currentFingerprint, StringComparison.Ordinal));
 
     private static IReadOnlyList<PublicationRenderDiagnostic> DeserializeDiagnostics(string json)
     {

@@ -104,6 +104,7 @@ builder.Services.AddScoped<IEditorConversationRepository, EditorConversationRepo
 builder.Services.AddScoped<IWritingSampleRepository, WritingSampleRepository>();
 builder.Services.AddScoped<IWritingCoachConversationRepository, WritingCoachConversationRepository>();
 builder.Services.AddScoped<IResearchConversationRepository, ResearchConversationRepository>();
+builder.Services.AddScoped<IPublishConversationRepository, PublishConversationRepository>();
 builder.Services.AddScoped<IProjectImageConversationRepository, ProjectImageConversationRepository>();
 builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
 builder.Services.AddScoped<IContestRepository, ContestRepository>();
@@ -258,8 +259,9 @@ builder.Services.AddScoped<IPublicationCoverService, PublicationCoverService>();
 builder.Services.AddScoped<IPublicationPackageService, PublicationPackageService>();
 builder.Services.AddScoped<PublicationRenderProcessor>();
 builder.Services.AddHostedService<PublicationRenderWorker>();
-builder.Services.AddScoped<PublishAssistantTools>();
-builder.Services.AddScoped<IPublishAssistantService, PublishAssistantService>();
+builder.Services.AddScoped<IPublishAssistantTools, PublishAssistantTools>();
+builder.Services.AddScoped<IPublishChatService, PublishChatService>();
+builder.Services.AddSingleton<IPublishChatTurnRunner, PublishChatTurnRunner>();
 builder.Services.AddSingleton<IPublicationEditionMigrationService, PublicationEditionMigrationService>();
 builder.Services.AddScoped<IPageGeometryService, PageGeometryService>();
 

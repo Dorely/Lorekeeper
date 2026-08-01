@@ -11,6 +11,7 @@ public enum ContextBuildPurpose
     EditorRevision,
     Images,
     Research,
+    Publish,
 }
 
 public sealed record ContextBuildRequest(

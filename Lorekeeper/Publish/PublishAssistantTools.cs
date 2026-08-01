@@ -9,6 +9,13 @@ namespace Lorekeeper.Publish;
 
 public sealed record PublishAssistantContext(Guid ProjectId);
 
+public interface IPublishAssistantTools
+{
+    Task<IList<AITool>> BuildAsync(
+        PublishAssistantContext context,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed class PublishAssistantTools(
     IPublicationEditionService editions,
     IPublishService publishing,
@@ -18,7 +25,7 @@ public sealed class PublishAssistantTools(
     IPublicationPackageService packages,
     IManuscriptStyleService manuscriptStyles,
     IProjectImageService projectImages,
-    IDatabaseMigrationRecoveryService recovery)
+    IDatabaseMigrationRecoveryService recovery) : IPublishAssistantTools
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -149,6 +156,10 @@ public sealed class PublishAssistantTools(
                 method: (Guid editionId) => ListRendersAsync(context, editionId),
                 name: "list_publication_renders",
                 description: "Inspect render status, progress, diagnostics, immutable artifacts, hashes, and stale state."),
+            AIFunctionFactory.Create(
+                method: (Guid editionId) => ListDownloadsAsync(context, editionId),
+                name: "list_publication_downloads",
+                description: "List generated publication artifacts with freshness, hashes, and safe in-app view/download URLs. Never claim a file was downloaded; the user must open a returned URL."),
             AIFunctionFactory.Create(
                 method: (Guid editionId, Guid jobId) => CancelRenderAsync(context, editionId, jobId),
                 name: "cancel_publication_render",
@@ -365,6 +376,11 @@ public sealed class PublishAssistantTools(
     private async Task<string> ListRendersAsync(PublishAssistantContext context, Guid editionId) =>
         Serialize(await renders.ListAsync(context.ProjectId, editionId));
 
+    private async Task<string> ListDownloadsAsync(PublishAssistantContext context, Guid editionId) =>
+        Serialize((await renders.ListArtifactsAsync(context.ProjectId, editionId))
+            .Where(artifact => artifact.Kind != PublicationArtifactKind.ProofRecord)
+            .Select(artifact => DownloadView(context, artifact)));
+
     private async Task<string> CancelRenderAsync(PublishAssistantContext context, Guid editionId, Guid jobId) =>
         Serialize(await renders.CancelAsync(context.ProjectId, editionId, jobId));
 
@@ -407,8 +423,33 @@ public sealed class PublishAssistantTools(
         });
     }
 
-    private async Task<string> BuildPackageAsync(PublishAssistantContext context, Guid editionId) =>
-        Serialize(await packages.BuildAsync(context.ProjectId, editionId));
+    private async Task<string> BuildPackageAsync(PublishAssistantContext context, Guid editionId)
+    {
+        var result = await packages.BuildAsync(context.ProjectId, editionId);
+        return Serialize(new
+        {
+            result.Preflight,
+            Artifacts = result.Artifacts.Select(artifact => DownloadView(context, artifact)),
+        });
+    }
+
+    internal static object DownloadView(PublishAssistantContext context, PublicationArtifactView artifact) => new
+    {
+        artifact.Id,
+        artifact.Kind,
+        artifact.FileName,
+        artifact.MediaType,
+        artifact.Sha256,
+        artifact.ByteLength,
+        artifact.PageCount,
+        artifact.SourceFingerprint,
+        artifact.RendererVersion,
+        artifact.ProfileId,
+        artifact.CreatedAt,
+        artifact.IsStale,
+        ViewUrl = $"/projects/{context.ProjectId:N}/publish/artifacts/{artifact.Id:N}",
+        DownloadUrl = $"/projects/{context.ProjectId:N}/publish/artifacts/{artifact.Id:N}/download",
+    };
 
     private static string Serialize<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
 }

@@ -327,25 +327,6 @@ public sealed class PublishService(
         };
     }
 
-    public async Task<PublishDocument> GetPrintDocumentAsync(
-        Guid projectId,
-        Guid editionId,
-        CancellationToken cancellationToken = default)
-    {
-        var edition = await GetEditionAsync(projectId, editionId, cancellationToken);
-        EnsureFormatAllowsPrint(edition.Format);
-        return await GetDocumentAsync(projectId, editionId, cancellationToken);
-    }
-
-    internal static void EnsureFormatAllowsPrint(PublicationEditionFormat format)
-    {
-        if (format != PublicationEditionFormat.Paperback)
-        {
-            throw new InvalidOperationException(
-                "Print/PDF output is available only from a paperback publication edition so digital ISBN and product metadata cannot leak into a print product.");
-        }
-    }
-
     private async Task<PublishDocument> AttachRenderedPicturePagesAsync(
         PublishDocument document,
         CancellationToken cancellationToken)

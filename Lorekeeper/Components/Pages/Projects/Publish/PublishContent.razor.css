@@ -8,9 +8,11 @@
     --publish-success: var(--lk-success);
     box-sizing: border-box;
     color: var(--publish-ink);
+    display: flex;
+    flex-direction: column;
     height: 100%;
     min-height: 0;
-    overflow-y: auto;
+    overflow: hidden;
     padding: 0.25rem 0.25rem 3rem;
     scrollbar-gutter: stable;
 }
@@ -129,14 +131,37 @@
 .publish-layout {
     align-items: start;
     display: grid;
+    flex: 1 1 auto;
     gap: 1rem;
-    grid-template-columns: minmax(0, 1fr) minmax(17.5rem, 21rem);
+    grid-template-columns: minmax(20rem, 27rem) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
 }
 
 .publish-main {
     display: grid;
     gap: 0.875rem;
+    grid-column: 2;
+    grid-row: 2;
     min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 0.2rem;
+}
+
+.publish-assistant-pane {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.publish-empty-workspace {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    margin: 0;
+    max-width: none;
 }
 
 .publish-card,
@@ -695,9 +720,9 @@
 }
 
 .publish-sidebar {
+    grid-column: 2;
+    grid-row: 1;
     min-width: 0;
-    position: sticky;
-    top: 0.25rem;
 }
 
 .publish-summary-card {
@@ -831,6 +856,31 @@
     text-align: center;
 }
 
+.publish-pdf-action-state,
+.publish-pdf-action-error {
+    border: 1px solid var(--publish-line);
+    border-radius: 0.5rem;
+    display: grid;
+    font-size: 0.72rem;
+    gap: 0.3rem;
+    padding: 0.65rem;
+}
+
+.publish-pdf-action-state span,
+.publish-pdf-action-error span {
+    color: var(--publish-muted);
+}
+
+.publish-pdf-action-state .btn {
+    justify-self: start;
+}
+
+.publish-pdf-action-error {
+    background: #fff1f2;
+    border-color: #fecdd3;
+    color: #9f1239;
+}
+
 .publish-modal-backdrop {
     background: rgb(15 23 42 / 55%);
     inset: 0;
@@ -887,43 +937,6 @@
     min-height: 0;
     overflow-y: auto;
     padding: 1rem 1.15rem;
-}
-
-.publish-print-modal-shell {
-    align-items: stretch;
-}
-
-.publish-print-modal {
-    height: calc(100dvh - 2rem);
-    max-height: none;
-    max-width: none;
-    width: calc(100vw - 2rem);
-}
-
-.publish-print-modal-body {
-    background: #f5f6f8;
-    flex: 1 1 auto;
-    min-height: 0;
-    position: relative;
-}
-
-.publish-print-frame {
-    border: 0;
-    display: block;
-    height: 100%;
-    width: 100%;
-}
-
-.publish-print-loading {
-    align-items: center;
-    background: rgb(245 246 248 / 94%);
-    color: var(--publish-muted);
-    display: flex;
-    gap: 0.55rem;
-    inset: 0;
-    justify-content: center;
-    position: absolute;
-    z-index: 1;
 }
 
 .publish-modal-footer {
@@ -1037,7 +1050,7 @@
 
 @media (max-width: 1100px) {
     .publish-layout {
-        grid-template-columns: minmax(0, 1fr) minmax(16rem, 18rem);
+        grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
     }
 
     .publish-option-groups {
@@ -1050,6 +1063,11 @@
 }
 
 @media (max-width: 850px) {
+    .publish-workspace {
+        height: auto;
+        overflow-y: auto;
+    }
+
     .publish-header {
         align-items: flex-start;
         flex-direction: column;
@@ -1057,10 +1075,31 @@
 
     .publish-layout {
         grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto;
+    }
+
+    .publish-assistant-pane,
+    .publish-empty-workspace,
+    .publish-main,
+    .publish-sidebar {
+        grid-column: 1;
+        grid-row: auto;
+        position: static;
+    }
+
+    .publish-assistant-pane {
+        height: min(42rem, 75vh);
+        order: 1;
     }
 
     .publish-sidebar {
-        position: static;
+        order: 2;
+    }
+
+    .publish-empty-workspace,
+    .publish-main {
+        overflow: visible;
+        order: 3;
     }
 
     .publish-summary-card {
@@ -1157,16 +1196,6 @@
         max-height: calc(100vh - 1rem);
     }
 
-    .publish-print-modal-shell {
-        align-items: stretch;
-    }
-
-    .publish-print-modal {
-        border-radius: 0;
-        height: 100dvh;
-        max-height: 100dvh;
-        width: 100vw;
-    }
 }
 
 @media (prefers-reduced-motion: reduce) {

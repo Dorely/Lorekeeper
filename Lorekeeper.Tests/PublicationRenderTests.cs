@@ -324,12 +324,6 @@ public sealed class PublicationRenderTests
             throw new InvalidOperationException("The blocking fixture should be cancelled.");
         }
 
-        public Task<PublishDocument> GetPrintDocumentAsync(
-            Guid projectId,
-            Guid editionId,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
         public Task<ProjectExportFile> ExportAsync(
             Guid projectId,
             Guid editionId,

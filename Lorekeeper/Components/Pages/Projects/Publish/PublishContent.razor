@@ -10,7 +10,6 @@
 @inject IPublicationCoverService CoverDesigns
 @inject IPublicationPackageService Packages
 @inject IManuscriptStyleService ManuscriptStyles
-@inject IPublishAssistantService PublishAssistant
 @inject IProjectImageService ProjectImages
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -31,27 +30,38 @@ else if (_loading)
 }
 else if (_editionSummaries.Count == 0)
 {
-    <section class="publish-load-error" aria-labelledby="edition-empty-title">
-        <div>
-            <h2 id="edition-empty-title">Create the first publication edition</h2>
-            <p>An edition owns its format, vendor, ISBN, included content, matter, styles, cover, and artifacts.</p>
+    <main class="publish-workspace publish-workspace-empty" aria-labelledby="edition-empty-title">
+        <div class="publish-layout">
+            <aside class="publish-assistant-pane" aria-label="Publish assistant">
+                <PublishChatPanel ProjectId="Project.Id"
+                                  SelectedEditionId="_selectedEditionId"
+                                  OnBeforeSend="PrepareAssistantTurnAsync"
+                                  OnWorkspaceMutated="HandleAssistantMutationAsync"
+                                  OnRunningChanged="HandleAssistantRunningChanged" />
+            </aside>
+            <section class="publish-load-error publish-empty-workspace" aria-labelledby="edition-empty-title">
+                <div>
+                    <h2 id="edition-empty-title">Create the first publication edition</h2>
+                    <p>Ask the assistant to plan and create it with you, or start one directly. An edition owns its format, vendor, ISBN, included content, matter, styles, cover, and artifacts.</p>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <input class="form-control" aria-label="Edition name" placeholder="Paperback" disabled="@_assistantRunning"
+                           @bind="_newEditionName" @bind:event="oninput" />
+                    <select class="form-select" aria-label="Edition format" disabled="@_assistantRunning" @bind="_newEditionFormat">
+                        <option value="@PublicationEditionFormat.Paperback">Paperback</option>
+                        <option value="@PublicationEditionFormat.Epub">EPUB</option>
+                    </select>
+                    <button type="button" class="btn btn-primary" disabled="@(_creatingEdition || _assistantRunning)" @onclick="CreateEditionAsync">
+                        @(_creatingEdition ? "Creating..." : "Create edition")
+                    </button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_editionActionError))
+                {
+                    <p class="text-danger" role="alert">@_editionActionError</p>
+                }
+            </section>
         </div>
-        <div class="d-flex gap-2 flex-wrap">
-            <input class="form-control" aria-label="Edition name" placeholder="Paperback"
-                   @bind="_newEditionName" @bind:event="oninput" />
-            <select class="form-select" aria-label="Edition format" @bind="_newEditionFormat">
-                <option value="@PublicationEditionFormat.Paperback">Paperback</option>
-                <option value="@PublicationEditionFormat.Epub">EPUB</option>
-            </select>
-            <button type="button" class="btn btn-primary" disabled="@_creatingEdition" @onclick="CreateEditionAsync">
-                @(_creatingEdition ? "Creating..." : "Create edition")
-            </button>
-        </div>
-        @if (!string.IsNullOrWhiteSpace(_editionActionError))
-        {
-            <p class="text-danger" role="alert">@_editionActionError</p>
-        }
-    </section>
+    </main>
 }
 else if (_workspace is null)
 {
@@ -73,7 +83,7 @@ else
                 <p>Choose what belongs in the book, review its presentation, and export when everything is ready.</p>
                 <label class="publish-field">
                     <span>Publication edition</span>
-                    <select class="form-select" value="@_selectedEditionId" @onchange="SelectEditionAsync">
+                    <select class="form-select" value="@_selectedEditionId" disabled="@_assistantRunning" @onchange="SelectEditionAsync">
                         @foreach (var edition in _editionSummaries)
                         {
                             <option value="@edition.Id">@edition.Name · @edition.Format · @edition.Vendor@(edition.IsDefault ? " · default" : null)</option>
@@ -118,29 +128,21 @@ else
         </header>
 
         <div class="publish-layout">
+            <aside class="publish-assistant-pane" aria-label="Publish assistant">
+                <PublishChatPanel ProjectId="Project.Id"
+                                  SelectedEditionId="_selectedEditionId"
+                                  OnBeforeSend="PrepareAssistantTurnAsync"
+                                  OnWorkspaceMutated="HandleAssistantMutationAsync"
+                                  OnRunningChanged="HandleAssistantRunningChanged" />
+            </aside>
             <div class="publish-main">
-                <section class="publish-card" aria-labelledby="publish-assistant-title">
-                    <div class="publish-card-heading">
-                        <div><span class="publish-step">AI</span><h2 id="publish-assistant-title">Publish assistant</h2></div>
-                        <p>The assistant uses the same revision-aware edition services as these controls.</p>
-                    </div>
-                    <textarea class="form-control" rows="3" @bind="_assistantPrompt"
-                              placeholder="Compare this edition, update its settings, or inspect its matter and audit history."></textarea>
-                    <button class="btn btn-sm btn-primary mt-2" disabled="@_assistantBusy" @onclick="AskPublishAssistantAsync">
-                        @(_assistantBusy ? "Working…" : "Ask Publish assistant")
-                    </button>
-                    @if (!string.IsNullOrWhiteSpace(_assistantResponse))
-                    {
-                        <div class="alert alert-secondary mt-2 mb-0">@_assistantResponse</div>
-                    }
-                </section>
                 @if (IsArchivedEdition)
                 {
                     <div class="alert alert-secondary" role="status">
                         This edition is archived and read-only. Existing exports and artifacts remain available; clone it to make changes.
                     </div>
                 }
-                <fieldset class="publish-readonly-boundary" disabled="@IsArchivedEdition">
+                <fieldset class="publish-readonly-boundary" disabled="@(IsArchivedEdition || _assistantRunning)">
                 <section class="publish-card" aria-labelledby="edition-settings-title">
                     <div class="publish-card-heading">
                         <div>
@@ -544,7 +546,7 @@ else
                             <legend>Picture Page spreads</legend>
                             <div class="publish-spread-options">
                                 <label class="publish-field">
-                                    <span>Print / PDF double spreads</span>
+                                    <span>Paperback PDF double spreads</span>
                                     <select class="form-select" @bind="_editionDraft.PrintPicturePageSpreadMode" @bind:after="ScheduleEditionAutosave">
                                         <option value="@PrintPicturePageSpreadMode.WholeSpread">Whole spread unrotated on one normal page</option>
                                         <option value="@PrintPicturePageSpreadMode.SidewaysWholeSpread">Whole spread rotated on one tall page</option>
@@ -572,14 +574,8 @@ else
                             <h2 id="press-preview-title">Typeset PDF preview</h2>
                             <p>Render immutable interior and cover PDFs from the current edition. The embedded PDF viewer provides thumbnails, zoom, and text search.</p>
                         </div>
-                        <div class="d-flex gap-2">
-                            <button type="button" class="btn btn-sm btn-outline-secondary"
-                                    disabled="@_renderBusy" @onclick="RefreshRendersAsync">Refresh</button>
-                            <button type="button" class="btn btn-sm btn-primary"
-                                    disabled="@(!CanRenderPdf)" @onclick="RequestRenderAsync">
-                                @(_renderBusy ? "Working..." : "Render PDFs")
-                            </button>
-                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                disabled="@_renderBusy" @onclick="RefreshRendersAsync">Refresh</button>
                     </div>
                     @if (!string.IsNullOrWhiteSpace(_renderError))
                     {
@@ -1123,19 +1119,65 @@ else
                             <span>Plain text</span>
                             <small>@ExportButtonDetail(PublishExportFormat.PlainText, "Text only")</small>
                         </button>
-                        <button type="button" class="btn btn-outline-secondary" disabled="@(!CanPrint)"
-                                @ref="_publishPreviewButtonElement" @onclick="() => OpenPrintAsync(autoprint: false)">
-                            <span>Publish preview</span>
-                            <small>@(_printing ? "Opening…" : "Review the finished layout")</small>
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" disabled="@(!CanPrint)"
-                                @ref="_printPdfButtonElement" @onclick="() => OpenPrintAsync(autoprint: true)">
-                            <span>Print / PDF</span>
-                            <small>@(_printing ? "Opening…" : "Browser print layout")</small>
-                        </button>
+                        @if (_editionDraft.Format == PublicationEditionFormat.Paperback)
+                        {
+                            @if (PdfActions.Kind == PublicationPdfActionKind.Active && PdfActions.Job is { } activeRender)
+                            {
+                                <div class="publish-pdf-action-state" aria-live="polite">
+                                    <strong>Generating PDFs</strong>
+                                    <span>@activeRender.ProgressPercent% · @activeRender.ProgressMessage</span>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_renderBusy || _assistantRunning)"
+                                            @onclick="() => CancelRenderAsync(activeRender.Id)">Cancel</button>
+                                </div>
+                            }
+                            else if (PdfActions.Kind == PublicationPdfActionKind.Current && PdfActions.Interior is { } interiorPdf)
+                            {
+                                <a class="btn btn-outline-secondary" href="@ArtifactDownloadUrl(interiorPdf.Id)" download="@interiorPdf.FileName">
+                                    <span>Save interior PDF</span>
+                                    <small>@interiorPdf.FileName</small>
+                                </a>
+                                @if (PdfActions.Cover is { } coverPdf)
+                                {
+                                    <a class="btn btn-outline-secondary" href="@ArtifactDownloadUrl(coverPdf.Id)" download="@coverPdf.FileName">
+                                        <span>Save cover PDF</span>
+                                        <small>@coverPdf.FileName</small>
+                                    </a>
+                                }
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-outline-secondary" disabled="@(!CanRenderPdf)" @onclick="RequestRenderAsync">
+                                    <span>@(PdfActions.Kind switch
+                                    {
+                                        PublicationPdfActionKind.Generate => "Generate PDFs",
+                                        PublicationPdfActionKind.Failed => "Retry",
+                                        _ => "Regenerate PDFs",
+                                    })</span>
+                                    <small>@(PdfActions.Kind == PublicationPdfActionKind.Failed ? "Previous generation failed · Retry" : "Create immutable Preview artifacts")</small>
+                                </button>
+                                @if (PdfActions.Kind == PublicationPdfActionKind.Failed && PdfActions.Job is { } failedRender)
+                                {
+                                    <div class="publish-pdf-action-error" role="alert">
+                                        <strong>PDF generation failed.</strong>
+                                        <span>@failedRender.ProgressMessage</span>
+                                        @foreach (var diagnostic in failedRender.Diagnostics)
+                                        {
+                                            <span><code>@diagnostic.Code</code> @diagnostic.Message</span>
+                                        }
+                                    </div>
+                                }
+                            }
+                        }
+                        @foreach (var artifact in _packageArtifacts.Where(IsSummaryPackageArtifact))
+                        {
+                            <a class="btn btn-outline-secondary" href="@ArtifactDownloadUrl(artifact.Id)" download="@artifact.FileName">
+                                <span>Save @SummaryArtifactLabel(artifact.Kind)</span>
+                                <small>@artifact.FileName</small>
+                            </a>
+                        }
                     </div>
 
-                    @if (!CanExport && !_exportingFormat.HasValue && !_printing)
+                    @if (!CanExport && !_exportingFormat.HasValue)
                     {
                         <p class="publish-export-note">@ExportBlockedMessage</p>
                     }
@@ -1276,34 +1318,6 @@ else
         </div>
     }
 
-    @if (_printDialogOpen)
-    {
-        <div class="publish-modal-backdrop" aria-hidden="true"></div>
-        <div class="publish-modal-shell publish-print-modal-shell" role="presentation" @onkeydown="HandlePrintDialogKeyDown">
-            <section class="publish-modal publish-print-modal" role="dialog" aria-modal="true"
-                     aria-labelledby="print-dialog-title" tabindex="-1" @ref="_printDialogElement">
-                <header class="publish-modal-header">
-                    <div>
-                        <span class="publish-eyebrow">Finished layout</span>
-                        <h2 id="print-dialog-title">Publish preview</h2>
-                    </div>
-                    <button type="button" class="btn-close" aria-label="Close publish preview" @onclick="ClosePrintDialogAsync"></button>
-                </header>
-
-                <div class="publish-print-modal-body" aria-busy="@(_printDialogLoading ? "true" : "false")">
-                    @if (_printDialogLoading)
-                    {
-                        <div class="publish-print-loading" role="status">
-                            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-                            <span>Preparing publish preview...</span>
-                        </div>
-                    }
-                    <iframe class="publish-print-frame" src="@_printDialogUrl" title="Publish preview"
-                            @onload="PrintDialogLoaded"></iframe>
-                </div>
-            </section>
-        </div>
-    }
 }
 
 @code {
@@ -1334,16 +1348,14 @@ else
     private bool _coverBusy;
     private bool _outlineBusy;
     private bool _placementDialogOpen;
-    private bool _printDialogOpen;
-    private bool _printDialogLoading;
     private bool _imagesLoading;
     private bool _placementSaving;
     private bool _placementActionBusy;
-    private bool _printing;
     private bool _disposing;
     private bool _creatingEdition;
-    private bool _assistantBusy;
+    private bool _assistantRunning;
     private bool _renderBusy;
+    private bool _renderStateUncertain;
     private bool _coverDesignSaving;
     private bool _packageBusy;
     private string? _loadError;
@@ -1370,12 +1382,9 @@ else
     private double _coverFocalYPercent = 50;
     private string _newEditionName = "Paperback";
     private PublicationEditionFormat _newEditionFormat = PublicationEditionFormat.Paperback;
-    private string _printDialogUrl = string.Empty;
     private string _placementTargetKey = string.Empty;
     private string _placementCaption = string.Empty;
     private string _imageSearch = string.Empty;
-    private string _assistantPrompt = string.Empty;
-    private string _assistantResponse = string.Empty;
     private string _styleMappingStyleId = string.Empty;
     private double? _styleFontSize;
     private double? _styleLineHeight;
@@ -1400,10 +1409,6 @@ else
     private PublicationImagePlacementKind _placementKind = PublicationImagePlacementKind.ChapterOpening;
     private PublishExportFormat? _exportingFormat;
     private ElementReference _placementDialogElement;
-    private ElementReference _printDialogElement;
-    private ElementReference _publishPreviewButtonElement;
-    private ElementReference _printPdfButtonElement;
-    private ElementReference _printDialogReturnFocusElement;
     private IJSObjectReference? _downloadModule;
     private IJSObjectReference? _autoSizer;
     private CancellationTokenSource? _editionDraftAutosaveCts;
@@ -1414,7 +1419,6 @@ else
     private SaveState _editionSaveState = SaveState.Idle;
     private DateTime? _editionDraftLastSavedAt;
     private bool _focusPlacementDialog;
-    private bool _focusPrintDialog;
 
     private bool EditionSaveInProgress => _editionSaveState == SaveState.Saving;
     private bool HasPendingEditionSave => _editionSavedVersion != _editionDraftVersion;
@@ -1427,27 +1431,26 @@ else
         && ValidPlacementKinds.Contains(_placementKind);
     private bool HasPlacementTargets => PlacementTargets.Count > 0;
     private bool IsArchivedEdition => _workspace?.Edition.Status == PublicationEditionStatus.Archived;
-    private bool HasBusyMutation => _coverBusy || _outlineBusy || _placementActionBusy || _placementSaving;
+    private bool HasBusyMutation => _assistantRunning || _coverBusy || _outlineBusy || _placementActionBusy || _placementSaving;
     private bool CanExport => _downloadModule is not null
         && _exportingFormat is null
-        && !_printing
         && !HasBusyMutation
         && _editionSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
         && !HasPendingEditionSave;
     private bool CanExportEpub => CanExport
         && _editionDraft.Format == PublicationEditionFormat.Epub;
-    private bool CanPrint => _exportingFormat is null
-        && !_printing
-        && !HasBusyMutation
-        && _editionDraft.Format == PublicationEditionFormat.Paperback
-        && _editionSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
-        && !HasPendingEditionSave;
     private bool CanRenderPdf => !_renderBusy
+        && !HasBusyMutation
         && _workspace?.Edition.Format == PublicationEditionFormat.Paperback
         && IncludedChapterCount > 0
         && !HasPendingEditionSave
         && _editionSaveState is not SaveState.Dirty and not SaveState.Saving and not SaveState.SaveFailed
         && _renderJobs.All(job => job.Status is not PublicationRenderStatus.Queued and not PublicationRenderStatus.Rendering);
+    private PublicationPdfActionState PdfActions => PublicationPdfActionState.Resolve(
+        _renderJobs,
+        _renderStateUncertain
+            || HasPendingEditionSave
+            || _editionSaveState is SaveState.Dirty or SaveState.Saving or SaveState.SaveFailed);
 
     private string DisplayTitle => string.IsNullOrWhiteSpace(_editionDraft.TitleOverride)
         ? _workspace?.Edition.ProjectName ?? Project?.Name ?? "Untitled book"
@@ -1587,16 +1590,6 @@ else
         _ => "Export tools are getting ready.",
     };
 
-    private string PrintUrl(bool autoprint)
-    {
-        if (Project is null || _selectedEditionId is not Guid editionId) return "#";
-        var baseUrl =
-            $"/projects/{Uri.EscapeDataString(Project.Slug)}/publish/{editionId:N}/preview";
-        return autoprint
-            ? $"{baseUrl}?embedded=true&autoprint=true"
-            : $"{baseUrl}?embedded=true";
-    }
-
     private string ImagesUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/images";
     private string OutlineUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/outline";
     private string EditorRootUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/editor";
@@ -1639,39 +1632,38 @@ else
             catch (JSDisconnectedException) { }
         }
 
-        if (_focusPrintDialog)
-        {
-            _focusPrintDialog = false;
-            try { await _printDialogElement.FocusAsync(); }
-            catch (InvalidOperationException) { }
-            catch (JSDisconnectedException) { }
-        }
     }
 
     private Task RetryLoadAsync() => LoadWorkspaceAsync(resetProfile: true);
 
-    private async Task AskPublishAssistantAsync()
+    private void HandleAssistantRunningChanged(bool running) => _assistantRunning = running;
+
+    private async Task PrepareAssistantTurnAsync()
     {
-        if (Project is null || _selectedEditionId is not Guid editionId || _assistantBusy) return;
-        _assistantBusy = true;
-        _assistantResponse = string.Empty;
-        try
+        if (_workspace is null) return;
+        await FlushEditionSaveAsync();
+        if (_editionSaveState == SaveState.SaveFailed || HasPendingEditionSave)
+            throw new InvalidOperationException("Your latest publishing settings could not be saved. Retry the save before asking the assistant to work with this edition.");
+    }
+
+    private async Task HandleAssistantMutationAsync(PublishWorkspaceMutated mutation)
+    {
+        if (Project is null) return;
+        if (mutation.SelectEdition && mutation.EditionId is Guid selectedEditionId)
         {
-            await FlushEditionSaveAsync();
-            _assistantResponse = await PublishAssistant.AskAsync(
-                Project.Id,
-                editionId,
-                _assistantPrompt);
-            await RefreshWorkspaceAsync();
+            StopRenderPolling();
+            _selectedEditionId = selectedEditionId;
         }
-        catch (Exception exception)
-        {
-            _assistantResponse = exception.Message;
-        }
-        finally
-        {
-            _assistantBusy = false;
-        }
+        await LoadWorkspaceAsync(resetProfile: true);
+        _liveMessage = mutation.SelectEdition
+            ? "The assistant created or cloned and selected a publication edition."
+            : mutation.Kind switch
+            {
+                PublishWorkspaceMutationKind.Render => "The assistant changed the PDF render queue; live progress is connected.",
+                PublishWorkspaceMutationKind.Preflight => "The assistant refreshed publication preflight.",
+                PublishWorkspaceMutationKind.Package => "The assistant built a publication package and refreshed its downloadable artifacts.",
+                _ => "The publishing workspace was refreshed after the assistant's changes.",
+            };
     }
 
     private async Task CreateEditionAsync()
@@ -1815,7 +1807,9 @@ else
             _namedStyles = await ManuscriptStyles.ListAsync(Project.Id);
             _editionAudit = await Editions.GetAuditAsync(Project.Id, _selectedEditionId.Value);
             _renderJobs = await Renders.ListAsync(Project.Id, _selectedEditionId.Value);
+            _renderStateUncertain = false;
             await LoadCoverDesignAsync(Project.Id, _selectedEditionId.Value);
+            await LoadPublicationOutputStateAsync(Project.Id, _selectedEditionId.Value);
             _placements = OrderPlacementViews(workspace.Placements);
             if (resetProfile)
             {
@@ -1828,6 +1822,8 @@ else
                 _editionDraftError = null;
             }
             PrunePlacementDraft();
+            if (_renderJobs.Any(job => job.Status is PublicationRenderStatus.Queued or PublicationRenderStatus.Rendering))
+                StartRenderPolling(Project.Id, _selectedEditionId.Value);
         }
         catch (Exception ex)
         {
@@ -1849,6 +1845,7 @@ else
         _workspace = workspace;
         _editionAudit = await Editions.GetAuditAsync(Project.Id, editionId);
         _renderJobs = await Renders.ListAsync(Project.Id, editionId);
+        _renderStateUncertain = false;
         await LoadCoverDesignAsync(Project.Id, editionId);
         _editionDraft.Revision = workspace.Edition.Revision;
         _editionSummaries = workspace.Editions;
@@ -1858,8 +1855,49 @@ else
         {
             InvalidatePackageState();
         }
+        await LoadPublicationOutputStateAsync(Project.Id, editionId);
         PrunePlacementDraft();
+        if (_renderJobs.Any(job => job.Status is PublicationRenderStatus.Queued or PublicationRenderStatus.Rendering))
+            StartRenderPolling(Project.Id, editionId);
     }
+
+    private async Task LoadPublicationOutputStateAsync(Guid projectId, Guid editionId)
+    {
+        _packageError = null;
+        try
+        {
+            _preflight = await Packages.PreflightAsync(projectId, editionId);
+        }
+        catch (Exception exception)
+        {
+            _preflight = null;
+            _packageError = exception.Message;
+        }
+
+        try
+        {
+            var packageIdentity = _preflight?.PackageIdentity;
+            _packageArtifacts = (await Renders.ListArtifactsAsync(projectId, editionId))
+                .Where(artifact => !artifact.IsStale
+                    && IsPackageArtifact(artifact.Kind)
+                    && string.Equals(artifact.ProfileId, packageIdentity, StringComparison.Ordinal))
+                .GroupBy(artifact => artifact.Kind)
+                .Select(group => group.First())
+                .ToList();
+        }
+        catch (Exception exception)
+        {
+            _packageArtifacts = [];
+            _packageError ??= exception.Message;
+        }
+    }
+
+    private static bool IsPackageArtifact(PublicationArtifactKind kind) => kind is
+        PublicationArtifactKind.Epub
+        or PublicationArtifactKind.FrontCoverImage
+        or PublicationArtifactKind.Manifest
+        or PublicationArtifactKind.PreflightReport
+        or PublicationArtifactKind.PublicationPackage;
 
     private async Task LoadCoverDesignAsync(Guid projectId, Guid editionId)
     {
@@ -2056,6 +2094,7 @@ else
             await FlushEditionSaveAsync();
             await Renders.RequestAsync(Project.Id, editionId);
             _renderJobs = await Renders.ListAsync(Project.Id, editionId);
+            _renderStateUncertain = false;
             InvalidatePackageState();
             StartRenderPolling(Project.Id, editionId);
             _liveMessage = "PDF render queued.";
@@ -2078,6 +2117,7 @@ else
         {
             var priorRenderIdentity = CurrentRenderIdentity(_renderJobs);
             _renderJobs = await Renders.ListAsync(Project.Id, editionId);
+            _renderStateUncertain = false;
             if (!string.Equals(priorRenderIdentity, CurrentRenderIdentity(_renderJobs), StringComparison.Ordinal))
                 InvalidatePackageState();
         }
@@ -2099,6 +2139,7 @@ else
         {
             await Renders.CancelAsync(Project.Id, editionId, jobId);
             _renderJobs = await Renders.ListAsync(Project.Id, editionId);
+            _renderStateUncertain = false;
         }
         catch (Exception exception)
         {
@@ -2149,6 +2190,7 @@ else
                     {
                         var priorRenderIdentity = CurrentRenderIdentity(_renderJobs);
                         _renderJobs = jobs;
+                        _renderStateUncertain = false;
                         if (!string.Equals(priorRenderIdentity, CurrentRenderIdentity(jobs), StringComparison.Ordinal))
                             InvalidatePackageState();
                         StateHasChanged();
@@ -2246,6 +2288,16 @@ else
                     _workspace = _workspace with { Edition = updated };
                 InvalidatePackageState();
                 _editionSummaries = await Editions.ListAsync(targetProjectId);
+                try
+                {
+                    _renderJobs = await Renders.ListAsync(targetProjectId, editionId);
+                    _renderStateUncertain = false;
+                }
+                catch (Exception exception)
+                {
+                    _renderError = $"Publishing settings were saved, but PDF status could not be refreshed. {exception.Message}";
+                    _renderStateUncertain = true;
+                }
                 _editionSavedVersion = versionToSave;
                 _editionDraftLastSavedAt = DateTime.Now;
                 _editionSaveState = _editionSavedVersion == _editionDraftVersion ? SaveState.Saved : SaveState.Dirty;
@@ -2986,61 +3038,21 @@ else
         }
     }
 
-    private async Task OpenPrintAsync(bool autoprint)
-    {
-        if (!CanPrint) return;
-        _printing = true;
-        _exportError = null;
-        try
-        {
-            await FlushEditionSaveAsync();
-            if (_editionSaveState == SaveState.SaveFailed || HasPendingEditionSave)
-                throw new InvalidOperationException("Your latest publishing settings could not be saved. Retry the save before opening the publish view.");
-            _printDialogUrl = PrintUrl(autoprint);
-            _printDialogLoading = true;
-            _printDialogOpen = true;
-            _focusPrintDialog = true;
-            _printDialogReturnFocusElement = autoprint ? _printPdfButtonElement : _publishPreviewButtonElement;
-            _liveMessage = autoprint
-                ? "Print preview opened. The print dialog will open when the layout is ready."
-                : "Publish preview opened.";
-        }
-        catch (Exception ex)
-        {
-            _exportError = ex.Message;
-            _liveMessage = $"Publish view could not be opened. {ex.Message}";
-        }
-        finally
-        {
-            _printing = false;
-        }
-    }
-
-    private void PrintDialogLoaded()
-    {
-        _printDialogLoading = false;
-        _liveMessage = "Publish preview is ready.";
-    }
-
-    private async Task ClosePrintDialogAsync()
-    {
-        _printDialogOpen = false;
-        _printDialogLoading = false;
-        _printDialogUrl = string.Empty;
-        _liveMessage = "Publish preview closed.";
-        await InvokeAsync(StateHasChanged);
-        try { await _printDialogReturnFocusElement.FocusAsync(); }
-        catch (InvalidOperationException) { }
-        catch (JSDisconnectedException) { }
-    }
-
-    private async Task HandlePrintDialogKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Escape") await ClosePrintDialogAsync();
-    }
-
     private string ExportButtonDetail(PublishExportFormat format, string defaultText) =>
         _exportingFormat == format ? "Exporting…" : defaultText;
+
+    private static bool IsSummaryPackageArtifact(PublicationArtifactView artifact) =>
+        artifact.Kind is PublicationArtifactKind.PublicationPackage
+            or PublicationArtifactKind.Manifest
+            or PublicationArtifactKind.PreflightReport;
+
+    private static string SummaryArtifactLabel(PublicationArtifactKind kind) => kind switch
+    {
+        PublicationArtifactKind.PublicationPackage => "publication package",
+        PublicationArtifactKind.Manifest => "package manifest",
+        PublicationArtifactKind.PreflightReport => "preflight report",
+        _ => "artifact",
+    };
 
     private void PrunePlacementDraft()
     {

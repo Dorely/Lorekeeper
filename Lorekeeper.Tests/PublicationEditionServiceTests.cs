@@ -73,6 +73,41 @@ public sealed class PublicationEditionServiceTests
     }
 
     [Fact]
+    public async Task StaleEditionRevisionFailsHonestlyAndRereadCanRetryWithoutLosingIntent()
+    {
+        await WithServiceAsync(async (_, service, project) =>
+        {
+            var original = await service.CreateAsync(
+                project.Id,
+                new PublicationEditionCreate("Paperback", PublicationEditionFormat.Paperback));
+            var firstUpdate = Update(original, string.Empty, original.Vendor, original.VendorProfileVersion) with
+            {
+                Author = "First author",
+            };
+            var current = await service.UpdateAsync(project.Id, original.Id, firstUpdate);
+
+            var staleUpdate = Update(original, string.Empty, original.Vendor, original.VendorProfileVersion) with
+            {
+                Publisher = "Intended publisher",
+            };
+            var conflict = await Assert.ThrowsAsync<DbUpdateConcurrencyException>(
+                () => service.UpdateAsync(project.Id, original.Id, staleUpdate));
+            Assert.Contains("revision", conflict.Message, StringComparison.OrdinalIgnoreCase);
+
+            var retried = await service.UpdateAsync(
+                project.Id,
+                original.Id,
+                Update(current, current.Isbn, current.Vendor, current.VendorProfileVersion) with
+                {
+                    Publisher = "Intended publisher",
+                });
+            Assert.Equal("First author", retried.Author);
+            Assert.Equal("Intended publisher", retried.Publisher);
+            Assert.True(retried.Revision > current.Revision);
+        });
+    }
+
+    [Fact]
     public async Task ArchivedEditionsAreReadOnlyThroughServicesAndAssistantTools()
     {
         await WithServiceAsync(async (db, service, project) =>
@@ -147,16 +182,6 @@ public sealed class PublicationEditionServiceTests
             Assert.Empty(await db.PublicationMatter.Where(item => item.EditionId == edition.Id).ToListAsync());
             Assert.Empty(await db.PublicationCoverDesigns.Where(item => item.EditionId == edition.Id).ToListAsync());
         });
-    }
-
-    [Fact]
-    public void PrintOutputRejectsDigitalProductForms()
-    {
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            PublishService.EnsureFormatAllowsPrint(PublicationEditionFormat.Epub));
-
-        Assert.Contains("paperback", exception.Message, StringComparison.OrdinalIgnoreCase);
-        PublishService.EnsureFormatAllowsPrint(PublicationEditionFormat.Paperback);
     }
 
     [Fact]
