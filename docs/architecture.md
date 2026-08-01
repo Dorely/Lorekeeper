@@ -129,8 +129,10 @@ revision agents persist one worker session per assigned chapter and return only
 compact IDs, statuses, summaries, and errors to the coordinating Editor turn.
 Full instructions, operations, proposals, raw responses, and transcripts remain
 in durable session detail for the review UI and never enter the parent model
-result. Tool contracts, prompts, persistence, review UI, and approval behavior
-must evolve together.
+result. The coordinator cancels and awaits any pending progress-channel read
+before disposing its async enumerator, so a terminal job cannot end the parent
+turn with a concurrent-disposal `NotSupportedException`. Tool contracts,
+prompts, persistence, review UI, and approval behavior must evolve together.
 
 ### Ingest, Research, and Background Work
 
@@ -434,7 +436,10 @@ constrained by the owned schema and reports removed elements. Manual edits and
 Editor/revision-worker tools share block, mark, style, validation, and
 structural-inspection semantics. Assistant operation conversion canonicalizes
 known built-in role aliases and the visible `***` scene-break representation;
-unknown custom roles still fail closed. Named style semantic roles and
+unknown custom roles still fail closed. GUID-backed stable block IDs compare by
+identity across strict compact and hyphenated representations, with exact
+ordinal matches taking precedence and ambiguous fallback matches failing
+closed; mutation results return the exact stored ID. Named style semantic roles and
 paragraph/character kinds are immutable stable keys; definitions are
 revision-checked and semantic roles are unique per project and kind.
 

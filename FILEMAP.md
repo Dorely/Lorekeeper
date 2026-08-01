@@ -58,7 +58,7 @@
 | `ChapterVisualMigrationTests.cs` | Picture Page multi-box/restart compatibility and illustrated-prose stable-anchor migration fixtures. |
 | `EditorChatStagingTests.cs` | Review-mode fixture proving sequential semantic operations share one staged manuscript overlay. |
 | `EditorManuscriptPreviewServiceTests.cs` | Direct and Review-edits fixtures for compact one-use previews, exact projected-document persistence, stale rejection, and approval payloads. |
-| `EditorRevisionAgentResultTests.cs` | Compact coordinator-result fixture proving persisted worker operations and raw payloads do not re-enter the main chat. |
+| `EditorRevisionAgentResultTests.cs` | Compact coordinator-result and pending progress-read disposal fixtures for revision-agent completion. |
 | `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
 | `ProjectExportCompatibilityTests.cs` | Current v12 manuscript/style/edition/font fixtures plus v8-v11 fail-closed import-boundary and visual-layout compatibility checks. |
 | `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trip for marked/figured manuscripts and image remapping, plus whole-import rollback on late publication conflicts. |
@@ -627,7 +627,7 @@
 | File | Description |
 |------|-------------|
 | `IEditorChatService.cs` | Project-wide editor chat service contract plus per-turn `EditorChatContext` for editor tools, opaque one-use manuscript previews, staging helpers, persisted/model-visible visuals, and pending PicturePage render-verification state. |
-| `EditorChatService.cs` | Editor adapter using one composed system prompt, persisted turn-context trace, vision-provider-agnostic page snapshots, post-PicturePage render verification, Review edits, contests, workers, and image-job progress. |
+| `EditorChatService.cs` | Editor adapter using one composed system prompt, persisted turn-context trace, vision-provider-agnostic page snapshots, post-PicturePage render verification, Review edits, contests, cancellation-safe worker progress, and image-job progress. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific paginated chapter reads and prose-only revision worker concurrency/iteration limits. |
 | `EditorChatTools.cs` | Editor tools for grounded reads, one-payload staged manuscript preview/apply, explicit canonical-reference mutations/single-subject crops, unattached structured image generation/editing, Book Brief updates, PicturePage layout, revision agents, and Contest preparation. |
 | `EditorManuscriptPreviewService.cs` | Turn-local manuscript preview/apply protocol: validates once, returns compact opaque IDs, rejects stale/reused previews, and persists or review-stages the exact projected document. |
@@ -674,7 +674,7 @@
 | `ManuscriptModels.cs` | Versioned manuscript document/block/inline/mark model, style roles, semantic operation records, snapshots, and revision-conflict contract. |
 | `ManuscriptSemanticRoles.cs` | Safe semantic-role identifier validation plus deterministic normalization for manuscript-v1 migration and v8 import. |
 | `ManuscriptCodec.cs` | Plain-text normalization/projection, deterministic migration IDs, validation, serialization, hashing, and stable-ID reparsing. |
-| `ManuscriptOperations.cs` / `ManuscriptOperationInput.cs` | Transactional insert/replace/delete/move/split/merge/type/style/mark transformations and assistant-safe DTO conversion with canonical built-in style/scene-break aliases. |
+| `ManuscriptOperations.cs` / `ManuscriptOperationInput.cs` | Transactional insert/replace/delete/move/split/merge/type/style/mark transformations with GUID-format-independent stable-ID lookup and assistant-safe DTO conversion. |
 | `ManuscriptInspection.cs` | Shared schema validation, normalization diagnostics, and structural block search used by Editor and revision-worker assistants. |
 | `ManuscriptSchemaUpgrade.cs` | Strict lossless v1-to-v2 document and nested historical-payload upgrader used by startup migration and the isolated v8 import adapter. |
 | `ManuscriptStyleService.cs` | Revision-checked named paragraph/character style ownership, validation, immutable semantic keys, and usage-safe deletion. |

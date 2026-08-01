@@ -337,6 +337,89 @@ public sealed class ManuscriptCodecTests
     }
 
     [Fact]
+    public void OperationsAcceptEquivalentGuidBlockIdFormatsAndReturnStoredIds()
+    {
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "One", revision: 3);
+        var storedBlockId = Assert.Single(source.Content).Id;
+        var alternateBlockId = Guid.Parse(storedBlockId).ToString("D");
+
+        var (result, changed) = ManuscriptOperations.Apply(
+            source,
+            [
+                new ReplaceManuscriptBlockText(alternateBlockId, "Revised"),
+                new SetManuscriptInlineMark(
+                    alternateBlockId,
+                    0,
+                    7,
+                    ManuscriptMarkType.Strong,
+                    Enabled: true),
+            ]);
+
+        Assert.Equal("Revised", ManuscriptCodec.ProjectPlainText(result));
+        Assert.Equal([storedBlockId], changed);
+    }
+
+    [Fact]
+    public void OperationsPreferAnExactBlockIdOverGuidEquivalentIds()
+    {
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "First\n\nSecond", revision: 3);
+        var sharedGuid = Guid.NewGuid();
+        var compactBlockId = sharedGuid.ToString("N");
+        var hyphenatedBlockId = sharedGuid.ToString("D");
+        source.Content[0] = source.Content[0] with { Id = compactBlockId };
+        source.Content[1] = source.Content[1] with { Id = hyphenatedBlockId };
+
+        var (result, changed) = ManuscriptOperations.Apply(
+            source,
+            [new ReplaceManuscriptBlockText(hyphenatedBlockId, "Exact")]);
+
+        Assert.Equal("First\n\nExact", ManuscriptCodec.ProjectPlainText(result));
+        Assert.Equal([hyphenatedBlockId], changed);
+    }
+
+    [Fact]
+    public void OperationsRejectAmbiguousGuidEquivalentBlockIds()
+    {
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "First\n\nSecond", revision: 3);
+        var sharedGuid = Guid.NewGuid();
+        source.Content[0] = source.Content[0] with { Id = sharedGuid.ToString("N").ToLowerInvariant() };
+        source.Content[1] = source.Content[1] with { Id = sharedGuid.ToString("D").ToLowerInvariant() };
+
+        var error = Assert.Throws<InvalidOperationException>(() => ManuscriptOperations.Apply(
+            source,
+            [new ReplaceManuscriptBlockText(sharedGuid.ToString("N").ToUpperInvariant(), "Unsafe")]
+        ));
+
+        Assert.Contains("ambiguous", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void OperationsPreserveExactSemanticsForArbitraryBlockIds()
+    {
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Original", revision: 3);
+        source.Content[0] = source.Content[0] with { Id = "chapter-ending" };
+
+        var (result, changed) = ManuscriptOperations.Apply(
+            source,
+            [new ReplaceManuscriptBlockText("chapter-ending", "Revised")]);
+
+        Assert.Equal("Revised", ManuscriptCodec.ProjectPlainText(result));
+        Assert.Equal(["chapter-ending"], changed);
+    }
+
+    [Fact]
+    public void OperationsDoNotAliasNonCanonicalGuidSpellings()
+    {
+        var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Original", revision: 3);
+        var storedBlockId = Assert.Single(source.Content).Id;
+
+        Assert.Throws<KeyNotFoundException>(() => ManuscriptOperations.Apply(
+            source,
+            [new ReplaceManuscriptBlockText($"{{{storedBlockId}}}", "Unsafe")]
+        ));
+    }
+
+    [Fact]
     public void BlockTypeChangesPreserveStableIdsAndContent()
     {
         var source = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Heading", revision: 2);

@@ -29,18 +29,21 @@ public static class ManuscriptOperations
 
                 case ReplaceManuscriptBlockText replace:
                     var replaceIndex = Find(blocks, replace.BlockId);
+                    var replacedBlockId = blocks[replaceIndex].Id;
                     RequireTextBlock(blocks[replaceIndex]);
                     ValidateBlockText(blocks[replaceIndex].Type, replace.Text);
                     blocks[replaceIndex] = blocks[replaceIndex] with
                     {
                         Content = [new ManuscriptInline { Text = replace.Text }],
                     };
-                    changed.Add(replace.BlockId);
+                    changed.Add(replacedBlockId);
                     break;
 
                 case DeleteManuscriptBlock delete:
-                    blocks.RemoveAt(Find(blocks, delete.BlockId));
-                    changed.Add(delete.BlockId);
+                    var deleteIndex = Find(blocks, delete.BlockId);
+                    var deletedBlockId = blocks[deleteIndex].Id;
+                    blocks.RemoveAt(deleteIndex);
+                    changed.Add(deletedBlockId);
                     break;
 
                 case MoveManuscriptBlock move:
@@ -50,7 +53,7 @@ public static class ManuscriptOperations
                     var moved = blocks[moveIndex];
                     blocks.RemoveAt(moveIndex);
                     blocks.Insert(move.TargetIndex, moved);
-                    changed.Add(move.BlockId);
+                    changed.Add(moved.Id);
                     break;
 
                 case SplitManuscriptBlock split:
@@ -73,13 +76,15 @@ public static class ManuscriptOperations
                         splitBlock.StyleRole,
                         headingLevel: splitBlock.HeadingLevel);
                     blocks.Insert(splitIndex + 1, tail);
-                    changed.Add(split.BlockId);
+                    changed.Add(splitBlock.Id);
                     changed.Add(tail.Id);
                     break;
 
                 case MergeManuscriptBlocks merge:
                     var firstIndex = Find(blocks, merge.FirstBlockId);
                     var secondIndex = Find(blocks, merge.SecondBlockId);
+                    var firstBlockId = blocks[firstIndex].Id;
+                    var secondBlockId = blocks[secondIndex].Id;
                     if (secondIndex != firstIndex + 1)
                         throw new InvalidOperationException("Only adjacent blocks can be merged.");
                     RequireTextBlock(blocks[firstIndex]);
@@ -108,8 +113,8 @@ public static class ManuscriptOperations
                         Content = mergedContent,
                     };
                     blocks.RemoveAt(secondIndex);
-                    changed.Add(merge.FirstBlockId);
-                    changed.Add(merge.SecondBlockId);
+                    changed.Add(firstBlockId);
+                    changed.Add(secondBlockId);
                     break;
 
                 case SetManuscriptBlockType blockType:
@@ -143,20 +148,21 @@ public static class ManuscriptOperations
                             ? blockType.HeadingLevel ?? current.HeadingLevel ?? 2
                             : null,
                     };
-                    changed.Add(blockType.BlockId);
+                    changed.Add(current.Id);
                     break;
 
                 case SetManuscriptBlockStyle style:
                     if (string.IsNullOrWhiteSpace(style.StyleRole))
                         throw new ArgumentException("Style role is required.", nameof(style.StyleRole));
                     var styleIndex = Find(blocks, style.BlockId);
+                    var styledBlockId = blocks[styleIndex].Id;
                     blocks[styleIndex] = blocks[styleIndex] with { StyleRole = style.StyleRole.Trim() };
-                    changed.Add(style.BlockId);
+                    changed.Add(styledBlockId);
                     break;
 
                 case SetManuscriptInlineMark mark:
                     ApplyMark(blocks, mark);
-                    changed.Add(mark.BlockId);
+                    changed.Add(blocks[Find(blocks, mark.BlockId)].Id);
                     break;
 
                 default:
@@ -352,9 +358,40 @@ public static class ManuscriptOperations
 
     private static int Find(IReadOnlyList<ManuscriptBlock> blocks, string blockId)
     {
-        var index = blocks.ToList().FindIndex(block => string.Equals(block.Id, blockId, StringComparison.Ordinal));
-        return index >= 0 ? index : throw new KeyNotFoundException($"Manuscript block {blockId} was not found.");
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            if (string.Equals(blocks[index].Id, blockId, StringComparison.Ordinal))
+                return index;
+        }
+
+        if (!TryParseCanonicalGuid(blockId, out var requestedGuid))
+            throw new KeyNotFoundException($"Manuscript block {blockId} was not found.");
+
+        int? matchingIndex = null;
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            if (!TryParseCanonicalGuid(blocks[index].Id, out var storedGuid)
+                || storedGuid != requestedGuid)
+            {
+                continue;
+            }
+
+            if (matchingIndex.HasValue)
+            {
+                throw new InvalidOperationException(
+                    $"Manuscript block {blockId} is ambiguous because more than one stored block has that GUID.");
+            }
+
+            matchingIndex = index;
+        }
+
+        return matchingIndex
+            ?? throw new KeyNotFoundException($"Manuscript block {blockId} was not found.");
     }
+
+    private static bool TryParseCanonicalGuid(string value, out Guid result) =>
+        Guid.TryParseExact(value, "N", out result)
+        || Guid.TryParseExact(value, "D", out result);
 
     private static void RequireTextBlock(ManuscriptBlock block)
     {

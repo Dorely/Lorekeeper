@@ -430,80 +430,89 @@ public sealed class EditorChatService(
                 else if (IsRevisionAgentsTool(pendingCall.Name))
                 {
                     Guid? lastRevisionJobId = null;
+                    using var updateCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                     await using var subscription = revisionJobNotifier.Subscribe(projectId);
-                    await using var updateEnumerator = subscription.ReadAllAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
+                    await using var updateEnumerator = subscription
+                        .ReadAllAsync(updateCancellation.Token)
+                        .GetAsyncEnumerator(updateCancellation.Token);
                     var updateTask = updateEnumerator.MoveNextAsync().AsTask();
                     var invokeTask = turnEngine.InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
-
-                    while (!invokeTask.IsCompleted)
+                    try
                     {
-                        var completed = await Task.WhenAny(invokeTask, updateTask);
-                        if (completed == invokeTask)
-                            break;
-
-                        bool hasUpdate;
-                        try
+                        while (!invokeTask.IsCompleted)
                         {
-                            hasUpdate = await updateTask;
+                            var completed = await Task.WhenAny(invokeTask, updateTask);
+                            if (completed == invokeTask)
+                                break;
+
+                            bool hasUpdate;
+                            try
+                            {
+                                hasUpdate = await updateTask;
+                            }
+                            catch (OperationCanceledException) when (updateCancellation.IsCancellationRequested)
+                            {
+                                break;
+                            }
+
+                            if (!hasUpdate)
+                                break;
+
+                            if (await TryBuildRevisionJobUpdateAsync(
+                                    updateEnumerator.Current,
+                                    projectId,
+                                    conversation.Id,
+                                    pendingCall.CallId,
+                                    cancellationToken) is { } revisionUpdate)
+                            {
+                                lastRevisionJobId = revisionUpdate.JobId;
+                                yield return revisionUpdate;
+                                if (ShouldRefreshForCompletedRevisionSession(editorContext, revisionUpdate))
+                                    yield return new EditorChatMutated();
+                            }
+
+                            updateTask = updateEnumerator.MoveNextAsync().AsTask();
                         }
-                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+
+                        while (updateTask.IsCompletedSuccessfully && updateTask.Result)
                         {
-                            break;
+                            if (await TryBuildRevisionJobUpdateAsync(
+                                    updateEnumerator.Current,
+                                    projectId,
+                                    conversation.Id,
+                                    pendingCall.CallId,
+                                    cancellationToken) is { } revisionUpdate)
+                            {
+                                lastRevisionJobId = revisionUpdate.JobId;
+                                yield return revisionUpdate;
+                                if (ShouldRefreshForCompletedRevisionSession(editorContext, revisionUpdate))
+                                    yield return new EditorChatMutated();
+                            }
+
+                            updateTask = updateEnumerator.MoveNextAsync().AsTask();
                         }
 
-                        if (!hasUpdate)
-                            break;
-
-                        if (await TryBuildRevisionJobUpdateAsync(
-                                updateEnumerator.Current,
-                                projectId,
-                                conversation.Id,
-                                pendingCall.CallId,
-                                cancellationToken) is { } revisionUpdate)
+                        toolOutcome = await invokeTask;
+                        var finalJobId = TryReadRevisionJobId(toolOutcome.Result) ?? lastRevisionJobId;
+                        if (finalJobId is { } revisionJobId)
                         {
-                            lastRevisionJobId = revisionUpdate.JobId;
-                            yield return revisionUpdate;
-                            if (ShouldRefreshForCompletedRevisionSession(editorContext, revisionUpdate))
-                                yield return new EditorChatMutated();
+                            var finalJob = await revisionAgents.GetJobAsync(revisionJobId, CancellationToken.None);
+                            if (finalJob is not null)
+                            {
+                                var progress = EditorRevisionAgentService.ToProgress(finalJob);
+                                yield return new EditorChatRevisionJobUpdated(
+                                    pendingCall.CallId,
+                                    revisionJobId,
+                                    SessionId: null,
+                                    RevisionUpdateKindForStatus(progress.Status),
+                                    DateTime.UtcNow,
+                                    progress);
+                            }
                         }
-
-                        updateTask = updateEnumerator.MoveNextAsync().AsTask();
                     }
-
-                    while (updateTask.IsCompletedSuccessfully && updateTask.Result)
+                    finally
                     {
-                        if (await TryBuildRevisionJobUpdateAsync(
-                                updateEnumerator.Current,
-                                projectId,
-                                conversation.Id,
-                                pendingCall.CallId,
-                                cancellationToken) is { } revisionUpdate)
-                        {
-                            lastRevisionJobId = revisionUpdate.JobId;
-                            yield return revisionUpdate;
-                            if (ShouldRefreshForCompletedRevisionSession(editorContext, revisionUpdate))
-                                yield return new EditorChatMutated();
-                        }
-
-                        updateTask = updateEnumerator.MoveNextAsync().AsTask();
-                    }
-
-                    toolOutcome = await invokeTask;
-                    var finalJobId = TryReadRevisionJobId(toolOutcome.Result) ?? lastRevisionJobId;
-                    if (finalJobId is { } revisionJobId)
-                    {
-                        var finalJob = await revisionAgents.GetJobAsync(revisionJobId, CancellationToken.None);
-                        if (finalJob is not null)
-                        {
-                            var progress = EditorRevisionAgentService.ToProgress(finalJob);
-                            yield return new EditorChatRevisionJobUpdated(
-                                pendingCall.CallId,
-                                revisionJobId,
-                                SessionId: null,
-                                RevisionUpdateKindForStatus(progress.Status),
-                                DateTime.UtcNow,
-                                progress);
-                        }
+                        await CompleteRevisionUpdateReadAsync(updateCancellation, updateTask);
                     }
                 }
                 else if (IsImageGenerationTool(pendingCall.Name))
@@ -1089,6 +1098,20 @@ public sealed class EditorChatService(
 
     private static bool IsRevisionAgentsTool(string toolName) =>
         string.Equals(toolName, "start_revision_agents", StringComparison.Ordinal);
+
+    internal static async Task CompleteRevisionUpdateReadAsync(
+        CancellationTokenSource updateCancellation,
+        Task<bool> updateTask)
+    {
+        await updateCancellation.CancelAsync();
+        try
+        {
+            await updateTask;
+        }
+        catch (OperationCanceledException) when (updateCancellation.IsCancellationRequested)
+        {
+        }
+    }
 
     private static bool ShouldRefreshForCompletedRevisionSession(
         EditorChatContext editorContext,
