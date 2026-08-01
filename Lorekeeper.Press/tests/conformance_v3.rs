@@ -25,7 +25,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 3);
-    assert_eq!(value["rendererVersion"], "1.0.0");
+    assert_eq!(value["rendererVersion"], "1.0.1");
     assert_eq!(
         value["profiles"],
         json!([
@@ -53,7 +53,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 3);
-    assert_eq!(response["rendererVersion"], "1.0.0");
+    assert_eq!(response["rendererVersion"], "1.0.1");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -163,8 +163,61 @@ fn invalid_ean_13_is_rejected_before_cover_output() {
     assert!(!output.status.success());
     let response = response(&output);
     assert_eq!(response["status"], "rejected");
+    assert_eq!(
+        response["jobId"], job.request["jobId"],
+        "a parsed request rejection must remain bound to its originating job"
+    );
     assert!(has_diagnostic(&response, "PRESS_EAN13_INVALID"));
     assert!(!job.root.path().join("output/cover.pdf").exists());
+}
+
+#[test]
+fn utf8_bom_request_is_accepted_and_remains_job_bound() {
+    let job = PreparedJob::new("kdp-paperback-v1");
+    let mut bytes = vec![0xef, 0xbb, 0xbf];
+    bytes.extend(serde_json::to_vec_pretty(&job.request).expect("request JSON"));
+    fs::write(job.root.path().join("input/request.json"), bytes).expect("BOM request");
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let response = response(&output);
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["jobId"], job.request["jobId"]);
+}
+
+#[test]
+fn parsed_layout_rejections_are_bound_but_unparseable_requests_remain_unbound() {
+    let mut parsed = PreparedJob::new("kdp-paperback-v1");
+    parsed.request["cover"]["barcodeMode"] = Value::String("LorekeeperBarcode".to_owned());
+    parsed.request["cover"]["isbn"] = Value::String("9780306406158".to_owned());
+    parsed.write_request();
+    let parsed_response = response(&parsed.layout());
+    assert_eq!(parsed_response["status"], "rejected");
+    assert_eq!(parsed_response["jobId"], parsed.request["jobId"]);
+    assert!(has_diagnostic(&parsed_response, "PRESS_EAN13_INVALID"));
+
+    for command in ["render", "layout"] {
+        let malformed = PreparedJob::new("kdp-paperback-v1");
+        fs::write(
+            malformed.root.path().join("input/request.json"),
+            b"{malformed",
+        )
+        .expect("malformed request");
+        let output = if command == "render" {
+            malformed.render()
+        } else {
+            malformed.layout()
+        };
+        let malformed_response = response(&output);
+        assert_eq!(malformed_response["status"], "rejected");
+        assert!(malformed_response.get("jobId").is_none());
+        assert!(has_diagnostic(&malformed_response, "PRESS_REQUEST_INVALID"));
+    }
 }
 
 #[test]
@@ -847,12 +900,16 @@ impl PreparedJob {
         child.wait_with_output().expect("render response")
     }
 
-    fn layout_trace(&self) -> Value {
-        let output = run(&[
+    fn layout(&self) -> Output {
+        run(&[
             "layout",
             "--job-root",
             self.root.path().to_str().expect("UTF-8 path"),
-        ]);
+        ])
+    }
+
+    fn layout_trace(&self) -> Value {
+        let output = self.layout();
         assert!(
             output.status.success(),
             "stdout={} stderr={}",

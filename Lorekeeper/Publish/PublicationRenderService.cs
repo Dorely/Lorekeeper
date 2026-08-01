@@ -954,10 +954,9 @@ public sealed class PublicationRenderProcessor(
                 throw new InvalidOperationException("A staged Press asset escaped the bounded input directory.");
             await File.WriteAllBytesAsync(path, asset.Data, cancellationToken);
         }
-        await File.WriteAllTextAsync(
+        await File.WriteAllBytesAsync(
             Path.Combine(inputRoot, "request.json"),
-            JsonSerializer.Serialize(request.Payload, JsonOptions),
-            Encoding.UTF8,
+            SerializeRequest(request.Payload),
             cancellationToken);
         var start = pressRuntime.CreateStartInfo(jobId, jobRoot);
         using var process = Process.Start(start)
@@ -1003,6 +1002,9 @@ public sealed class PublicationRenderProcessor(
         "Lorekeeper",
         "press-jobs",
         jobId.ToString("N")));
+
+    internal static byte[] SerializeRequest(object payload) =>
+        JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
 
     private static bool IsContainedBy(string rootPath, string candidatePath)
     {

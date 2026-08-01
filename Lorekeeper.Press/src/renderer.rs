@@ -27,11 +27,15 @@ type RenderResult<T> = Result<T, Box<RenderResponse>>;
 
 pub fn run(job_root: &Path) -> RenderResult<()> {
     let request = load_request(job_root)?;
-    let validated_assets = validate_request(&request, job_root)?;
+    bind_job_id(run_parsed(job_root, &request), &request.job_id)
+}
+
+fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
+    let validated_assets = validate_request(request, job_root)?;
     ensure_output_is_safe(job_root)?;
     ensure_not_cancelled(job_root)?;
 
-    let layout = paginate_with_cancellation(&request, Some(job_root))?;
+    let layout = paginate_with_cancellation(request, Some(job_root))?;
     if layout.pages.len() > MAX_PAGES {
         return Err(Box::new(RenderResponse::failed(
             "failed",
@@ -47,7 +51,7 @@ pub fn run(job_root: &Path) -> RenderResult<()> {
         spine_width = layout.pages.len() as f32 * cover.paper_caliper_inches_per_page * 72.0;
         cover_width = request.trim.width_inches * 144.0 + spine_width + cover.bleed_inches * 144.0;
         Some(
-            cover_layout(&request, cover_width)
+            cover_layout(request, cover_width)
                 .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?,
         )
     } else {
@@ -64,13 +68,13 @@ pub fn run(job_root: &Path) -> RenderResult<()> {
 
     let is_pdfx = request.profile == "ingram-paperback-pdfx1a-v1";
     let interior_images = prepare_images(
-        &request,
+        request,
         &validated_assets,
         is_pdfx,
         request.ink == "BlackAndWhite",
     )
     .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
-    let cover_images = prepare_images(&request, &validated_assets, is_pdfx, false)
+    let cover_images = prepare_images(request, &validated_assets, is_pdfx, false)
         .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
     let mut maximum_total_ink_percent = interior_images
         .values()
@@ -81,7 +85,7 @@ pub fn run(job_root: &Path) -> RenderResult<()> {
         maximum_total_ink_percent = maximum_total_ink_percent
             .max(cover_background_total_ink_percent(&cover.background_color));
     }
-    let interior_options = PdfOptions::interior(&request, is_pdfx);
+    let interior_options = PdfOptions::interior(request, is_pdfx);
     let interior_bytes = write_pdf_cancellable(
         &layout.pages,
         &fonts,
@@ -102,7 +106,7 @@ pub fn run(job_root: &Path) -> RenderResult<()> {
         layout.pages.len(),
     )];
     if let Some(rendered_cover) = &cover_page {
-        let cover_options = PdfOptions::cover(&request, is_pdfx, cover_width, spine_width);
+        let cover_options = PdfOptions::cover(request, is_pdfx, cover_width, spine_width);
         let cover_bytes = write_pdf_cancellable(
             std::slice::from_ref(rendered_cover),
             &fonts,
@@ -247,8 +251,12 @@ pub fn run(job_root: &Path) -> RenderResult<()> {
 
 pub fn trace(job_root: &Path) -> RenderResult<()> {
     let request = load_request(job_root)?;
-    validate_request(&request, job_root)?;
-    let layout = paginate(&request)?;
+    bind_job_id(trace_parsed(job_root, &request), &request.job_id)
+}
+
+fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
+    validate_request(request, job_root)?;
+    let layout = paginate(request)?;
     let fonts = subset_for_layout(&layout.pages)
         .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
     let pages = layout.pages.iter().map(|page| {
@@ -281,6 +289,7 @@ pub fn trace(job_root: &Path) -> RenderResult<()> {
         serde_json::to_string(&serde_json::json!({
             "protocolVersion": 3,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
+            "jobId": request.job_id,
             "pages": pages,
             "pageMap": layout.page_map,
             "features": layout.features,
@@ -288,6 +297,13 @@ pub fn trace(job_root: &Path) -> RenderResult<()> {
         .expect("serialize layout trace")
     );
     Ok(())
+}
+
+fn bind_job_id<T>(result: RenderResult<T>, job_id: &str) -> RenderResult<T> {
+    result.map_err(|mut response| {
+        response.job_id = Some(job_id.to_owned());
+        response
+    })
 }
 
 struct StagingDirectory {
@@ -378,7 +394,8 @@ fn load_request(job_root: &Path) -> RenderResult<RenderRequest> {
             Diagnostic::error("PRESS_REQUEST_MISSING", error.to_string()),
         ))
     })?;
-    serde_json::from_slice(&bytes).map_err(|error| {
+    let json = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes);
+    serde_json::from_slice(json).map_err(|error| {
         Box::new(RenderResponse::failed(
             "rejected",
             Diagnostic::error("PRESS_REQUEST_INVALID", error.to_string()),

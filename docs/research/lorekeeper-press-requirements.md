@@ -24,7 +24,7 @@ assertion was removed or relaxed.
 
 | Area | Required behavior | Evidence boundary |
 |---|---|---|
-| Protocol | Version 3; absolute job root; staged request; declared relative assets; hashes, sizes, dimensions, limits, and structured diagnostics | Black-box CLI adversarial fixtures |
+| Protocol | Version 3; absolute job root; BOM-free UTF-8 app requests with compatible BOM parsing; job-bound terminal responses; staged request; declared relative assets; hashes, sizes, dimensions, limits, and structured diagnostics | Black-box CLI adversarial fixtures, including BOM compatibility and parsed-rejection identity assertions |
 | Containment | Reject traversal, absolute asset paths, symlinks/reparse points, undeclared files, corrupt/changed assets, pre-existing output, unsupported formats, and unsupported scripts | Test-owned filesystem fixtures; no production validator calls |
 | Atomicity | Cancellation before or during rendering and any failure leave no promoted artifact; existing output is never overwritten | Process tests, staging observation, and sentinel bytes |
 | Determinism | Identical semantic input, settings, assets, fonts, profile, and renderer produce byte-identical PDFs and hashes | Two independent job roots compared byte for byte |

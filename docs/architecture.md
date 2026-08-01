@@ -296,8 +296,12 @@ WeasyPrint, Chromium, machine PDF software, or repository fallback. Runtime
 readiness and the dynamic `describe` contract are checked by the
 UI, assistant, and service before a render can be queued. The processor captures
 bounded stdout/stderr, bounds its lifetime and paths,
-and verifies every returned length/hash before persistence. Project-
-scoped range endpoints serve actual PDF/package bytes only after recomputing
+and verifies every returned length/hash before persistence. Protocol-v3
+requests are serialized as BOM-free UTF-8 JSON; the owned renderer also
+tolerates an optional UTF-8 BOM for compatibility and binds every post-parse
+terminal response to the parsed job identity before the app accepts its
+diagnostics or artifacts. Project-scoped range endpoints serve actual
+PDF/package bytes only after recomputing
 their stored length and SHA-256; corrupt rows fail closed before an ETag or body
 is returned. Source-fingerprint mismatch marks otherwise valid immutable
 artifacts stale. Installed-renderer or selected-profile provenance mismatch also

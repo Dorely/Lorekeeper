@@ -77,9 +77,9 @@ public sealed class LorekeeperPressProcessIntegrationTests
             request["profile"] = "kdp-paperback-v1";
             request["assets"]![0]!["byteLength"] = PixelPng.LongLength;
             request["assets"]![0]!["sha256"] = Convert.ToHexStringLower(SHA256.HashData(PixelPng));
-            await File.WriteAllTextAsync(
+            await File.WriteAllBytesAsync(
                 Path.Combine(jobRoot, "input", "request.json"),
-                request.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                PublicationRenderProcessor.SerializeRequest(request));
 
             var startInfo = runtime.CreateStartInfo(jobId, jobRoot);
             Assert.Empty(startInfo.Environment);

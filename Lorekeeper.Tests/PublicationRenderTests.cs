@@ -416,6 +416,19 @@ public sealed class PublicationRenderTests
         Assert.NotNull(job.CompletedAt);
     }
 
+    [Fact]
+    public void PressRequestsAreUtf8JsonWithoutAByteOrderMark()
+    {
+        var bytes = PublicationRenderProcessor.SerializeRequest(new
+        {
+            protocolVersion = 3,
+            jobId = Guid.Empty.ToString("N"),
+        });
+
+        Assert.True(bytes.AsSpan().StartsWith("{"u8));
+        Assert.False(bytes.AsSpan().StartsWith(new byte[] { 0xef, 0xbb, 0xbf }));
+    }
+
     private sealed class RenderWorkerFixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;

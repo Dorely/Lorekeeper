@@ -71,7 +71,7 @@
 | `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
 | `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, current/legacy render provenance, language/ISBN/profile/color rejection, product-form proof isolation, and assistant-authorization fixtures. |
 | `PublicationEditionServiceTests.cs` | Final-profile defaults, archived assistant/service mutation guards, cover-focal UI mapping, shared-ISBN identity, and hostile semantic-matter ownership fixtures. |
-| `PublicationRenderTests.cs` | Native-runtime integrity, artifact-integrity/staleness, staged-request, and clean publication-worker cancellation fixtures. |
+| `PublicationRenderTests.cs` | Native-runtime integrity, artifact-integrity/staleness, BOM-free staged-request, and clean publication-worker cancellation fixtures. |
 | `PublicationPdfActionStateTests.cs` | NotGenerated/Rendering/Invalid/Stale/Validated/Legacy PDF action-state fixtures plus immutable assistant artifact-link metadata. |
 | `PublishChatServiceTests.cs` | Publish conversation persistence/reset, streaming completion/failure/cancellation, selected-edition prompt, non-replayed tools, mutation notices, and active-turn reconnection fixtures. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
@@ -97,7 +97,7 @@
 | `Cargo.toml` / `Cargo.lock` / `rust-toolchain.toml` | Rust 1.97.1 crate with exact permissive serialization, shaping, subsetting, line-breaking, hyphenation, image/color, PDF-writing, hashing, and inspection dependencies. |
 | `src/main.rs` / `src/lib.rs` | Native `describe` and bounded protocol-v3 `render` CLI plus the independently testable library surface. |
 | `src/model.rs` | Protocol-v3 requests, diagnostics, artifacts, validation evidence, and intermediate layout/page-map contracts. |
-| `src/renderer.rs` | Contained staging, validation, deterministic pagination, semantic composition, covers/barcodes, atomic promotion, and evidence assembly. |
+| `src/renderer.rs` | Contained staging, UTF-8/BOM-compatible parsing, job-bound terminal responses, validation, deterministic pagination, semantic composition, covers/barcodes, atomic promotion, and evidence assembly. |
 | `src/font.rs` | Bundled-font glyph coverage, shaping, subsetting, widths, encoding, and multi-codepoint ToUnicode mapping. |
 | `src/image.rs` | Bounded PNG decoding, alpha flattening, registered-profile CMYK conversion, and total-ink enforcement. |
 | `src/pdf.rs` | Owned deterministic PDF 1.7/PDF 1.3 object writer for pages, boxes, fonts, images, output intent, streams, and barcodes. |
@@ -106,7 +106,7 @@
 | `fixtures/full-model-v3.json` | Canonical complete publication-model protocol fixture used by black-box conformance tests. |
 | `fixtures/negative-cases-v3.json` | Frozen adversarial protocol mutations and expected fail-closed diagnostic codes. |
 | `fixtures/invalid-pdf-structures-v3.json` | Frozen malformed raw-PDF cases proving the black-box harness fails closed independently of production preflight. |
-| `tests/conformance_v3.rs` | Test-owned CLI harness and raw-PDF assertions for protocol, containment, atomicity, determinism, KDP, PDF/X, images, fonts, geometry, covers, barcodes, and negative cases. |
+| `tests/conformance_v3.rs` | Test-owned CLI harness and raw-PDF assertions for protocol encoding/identity, containment, atomicity, determinism, KDP, PDF/X, images, fonts, geometry, covers, barcodes, and negative cases. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
 
@@ -607,7 +607,7 @@
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration, shared active-turn streaming/reconnection, collaborative prompt policy, tool activity, and structured mutation notices. |
 | `PublicationPdfActionState.cs` | Deterministic NotGenerated/Rendering/Invalid/Stale/Validated/Legacy selector and correlated current interior/cover artifact projection for the Publish summary. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
-| `PublicationRenderService.cs` | Persisted/recoverable queue, protocol-v3 request/asset staging, native process lifecycle, hash-verified immutable artifacts, semantic page maps, legacy/stale derivation, and render comparison. |
+| `PublicationRenderService.cs` | Persisted/recoverable queue, BOM-free protocol-v3 request/asset staging, native process lifecycle, hash-verified immutable artifacts, semantic page maps, legacy/stale derivation, and render comparison. |
 | `PublicationCoverService.cs` | Edition full-wrap template calculation, revisioned cover design, ISBN-13/vendor/spine diagnostics, and acknowledgement invalidation. |
 | `PublicationPackageService.cs` | Versioned fail-closed Lorekeeper validation preflight, product-form-specific deterministic package assembly, manifests, reports, provenance, legacy guards, and exact-package proof records. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying every included ordered semantic-matter document into edition-scoped TXT, Markdown, EPUB, and contained press output with reciprocal product-form guards. |
