@@ -75,58 +75,7 @@ else if (_workspace is null)
 }
 else
 {
-    <main class="publish-workspace" aria-labelledby="publish-title">
-        <header class="publish-header">
-            <div class="publish-heading">
-                <span class="publish-eyebrow">Book publishing</span>
-                <h1 id="publish-title">Prepare your manuscript</h1>
-                <p>Choose what belongs in the book, review its presentation, and export when everything is ready.</p>
-                <label class="publish-field">
-                    <span>Publication edition</span>
-                    <select class="form-select" value="@_selectedEditionId" disabled="@_assistantRunning" @onchange="SelectEditionAsync">
-                        @foreach (var edition in _editionSummaries)
-                        {
-                            <option value="@edition.Id">@edition.Name · @edition.Format · @edition.Vendor@(edition.IsDefault ? " · default" : null)</option>
-                        }
-                    </select>
-                </label>
-                <div class="d-flex flex-wrap gap-2 mt-2">
-                    <button type="button" class="btn btn-sm btn-outline-secondary"
-                            disabled="@HasBusyMutation" @onclick="CloneEditionAsync">Clone</button>
-                    @if (!_workspace.Edition.IsDefault && !IsArchivedEdition)
-                    {
-                        <button type="button" class="btn btn-sm btn-outline-secondary"
-                                disabled="@HasBusyMutation" @onclick="SetDefaultEditionAsync">Make default</button>
-                    }
-                    @if (_editionSummaries.Count > 1)
-                    {
-                        <button type="button" class="btn btn-sm btn-outline-secondary"
-                                disabled="@HasBusyMutation" @onclick="CompareEditionAsync">Compare</button>
-                        @if (!IsArchivedEdition)
-                        {
-                            <button type="button" class="btn btn-sm btn-outline-danger"
-                                    disabled="@HasBusyMutation" @onclick="ArchiveEditionAsync">Archive</button>
-                        }
-                    }
-                </div>
-                @if (!string.IsNullOrWhiteSpace(_editionActionError))
-                {
-                    <div class="small mt-2" role="status">@_editionActionError</div>
-                }
-            </div>
-
-            <div class="publish-header-status" aria-live="polite" aria-atomic="true">
-                <span class="publish-status-dot @SaveStatusDotClass" aria-hidden="true"></span>
-                <span class="@SaveStatusTextClass">@SaveStatusText</span>
-                @if (_editionSaveState == SaveState.SaveFailed)
-                {
-                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@EditionSaveInProgress" @onclick="RetryEditionSaveAsync">
-                        Retry save
-                    </button>
-                }
-            </div>
-        </header>
-
+    <main class="publish-workspace" aria-label="Publish">
         <div class="publish-layout">
             <aside class="publish-assistant-pane" aria-label="Publish assistant">
                 <PublishChatPanel ProjectId="Project.Id"
@@ -136,6 +85,88 @@ else
                                   OnRunningChanged="HandleAssistantRunningChanged" />
             </aside>
             <div class="publish-main">
+                <section class="publish-edition-bar" aria-labelledby="edition-switcher-label">
+                    <div class="publish-edition-bar-row">
+                        <label class="publish-edition-switcher">
+                            <span id="edition-switcher-label">Publication edition</span>
+                            <select class="form-select" value="@_selectedEditionId" disabled="@HasBusyMutation" @onchange="SelectEditionAsync">
+                                @foreach (var edition in _editionSummaries)
+                                {
+                                    <option value="@edition.Id">@edition.Name · @edition.Format · @edition.Vendor@(edition.IsDefault ? " · default" : null)</option>
+                                }
+                            </select>
+                        </label>
+
+                        <div class="publish-edition-status" aria-live="polite" aria-atomic="true">
+                            <span class="publish-status-dot @SaveStatusDotClass" aria-hidden="true"></span>
+                            <span class="@SaveStatusTextClass">@SaveStatusText</span>
+                            @if (_editionSaveState == SaveState.SaveFailed)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@EditionSaveInProgress" @onclick="RetryEditionSaveAsync">
+                                    Retry save
+                                </button>
+                            }
+                        </div>
+
+                        <div class="publish-edition-actions" aria-label="Edition actions">
+                            <button type="button" class="btn btn-sm btn-primary"
+                                    aria-expanded="@(_newEditionFormOpen ? "true" : "false")"
+                                    aria-controls="new-edition-form"
+                                    disabled="@HasBusyMutation" @onclick="BeginCreateEdition">New edition</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    disabled="@HasBusyMutation" @onclick="CloneEditionAsync">Clone</button>
+                            @if (!_workspace.Edition.IsDefault && !IsArchivedEdition)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        disabled="@HasBusyMutation" @onclick="SetDefaultEditionAsync">Make default</button>
+                            }
+                            @if (_editionSummaries.Count > 1)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        disabled="@HasBusyMutation" @onclick="CompareEditionAsync">Compare</button>
+                                @if (!IsArchivedEdition)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-danger"
+                                            disabled="@HasBusyMutation" @onclick="ArchiveEditionAsync">Archive</button>
+                                }
+                            }
+                        </div>
+                    </div>
+
+                    @if (_newEditionFormOpen)
+                    {
+                        <div id="new-edition-form" class="publish-edition-create" role="group" aria-label="Create a new publication edition">
+                            <label class="publish-field">
+                                <span>Edition name</span>
+                                <input class="form-control" placeholder="Paperback" autocomplete="off"
+                                       @ref="_newEditionNameInput" disabled="@(_assistantRunning || EditionTransitionInProgress)"
+                                       @bind="_newEditionName" @bind:event="oninput" />
+                            </label>
+                            <label class="publish-field">
+                                <span>Format</span>
+                                <select class="form-select" disabled="@(_assistantRunning || EditionTransitionInProgress)" @bind="_newEditionFormat">
+                                    <option value="@PublicationEditionFormat.Paperback">Paperback</option>
+                                    <option value="@PublicationEditionFormat.Epub">EPUB</option>
+                                </select>
+                            </label>
+                            <div class="publish-edition-create-actions">
+                                <button type="button" class="btn btn-sm btn-primary"
+                                        disabled="@(HasBusyMutation || string.IsNullOrWhiteSpace(_newEditionName))"
+                                        @onclick="CreateEditionAsync">
+                                    @(_creatingEdition ? "Creating…" : "Create edition")
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        disabled="@_creatingEdition" @onclick="CancelCreateEdition">Cancel</button>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(_editionActionError))
+                    {
+                        <div class="publish-edition-message" role="status">@_editionActionError</div>
+                    }
+                </section>
+
                 <aside class="publish-sidebar" aria-labelledby="summary-title">
                     <div class="publish-summary-card">
                         <div class="publish-summary-heading">
@@ -207,7 +238,7 @@ else
                                     <div class="publish-pdf-action-state" aria-live="polite">
                                         <strong>Generating PDFs</strong>
                                         <span>@activeRender.ProgressPercent% · @activeRender.ProgressMessage</span>
-                                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_renderBusy || _assistantRunning)"
+                                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@HasBusyMutation"
                                                 @onclick="() => CancelRenderAsync(activeRender.Id)">Cancel</button>
                                     </div>
                                 }
@@ -270,7 +301,7 @@ else
                         This edition is archived and read-only. Existing exports and artifacts remain available; clone it to make changes.
                     </div>
                 }
-                <fieldset class="publish-readonly-boundary" disabled="@(IsArchivedEdition || _assistantRunning)">
+                <fieldset class="publish-readonly-boundary" disabled="@(IsArchivedEdition || _assistantRunning || EditionTransitionInProgress)">
                 <section class="publish-card" aria-labelledby="edition-settings-title">
                     <div class="publish-card-heading">
                         <div>
@@ -703,7 +734,7 @@ else
                             <p>Render immutable interior and cover PDFs from the current edition. The embedded PDF viewer provides thumbnails, zoom, and text search.</p>
                         </div>
                         <button type="button" class="btn btn-sm btn-outline-secondary"
-                                disabled="@_renderBusy" @onclick="RefreshRendersAsync">Refresh</button>
+                                disabled="@HasBusyMutation" @onclick="RefreshRendersAsync">Refresh</button>
                     </div>
                     @if (!string.IsNullOrWhiteSpace(_renderError))
                     {
@@ -721,7 +752,8 @@ else
                             <span>@latestRender.ProgressPercent% &middot; @latestRender.ProgressMessage</span>
                             @if (latestRender.Status is PublicationRenderStatus.Queued or PublicationRenderStatus.Rendering)
                             {
-                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => CancelRenderAsync(latestRender.Id)">Cancel</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@HasBusyMutation"
+                                        @onclick="() => CancelRenderAsync(latestRender.Id)">Cancel</button>
                             }
                         </div>
                         @foreach (var diagnostic in latestRender.Diagnostics)
@@ -767,7 +799,8 @@ else
                         }
                         @if (_renderJobs.Count > 1)
                         {
-                            <button type="button" class="btn btn-sm btn-link px-0" @onclick="CompareLatestRendersAsync">Explain changes from previous render</button>
+                            <button type="button" class="btn btn-sm btn-link px-0" disabled="@HasBusyMutation"
+                                    @onclick="CompareLatestRendersAsync">Explain changes from previous render</button>
                             @if (!string.IsNullOrWhiteSpace(_renderComparison))
                             {
                                 <p class="small text-muted">@_renderComparison</p>
@@ -1353,6 +1386,9 @@ else
     private bool _placementActionBusy;
     private bool _disposing;
     private bool _creatingEdition;
+    private bool _newEditionFormOpen;
+    private bool _editionTransitionBusy;
+    private bool _focusNewEditionName;
     private bool _assistantRunning;
     private bool _renderBusy;
     private bool _renderStateUncertain;
@@ -1409,6 +1445,7 @@ else
     private PublicationImagePlacementKind _placementKind = PublicationImagePlacementKind.ChapterOpening;
     private PublishExportFormat? _exportingFormat;
     private ElementReference _placementDialogElement;
+    private ElementReference _newEditionNameInput;
     private IJSObjectReference? _downloadModule;
     private IJSObjectReference? _autoSizer;
     private CancellationTokenSource? _editionDraftAutosaveCts;
@@ -1431,7 +1468,18 @@ else
         && ValidPlacementKinds.Contains(_placementKind);
     private bool HasPlacementTargets => PlacementTargets.Count > 0;
     private bool IsArchivedEdition => _workspace?.Edition.Status == PublicationEditionStatus.Archived;
-    private bool HasBusyMutation => _assistantRunning || _coverBusy || _outlineBusy || _placementActionBusy || _placementSaving;
+    private bool EditionTransitionInProgress => _creatingEdition || _editionTransitionBusy;
+    private bool HasBusyMutation => _assistantRunning
+        || _creatingEdition
+        || _editionTransitionBusy
+        || _coverBusy
+        || _coverDesignSaving
+        || _outlineBusy
+        || _placementActionBusy
+        || _placementSaving
+        || _packageBusy
+        || _renderBusy
+        || _exportingFormat is not null;
     private bool CanExport => _downloadModule is not null
         && _exportingFormat is null
         && !HasBusyMutation
@@ -1632,6 +1680,14 @@ else
             catch (JSDisconnectedException) { }
         }
 
+        if (_focusNewEditionName)
+        {
+            _focusNewEditionName = false;
+            try { await _newEditionNameInput.FocusAsync(); }
+            catch (InvalidOperationException) { }
+            catch (JSDisconnectedException) { }
+        }
+
     }
 
     private Task RetryLoadAsync() => LoadWorkspaceAsync(resetProfile: true);
@@ -1666,17 +1722,34 @@ else
             };
     }
 
+    private async Task<bool> PrepareEditionTransitionAsync()
+    {
+        if (_workspace is null) return true;
+
+        await FlushEditionSaveAsync();
+        if (_editionSaveState != SaveState.SaveFailed && !HasPendingEditionSave)
+            return true;
+
+        _editionActionError = "Your latest publishing settings could not be saved. Retry the save before changing editions.";
+        return false;
+    }
+
     private async Task CreateEditionAsync()
     {
-        if (Project is null || _creatingEdition) return;
+        if (Project is null || HasBusyMutation) return;
         _creatingEdition = true;
         _editionActionError = null;
         try
         {
+            if (!await PrepareEditionTransitionAsync()) return;
+
             var created = await Editions.CreateAsync(
                 Project.Id,
                 new PublicationEditionCreate(_newEditionName, _newEditionFormat));
             _selectedEditionId = created.Id;
+            _newEditionFormOpen = false;
+            _newEditionName = "Paperback";
+            _newEditionFormat = PublicationEditionFormat.Paperback;
             await LoadWorkspaceAsync(resetProfile: true);
             _liveMessage = $"Created publication edition {created.Name}.";
         }
@@ -1690,26 +1763,56 @@ else
         }
     }
 
+    private void BeginCreateEdition()
+    {
+        _editionActionError = null;
+        _newEditionFormOpen = true;
+        _focusNewEditionName = true;
+    }
+
+    private void CancelCreateEdition()
+    {
+        _editionActionError = null;
+        _newEditionFormOpen = false;
+        _focusNewEditionName = false;
+    }
+
     private async Task SelectEditionAsync(ChangeEventArgs args)
     {
-        if (!Guid.TryParse(args.Value?.ToString(), out var editionId)
+        if (HasBusyMutation
+            || !Guid.TryParse(args.Value?.ToString(), out var editionId)
             || _editionSummaries.All(edition => edition.Id != editionId))
         {
             return;
         }
-        StopRenderPolling();
-        await FlushEditionSaveAsync();
-        _selectedEditionId = editionId;
-        await LoadWorkspaceAsync(resetProfile: true);
+
+        _editionTransitionBusy = true;
+        _editionActionError = null;
+        try
+        {
+            if (!await PrepareEditionTransitionAsync()) return;
+            StopRenderPolling();
+            _selectedEditionId = editionId;
+            await LoadWorkspaceAsync(resetProfile: true);
+        }
+        catch (Exception exception)
+        {
+            _editionActionError = exception.Message;
+        }
+        finally
+        {
+            _editionTransitionBusy = false;
+        }
     }
 
     private async Task CloneEditionAsync()
     {
-        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        if (Project is null || _selectedEditionId is not Guid editionId || HasBusyMutation) return;
+        _editionTransitionBusy = true;
         _editionActionError = null;
         try
         {
-            await FlushEditionSaveAsync();
+            if (!await PrepareEditionTransitionAsync()) return;
             var clone = await Editions.CloneAsync(
                 Project.Id,
                 editionId,
@@ -1723,13 +1826,20 @@ else
         {
             _editionActionError = exception.Message;
         }
+        finally
+        {
+            _editionTransitionBusy = false;
+        }
     }
 
     private async Task SetDefaultEditionAsync()
     {
-        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        if (Project is null || _selectedEditionId is not Guid editionId || HasBusyMutation) return;
+        _editionTransitionBusy = true;
+        _editionActionError = null;
         try
         {
+            if (!await PrepareEditionTransitionAsync()) return;
             var updated = await Editions.SetDefaultAsync(
                 Project.Id,
                 editionId,
@@ -1742,13 +1852,20 @@ else
         {
             _editionActionError = exception.Message;
         }
+        finally
+        {
+            _editionTransitionBusy = false;
+        }
     }
 
     private async Task ArchiveEditionAsync()
     {
-        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        if (Project is null || _selectedEditionId is not Guid editionId || HasBusyMutation) return;
+        _editionTransitionBusy = true;
+        _editionActionError = null;
         try
         {
+            if (!await PrepareEditionTransitionAsync()) return;
             await Editions.ArchiveAsync(Project.Id, editionId, _editionDraft.Revision);
             _selectedEditionId = _editionSummaries.First(edition => edition.Id != editionId).Id;
             await LoadWorkspaceAsync(resetProfile: true);
@@ -1758,15 +1875,22 @@ else
         {
             _editionActionError = exception.Message;
         }
+        finally
+        {
+            _editionTransitionBusy = false;
+        }
     }
 
     private async Task CompareEditionAsync()
     {
-        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        if (Project is null || _selectedEditionId is not Guid editionId || HasBusyMutation) return;
         var other = _editionSummaries.FirstOrDefault(candidate => candidate.Id != editionId);
         if (other is null) return;
+        _editionTransitionBusy = true;
+        _editionActionError = null;
         try
         {
+            if (!await PrepareEditionTransitionAsync()) return;
             var comparison = await Editions.CompareAsync(Project.Id, editionId, other.Id);
             _editionActionError = comparison.Differences.Count == 0
                 ? $"{comparison.Left.Name} and {comparison.Right.Name} have the same compared settings."
@@ -1775,6 +1899,10 @@ else
         catch (Exception exception)
         {
             _editionActionError = exception.Message;
+        }
+        finally
+        {
+            _editionTransitionBusy = false;
         }
     }
 
@@ -1921,7 +2049,13 @@ else
 
     private async Task SaveCoverDesignAsync()
     {
-        if (Project is null || _selectedEditionId is not Guid editionId || _coverDesign is null) return;
+        if (EditionTransitionInProgress
+            || Project is null
+            || _selectedEditionId is not Guid editionId
+            || _coverDesign is null)
+        {
+            return;
+        }
         _coverDesignSaving = true;
         _coverError = null;
         try
@@ -1979,7 +2113,7 @@ else
 
     private async Task RunPreflightAsync()
     {
-        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        if (EditionTransitionInProgress || Project is null || _selectedEditionId is not Guid editionId) return;
         _packageBusy = true;
         _packageError = null;
         try
@@ -1999,7 +2133,7 @@ else
 
     private async Task BuildPackageAsync()
     {
-        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        if (EditionTransitionInProgress || Project is null || _selectedEditionId is not Guid editionId) return;
         _packageBusy = true;
         _packageError = null;
         try
@@ -2033,7 +2167,8 @@ else
 
     private async Task RecordDigitalProofAsync()
     {
-        if (Project is null
+        if (EditionTransitionInProgress
+            || Project is null
             || _selectedEditionId is not Guid editionId
             || CurrentPackageArtifact is not { } package)
         {
@@ -2044,7 +2179,8 @@ else
 
     private async Task RecordPhysicalProofAsync()
     {
-        if (Project is null
+        if (EditionTransitionInProgress
+            || Project is null
             || _selectedEditionId is not Guid editionId
             || CurrentPackageArtifact is not { } package)
         {
@@ -2059,6 +2195,7 @@ else
         PublicationProofKind kind,
         string note)
     {
+        if (EditionTransitionInProgress) return;
         _packageBusy = true;
         _packageError = null;
         try
@@ -2111,7 +2248,7 @@ else
 
     private async Task RefreshRendersAsync()
     {
-        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        if (EditionTransitionInProgress || Project is null || _selectedEditionId is not Guid editionId) return;
         _renderBusy = true;
         try
         {
@@ -2133,7 +2270,7 @@ else
 
     private async Task CancelRenderAsync(Guid jobId)
     {
-        if (Project is null || _selectedEditionId is not Guid editionId) return;
+        if (EditionTransitionInProgress || Project is null || _selectedEditionId is not Guid editionId) return;
         _renderBusy = true;
         try
         {
@@ -2153,7 +2290,14 @@ else
 
     private async Task CompareLatestRendersAsync()
     {
-        if (Project is null || _selectedEditionId is not Guid editionId || _renderJobs.Count < 2) return;
+        if (EditionTransitionInProgress
+            || Project is null
+            || _selectedEditionId is not Guid editionId
+            || _renderJobs.Count < 2)
+        {
+            return;
+        }
+        _renderBusy = true;
         try
         {
             var comparison = await Renders.CompareAsync(
@@ -2166,6 +2310,10 @@ else
         catch (Exception exception)
         {
             _renderError = exception.Message;
+        }
+        finally
+        {
+            _renderBusy = false;
         }
     }
 
@@ -2221,7 +2369,12 @@ else
 
     private void ScheduleEditionAutosave()
     {
-        if (IsArchivedEdition || (_loadedProjectId is null && Project is null)) return;
+        if (EditionTransitionInProgress
+            || IsArchivedEdition
+            || (_loadedProjectId is null && Project is null))
+        {
+            return;
+        }
         _editionDraftVersion++;
         _editionDraftError = null;
         _editionSaveState = SaveState.Dirty;
