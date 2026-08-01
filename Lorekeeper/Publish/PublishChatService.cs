@@ -58,13 +58,13 @@ public sealed class PublishChatService(
         - Archived editions are read-only. Recommend cloning when the user wants to change one.
 
         Publishing trust:
-        - Clearly label current press output and packages as Preview. Do not claim PDF/X conformance, vendor acceptance, accessibility certification, or print readiness beyond the evidence returned by preflight.
+        - Report owned-renderer validation exactly as returned by preflight. Lorekeeper can internally validate KDP PDF 1.7 and Ingram PDF/X-1a:2001 output; do not turn optional human proof or recorded vendor upload results into gates, and never imply vendor acceptance that the user did not record.
         - You may run and explain preflight, request or cancel renders, build packages, and guide proof inspection. You cannot approve a digital or physical proof; only the user-facing proof controls may record that human attestation.
         - End each turn with a concise account of the exact settings or artifacts changed, remaining diagnostics, current render/package state, what remains blocked, and every user action still required.
         """;
 
     private const string InitialGreeting =
-        "What are you publishing? I can help choose an edition, work through the production options with you, configure it, generate Preview files, and explain anything that still blocks export.";
+        "What are you publishing? I can help choose an edition, work through the production options with you, configure it, generate Lorekeeper-validated files, and explain anything that still blocks export.";
 
     private static readonly HashSet<string> MutationTools =
     [

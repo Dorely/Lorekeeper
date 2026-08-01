@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 3,
+  "cases": [
+    { "name": "truncated-header", "bytes": "%PDF-1.7\n" },
+    { "name": "missing-page-tree", "bytes": "%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF" },
+    { "name": "broken-cross-reference", "bytes": "%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\nstartxref\n999999\n%%EOF" }
+  ]
+}

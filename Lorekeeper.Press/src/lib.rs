@@ -1,7 +1,6 @@
+pub mod font;
+pub mod image;
 pub mod inspect;
-pub mod protocol;
-pub mod render;
-mod world;
-
-#[cfg(test)]
-mod tests;
+pub mod model;
+pub mod pdf;
+pub mod renderer;

@@ -2,7 +2,9 @@
 
 Date: 2026-07-30
 
-Status: Accepted
+Status: Superseded by ADR 0003 on 2026-07-31
+
+This record is historical. WeasyPrint is not part of the current runtime.
 
 ## Context
 

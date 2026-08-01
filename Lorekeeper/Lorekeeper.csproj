@@ -49,4 +49,24 @@
     <InternalsVisibleTo Include="Lorekeeper.Tests" />
   </ItemGroup>
 
+  <Target Name="BuildLorekeeperPressRuntime" AfterTargets="Build">
+    <PropertyGroup>
+      <PressBuildConfiguration Condition="'$(Configuration)' == 'Release'">Release</PressBuildConfiguration>
+      <PressBuildConfiguration Condition="'$(PressBuildConfiguration)' == ''">Debug</PressBuildConfiguration>
+      <PressPowerShell Condition="$([MSBuild]::IsOSPlatform('Windows'))">powershell -ExecutionPolicy Bypass</PressPowerShell>
+      <PressPowerShell Condition="'$(PressPowerShell)' == ''">pwsh</PressPowerShell>
+    </PropertyGroup>
+    <Exec Command="$(PressPowerShell) -NoProfile -NonInteractive -File &quot;$(MSBuildProjectDirectory)\..\eng\BuildPressRuntime.ps1&quot; -PressProjectDirectory &quot;$(MSBuildProjectDirectory)\..\Lorekeeper.Press&quot; -RuntimeDirectory &quot;$(TargetDir)press-runtime&quot; -Configuration $(PressBuildConfiguration)" />
+  </Target>
+
+  <Target Name="PrepareLorekeeperPressRuntimeForPublish" AfterTargets="CopyFilesToPublishDirectory">
+    <PropertyGroup>
+      <PressBuildConfiguration Condition="'$(Configuration)' == 'Release'">Release</PressBuildConfiguration>
+      <PressBuildConfiguration Condition="'$(PressBuildConfiguration)' == ''">Debug</PressBuildConfiguration>
+      <PressPowerShell Condition="$([MSBuild]::IsOSPlatform('Windows'))">powershell -ExecutionPolicy Bypass</PressPowerShell>
+      <PressPowerShell Condition="'$(PressPowerShell)' == ''">pwsh</PressPowerShell>
+    </PropertyGroup>
+    <Exec Command="$(PressPowerShell) -NoProfile -NonInteractive -File &quot;$(MSBuildProjectDirectory)\..\eng\BuildPressRuntime.ps1&quot; -PressProjectDirectory &quot;$(MSBuildProjectDirectory)\..\Lorekeeper.Press&quot; -RuntimeDirectory &quot;$(PublishDir)press-runtime&quot; -Configuration $(PressBuildConfiguration)" />
+  </Target>
+
 </Project>

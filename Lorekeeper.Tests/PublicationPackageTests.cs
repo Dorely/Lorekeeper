@@ -15,6 +15,39 @@ namespace Lorekeeper.Tests;
 public sealed class PublicationPackageTests
 {
     [Fact]
+    public void PaperbackPreflightRejectsOlderRendererAndDifferentProfileProvenance()
+    {
+        var bytes = "%PDF-1.7\nowned"u8.ToArray();
+        var artifact = new PublicationArtifact
+        {
+            EditionId = Guid.NewGuid(),
+            Kind = PublicationArtifactKind.InteriorPdf,
+            FileName = "interior.pdf",
+            MediaType = "application/pdf",
+            Data = bytes,
+            Sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)),
+            ByteLength = bytes.Length,
+            PageCount = 1,
+            SourceFingerprint = "source",
+            RendererVersion = "0.9.0",
+            ProfileId = "generic-paperback-v1",
+        };
+        var items = new List<PublicationPreflightItem>();
+
+        PublicationPackageService.ValidatePdf(
+            artifact,
+            "source",
+            "1.0.0",
+            "kdp-paperback-v1",
+            PublicationArtifactKind.InteriorPdf,
+            "INTERIOR",
+            items);
+
+        Assert.Contains(items, item => item.Code == "PRESS_RENDERER_STALE");
+        Assert.Contains(items, item => item.Code == "PRESS_PROFILE_STALE");
+    }
+
+    [Fact]
     public void EpubStructureAcceptsRequiredContainerFiles()
     {
         var epub = BuildEpub(includeNavigation: true);
@@ -188,7 +221,7 @@ public sealed class PublicationPackageTests
                 Name = "EPUB",
                 Format = PublicationEditionFormat.Epub,
                 Vendor = PublicationVendor.Generic,
-                VendorProfileVersion = "preview-1",
+                VendorProfileVersion = "epub3-v1",
                 TitleOverride = "Book",
                 Author = "Author",
                 Language = "en",
@@ -379,7 +412,7 @@ public sealed class PublicationPackageTests
                 Name = "KDP paperback",
                 Format = PublicationEditionFormat.Paperback,
                 Vendor = PublicationVendor.AmazonKdp,
-                VendorProfileVersion = "preview-1",
+                VendorProfileVersion = "kdp-paperback-v1",
                 TitleOverride = "Book",
                 Author = "Author",
                 Language = "en",
@@ -408,7 +441,7 @@ public sealed class PublicationPackageTests
             });
             await db.SaveChangesAsync();
             var blockedPaperback = await packages.PreflightAsync(project.Id, paperback.Id);
-            Assert.Contains(blockedPaperback.Items, item => item.Code == "PRINT_TRIM_UNSUPPORTED");
+            Assert.DoesNotContain(blockedPaperback.Items, item => item.Code == "PRINT_TRIM_UNSUPPORTED");
             Assert.Contains(blockedPaperback.Items, item => item.Code == "PRINT_COVER_BLEED_REQUIRED");
             Assert.Contains(blockedPaperback.Items, item =>
                 item.Message.Contains("back copy", StringComparison.Ordinal));
@@ -482,7 +515,7 @@ public sealed class PublicationPackageTests
                     "Printed proof inspected."));
 
             var replacementData = "different package"u8.ToArray();
-            db.PublicationArtifacts.Add(new PublicationArtifact
+            var replacement = new PublicationArtifact
             {
                 EditionId = edition.Id,
                 Kind = PublicationArtifactKind.PublicationPackage,
@@ -495,13 +528,20 @@ public sealed class PublicationPackageTests
                 RendererVersion = package.RendererVersion,
                 ProfileId = package.ProfileId,
                 CreatedAt = DateTime.UtcNow.AddSeconds(1),
-            });
+            };
+            db.PublicationArtifacts.Add(replacement);
             await db.SaveChangesAsync();
 
             var replaced = await packages.PreflightAsync(project.Id, edition.Id);
             Assert.NotEqual(package.Id, replaced.CurrentPackage?.Id);
             Assert.Equal("Pending", replaced.DigitalProof.Status);
             Assert.Equal("Not applicable", replaced.PhysicalProof.Status);
+
+            replacement.IsLegacy = true;
+            await db.SaveChangesAsync();
+            var legacyIgnored = await packages.PreflightAsync(project.Id, edition.Id);
+            Assert.Equal(package.Id, legacyIgnored.CurrentPackage?.Id);
+            Assert.Equal("Recorded", legacyIgnored.DigitalProof.Status);
 
             edition.VendorProfileVersion = "preview-2";
             await db.SaveChangesAsync();
@@ -558,6 +598,7 @@ public sealed class PublicationPackageTests
             "compare_publication_editions",
             "read_publication_audit",
             "read_publication_migration_state",
+            "read_publication_pdf_runtime",
             "request_publication_render",
             "list_publication_renders",
             "list_publication_downloads",
@@ -605,7 +646,7 @@ public sealed class PublicationPackageTests
                 Name = "KDP paperback",
                 Format = PublicationEditionFormat.Paperback,
                 Vendor = PublicationVendor.AmazonKdp,
-                VendorProfileVersion = "preview-1",
+                VendorProfileVersion = "kdp-paperback-v1",
                 TitleOverride = "Print Book",
                 Author = "Author",
                 Language = "en",
@@ -788,6 +829,10 @@ public sealed class PublicationPackageTests
             coverPageBoxesConsistent = true,
             fonts = new[] { new { name = "Test", embedded = true } },
             colorSpaces = new[] { "DeviceGray" },
+            interiorImageColorSpace = (string?)null,
+            coverImageColorSpace = "DeviceRGB",
+            interiorImageCount = 0,
+            coverImageCount = 1,
             imageCount = 0,
             annotationCount = 0,
             outputIntentCount = 0,

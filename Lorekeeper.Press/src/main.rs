@@ -1,55 +1,57 @@
 use std::env;
-use std::io::{self, Read};
 use std::path::PathBuf;
-use std::process::ExitCode;
 
-use lorekeeper_press::protocol::RenderResponse;
-use lorekeeper_press::render::render;
+use lorekeeper_press::model::{Capabilities, Diagnostic, RenderResponse};
+use lorekeeper_press::renderer;
+use serde_json::json;
 
-const MAX_REQUEST_BYTES: u64 = 5 * 1024 * 1024;
-
-fn main() -> ExitCode {
-    match run() {
-        Ok(response) => {
-            if serde_json::to_writer_pretty(io::stdout(), &response).is_err() {
-                eprintln!("Failed to write the response.");
-                return ExitCode::FAILURE;
-            }
-            ExitCode::SUCCESS
+fn main() {
+    let arguments: Vec<String> = env::args().skip(1).collect();
+    let result = match arguments.as_slice() {
+        [command, flag] if command == "describe" && flag == "--json" => {
+            println!(
+                "{}",
+                serde_json::to_string(&json!({
+                    "protocolVersion": 3,
+                    "rendererVersion": env!("CARGO_PKG_VERSION"),
+                    "profiles": [
+                        "generic-paperback-v1",
+                        "ingram-paperback-pdfx1a-v1",
+                        "kdp-paperback-v1"
+                    ],
+                    "machineRuntimeDependencies": [],
+                    "limits": {
+                        "maximumAssets": 512,
+                        "maximumAssetBytes": 268435456u64,
+                        "maximumJobBytes": 1073741824u64,
+                        "maximumPages": 10000
+                    },
+                    "capabilities": Capabilities::all()
+                }))
+                .expect("serialize capability contract")
+            );
+            Ok::<(), Box<RenderResponse>>(())
         }
-        Err(message) => {
-            let response = RenderResponse::process_failure("PRESS_ENVELOPE_INVALID", message);
-            let _ = serde_json::to_writer_pretty(io::stdout(), &response);
-            ExitCode::FAILURE
+        [command, root_flag, root] if command == "render" && root_flag == "--job-root" => {
+            renderer::run(&PathBuf::from(root))
         }
-    }
-}
+        [command, root_flag, root] if command == "layout" && root_flag == "--job-root" => {
+            renderer::trace(&PathBuf::from(root))
+        }
+        _ => Err(Box::new(RenderResponse::failed(
+            "rejected",
+            Diagnostic::error(
+                "PRESS_PROTOCOL_INVALID",
+                "Use 'describe --json', 'layout --job-root <bounded-job-directory>', or 'render --job-root <bounded-job-directory>'.",
+            ),
+        ))),
+    };
 
-fn run() -> Result<RenderResponse, String> {
-    let output_root = parse_output_root()?;
-    let mut input = Vec::new();
-    io::stdin()
-        .take(MAX_REQUEST_BYTES + 1)
-        .read_to_end(&mut input)
-        .map_err(|error| error.to_string())?;
-    if input.len() as u64 > MAX_REQUEST_BYTES {
-        return Err(format!(
-            "The request exceeds the {MAX_REQUEST_BYTES}-byte process limit."
-        ));
-    }
-    let input = String::from_utf8(input).map_err(|error| error.to_string())?;
-    let request = serde_json::from_str(&input).map_err(|error| error.to_string())?;
-    Ok(render(request, &output_root))
-}
-
-fn parse_output_root() -> Result<PathBuf, String> {
-    let mut arguments = env::args_os().skip(1);
-    match (
-        arguments.next().and_then(|value| value.into_string().ok()),
-        arguments.next(),
-        arguments.next(),
-    ) {
-        (Some(flag), Some(path), None) if flag == "--output-root" => Ok(PathBuf::from(path)),
-        _ => Err("Usage: lorekeeper-press --output-root <directory>".to_owned()),
+    if let Err(response) = result {
+        println!(
+            "{}",
+            serde_json::to_string(&response).expect("serialize failure response")
+        );
+        std::process::exit(2);
     }
 }

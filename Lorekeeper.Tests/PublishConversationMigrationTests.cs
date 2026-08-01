@@ -69,34 +69,23 @@ public sealed class PublishConversationMigrationTests
                          'White', 'BlackAndWhite', 0, 6, 9, 0.75, 11, 1.3,
                          NULL, {DateTime.UtcNow}, {DateTime.UtcNow});
                      """);
-                db.PublicationRenderJobs.Add(new PublicationRenderJob
-                {
-                    Id = renderId,
-                    EditionId = editionId,
-                    Status = PublicationRenderStatus.Completed,
-                    SourceFingerprint = "source-before-chat",
-                    RendererVersion = "fixture",
-                    ProfileId = "preview",
-                    ProgressPercent = 100,
-                    ProgressMessage = "Completed",
-                });
-                db.PublicationArtifacts.Add(new PublicationArtifact
-                {
-                    Id = artifactId,
-                    EditionId = editionId,
-                    RenderJobId = renderId,
-                    Kind = PublicationArtifactKind.InteriorPdf,
-                    FileName = "interior.pdf",
-                    MediaType = "application/pdf",
-                    Data = artifactBytes,
-                    Sha256 = artifactHash,
-                    ByteLength = artifactBytes.Length,
-                    PageCount = 12,
-                    SourceFingerprint = "source-before-chat",
-                    RendererVersion = "fixture",
-                    ProfileId = "preview",
-                });
-                await db.SaveChangesAsync();
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     INSERT INTO PublicationRenderJobs (
+                         Id, EditionId, Status, SourceFingerprint, RendererVersion, ProfileId,
+                         DiagnosticsJson, EvidenceJson, ProgressPercent, ProgressMessage,
+                         CancellationRequested, CreatedAt, StartedAt, CompletedAt)
+                     VALUES ({renderId}, {editionId}, 'Completed', 'source-before-chat',
+                         'fixture', 'preview', '[]', '', 100, 'Completed', 0,
+                         {DateTime.UtcNow}, NULL, {DateTime.UtcNow});
+
+                     INSERT INTO PublicationArtifacts (
+                         Id, EditionId, RenderJobId, Kind, FileName, MediaType, Data, Sha256,
+                         ByteLength, PageCount, SourceFingerprint, RendererVersion, ProfileId, CreatedAt)
+                     VALUES ({artifactId}, {editionId}, {renderId}, 'InteriorPdf', 'interior.pdf',
+                         'application/pdf', {artifactBytes}, {artifactHash}, {artifactBytes.Length},
+                         12, 'source-before-chat', 'fixture', 'preview', {DateTime.UtcNow});
+                     """);
             }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))

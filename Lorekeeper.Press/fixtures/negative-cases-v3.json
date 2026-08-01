@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "name": "asset traversal",
+      "pointer": "/assets/0/relativePath",
+      "value": "../outside.png",
+      "diagnostic": "PRESS_ASSET_PATH_UNSAFE"
+    },
+    {
+      "name": "modified asset hash",
+      "pointer": "/assets/0/sha256",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000",
+      "diagnostic": "PRESS_ASSET_HASH_MISMATCH"
+    },
+    {
+      "name": "unsupported document language",
+      "pointer": "/document/language",
+      "value": "ar",
+      "diagnostic": "PRESS_LANGUAGE_UNSUPPORTED"
+    },
+    {
+      "name": "undeclared cover asset",
+      "pointer": "/cover/assetId",
+      "value": "undeclared-asset",
+      "diagnostic": "PRESS_ASSET_REFERENCE_MISSING"
+    },
+    {
+      "name": "invalid EAN-13 checksum",
+      "pointer": "/cover/isbn",
+      "value": "9780306406158",
+      "diagnostic": "PRESS_EAN13_INVALID"
+    },
+    {
+      "name": "invalid cover color",
+      "pointer": "/cover/backgroundColor",
+      "value": "not-a-color",
+      "diagnostic": "PRESS_COVER_COLOR_INVALID"
+    },
+    {
+      "name": "unsupported ink intent",
+      "pointer": "/ink",
+      "value": "SpotColor",
+      "diagnostic": "PRESS_INK_UNSUPPORTED"
+    },
+    {
+      "name": "unsupported Picture Page mode",
+      "pointer": "/document/printPicturePageSpreadMode",
+      "value": "Foldout",
+      "diagnostic": "PRESS_PICTURE_PAGE_MODE_INVALID"
+    },
+    {
+      "name": "incorrect declared image width",
+      "pointer": "/assets/0/widthPixels",
+      "value": 2,
+      "diagnostic": "PRESS_ASSET_DIMENSION_MISMATCH"
+    }
+  ]
+}

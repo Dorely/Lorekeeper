@@ -233,7 +233,7 @@ else
                             </button>
                             @if (_editionDraft.Format == PublicationEditionFormat.Paperback)
                             {
-                                @if (PdfActions.Kind == PublicationPdfActionKind.Active && PdfActions.Job is { } activeRender)
+                                @if (PdfActions.Kind == PublicationPdfActionKind.Rendering && PdfActions.Job is { } activeRender)
                                 {
                                     <div class="publish-pdf-action-state" aria-live="polite">
                                         <strong>Generating PDFs</strong>
@@ -242,7 +242,7 @@ else
                                                 @onclick="() => CancelRenderAsync(activeRender.Id)">Cancel</button>
                                     </div>
                                 }
-                                else if (PdfActions.Kind == PublicationPdfActionKind.Current && PdfActions.Interior is { } interiorPdf)
+                                else if (PdfActions.Kind == PublicationPdfActionKind.Validated && PdfActions.Interior is { } interiorPdf)
                                 {
                                     <a class="btn btn-outline-secondary" href="@ArtifactDownloadUrl(interiorPdf.Id)" download="@interiorPdf.FileName">
                                         <span>Save interior PDF</span>
@@ -261,11 +261,11 @@ else
                                     <button type="button" class="btn btn-outline-secondary" disabled="@(!CanRenderPdf)" @onclick="RequestRenderAsync">
                                         <span>@(PdfActions.Kind switch
                                         {
-                                            PublicationPdfActionKind.Generate => "Generate PDFs",
-                                            PublicationPdfActionKind.Failed => "Retry",
+                                            PublicationPdfActionKind.NotGenerated => "Generate PDFs",
+                                            PublicationPdfActionKind.Invalid => "Retry",
                                             _ => "Regenerate PDFs",
                                         })</span>
-                                        <small>@(PdfActions.Kind == PublicationPdfActionKind.Failed ? "Previous generation failed · Retry" : "Create immutable Preview artifacts")</small>
+                                        <small>@(PdfActions.Kind == PublicationPdfActionKind.Invalid ? "Previous generation failed · Retry" : "Create immutable Lorekeeper Press artifacts")</small>
                                     </button>
                                     @if (!_pressRuntimeReadiness.IsReady)
                                     {
@@ -274,7 +274,7 @@ else
                                             <span>@_pressRuntimeReadiness.Message</span>
                                         </div>
                                     }
-                                    @if (PdfActions.Kind == PublicationPdfActionKind.Failed && PdfActions.Job is { } failedRender)
+                                    @if (PdfActions.Kind == PublicationPdfActionKind.Invalid && PdfActions.Job is { } failedRender)
                                     {
                                         <div class="publish-pdf-action-error" role="alert">
                                             <strong>PDF generation failed.</strong>
@@ -733,11 +733,11 @@ else
                     </div>
                 </section>
 
-                <section class="publish-card" aria-labelledby="press-preview-title">
+                <section class="publish-card" aria-labelledby="press-pdf-title">
                     <div class="publish-card-heading publish-card-heading-actions">
                         <div>
                             <span class="publish-step">PDF</span>
-                            <h2 id="press-preview-title">Typeset PDF preview</h2>
+                            <h2 id="press-pdf-title">Typeset PDFs</h2>
                             <p>Render immutable interior and cover PDFs from the current edition. The embedded PDF viewer provides thumbnails, zoom, and text search.</p>
                         </div>
                         <button type="button" class="btn btn-sm btn-outline-secondary"
@@ -749,7 +749,7 @@ else
                     }
                     @if (_renderJobs.Count == 0)
                     {
-                        <div class="publish-inline-empty">No press renders yet. The current Preview renderer is pinned but is not a vendor-conformance claim.</div>
+                        <div class="publish-inline-empty">No press renders yet. Generate PDFs to run the owned renderer and its independent post-write validation.</div>
                     }
                     else
                     {
@@ -799,7 +799,7 @@ else
                                     </span>
                                 </div>
                                 <div class="d-flex gap-2">
-                                    <a class="btn btn-sm btn-outline-secondary" href="@ArtifactViewUrl(coverPdf.Id)" target="_blank">Preview</a>
+                                    <a class="btn btn-sm btn-outline-secondary" href="@ArtifactViewUrl(coverPdf.Id)" target="_blank">View</a>
                                     <a class="btn btn-sm btn-outline-primary" href="@ArtifactDownloadUrl(coverPdf.Id)">Download</a>
                                 </div>
                             </div>
@@ -821,7 +821,7 @@ else
                         <div>
                             <span class="publish-step">PKG</span>
                             <h2 id="package-title">Preflight and publication package</h2>
-                            <p>Validate this edition and assemble its Preview PDF, EPUB 3, manifest, report, and cover files without an external conversion tool.</p>
+                            <p>Validate this edition and assemble its PDF, EPUB 3, manifest, report, and cover files without an external conversion tool.</p>
                         </div>
                         <div class="d-flex gap-2">
                             <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_packageBusy" @onclick="RunPreflightAsync">Run preflight</button>
@@ -835,7 +835,9 @@ else
                     @if (_preflight is not null)
                     {
                         <div class="d-flex gap-2 align-items-center mb-2">
-                            <span class="badge text-bg-warning">Preview</span>
+                            <span class="badge @(_preflight.IsLorekeeperValidated ? "text-bg-success" : "text-bg-danger")">
+                                @(_preflight.IsLorekeeperValidated ? "Lorekeeper validated" : "Validation blocked")
+                            </span>
                             <strong>@(_preflight.CanPackage ? "Package checks passed" : "Package blocked")</strong>
                             <span class="small text-muted">
                                 @_preflight.ProfileId &middot; @_preflight.ProfileVersion &middot;
@@ -1355,7 +1357,7 @@ else
     private IReadOnlyList<PublicationArtifactView> _packageArtifacts = [];
     private PublicationPressRuntimeReadiness _pressRuntimeReadiness = new(
         false,
-        "Checking Lorekeeper's app-owned Preview PDF runtime.");
+        "Checking Lorekeeper's owned PDF runtime.");
     private EditionDraft _editionDraft = new();
     private Guid? _loadedProjectId;
     private Guid? _selectedEditionId;
@@ -2127,7 +2129,7 @@ else
             var result = await Packages.BuildAsync(Project.Id, editionId);
             _preflight = result.Preflight;
             _packageArtifacts = result.Artifacts;
-            _liveMessage = "Preview publication package is ready.";
+            _liveMessage = "Publication package is ready.";
         }
         catch (Exception exception)
         {
@@ -3296,7 +3298,7 @@ else
         public string Name { get; set; } = "Edition";
         public PublicationEditionFormat Format { get; set; } = PublicationEditionFormat.Paperback;
         public PublicationVendor Vendor { get; set; } = PublicationVendor.Generic;
-        public string VendorProfileVersion { get; set; } = "preview-1";
+        public string VendorProfileVersion { get; set; } = "generic-paperback-v1";
         public PublicationBinding Binding { get; set; } = PublicationBinding.PerfectBound;
         public PublicationPaper Paper { get; set; } = PublicationPaper.White;
         public PublicationInk Ink { get; set; } = PublicationInk.BlackAndWhite;

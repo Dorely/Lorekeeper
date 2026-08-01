@@ -61,6 +61,10 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Set up pinned Rust toolchain
+        shell: bash
+        run: rustup toolchain install 1.97.1 --profile minimal
+
       - name: Build and verify DMG
         shell: pwsh
         env:

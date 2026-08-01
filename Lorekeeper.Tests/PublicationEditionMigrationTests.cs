@@ -220,20 +220,16 @@ public sealed class PublicationEditionMigrationTests
                          {missingAssetChapterId}, NULL, {missingAssetChapterId}, 1, 0,
                          {DateTime.UtcNow}, {DateTime.UtcNow});
                      """);
-                db.PublicationArtifacts.Add(new PublicationArtifact
-                {
-                    EditionId = editionId,
-                    Kind = PublicationArtifactKind.InteriorPdf,
-                    FileName = "preserved.pdf",
-                    MediaType = "application/pdf",
-                    Data = artifactBytes,
-                    Sha256 = artifactHash,
-                    ByteLength = artifactBytes.Length,
-                    SourceFingerprint = "preserved-source",
-                    RendererVersion = "0.2.0",
-                    ProfileId = "fixture",
-                });
-                await db.SaveChangesAsync();
+                var artifactId = Guid.NewGuid();
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     INSERT INTO PublicationArtifacts (
+                         Id, EditionId, RenderJobId, Kind, FileName, MediaType, Data, Sha256,
+                         ByteLength, PageCount, SourceFingerprint, RendererVersion, ProfileId, CreatedAt)
+                     VALUES ({artifactId}, {editionId}, NULL, 'InteriorPdf', 'preserved.pdf',
+                         'application/pdf', {artifactBytes}, {artifactHash}, {artifactBytes.Length},
+                         NULL, 'preserved-source', '0.2.0', 'fixture', {DateTime.UtcNow});
+                     """);
             }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))

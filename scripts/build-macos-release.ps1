@@ -50,7 +50,7 @@ else
 }
 $dmgPath = Join-Path $outputDirectory "Lorekeeper-$Version-$artifactArchitecture.dmg"
 
-foreach ($commandName in @('dotnet', 'node', 'npm', 'hdiutil', 'codesign', 'lipo', 'ditto'))
+foreach ($commandName in @('dotnet', 'node', 'npm', 'cargo', 'rustc', 'hdiutil', 'codesign', 'lipo', 'ditto'))
 {
     if (-not (Get-Command $commandName -ErrorAction SilentlyContinue))
     {
@@ -286,7 +286,26 @@ try
     $electronExecutable = Join-Path $appPath 'Contents/MacOS/Lorekeeper'
     $dotnetExecutable = Join-Path $appPath "Contents/Resources/bin/$($manifest.executable)"
     $sqliteVecLibrary = Join-Path $appPath 'Contents/Resources/bin/vec0.dylib'
-    foreach ($executable in @($electronExecutable, $dotnetExecutable, $sqliteVecLibrary))
+    $pressRoot = Join-Path $appPath 'Contents/Resources/bin/press-runtime'
+    $pressExecutable = Join-Path $pressRoot 'lorekeeper-press'
+    foreach ($requiredPressFile in @(
+        $pressExecutable,
+        (Join-Path $pressRoot 'lorekeeper-press-runtime.json'),
+        (Join-Path $pressRoot 'THIRD-PARTY-NOTICES.txt'),
+        (Join-Path $pressRoot 'sbom.json'),
+        (Join-Path $pressRoot 'profiles/CGATS21_CRPC1.icc')))
+    {
+        if (-not (Test-Path -LiteralPath $requiredPressFile -PathType Leaf))
+        {
+            throw "The packaged Lorekeeper Press runtime is incomplete: $requiredPressFile"
+        }
+    }
+    $pressDescription = (& $pressExecutable describe --json | ConvertFrom-Json)
+    if ($LASTEXITCODE -ne 0 -or $pressDescription.protocolVersion -ne 3)
+    {
+        throw 'The packaged Lorekeeper Press executable failed its capability probe.'
+    }
+    foreach ($executable in @($electronExecutable, $dotnetExecutable, $sqliteVecLibrary, $pressExecutable))
     {
         if (-not (Test-Path -LiteralPath $executable -PathType Leaf))
         {

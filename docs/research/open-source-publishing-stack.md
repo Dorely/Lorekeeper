@@ -1,5 +1,9 @@
 # Open-source publishing stack preliminary screen
 
+> Historical candidate research. ADR 0003 and
+> `lorekeeper-press-requirements.md` define the current owned renderer; neither
+> Typst nor WeasyPrint is a runtime component.
+
 Last reviewed: 2026-07-30
 Research access date: 2026-07-30
 Decision state: the first renderer candidate was implemented and rejected;

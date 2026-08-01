@@ -26,6 +26,7 @@
 | `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates tooling/version, audits NuGet plus shipped npm/Electron dependencies, rebuilds isolated staging/output, verifies installer/updater artifacts, and writes GitHub Release checksums. |
 | `scripts/build-macos-release.ps1` | Native macOS release builder for one RID: audits dependencies, packages an ad-hoc-signed DMG, verifies signatures/architectures, mounts and smoke-tests the app, and writes a checksum. |
 | `scripts/publish-release.ps1` | Windows release orchestrator with a local Windows-only mode or an optional correlated macOS Actions build; downloads each architecture, atomically publishes the selected platforms, and removes temporary Actions artifacts after publication. |
+| `eng/BuildPressRuntime.ps1` | Locked Rust build, license-expression audit, and exact native Press runtime packager used by Debug, Release, and platform packaging. |
 | `scripts/generate-brand-assets.py` | Deterministically exports browser PNG sizes and the multi-resolution Windows ICO from the 1024px Lorekeeper icon master. |
 | `docs/research/README.md` | Index and maintenance policy for Lorekeeper's sourced editorial, image-prompting, and composition research briefs. |
 | `docs/research/image-generation-prompting.md` | Sourced `gpt-image-2` prompting/API brief with structured reference/edit/page-target guidance and runtime contract mappings. |
@@ -33,10 +34,11 @@
 | `docs/research/page-composition-and-typesetting.md` | Sourced page/spread, typography, accessibility, diagnostic threshold, and shared-geometry brief. |
 | `docs/research/publishing-industry-and-file-standards.md` | Sourced print/ebook workflow, service-input, metadata, preflight, edition, and artifact requirements. |
 | `docs/research/book-authoring-and-design-software.md` | Competitor capability matrix, missing editing/design tools, delivery phases, and Lorekeeper integration proposals. |
-| `docs/research/open-source-publishing-stack.md` | Preliminary editor/renderer/color/validation license screen, release-audit requirements, rejected licenses, proposed press sidecar, and PDF/X spike gate. |
+| `docs/research/open-source-publishing-stack.md` | Historical editor/renderer/color/validation license screen and candidate gates that preceded the owned Press renderer. |
 | `docs/research/structured-manuscripts-and-safe-migration.md` | Semantic manuscript design plus WAL-safe backup, data conversion, validation, recovery, legacy import, and assistant-parity plan. |
-| `docs/research/press-renderer-conformance-spike.md` | Executable Typst/krilla/moxcms spike evidence, fail-closed PDF/X result, external-gate disposition, and free fallback comparison. |
-| `docs/research/weasyprint-pdfx-fallback-spike.md` | Executable WeasyPrint PDF/X declaration/inspection evidence, ICC rights and fingerprint, containment, packaging gaps, and reduced Preview acceptance. |
+| `docs/research/press-renderer-conformance-spike.md` | Historical Typst/krilla/moxcms spike evidence and the fail-closed PDF/X result that rejected the candidate. |
+| `docs/research/weasyprint-pdfx-fallback-spike.md` | Historical WeasyPrint fallback evidence, including the distribution gaps that retired the reduced-scope runtime. |
+| `docs/research/lorekeeper-press-requirements.md` | Current owned-renderer requirements/evidence matrix, dependencies, distribution/security boundaries, limitations, and future phases. |
 | `docs/research/weasyprint-spike-license-inventory.json` | Generated locked Python source/checksum/license-file inventory for the Windows fallback fixture plus explicit target-native release gaps. |
 | `docs/research/weasyprint-spike-build-evidence.json` | Controlled Windows fallback interpreter, archive, font, source, executable, and binary-inventory fingerprints. |
 | `docs/research/weasyprint-spike-native-source.json` | Archive-derived per-payload hash manifest tying frozen native inputs to the verified official portable executable. |
@@ -44,7 +46,8 @@
 | `docs/research/weasyprint-spike-verification-evidence.json` | Recorded deterministic-output, containment, parse, text, geometry, and artifact-hash checks for the frozen fallback. |
 | `docs/research/press-spike-license-inventory.json` | Generated exact-version/checksum/VCS/license-file inventory for every target-inclusive Rust spike dependency and bundled asset notice. |
 | `docs/decisions/0001-reject-typst-as-sole-press-renderer.md` | Accepted no-go decision for the first press renderer candidate and the WeasyPrint 69 fallback gate. |
-| `docs/decisions/0002-accept-weasyprint-for-preview-press-runtime.md` | Accepted reduced-scope decision that governs the exact-pinned WeasyPrint runtime now integrated for Preview output. |
+| `docs/decisions/0002-accept-weasyprint-for-preview-press-runtime.md` | Superseded historical decision for the retired reduced-scope WeasyPrint runtime. |
+| `docs/decisions/0003-own-lorekeeper-press-renderer.md` | Accepted decision to own the Rust Press renderer, protocol, validation, and packaged runtime boundary. |
 | `docs/schemas/manuscript-v1.schema.json` | Published JSON Schema for canonical structured-manuscript v1 documents, blocks, inline nodes, marks, and semantic style roles. |
 | `docs/schemas/manuscript-v2.schema.json` | Current semantic-manuscript schema with figure blocks and expanded character marks. |
 
@@ -61,17 +64,19 @@
 | `EditorRevisionAgentResultTests.cs` | Compact coordinator-result and pending progress-read disposal fixtures for revision-agent completion. |
 | `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
 | `ProjectExportCompatibilityTests.cs` | Current v13 manuscript/style/edition/cover-image/font fixtures plus v8-v12 fail-closed import-boundary and visual-layout compatibility checks. |
-| `PublicationEditionMigrationTests.cs` | Protected legacy edition cutover plus cover-image forward-migration, missing-outline preservation, and interrupted EF-history retry fixtures. |
+| `PublicationEditionMigrationTests.cs` | Protected legacy edition cutover plus cover-image/Press forward migration, missing-outline preservation, and interrupted EF-history retry fixtures. |
 | `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image remapping, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
 | `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, image-backed figures, persisted Picture Page text hydration, ordered user-authored matter, and generated-page conflict rejection in Markdown/EPUB publication rendering. |
 | `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, content-use, and edition-mapping deletion guards. |
 | `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
-| `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, render/source drift, language/ISBN/profile/color rejection, product-form proof isolation, and assistant-authorization fixtures. |
-| `PublicationEditionServiceTests.cs` | Preview defaults, archived assistant/service mutation guards, cover-focal UI mapping, shared-ISBN identity, and hostile semantic-matter ownership fixtures. |
-| `PublicationRenderTests.cs` | Artifact-integrity/staleness fixtures plus clean publication-worker cancellation during host shutdown. |
-| `PublicationPdfActionStateTests.cs` | Missing/active/failed/stale/current PDF action-state fixtures plus immutable assistant artifact-link metadata. |
+| `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, current/legacy render provenance, language/ISBN/profile/color rejection, product-form proof isolation, and assistant-authorization fixtures. |
+| `PublicationEditionServiceTests.cs` | Final-profile defaults, archived assistant/service mutation guards, cover-focal UI mapping, shared-ISBN identity, and hostile semantic-matter ownership fixtures. |
+| `PublicationRenderTests.cs` | Native-runtime integrity, artifact-integrity/staleness, staged-request, and clean publication-worker cancellation fixtures. |
+| `PublicationPdfActionStateTests.cs` | NotGenerated/Rendering/Invalid/Stale/Validated/Legacy PDF action-state fixtures plus immutable assistant artifact-link metadata. |
 | `PublishChatServiceTests.cs` | Publish conversation persistence/reset, streaming completion/failure/cancellation, selected-edition prompt, non-replayed tools, mutation notices, and active-turn reconnection fixtures. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
+| `LorekeeperPressMigrationTests.cs` | Fully populated pre-Press upgrade, malformed-marker, cross-process ownership, final-profile mapping, recoverable-work, legacy classification, and whole-database byte/hash preservation fixtures. |
+| `LorekeeperPressProcessIntegrationTests.cs` | Real C#-to-packaged-Rust protocol-v3 render of interior and cover with a cleared machine environment. |
 | `DatabaseMigrationRecoveryTests.cs` | Shared migration-recovery pruning fixture proving protected failed/running backup references survive automatic retention. |
 | `OpenAIChatToolMetadataClientTests.cs` | OpenAI-compatible streaming fixture proving Gemini tool-call extension metadata survives the assistant/tool-result round trip. |
 | `CodexAuthServiceTests.cs` | OAuth refresh fixtures for reconnect rejection, cross-scope serialization/cache replacement, rotation preservation, and fail-loud server errors. |
@@ -85,37 +90,23 @@
 | `test/semantic-editor.test.js` | Node/jsdom fixtures for round-trip fidelity, stable IDs, accessibility/read-only state, save draining, conflicts, paste, links, and marked-text find. |
 | `THIRD_PARTY_NOTICES.md` | Runtime/build dependency inventory and MIT notice for the semantic-editor bundle. |
 
-## Lorekeeper.Press/ — Disposable renderer spike
+## Lorekeeper.Press/ — Owned native publication renderer
 
 | File | Description |
 |------|-------------|
-| `Cargo.toml` / `Cargo.lock` | Unpublished Rust 2024 crate with exact Typst, krilla-resolving, moxcms, PDF inspection, serialization, and fixture dependency pins. |
-| `src/main.rs` / `src/lib.rs` | Stdin/stdout JSON process envelope and library surface for the non-production spike. |
-| `src/protocol.rs` | Versioned request/response, profile, artifact, evidence, and structured diagnostic contracts. |
-| `src/world.rs` | In-memory Typst world with pinned embedded fonts and no filesystem, package, or network loader. |
-| `src/render.rs` | 6 × 9 PDF 1.7 interior/wrap-cover compilation, page-count spine calculation, fail-closed PDF/X response, hashing, and preflight orchestration. |
-| `src/inspect.rs` | Independent `lopdf` structural inspection for page geometry, fonts, color spaces, images, output intents, transparency, encryption, and actions. |
-| `src/tests.rs` / `tests/process_contract.rs` | Authorized unit/adversarial/process fixtures for deterministic output, recursive PDF inspection, warning handling, immutable containment, complete envelopes, and PDF/X rejection. |
-| `fixtures/*.json` | Representative PDF 1.7 book request and deliberate unsupported PDF/X request. |
-| `scripts/verify-spike.ps1` | Locked tests, optimized build, process fixtures, timing/size evidence, and optional independent Poppler checks. |
-| `scripts/generate-license-report.ps1` | Deterministic Cargo metadata, checksum, upstream VCS, license expression, and license/notice hash inventory generator. |
-
-## Lorekeeper.Press.Weasy/ — Preview press renderer
-
-| File | Description |
-|------|-------------|
-| `pyproject.toml` / `uv.lock` | Exact direct pins and hash-locked transitive Python resolution for WeasyPrint 69, pypdf, cffi, and the PyInstaller build harness. |
-| `launcher.py` / `src/lorekeeper_press_weasy/startup.py` / `main.py` | Pre-native font environment/bundle fingerprint validation followed by the bounded stdin/stdout JSON process envelope. |
-| `assets/fonts.conf` | Minimal sibling-font-only Fontconfig policy copied beside the frozen executable with pinned Liberation Serif files. |
-| `src/lorekeeper_press_weasy/protocol.py` | Strict versioned request/response, diagnostic, artifact, and conformance-evidence contracts shared with the first spike. |
-| `src/lorekeeper_press_weasy/pdfx.py` | Exact-pinned PDF/X-1a:2001/PDF 1.3 adapter required because WeasyPrint 69's stock name targets the 2003 revision. |
-| `src/lorekeeper_press_weasy/markup.py` / `render.py` | Pure ordered semantic-matter/chapter markup plus generated paged HTML, restricted ICC fetcher, interior/wrap-cover rendering, hashing, and internal checks. |
-| `src/lorekeeper_press_weasy/inspect.py` | Independent pypdf inspection for PDF version, page boxes, fonts, colors, images, output intents, transparency, annotations, encryption, and actions. |
-| `src/lorekeeper_press_weasy/geometry.py` / `storage.py` | Measured PDF box geometry plus exclusive-lock, staged, fsynced, immutable job publication. |
-| `tests/*.py` | Authorized protocol/semantic-block/matter-order, bounded maximum-request, recursive PDF inspection, measured geometry, and concurrent immutable-publication fixtures. |
-| `scripts/build-windows-spike.ps1` / `scripts/extract-pyinstaller-native.py` / `scripts/audit-pyinstaller-binaries.py` | Archive-owned native extraction, controlled frozen Windows build with platform/architecture/full-bundle evidence and optional CMYK profile, and fail-closed source classification. |
-| `scripts/verify-spike.ps1` / `scripts/verify-artifacts.py` | Frozen-process adversarial/repeatability harness plus independent PDF parse, text, box, and hash verification. |
-| `scripts/generate-license-inventory.py` | Deterministic uv-lock/package-metadata/license-file hash inventory generator for the active fallback environment. |
+| `Cargo.toml` / `Cargo.lock` / `rust-toolchain.toml` | Rust 1.97.1 crate with exact permissive serialization, shaping, subsetting, line-breaking, hyphenation, image/color, PDF-writing, hashing, and inspection dependencies. |
+| `src/main.rs` / `src/lib.rs` | Native `describe` and bounded protocol-v3 `render` CLI plus the independently testable library surface. |
+| `src/model.rs` | Protocol-v3 requests, diagnostics, artifacts, validation evidence, and intermediate layout/page-map contracts. |
+| `src/renderer.rs` | Contained staging, validation, deterministic pagination, semantic composition, covers/barcodes, atomic promotion, and evidence assembly. |
+| `src/font.rs` | Bundled-font glyph coverage, shaping, subsetting, widths, encoding, and multi-codepoint ToUnicode mapping. |
+| `src/image.rs` | Bounded PNG decoding, alpha flattening, registered-profile CMYK conversion, and total-ink enforcement. |
+| `src/pdf.rs` | Owned deterministic PDF 1.7/PDF 1.3 object writer for pages, boxes, fonts, images, output intent, streams, and barcodes. |
+| `src/inspect.rs` | Separate `lopdf` post-write inspection for geometry, fonts, XObject colors, output intent, transparency, encryption, annotations, and actions. |
+| `assets/` | Approved OFL font notices plus the registered CGATS21 CRPC1 CMYK profile, source, fingerprint, and redistribution record. |
+| `fixtures/full-model-v3.json` | Canonical complete publication-model protocol fixture used by black-box conformance tests. |
+| `fixtures/negative-cases-v3.json` | Frozen adversarial protocol mutations and expected fail-closed diagnostic codes. |
+| `fixtures/invalid-pdf-structures-v3.json` | Frozen malformed raw-PDF cases proving the black-box harness fails closed independently of production preflight. |
+| `tests/conformance_v3.rs` | Test-owned CLI harness and raw-PDF assertions for protocol, containment, atomicity, determinism, KDP, PDF/X, images, fonts, geometry, covers, barcodes, and negative cases. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
 
@@ -352,7 +343,7 @@
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, and lossless publication-edition forward migrations with the current model snapshot. |
+| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-edition, Publish-chat, and data-preserving Lorekeeper Press forward migrations with the current model snapshot. |
 
 ### Persistence/Repositories/
 
@@ -609,14 +600,16 @@
 | `PageGeometryService.cs` | Default-publication-edition-derived page/spread calculation consumed by viewer pagination, rendering, image targeting, diagnostics, and publishing. |
 | `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning application boundary for edition lifecycle, settings, content, matter, style mappings, placements, audit history, comparison, and deterministic source fingerprints. |
 | `PublicationEditionMigrationService.cs` | Independent v10 backup/hash/journal cutover plus validated, resumable reconciliation of SQLite's split v14 cover-table rebuild and EF history write. |
+| `PublicationMigrationLock.cs` | Database-scoped process and crash-releasing file lease shared by edition recovery and Press schema advancement so the v14 rebuild/history window has one migration owner. |
+| `PublicationPressMigrationService.cs` | Guarded v15 Press cutover/reconciliation owner with protected backup, atomic marker, integrity and byte/hash invariants, journal evidence, and recovery-shell fallback. |
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
 | `PublishAssistantTools.cs` | Publish tool catalog for editions, matter, styles, placements, covers, renders, preflight, packages, audits, comparisons, exports, and artifact view/download metadata; proof approval is intentionally absent. |
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration, shared active-turn streaming/reconnection, collaborative prompt policy, tool activity, and structured mutation notices. |
-| `PublicationPdfActionState.cs` | Deterministic Generate/active/failed/Regenerate/current selector and correlated current interior/cover artifact projection for the Publish summary. |
-| `PublicationPressRuntime.cs` | Fail-closed installation-root resolver for a release-provisioned app-owned press bundle, integrity evidence, controlled child environment, and shared PDF readiness reporting; no launch-state or machine-tool fallback. |
-| `PublicationRenderService.cs` | Persisted/recoverable render queue, contained ordered-matter press adapter, hash-verified artifact download boundary, semantic page maps, stale-state derivation, and render comparison. |
+| `PublicationPdfActionState.cs` | Deterministic NotGenerated/Rendering/Invalid/Stale/Validated/Legacy selector and correlated current interior/cover artifact projection for the Publish summary. |
+| `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
+| `PublicationRenderService.cs` | Persisted/recoverable queue, protocol-v3 request/asset staging, native process lifecycle, hash-verified immutable artifacts, semantic page maps, legacy/stale derivation, and render comparison. |
 | `PublicationCoverService.cs` | Edition full-wrap template calculation, revisioned cover design, ISBN-13/vendor/spine diagnostics, and acknowledgement invalidation. |
-| `PublicationPackageService.cs` | Versioned fail-closed Preview preflight, product-form-specific deterministic package assembly, manifests, reports, and exact-package proof records. |
+| `PublicationPackageService.cs` | Versioned fail-closed Lorekeeper validation preflight, product-form-specific deterministic package assembly, manifests, reports, provenance, legacy guards, and exact-package proof records. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying every included ordered semantic-matter document into edition-scoped TXT, Markdown, EPUB, and contained press output with reciprocal product-form guards. |
 | `PublishEndpoints.cs` | Cacheable/range HTTP endpoints for validated interior Picture Page surfaces and project-scoped immutable publication artifact viewing/download. |
 | `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus an ordered semantic-matter, mixed-layout EPUB writer using shared geometry for reflowable prose and accessible fixed cover/Picture Page items. |

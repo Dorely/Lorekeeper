@@ -150,6 +150,29 @@ public sealed class PublishChatServiceTests
     }
 
     [Fact]
+    public async Task ExploratoryTurnCanRemainCollaborativeWithoutInventingAMutation()
+    {
+        var fixture = Fixture.With(new ScriptedChatClient(
+            Complete("Which distributor and finished trim size are you targeting?")));
+
+        var updates = await CollectAsync(fixture.Service.SendAsync(
+            fixture.Project.Id,
+            null,
+            "Help me decide how to publish this book.",
+            []));
+
+        Assert.Contains(updates, update => update is PublishTextDelta
+        {
+            Text: "Which distributor and finished trim size are you targeting?",
+        });
+        Assert.DoesNotContain(updates, update => update is PublishWorkspaceMutated);
+        var conversation = await fixture.Service.GetOrCreateAsync(fixture.Project.Id);
+        Assert.DoesNotContain(
+            await fixture.Service.LoadMessagesAsync(conversation.Id),
+            message => message.Role == PublishMessageRole.Tool);
+    }
+
+    [Fact]
     public void PromptAndMutationNoticesEnforceCollaborativeRevisionAwareBehavior()
     {
         Assert.Contains("Execute explicit instructions directly", PublishChatService.WorkflowInstructions);
@@ -157,7 +180,8 @@ public sealed class PublishChatServiceTests
         Assert.Contains("revision conflict", PublishChatService.WorkflowInstructions);
         Assert.Contains("reread", PublishChatService.WorkflowInstructions);
         Assert.Contains("cannot approve", PublishChatService.WorkflowInstructions);
-        Assert.Contains("Preview", PublishChatService.WorkflowInstructions);
+        Assert.Contains("internally validate KDP PDF 1.7", PublishChatService.WorkflowInstructions);
+        Assert.Contains("vendor acceptance", PublishChatService.WorkflowInstructions);
 
         var editionId = Guid.NewGuid();
         var created = PublishChatService.TryMutationNotice(

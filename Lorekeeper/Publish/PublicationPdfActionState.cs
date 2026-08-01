@@ -4,11 +4,12 @@ namespace Lorekeeper.Publish;
 
 public enum PublicationPdfActionKind
 {
-    Generate,
-    Active,
-    Failed,
-    Regenerate,
-    Current,
+    NotGenerated,
+    Rendering,
+    Invalid,
+    Validated,
+    Stale,
+    Legacy,
 }
 
 public sealed record PublicationPdfActionState(
@@ -24,39 +25,53 @@ public sealed record PublicationPdfActionState(
         var active = jobs.FirstOrDefault(job =>
             job.Status is PublicationRenderStatus.Queued or PublicationRenderStatus.Rendering);
         if (active is not null)
-            return new(PublicationPdfActionKind.Active, active, null, null);
+            return new(PublicationPdfActionKind.Rendering, active, null, null);
 
         if (sourceMayHaveChanged && jobs.Any(job =>
-                job.Artifacts.Any(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf)))
+                job.Artifacts.Any(artifact =>
+                    artifact.Kind == PublicationArtifactKind.InteriorPdf && !artifact.IsLegacy)))
         {
-            return new(PublicationPdfActionKind.Regenerate, jobs.FirstOrDefault(), null, null);
+            return new(PublicationPdfActionKind.Stale, jobs.FirstOrDefault(), null, null);
         }
 
         var currentJob = jobs.FirstOrDefault(job =>
             job.Status == PublicationRenderStatus.Completed
             && job.Artifacts.Any(artifact =>
-                artifact.Kind == PublicationArtifactKind.InteriorPdf && !artifact.IsStale));
+                artifact.Kind == PublicationArtifactKind.InteriorPdf
+                    && !artifact.IsLegacy
+                    && !artifact.IsStale));
         if (currentJob is not null)
         {
             return new(
-                PublicationPdfActionKind.Current,
+                PublicationPdfActionKind.Validated,
                 currentJob,
                 currentJob.Artifacts.First(artifact =>
-                    artifact.Kind == PublicationArtifactKind.InteriorPdf && !artifact.IsStale),
+                    artifact.Kind == PublicationArtifactKind.InteriorPdf
+                        && !artifact.IsLegacy
+                        && !artifact.IsStale),
                 currentJob.Artifacts.FirstOrDefault(artifact =>
-                    artifact.Kind == PublicationArtifactKind.CoverPdf && !artifact.IsStale));
+                    artifact.Kind == PublicationArtifactKind.CoverPdf
+                        && !artifact.IsLegacy
+                        && !artifact.IsStale));
         }
 
         var latest = jobs.FirstOrDefault();
         if (latest?.Status == PublicationRenderStatus.Failed)
-            return new(PublicationPdfActionKind.Failed, latest, null, null);
+            return new(PublicationPdfActionKind.Invalid, latest, null, null);
 
         var staleJob = jobs.FirstOrDefault(job =>
             job.Artifacts.Any(artifact =>
-                artifact.Kind == PublicationArtifactKind.InteriorPdf && artifact.IsStale));
+                artifact.Kind == PublicationArtifactKind.InteriorPdf
+                    && !artifact.IsLegacy
+                    && artifact.IsStale));
         if (staleJob is not null)
-            return new(PublicationPdfActionKind.Regenerate, staleJob, null, null);
+            return new(PublicationPdfActionKind.Stale, staleJob, null, null);
 
-        return new(PublicationPdfActionKind.Generate, latest, null, null);
+        var legacyJob = jobs.FirstOrDefault(job => job.Artifacts.Any(artifact =>
+            artifact.Kind == PublicationArtifactKind.InteriorPdf && artifact.IsLegacy));
+        if (legacyJob is not null)
+            return new(PublicationPdfActionKind.Legacy, legacyJob, null, null);
+
+        return new(PublicationPdfActionKind.NotGenerated, latest, null, null);
     }
 }

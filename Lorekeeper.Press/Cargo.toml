@@ -1,19 +1,23 @@
 [package]
 name = "lorekeeper-press"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 publish = false
 
 [dependencies]
+flate2 = "=1.1.9"
+harfrust = "=0.12.0"
+hypher = { version = "=0.1.7", default-features = false, features = ["alloc", "english"] }
 lopdf = { version = "=0.44.0", default-features = false }
 moxcms = { version = "=0.9.0", default-features = false, features = ["lut"] }
-serde = { version = "=1.0.228", features = ["derive"] }
-serde_json = "=1.0.145"
-sha2 = "=0.10.9"
-typst = "=0.15.1"
-typst-kit = { version = "=0.15.1", features = ["embedded-fonts"] }
-typst-layout = "=0.15.1"
-typst-pdf = "=0.15.1"
+pdf-writer = "=0.15.0"
+png = "=0.18.1"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = "=0.11.0"
+subsetter = "=0.2.6"
+unicode-linebreak = "=0.1.5"
+unicode-segmentation = "=1.13.3"
 
 [dev-dependencies]
 tempfile = "=3.23.0"

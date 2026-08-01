@@ -1,6 +1,6 @@
 # Lorekeeper editorial and composition research
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-07-31
 
 Research access date: recorded by brief.
 
@@ -27,13 +27,16 @@ These briefs are engineering references for Lorekeeper's prompts, automation, co
 - [Structured manuscripts and safe migration](structured-manuscripts-and-safe-migration.md)
   — semantic document ownership, WAL-safe backup, expand/migrate/validate/
   contract conversion, legacy imports, recovery, and assistant parity.
+- [Lorekeeper Press requirements and evidence](lorekeeper-press-requirements.md)
+  — current protocol-v3, renderer, PDF/PDF-X, security, packaging, application,
+  assistant, limitation, and future-phase requirements for the owned runtime.
 - [Press renderer and conformance spike](press-renderer-conformance-spike.md)
-  — executable Typst/krilla/moxcms evidence, fail-closed PDF/X result,
-  dependency/license inventory, and the WeasyPrint fallback decision.
+  — historical Typst/krilla/moxcms evidence, fail-closed PDF/X result,
+  dependency/license inventory, and the reason that candidate was rejected.
 - [WeasyPrint PDF/X fallback spike](weasyprint-pdfx-fallback-spike.md)
-  — executable PDF/X-1a:2001 declaration and inspection evidence, contained
-  input/output design, ICC fingerprint and rights, packaging gaps, and the
-  reduced `Preview` acceptance decision.
+  — historical PDF/X declaration/inspection evidence, containment, ICC rights,
+  and the packaging/distribution gaps that retired the reduced `Preview`
+  decision in favor of the owned renderer.
 - [WeasyPrint fallback license inventory](weasyprint-spike-license-inventory.json)
   — generated locked-package source/checksum/metadata and installed
   license-file hashes for the Windows fallback fixture, with target-native

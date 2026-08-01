@@ -29,7 +29,7 @@ public sealed record PublicationPreflightReport(
     string SourceFingerprint,
     string PackageIdentity,
     IReadOnlyList<PublicationValidatedArtifact> ValidatedArtifacts,
-    bool IsPreview,
+    bool IsLorekeeperValidated,
     bool CanPackage,
     PublicationArtifactView? CurrentPackage,
     PublicationProofStatus DigitalProof,
@@ -92,11 +92,11 @@ public sealed class PublicationPackageService(
     IPublishService publishing,
     IPublicationEditionService editions,
     IPublicationCoverService covers,
-    IProjectMutationCoordinator projectMutations) : IPublicationPackageService
+    IProjectMutationCoordinator projectMutations,
+    IPublicationPressRuntime? pressRuntime = null) : IPublicationPackageService
 {
     private const string AssemblerVersion = "lorekeeper-package-v1";
     private const string EpubExporterVersion = "lorekeeper-epub-v2";
-    private const string PressRendererVersion = "0.2.0";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -126,7 +126,7 @@ public sealed class PublicationPackageService(
             PublicationEditionFormat.Paperback,
             PublicationVendor.AmazonKdp,
             "amazon-kdp-paperback",
-            "preview-1",
+            "kdp-paperback-v1",
             new DateTime(2026, 7, 30, 0, 0, 0, DateTimeKind.Utc),
             24,
             800,
@@ -138,7 +138,7 @@ public sealed class PublicationPackageService(
             PublicationEditionFormat.Paperback,
             PublicationVendor.IngramSpark,
             "ingramspark-paperback",
-            "preview-1",
+            "ingram-paperback-pdfx1a-v1",
             new DateTime(2026, 7, 30, 0, 0, 0, DateTimeKind.Utc),
             18,
             800,
@@ -147,7 +147,7 @@ public sealed class PublicationPackageService(
             PublicationEditionFormat.Paperback,
             PublicationVendor.Generic,
             "generic-paperback",
-            "preview-1",
+            "generic-paperback-v1",
             new DateTime(2026, 7, 30, 0, 0, 0, DateTimeKind.Utc),
             2,
             800,
@@ -156,7 +156,7 @@ public sealed class PublicationPackageService(
             PublicationEditionFormat.Epub,
             PublicationVendor.AmazonKdp,
             "amazon-kdp-epub",
-            "preview-1",
+            "epub3-v1",
             new DateTime(2026, 7, 30, 0, 0, 0, DateTimeKind.Utc),
             0,
             0,
@@ -168,7 +168,7 @@ public sealed class PublicationPackageService(
             PublicationEditionFormat.Epub,
             PublicationVendor.Generic,
             "generic-epub3",
-            "preview-1",
+            "epub3-v1",
             new DateTime(2026, 7, 30, 0, 0, 0, DateTimeKind.Utc),
             0,
             0,
@@ -180,7 +180,7 @@ public sealed class PublicationPackageService(
             PublicationEditionFormat.Epub,
             PublicationVendor.IngramSpark,
             "generic-epub3",
-            "preview-1",
+            "epub3-v1",
             new DateTime(2026, 7, 30, 0, 0, 0, DateTimeKind.Utc),
             0,
             0,
@@ -227,18 +227,29 @@ public sealed class PublicationPackageService(
         PublicationCoverDesignView? coverDesign = null;
         if (edition.Format == PublicationEditionFormat.Paperback)
         {
-            ValidatePdf(interior, fingerprint, PublicationArtifactKind.InteriorPdf, "INTERIOR", items);
-            ValidatePdf(coverArtifact, fingerprint, PublicationArtifactKind.CoverPdf, "COVER", items);
+            string? currentRendererVersion = null;
+            if (pressRuntime is not null)
+            {
+                var readiness = pressRuntime.GetReadiness();
+                if (!readiness.IsReady)
+                    items.Add(Error("PRESS_RUNTIME_UNAVAILABLE", readiness.Message));
+                else
+                {
+                    var description = pressRuntime.GetDescription();
+                    currentRendererVersion = description.RendererVersion;
+                    if (!description.Profiles.Contains(edition.VendorProfileVersion, StringComparer.Ordinal))
+                        items.Add(Error("PRESS_PROFILE_STALE", "The selected profile is not available in the installed Lorekeeper Press runtime."));
+                }
+            }
+            ValidatePdf(interior, fingerprint, currentRendererVersion, edition.VendorProfileVersion, PublicationArtifactKind.InteriorPdf, "INTERIOR", items);
+            ValidatePdf(coverArtifact, fingerprint, currentRendererVersion, edition.VendorProfileVersion, PublicationArtifactKind.CoverPdf, "COVER", items);
             if (coverArtifact is not null && coverArtifact.PageCount != 1)
                 items.Add(Error("COVER_PAGE_COUNT_INVALID", "The full-wrap cover PDF must contain exactly one page.", PublicationArtifactKind.CoverPdf));
-            if (interior is not null
-                && coverArtifact is not null
-                && (!string.Equals(interior.RendererVersion, PressRendererVersion, StringComparison.Ordinal)
-                    || !string.Equals(coverArtifact.RendererVersion, PressRendererVersion, StringComparison.Ordinal)))
+            if (interior?.IsLegacy == true || coverArtifact?.IsLegacy == true)
             {
                 items.Add(Error(
-                    "PRESS_RENDERER_VERSION_STALE",
-                    $"Render the paperback again with press runtime {PressRendererVersion}."));
+                    "PRESS_RENDERER_LEGACY",
+                    "Legacy PDFs remain downloadable but cannot satisfy current validation or package readiness."));
             }
             coverDesign = await covers.GetAsync(projectId, editionId, cancellationToken);
             items.AddRange(coverDesign.Diagnostics.Select(message =>
@@ -255,14 +266,14 @@ public sealed class PublicationPackageService(
             if (edition.Vendor == PublicationVendor.IngramSpark
                 && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
             {
-                items.Add(Error("META_ISBN13_REQUIRED", "The Ingram Preview profile requires a valid ISBN-13."));
+                items.Add(Error("META_ISBN13_REQUIRED", "The Ingram profile requires a valid ISBN-13."));
             }
             if (coverDesign.BarcodeMode == PublicationBarcodeMode.LorekeeperBarcode
                 && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
             {
                 items.Add(Error("META_ISBN13_BARCODE_REQUIRED", "Lorekeeper barcode output requires a valid ISBN-13."));
             }
-            await AddPressEvidenceAsync(edition, interior, coverArtifact, coverDesign.Template, items, cancellationToken);
+            await AddPressEvidenceAsync(edition, interior, coverArtifact, coverDesign.Template, currentRendererVersion, items, cancellationToken);
         }
         var document = await publishing.GetDocumentAsync(projectId, editionId, cancellationToken);
         ValidateProfile(edition, profile, interior, document, coverDesign, items);
@@ -280,15 +291,16 @@ public sealed class PublicationPackageService(
         ValidateLanguageScope(document, coverDesign, matter, items);
         if (!string.Equals(edition.Language, "en", StringComparison.OrdinalIgnoreCase)
             && !edition.Language.StartsWith("en-", StringComparison.OrdinalIgnoreCase))
-            items.Add(Error("LANGUAGE_SCOPE_UNSUPPORTED", "The Preview publishing profiles currently support English only."));
+            items.Add(Error("LANGUAGE_SCOPE_UNSUPPORTED", "Lorekeeper Press 1.0 supports English/Latin left-to-right publishing only."));
         items.Add(new(
-            "warning",
-            "EXTERNAL_VALIDATION_PENDING",
-            "Independent Acrobat, EPUBCheck, and vendor-upload validation remain outside this runtime. Outputs remain Preview even when proof checks are recorded."));
+            "info",
+            "LOREKEEPER_VALIDATED_SCOPE",
+            "Lorekeeper validation covers the generated file structure and selected profile. Human proof and recorded vendor results remain separate evidence."));
         var packageIdentity = PackageIdentity(profile, fingerprint, interior, coverArtifact);
         var currentPackageEntity = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
                 && artifact.Kind == PublicationArtifactKind.PublicationPackage
+                && !artifact.IsLegacy
                 && artifact.SourceFingerprint == fingerprint
                 && artifact.RendererVersion == RuntimeVersion(profile.Format)
                 && artifact.ProfileId == packageIdentity)
@@ -308,6 +320,17 @@ public sealed class PublicationPackageService(
             cancellationToken);
         if (edition.Format == PublicationEditionFormat.Epub)
             physicalProof = NotApplicableProofStatus();
+        if (items.Any(item => item.Code is
+                "PRESS_RENDERER_STALE" or
+                "PRESS_PROFILE_STALE" or
+                "PRESS_RUNTIME_UNAVAILABLE"))
+        {
+            currentPackage = null;
+            digitalProof = ProofStatus(null, DigitalProofChecklist(edition.Format));
+            physicalProof = edition.Format == PublicationEditionFormat.Paperback
+                ? ProofStatus(null, PhysicalProofChecklist)
+                : NotApplicableProofStatus();
+        }
         var finalFingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         if (!string.Equals(finalFingerprint, fingerprint, StringComparison.Ordinal))
         {
@@ -337,7 +360,7 @@ public sealed class PublicationPackageService(
                     .OrderBy(artifact => artifact.Kind)
                     .ToList()
                 : [],
-            IsPreview: true,
+            IsLorekeeperValidated: items.All(item => item.Severity != "error"),
             CanPackage: items.All(item => item.Severity != "error"),
             currentPackage,
             digitalProof,
@@ -368,6 +391,7 @@ public sealed class PublicationPackageService(
         var validatedArtifactIds = report.ValidatedArtifactIds;
         var sourceArtifacts = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
+                && !artifact.IsLegacy
                 && validatedArtifactIds.Contains(artifact.Id))
             .ToListAsync(cancellationToken);
         if (sourceArtifacts.Count != validatedArtifactIds.Count
@@ -422,7 +446,7 @@ public sealed class PublicationPackageService(
         var manifest = new
         {
             schemaVersion = 1,
-            label = "Preview",
+            label = "Lorekeeper validated",
             editionId,
             sourceFingerprint = report.SourceFingerprint,
             profile = new { report.ProfileId, report.ProfileVersion, report.ProfileReviewedAtUtc },
@@ -445,6 +469,7 @@ public sealed class PublicationPackageService(
             throw new InvalidOperationException("The edition changed while its publication package was being built. Run preflight again.");
         var latestArtifacts = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
+                && !artifact.IsLegacy
                 && artifact.SourceFingerprint == report.SourceFingerprint
                 && (artifact.Kind == PublicationArtifactKind.InteriorPdf
                     || artifact.Kind == PublicationArtifactKind.CoverPdf))
@@ -471,7 +496,7 @@ public sealed class PublicationPackageService(
         generated.Add(Artifact(
             editionId,
             PublicationArtifactKind.PublicationPackage,
-            "publication-package-preview.zip",
+            "publication-package.zip",
             "application/zip",
             packageData,
             report.SourceFingerprint,
@@ -504,6 +529,7 @@ public sealed class PublicationPackageService(
                 artifact.RendererVersion,
                 artifact.ProfileId,
                 artifact.CreatedAt,
+                artifact.IsLegacy,
                 IsStale: false)).ToList());
     }
 
@@ -543,7 +569,8 @@ public sealed class PublicationPackageService(
             artifact => artifact.Id == packageArtifactId
                 && artifact.EditionId == editionId
                 && artifact.Edition.ProjectId == projectId
-                && artifact.Kind == PublicationArtifactKind.PublicationPackage,
+                && artifact.Kind == PublicationArtifactKind.PublicationPackage
+                && !artifact.IsLegacy,
             cancellationToken) ?? throw new KeyNotFoundException("Publication package not found.");
         if (kind == PublicationProofKind.Physical)
         {
@@ -584,9 +611,11 @@ public sealed class PublicationPackageService(
         return await PreflightAsync(projectId, editionId, cancellationToken);
     }
 
-    private static void ValidatePdf(
+    internal static void ValidatePdf(
         PublicationArtifact? artifact,
         string fingerprint,
+        string? currentRendererVersion,
+        string currentProfile,
         PublicationArtifactKind kind,
         string prefix,
         List<PublicationPreflightItem> items)
@@ -598,6 +627,14 @@ public sealed class PublicationPackageService(
         }
         if (!string.Equals(artifact.SourceFingerprint, fingerprint, StringComparison.Ordinal))
             items.Add(Error($"{prefix}_PDF_STALE", $"The {prefix.ToLowerInvariant()} PDF is stale.", kind));
+        if (artifact.IsLegacy)
+            items.Add(Error($"{prefix}_PDF_LEGACY", $"The {prefix.ToLowerInvariant()} PDF was created by a retired renderer.", kind));
+        if (currentRendererVersion is not null
+            && !string.Equals(artifact.RendererVersion, currentRendererVersion, StringComparison.Ordinal))
+            items.Add(Error("PRESS_RENDERER_STALE", $"The {prefix.ToLowerInvariant()} PDF was created by a different Lorekeeper Press renderer.", kind));
+        if (currentRendererVersion is not null
+            && !string.Equals(artifact.ProfileId, currentProfile, StringComparison.Ordinal))
+            items.Add(Error("PRESS_PROFILE_STALE", $"The {prefix.ToLowerInvariant()} PDF was created for a different publication profile.", kind));
         if (!artifact.Data.AsSpan().StartsWith("%PDF-"u8)
             || artifact.PageCount is not > 0
             || !ArtifactBytesMatch(artifact))
@@ -974,15 +1011,15 @@ public sealed class PublicationPackageService(
         }
 
         if (edition.Binding != PublicationBinding.PerfectBound)
-            items.Add(Error("PRINT_BINDING_UNSUPPORTED", "The Preview paperback profiles support perfect binding only."));
+            items.Add(Error("PRINT_BINDING_UNSUPPORTED", "The current paperback profiles support perfect binding only."));
         if (edition.Paper is not PublicationPaper.White and not PublicationPaper.Cream)
-            items.Add(Error("PRINT_PAPER_UNSUPPORTED", "The Preview paperback profiles support white or cream paper."));
+            items.Add(Error("PRINT_PAPER_UNSUPPORTED", "The current paperback profiles support white or cream paper."));
         if (edition.Ink != PublicationInk.BlackAndWhite)
-            items.Add(Error("PRINT_INK_UNSUPPORTED", "The Preview paperback profiles support black-and-white interiors only."));
-        if (Math.Abs(edition.PageWidthInches - 6) > 0.0001
-            || Math.Abs(edition.PageHeightInches - 9) > 0.0001)
+            items.Add(Error("PRINT_INK_UNSUPPORTED", "The current paperback profiles support black-and-white interiors only."));
+        if (edition.PageWidthInches is < 3.5 or > 12
+            || edition.PageHeightInches is < 5 or > 15)
         {
-            items.Add(Error("PRINT_TRIM_UNSUPPORTED", "The installed Preview paperback profiles support exactly 6 × 9 inches."));
+            items.Add(Error("PRINT_TRIM_UNSUPPORTED", "Lorekeeper Press supports trim sizes from 3.5 × 5 through 12 × 15 inches."));
         }
         if (edition.PageMarginInches < 0.5)
             items.Add(Error("PRINT_MARGIN_UNSAFE", "The initial paperback profile requires at least a 0.5-inch page margin."));
@@ -1006,19 +1043,6 @@ public sealed class PublicationPackageService(
             }
             if (pages % 2 != 0)
                 items.Add(Error("PRINT_PAGE_COUNT_ODD", "The paperback interior page count must be even."));
-        }
-        var unsupportedVisuals = document.Placements.Count > 0
-            || document.Matter.Any(item =>
-                item.Manuscript.Content.Any(block => block.Type == ManuscriptBlockType.Figure))
-            || chapters.Any(chapter =>
-                chapter.VisualMode != ChapterVisualMode.Prose
-                || chapter.IllustrationLayout.Images.Count > 0
-                || chapter.Manuscript.Content.Any(block => block.Type == ManuscriptBlockType.Figure));
-        if (unsupportedVisuals)
-        {
-            items.Add(Error(
-                "PRINT_IMAGES_UNSUPPORTED",
-                "The Preview press runtime does not yet place manuscript or edition images in paperback interiors."));
         }
         items.Add(new(
             "warning",
@@ -1198,6 +1222,7 @@ public sealed class PublicationPackageService(
         var records = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
                 && artifact.Kind == PublicationArtifactKind.ProofRecord
+                && !artifact.IsLegacy
                 && artifact.SourceFingerprint == fingerprint
                 && artifact.RendererVersion == currentPackage.RendererVersion
                 && artifact.ProfileId == currentPackage.ProfileId)
@@ -1260,6 +1285,7 @@ public sealed class PublicationPackageService(
         artifact.RendererVersion,
         artifact.ProfileId,
         artifact.CreatedAt,
+        artifact.IsLegacy,
         isStale);
 
     private static void WriteNormalizedEpubEntry(
@@ -1279,6 +1305,7 @@ public sealed class PublicationPackageService(
         PublicationArtifact? interior,
         PublicationArtifact? cover,
         PublicationCoverTemplate template,
+        string? currentRendererVersion,
         List<PublicationPreflightItem> items,
         CancellationToken cancellationToken)
     {
@@ -1298,6 +1325,14 @@ public sealed class PublicationPackageService(
             items.Add(Error("PRESS_EVIDENCE_REQUIRED", "The current PDFs do not have completed press evidence."));
             return;
         }
+        if (currentRendererVersion is not null
+            && !string.Equals(job.RendererVersion, currentRendererVersion, StringComparison.Ordinal))
+        {
+            items.Add(Error("PRESS_RENDERER_STALE", "The completed render evidence belongs to a different Lorekeeper Press renderer."));
+        }
+        if (currentRendererVersion is not null
+            && !string.Equals(job.ProfileId, edition.VendorProfileVersion, StringComparison.Ordinal))
+            items.Add(Error("PRESS_PROFILE_STALE", "The completed render evidence belongs to a different publication profile."));
         try
         {
             var diagnostics = JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(
@@ -1341,23 +1376,39 @@ public sealed class PublicationPackageService(
             }
             if (edition.Vendor == PublicationVendor.IngramSpark)
             {
-                RequireFalse(root, "hasTransparency", "PDF_TRANSPARENCY", "The Ingram Preview PDF contains transparency.", items);
+                RequireFalse(root, "hasTransparency", "PDF_TRANSPARENCY", "The Ingram PDF contains transparency.", items);
                 if (!root.TryGetProperty("outputIntentCount", out var outputIntentCount)
                     || outputIntentCount.ValueKind != JsonValueKind.Number
                     || outputIntentCount.GetInt32() != 2)
                 {
-                    items.Add(Error("PDF_OUTPUT_INTENT_REQUIRED", "Both Ingram Preview PDFs require an output intent."));
+                    items.Add(Error("PDF_OUTPUT_INTENT_REQUIRED", "Both Ingram PDFs require an output intent."));
                 }
                 if (!root.TryGetProperty("declaredStandard", out var declaredStandard)
                     || declaredStandard.GetString() != "PDF/X-1a:2001")
                 {
-                    items.Add(Error("PDF_STANDARD_DECLARATION", "The Ingram Preview artifacts must declare PDF/X-1a:2001."));
+                    items.Add(Error("PDF_STANDARD_DECLARATION", "The Ingram artifacts must declare PDF/X-1a:2001."));
                 }
                 ValidateIngramColorSpaces(root, items);
             }
             else
             {
-                RequireFalse(root, "hasTransparency", "PDF_TRANSPARENCY", "The KDP Preview PDFs contain transparency.", items);
+                RequireFalse(root, "hasTransparency", "PDF_TRANSPARENCY", "The KDP PDFs contain transparency.", items);
+            }
+            if (currentRendererVersion is not null && edition.Ink == PublicationInk.BlackAndWhite)
+            {
+                if (!root.TryGetProperty("interiorImageCount", out var interiorImageCount)
+                    || interiorImageCount.ValueKind != JsonValueKind.Number
+                    || interiorImageCount.GetInt32() < 0)
+                {
+                    items.Add(Error("PRESS_EVIDENCE_INVALID", "Current press evidence must report the number of placed interior images."));
+                }
+                else if (interiorImageCount.GetInt32() > 0
+                    && (!root.TryGetProperty("interiorImageColorSpace", out var interiorImageColorSpace)
+                        || interiorImageColorSpace.ValueKind != JsonValueKind.String
+                        || interiorImageColorSpace.GetString() != "DeviceGray"))
+                {
+                    items.Add(Error("PDF_BLACK_AND_WHITE_INTERIOR_REQUIRED", "Black-and-white editions require grayscale interior image content."));
+                }
             }
             if (root.TryGetProperty("imageCount", out var imageCount)
                 && imageCount.ValueKind == JsonValueKind.Number
@@ -1365,8 +1416,8 @@ public sealed class PublicationPackageService(
             {
                 items.Add(new(
                     "warning",
-                    "IMAGE_RESOLUTION_SCOPE_PREVIEW",
-                    "Image effective-resolution checks are not yet independently recorded for every PDF image."));
+                    "IMAGE_RESOLUTION_REVIEW",
+                    "Review effective image resolution in the rendered page map and proof checklist."));
             }
         }
         catch (JsonException)
@@ -1387,7 +1438,7 @@ public sealed class PublicationPackageService(
         {
             items.Add(Error(
                 "PDF_COLOR_SPACE_EVIDENCE_INVALID",
-                "The Ingram Preview PDFs require non-empty, well-formed color-space evidence."));
+                "The Ingram PDFs require non-empty, well-formed color-space evidence."));
             return;
         }
 
@@ -1396,13 +1447,13 @@ public sealed class PublicationPackageService(
             StringComparer.Ordinal);
         var reported = colorSpaces.EnumerateArray().Select(color => color.GetString()!).ToList();
         if (reported.Contains("DeviceRGB", StringComparer.Ordinal))
-            items.Add(Error("PDF_RGB_FORBIDDEN", "The Ingram Preview PDFs contain DeviceRGB content."));
+            items.Add(Error("PDF_RGB_FORBIDDEN", "The Ingram PDFs contain DeviceRGB content."));
         var unsupported = reported.Where(color => !allowed.Contains(color)).Distinct(StringComparer.Ordinal).ToList();
         if (unsupported.Count > 0)
         {
             items.Add(Error(
                 "PDF_COLOR_SPACE_EVIDENCE_INVALID",
-                $"The Ingram Preview PDFs contain unsupported or unrecognized color-space evidence: {string.Join(", ", unsupported)}."));
+                $"The Ingram PDFs contain unsupported or unrecognized color-space evidence: {string.Join(", ", unsupported)}."));
         }
     }
 

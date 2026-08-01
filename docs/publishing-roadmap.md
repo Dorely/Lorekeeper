@@ -1,6 +1,6 @@
 # End-to-end book publishing roadmap
 
-Last updated: 2026-07-30
+Last updated: 2026-07-31
 
 ## Destination
 
@@ -32,8 +32,10 @@ Every roadmap capability uses one status:
   the declared scope has passed.
 - `Deferred` — deliberately outside the current delivery scope.
 
-No output is called “print-ready,” “PDF/X,” “accessible,” or vendor-compatible
-until the corresponding verified gate passes.
+No output is called “print-ready,” “accessible,” or vendor-compatible until the
+corresponding verified gate passes. A PDF/X label is limited to the exact
+versioned structural profile and evidence named here; it never implies vendor
+acceptance or human proof.
 
 ## Cross-cutting completion rules
 
@@ -97,7 +99,7 @@ conversion/preflight tool.
 
 ## Phase 1 — publisher-ready novel foundation
 
-Status: `Preview; release certification pending`
+Status: `Lorekeeper validated; native release-matrix verification pending`
 
 ### Certified outcome
 
@@ -132,8 +134,9 @@ feature-by-feature migration, review, verification, or commit gates.
 
 ### Phase 1 feature sequence
 
-Each numbered item is a coherent feature, reviewed and committed before the next
-begins.
+The numbered spike records below are retained as historical research. The owned
+renderer, application cutover, migration, packaging, assistant parity, and
+documentation are delivered and reviewed as one coherent feature.
 
 #### 1. Renderer and conformance spike
 
@@ -177,9 +180,9 @@ remains blocked. Evidence and the accepted decision are in
 and
 [`decisions/0001-reject-typst-as-sole-press-renderer.md`](decisions/0001-reject-typst-as-sole-press-renderer.md).
 
-#### 1a. PDF/X fallback conformance spike
+#### 1a. PDF/X fallback conformance spike (historical)
 
-Status: `Preview` — reduced-scope renderer accepted on 2026-07-30
+Status: `Superseded` — reduced-scope decision retired on 2026-07-31
 
 Repeat Feature 1's conformance and release gates with WeasyPrint 69 as the lead
 free fallback. Its current BSD-licensed API exposes PDF/X-1a, PDF/X-3, PDF/X-4,
@@ -209,12 +212,38 @@ structural inspection. The stock WeasyPrint PDF/X-1a mode targets the wrong
 revalidated on every renderer change. The redistributable basICColor fixture
 profile and dependency graph are fingerprinted. External Acrobat/vendor,
 physical-proof, macOS packaging, and complete native-notice gates remain open;
-therefore no conformance or vendor claim is made. This explicit reduced
-`Preview` acceptance unblocks Feature 2 while reserving `Verified` for Feature
-7's external evidence. See
+therefore no conformance or vendor claim is made. This decision temporarily
+unblocked implementation, but its distribution and
+machine-state assumptions did not satisfy the original production requirement.
+ADR 0003 removes the WeasyPrint runtime entirely. See
 [`research/weasyprint-pdfx-fallback-spike.md`](research/weasyprint-pdfx-fallback-spike.md)
 and
 [`decisions/0002-accept-weasyprint-for-preview-press-runtime.md`](decisions/0002-accept-weasyprint-for-preview-press-runtime.md).
+
+#### 1b. Lorekeeper-owned Press renderer
+
+Status: `Implemented; Windows verified locally, native macOS matrix pending`
+
+On 2026-07-31 Lorekeeper replaced both candidate paths with the owned Rust
+`Lorekeeper.Press` subproject and protocol v3. Requirements and black-box
+conformance fixtures were written and run against the Typst implementation
+before production work began; the expected failures were recorded in the work
+log. The current suite independently parses raw objects, streams, fonts, page
+trees, boxes, colors, output intents, metadata, annotations, security state,
+and image XObjects.
+
+The KDP profile emits PDF 1.7. The Ingram profile emits restricted PDF 1.3 with
+PDF/X-1a:2001 identification, registered CGATS21 CRPC1 output intent,
+ICC-converted images, bounded CMYK/gray page paint, flattened alpha, embedded subset fonts,
+ToUnicode maps, and a 240% ink ceiling. Staged assets are declared and hashed;
+output is promoted atomically after separate post-write inspection. The same
+locked native runtime, fonts, profile, notices, SBOM, and hash manifest are
+packaged automatically in Debug and Release. Runtime execution has no machine
+tool fallback or inherited `PATH`.
+
+ADR 0003 records the decision. The complete requirements, dependency/license
+scope, security boundary, and future phases are in
+[`research/lorekeeper-press-requirements.md`](research/lorekeeper-press-requirements.md).
 
 #### 2. Structured manuscript schema and migration
 
@@ -348,12 +377,13 @@ migration status and diagnostics. Destructive recovery remains user-confirmed.
 Gate: EPUB and two paperback editions can share source content while retaining
 independent settings and identifiers.
 
-#### 5. Deterministic novel typesetting and real preview
+#### 5. Deterministic novel typesetting and real PDF output
 
-Status: `Preview; packaged-runtime validation pending`
+Status: `Implemented; native release-matrix validation pending`
 
-Implemented in the application on 2026-07-30. Paperback editions now queue
-contained WeasyPrint render jobs with restart recovery, progress, cancellation,
+Implemented in the application and replaced with the owned renderer on
+2026-07-31. Paperback editions queue contained native render jobs with restart
+recovery, progress, cancellation,
 timeout/process-tree containment, safe job roots, response validation, and
 SHA-256 verification before immutable PDF bytes are persisted. Semantic block
 anchors produce page maps; actual PDF bytes are served with range requests to
@@ -361,14 +391,11 @@ the embedded Chromium PDF viewer; artifacts report current/stale state and two
 renders can explain page and block movement. The Publish assistant has the same
 request, cancel, inspect, page-map, and comparison surface. Runtime execution is
 fail-closed: the UI, assistant, service, and worker share an app-owned bundle
-resolver that rejects machine-installed Python/uv/native-library fallbacks and
-requires release-provisioned, platform-matched integrity evidence before queueing.
-Licensing remains a separate release audit. The current spike's
-license gate remains false, so an unprovisioned source checkout reports PDF
-generation unavailable instead of launching from machine state. The runtime
-remains `Preview`: checked-in cross-platform frozen distributions, macOS verification,
-independent snapshots on every packaged runtime, Acrobat/vendor preflight, and
-physical proofs remain Feature 7 release gates.
+resolver that verifies an exact platform-matched file/hash inventory before
+queueing. Debug and Release build the same locked runtime and fail-closed
+license/asset inventory. A real .NET-to-Rust fixture renders with `PATH` absent.
+Native macOS x64/arm64 workflows build on matching runners; their execution
+remains a release-matrix acceptance item.
 
 Integrate the proven press sidecar as a production runtime.
 
@@ -394,7 +421,7 @@ on every packaged runtime.
 
 #### 6. Full-wrap cover builder
 
-Status: `Preview; proof validation pending`
+Status: `Implemented; physical proof remains a user record`
 
 Implemented in the application on 2026-07-30 for the initial prose-paperback
 scope. Each edition owns revision-checked cover copy, background, focal intent,
@@ -404,10 +431,10 @@ barcode reserve. Geometry changes invalidate acknowledgement. ISBN-13 checksum
 validation, true EAN-13 bars/quiet zones, separate KDP overlay and Ingram
 embedded-barcode behavior, conditional spine text, actual cover PDF artifacts,
 and complete assistant reads/writes are wired through shared services. Physical
-template/proof measurements, font-license clearance, and vendor acceptance
-remain release validation gates. KDP Preview output now composites a selected
-normalized PNG with focal controls; the Ingram Preview profile fails closed on
-selected cover images until a reviewed CMYK conversion path exists.
+template/proof measurements and vendor acceptance remain separate evidence. KDP
+and Ingram output composite selected normalized PNG artwork with focal controls.
+Ingram artwork is converted through the bundled registered CMYK profile,
+flattened, and capped at 240% total ink.
 
 Turn existing project images into edition-aware dedicated cover sources.
 
@@ -435,13 +462,13 @@ changes; a user must acknowledge material layout changes before proof approval.
 
 #### 7. Preflight, EPUB 3, and publication package
 
-Status: `Preview; external conformance and production-proof validation pending`
+Status: `Lorekeeper validated; reader/vendor/proof results remain separate`
 
 Implemented in the application on 2026-07-30. Edition-scoped preflight now
 checks metadata, content, ISBN/vendor rules, current artifact fingerprints,
 correlated render evidence, page geometry/boxes, embedded fonts, annotations,
 security, fail-closed output-intent/transparency/color evidence for the Ingram
-Preview profile, supported product/page/language scope, and cover
+profile, supported product/page/language scope, and cover
 template/barcode diagnostics. Eligible editions produce deterministic
 product-form-specific ZIPs: paperback packages contain the exact validated
 interior/cover PDFs, while EPUB packages contain a normalized,
@@ -464,11 +491,10 @@ Ingram requirements, Lorekeeper-generated barcodes, and KDP overlay reserves.
 Exact-package digital and physical proof records are explicit
 user actions; the Publish assistant can run/explain preflight and build packages
 through the same service but cannot approve proofs. Physical proofs are
-paperback-only; EPUB reports that proof stage as not applicable. The in-app structural EPUB
-check is not EPUBCheck, the press evidence is not Acrobat conformance, and no
-vendor upload, reader matrix, packaged-runtime matrix, or physical-production
-proof has been completed. Those gates keep the feature and Phase 1 output
-`Preview`.
+paperback-only; EPUB reports that proof stage as not applicable. The in-app EPUB
+check is structural rather than a complete reader matrix. Vendor uploads and
+digital/physical proofs are explicit human records, not requirements for the
+owned renderer to report its scoped validation result.
 
 Complete the in-app production path.
 
@@ -482,23 +508,23 @@ Deliverables:
   alt text, metadata, and validator integration;
 - downloadable interior, cover, EPUB, front-cover image, manifest, and report;
 - explicit digital-proof checklist and physical-proof status;
-- `Preview` versus `Verified` labels in product language.
+- `Legacy`, stale, invalid, and `Lorekeeper validated` labels in product language.
 
 Assistant parity: the Publish assistant can run and explain every rule, navigate
 to affected source, apply safe fixes through owning services, rerun validation,
 and package artifacts. Only the user can approve a proof.
 
-Gate: representative artifacts pass internal checks, the independently
-versioned PDF/X profile where claimed, KDP/Ingram upload preflight, EPUBCheck,
-multiple reader/viewer checks, and documented physical-proof review.
+Gate: representative artifacts pass the independent versioned structural
+profiles. Vendor upload, reader/viewer, and physical-proof outcomes remain
+versioned evidence the user may record without changing internal conformance.
 
 ### Phase 1 definition of done
 
 - Existing local data migrates without content loss and can be restored.
 - The old chapter-body and single-profile runtime paths are gone.
-- A user can complete the end-to-end Preview workflow without a separate
-  production application; certified/vendor-verified release claims remain
-  gated below.
+- A user can complete the end-to-end production-file workflow without a separate
+  conversion or preflight application; vendor acceptance remains a recorded
+  external fact.
 - All UI capabilities have complete assistant parity.
 - Artifacts identify source revision, edition, renderer, profile, and hashes.
 - Documentation clearly separates implemented, preview, and verified claims.

@@ -51,7 +51,7 @@ public sealed class PublicationEditionServiceTests
     }
 
     [Fact]
-    public async Task NewPaperbackUsesTheInstalledPreviewProfileDefaults()
+    public async Task NewPaperbackUsesTheOwnedKdpProfileDefaults()
     {
         await WithServiceAsync(async (_, service, project) =>
         {
@@ -68,7 +68,7 @@ public sealed class PublicationEditionServiceTests
             Assert.Equal(11, edition.BodyFontSizePoints);
             Assert.Equal(1.4, edition.BodyLineHeight);
             Assert.False(edition.Bleed);
-            Assert.Equal("preview-1", edition.VendorProfileVersion);
+            Assert.Equal("kdp-paperback-v1", edition.VendorProfileVersion);
         });
     }
 

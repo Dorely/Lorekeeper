@@ -47,6 +47,7 @@ public sealed record PublicationArtifactView(
     string RendererVersion,
     string ProfileId,
     DateTime CreatedAt,
+    bool IsLegacy,
     bool IsStale);
 
 public sealed record PublicationPageMapView(Guid ChapterId, Guid BlockId, int PageNumber);
@@ -66,6 +67,7 @@ public sealed record PublicationPageMovement(Guid ChapterId, Guid BlockId, int F
 public interface IPublicationRenderService
 {
     PublicationPressRuntimeReadiness GetRuntimeReadiness(PublicationVendor? vendor = null);
+    PublicationPressDescription GetRuntimeDescription();
     Task<PublicationRenderJobView> RequestAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
     Task<PublicationRenderJobView> CancelAsync(Guid projectId, Guid editionId, Guid jobId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PublicationRenderJobView>> ListAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
@@ -133,15 +135,24 @@ public sealed class PublicationRenderQueue : IPublicationRenderQueue
 public sealed class PublicationRenderService(
     AppDbContext db,
     IPublicationEditionService editions,
-    IPublishService publishing,
     IPublicationRenderQueue queue,
     IPublicationPressRuntime pressRuntime,
     IProjectMutationCoordinator projectMutations) : IPublicationRenderService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public PublicationPressRuntimeReadiness GetRuntimeReadiness(PublicationVendor? vendor = null) =>
-        pressRuntime.GetReadiness(vendor == PublicationVendor.IngramSpark);
+    public PublicationPressRuntimeReadiness GetRuntimeReadiness(PublicationVendor? vendor = null)
+    {
+        var readiness = pressRuntime.GetReadiness();
+        if (!readiness.IsReady || vendor is null)
+            return readiness;
+        var profile = PublicationRenderProcessor.ProfileFor(vendor.Value);
+        return pressRuntime.GetDescription().Profiles.Contains(profile, StringComparer.Ordinal)
+            ? readiness
+            : new(false, $"Lorekeeper Press does not advertise the required profile '{profile}'.");
+    }
+
+    public PublicationPressDescription GetRuntimeDescription() => pressRuntime.GetDescription();
 
     public async Task<PublicationRenderJobView> RequestAsync(
         Guid projectId,
@@ -159,17 +170,6 @@ public sealed class PublicationRenderService(
         var runtimeReadiness = GetRuntimeReadiness(edition.Vendor);
         if (!runtimeReadiness.IsReady)
             throw new InvalidOperationException(runtimeReadiness.Message);
-        var document = await publishing.GetDocumentAsync(projectId, editionId, cancellationToken);
-        if (HasUnsupportedInteriorVisuals(document))
-        {
-            throw new InvalidOperationException(
-                "The installed prose-only Preview press runtime cannot render Picture Pages, illustrated-prose images, semantic figures, or edition image placements. Remove them from this paperback edition or use EPUB export.");
-        }
-        if (edition.Vendor == PublicationVendor.IngramSpark && document.CoverAsset is not null)
-        {
-            throw new InvalidOperationException(
-                "Selected cover images are not yet supported by the contained Ingram CMYK Preview profile.");
-        }
         var active = await db.PublicationRenderJobs.AnyAsync(
             job => job.EditionId == editionId
                 && (job.Status == PublicationRenderStatus.Queued || job.Status == PublicationRenderStatus.Rendering),
@@ -182,21 +182,13 @@ public sealed class PublicationRenderService(
             EditionId = editionId,
             SourceFingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken),
             ProfileId = PublicationRenderProcessor.ProfileFor(edition.Vendor),
+            RendererVersion = pressRuntime.GetDescription().RendererVersion,
         };
         db.PublicationRenderJobs.Add(job);
         await db.SaveChangesAsync(cancellationToken);
         await queue.EnqueueAsync(job.Id, CancellationToken.None);
-        return View(job, [], job.SourceFingerprint);
+        return View(job, [], job.SourceFingerprint, job.RendererVersion);
     }
-
-    private static bool HasUnsupportedInteriorVisuals(PublishDocument document) =>
-        document.Placements.Count > 0
-        || document.Matter.Any(item =>
-            item.Manuscript.Content.Any(block => block.Type == ManuscriptBlockType.Figure))
-        || document.Sections.SelectMany(section => section.Chapters).Any(chapter =>
-            chapter.VisualMode != ChapterVisualMode.Prose
-            || chapter.IllustrationLayout.Images.Count > 0
-            || chapter.Manuscript.Content.Any(block => block.Type == ManuscriptBlockType.Figure));
 
     public async Task<PublicationRenderJobView> CancelAsync(
         Guid projectId,
@@ -231,7 +223,8 @@ public sealed class PublicationRenderService(
             .Include(job => job.Artifacts)
             .OrderByDescending(job => job.CreatedAt)
             .ToListAsync(cancellationToken);
-        return jobs.Select(job => View(job, job.Artifacts, fingerprint)).ToList();
+        var rendererVersion = CurrentRendererVersion();
+        return jobs.Select(job => View(job, job.Artifacts, fingerprint, rendererVersion)).ToList();
     }
 
     public async Task<PublicationRenderJobView> GetAsync(
@@ -248,7 +241,7 @@ public sealed class PublicationRenderService(
                 && candidate.EditionId == editionId
                 && candidate.Edition.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Publication render job not found.");
-        return View(job, job.Artifacts, fingerprint);
+        return View(job, job.Artifacts, fingerprint, CurrentRendererVersion());
     }
 
     public async Task<IReadOnlyList<PublicationPageMapView>> GetPageMapAsync(
@@ -323,13 +316,18 @@ public sealed class PublicationRenderService(
         CancellationToken cancellationToken = default)
     {
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
+        var rendererVersion = CurrentRendererVersion();
         return (await db.PublicationArtifacts.AsNoTracking()
                 .Where(artifact => artifact.EditionId == editionId && artifact.Edition.ProjectId == projectId)
                 .OrderByDescending(artifact => artifact.CreatedAt)
                 .ToListAsync(cancellationToken))
-            .Select(artifact => ArtifactView(artifact, fingerprint))
+            .Select(artifact => ArtifactView(artifact, fingerprint, rendererVersion))
             .ToList();
     }
+
+    private string? CurrentRendererVersion() => pressRuntime.GetReadiness().IsReady
+        ? pressRuntime.GetDescription().RendererVersion
+        : null;
 
     private async Task<PublicationRenderJob> GetTrackedAsync(
         Guid projectId,
@@ -351,7 +349,8 @@ public sealed class PublicationRenderService(
     internal static PublicationRenderJobView View(
         PublicationRenderJob job,
         IEnumerable<PublicationArtifact> artifacts,
-        string currentFingerprint) =>
+        string currentFingerprint,
+        string? currentRendererVersion = null) =>
         new(
             job.Id,
             job.EditionId,
@@ -363,12 +362,15 @@ public sealed class PublicationRenderService(
             job.ProgressMessage,
             job.CancellationRequested,
             DeserializeDiagnostics(job.DiagnosticsJson),
-            artifacts.Select(artifact => ArtifactView(artifact, currentFingerprint)).ToList(),
+            artifacts.Select(artifact => ArtifactView(artifact, currentFingerprint, currentRendererVersion)).ToList(),
             job.CreatedAt,
             job.StartedAt,
             job.CompletedAt);
 
-    private static PublicationArtifactView ArtifactView(PublicationArtifact artifact, string currentFingerprint) =>
+    private static PublicationArtifactView ArtifactView(
+        PublicationArtifact artifact,
+        string currentFingerprint,
+        string? currentRendererVersion) =>
         new(
             artifact.Id,
             artifact.Kind,
@@ -381,7 +383,11 @@ public sealed class PublicationRenderService(
             artifact.RendererVersion,
             artifact.ProfileId,
             artifact.CreatedAt,
-            !string.Equals(artifact.SourceFingerprint, currentFingerprint, StringComparison.Ordinal));
+            artifact.IsLegacy,
+            !string.Equals(artifact.SourceFingerprint, currentFingerprint, StringComparison.Ordinal)
+                || artifact.Kind is PublicationArtifactKind.InteriorPdf or PublicationArtifactKind.CoverPdf
+                    && currentRendererVersion is not null
+                    && !string.Equals(artifact.RendererVersion, currentRendererVersion, StringComparison.Ordinal));
 
     private static IReadOnlyList<PublicationRenderDiagnostic> DeserializeDiagnostics(string json)
     {
@@ -513,11 +519,24 @@ public sealed class PublicationRenderWorker(
             return;
         job.Status = PublicationRenderStatus.Failed;
         job.ProgressMessage = "Render failed";
-        job.DiagnosticsJson = JsonSerializer.Serialize(
-            new[] { new PublicationRenderDiagnostic("error", "PRESS_RUNTIME_FAILED", exception.Message) });
+        job.DiagnosticsJson = JsonSerializer.Serialize(new[] { FailureDiagnostic(exception) });
         job.CompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    internal static PublicationRenderDiagnostic FailureDiagnostic(Exception exception) =>
+        exception is InvalidOperationException
+            && exception.Message.Contains("edition changed", StringComparison.OrdinalIgnoreCase)
+            ? new("error", "PRESS_SOURCE_STALE", exception.Message)
+            : exception is InvalidOperationException
+                && exception.Message.Contains("profile is unsupported", StringComparison.OrdinalIgnoreCase)
+                ? new("error", "PRESS_PROFILE_UNSUPPORTED", exception.Message)
+            : exception is InvalidOperationException
+                && exception.Message.Contains("renderer", StringComparison.OrdinalIgnoreCase)
+                && (exception.Message.Contains("older", StringComparison.OrdinalIgnoreCase)
+                    || exception.Message.Contains("different", StringComparison.OrdinalIgnoreCase))
+                ? new("error", "PRESS_RENDERER_STALE", exception.Message)
+            : new("error", "PRESS_RUNTIME_FAILED", exception.Message);
 }
 
 public sealed class PublicationRenderProcessor(
@@ -531,8 +550,10 @@ public sealed class PublicationRenderProcessor(
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static string ProfileFor(PublicationVendor vendor) => vendor == PublicationVendor.IngramSpark
-        ? "ingram-pdf-x1a-preview-v1"
-        : "kdp-paperback-6x9-preview-v1";
+        ? "ingram-paperback-pdfx1a-v1"
+        : vendor == PublicationVendor.AmazonKdp
+            ? "kdp-paperback-v1"
+            : "generic-paperback-v1";
 
     public async Task ProcessAsync(Guid jobId, CancellationToken cancellationToken)
     {
@@ -542,6 +563,22 @@ public sealed class PublicationRenderProcessor(
             ?? throw new KeyNotFoundException("Publication render job not found.");
         if (job.Status == PublicationRenderStatus.Cancelled || job.CancellationRequested)
             throw new OperationCanceledException(cancellationToken);
+        if (!IsSupportedProfile(job.Edition.VendorProfileVersion)
+            || !string.Equals(
+                job.ProfileId,
+                job.Edition.VendorProfileVersion,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The edition's publication profile is unsupported by Lorekeeper Press.");
+        }
+        var runtime = pressRuntime.GetDescription();
+        if (!runtime.Profiles.Contains(job.ProfileId, StringComparer.Ordinal))
+            throw new InvalidOperationException("The queued publication profile is unsupported by the installed Lorekeeper Press runtime.");
+        if (string.IsNullOrWhiteSpace(job.RendererVersion))
+            job.RendererVersion = runtime.RendererVersion;
+        else if (!string.Equals(job.RendererVersion, runtime.RendererVersion, StringComparison.Ordinal))
+            throw new InvalidOperationException("The queued render targets an older Lorekeeper Press renderer. Request a new render.");
         job.Status = PublicationRenderStatus.Rendering;
         job.ProgressPercent = 10;
         job.ProgressMessage = "Preparing semantic manuscript";
@@ -571,21 +608,23 @@ public sealed class PublicationRenderProcessor(
         await db.SaveChangesAsync(cancellationToken);
 
         Cleanup(job.Id);
-        var result = await InvokeAsync(
-            job.Id,
-            request,
-            job.Edition.Vendor == PublicationVendor.IngramSpark,
-            cancellationToken);
-        if (result.ProtocolVersion != 2
+        var result = await InvokeAsync(job.Id, request, cancellationToken);
+        if (result.ProtocolVersion != 3
             || !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a mismatched protocol or job identity.");
-        job.RendererVersion = result.RendererVersion ?? string.Empty;
-        job.DiagnosticsJson = JsonSerializer.Serialize(result.Diagnostics ?? [], JsonOptions);
-        job.EvidenceJson = result.Evidence.ValueKind == JsonValueKind.Undefined ? "{}" : result.Evidence.GetRawText();
-        if (!string.Equals(result.Status, "completed", StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                result.Diagnostics?.FirstOrDefault(d => d.Severity == "error")?.Message
-                ?? "The press renderer rejected the job.");
+        if (!string.Equals(result.RendererVersion, job.RendererVersion, StringComparison.Ordinal))
+            throw new InvalidOperationException("The press renderer returned a different renderer version than the queued job.");
+        if (ApplyTerminalResponse(
+            job,
+            result.Status,
+            result.RendererVersion,
+            result.Diagnostics,
+            result.Evidence))
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            Cleanup(job.Id);
+            return;
+        }
         var resultArtifacts = result.Artifacts
             ?? throw new InvalidOperationException("The press renderer omitted its artifact list.");
         var resultKinds = resultArtifacts.Select(artifact => artifact.Kind).Order().ToArray();
@@ -671,17 +710,59 @@ public sealed class PublicationRenderProcessor(
             });
         job.Status = PublicationRenderStatus.Completed;
         job.ProgressPercent = 100;
-        job.ProgressMessage = "Preview ready";
+        job.ProgressMessage = "Lorekeeper validated";
         job.CompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         Cleanup(job.Id);
     }
 
-    private object BuildRequest(
+    private static bool IsSupportedProfile(string profile) => profile is
+        "generic-paperback-v1" or
+        "kdp-paperback-v1" or
+        "ingram-paperback-pdfx1a-v1";
+
+    internal static bool ApplyTerminalResponse(
+        PublicationRenderJob job,
+        string status,
+        string? rendererVersion,
+        IReadOnlyList<PublicationRenderDiagnostic>? diagnostics,
+        JsonElement evidence)
+    {
+        job.RendererVersion = rendererVersion ?? string.Empty;
+        job.DiagnosticsJson = JsonSerializer.Serialize(diagnostics ?? [], JsonOptions);
+        job.EvidenceJson = evidence.ValueKind == JsonValueKind.Undefined
+            ? "{}"
+            : evidence.GetRawText();
+        if (string.Equals(status, "completed", StringComparison.Ordinal))
+            return false;
+
+        var cancelled = string.Equals(status, "cancelled", StringComparison.Ordinal);
+        job.Status = cancelled
+            ? PublicationRenderStatus.Cancelled
+            : PublicationRenderStatus.Failed;
+        job.CancellationRequested |= cancelled;
+        job.ProgressPercent = 100;
+        job.ProgressMessage = cancelled
+            ? "Cancelled"
+            : diagnostics?.FirstOrDefault(diagnostic => diagnostic.Severity == "error")?.Message
+                ?? "Render failed";
+        job.CompletedAt = DateTime.UtcNow;
+        return true;
+    }
+
+    private PressPreparedRequest BuildRequest(
         PublicationRenderJob job,
         PublishDocument document,
         PublicationCoverDesignView coverDesign)
     {
+        var assets = document.Assets
+            .Concat(document.Sections
+                .SelectMany(section => section.Chapters)
+                .Select(chapter => chapter.RenderedPicturePage?.Surface)
+                .OfType<PublishAssetDocument>())
+            .GroupBy(asset => asset.Id)
+            .Select(group => NormalizeAsset(group.First()))
+            .ToArray();
         var sections = document.Sections.Select(section => new
         {
             id = section.ActId,
@@ -695,6 +776,35 @@ public sealed class PublicationRenderProcessor(
                 title = string.IsNullOrWhiteSpace(chapter.Title) ? "Untitled chapter" : chapter.Title,
                 synopsis = document.Profile.IncludeChapterSynopses ? chapter.Synopsis : string.Empty,
                 chapter.IncludeHeading,
+                visualMode = chapter.VisualMode.ToString(),
+                pageLayoutKind = chapter.PageLayoutKind.ToString(),
+                illustrations = chapter.IllustrationLayout.Images
+                    .OrderBy(image => image.SortOrder)
+                    .Select(image => new
+                    {
+                        assetId = image.ImageId,
+                        anchorBlockId = image.BlockId,
+                        anchorPosition = image.AnchorPosition.ToString(),
+                        image.Caption,
+                        image.WidthPercent,
+                        alignment = image.Alignment.ToString(),
+                        focalXPercent = 50,
+                        focalYPercent = 50,
+                        image.StartOnNewPage,
+                    }).ToArray(),
+                picturePage = chapter.RenderedPicturePage is not { } picturePage
+                    ? null
+                    : new
+                    {
+                        assetId = picturePage.Surface.Id,
+                        picturePage.PhysicalPageWidthPixels,
+                        picturePage.PhysicalPageHeightPixels,
+                        picturePage.LeafCount,
+                        picturePage.SurfaceWidthPixels,
+                        picturePage.SurfaceHeightPixels,
+                        rotation = picturePage.Rotation.ToString(),
+                        picturePage.AccessibleText,
+                    },
                 blocks = chapter.Manuscript.Content.Select(BlockPayload).ToArray(),
             }).ToArray(),
         }).ToArray();
@@ -713,11 +823,12 @@ public sealed class PublicationRenderProcessor(
             .ToArray();
         if (sections.Sum(section => section.chapters.Length) == 0)
             throw new InvalidOperationException("Include at least one non-empty chapter before rendering.");
-        return new
+        var payload = new
         {
-            protocolVersion = 2,
+            protocolVersion = 3,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
+            ink = job.Edition.Ink.ToString(),
             document = new
             {
                 title = string.IsNullOrWhiteSpace(document.DisplayTitle) ? document.ProjectName : document.DisplayTitle,
@@ -729,6 +840,11 @@ public sealed class PublicationRenderProcessor(
                 matter,
                 includeTitlePage = document.Profile.IncludeTitlePage,
                 includeVisibleTableOfContents = document.Profile.IncludeVisibleTableOfContents,
+                includeActHeadings = document.Profile.IncludeActHeadings,
+                includeChapterHeadings = document.Profile.IncludeChapterHeadings,
+                numberActs = document.Profile.NumberActs,
+                numberChapters = document.Profile.NumberChapters,
+                printPicturePageSpreadMode = document.Profile.PrintPicturePageSpreadMode.ToString(),
                 sections,
                 styles = document.NamedStyles.Select(style => new
                 {
@@ -737,6 +853,18 @@ public sealed class PublicationRenderProcessor(
                     style.SemanticRole,
                     definition = style.Definition,
                 }).ToArray(),
+                placements = document.Placements
+                    .OrderBy(placement => placement.SortOrder)
+                    .Select(placement => new
+                    {
+                        placement.Id,
+                        assetId = placement.Asset.Id,
+                        targetKind = placement.TargetKind.ToString(),
+                        placement.TargetId,
+                        placementKind = placement.PlacementKind.ToString(),
+                        placement.Caption,
+                        placement.SortOrder,
+                    }).ToArray(),
             },
             trim = new
             {
@@ -745,6 +873,10 @@ public sealed class PublicationRenderProcessor(
                 marginInches = document.Profile.PageMarginInches,
                 bodyFontSizePoints = document.Profile.BodyFontSizePoints,
                 bodyLineHeight = document.Profile.BodyLineHeight,
+                mirrorMargins = true,
+                rectoChapterStarts = true,
+                minimumWidowLines = 2,
+                minimumOrphanLines = 2,
             },
             cover = new
             {
@@ -758,50 +890,78 @@ public sealed class PublicationRenderProcessor(
                 backgroundColor = coverDesign.BackgroundColor,
                 isbn = job.Edition.Isbn,
                 barcodeMode = coverDesign.BarcodeMode.ToString(),
-                imageDataUri = CoverImageDataUri(document.CoverAsset),
+                assetId = document.CoverAsset?.Id,
                 imageFocalXPercent = coverDesign.ImageFocalXPercent,
                 imageFocalYPercent = coverDesign.ImageFocalYPercent,
             },
+            assets = assets.Select(asset => new
+            {
+                id = asset.Id,
+                asset.RelativePath,
+                mediaType = "image/png",
+                byteLength = asset.Data.LongLength,
+                asset.Sha256,
+                asset.WidthPixels,
+                asset.HeightPixels,
+                asset.AltText,
+            }).ToArray(),
         };
+        return new PressPreparedRequest(payload, assets);
     }
 
-    internal static string CoverImageDataUri(PublishAssetDocument? asset)
+    internal static PressStagedAsset NormalizeAsset(PublishAssetDocument asset)
     {
-        if (asset is null)
-            return string.Empty;
         if (asset.Data.Length is 0 or > 20_000_000)
-            throw new InvalidOperationException("The selected cover image must be a non-empty raster image no larger than 20 MB.");
+            throw new InvalidOperationException($"Publication image '{asset.FileName}' must be non-empty and no larger than 20 MB.");
 
         using var bitmap = SKBitmap.Decode(asset.Data)
-            ?? throw new InvalidOperationException("The selected cover image is not a supported raster image.");
+            ?? throw new InvalidOperationException($"Publication image '{asset.FileName}' is not a supported raster image.");
         if (bitmap.Width <= 0
             || bitmap.Height <= 0
             || (long)bitmap.Width * bitmap.Height > 16_000_000)
         {
-            throw new InvalidOperationException("The selected cover image dimensions exceed the Preview renderer limit.");
+            throw new InvalidOperationException($"Publication image '{asset.FileName}' dimensions exceed the renderer limit.");
         }
 
         using var image = SKImage.FromBitmap(bitmap);
         using var encoded = image.Encode(SKEncodedImageFormat.Png, 100)
-            ?? throw new InvalidOperationException("The selected cover image could not be normalized for rendering.");
+            ?? throw new InvalidOperationException($"Publication image '{asset.FileName}' could not be normalized for rendering.");
         var png = encoded.ToArray();
         if (png.Length > 20_000_000)
-            throw new InvalidOperationException("The selected cover image is larger than 20 MB after safe PNG normalization.");
-        return $"data:image/png;base64,{Convert.ToBase64String(png)}";
+            throw new InvalidOperationException($"Publication image '{asset.FileName}' is larger than 20 MB after PNG normalization.");
+        return new PressStagedAsset(
+            asset.Id,
+            $"assets/{asset.Id:N}.png",
+            png,
+            Convert.ToHexStringLower(SHA256.HashData(png)),
+            bitmap.Width,
+            bitmap.Height,
+            asset.AltText);
     }
 
     private async Task<PressResponse> InvokeAsync(
         Guid jobId,
-        object request,
-        bool requireCmykProfile,
+        PressPreparedRequest request,
         CancellationToken cancellationToken)
     {
-        var outputRoot = JobRoot(jobId);
-        Directory.CreateDirectory(outputRoot);
-        var start = pressRuntime.CreateStartInfo(jobId, outputRoot, requireCmykProfile);
+        var jobRoot = JobRoot(jobId);
+        var inputRoot = Path.Combine(jobRoot, "input");
+        Directory.CreateDirectory(Path.Combine(inputRoot, "assets"));
+        foreach (var asset in request.Assets)
+        {
+            var path = Path.GetFullPath(Path.Combine(inputRoot, asset.RelativePath));
+            if (!IsContainedBy(inputRoot, path))
+                throw new InvalidOperationException("A staged Press asset escaped the bounded input directory.");
+            await File.WriteAllBytesAsync(path, asset.Data, cancellationToken);
+        }
+        await File.WriteAllTextAsync(
+            Path.Combine(inputRoot, "request.json"),
+            JsonSerializer.Serialize(request.Payload, JsonOptions),
+            Encoding.UTF8,
+            cancellationToken);
+        var start = pressRuntime.CreateStartInfo(jobId, jobRoot);
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException("The configured press renderer could not be started.");
-        var input = JsonSerializer.Serialize(request, JsonOptions);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(
             Math.Clamp(options.Value.RenderTimeoutSeconds, 10, 1800)));
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
@@ -809,23 +969,6 @@ public sealed class PublicationRenderProcessor(
         var stderrTask = ReadBoundedAsync(process.StandardError, 64 * 1024, linked.Token);
         try
         {
-            try
-            {
-                await process.StandardInput.WriteAsync(input.AsMemory(), linked.Token);
-                process.StandardInput.Close();
-            }
-            catch (Exception exception) when (
-                !linked.IsCancellationRequested
-                && exception is IOException or InvalidOperationException or ObjectDisposedException)
-            {
-                await process.WaitForExitAsync(linked.Token);
-                var earlyStdout = await stdoutTask;
-                var earlyStderr = await stderrTask;
-                var detail = string.IsNullOrWhiteSpace(earlyStderr) ? earlyStdout : earlyStderr;
-                throw new InvalidOperationException(
-                    $"Press renderer exited before accepting the render request (exit code {process.ExitCode}). {Limit(detail)}",
-                    exception);
-            }
             await process.WaitForExitAsync(linked.Token);
             var stdout = await stdoutTask;
             var stderr = await stderrTask;
@@ -839,6 +982,16 @@ public sealed class PublicationRenderProcessor(
         }
         catch (OperationCanceledException)
         {
+            try
+            {
+                await File.WriteAllTextAsync(
+                    Path.Combine(jobRoot, "cancel.requested"),
+                    "cancelled",
+                    CancellationToken.None);
+            }
+            catch (IOException)
+            {
+            }
             if (!process.HasExited)
                 process.Kill(entireProcessTree: true);
             throw;
@@ -851,12 +1004,22 @@ public sealed class PublicationRenderProcessor(
         "press-jobs",
         jobId.ToString("N")));
 
+    private static bool IsContainedBy(string rootPath, string candidatePath)
+    {
+        var relative = Path.GetRelativePath(rootPath, candidatePath);
+        return !Path.IsPathRooted(relative)
+            && relative != ".."
+            && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal);
+    }
+
     private static object BlockPayload(ManuscriptBlock block) => new
     {
         id = block.Id,
         type = block.Type.ToString(),
         block.StyleRole,
         block.HeadingLevel,
+        assetId = block.ImageId,
+        caption = string.Concat(block.Content.Select(inline => inline.Text)),
         content = block.Content.Select(inline => new
         {
             type = inline.Type.ToString(),
@@ -933,4 +1096,15 @@ public sealed class PublicationRenderProcessor(
         int? PageCount);
 
     private sealed record PressPageMap(string ChapterId, string BlockId, int PageNumber);
+
+    internal sealed record PressStagedAsset(
+        Guid Id,
+        string RelativePath,
+        byte[] Data,
+        string Sha256,
+        int WidthPixels,
+        int HeightPixels,
+        string AltText);
+
+    private sealed record PressPreparedRequest(object Payload, IReadOnlyList<PressStagedAsset> Assets);
 }

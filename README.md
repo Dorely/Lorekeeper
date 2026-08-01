@@ -40,29 +40,33 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   deterministic staleness fingerprints, read-only archived editions, and
   a full-height conversational Publish assistant with streaming, persistent
   history, image attachments, Stop/Reset, and matching tools. New paperback editions start on the
-  installed 6 × 9 in Preview profile.
-- Preview paperback press jobs with cancellation/restart recovery, immutable
-  SHA-256-verified interior and cover PDFs, actual in-app PDF viewing, semantic
-  block-to-page maps, render comparisons, and matching assistant controls. PDF
-  generation is enabled only when a release-provisioned press bundle is installed
-  beside Lorekeeper's binaries in its configured app-owned `press-runtime` directory; the app
-  never falls back to machine-installed Python, uv, or native libraries.
+  owned 6 × 9 in KDP, Ingram, or generic profile selected for the edition.
+- Lorekeeper-owned paperback press jobs with cancellation/restart recovery,
+  immutable SHA-256-verified interior and full-wrap cover PDFs, actual in-app
+  PDF viewing, semantic block-to-page maps, render comparisons, and matching
+  assistant controls. The exact-pinned Rust renderer is built and packaged in
+  both Debug and Release; the running app invokes only that integrity-checked
+  native executable and never uses machine-installed PDF software.
+  Black-and-white editions produce grayscale interior imagery while full-wrap
+  cover color remains independently preserved. Renderer/profile upgrades make
+  older owned PDFs stale until regenerated.
 - Edition-aware full-wrap cover design with page-count/paper-caliper geometry,
   copy and background controls, template acknowledgement, ISBN-13/EAN-13
   barcode or KDP overlay-reserve behavior, cover PDF output, and assistant parity.
-- Versioned Preview publication preflight with renderer-evidence checks,
+- Versioned Lorekeeper validation with independent post-write inspection,
   deterministic EPUB 3/package assembly, downloadable manifests and reports,
   exact-package digital proof records plus paperback-only physical-proof
-  records, and matching assistant preflight/package controls. Independent
-  EPUBCheck, Acrobat, vendor-upload, and
-  physical-production validation remain release gates.
+  records, and matching assistant preflight/package controls. The owned KDP
+  profile emits PDF 1.7, and the owned Ingram profile emits restricted PDF 1.3
+  with PDF/X-1a:2001 identification, embedded CMYK output intent, CMYK/gray
+  content, flattened transparency, embedded subset fonts, ToUnicode maps, and a
+  240% total-ink ceiling. Recorded vendor acceptance and human proof remain
+  separate evidence, never assistant-controlled conformance gates.
 - Versioned project import/export (current v13
   manuscripts/styles/editions/covers/custom-font binaries, isolated v8-v12
   structured adapters, and v1-v7 text adapters) plus TXT,
   Markdown, mixed-layout EPUB, and artifact-backed Generate/Regenerate plus
-  separate interior/cover PDF saves. EPUB export is restricted to EPUB editions,
-  and generated press PDFs are
-  explicitly Preview artifacts, not PDF/X conformance or vendor-preflight claims.
+  separate interior/cover PDF saves. EPUB export is restricted to EPUB editions.
 - Configurable Codex/OpenAI-compatible chat and embedding providers, configurable
   web search, and local SQLite persistence.
 
@@ -70,12 +74,14 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 
 - .NET 10 SDK
 - Node.js 22.12 or later for Electron.NET desktop builds
+- Rust 1.97.1 for source builds; the packaged app has no Rust or Cargo runtime requirement
 
-The browser and Electron hosts do not require Python or uv. Preview PDF
-generation requires an app-owned, release-provisioned press bundle containing its
-executable, controlled fonts/licenses, and matching build evidence. When that
-bundle is absent or fails integrity/licensing checks, Publish reports the exact
-readiness problem and disables generation without queueing a doomed job.
+Every Debug and Release build produces the app-owned `press-runtime` bundle
+automatically from `Cargo.lock`. It contains only the native executable, approved
+fonts, the registered CMYK profile, notices, an SBOM, and a complete hash
+manifest. At runtime, a missing, modified, linked, or unexpected file disables
+PDF generation before a job can be queued. Browser and Electron hosts never
+invoke Cargo, Python, uv, Typst, WeasyPrint, Chromium, or machine PDF tools.
 
 ## Web Development
 

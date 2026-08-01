@@ -49,6 +49,7 @@ public sealed class PublicationEditionService(
             Name = name,
             Format = input.Format,
             Vendor = input.Vendor,
+            VendorProfileVersion = DefaultProfile(input.Format, input.Vendor),
             IsDefault = isFirst,
             TitleOverride = project.Name,
             Binding = input.Format == PublicationEditionFormat.Epub
@@ -72,6 +73,11 @@ public sealed class PublicationEditionService(
         await SaveWithAuditAsync(edition, "create", string.Empty, new { input.Name, input.Format, input.Vendor }, cancellationToken);
         return View(project, edition);
     }
+
+    internal static string DefaultProfile(PublicationEditionFormat format, PublicationVendor vendor) =>
+        format == PublicationEditionFormat.Epub
+            ? "epub3-v1"
+            : PublicationRenderProcessor.ProfileFor(vendor);
 
     public async Task<PublicationEditionView> CloneAsync(
         Guid projectId,

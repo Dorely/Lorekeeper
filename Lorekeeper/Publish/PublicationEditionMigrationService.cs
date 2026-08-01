@@ -28,99 +28,92 @@ public sealed class PublicationEditionMigrationService(
     public const string MigrationName = "publication-editions-v10";
     public const string EfMigrationId = "20260730203619_PublicationEditionsV10";
     internal const string CoverImagesV14MigrationId = "20260801022548_PublicationCoverImagesV14";
-    private static readonly SemaphoreSlim MigrationLock = new(1, 1);
     private readonly string _connectionString = SqliteConnectionSettings.BuildConnectionString(configuration);
 
     public async Task ApplyPendingAsync(AppDbContext db, CancellationToken cancellationToken = default)
     {
-        await MigrationLock.WaitAsync(cancellationToken);
+        await using var migrationLock = await PublicationMigrationLock.AcquireAsync(
+            _connectionString,
+            cancellationToken);
+        await ReconcileInterruptedCoverMigrationAsync(db, cancellationToken);
+        var pending = await db.Database.GetPendingMigrationsAsync(cancellationToken);
+        if (!pending.Contains(EfMigrationId, StringComparer.Ordinal)
+            && File.Exists(MarkerPath()))
+        {
+            await ResumeValidationAsync(db, cancellationToken);
+            return;
+        }
+        if (!pending.Contains(EfMigrationId, StringComparer.Ordinal))
+            return;
+
+        await using var source = new SqliteConnection(_connectionString);
+        await source.OpenAsync(cancellationToken);
+        await EnsureHealthyAsync(source, cancellationToken);
+        var sourceCounts = await ReadSourceCountsAsync(source, cancellationToken);
+        var sourceHash = await ReadShapeHashAsync(source, legacy: true, cancellationToken);
+        var backupPath = await CreateBackupAsync(source, cancellationToken);
+        var marker = new MigrationMarker(sourceCounts, sourceHash, backupPath);
+        await File.WriteAllTextAsync(
+            MarkerPath(),
+            JsonSerializer.Serialize(marker),
+            cancellationToken);
+        ProtectPath(MarkerPath(), directory: false);
         try
         {
-            await using var crossProcessLock = await AcquireCrossProcessLockAsync(cancellationToken);
-            await ReconcileInterruptedCoverMigrationAsync(db, cancellationToken);
-            var pending = await db.Database.GetPendingMigrationsAsync(cancellationToken);
-            if (!pending.Contains(EfMigrationId, StringComparer.Ordinal)
-                && File.Exists(MarkerPath()))
-            {
-                await ResumeValidationAsync(db, cancellationToken);
-                return;
-            }
-            if (!pending.Contains(EfMigrationId, StringComparer.Ordinal))
-                return;
-
-            await using var source = new SqliteConnection(_connectionString);
-            await source.OpenAsync(cancellationToken);
-            await EnsureHealthyAsync(source, cancellationToken);
-            var sourceCounts = await ReadSourceCountsAsync(source, cancellationToken);
-            var sourceHash = await ReadShapeHashAsync(source, legacy: true, cancellationToken);
-            var backupPath = await CreateBackupAsync(source, cancellationToken);
-            var marker = new MigrationMarker(sourceCounts, sourceHash, backupPath);
-            await File.WriteAllTextAsync(
-                MarkerPath(),
-                JsonSerializer.Serialize(marker),
+            var migrator = db.Database.GetService<IMigrator>();
+            await migrator.MigrateAsync(EfMigrationId, cancellationToken);
+            db.ChangeTracker.Clear();
+            await db.Database.OpenConnectionAsync(cancellationToken);
+            await EnsureHealthyAsync((SqliteConnection)db.Database.GetDbConnection(), cancellationToken);
+            var targetCounts = await ReadTargetCountsAsync(db, cancellationToken);
+            var targetHash = await ReadShapeHashAsync(
+                (SqliteConnection)db.Database.GetDbConnection(),
+                legacy: false,
                 cancellationToken);
-            ProtectPath(MarkerPath(), directory: false);
-            try
-            {
-                var migrator = db.Database.GetService<IMigrator>();
-                await migrator.MigrateAsync(EfMigrationId, cancellationToken);
-                db.ChangeTracker.Clear();
-                await db.Database.OpenConnectionAsync(cancellationToken);
-                await EnsureHealthyAsync((SqliteConnection)db.Database.GetDbConnection(), cancellationToken);
-                var targetCounts = await ReadTargetCountsAsync(db, cancellationToken);
-                var targetHash = await ReadShapeHashAsync(
-                    (SqliteConnection)db.Database.GetDbConnection(),
-                    legacy: false,
-                    cancellationToken);
-                Validate(sourceCounts, targetCounts, sourceHash, targetHash);
-                await ValidateMatterAsync(db, cancellationToken);
+            Validate(sourceCounts, targetCounts, sourceHash, targetHash);
+            await ValidateMatterAsync(db, cancellationToken);
 
-                db.PublicationEditionMigrationJournals.Add(new PublicationEditionMigrationJournal
-                {
-                    MigrationName = MigrationName,
-                    Status = "Completed",
-                    BackupPath = backupPath,
-                    SourceProfileCount = sourceCounts.Profiles,
-                    SourceSelectionCount = sourceCounts.Selections,
-                    SourcePlacementCount = sourceCounts.Placements,
-                    EditionCount = targetCounts.Editions,
-                    OutlineItemCount = targetCounts.Selections,
-                    PlacementCount = targetCounts.Placements,
-                    SourceHash = sourceHash,
-                    TargetHash = targetHash,
-                    ValidationReportJson =
-                        """{"quickCheck":"ok","foreignKeys":"ok","mappingHash":"equal","matter":"schema-v2"}""",
-                    CompletedAt = DateTime.UtcNow,
-                });
-                await db.SaveChangesAsync(cancellationToken);
-                File.Delete(MarkerPath());
-            }
-            catch (Exception exception)
+            db.PublicationEditionMigrationJournals.Add(new PublicationEditionMigrationJournal
             {
-                logger.LogError(
-                    exception,
-                    "Publication-edition migration failed. The protected source backup is {BackupPath}.",
-                    backupPath);
-                db.ChangeTracker.Clear();
-                await db.Database.CloseConnectionAsync();
-                await recovery.EnterRecoveryModeAsync(
-                    db,
-                    backupPath,
-                    MigrationName,
-                    sourceVersion: 9,
-                    targetVersion: 10,
-                    exception,
-                    cancellationToken);
-                File.Delete(MarkerPath());
-                logger.LogWarning(
-                    "Publication-edition migration entered the recoverable projectless shell. Restore {BackupPath} from Data Recovery.",
-                    backupPath);
-                return;
-            }
+                MigrationName = MigrationName,
+                Status = "Completed",
+                BackupPath = backupPath,
+                SourceProfileCount = sourceCounts.Profiles,
+                SourceSelectionCount = sourceCounts.Selections,
+                SourcePlacementCount = sourceCounts.Placements,
+                EditionCount = targetCounts.Editions,
+                OutlineItemCount = targetCounts.Selections,
+                PlacementCount = targetCounts.Placements,
+                SourceHash = sourceHash,
+                TargetHash = targetHash,
+                ValidationReportJson =
+                    """{"quickCheck":"ok","foreignKeys":"ok","mappingHash":"equal","matter":"schema-v2"}""",
+                CompletedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+            File.Delete(MarkerPath());
         }
-        finally
+        catch (Exception exception)
         {
-            MigrationLock.Release();
+            logger.LogError(
+                exception,
+                "Publication-edition migration failed. The protected source backup is {BackupPath}.",
+                backupPath);
+            db.ChangeTracker.Clear();
+            await db.Database.CloseConnectionAsync();
+            await recovery.EnterRecoveryModeAsync(
+                db,
+                backupPath,
+                MigrationName,
+                sourceVersion: 9,
+                targetVersion: 10,
+                exception,
+                cancellationToken);
+            File.Delete(MarkerPath());
+            logger.LogWarning(
+                "Publication-edition migration entered the recoverable projectless shell. Restore {BackupPath} from Data Recovery.",
+                backupPath);
+            return;
         }
     }
 
@@ -236,29 +229,6 @@ public sealed class PublicationEditionMigrationService(
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (await reader.ReadAsync(cancellationToken))
             throw new InvalidOperationException("The interrupted cover-image migration contains foreign-key violations.");
-    }
-
-    private async Task<FileStream> AcquireCrossProcessLockAsync(CancellationToken cancellationToken)
-    {
-        var path = Path.Combine(Path.GetDirectoryName(MarkerPath())!, "migration.lock");
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                return new FileStream(
-                    path,
-                    FileMode.OpenOrCreate,
-                    FileAccess.ReadWrite,
-                    FileShare.None,
-                    bufferSize: 1,
-                    FileOptions.Asynchronous);
-            }
-            catch (IOException)
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
-            }
-        }
     }
 
     private async Task ResumeValidationAsync(AppDbContext db, CancellationToken cancellationToken)

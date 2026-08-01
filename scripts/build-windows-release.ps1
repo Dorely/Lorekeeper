@@ -39,7 +39,7 @@ if ($Version -notmatch $semVerPattern)
     throw "Version '$Version' must use SemVer form such as 0.2.0 or 0.2.0-beta.1."
 }
 
-foreach ($commandName in @('dotnet', 'node', 'npm.cmd'))
+foreach ($commandName in @('dotnet', 'node', 'npm.cmd', 'cargo', 'rustc'))
 {
     if (-not (Get-Command $commandName -ErrorAction SilentlyContinue))
     {
@@ -235,6 +235,26 @@ try
         "-p:Version=$Version",
         '--no-restore'
     )
+
+    $packagedPressRoot = Join-Path $outputDirectory 'win-unpacked\resources\bin\press-runtime'
+    $packagedPressExecutable = Join-Path $packagedPressRoot 'lorekeeper-press.exe'
+    foreach ($requiredPressFile in @(
+        $packagedPressExecutable,
+        (Join-Path $packagedPressRoot 'lorekeeper-press-runtime.json'),
+        (Join-Path $packagedPressRoot 'THIRD-PARTY-NOTICES.txt'),
+        (Join-Path $packagedPressRoot 'sbom.json'),
+        (Join-Path $packagedPressRoot 'profiles\CGATS21_CRPC1.icc')))
+    {
+        if (-not (Test-Path -LiteralPath $requiredPressFile -PathType Leaf))
+        {
+            throw "The packaged Lorekeeper Press runtime is incomplete: $requiredPressFile"
+        }
+    }
+    $pressDescription = (& $packagedPressExecutable describe --json | ConvertFrom-Json)
+    if ($LASTEXITCODE -ne 0 -or $pressDescription.protocolVersion -ne 3)
+    {
+        throw 'The packaged Lorekeeper Press executable failed its capability probe.'
+    }
 
     $stagedSemanticBundles = @(Get-ChildItem -LiteralPath $stageDirectory -Recurse -File -Filter 'semantic-editor.bundle.js')
     $stagedSemanticNotices = @(Get-ChildItem -LiteralPath $stageDirectory -Recurse -File -Filter 'semantic-editor.NOTICES.txt')

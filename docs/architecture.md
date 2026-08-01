@@ -19,7 +19,7 @@ story state, semantic and lexical retrieval, source ingest, web research,
 writing samples and coaching, context-aware chapter editing, assistant review
 and contest workflows, project image generation and editing, illustrated and
 picture-page composition, import/export, TXT, Markdown, EPUB, and immutable
-Preview PDF generation/view/download. `VISION.md` remains the product direction and is not
+Lorekeeper-validated PDF generation/view/download. `VISION.md` remains the product direction and is not
 proof that every future bookmaking goal is complete. The researched delivery
 sequence and verification gates are documented in
 `docs/publishing-roadmap.md`; roadmap statuses do not change this document's
@@ -36,17 +36,16 @@ current-runtime claims.
   providers
 - SkiaSharp for image, page, font, and publishing operations
 - PdfPig, Docnet, and VersOne.Epub for source ingest and EPUB handling
+- exact-pinned Rust 1.97.1 `Lorekeeper.Press`, using `pdf-writer`, `harfrust`,
+  `subsetter`, `moxcms`, `png`, and a separate `lopdf` post-write inspector
 - Bootstrap and vis-network vendored under `Lorekeeper/wwwroot`
 
 The solution contains the application and its authorized migration/format
-fixture test project. `Lorekeeper.Press` is retained as the rejected,
-non-production Rust renderer/conformance comparison and is not invoked by the
-application. `Lorekeeper.Press.Weasy` remains outside the .NET solution because
-it is an independently locked Python/native sidecar, but it is the current
-integrated `Preview` press runtime invoked and contained by
-`PublicationRenderService`. It is not yet included in a production desktop
-package and its internal PDF inspection is not independent PDF/X or vendor
-conformance evidence.
+fixture test project. `Lorekeeper.Press` is a Lorekeeper-owned native subproject
+and the sole paperback renderer. MSBuild builds its locked native executable and
+packages it into the application-owned runtime for Debug and Release. The
+retired Typst and WeasyPrint implementations have no runtime code, registration,
+settings, scripts, or machine fallback.
 `Program.cs` owns host startup,
 dependency registration, middleware, local media and OAuth endpoints, database
 migration, interrupted-work reconciliation, desktop update setup, and Electron
@@ -231,7 +230,7 @@ history row transactionally before normal migration startup continues.
 Archived editions are immutable at every owning mutation boundary, including
 cover, package-build, and proof writes; their existing artifacts remain readable
 and exportable, and cloning creates the editable continuation. New paperback
-editions use the installed Preview profile defaults of 6 × 9 in, 0.75 in
+editions use their vendor-owned profile defaults of 6 × 9 in, 0.75 in
 margins, 11 pt body text, and 1.4 line height.
 Project export v13 writes the complete edition aggregate, semantic manuscripts,
 named styles, visual references, and project-owned font families/faces with
@@ -256,45 +255,33 @@ interior/cover actions from current render and artifact state; Save uses the
 hash-verifying immutable artifact endpoints and never invokes browser print.
 EPUB editions cannot request press output, and paperback editions cannot export
 EPUB, preventing product-form identifiers and metadata from crossing formats.
-Internal press inspection is not an independent PDF/X or vendor-acceptance
-claim.
 
-`Lorekeeper.Press` proves only a local PDF 1.7 fixture path. Its versioned JSON
-protocol validates child job IDs, accepts semantic book content and explicit
-geometry, and returns artifact hashes plus structured diagnostics. Its Typst
-world has no filesystem or network loader. The experimental Ingram profile
-fails closed and emits no artifact because Typst 0.15.1 has no PDF/X mode and no
-reviewed CMYK press profile is bundled. This spike is not a production renderer,
-KDP/Ingram compatibility claim, or substitute for the future application
-service and assistant boundary.
+`Lorekeeper.Press` owns protocol v3, deterministic layout, English/Latin shaping
+and glyph diagnostics, mixed-face paragraph/character/inline typography, font
+subsetting and ToUnicode maps, shaped glyph advances/offsets, bounded vertical
+pagination, measured/wrapped TOC convergence, and stable page maps, ordered front
+and back matter, illustrated prose, contain-fit whole Picture Page spreads,
+crop-fit split leaves and other placements, bounded captions,
+full-wrap cover geometry, EAN-13 bars, and PDF serialization. KDP and generic
+profiles emit PDF 1.7. The Ingram profile emits PDF 1.3 with
+PDF/X-1a:2001 identification, the registered CGATS21 CRPC1 CMYK output intent,
+CMYK/gray-only resources, flattened alpha, embedded fonts, no encryption,
+annotations, actions, or transparency, and image/page-paint colors capped at
+240% total ink. A separate production `lopdf` pass reparses completed bytes before
+atomic promotion. An independent black-box test harness parses raw PDF objects
+without calling that validator. This is the evidence behind the scoped
+“Lorekeeper validated” state; it is not evidence of vendor upload acceptance or
+a human proof attestation.
 
-`Lorekeeper.Press.Weasy` is the Preview press sidecar behind that
-protocol. Its controlled Windows x64 fixture emits PDF 1.3 files declaring
-PDF/X-1a:2001 with a
-fingerprinted CMYK output intent. Generated HTML/CSS is code-owned, external
-resource reads are restricted to the exact profile URI, and output is atomically
-published into immutable child job directories. Its internal pypdf inspection
-does not establish standards conformance. The adapter uses an exact-version
-internal WeasyPrint API because the stock `pdf/x-1a` variant declares the wrong
-2003 revision. Its controlled Windows fixture carries pinned Liberation Serif
-files and requires the future owning application service to set the sibling
-Fontconfig environment before native process startup. Its launcher verifies that
-environment and the sibling font/config/license hashes before importing
-WeasyPrint. The application additionally requires release-provisioned build
-evidence before it treats a bundle as runnable. This co-located evidence is an
-integrity and provisioning contract, not an authentication boundary against a
-user who can modify the installed application.
-Native payloads are extracted into a fresh build-owned directory
-from the fingerprinted official portable executable, then the final collected
-binaries are source-classified. The release-license gate remains closed because
-the native notice bundle is incomplete. Acrobat/vendor/physical-proof evidence
-and cross-platform packaging also remain incomplete. The current spike evidence
-therefore keeps that release gate false; a source checkout without a separately
-release-provisioned app-owned bundle correctly reports PDF generation unavailable. The
-runtime returns no independently validated or claimed standard and is not a
-production runtime.
+Protocol v3 stages `input/request.json` and declared relative PNG assets in a
+bounded job root. Each declaration carries media type, byte length, dimensions,
+and SHA-256. Absolute paths, traversal, links/reparse points, undeclared files,
+changed bytes, corrupt assets, unsupported formats, existing output, and
+cancellation fail before artifact promotion. The renderer writes a fresh
+staging directory, validates both PDFs, and renames it to `output` only after
+every check succeeds; it never overwrites prior output.
 
-The structured-manuscript, publication-edition, and Preview press-runtime
+The structured-manuscript, publication-edition, and owned press-runtime
 boundaries are implemented. `PublicationRenderService` persists edition-scoped
 queue state, immutable artifact bytes/hashes, renderer/profile provenance,
 diagnostics, and stable block-to-page mappings. `PublicationRenderWorker`
@@ -302,20 +289,35 @@ recovers interrupted jobs and owns cancellation; `PublicationRenderProcessor`
 contains the child process, while `PublicationPressRuntime` resolves only a
 relative directory beneath the stable binary installation root
 (`AppContext.BaseDirectory`), independent of the launch working/content root,
-rejects reparse/missing files,
-verifies the build-evidence schema, platform, architecture, complete bundle-file
-inventory, binary inventory, and executable fingerprint, and
-constructs a cleared environment from controlled sibling resources. There is no
-machine `uv`, Python, inherited `PATH`, virtual-environment, or repo-local native
-binary fallback. On Windows, only OS runtime directories resolved through .NET
-are added for required platform DLL loading. Runtime readiness is checked by the
+rejects reparse/missing files, verifies the schema-v3 platform/architecture
+manifest, exact file inventory, sizes, and SHA-256 fingerprints, and constructs
+a cleared environment. There is no inherited `PATH`, Cargo, Python, uv, Typst,
+WeasyPrint, Chromium, machine PDF software, or repository fallback. Runtime
+readiness and the dynamic `describe` contract are checked by the
 UI, assistant, and service before a render can be queued. The processor captures
-bounded stdout/stderr before writing the request, bounds its lifetime and paths,
+bounded stdout/stderr, bounds its lifetime and paths,
 and verifies every returned length/hash before persistence. Project-
 scoped range endpoints serve actual PDF/package bytes only after recomputing
 their stored length and SHA-256; corrupt rows fail closed before an ETag or body
 is returned. Source-fingerprint mismatch marks otherwise valid immutable
-artifacts stale.
+artifacts stale. Installed-renderer or selected-profile provenance mismatch also
+stales otherwise current PDF artifacts. Queued jobs snapshot the dynamic
+`describe` version and reject a different executable response. The guarded
+Press cutover owner runs before general EF migration. Edition recovery and Press
+schema advancement share one database-scoped process-local and crash-releasing
+cross-process lease, so no second startup can enter the known v14 SQLite table-
+rebuild/history-write handoff while another owner advances it. The cutover
+creates a protected SQLite backup and ACL-protected
+atomic marker, then hashes every canonical application table except migration
+bookkeeping and regenerable virtual search/vector indexes; only the explicitly
+transformed profile, legacy, and recovered-job columns are excluded, and
+`PublishAssets` image blobs are hashed in full. Expected
+publication tables must exist. The owner validates integrity, foreign keys,
+unknown profiles, and exact artifact bytes/hashes, and journals either a guarded
+v14-to-v15 cutover or an honestly labeled post-v15 reconciliation baseline.
+Malformed markers are quarantined: a pending v15 restarts from a fresh protected
+snapshot, while an already-applied cutover restores its newest protected source
+backup into the existing projectless recovery shell.
 
 `PublicationCoverService` owns the one-to-one revisioned cover design and derives
 the wrap template from the latest interior page count plus edition trim, bleed,
@@ -326,18 +328,19 @@ the geometry produced by a completed first render does not stale that render.
 ISBN-13 validation is shared by UI,
 assistant, and render gating; the contained renderer emits the EAN-13 symbol or
 the permitted KDP overlay reserve, prevents back copy from entering that
-reserve, and suppresses unsafe narrow-spine text. KDP Preview covers can
-composite the selected normalized PNG with edition focal coordinates. The
-Ingram Preview profile rejects selected cover images until a reviewed CMYK
-conversion path exists.
+reserve, and suppresses unsafe narrow-spine text. KDP and Ingram covers both
+composite selected normalized PNG artwork with edition focal coordinates;
+Ingram uses the owned ICC conversion and ink-limit path. Black-and-white
+editions convert interior raster content to DeviceGray; cover color remains
+independent and uses RGB for KDP/generic or CMYK for Ingram.
 
-`PublicationPackageService` owns the versioned Preview preflight and final
+`PublicationPackageService` owns versioned Lorekeeper validation and the final
 artifact-assembly boundary. It verifies current source fingerprints, correlated
 interior/cover render evidence, page geometry, page-box consistency, embedded
 fonts, annotations, security, Ingram output intent/transparency and fail-closed
 color-space evidence, cover diagnostics, ISBN, metadata, content, supported
-product geometry, page count, language, and the current prose-only print-image
-boundary before packaging. It
+product geometry, page count, language, and the current English/Latin and
+contained-raster-image boundaries before packaging. It
 normalizes the EPUB modification timestamp and ZIP entry metadata, validates
 safe EPUB entry paths plus container, OPF 3 metadata/manifest/spine, resource,
 XHTML, TOC/landmark, and navigation relationships, and writes deterministic
@@ -360,10 +363,11 @@ read preflight/proof state and build an eligible package but cannot approve a
 proof. Physical-proof state and approval apply only to paperback editions; EPUB
 reports it as not applicable. Title, copyright, and visible contents pages are
 generated exclusively from edition settings, so user-authored semantic matter
-cannot claim those reserved kinds and duplicate generated output. External
-EPUBCheck, Acrobat, vendor-upload, reader/device, and
-physical-production evidence remains a release gate, so all output stays
-`Preview`.
+cannot claim those reserved kinds and duplicate generated output. EPUB
+validation remains structural and internal; broader reader-matrix results are
+recorded separately. Vendor-upload results and digital/physical proof
+attestations are optional human evidence and never alter the renderer's scoped
+structural result.
 
 ISBN values are strict, checksum-validated, and stored in canonical ISBN-13
 form. The same ISBN may be shared only by same-format vendor editions whose
@@ -373,12 +377,13 @@ Vendor/profile production settings may differ. Once shared, content-affecting
 edition mutations fail closed until the ISBN is cleared and the editions are
 synchronized.
 
-Press-sidecar fixture development resolves the exact-locked Python project and
-fingerprinted native payload. Application development never resolves or invokes
-that source environment; it uses only the same release-provisioned contained
-bundle boundary as a packaged app. Packaged releases must ship the frozen
-renderer with controlled fonts/notices. This remains Preview, not a PDF/X or
-vendor-conformance claim.
+`eng/BuildPressRuntime.ps1` builds `Cargo.lock` with Rust 1.97.1, rejects any
+unknown direct or transitive license expression, and packages only the native
+executable, the OFL Lora/Nunito/Roboto Mono assets, the registered ICC profile,
+third-party notices, SBOM, and exact hash manifest. Debug and Release use this
+same boundary. Windows x64, Linux x64, macOS x64, and macOS arm64 build on their
+native target runners; neither the app nor release package compiles Rust at
+runtime.
 `PublishChatService` owns one persisted, ordered, project-scoped Publish
 conversation and uses the shared turn runtime for streaming, cancellation,
 reconnection, image attachments, and text-only cross-turn replay. The two-column
@@ -548,9 +553,7 @@ Requirements:
 
 - .NET 10 SDK, pinned by `global.json`
 - Node.js 22.12 or later for Electron.NET desktop builds and packaging
-- Rust 1.92 or later only when building the disposable `Lorekeeper.Press` spike
-- Python 3.13 or 3.14 plus uv when exercising the
-  `Lorekeeper.Press.Weasy` Preview sidecar source/runtime fixtures
+- Rust 1.97.1, pinned by `Lorekeeper.Press/rust-toolchain.toml`, for source builds
 
 Build and start the browser-hosted development app:
 
@@ -597,26 +600,20 @@ npm test --prefix tools/semantic-editor
 npm run build --prefix tools/semantic-editor
 ```
 
-The standalone press spike owns separate Rust fixture tests. Run its locked
-verification separately:
+The owned Press project runs an independent black-box conformance suite plus
+unit and adversarial fixtures:
 
 ```powershell
 cd Lorekeeper.Press
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
 cargo test --locked
-.\scripts\verify-spike.ps1 -PopplerBin <poppler-bin-directory>
 ```
 
-Run the Preview press-sidecar source fixtures separately:
-
-```powershell
-cd Lorekeeper.Press.Weasy
-uv run --locked python -m unittest discover -s tests -v
-```
-
-The frozen Preview-runtime verification additionally requires an explicitly supplied,
-fingerprinted CMYK profile and a controlled native Pango/Fontconfig stack; see
-`Lorekeeper.Press.Weasy/scripts/build-windows-spike.ps1` and
-`Lorekeeper.Press.Weasy/scripts/verify-spike.ps1`.
+`dotnet build Lorekeeper.sln` also builds and packages the same locked native
+runtime used by the app. `LorekeeperPressProcessIntegrationTests` stages a real
+protocol-v3 job through the C# runtime boundary with `PATH` removed and verifies
+the generated interior and cover bytes.
 
 Successful compilation does not validate OAuth, provider calls,
 embeddings, web search, image generation, publication output, packaging,

@@ -80,7 +80,7 @@ public class PublicationEdition
     public required string Name { get; set; }
     public PublicationEditionFormat Format { get; set; } = PublicationEditionFormat.Paperback;
     public PublicationVendor Vendor { get; set; } = PublicationVendor.Generic;
-    public string VendorProfileVersion { get; set; } = "preview-1";
+    public string VendorProfileVersion { get; set; } = "generic-paperback-v1";
     public PublicationEditionStatus Status { get; set; } = PublicationEditionStatus.Draft;
     public bool IsDefault { get; set; }
     public long Revision { get; set; }

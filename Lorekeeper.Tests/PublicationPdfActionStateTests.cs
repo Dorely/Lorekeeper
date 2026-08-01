@@ -9,30 +9,35 @@ public sealed class PublicationPdfActionStateTests
     [Fact]
     public void ResolveCoversMissingActiveFailedStaleAndCurrentRenders()
     {
-        Assert.Equal(PublicationPdfActionKind.Generate, PublicationPdfActionState.Resolve([]).Kind);
+        Assert.Equal(PublicationPdfActionKind.NotGenerated, PublicationPdfActionState.Resolve([]).Kind);
 
         var active = Job(PublicationRenderStatus.Rendering);
-        Assert.Equal(PublicationPdfActionKind.Active, PublicationPdfActionState.Resolve([active]).Kind);
+        Assert.Equal(PublicationPdfActionKind.Rendering, PublicationPdfActionState.Resolve([active]).Kind);
 
         var failed = Job(PublicationRenderStatus.Failed);
-        Assert.Equal(PublicationPdfActionKind.Failed, PublicationPdfActionState.Resolve([failed]).Kind);
+        Assert.Equal(PublicationPdfActionKind.Invalid, PublicationPdfActionState.Resolve([failed]).Kind);
 
         var stale = Job(
             PublicationRenderStatus.Completed,
             Artifact(PublicationArtifactKind.InteriorPdf, stale: true));
-        Assert.Equal(PublicationPdfActionKind.Regenerate, PublicationPdfActionState.Resolve([stale]).Kind);
+        Assert.Equal(PublicationPdfActionKind.Stale, PublicationPdfActionState.Resolve([stale]).Kind);
 
         var interior = Artifact(PublicationArtifactKind.InteriorPdf, stale: false, "interior.pdf");
         var cover = Artifact(PublicationArtifactKind.CoverPdf, stale: false, "cover.pdf");
         var current = PublicationPdfActionState.Resolve([
             Job(PublicationRenderStatus.Completed, interior, cover),
         ]);
-        Assert.Equal(PublicationPdfActionKind.Current, current.Kind);
+        Assert.Equal(PublicationPdfActionKind.Validated, current.Kind);
         Assert.Equal(interior.Id, current.Interior?.Id);
         Assert.Equal(cover.Id, current.Cover?.Id);
         Assert.Equal(
-            PublicationPdfActionKind.Regenerate,
+            PublicationPdfActionKind.Stale,
             PublicationPdfActionState.Resolve([current.Job!], sourceMayHaveChanged: true).Kind);
+
+        var legacy = Job(
+            PublicationRenderStatus.Completed,
+            Artifact(PublicationArtifactKind.InteriorPdf, stale: false, isLegacy: true));
+        Assert.Equal(PublicationPdfActionKind.Legacy, PublicationPdfActionState.Resolve([legacy]).Kind);
     }
 
     [Fact]
@@ -47,6 +52,8 @@ public sealed class PublicationPdfActionStateTests
 
         Assert.Equal("book-interior.pdf", document.RootElement.GetProperty("FileName").GetString());
         Assert.False(document.RootElement.GetProperty("IsStale").GetBoolean());
+        Assert.False(document.RootElement.GetProperty("IsLegacy").GetBoolean());
+        Assert.Equal("Current", document.RootElement.GetProperty("State").GetString());
         Assert.Equal(
             $"/projects/{projectId:N}/publish/artifacts/{artifact.Id:N}",
             document.RootElement.GetProperty("ViewUrl").GetString());
@@ -77,7 +84,8 @@ public sealed class PublicationPdfActionStateTests
     private static PublicationArtifactView Artifact(
         PublicationArtifactKind kind,
         bool stale,
-        string fileName = "artifact.pdf") =>
+        string fileName = "artifact.pdf",
+        bool isLegacy = false) =>
         new(
             Guid.NewGuid(),
             kind,
@@ -90,5 +98,6 @@ public sealed class PublicationPdfActionStateTests
             "renderer",
             "preview",
             DateTime.UtcNow,
+            isLegacy,
             stale);
 }

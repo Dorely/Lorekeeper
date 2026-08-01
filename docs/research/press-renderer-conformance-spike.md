@@ -1,5 +1,8 @@
 # Press renderer and conformance spike
 
+> Historical evidence for the rejected Typst candidate. The current owned
+> renderer is documented in `lorekeeper-press-requirements.md` and ADR 0003.
+
 Last reviewed: 2026-07-30
 
 ## Scope and outcome

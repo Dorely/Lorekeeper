@@ -125,7 +125,7 @@ public sealed class PublicationCoverService(
             diagnostics.Add("Lorekeeper barcode output requires a valid ISBN-13.");
         if (edition.Vendor == PublicationVendor.IngramSpark
             && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
-            diagnostics.Add("Ingram Preview cover output requires a valid ISBN-13 barcode.");
+            diagnostics.Add("Ingram cover output requires a valid ISBN-13 barcode.");
         if (edition.Vendor == PublicationVendor.IngramSpark
             && design.BarcodeMode == PublicationBarcodeMode.VendorOverlay)
             diagnostics.Add("Ingram covers must contain Lorekeeper's ISBN-13 barcode.");

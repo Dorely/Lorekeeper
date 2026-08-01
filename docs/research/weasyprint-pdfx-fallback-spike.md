@@ -1,5 +1,8 @@
 # WeasyPrint PDF/X fallback spike
 
+> Historical evidence only. ADR 0003 superseded this reduced-scope decision on
+> 2026-07-31; WeasyPrint is not part of Lorekeeper's current runtime.
+
 Last reviewed: 2026-07-30
 
 ## Decision

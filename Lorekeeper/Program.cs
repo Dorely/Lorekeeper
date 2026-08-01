@@ -265,6 +265,7 @@ builder.Services.AddScoped<IPublishAssistantTools, PublishAssistantTools>();
 builder.Services.AddScoped<IPublishChatService, PublishChatService>();
 builder.Services.AddSingleton<IPublishChatTurnRunner, PublishChatTurnRunner>();
 builder.Services.AddSingleton<IPublicationEditionMigrationService, PublicationEditionMigrationService>();
+builder.Services.AddSingleton<IPublicationPressMigrationService, PublicationPressMigrationService>();
 builder.Services.AddScoped<IPageGeometryService, PageGeometryService>();
 
 // Context + editor chat
@@ -302,6 +303,8 @@ using (var scope = app.Services.CreateScope())
     await manuscriptMigration.ApplyPendingAsync(db);
     var editionMigration = scope.ServiceProvider.GetRequiredService<IPublicationEditionMigrationService>();
     await editionMigration.ApplyPendingAsync(db);
+    var pressMigration = scope.ServiceProvider.GetRequiredService<IPublicationPressMigrationService>();
+    await pressMigration.ApplyPendingAsync(db);
     // The guarded manuscript and edition transformations intentionally stop at
     // their owned schema boundaries. Apply later additive migrations only after
     // both validated cutovers have completed.

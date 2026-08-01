@@ -151,7 +151,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (PublicationVendor vendor) => ReadPressRuntimeReadiness(vendor),
                 name: "read_publication_pdf_runtime",
-                description: "Check whether Lorekeeper's app-owned Preview PDF runtime is ready for a vendor before proposing or requesting PDF generation."),
+                description: "Read Lorekeeper Press readiness, protocol version, renderer version, supported profiles, limits, and capabilities before proposing or requesting PDF generation."),
             AIFunctionFactory.Create(
                 method: (Guid editionId) => RequestRenderAsync(context, editionId),
                 name: "request_publication_render",
@@ -198,7 +198,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid editionId) => BuildPackageAsync(context, editionId),
                 name: "build_publication_package",
-                description: "Build the selected product-form Preview package (EPUB or validated paperback PDFs), manifest, report, and cover image when available only when preflight has no errors."),
+                description: "Build the selected product-form package (EPUB or Lorekeeper-validated paperback PDFs), manifest, report, and cover image when preflight has no errors."),
         ];
         return Task.FromResult(tools);
     }
@@ -209,8 +209,14 @@ public sealed class PublishAssistantTools(
     private async Task<string> ReadWorkspaceAsync(PublishAssistantContext context, Guid editionId) =>
         Serialize(await publishing.GetWorkspaceAsync(context.ProjectId, editionId));
 
-    private string ReadPressRuntimeReadiness(PublicationVendor vendor) =>
-        Serialize(renders.GetRuntimeReadiness(vendor));
+    private string ReadPressRuntimeReadiness(PublicationVendor vendor)
+    {
+        var readiness = renders.GetRuntimeReadiness(vendor);
+        PublicationPressDescription? description = readiness.IsReady
+            ? renders.GetRuntimeDescription()
+            : null;
+        return Serialize(new { readiness, description });
+    }
 
     private async Task<string> ListNamedStylesAsync(PublishAssistantContext context) =>
         Serialize(await manuscriptStyles.ListAsync(context.ProjectId));
@@ -453,7 +459,9 @@ public sealed class PublishAssistantTools(
         artifact.RendererVersion,
         artifact.ProfileId,
         artifact.CreatedAt,
+        artifact.IsLegacy,
         artifact.IsStale,
+        State = artifact.IsLegacy ? "Legacy" : artifact.IsStale ? "Stale" : "Current",
         ViewUrl = $"/projects/{context.ProjectId:N}/publish/artifacts/{artifact.Id:N}",
         DownloadUrl = $"/projects/{context.ProjectId:N}/publish/artifacts/{artifact.Id:N}/download",
     };

@@ -39,6 +39,7 @@ public class PublicationRenderJob
     public int ProgressPercent { get; set; }
     public string ProgressMessage { get; set; } = "Queued";
     public bool CancellationRequested { get; set; }
+    public bool IsLegacy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
@@ -64,6 +65,7 @@ public class PublicationArtifact
     public string SourceFingerprint { get; set; } = string.Empty;
     public string RendererVersion { get; set; } = string.Empty;
     public string ProfileId { get; set; } = string.Empty;
+    public bool IsLegacy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

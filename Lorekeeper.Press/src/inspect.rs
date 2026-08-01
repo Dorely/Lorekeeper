@@ -1,490 +1,595 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use lopdf::content::Content;
-use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
+use lopdf::{Dictionary, Document, Object};
 
-use crate::protocol::{FontEvidence, PageBoxEvidence};
+use crate::model::Diagnostic;
+use crate::pdf::PdfOptions;
 
-#[derive(Debug)]
-pub struct PdfInspection {
-    pub version: String,
-    pub page_count: usize,
-    pub page_width_points: f64,
-    pub page_height_points: f64,
-    pub page_boxes: PageBoxEvidence,
-    pub page_box_mismatch_pages: Vec<usize>,
-    pub fonts: Vec<FontEvidence>,
-    pub color_spaces: Vec<String>,
-    pub image_count: usize,
-    pub annotation_count: usize,
-    pub output_intent_count: usize,
-    pub has_transparency: bool,
-    pub has_encryption: bool,
-    pub has_forbidden_actions: bool,
+#[derive(Debug, Clone)]
+pub struct InspectionEvidence {
+    pub fonts_embedded: bool,
+    pub to_unicode: bool,
 }
 
-pub fn inspect_pdf(bytes: &[u8]) -> Result<PdfInspection, String> {
-    let document = Document::load_mem(bytes).map_err(|error| error.to_string())?;
-    let pages = document.get_pages();
-    let (_, first_page_id) = pages
-        .first_key_value()
-        .ok_or_else(|| "PDF has no pages.".to_owned())?;
-    let page = document
-        .get_dictionary(*first_page_id)
-        .map_err(|error| error.to_string())?;
-    let page_boxes = page_boxes_for(&document, page);
-    let media_box = page_boxes
-        .media_box
-        .ok_or_else(|| "First page has no MediaBox.".to_owned())?;
-    let (width, height) = box_dimensions(&media_box);
-
-    let mut fonts = BTreeMap::<String, bool>::new();
-    let mut color_spaces = BTreeSet::<String>::new();
-    let mut image_count = 0;
-    let mut annotation_count = 0;
-    let mut has_transparency = false;
-    let mut page_box_mismatch_pages = Vec::new();
-    let mut visited_x_objects = BTreeSet::new();
-
-    for (page_number, page_id) in &pages {
-        let page = document
-            .get_dictionary(*page_id)
-            .map_err(|error| error.to_string())?;
-        if page_boxes_for(&document, page) != page_boxes {
-            page_box_mismatch_pages.push(*page_number as usize);
-        }
-        annotation_count += page
-            .get(b"Annots")
-            .ok()
-            .and_then(|value| dereference(&document, value).ok())
-            .and_then(|value| value.as_array().ok())
-            .map_or(0, Vec::len);
-        inspect_page_resources(
-            &document,
-            *page_id,
-            &mut fonts,
-            &mut color_spaces,
-            &mut image_count,
-            &mut has_transparency,
-            &mut visited_x_objects,
-        )?;
-        let content = document.get_page_content(*page_id);
-        inspect_content(&content, &mut color_spaces)?;
+pub fn validate(path: &Path, expected: &PdfOptions) -> Result<InspectionEvidence, Diagnostic> {
+    let document = Document::load(path).map_err(|error| {
+        Diagnostic::error(
+            "PRESS_PDF_INVALID",
+            format!("The written PDF cannot be parsed: {error}"),
+        )
+    })?;
+    let expected_version = if expected.pdf_x { "1.3" } else { "1.7" };
+    if document.version != expected_version {
+        return Err(Diagnostic::error(
+            "PRESS_PDF_VERSION_INVALID",
+            format!(
+                "Expected PDF {expected_version}, found PDF {}.",
+                document.version
+            ),
+        ));
     }
-
-    let catalog = document.catalog().map_err(|error| error.to_string())?;
-    let output_intent_count = catalog
-        .get(b"OutputIntents")
+    if document.trailer.has(b"Encrypt") {
+        return Err(Diagnostic::error(
+            "PRESS_PDF_ENCRYPTED",
+            "Publication PDFs must not be encrypted.",
+        ));
+    }
+    let catalog = document.catalog().map_err(|_| {
+        Diagnostic::error("PRESS_PDF_CATALOG_INVALID", "The catalog is unreadable.")
+    })?;
+    if catalog.has(b"OpenAction") || catalog.has(b"AA") || catalog.has(b"AcroForm") {
+        return Err(Diagnostic::error(
+            "PRESS_PDF_ACTIONS_FORBIDDEN",
+            "Publication PDFs cannot contain actions or interactive forms.",
+        ));
+    }
+    if catalog
+        .get(b"Names")
         .ok()
-        .and_then(|value| dereference(&document, value).ok())
-        .and_then(|value| value.as_array().ok())
-        .map_or(0, Vec::len);
-
-    let mut visited_actions = BTreeSet::new();
-    let has_forbidden_actions = document.objects.iter().any(|(id, object)| {
-        visited_actions.insert(*id);
-        object_has_forbidden_action(&document, object, &mut visited_actions)
-    });
-
-    Ok(PdfInspection {
-        version: document.version,
-        page_count: pages.len(),
-        page_width_points: width,
-        page_height_points: height,
-        page_boxes,
-        page_box_mismatch_pages,
-        fonts: fonts
-            .into_iter()
-            .map(|(name, embedded)| FontEvidence { name, embedded })
-            .collect(),
-        color_spaces: color_spaces.into_iter().collect(),
-        image_count,
-        annotation_count,
-        output_intent_count,
-        has_transparency,
-        has_encryption: document.trailer.has(b"Encrypt"),
-        has_forbidden_actions,
-    })
-}
-
-fn inspect_page_resources(
-    document: &Document,
-    page_id: ObjectId,
-    fonts: &mut BTreeMap<String, bool>,
-    color_spaces: &mut BTreeSet<String>,
-    image_count: &mut usize,
-    has_transparency: &mut bool,
-    visited_x_objects: &mut BTreeSet<ObjectId>,
-) -> Result<(), String> {
-    let page = document
-        .get_dictionary(page_id)
-        .map_err(|error| error.to_string())?;
-    let Some(resources) = inherited_object(document, page, b"Resources") else {
-        return Ok(());
-    };
-    let resources = dereference(document, resources)
-        .map_err(|error| error.to_string())?
-        .as_dict()
-        .map_err(|error| error.to_string())?;
-
-    inspect_resources(
-        document,
-        resources,
-        fonts,
-        color_spaces,
-        image_count,
-        has_transparency,
-        visited_x_objects,
-    )
-}
-
-fn inspect_resources(
-    document: &Document,
-    resources: &Dictionary,
-    fonts: &mut BTreeMap<String, bool>,
-    color_spaces: &mut BTreeSet<String>,
-    image_count: &mut usize,
-    has_transparency: &mut bool,
-    visited_x_objects: &mut BTreeSet<ObjectId>,
-) -> Result<(), String> {
-    if let Ok(font_dictionary) = resources.get(b"Font") {
-        let font_dictionary = dereference(document, font_dictionary)
-            .map_err(|error| error.to_string())?
-            .as_dict()
-            .map_err(|error| error.to_string())?;
-        for value in font_dictionary.iter().map(|(_, value)| value) {
-            let dictionary = dereference(document, value)
-                .map_err(|error| error.to_string())?
-                .as_dict()
-                .map_err(|error| error.to_string())?;
-            let name = dictionary
-                .get(b"BaseFont")
+        .and_then(|value| dereference(&document, value))
+        .and_then(|value| value.as_dict().ok())
+        .is_some_and(|names| names.has(b"JavaScript") || names.has(b"EmbeddedFiles"))
+    {
+        return Err(Diagnostic::error(
+            "PRESS_PDF_ACTIONS_FORBIDDEN",
+            "Publication PDFs cannot contain JavaScript or embedded files.",
+        ));
+    }
+    let pages = document.get_pages();
+    if pages.is_empty() {
+        return Err(Diagnostic::error(
+            "PRESS_PDF_PAGE_TREE_INVALID",
+            "The PDF has no pages.",
+        ));
+    }
+    let mut saw_font = false;
+    let mut fonts_embedded = true;
+    let mut to_unicode = true;
+    for page_id in pages.values() {
+        let page = document.get_dictionary(*page_id).map_err(|_| {
+            Diagnostic::error(
+                "PRESS_PDF_PAGE_TREE_INVALID",
+                "A page dictionary is unreadable.",
+            )
+        })?;
+        for (key, expected_box) in [
+            (
+                b"MediaBox".as_slice(),
+                [0.0, 0.0, expected.width, expected.height],
+            ),
+            (
+                b"TrimBox".as_slice(),
+                [
+                    expected.trim.x1,
+                    expected.trim.y1,
+                    expected.trim.x2,
+                    expected.trim.y2,
+                ],
+            ),
+            (
+                b"BleedBox".as_slice(),
+                [
+                    expected.bleed.x1,
+                    expected.bleed.y1,
+                    expected.bleed.x2,
+                    expected.bleed.y2,
+                ],
+            ),
+        ] {
+            let actual = inherited(&document, page, key).and_then(object_rect);
+            if actual.is_none_or(|actual| !rect_matches(actual, expected_box)) {
+                return Err(Diagnostic::error(
+                    "PRESS_PDF_PAGE_BOX_INVALID",
+                    format!(
+                        "A page has an invalid {} for the requested geometry.",
+                        String::from_utf8_lossy(key)
+                    ),
+                ));
+            }
+        }
+        if page.has(b"Annots") || page.has(b"AA") {
+            return Err(Diagnostic::error(
+                "PRESS_PDF_ANNOTATIONS_FORBIDDEN",
+                "Publication PDFs cannot contain annotations.",
+            ));
+        }
+        if let Some(resources) = inherited(&document, page, b"Resources")
+            .and_then(|value| dereference(&document, value))
+            .and_then(|value| value.as_dict().ok())
+        {
+            validate_resources(
+                &document,
+                resources,
+                expected.pdf_x,
+                expected.expected_image_color_space,
+            )?;
+            if let Some(fonts) = resources
+                .get(b"Font")
                 .ok()
-                .and_then(|value| value.as_name().ok())
-                .map(|name| String::from_utf8_lossy(name).into_owned())
-                .unwrap_or_else(|| "Unknown".to_owned());
-            fonts
-                .entry(name)
-                .and_modify(|embedded| *embedded &= font_is_embedded(document, dictionary))
-                .or_insert_with(|| font_is_embedded(document, dictionary));
-        }
-    }
-
-    if let Ok(color_space_dictionary) = resources.get(b"ColorSpace") {
-        let dictionary = dereference(document, color_space_dictionary)
-            .map_err(|error| error.to_string())?
-            .as_dict()
-            .map_err(|error| error.to_string())?;
-        for value in dictionary.iter().map(|(_, value)| value) {
-            collect_color_space(document, value, color_spaces);
-        }
-    }
-
-    inspect_x_objects(
-        document,
-        resources,
-        fonts,
-        color_spaces,
-        image_count,
-        has_transparency,
-        visited_x_objects,
-    )?;
-
-    if let Ok(ext_g_state) = resources.get(b"ExtGState") {
-        let dictionary = dereference(document, ext_g_state)
-            .map_err(|error| error.to_string())?
-            .as_dict()
-            .map_err(|error| error.to_string())?;
-        for value in dictionary.iter().map(|(_, value)| value) {
-            if let Ok(state) = dereference(document, value).and_then(Object::as_dict)
-                && (state.get(b"SMask").ok().is_some_and(is_non_none_name)
-                    || number_is_less_than_one(state.get(b"ca").ok())
-                    || number_is_less_than_one(state.get(b"CA").ok())
-                    || state.get(b"BM").ok().is_some_and(is_non_normal_blend_mode))
+                .and_then(|value| dereference(&document, value))
+                .and_then(|value| value.as_dict().ok())
             {
-                *has_transparency = true;
+                for (_, value) in fonts.iter() {
+                    let Some(font) =
+                        dereference(&document, value).and_then(|value| value.as_dict().ok())
+                    else {
+                        continue;
+                    };
+                    saw_font = true;
+                    to_unicode &= font.has(b"ToUnicode");
+                    fonts_embedded &= descendant_is_embedded(&document, font);
+                }
+            }
+        }
+        if expected.pdf_x {
+            let content = document.get_page_content(*page_id);
+            let text = String::from_utf8_lossy(&content);
+            if text.contains(" rg") || text.contains(" RG") {
+                return Err(Diagnostic::error(
+                    "PRESS_PDFX_RGB_FORBIDDEN",
+                    "PDF/X-1a content uses an RGB operator.",
+                ));
+            }
+            let operations = Content::decode(&content).map_err(|_| {
+                Diagnostic::error(
+                    "PRESS_PDF_CONTENT_INVALID",
+                    "A PDF page content stream could not be parsed.",
+                )
+            })?;
+            if operations.operations.iter().any(|operation| {
+                matches!(operation.operator.as_str(), "k" | "K")
+                    && operation.operands.len() == 4
+                    && operation
+                        .operands
+                        .iter()
+                        .filter_map(|value| value.as_float().ok())
+                        .sum::<f32>()
+                        > 2.400_01
+            }) {
+                return Err(Diagnostic::error(
+                    "PRESS_TOTAL_INK_EXCEEDED",
+                    "A PDF/X-1a page-paint color exceeds the 240% total-ink ceiling.",
+                ));
             }
         }
     }
-
-    Ok(())
+    if !saw_font || !fonts_embedded || !to_unicode {
+        return Err(Diagnostic::error(
+            "PRESS_PDF_FONT_INVALID",
+            "Every used font must be embedded and expose a ToUnicode map.",
+        ));
+    }
+    if expected.pdf_x {
+        let output_intents = catalog
+            .get(b"OutputIntents")
+            .ok()
+            .and_then(|value| dereference(&document, value))
+            .and_then(|value| value.as_array().ok());
+        if output_intents.is_none_or(Vec::is_empty) {
+            return Err(Diagnostic::error(
+                "PRESS_PDFX_OUTPUT_INTENT_MISSING",
+                "PDF/X-1a requires an embedded CMYK output intent.",
+            ));
+        }
+        let valid_cmyk_intent = output_intents.is_some_and(|intents| {
+            intents.iter().any(|value| {
+                dereference(&document, value)
+                    .and_then(|value| value.as_dict().ok())
+                    .filter(|intent| {
+                        intent.get(b"S").ok().and_then(|value| value.as_name().ok())
+                            == Some(b"GTS_PDFX")
+                    })
+                    .and_then(|intent| intent.get(b"DestOutputProfile").ok())
+                    .and_then(|value| dereference(&document, value))
+                    .and_then(|value| value.as_stream().ok())
+                    .is_some_and(|profile| {
+                        profile
+                            .dict
+                            .get(b"N")
+                            .ok()
+                            .and_then(|value| value.as_i64().ok())
+                            == Some(4)
+                            && !profile.content.is_empty()
+                    })
+            })
+        });
+        if !valid_cmyk_intent {
+            return Err(Diagnostic::error(
+                "PRESS_PDFX_OUTPUT_INTENT_INVALID",
+                "PDF/X-1a requires an embedded four-channel CMYK output profile.",
+            ));
+        }
+        let pdfx = document.trailer.get(b"Info").ok()
+            .and_then(|value| dereference(&document, value))
+            .and_then(|value| value.as_dict().ok())
+            .and_then(|info| info.get(b"GTS_PDFXVersion").ok())
+            .is_some_and(|value| matches!(value, Object::String(bytes, _) if String::from_utf8_lossy(bytes).contains("PDF/X-1a:2001")));
+        if !pdfx {
+            return Err(Diagnostic::error(
+                "PRESS_PDFX_METADATA_INVALID",
+                "PDF/X-1a identification metadata is missing.",
+            ));
+        }
+    }
+    Ok(InspectionEvidence {
+        fonts_embedded,
+        to_unicode,
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn inspect_x_objects(
+fn validate_resources(
     document: &Document,
     resources: &Dictionary,
-    fonts: &mut BTreeMap<String, bool>,
-    color_spaces: &mut BTreeSet<String>,
-    image_count: &mut usize,
-    has_transparency: &mut bool,
-    visited_x_objects: &mut BTreeSet<ObjectId>,
-) -> Result<(), String> {
-    let Ok(x_objects) = resources.get(b"XObject") else {
+    pdf_x: bool,
+    expected_image_color_space: crate::pdf::ImageColorSpace,
+) -> Result<(), Diagnostic> {
+    if resources.has(b"ExtGState") {
+        return Err(Diagnostic::error(
+            "PRESS_PDF_TRANSPARENCY_FORBIDDEN",
+            "Transparency is forbidden.",
+        ));
+    }
+    let Some(xobjects) = resources
+        .get(b"XObject")
+        .ok()
+        .and_then(|value| dereference(document, value))
+        .and_then(|value| value.as_dict().ok())
+    else {
         return Ok(());
     };
-    let dictionary = dereference(document, x_objects)
-        .map_err(|error| error.to_string())?
-        .as_dict()
-        .map_err(|error| error.to_string())?;
-
-    for value in dictionary.iter().map(|(_, value)| value) {
-        if let Object::Reference(id) = value
-            && !visited_x_objects.insert(*id)
-        {
-            continue;
-        }
-        let object = dereference(document, value).map_err(|error| error.to_string())?;
-        let Ok(stream) = object.as_stream() else {
+    for (_, value) in xobjects.iter() {
+        let Some(stream) = dereference(document, value).and_then(|value| value.as_stream().ok())
+        else {
             continue;
         };
-        match stream
+        if stream.dict.has(b"SMask") || stream.dict.has(b"Mask") || stream.dict.has(b"Group") {
+            return Err(Diagnostic::error(
+                "PRESS_PDF_TRANSPARENCY_FORBIDDEN",
+                "Publication PDF XObjects cannot contain transparency masks or groups.",
+            ));
+        }
+        if stream
             .dict
             .get(b"Subtype")
             .ok()
             .and_then(|value| value.as_name().ok())
+            == Some(b"Image")
         {
-            Some(b"Image") => {
-                *image_count += 1;
-                if let Ok(color_space) = stream.dict.get(b"ColorSpace") {
-                    collect_color_space(document, color_space, color_spaces);
-                }
-                if stream.dict.has(b"SMask") {
-                    *has_transparency = true;
-                }
+            let actual = stream
+                .dict
+                .get(b"ColorSpace")
+                .ok()
+                .and_then(|value| value.as_name().ok());
+            let expected = match expected_image_color_space {
+                crate::pdf::ImageColorSpace::Gray => b"DeviceGray".as_slice(),
+                crate::pdf::ImageColorSpace::Rgb => b"DeviceRGB".as_slice(),
+                crate::pdf::ImageColorSpace::Cmyk => b"DeviceCMYK".as_slice(),
+            };
+            if actual != Some(expected) && !(pdf_x && actual == Some(b"DeviceRGB")) {
+                return Err(Diagnostic::error(
+                    "PRESS_IMAGE_COLOR_SPACE_INVALID",
+                    "A rendered image does not match the edition ink and artifact color intent.",
+                ));
             }
-            Some(b"Form") => {
-                inspect_transparency_group(document, stream, has_transparency);
-                let content = stream
-                    .get_plain_content_with_limit(32 * 1024 * 1024)
-                    .map_err(|error| error.to_string())?;
-                inspect_content(&content, color_spaces)?;
-                if let Ok(form_resources) = stream.dict.get(b"Resources") {
-                    let form_resources = dereference(document, form_resources)
-                        .map_err(|error| error.to_string())?
-                        .as_dict()
-                        .map_err(|error| error.to_string())?;
-                    inspect_resources(
-                        document,
-                        form_resources,
-                        fonts,
-                        color_spaces,
-                        image_count,
-                        has_transparency,
-                        visited_x_objects,
-                    )?;
-                }
-            }
-            _ => {}
         }
-    }
-
-    Ok(())
-}
-
-fn inspect_transparency_group(document: &Document, stream: &Stream, has_transparency: &mut bool) {
-    if let Ok(group) = stream.dict.get(b"Group")
-        && let Ok(group) = dereference(document, group).and_then(Object::as_dict)
-        && group.get(b"S").ok().and_then(|value| value.as_name().ok()) == Some(b"Transparency")
-    {
-        *has_transparency = true;
-    }
-}
-
-fn inspect_content(bytes: &[u8], color_spaces: &mut BTreeSet<String>) -> Result<(), String> {
-    let content = Content::decode(bytes).map_err(|error| error.to_string())?;
-    for operation in content.operations {
-        match operation.operator.as_str() {
-            "rg" | "RG" => {
-                color_spaces.insert("DeviceRGB".to_owned());
-            }
-            "k" | "K" => {
-                color_spaces.insert("DeviceCMYK".to_owned());
-            }
-            "g" | "G" => {
-                color_spaces.insert("DeviceGray".to_owned());
-            }
-            "cs" | "CS" => {
-                if let Some(Object::Name(name)) = operation.operands.first()
-                    && matches!(
-                        name.as_slice(),
-                        b"DeviceRGB" | b"DeviceCMYK" | b"DeviceGray"
+        if pdf_x
+            && stream
+                .dict
+                .get(b"ColorSpace")
+                .ok()
+                .is_some_and(|value| color_space_is_rgb(document, value))
+        {
+            return Err(Diagnostic::error(
+                "PRESS_PDFX_RGB_FORBIDDEN",
+                "PDF/X-1a contains an RGB image or form XObject.",
+            ));
+        }
+        if pdf_x
+            && stream
+                .dict
+                .get(b"Subtype")
+                .ok()
+                .and_then(|value| value.as_name().ok())
+                == Some(b"Image")
+            && stream
+                .dict
+                .get(b"ColorSpace")
+                .ok()
+                .is_some_and(|value| color_space_is_cmyk(document, value))
+            && stream
+                .dict
+                .get(b"BitsPerComponent")
+                .ok()
+                .and_then(|value| value.as_i64().ok())
+                == Some(8)
+        {
+            let samples = stream
+                .decompressed_content_with_limit(256 * 1024 * 1024)
+                .map_err(|_| {
+                    Diagnostic::error(
+                        "PRESS_PDF_IMAGE_INVALID",
+                        "A CMYK image stream could not be decoded safely.",
                     )
-                {
-                    color_spaces.insert(String::from_utf8_lossy(name).into_owned());
-                }
+                })?;
+            if samples
+                .chunks_exact(4)
+                .any(|pixel| pixel.iter().map(|channel| *channel as u32).sum::<u32>() > 612)
+            {
+                return Err(Diagnostic::error(
+                    "PRESS_TOTAL_INK_EXCEEDED",
+                    "A PDF/X-1a image exceeds the 240% total-ink ceiling.",
+                ));
             }
-            "gs" => {}
-            _ => {}
+        }
+        if let Ok(nested) = stream.dict.get(b"Resources")
+            && let Some(nested) =
+                dereference(document, nested).and_then(|value| value.as_dict().ok())
+        {
+            validate_resources(document, nested, pdf_x, expected_image_color_space)?;
         }
     }
     Ok(())
 }
 
-fn object_has_forbidden_action(
-    document: &Document,
-    object: &Object,
-    visited: &mut BTreeSet<ObjectId>,
-) -> bool {
-    match object {
-        Object::Reference(id) => {
-            if !visited.insert(*id) {
-                return false;
-            }
-            document
-                .get_object(*id)
-                .is_ok_and(|object| object_has_forbidden_action(document, object, visited))
-        }
+fn color_space_is_rgb(document: &Document, value: &Object) -> bool {
+    let Some(value) = dereference(document, value) else {
+        return false;
+    };
+    match value {
+        Object::Name(name) => name == b"DeviceRGB" || name == b"CalRGB",
         Object::Array(values) => values
             .iter()
-            .any(|value| object_has_forbidden_action(document, value, visited)),
-        Object::Dictionary(dictionary) => {
-            dictionary_has_forbidden_action(document, dictionary, visited)
-        }
-        Object::Stream(stream) => dictionary_has_forbidden_action(document, &stream.dict, visited),
+            .any(|value| color_space_is_rgb(document, value)),
         _ => false,
     }
 }
 
-fn dictionary_has_forbidden_action(
-    document: &Document,
-    dictionary: &Dictionary,
-    visited: &mut BTreeSet<ObjectId>,
-) -> bool {
-    if dictionary_has_any(dictionary, &[b"OpenAction", b"AA"]) {
-        return true;
-    }
-    if dictionary
-        .get(b"S")
-        .ok()
-        .and_then(|value| value.as_name().ok())
-        .is_some_and(|name| matches!(name, b"JavaScript" | b"Launch"))
-    {
-        return true;
-    }
-    dictionary
-        .iter()
-        .any(|(_, value)| object_has_forbidden_action(document, value, visited))
+fn color_space_is_cmyk(document: &Document, value: &Object) -> bool {
+    dereference(document, value)
+        .is_some_and(|value| matches!(value, Object::Name(name) if name == b"DeviceCMYK"))
 }
 
-fn font_is_embedded(document: &Document, dictionary: &Dictionary) -> bool {
-    if let Ok(descendant_fonts) = dictionary.get(b"DescendantFonts")
-        && let Ok(array) = dereference(document, descendant_fonts).and_then(Object::as_array)
-    {
-        return array.iter().any(|font| {
-            dereference(document, font)
-                .and_then(Object::as_dict)
-                .is_ok_and(|font| font_descriptor_is_embedded(document, font))
-        });
+fn object_rect(value: &Object) -> Option<[f32; 4]> {
+    let values = value.as_array().ok()?;
+    if values.len() != 4 {
+        return None;
     }
-
-    font_descriptor_is_embedded(document, dictionary)
+    Some([
+        values[0].as_float().ok()?,
+        values[1].as_float().ok()?,
+        values[2].as_float().ok()?,
+        values[3].as_float().ok()?,
+    ])
 }
 
-fn font_descriptor_is_embedded(document: &Document, dictionary: &Dictionary) -> bool {
-    dictionary
-        .get(b"FontDescriptor")
+fn rect_matches(actual: [f32; 4], expected: [f32; 4]) -> bool {
+    actual
+        .into_iter()
+        .zip(expected)
+        .all(|(actual, expected)| (actual - expected).abs() < 0.01)
+}
+
+fn descendant_is_embedded(document: &Document, font: &lopdf::Dictionary) -> bool {
+    font.get(b"DescendantFonts")
         .ok()
-        .and_then(|value| dereference(document, value).ok())
-        .and_then(|value| value.as_dict().ok())
-        .is_some_and(|descriptor| {
-            dictionary_has_any(descriptor, &[b"FontFile", b"FontFile2", b"FontFile3"])
+        .and_then(|value| dereference(document, value))
+        .and_then(|value| value.as_array().ok())
+        .is_some_and(|descendants| {
+            descendants.iter().any(|value| {
+                dereference(document, value)
+                    .and_then(|value| value.as_dict().ok())
+                    .and_then(|descendant| descendant.get(b"FontDescriptor").ok())
+                    .and_then(|value| dereference(document, value))
+                    .and_then(|value| value.as_dict().ok())
+                    .is_some_and(|descriptor| {
+                        descriptor.has(b"FontFile2") || descriptor.has(b"FontFile3")
+                    })
+            })
         })
 }
 
-fn collect_color_space(document: &Document, value: &Object, found: &mut BTreeSet<String>) {
-    let Ok(value) = dereference(document, value) else {
-        return;
-    };
-
-    match value {
-        Object::Name(name) => {
-            found.insert(String::from_utf8_lossy(name).into_owned());
-        }
-        Object::Array(items) => {
-            if let Some(Object::Name(name)) = items.first() {
-                found.insert(String::from_utf8_lossy(name).into_owned());
-            }
-        }
-        _ => {}
-    }
-}
-
-fn inherited_object<'a>(
+fn inherited<'a>(
     document: &'a Document,
-    dictionary: &'a Dictionary,
+    dictionary: &'a lopdf::Dictionary,
     key: &[u8],
 ) -> Option<&'a Object> {
     if let Ok(value) = dictionary.get(key) {
         return Some(value);
     }
-
-    let parent = dictionary.get(b"Parent").ok()?;
-    let parent = dereference(document, parent).ok()?.as_dict().ok()?;
-    inherited_object(document, parent, key)
+    dictionary
+        .get(b"Parent")
+        .ok()
+        .and_then(|value| dereference(document, value))
+        .and_then(|value| value.as_dict().ok())
+        .and_then(|parent| inherited(document, parent, key))
 }
 
-fn inherited_box(document: &Document, dictionary: &Dictionary, key: &[u8]) -> Option<[f64; 4]> {
-    inherited_object(document, dictionary, key)
-        .and_then(|value| dereference(document, value).ok())
-        .and_then(|value| value.as_array().ok())
-        .and_then(|values| {
-            let numbers = values
-                .iter()
-                .map(object_number)
-                .collect::<Result<Vec<_>, _>>()
-                .ok()?;
-            numbers.try_into().ok()
-        })
-}
-
-fn page_boxes_for(document: &Document, page: &Dictionary) -> PageBoxEvidence {
-    PageBoxEvidence {
-        media_box: inherited_box(document, page, b"MediaBox"),
-        crop_box: inherited_box(document, page, b"CropBox"),
-        bleed_box: inherited_box(document, page, b"BleedBox"),
-        trim_box: inherited_box(document, page, b"TrimBox"),
-        art_box: inherited_box(document, page, b"ArtBox"),
-    }
-}
-
-fn dereference<'a>(document: &'a Document, value: &'a Object) -> lopdf::Result<&'a Object> {
+fn dereference<'a>(document: &'a Document, value: &'a Object) -> Option<&'a Object> {
     match value {
-        Object::Reference(id) => document.get_object(*id),
-        _ => Ok(value),
+        Object::Reference(id) => document.get_object(*id).ok(),
+        _ => Some(value),
     }
 }
 
-fn box_dimensions(values: &[f64; 4]) -> (f64, f64) {
-    (values[2] - values[0], values[3] - values[1])
-}
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::PathBuf;
 
-fn object_number(value: &Object) -> Result<f64, String> {
-    match value {
-        Object::Integer(value) => Ok(*value as f64),
-        Object::Real(value) => Ok(*value as f64),
-        _ => Err("Page box contains a non-numeric value.".to_owned()),
+    use lopdf::{Dictionary, Stream};
+    use pdf_writer::Rect;
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::font::subset_for_text;
+    use crate::model::{FontFace, LayoutLine, LayoutPage, PageKind};
+    use crate::pdf::write_pdf;
+
+    #[test]
+    fn post_write_inspector_rejects_wrong_geometry_and_actions() {
+        let (root, path, options) = valid_pdf(false);
+        let mut document = Document::load(&path).expect("load");
+        let page_id = *document.get_pages().values().next().expect("page");
+        document
+            .get_dictionary_mut(page_id)
+            .expect("page dictionary")
+            .set("MediaBox", vec![0.into(), 0.into(), 100.into(), 100.into()]);
+        document.save(&path).expect("save bad box");
+        assert_eq!(
+            validate(&path, &options).unwrap_err().code,
+            "PRESS_PDF_PAGE_BOX_INVALID"
+        );
+
+        let (_action_root, action_path, action_options) = valid_pdf(false);
+        let mut document = Document::load(&action_path).expect("load");
+        document
+            .catalog_mut()
+            .expect("catalog")
+            .set("OpenAction", Object::Null);
+        document.save(&action_path).expect("save action");
+        assert_eq!(
+            validate(&action_path, &action_options).unwrap_err().code,
+            "PRESS_PDF_ACTIONS_FORBIDDEN"
+        );
+        drop(root);
     }
-}
 
-fn number_is_less_than_one(value: Option<&Object>) -> bool {
-    value
-        .and_then(|value| object_number(value).ok())
-        .is_some_and(|value| value < 1.0)
-}
+    #[test]
+    fn post_write_inspector_rejects_rgb_and_excessive_ink_xobjects() {
+        let (_rgb_root, rgb_path, options) = valid_pdf(true);
+        inject_image(&rgb_path, b"DeviceRGB", vec![255, 0, 0]);
+        assert_eq!(
+            validate(&rgb_path, &options).unwrap_err().code,
+            "PRESS_PDFX_RGB_FORBIDDEN"
+        );
 
-fn is_non_none_name(value: &Object) -> bool {
-    !matches!(value.as_name(), Ok(name) if name == b"None")
-}
+        let (_ink_root, ink_path, options) = valid_pdf(true);
+        inject_image(&ink_path, b"DeviceCMYK", vec![255, 255, 255, 255]);
+        assert_eq!(
+            validate(&ink_path, &options).unwrap_err().code,
+            "PRESS_TOTAL_INK_EXCEEDED"
+        );
 
-fn is_non_normal_blend_mode(value: &Object) -> bool {
-    match value {
-        Object::Name(name) => !matches!(name.as_slice(), b"Normal" | b"Compatible"),
-        Object::Array(values) => values.iter().any(is_non_normal_blend_mode),
-        _ => true,
+        let (_content_root, content_path, options) = valid_pdf(true);
+        append_page_content(&content_path, b"\n1 1 1 1 k\n");
+        assert_eq!(
+            validate(&content_path, &options).unwrap_err().code,
+            "PRESS_TOTAL_INK_EXCEEDED"
+        );
     }
-}
 
-fn dictionary_has_any(dictionary: &Dictionary, keys: &[&[u8]]) -> bool {
-    keys.iter().any(|key| dictionary.has(key))
+    fn valid_pdf(pdf_x: bool) -> (TempDir, PathBuf, PdfOptions) {
+        let root = tempfile::tempdir().expect("temporary directory");
+        let path = root.path().join("candidate.pdf");
+        let options = PdfOptions {
+            pdf_x,
+            width: 432.0,
+            height: 648.0,
+            trim: Rect::new(0.0, 0.0, 432.0, 648.0),
+            bleed: Rect::new(0.0, 0.0, 432.0, 648.0),
+            title: "Inspector fixture".to_owned(),
+            author: "Lorekeeper".to_owned(),
+            background_rgb: None,
+            expected_image_color_space: if pdf_x {
+                crate::pdf::ImageColorSpace::Cmyk
+            } else {
+                crate::pdf::ImageColorSpace::Rgb
+            },
+        };
+        let font = subset_for_text("Inspector fixture").expect("font");
+        let fonts = BTreeMap::from([(FontFace::SerifRegular, font)]);
+        let page = LayoutPage {
+            kind: PageKind::Body,
+            lines: vec![LayoutLine {
+                text: "Inspector fixture".to_owned(),
+                runs: Vec::new(),
+                size: 11.0,
+                x: 54.0,
+                y: 594.0,
+                word_spacing: 0.0,
+                rotation_degrees: 0.0,
+                light_text: false,
+            }],
+            images: Vec::new(),
+            barcode_modules: None,
+            page_label: Some("1".to_owned()),
+        };
+        let bytes = write_pdf(&[page], &fonts, &BTreeMap::new(), &options).expect("write");
+        fs::write(&path, bytes).expect("fixture PDF");
+        (root, path, options)
+    }
+
+    fn inject_image(path: &Path, color_space: &[u8], samples: Vec<u8>) {
+        let mut document = Document::load(path).expect("load");
+        let image_id = document.new_object_id();
+        let mut dictionary = Dictionary::new();
+        dictionary.set("Type", Object::Name(b"XObject".to_vec()));
+        dictionary.set("Subtype", Object::Name(b"Image".to_vec()));
+        dictionary.set("Width", 1);
+        dictionary.set("Height", 1);
+        dictionary.set("ColorSpace", Object::Name(color_space.to_vec()));
+        dictionary.set("BitsPerComponent", 8);
+        document
+            .objects
+            .insert(image_id, Object::Stream(Stream::new(dictionary, samples)));
+        let page_id = *document.get_pages().values().next().expect("page");
+        let page = document
+            .get_dictionary_mut(page_id)
+            .expect("page dictionary");
+        let resources = page
+            .get_mut(b"Resources")
+            .expect("resources")
+            .as_dict_mut()
+            .expect("resource dictionary");
+        resources
+            .get_mut(b"XObject")
+            .expect("xobjects")
+            .as_dict_mut()
+            .expect("xobject dictionary")
+            .set("Injected", Object::Reference(image_id));
+        document.save(path).expect("save malformed PDF");
+    }
+
+    fn append_page_content(path: &Path, suffix: &[u8]) {
+        let mut document = Document::load(path).expect("load");
+        let page_id = *document.get_pages().values().next().expect("page");
+        let content_id = document
+            .get_dictionary(page_id)
+            .expect("page")
+            .get(b"Contents")
+            .expect("contents")
+            .as_reference()
+            .expect("content reference");
+        let stream = document
+            .get_object_mut(content_id)
+            .expect("content")
+            .as_stream_mut()
+            .expect("content stream");
+        let mut bytes = stream.decompressed_content().expect("decode content");
+        bytes.extend_from_slice(suffix);
+        stream.set_plain_content(bytes);
+        document.save(path).expect("save content");
+    }
 }
