@@ -17,7 +17,6 @@ public sealed record PublishWorkspaceView(
     PublicationEditionView Edition,
     IReadOnlyList<PublicationEditionSummary> Editions,
     IReadOnlyList<PublishSectionView> Sections,
-    IReadOnlyList<PublishCoverCandidateView> CoverCandidates,
     IReadOnlyList<PublicationImagePlacementView> Placements,
     IReadOnlyList<PublicationMatterView> Matter,
     IReadOnlyList<PublicationEditionStyleMappingView> StyleMappings,
@@ -67,7 +66,7 @@ public sealed record PublicationEditionView(
     double PageMarginInches,
     double BodyFontSizePoints,
     double BodyLineHeight,
-    Guid? SelectedCoverChapterId,
+    Guid? SelectedCoverImageId,
     PublicationBinding Binding,
     PublicationPaper Paper,
     PublicationInk Ink,
@@ -172,16 +171,8 @@ public sealed record PublishChapterView(
     Guid? ActId,
     string Title,
     bool IsIncluded,
-    bool IsCover,
     ChapterVisualMode VisualMode,
     ChapterPageLayoutKind PageLayoutKind);
-
-public sealed record PublishCoverCandidateView(
-    Guid Id,
-    string Title,
-    string OutlineLabel,
-    ChapterPageLayoutKind PageLayoutKind,
-    string PreviewUrl);
 
 public sealed record PublicationImagePlacementView(
     Guid Id,
@@ -231,7 +222,6 @@ public sealed record PublishDocument(
     IReadOnlyList<PublicationImagePlacementDocument> Placements)
 {
     public string SourceFingerprint { get; init; } = string.Empty;
-    public ChapterPageLayoutKind? CoverPageLayoutKind { get; init; }
     public IReadOnlyList<PublishManuscriptStyleDocument> NamedStyles { get; init; } = [];
     public IReadOnlyList<PublishMatterDocument> Matter { get; init; } = [];
 

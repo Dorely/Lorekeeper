@@ -81,8 +81,7 @@ public sealed class PublishService(
         return new PublishWorkspaceView(
             PublicationEditionService.View(project, profile),
             await editions.ListAsync(projectId, cancellationToken),
-            SectionViews(acts, chapters, selections, profile.SelectedCoverChapterId),
-            CoverCandidateViews(projectId, acts, chapters),
+            SectionViews(acts, chapters, selections),
             placementViews,
             matter,
             mappings.Select(mapping => PublicationEditionService.StyleMappingView(
@@ -125,8 +124,6 @@ public sealed class PublishService(
     {
         var project = await GetProjectAsync(projectId, cancellationToken);
         var profile = await GetEditionAsync(projectId, editionId, cancellationToken);
-        await EnsureValidCoverChapterAsync(project, profile, cancellationToken);
-
         var acts = await db.Acts
             .AsNoTracking()
             .Where(act => act.ProjectId == projectId)
@@ -178,8 +175,7 @@ public sealed class PublishService(
                 ? unassignedChapters
                 : chapters.Where(chapter => chapter.ActId == source.Act.Id).ToList();
             var includedChapters = sourceChapters
-                .Where(chapter => chapter.Id != profile.SelectedCoverChapterId
-                    && IsIncluded(selections, PublishOutlineTargetKind.Chapter, chapter.Id))
+                .Where(chapter => IsIncluded(selections, PublishOutlineTargetKind.Chapter, chapter.Id))
                 .OrderBy(chapter => OutlineOrder(
                     selections,
                     PublishOutlineTargetKind.Chapter,
@@ -225,9 +221,7 @@ public sealed class PublishService(
         }
 
         var validPlacements = placements
-            .Where(placement => (placement.TargetKind != PublishOutlineTargetKind.Chapter
-                    || placement.TargetId != profile.SelectedCoverChapterId)
-                && TargetIncluded(sections, placement.TargetKind, placement.TargetId))
+            .Where(placement => TargetIncluded(sections, placement.TargetKind, placement.TargetId))
             .ToList();
         var matterDocuments = matter
             .Select(item => new PublishMatterDocument(
@@ -250,6 +244,7 @@ public sealed class PublishService(
                 .Where(block => block.Type == ManuscriptBlockType.Figure)
                 .Select(block => block.ImageId!.Value))
             .Concat(validPlacements.Select(placement => placement.AssetId))
+            .Concat(profile.SelectedCoverImageId is Guid coverImageId ? [coverImageId] : [])
             .ToHashSet();
         var assets = referencedAssetIds.Count == 0
             ? new Dictionary<Guid, PublishAsset>()
@@ -269,11 +264,10 @@ public sealed class PublishService(
                 placement.Caption,
                 placement.SortOrder))
             .ToList();
-        var cover = await RenderCoverAsync(profile, chapters, cancellationToken);
-
-        var coverPageLayoutKind = profile.SelectedCoverChapterId is Guid coverChapterId
-            ? chapters.FirstOrDefault(chapter => chapter.Id == coverChapterId)?.PageLayoutKind
-            : null;
+        var cover = profile.SelectedCoverImageId is Guid selectedCoverImageId
+            && assets.TryGetValue(selectedCoverImageId, out var selectedCoverImage)
+                ? AssetDocument(selectedCoverImage)
+                : null;
         var editionStyleMappings = await db.PublicationEditionStyleMappings
             .AsNoTracking()
             .Where(mapping => mapping.EditionId == editionId)
@@ -321,7 +315,6 @@ public sealed class PublishService(
             assets.Values.Select(AssetDocument).ToList(),
             placementDocuments)
         {
-            CoverPageLayoutKind = coverPageLayoutKind,
             NamedStyles = namedStyles,
             Matter = matterDocuments,
         };
@@ -400,46 +393,6 @@ public sealed class PublishService(
             cancellationToken)
         ?? throw new InvalidOperationException("Publication edition was not found.");
 
-    private async Task EnsureValidCoverChapterAsync(
-        Project project,
-        PublicationEdition profile,
-        CancellationToken cancellationToken)
-    {
-        if (profile.SelectedCoverChapterId is not Guid coverChapterId) return;
-        var isValid = await db.Chapters.AnyAsync(
-            chapter => chapter.Id == coverChapterId
-                && chapter.ProjectId == project.Id
-                && chapter.VisualMode == ChapterVisualMode.PicturePage,
-            cancellationToken);
-        if (!isValid)
-            throw new InvalidOperationException("The edition cover source is no longer a valid Picture Page. Clear or replace it in Publish before exporting.");
-    }
-
-    private async Task<PublishAssetDocument?> RenderCoverAsync(
-        PublicationEdition profile,
-        IReadOnlyList<Chapter> chapters,
-        CancellationToken cancellationToken)
-    {
-        if (profile.SelectedCoverChapterId is not Guid chapterId) return null;
-        var chapter = chapters.FirstOrDefault(candidate => candidate.Id == chapterId);
-        if (chapter is null || chapter.VisualMode != ChapterVisualMode.PicturePage) return null;
-
-        var surfaces = await chapterVisuals.RenderPicturePageSurfacesAsync(
-            [chapterId],
-            physicalPageLongEdgePixels: 2400,
-            rotation: ChapterPicturePageSurfaceRotation.None,
-            geometry: PicturePageGeometry(ProfileDocument(profile)),
-            cancellationToken: cancellationToken);
-        return !surfaces.TryGetValue(chapterId, out var surface)
-            ? null
-            : new PublishAssetDocument(
-                chapterId,
-                surface.FileName,
-                surface.ContentType,
-                surface.Data,
-                chapter.Title);
-    }
-
     private static ChapterPicturePageGeometryProfile PicturePageGeometry(PublishDocumentProfile profile) =>
         new(
             profile.PageWidthInches,
@@ -499,14 +452,13 @@ public sealed class PublishService(
     {
         PublishTitlePageMode.Include => true,
         PublishTitlePageMode.Omit => false,
-        _ => profile.SelectedCoverChapterId is null,
+        _ => true,
     };
 
     private static List<PublishSectionView> SectionViews(
         IReadOnlyList<Act> acts,
         IReadOnlyList<Chapter> chapters,
-        IReadOnlyList<PublicationEditionOutlineItem> selections,
-        Guid? coverChapterId)
+        IReadOnlyList<PublicationEditionOutlineItem> selections)
     {
         var result = new List<PublishSectionView>();
         foreach (var act in acts.OrderBy(act => OutlineOrder(
@@ -522,7 +474,7 @@ public sealed class PublishService(
                     PublishOutlineTargetKind.Chapter,
                     chapter.Id,
                     chapter.Order))
-                .Select(chapter => ChapterView(chapter, selections, coverChapterId))
+                .Select(chapter => ChapterView(chapter, selections))
                 .ToList();
 
             result.Add(new PublishSectionView(
@@ -540,7 +492,7 @@ public sealed class PublishService(
                 PublishOutlineTargetKind.Chapter,
                 chapter.Id,
                 int.MaxValue - chapters.Count + chapter.Order))
-            .Select(chapter => ChapterView(chapter, selections, coverChapterId))
+            .Select(chapter => ChapterView(chapter, selections))
             .ToList();
         if (unassigned.Count > 0)
             result.Add(new PublishSectionView(null, "Unassigned", IsUnassigned: true, IsIncluded: true, unassigned));
@@ -549,51 +501,14 @@ public sealed class PublishService(
 
     private static PublishChapterView ChapterView(
         Chapter chapter,
-        IReadOnlyList<PublicationEditionOutlineItem> selections,
-        Guid? coverChapterId) =>
+        IReadOnlyList<PublicationEditionOutlineItem> selections) =>
         new(
             chapter.Id,
             chapter.ActId,
             chapter.Title,
             IsIncluded(selections, PublishOutlineTargetKind.Chapter, chapter.Id),
-            chapter.Id == coverChapterId,
             chapter.VisualMode,
             chapter.PageLayoutKind);
-
-    private static List<PublishCoverCandidateView> CoverCandidateViews(
-        Guid projectId,
-        IReadOnlyList<Act> acts,
-        IReadOnlyList<Chapter> chapters)
-    {
-        var actTitles = acts.ToDictionary(act => act.Id, act => act.Title);
-        return OrderedChapters(acts, chapters)
-            .Where(chapter => chapter.VisualMode == ChapterVisualMode.PicturePage)
-            .Select(chapter =>
-            {
-                var sectionTitle = chapter.ActId is Guid actId && actTitles.TryGetValue(actId, out var actTitle)
-                    ? actTitle
-                    : "Unassigned";
-                return new PublishCoverCandidateView(
-                    chapter.Id,
-                    chapter.Title,
-                    $"{sectionTitle} · {chapter.Title}",
-                    chapter.PageLayoutKind,
-                    $"/projects/{projectId:N}/publish/cover/{chapter.Id:N}/preview?v={chapter.UpdatedAt.Ticks:x}");
-            })
-            .ToList();
-    }
-
-    private static IEnumerable<Chapter> OrderedChapters(IReadOnlyList<Act> acts, IReadOnlyList<Chapter> chapters)
-    {
-        foreach (var act in acts.OrderBy(act => act.Order))
-        {
-            foreach (var chapter in chapters.Where(chapter => chapter.ActId == act.Id).OrderBy(chapter => chapter.Order))
-                yield return chapter;
-        }
-
-        foreach (var chapter in chapters.Where(chapter => chapter.ActId is null).OrderBy(chapter => chapter.Order))
-            yield return chapter;
-    }
 
     private static PublicationImagePlacementView PlacementView(
         Guid projectId,

@@ -48,13 +48,14 @@ public sealed class ManuscriptMigrationService(
             db.ChangeTracker.Clear();
         var needsDataMigration = await HasColumnAsync("Chapters", "Body", cancellationToken);
         var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+        var manuscriptSchemaPending = pending.Contains(SchemaV2EfMigrationId, StringComparer.Ordinal);
         var hasCurrentColumns = await HasColumnAsync("Chapters", "ManuscriptJson", cancellationToken);
         var hasInterruptedTransform = hasCurrentColumns
             && await ContainsUnstructuredManuscriptsAsync(cancellationToken);
         var needsSchemaV2Upgrade = hasCurrentColumns
             && await ContainsSchemaV1ManuscriptsAsync(cancellationToken);
         if (!needsDataMigration
-            && pending.Count == 0
+            && !manuscriptSchemaPending
             && !hasInterruptedTransform
             && !needsSchemaV2Upgrade)
             return;
@@ -74,8 +75,11 @@ public sealed class ManuscriptMigrationService(
                     cancellationToken);
             }
 
-            await ClearStrandedMigrationLockAsync(db, cancellationToken);
-            await MigrateManuscriptSchemaAsync(db, cancellationToken);
+            if (needsDataMigration || manuscriptSchemaPending)
+            {
+                await ClearStrandedMigrationLockAsync(db, cancellationToken);
+                await MigrateManuscriptSchemaAsync(db, cancellationToken);
+            }
 
             if (await ContainsUnstructuredManuscriptsAsync(cancellationToken))
             {

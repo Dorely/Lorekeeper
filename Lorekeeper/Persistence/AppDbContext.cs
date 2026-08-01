@@ -776,7 +776,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasIndex(e => new { e.ProjectId, e.IsDefault })
                 .IsUnique()
                 .HasFilter("\"IsDefault\" = 1");
-            entity.HasIndex(e => e.SelectedCoverChapterId);
+            entity.HasIndex(e => e.SelectedCoverImageId);
             entity.Property(e => e.Format).HasConversion<string>();
             entity.Property(e => e.Vendor).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
@@ -793,9 +793,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
                 .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasOne(e => e.SelectedCoverChapter)
-                .WithMany(chapter => chapter.CoverEditions)
-                .HasForeignKey(e => e.SelectedCoverChapterId)
+            entity.HasOne(e => e.SelectedCoverImage)
+                .WithMany(image => image.CoverEditions)
+                .HasForeignKey(e => e.SelectedCoverImageId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 

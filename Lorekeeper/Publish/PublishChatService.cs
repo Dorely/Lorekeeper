@@ -73,7 +73,7 @@ public sealed class PublishChatService(
         "update_publication_edition",
         "set_default_publication_edition",
         "archive_publication_edition",
-        "set_publication_cover_source",
+        "set_publication_cover_image",
         "set_publication_content",
         "reorder_publication_content",
         "upsert_publication_matter",

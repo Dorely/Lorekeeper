@@ -8,11 +8,162 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using SkiaSharp;
 
 namespace Lorekeeper.Tests;
 
 public sealed class PublicationRenderTests
 {
+    [Fact]
+    public void PressRuntimeFailsClosedWithoutUsingMachineInstalledTools()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var runtime = new PublicationPressRuntime(
+                Options.Create(new PublicationPressOptions()),
+                new TestPressInstallationRoot(root));
+
+            var readiness = runtime.GetReadiness();
+
+            Assert.False(readiness.IsReady);
+            Assert.Contains("app-owned runtime folder", readiness.Message, StringComparison.Ordinal);
+            Assert.Contains("will not fall back", readiness.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PressRuntimeBuildsAControlledEnvironmentFromItsOwnedBundle()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        var runtimeRoot = Path.Combine(root, "press-runtime");
+        Directory.CreateDirectory(Path.Combine(runtimeRoot, "fonts"));
+        Directory.CreateDirectory(Path.Combine(runtimeRoot, "licenses"));
+        Directory.CreateDirectory(Path.Combine(runtimeRoot, "profiles"));
+        try
+        {
+            var executableName = OperatingSystem.IsWindows()
+                ? "lorekeeper-press-weasy.exe"
+                : "lorekeeper-press-weasy";
+            foreach (var path in new[]
+            {
+                Path.Combine(runtimeRoot, executableName),
+                Path.Combine(runtimeRoot, "fonts", "fonts.conf"),
+                Path.Combine(runtimeRoot, "fonts", "LiberationSerif-Regular.ttf"),
+                Path.Combine(runtimeRoot, "fonts", "LiberationSerif-Bold.ttf"),
+                Path.Combine(runtimeRoot, "licenses", "Liberation-Fonts-LICENSE.txt"),
+                Path.Combine(runtimeRoot, "profiles", "printing2009.icc"),
+            })
+            {
+                File.WriteAllText(path, "fixture");
+            }
+            File.WriteAllText(
+                Path.Combine(runtimeRoot, "lorekeeper-press-weasy-binaries.json"),
+                "{\"binaryCount\":1}");
+            var executablePath = Path.Combine(runtimeRoot, executableName);
+            var executableHash = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(executablePath)));
+            var bundleFiles = Directory.EnumerateFiles(runtimeRoot, "*", SearchOption.AllDirectories)
+                .Select(path => new
+                {
+                    relativePath = Path.GetRelativePath(runtimeRoot, path).Replace(Path.DirectorySeparatorChar, '/'),
+                    sha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))),
+                })
+                .ToArray();
+            var inventoryHash = bundleFiles.Single(file =>
+                file.relativePath == "lorekeeper-press-weasy-binaries.json").sha256;
+            var profileHash = bundleFiles.Single(file =>
+                file.relativePath == "profiles/printing2009.icc").sha256;
+            File.WriteAllText(
+                Path.Combine(runtimeRoot, "lorekeeper-press-weasy-build.json"),
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    schemaVersion = 2,
+                    platform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsLinux() ? "linux" : "macos",
+                    architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant(),
+                    binaryInventory = new
+                    {
+                        releaseLicenseGatePassed = true,
+                        uncontrolledBinaryCount = 0,
+                        sha256 = inventoryHash,
+                    },
+                    executable = new { sha256 = executableHash },
+                    cmykProfile = new
+                    {
+                        relativePath = "profiles/printing2009.icc",
+                        sha256 = profileHash,
+                    },
+                    bundleFiles,
+                }));
+            var runtime = new PublicationPressRuntime(
+                Options.Create(new PublicationPressOptions()),
+                new TestPressInstallationRoot(root));
+            var output = Path.Combine(root, "job");
+            Assert.NotEqual(
+                Path.GetFullPath(Environment.CurrentDirectory),
+                Path.GetFullPath(root));
+
+            if (!OperatingSystem.IsWindows())
+            {
+                var notExecutable = runtime.GetReadiness();
+                Assert.False(notExecutable.IsReady);
+                Assert.Contains("not marked executable", notExecutable.Message, StringComparison.Ordinal);
+                File.SetUnixFileMode(
+                    executablePath,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            var start = runtime.CreateStartInfo(Guid.NewGuid(), output, requireCmykProfile: false);
+
+            Assert.Equal(Path.Combine(runtimeRoot, executableName), start.FileName);
+            Assert.Equal(runtimeRoot, start.WorkingDirectory);
+            Assert.Equal(Path.Combine(runtimeRoot, "fonts", "fonts.conf"), start.Environment["FONTCONFIG_FILE"]);
+            Assert.DoesNotContain("uv", start.FileName, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("fixture-machine-path", start.Environment["PATH"], StringComparison.Ordinal);
+
+            var ingramStart = runtime.CreateStartInfo(Guid.NewGuid(), output, requireCmykProfile: true);
+            Assert.Contains(Path.Combine(runtimeRoot, "profiles", "printing2009.icc"), ingramStart.ArgumentList);
+
+            File.WriteAllText(Path.Combine(runtimeRoot, "unreviewed.dll"), "payload");
+            var withUnexpectedPayload = runtime.GetReadiness();
+            Assert.False(withUnexpectedPayload.IsReady);
+            Assert.Contains("exactly match", withUnexpectedPayload.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void JpegCoverIsNormalizedToTheBoundedPngRendererContract()
+    {
+        using var bitmap = new SKBitmap(2, 3);
+        bitmap.Erase(SKColors.CornflowerBlue);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SKEncodedImageFormat.Jpeg, 90);
+        var asset = new PublishAssetDocument(
+            Guid.NewGuid(),
+            "cover.jpg",
+            "image/jpeg",
+            encoded.ToArray(),
+            string.Empty);
+
+        var dataUri = PublicationRenderProcessor.CoverImageDataUri(asset);
+
+        Assert.StartsWith("data:image/png;base64,", dataUri, StringComparison.Ordinal);
+        var png = Convert.FromBase64String(dataUri[(dataUri.IndexOf(',') + 1)..]);
+        using var decoded = SKCodec.Create(new SKMemoryStream(png));
+        Assert.NotNull(decoded);
+        Assert.Equal(SKEncodedImageFormat.Png, decoded.EncodedFormat);
+        Assert.Equal(2, decoded.Info.Width);
+        Assert.Equal(3, decoded.Info.Height);
+    }
+
     [Fact]
     public async Task WorkerTreatsHostShutdownCancellationAsNormalCompletion()
     {
@@ -138,7 +289,7 @@ public sealed class PublicationRenderTests
         };
         db.AddRange(project, edition, valid, corrupt);
         await db.SaveChangesAsync();
-        var service = new PublicationRenderService(db, null!, null!, null!, null!);
+        var service = new PublicationRenderService(db, null!, null!, null!, null!, null!);
 
         Assert.NotNull(await service.GetArtifactAsync(project.Id, valid.Id));
         Assert.Null(await service.GetArtifactAsync(project.Id, corrupt.Id));
@@ -223,8 +374,8 @@ public sealed class PublicationRenderTests
                     publishing ?? new BlockingPublishService(),
                     null!,
                     null!,
-                    Options.Create(new PublicationPressOptions()),
-                    null!));
+                    null!,
+                    Options.Create(new PublicationPressOptions())));
             var provider = services.BuildServiceProvider();
             await using (var setupScope = provider.CreateAsyncScope())
             {
@@ -274,6 +425,11 @@ public sealed class PublicationRenderTests
             await Provider.DisposeAsync();
             await _connection.DisposeAsync();
         }
+    }
+
+    private sealed class TestPressInstallationRoot(string rootPath) : IPublicationPressInstallationRoot
+    {
+        public string RootPath { get; } = rootPath;
     }
 
     private sealed class RecordingRenderQueue : IPublicationRenderQueue

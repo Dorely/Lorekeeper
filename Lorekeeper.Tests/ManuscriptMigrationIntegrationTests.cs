@@ -15,6 +15,38 @@ public sealed class ManuscriptMigrationIntegrationTests
     private const string PreviousMigration = "20260716224731_AddChatMessageImageAttachments";
 
     [Fact]
+    public async Task LaterPendingMigrationDoesNotDowngradeCurrentApplicationTables()
+    {
+        using var fixture = new MigrationFixture();
+        var conversationId = Guid.NewGuid();
+        await using (var db = fixture.CreateDbContext())
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20260801003844_PublishConversationsV13");
+            var project = new Project
+            {
+                Name = "Current book",
+                Slug = $"current-{Guid.NewGuid():N}",
+            };
+            db.Projects.Add(project);
+            db.PublishConversations.Add(new PublishConversation
+            {
+                Id = conversationId,
+                ProjectId = project.Id,
+            });
+            await db.SaveChangesAsync();
+
+            await fixture.CreateService().ApplyPendingAsync(db);
+        }
+
+        await using var verification = fixture.CreateDbContext();
+        Assert.True(await verification.PublishConversations.AsNoTracking()
+            .AnyAsync(conversation => conversation.Id == conversationId));
+        Assert.Contains(
+            "20260801022548_PublicationCoverImagesV14",
+            await verification.Database.GetPendingMigrationsAsync());
+    }
+
+    [Fact]
     public async Task V7WalDatabaseMigratesWithBackupJournalAndExactText()
     {
         using var fixture = new MigrationFixture();

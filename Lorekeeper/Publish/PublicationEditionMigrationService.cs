@@ -27,6 +27,7 @@ public sealed class PublicationEditionMigrationService(
 {
     public const string MigrationName = "publication-editions-v10";
     public const string EfMigrationId = "20260730203619_PublicationEditionsV10";
+    internal const string CoverImagesV14MigrationId = "20260801022548_PublicationCoverImagesV14";
     private static readonly SemaphoreSlim MigrationLock = new(1, 1);
     private readonly string _connectionString = SqliteConnectionSettings.BuildConnectionString(configuration);
 
@@ -36,6 +37,7 @@ public sealed class PublicationEditionMigrationService(
         try
         {
             await using var crossProcessLock = await AcquireCrossProcessLockAsync(cancellationToken);
+            await ReconcileInterruptedCoverMigrationAsync(db, cancellationToken);
             var pending = await db.Database.GetPendingMigrationsAsync(cancellationToken);
             if (!pending.Contains(EfMigrationId, StringComparer.Ordinal)
                 && File.Exists(MarkerPath()))
@@ -120,6 +122,120 @@ public sealed class PublicationEditionMigrationService(
         {
             MigrationLock.Release();
         }
+    }
+
+    internal static async Task ReconcileInterruptedCoverMigrationAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken = default)
+    {
+        if ((await db.Database.GetAppliedMigrationsAsync(cancellationToken))
+            .Contains(CoverImagesV14MigrationId, StringComparer.Ordinal))
+        {
+            return;
+        }
+
+        await db.Database.OpenConnectionAsync(cancellationToken);
+        var connection = (SqliteConnection)db.Database.GetDbConnection();
+        if (!await TableExistsAsync(connection, "PublicationEditions", cancellationToken))
+            return;
+        var columns = await TableColumnsAsync(connection, "PublicationEditions", cancellationToken);
+        var hasLegacyColumn = columns.Contains("SelectedCoverChapterId");
+        var hasImageColumn = columns.Contains("SelectedCoverImageId");
+        var hasTemporaryTable = await TableExistsAsync(
+            connection,
+            "ef_temp_PublicationEditions",
+            cancellationToken);
+
+        if (hasLegacyColumn && !hasImageColumn && !hasTemporaryTable)
+            return;
+        if (hasLegacyColumn && hasImageColumn && hasTemporaryTable)
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                PRAGMA foreign_keys = 0;
+                BEGIN IMMEDIATE;
+                DROP TABLE "PublicationEditions";
+                ALTER TABLE "ef_temp_PublicationEditions" RENAME TO "PublicationEditions";
+                COMMIT;
+                PRAGMA foreign_keys = 1;
+                """,
+                cancellationToken);
+            columns = await TableColumnsAsync(connection, "PublicationEditions", cancellationToken);
+            hasLegacyColumn = columns.Contains("SelectedCoverChapterId");
+            hasImageColumn = columns.Contains("SelectedCoverImageId");
+            hasTemporaryTable = false;
+        }
+
+        if (hasLegacyColumn || !hasImageColumn || hasTemporaryTable)
+        {
+            throw new InvalidOperationException(
+                "The interrupted cover-image migration is in an unrecognized schema state and cannot be resumed safely.");
+        }
+        if (!await HasCoverImageForeignKeyAsync(connection, cancellationToken))
+            throw new InvalidOperationException("The interrupted cover-image migration is missing its image foreign key.");
+        await EnsureNoForeignKeyViolationsAsync(connection, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_PublicationEditions_ProjectId_IsDefault"
+                ON "PublicationEditions" ("ProjectId", "IsDefault") WHERE "IsDefault" = 1;
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_PublicationEditions_ProjectId_Name"
+                ON "PublicationEditions" ("ProjectId", "Name");
+            CREATE INDEX IF NOT EXISTS "IX_PublicationEditions_SelectedCoverImageId"
+                ON "PublicationEditions" ("SelectedCoverImageId");
+            INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+            SELECT '20260801022548_PublicationCoverImagesV14', '10.0.5'
+            WHERE NOT EXISTS (
+                SELECT 1 FROM "__EFMigrationsHistory"
+                WHERE "MigrationId" = '20260801022548_PublicationCoverImagesV14');
+            """,
+            cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task<HashSet<string>> TableColumnsAsync(
+        SqliteConnection connection,
+        string tableName,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info('{tableName.Replace("'", "''", StringComparison.Ordinal)}');";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var columns = new HashSet<string>(StringComparer.Ordinal);
+        while (await reader.ReadAsync(cancellationToken))
+            columns.Add(reader.GetString(1));
+        return columns;
+    }
+
+    private static async Task<bool> HasCoverImageForeignKeyAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA foreign_key_list('PublicationEditions');";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (string.Equals(reader.GetString(2), "PublishAssets", StringComparison.Ordinal)
+                && string.Equals(reader.GetString(3), "SelectedCoverImageId", StringComparison.Ordinal)
+                && string.Equals(reader.GetString(6), "SET NULL", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static async Task EnsureNoForeignKeyViolationsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA foreign_key_check;";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (await reader.ReadAsync(cancellationToken))
+            throw new InvalidOperationException("The interrupted cover-image migration contains foreign-key violations.");
     }
 
     private async Task<FileStream> AcquireCrossProcessLockAsync(CancellationToken cancellationToken)

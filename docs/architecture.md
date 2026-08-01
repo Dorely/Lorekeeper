@@ -213,18 +213,29 @@ the same cross-process project mutation lease.
 editor, image targets, diagnostics, previews, and exporters.
 `IPublicationEditionService` owns the one-to-many edition aggregate: product
 settings and identifiers, independently ordered content, semantic front/back
-matter, named-style mappings, image placements, Picture Page cover selection,
+matter, named-style mappings, image placements, dedicated project-image cover
+selection,
 revision tokens, cloning, archival, comparison, audit history, and deterministic
 source fingerprints. `IPublishService` is now projection/export-only; UI and
 assistant mutations use the edition service rather than parallel publish logic.
+The v14 forward migration replaces the obsolete cover-chapter foreign key with
+an edition-owned project-image foreign key. It preserves an existing selection
+only when the referenced Picture Page resolves to one distinct project image;
+for every former cover selection, the Chapter and PageLayout bytes remain intact
+while that edition's outline row is excluded to preserve its prior cover-only
+body semantics. Ambiguous compositions require an explicit new cover choice.
+If SQLite is interrupted after a provider-required table-rebuild commit but
+before EF records v14, the guarded edition migration validates and completes
+the known intermediate schema, restores required indexes, and records the
+history row transactionally before normal migration startup continues.
 Archived editions are immutable at every owning mutation boundary, including
 cover, package-build, and proof writes; their existing artifacts remain readable
 and exportable, and cloning creates the editable continuation. New paperback
 editions use the installed Preview profile defaults of 6 × 9 in, 0.75 in
 margins, 11 pt body text, and 1.4 line height.
-Project export v12 writes the complete edition aggregate, semantic manuscripts,
+Project export v13 writes the complete edition aggregate, semantic manuscripts,
 named styles, visual references, and project-owned font families/faces with
-binary hashes. Isolated v8-v11 adapters handle older structured exports and the
+binary hashes. Isolated v8-v12 adapters handle older structured exports and the
 v1-v7 adapters handle legacy plain text. A pre-v12 backup that references a
 project font fails closed because those formats did not carry the required font
 binary; a foreign custom-font key is never persisted. Each coherent database
@@ -257,7 +268,7 @@ reviewed CMYK press profile is bundled. This spike is not a production renderer,
 KDP/Ingram compatibility claim, or substitute for the future application
 service and assistant boundary.
 
-`Lorekeeper.Press.Weasy` is the integrated Preview press sidecar behind that
+`Lorekeeper.Press.Weasy` is the Preview press sidecar behind that
 protocol. Its controlled Windows x64 fixture emits PDF 1.3 files declaring
 PDF/X-1a:2001 with a
 fingerprinted CMYK output intent. Generated HTML/CSS is code-owned, external
@@ -269,20 +280,38 @@ internal WeasyPrint API because the stock `pdf/x-1a` variant declares the wrong
 files and requires the future owning application service to set the sibling
 Fontconfig environment before native process startup. Its launcher verifies that
 environment and the sibling font/config/license hashes before importing
-WeasyPrint. Native payloads are extracted into a fresh build-owned directory
+WeasyPrint. The application additionally requires release-provisioned build
+evidence before it treats a bundle as runnable. This co-located evidence is an
+integrity and provisioning contract, not an authentication boundary against a
+user who can modify the installed application.
+Native payloads are extracted into a fresh build-owned directory
 from the fingerprinted official portable executable, then the final collected
 binaries are source-classified. The release-license gate remains closed because
 the native notice bundle is incomplete. Acrobat/vendor/physical-proof evidence
-and cross-platform packaging also remain incomplete, so the runtime returns no
-independently validated or claimed standard and is not a production runtime.
+and cross-platform packaging also remain incomplete. The current spike evidence
+therefore keeps that release gate false; a source checkout without a separately
+release-provisioned app-owned bundle correctly reports PDF generation unavailable. The
+runtime returns no independently validated or claimed standard and is not a
+production runtime.
 
 The structured-manuscript, publication-edition, and Preview press-runtime
 boundaries are implemented. `PublicationRenderService` persists edition-scoped
 queue state, immutable artifact bytes/hashes, renderer/profile provenance,
 diagnostics, and stable block-to-page mappings. `PublicationRenderWorker`
 recovers interrupted jobs and owns cancellation; `PublicationRenderProcessor`
-contains the child process, clears its environment, bounds its lifetime and
-paths, and verifies every returned length/hash before persistence. Project-
+contains the child process, while `PublicationPressRuntime` resolves only a
+relative directory beneath the stable binary installation root
+(`AppContext.BaseDirectory`), independent of the launch working/content root,
+rejects reparse/missing files,
+verifies the build-evidence schema, platform, architecture, complete bundle-file
+inventory, binary inventory, and executable fingerprint, and
+constructs a cleared environment from controlled sibling resources. There is no
+machine `uv`, Python, inherited `PATH`, virtual-environment, or repo-local native
+binary fallback. On Windows, only OS runtime directories resolved through .NET
+are added for required platform DLL loading. Runtime readiness is checked by the
+UI, assistant, and service before a render can be queued. The processor captures
+bounded stdout/stderr before writing the request, bounds its lifetime and paths,
+and verifies every returned length/hash before persistence. Project-
 scoped range endpoints serve actual PDF/package bytes only after recomputing
 their stored length and SHA-256; corrupt rows fail closed before an ETag or body
 is returned. Source-fingerprint mismatch marks otherwise valid immutable
@@ -344,9 +373,12 @@ Vendor/profile production settings may differ. Once shared, content-affecting
 edition mutations fail closed until the ISBN is cleared and the editions are
 synchronized.
 
-Development resolves the exact-locked Python project and fingerprinted native
-payload. Packaged releases must configure a frozen renderer and ship controlled
-fonts/notices. This remains Preview, not a PDF/X or vendor-conformance claim.
+Press-sidecar fixture development resolves the exact-locked Python project and
+fingerprinted native payload. Application development never resolves or invokes
+that source environment; it uses only the same release-provisioned contained
+bundle boundary as a packaged app. Packaged releases must ship the frozen
+renderer with controlled fonts/notices. This remains Preview, not a PDF/X or
+vendor-conformance claim.
 `PublishChatService` owns one persisted, ordered, project-scoped Publish
 conversation and uses the shared turn runtime for streaming, cancellation,
 reconnection, image attachments, and text-only cross-turn replay. The two-column
@@ -412,10 +444,14 @@ first. Backup files and their directory use owner-only ACLs/permissions.
 The current manuscript schema is v2. Startup safely upgrades v1 documents in
 live chapters and every historical/review JSON payload under the same protected
 backup, transaction, projection-hash, and journal boundary. Project export
-format v12 carries v2 manuscripts, stable visual references, project named
+format v13 carries v2 manuscripts, stable visual references, project named
 paragraph/character style definitions, publication editions, and complete
-project font binaries. The v8-v11 structured adapters and v1-v7 text adapters
+project font binaries. The v8-v12 structured adapters and v1-v7 text adapters
 exist only at the import boundary.
+The manuscript migration owner targets its historical EF schema only when that
+schema migration itself is pending; a later unrelated EF migration never causes
+the startup orchestrator to downgrade current application tables. This preserves
+edition, render, artifact, and chat rows while later forward migrations run.
 
 Startup then delegates the independent single-profile-to-editions cutover to
 `IPublicationEditionMigrationService`. Before applying the v10 forward
@@ -435,7 +471,7 @@ Manuscript v2 stores structural heading level separately from edition-independen
 style role, so assigning or removing a named paragraph style cannot change a
 chapter heading into a subheading. Figure blocks own a project image ID,
 alternative text, and caption content. Manuscript saves and assistant previews
-validate image ownership; image deletion refuses live figure references; v12
+validate image ownership; image deletion refuses live figure references; v13
 imports preflight and remap figure asset IDs. Current Markdown and EPUB
 publication projections consume the structured manuscript rather than flattening
 these blocks and marks through the plain-text projection.

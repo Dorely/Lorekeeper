@@ -41,14 +41,6 @@ public sealed class PublishConversationMigrationTests
                     Name = "Existing book",
                     Slug = $"existing-{projectId:N}",
                 });
-                db.PublicationEditions.Add(new PublicationEdition
-                {
-                    Id = editionId,
-                    ProjectId = projectId,
-                    Name = "Paperback",
-                    IsDefault = true,
-                    Revision = 7,
-                });
                 db.Chapters.Add(new Chapter
                 {
                     Id = chapterId,
@@ -57,6 +49,26 @@ public sealed class PublishConversationMigrationTests
                     ManuscriptJson = manuscriptJson,
                     ManuscriptRevision = 4,
                 });
+                await db.SaveChangesAsync();
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     INSERT INTO PublicationEditions (
+                         Id, ProjectId, Name, Format, Vendor, VendorProfileVersion, Status,
+                         IsDefault, Revision, TitleOverride, Subtitle, Author, Language,
+                         Publisher, Copyright, Isbn, Description, IncludeTableOfContents,
+                         IncludeVisibleTableOfContents, IncludeActSynopses, IncludeChapterSynopses,
+                         IncludeActHeadings, IncludeChapterHeadings, NumberActs, NumberChapters,
+                         TitlePageMode, PrintPicturePageSpreadMode, EpubPicturePageSpreadMode,
+                         Binding, Paper, Ink, Bleed, PageWidthInches, PageHeightInches,
+                         PageMarginInches, BodyFontSizePoints, BodyLineHeight,
+                         SelectedCoverChapterId, CreatedAt, UpdatedAt)
+                     VALUES (
+                         {editionId}, {projectId}, 'Paperback', 'Paperback', 'Generic', 'preview-1',
+                         'Draft', 1, 7, '', '', '', 'en', '', '', '', '', 1, 1, 0, 0, 1, 1,
+                         0, 0, 'Automatic', 'WholeSpread', 'RequestLandscape', 'PerfectBound',
+                         'White', 'BlackAndWhite', 0, 6, 9, 0.75, 11, 1.3,
+                         NULL, {DateTime.UtcNow}, {DateTime.UtcNow});
+                     """);
                 db.PublicationRenderJobs.Add(new PublicationRenderJob
                 {
                     Id = renderId,

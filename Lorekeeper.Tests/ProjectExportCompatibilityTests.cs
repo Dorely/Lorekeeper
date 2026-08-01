@@ -9,14 +9,43 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V12WritesEditionsWithoutLegacyPublishProfiles()
+    public void V13WritesDedicatedCoverImageWithoutObsoletePublicationFields()
     {
-        var document = Document(new ProjectExportChapter());
+        var coverImageId = Guid.NewGuid();
+        var document = Document(new ProjectExportChapter()) with
+        {
+            PublicationEditions = [Edition(coverImageId, null, [])],
+        };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(12, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(13, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
+        Assert.Contains($"\"selectedCoverImageId\":\"{coverImageId}\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("selectedCoverChapterId", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"publishProfiles\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void V12RejectsTheNewCoverImageFieldAtItsVersionBoundary()
+    {
+        var chapterId = Guid.NewGuid();
+        var manuscript = ManuscriptCodec.CreateEmpty(chapterId);
+        var document = Document(new ProjectExportChapter
+        {
+            Id = chapterId,
+            Title = "Chapter",
+            ManuscriptJson = ManuscriptCodec.Serialize(manuscript),
+            ManuscriptRevision = manuscript.Revision,
+        }) with
+        {
+            FormatVersion = 12,
+            PublicationEditions = [Edition(Guid.NewGuid(), null, [])],
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => ProjectImportJobProcessor.ValidatePublicationPayloads(document));
+
+        Assert.Contains("introduced after export format v12", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -611,4 +640,53 @@ public sealed class ProjectExportCompatibilityTests
                 true),
             Chapters = [chapter],
         };
+
+    private static ProjectExportPublicationEdition Edition(
+        Guid? coverImageId,
+        Guid? legacyCoverChapterId,
+        List<ProjectExportEditionOutlineItem> outlineItems) =>
+        new(
+            Guid.NewGuid(),
+            "Paperback",
+            PublicationEditionFormat.Paperback,
+            PublicationVendor.Generic,
+            "preview-1",
+            PublicationEditionStatus.Draft,
+            true,
+            0,
+            string.Empty,
+            string.Empty,
+            "Author",
+            "en",
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            true,
+            true,
+            false,
+            false,
+            true,
+            true,
+            false,
+            false,
+            PublishTitlePageMode.Automatic,
+            PrintPicturePageSpreadMode.WholeSpread,
+            EpubPicturePageSpreadMode.RequestLandscape,
+            6,
+            9,
+            0.75,
+            11,
+            1.3,
+            coverImageId,
+            legacyCoverChapterId,
+            PublicationBinding.PerfectBound,
+            PublicationPaper.White,
+            PublicationInk.BlackAndWhite,
+            false,
+            outlineItems,
+            [],
+            [],
+            [],
+            null);
 }

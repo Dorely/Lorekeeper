@@ -54,7 +54,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: () => ListProjectImagesAsync(context),
                 name: "list_publication_project_images",
-                description: "List every available project image with the stable asset ID, file metadata, alt text, source, and preview URL required for matter figures and edition placements."),
+                description: "List every available project image with the stable asset ID, file metadata, alt text, source, and preview URL required for cover artwork, matter figures, and edition placements."),
             AIFunctionFactory.Create(
                 method: (string name, PublicationEditionFormat format, PublicationVendor vendor) =>
                     CreateEditionAsync(context, name, format, vendor),
@@ -81,10 +81,10 @@ public sealed class PublishAssistantTools(
                 name: "archive_publication_edition",
                 description: "Archive an edition using its expected revision."),
             AIFunctionFactory.Create(
-                method: (Guid editionId, Guid? chapterId, long expectedRevision) =>
-                    SetCoverAsync(context, editionId, chapterId, expectedRevision),
-                name: "set_publication_cover_source",
-                description: "Set or clear the edition cover Picture Page using a stable chapter ID and expected revision."),
+                method: (Guid editionId, Guid? imageId, long expectedRevision) =>
+                    SetCoverAsync(context, editionId, imageId, expectedRevision),
+                name: "set_publication_cover_image",
+                description: "Set or clear dedicated edition cover artwork using a stable project-image ID and expected revision. Discover image IDs with list_publication_project_images."),
             AIFunctionFactory.Create(
                 method: (Guid editionId, PublicationEditionOutlineItemUpdate[] updates, long expectedRevision) =>
                     SetContentAsync(context, editionId, updates, expectedRevision),
@@ -149,6 +149,10 @@ public sealed class PublishAssistantTools(
                 name: "read_publication_migration_state",
                 description: "Read the publication-edition migration journal and protected backup diagnostics. Restore remains user-confirmed."),
             AIFunctionFactory.Create(
+                method: (PublicationVendor vendor) => ReadPressRuntimeReadiness(vendor),
+                name: "read_publication_pdf_runtime",
+                description: "Check whether Lorekeeper's app-owned Preview PDF runtime is ready for a vendor before proposing or requesting PDF generation."),
+            AIFunctionFactory.Create(
                 method: (Guid editionId) => RequestRenderAsync(context, editionId),
                 name: "request_publication_render",
                 description: "Queue deterministic interior and cover PDF rendering for a paperback edition."),
@@ -205,6 +209,9 @@ public sealed class PublishAssistantTools(
     private async Task<string> ReadWorkspaceAsync(PublishAssistantContext context, Guid editionId) =>
         Serialize(await publishing.GetWorkspaceAsync(context.ProjectId, editionId));
 
+    private string ReadPressRuntimeReadiness(PublicationVendor vendor) =>
+        Serialize(renders.GetRuntimeReadiness(vendor));
+
     private async Task<string> ListNamedStylesAsync(PublishAssistantContext context) =>
         Serialize(await manuscriptStyles.ListAsync(context.ProjectId));
 
@@ -243,9 +250,9 @@ public sealed class PublishAssistantTools(
     private async Task<string> SetCoverAsync(
         PublishAssistantContext context,
         Guid editionId,
-        Guid? chapterId,
+        Guid? imageId,
         long expectedRevision) =>
-        Serialize(await editions.SetCoverChapterAsync(context.ProjectId, editionId, chapterId, expectedRevision));
+        Serialize(await editions.SetCoverImageAsync(context.ProjectId, editionId, imageId, expectedRevision));
 
     private async Task<string> SetContentAsync(
         PublishAssistantContext context,

@@ -66,13 +66,6 @@ public sealed class ChapterVisualService(
         }
         else
         {
-            if (await db.PublicationEditions.AsNoTracking().AnyAsync(
-                edition => edition.SelectedCoverChapterId == chapter.Id,
-                cancellationToken))
-            {
-                throw new InvalidOperationException(
-                    "This Picture Page is selected as a publication cover. Clear it from every publication edition before changing the chapter visual mode.");
-            }
             if (previousMode == ChapterVisualMode.PicturePage)
             {
                 var layout = ReadPageLayout(chapter);

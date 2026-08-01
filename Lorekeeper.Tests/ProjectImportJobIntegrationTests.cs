@@ -11,14 +11,197 @@ using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
+using Lorekeeper.Publish;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using SkiaSharp;
 
 namespace Lorekeeper.Tests;
 
 public sealed class ProjectImportJobIntegrationTests
 {
+    [Fact]
+    public async Task V12CoverImportPreservesLegacyBodyExclusionAndClearsAmbiguousArtwork()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+        var project = new Project { Name = "Legacy import", Slug = $"legacy-{Guid.NewGuid():N}" };
+        db.Projects.Add(project);
+        await db.SaveChangesAsync();
+
+        var imageId = Guid.NewGuid();
+        var secondImageId = Guid.NewGuid();
+        var validChapterId = Guid.NewGuid();
+        var ambiguousChapterId = Guid.NewGuid();
+        var validManuscript = ManuscriptCodec.CreateEmpty(validChapterId);
+        var ambiguousManuscript = ManuscriptCodec.CreateEmpty(ambiguousChapterId);
+        var imageBytes = TinyPng();
+        var document = new ProjectExportDocument
+        {
+            FormatVersion = 12,
+            ExportKind = ProjectExportKind.Full,
+            Project = new ProjectExportProject(Guid.NewGuid(), "Legacy", "legacy", string.Empty, true, true),
+            Images =
+            [
+                ExportImage(imageId, "cover.png", imageBytes),
+                ExportImage(secondImageId, "alternate.png", imageBytes),
+            ],
+            Chapters =
+            [
+                ExportPicturePage(validChapterId, "Legacy cover", validManuscript,
+                    new PicturePageLayout([PictureElement(imageId)], [])),
+                ExportPicturePage(ambiguousChapterId, "Ambiguous cover", ambiguousManuscript,
+                    new PicturePageLayout([PictureElement(imageId), PictureElement(secondImageId)], [])),
+            ],
+            PublicationEditions =
+            [
+                ExportEdition(
+                    "Converted",
+                    null,
+                    validChapterId,
+                    [
+                        new ProjectExportEditionOutlineItem(Guid.NewGuid(), PublishOutlineTargetKind.Chapter, validChapterId, true, 0),
+                        new ProjectExportEditionOutlineItem(Guid.NewGuid(), PublishOutlineTargetKind.Chapter, ambiguousChapterId, true, 1),
+                    ]),
+                ExportEdition(
+                    "Ambiguous",
+                    null,
+                    ambiguousChapterId,
+                    [
+                        new ProjectExportEditionOutlineItem(Guid.NewGuid(), PublishOutlineTargetKind.Chapter, validChapterId, true, 0),
+                        new ProjectExportEditionOutlineItem(Guid.NewGuid(), PublishOutlineTargetKind.Chapter, ambiguousChapterId, true, 1),
+                    ]),
+            ],
+        };
+        var job = AddImportJob(db, project.Id, document);
+        await db.SaveChangesAsync();
+
+        var processor = await CreateProcessorAsync(db, project);
+        await processor.RunAsync(job.Id);
+
+        db.ChangeTracker.Clear();
+        var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync();
+        Assert.True(
+            completed.Status == ProjectImportJobStatus.Completed,
+            completed.ErrorMessage);
+        var images = await db.PublishAssets.AsNoTracking().ToListAsync();
+        var converted = await db.PublicationEditions.AsNoTracking().SingleAsync(edition => edition.Name == "Converted");
+        var ambiguous = await db.PublicationEditions.AsNoTracking().SingleAsync(edition => edition.Name == "Ambiguous");
+        Assert.Equal(images.Single(image => image.FileName == "cover.png").Id, converted.SelectedCoverImageId);
+        Assert.Null(ambiguous.SelectedCoverImageId);
+        Assert.All(images, image => Assert.Equal(imageBytes, image.Data));
+        var importedValidChapter = await db.Chapters.AsNoTracking().SingleAsync(chapter => chapter.Title == "Legacy cover");
+        var importedAmbiguousChapter = await db.Chapters.AsNoTracking().SingleAsync(chapter => chapter.Title == "Ambiguous cover");
+        var outlines = await db.PublicationEditionOutlineItems.AsNoTracking().ToListAsync();
+        Assert.False(outlines.Single(item =>
+            item.EditionId == converted.Id && item.ChapterId == importedValidChapter.Id).IsIncluded);
+        Assert.True(outlines.Single(item =>
+            item.EditionId == converted.Id && item.ChapterId == importedAmbiguousChapter.Id).IsIncluded);
+        Assert.False(outlines.Single(item =>
+            item.EditionId == ambiguous.Id && item.ChapterId == importedAmbiguousChapter.Id).IsIncluded);
+        Assert.True(outlines.Single(item =>
+            item.EditionId == ambiguous.Id && item.ChapterId == importedValidChapter.Id).IsIncluded);
+        var rendered = await new PublishService(db, null!, null!, []).GetDocumentAsync(project.Id, converted.Id);
+        Assert.DoesNotContain(
+            rendered.Sections.SelectMany(section => section.Chapters),
+            chapter => chapter.Id == importedValidChapter.Id);
+    }
+
+    [Fact]
+    public async Task V13CoverImageImportsItsBinaryAndRemapsTheEditionReference()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+        var project = new Project { Name = "Current import", Slug = $"current-{Guid.NewGuid():N}" };
+        db.Projects.Add(project);
+        await db.SaveChangesAsync();
+        var imageId = Guid.NewGuid();
+        var imageBytes = TinyPng();
+        var document = new ProjectExportDocument
+        {
+            ExportKind = ProjectExportKind.Full,
+            Project = new ProjectExportProject(Guid.NewGuid(), "Current", "current", string.Empty, true, true),
+            Images = [ExportImage(imageId, "cover.png", imageBytes)],
+            PublicationEditions = [ExportEdition("Current", imageId, null, [])],
+        };
+        var job = AddImportJob(db, project.Id, document);
+        await db.SaveChangesAsync();
+
+        var processor = await CreateProcessorAsync(db, project);
+        await processor.RunAsync(job.Id);
+
+        db.ChangeTracker.Clear();
+        var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync();
+        Assert.True(
+            completed.Status == ProjectImportJobStatus.Completed,
+            completed.ErrorMessage);
+        var importedImage = await db.PublishAssets.AsNoTracking().SingleAsync();
+        var importedEdition = await db.PublicationEditions.AsNoTracking().SingleAsync();
+        Assert.NotEqual(imageId, importedImage.Id);
+        Assert.Equal(imageBytes, importedImage.Data);
+        Assert.Equal(importedImage.Id, importedEdition.SelectedCoverImageId);
+    }
+
+    [Fact]
+    public async Task V9ProfileCoverImportKeepsItsFallbackOutlineRowExcluded()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+        var project = new Project { Name = "V9 import", Slug = $"v9-{Guid.NewGuid():N}" };
+        db.Projects.Add(project);
+        await db.SaveChangesAsync();
+        var imageId = Guid.NewGuid();
+        var chapterId = Guid.NewGuid();
+        var manuscript = ManuscriptCodec.CreateEmpty(chapterId);
+        var document = new ProjectExportDocument
+        {
+            FormatVersion = 9,
+            ExportKind = ProjectExportKind.Full,
+            Project = new ProjectExportProject(Guid.NewGuid(), "V9", "v9", string.Empty, true, true),
+            Images = [ExportImage(imageId, "cover.png", TinyPng())],
+            Chapters =
+            [
+                ExportPicturePage(
+                    chapterId,
+                    "Old cover",
+                    manuscript,
+                    new PicturePageLayout([PictureElement(imageId)], [])),
+            ],
+            LegacyPublishProfiles =
+            [
+                new ProjectExportLegacyPublishProfile(
+                    Guid.NewGuid(), string.Empty, string.Empty, "Author", "en", string.Empty,
+                    string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty,
+                    true, true, false, false, true, true, false, false,
+                    PublishTitlePageMode.Automatic, PrintPicturePageSpreadMode.WholeSpread,
+                    EpubPicturePageSpreadMode.RequestLandscape, 6, 9, 0.75, 11, 1.3, chapterId),
+            ],
+        };
+        var job = AddImportJob(db, project.Id, document);
+        await db.SaveChangesAsync();
+
+        var processor = await CreateProcessorAsync(db, project);
+        await processor.RunAsync(job.Id);
+
+        db.ChangeTracker.Clear();
+        var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync();
+        Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
+        var edition = await db.PublicationEditions.AsNoTracking().SingleAsync();
+        var outline = await db.PublicationEditionOutlineItems.AsNoTracking().SingleAsync();
+        Assert.NotNull(edition.SelectedCoverImageId);
+        Assert.False(outline.IsIncluded);
+    }
+
     [Fact]
     public async Task IncompatibleImportedIsbnRollsBackTheEntireImport()
     {
@@ -139,6 +322,7 @@ public sealed class ProjectImportJobIntegrationTests
                     PageMarginInches: 0.75,
                     BodyFontSizePoints: 12,
                     BodyLineHeight: 1.55,
+                    SelectedCoverImageId: null,
                     SelectedCoverChapterId: null,
                     Binding: PublicationBinding.Digital,
                     Paper: PublicationPaper.Digital,
@@ -413,6 +597,112 @@ public sealed class ProjectImportJobIntegrationTests
 
     private static T DefaultProxy<T>() where T : class =>
         DispatchProxy.Create<T, DefaultDispatchProxy>();
+
+    private static async Task<ProjectImportJobProcessor> CreateProcessorAsync(AppDbContext db, Project project)
+    {
+        var projectRepo = new ProjectRepository(db);
+        var chapterRepo = new ChapterRepository(db);
+        var nodeRepo = new GraphNodeRepository(db);
+        var edgeRepo = new GraphEdgeRepository(db);
+        var entityTypeRepo = new GraphEntityTypeRepository(db);
+        var graph = new RelationalGraphStore(nodeRepo, edgeRepo);
+        var entityTypes = new EntityTypeService(entityTypeRepo, nodeRepo);
+        var outline = new OutlineGraphSync(
+            graph,
+            nodeRepo,
+            edgeRepo,
+            projectRepo,
+            new ActRepository(db),
+            chapterRepo,
+            entityTypes);
+        await outline.EnsureProjectAsync(project);
+        var mutations = new ProjectMutationCoordinator();
+        return new ProjectImportJobProcessor(
+            new ProjectImportRepository(db),
+            db,
+            projectRepo,
+            nodeRepo,
+            edgeRepo,
+            entityTypeRepo,
+            graph,
+            DefaultProxy<IActService>(),
+            new ImportChapterService(chapterRepo),
+            chapterRepo,
+            DefaultProxy<IProjectFactService>(),
+            entityTypes,
+            outline,
+            DefaultProxy<IContextIndexingService>(),
+            DefaultProxy<IEntityVisualExampleService>(),
+            new BookBriefService(db),
+            new ManuscriptStyleService(db, mutations),
+            new VectorIndexWorkCoordinator(NullLogger<VectorIndexWorkCoordinator>.Instance),
+            mutations,
+            new ProjectImportJobNotifier(),
+            NullLogger<ProjectImportJobProcessor>.Instance);
+    }
+
+    private static ProjectImportJob AddImportJob(
+        AppDbContext db,
+        Guid projectId,
+        ProjectExportDocument document)
+    {
+        var job = new ProjectImportJob
+        {
+            ProjectId = projectId,
+            FileName = "cover-fixture.lorekeeper.json",
+            ContentJson = JsonSerializer.Serialize(document, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+        };
+        db.ProjectImportJobs.Add(job);
+        return job;
+    }
+
+    private static ProjectExportImage ExportImage(Guid id, string fileName, byte[] data) =>
+        new(
+            id, fileName, "image/png", data, "Cover artwork", PublishAssetSource.Uploaded,
+            string.Empty, string.Empty, "{}", null, null, null, null, null,
+            DateTime.UtcNow, DateTime.UtcNow);
+
+    private static ProjectExportChapter ExportPicturePage(
+        Guid id,
+        string title,
+        ManuscriptDocument manuscript,
+        PicturePageLayout layout) =>
+        new()
+        {
+            Id = id,
+            Title = title,
+            ManuscriptJson = ManuscriptCodec.Serialize(manuscript),
+            ManuscriptRevision = manuscript.Revision,
+            VisualMode = ChapterVisualMode.PicturePage,
+            PageLayoutJson = JsonSerializer.Serialize(layout, ManuscriptCodec.JsonOptions),
+        };
+
+    private static PicturePageImageElement PictureElement(Guid imageId) =>
+        new(Guid.NewGuid(), imageId, 0, 0, 100, 100, ChapterImageFit.Cover, 1, 0, string.Empty);
+
+    private static ProjectExportPublicationEdition ExportEdition(
+        string name,
+        Guid? selectedCoverImageId,
+        Guid? selectedCoverChapterId,
+        List<ProjectExportEditionOutlineItem> outline) =>
+        new(
+            Guid.NewGuid(), name, PublicationEditionFormat.Paperback, PublicationVendor.Generic,
+            "preview-1", PublicationEditionStatus.Draft, false, 0, string.Empty, string.Empty,
+            "Author", "en", string.Empty, string.Empty, string.Empty, string.Empty, true, true,
+            false, false, true, true, false, false, PublishTitlePageMode.Automatic,
+            PrintPicturePageSpreadMode.WholeSpread, EpubPicturePageSpreadMode.RequestLandscape,
+            6, 9, 0.75, 11, 1.3, selectedCoverImageId, selectedCoverChapterId,
+            PublicationBinding.PerfectBound, PublicationPaper.White, PublicationInk.BlackAndWhite,
+            false, outline, [], [], [], null);
+
+    private static byte[] TinyPng()
+    {
+        using var bitmap = new SKBitmap(2, 2);
+        bitmap.Erase(SKColors.CornflowerBlue);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);
+        return encoded.ToArray();
+    }
 
     private sealed class GateMutationCoordinator(
         IProjectMutationCoordinator inner) : IProjectMutationCoordinator

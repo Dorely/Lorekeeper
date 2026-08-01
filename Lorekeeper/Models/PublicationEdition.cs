@@ -119,8 +119,8 @@ public class PublicationEdition
 
     public double BodyLineHeight { get; set; } = 1.55;
 
-    public Guid? SelectedCoverChapterId { get; set; }
-    public Chapter? SelectedCoverChapter { get; set; }
+    public Guid? SelectedCoverImageId { get; set; }
+    public PublishAsset? SelectedCoverImage { get; set; }
 
     public ICollection<PublicationEditionOutlineItem> OutlineItems { get; set; } = [];
     public ICollection<PublicationMatter> Matter { get; set; } = [];

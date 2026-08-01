@@ -8,19 +8,9 @@ using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SkiaSharp;
 
 namespace Lorekeeper.Publish;
-
-public sealed class PublicationPressOptions
-{
-    public const string SectionName = "Publishing:Press";
-
-    public string ExecutablePath { get; set; } = string.Empty;
-    public string ProjectPath { get; set; } = "../Lorekeeper.Press.Weasy";
-    public string CmykProfilePath { get; set; } = string.Empty;
-    public string NativeLibraryPath { get; set; } = ".tmp/verified-native-binaries";
-    public int RenderTimeoutSeconds { get; set; } = 300;
-}
 
 public sealed record PublicationRenderJobView(
     Guid Id,
@@ -75,6 +65,7 @@ public sealed record PublicationPageMovement(Guid ChapterId, Guid BlockId, int F
 
 public interface IPublicationRenderService
 {
+    PublicationPressRuntimeReadiness GetRuntimeReadiness(PublicationVendor? vendor = null);
     Task<PublicationRenderJobView> RequestAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
     Task<PublicationRenderJobView> CancelAsync(Guid projectId, Guid editionId, Guid jobId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PublicationRenderJobView>> ListAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
@@ -144,9 +135,13 @@ public sealed class PublicationRenderService(
     IPublicationEditionService editions,
     IPublishService publishing,
     IPublicationRenderQueue queue,
+    IPublicationPressRuntime pressRuntime,
     IProjectMutationCoordinator projectMutations) : IPublicationRenderService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public PublicationPressRuntimeReadiness GetRuntimeReadiness(PublicationVendor? vendor = null) =>
+        pressRuntime.GetReadiness(vendor == PublicationVendor.IngramSpark);
 
     public async Task<PublicationRenderJobView> RequestAsync(
         Guid projectId,
@@ -161,6 +156,9 @@ public sealed class PublicationRenderService(
             throw new InvalidOperationException("Archived editions cannot be rendered.");
         if (edition.Format != PublicationEditionFormat.Paperback)
             throw new InvalidOperationException("PDF rendering is available only for paperback editions.");
+        var runtimeReadiness = GetRuntimeReadiness(edition.Vendor);
+        if (!runtimeReadiness.IsReady)
+            throw new InvalidOperationException(runtimeReadiness.Message);
         var document = await publishing.GetDocumentAsync(projectId, editionId, cancellationToken);
         if (HasUnsupportedInteriorVisuals(document))
         {
@@ -527,8 +525,8 @@ public sealed class PublicationRenderProcessor(
     IPublishService publishing,
     IPublicationEditionService editions,
     IPublicationCoverService covers,
-    IOptions<PublicationPressOptions> options,
-    IWebHostEnvironment environment)
+    IPublicationPressRuntime pressRuntime,
+    IOptions<PublicationPressOptions> options)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -573,10 +571,21 @@ public sealed class PublicationRenderProcessor(
         await db.SaveChangesAsync(cancellationToken);
 
         Cleanup(job.Id);
-        var result = await InvokeAsync(job.Id, request, cancellationToken);
+        var result = await InvokeAsync(
+            job.Id,
+            request,
+            job.Edition.Vendor == PublicationVendor.IngramSpark,
+            cancellationToken);
         if (result.ProtocolVersion != 2
             || !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a mismatched protocol or job identity.");
+        job.RendererVersion = result.RendererVersion ?? string.Empty;
+        job.DiagnosticsJson = JsonSerializer.Serialize(result.Diagnostics ?? [], JsonOptions);
+        job.EvidenceJson = result.Evidence.ValueKind == JsonValueKind.Undefined ? "{}" : result.Evidence.GetRawText();
+        if (!string.Equals(result.Status, "completed", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                result.Diagnostics?.FirstOrDefault(d => d.Severity == "error")?.Message
+                ?? "The press renderer rejected the job.");
         var resultArtifacts = result.Artifacts
             ?? throw new InvalidOperationException("The press renderer omitted its artifact list.");
         var resultKinds = resultArtifacts.Select(artifact => artifact.Kind).Order().ToArray();
@@ -588,14 +597,6 @@ public sealed class PublicationRenderProcessor(
             throw new InvalidOperationException("The renderer returned an invalid interior page count.");
         if (coverResult.PageCount != 1)
             throw new InvalidOperationException("The renderer must return a one-page full-wrap cover.");
-        job.RendererVersion = result.RendererVersion ?? string.Empty;
-        job.DiagnosticsJson = JsonSerializer.Serialize(result.Diagnostics ?? [], JsonOptions);
-        job.EvidenceJson = result.Evidence.ValueKind == JsonValueKind.Undefined ? "{}" : result.Evidence.GetRawText();
-        if (!string.Equals(result.Status, "completed", StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                result.Diagnostics?.FirstOrDefault(d => d.Severity == "error")?.Message
-                ?? "The press renderer rejected the job.");
-
         job.ProgressPercent = 80;
         job.ProgressMessage = "Verifying immutable artifacts";
         await db.SaveChangesAsync(cancellationToken);
@@ -757,71 +758,74 @@ public sealed class PublicationRenderProcessor(
                 backgroundColor = coverDesign.BackgroundColor,
                 isbn = job.Edition.Isbn,
                 barcodeMode = coverDesign.BarcodeMode.ToString(),
-                imageDataUri = document.CoverAsset is null
-                    ? string.Empty
-                    : $"data:{document.CoverAsset.ContentType};base64,{Convert.ToBase64String(document.CoverAsset.Data)}",
+                imageDataUri = CoverImageDataUri(document.CoverAsset),
                 imageFocalXPercent = coverDesign.ImageFocalXPercent,
                 imageFocalYPercent = coverDesign.ImageFocalYPercent,
             },
         };
     }
 
-    private async Task<PressResponse> InvokeAsync(Guid jobId, object request, CancellationToken cancellationToken)
+    internal static string CoverImageDataUri(PublishAssetDocument? asset)
     {
-        var pressOptions = options.Value;
+        if (asset is null)
+            return string.Empty;
+        if (asset.Data.Length is 0 or > 20_000_000)
+            throw new InvalidOperationException("The selected cover image must be a non-empty raster image no larger than 20 MB.");
+
+        using var bitmap = SKBitmap.Decode(asset.Data)
+            ?? throw new InvalidOperationException("The selected cover image is not a supported raster image.");
+        if (bitmap.Width <= 0
+            || bitmap.Height <= 0
+            || (long)bitmap.Width * bitmap.Height > 16_000_000)
+        {
+            throw new InvalidOperationException("The selected cover image dimensions exceed the Preview renderer limit.");
+        }
+
+        using var image = SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SKEncodedImageFormat.Png, 100)
+            ?? throw new InvalidOperationException("The selected cover image could not be normalized for rendering.");
+        var png = encoded.ToArray();
+        if (png.Length > 20_000_000)
+            throw new InvalidOperationException("The selected cover image is larger than 20 MB after safe PNG normalization.");
+        return $"data:image/png;base64,{Convert.ToBase64String(png)}";
+    }
+
+    private async Task<PressResponse> InvokeAsync(
+        Guid jobId,
+        object request,
+        bool requireCmykProfile,
+        CancellationToken cancellationToken)
+    {
         var outputRoot = JobRoot(jobId);
         Directory.CreateDirectory(outputRoot);
-        var executable = pressOptions.ExecutablePath.Trim();
-        var projectPath = Path.GetFullPath(
-            Path.Combine(environment.ContentRootPath, pressOptions.ProjectPath));
-        var start = new ProcessStartInfo
-        {
-            FileName = string.IsNullOrWhiteSpace(executable) ? "uv" : executable,
-            WorkingDirectory = projectPath,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        if (string.IsNullOrWhiteSpace(executable))
-        {
-            start.ArgumentList.Add("run");
-            start.ArgumentList.Add("--frozen");
-            start.ArgumentList.Add("lorekeeper-press-weasy");
-        }
-        start.ArgumentList.Add("--output-root");
-        start.ArgumentList.Add(outputRoot);
-        if (!string.IsNullOrWhiteSpace(pressOptions.CmykProfilePath))
-        {
-            start.ArgumentList.Add("--cmyk-profile");
-            start.ArgumentList.Add(Path.GetFullPath(pressOptions.CmykProfilePath));
-        }
-        start.Environment.Clear();
-        var inheritedPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        var nativeLibraryPath = Path.GetFullPath(Path.Combine(projectPath, pressOptions.NativeLibraryPath));
-        if (string.IsNullOrWhiteSpace(executable) && Directory.Exists(nativeLibraryPath))
-        {
-            start.Environment["WEASYPRINT_DLL_DIRECTORIES"] = nativeLibraryPath;
-            start.Environment["PATH"] = $"{nativeLibraryPath}{Path.PathSeparator}{inheritedPath}";
-        }
-        else
-        {
-            start.Environment["PATH"] = inheritedPath;
-        }
-        start.Environment["PYTHONUTF8"] = "1";
+        var start = pressRuntime.CreateStartInfo(jobId, outputRoot, requireCmykProfile);
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException("The configured press renderer could not be started.");
         var input = JsonSerializer.Serialize(request, JsonOptions);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(
-            Math.Clamp(pressOptions.RenderTimeoutSeconds, 10, 1800)));
+            Math.Clamp(options.Value.RenderTimeoutSeconds, 10, 1800)));
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+        var stdoutTask = ReadBoundedAsync(process.StandardOutput, 4 * 1024 * 1024, linked.Token);
+        var stderrTask = ReadBoundedAsync(process.StandardError, 64 * 1024, linked.Token);
         try
         {
-            await process.StandardInput.WriteAsync(input.AsMemory(), linked.Token);
-            process.StandardInput.Close();
-            var stdoutTask = ReadBoundedAsync(process.StandardOutput, 4 * 1024 * 1024, linked.Token);
-            var stderrTask = ReadBoundedAsync(process.StandardError, 64 * 1024, linked.Token);
+            try
+            {
+                await process.StandardInput.WriteAsync(input.AsMemory(), linked.Token);
+                process.StandardInput.Close();
+            }
+            catch (Exception exception) when (
+                !linked.IsCancellationRequested
+                && exception is IOException or InvalidOperationException or ObjectDisposedException)
+            {
+                await process.WaitForExitAsync(linked.Token);
+                var earlyStdout = await stdoutTask;
+                var earlyStderr = await stderrTask;
+                var detail = string.IsNullOrWhiteSpace(earlyStderr) ? earlyStdout : earlyStderr;
+                throw new InvalidOperationException(
+                    $"Press renderer exited before accepting the render request (exit code {process.ExitCode}). {Limit(detail)}",
+                    exception);
+            }
             await process.WaitForExitAsync(linked.Token);
             var stdout = await stdoutTask;
             var stderr = await stderrTask;

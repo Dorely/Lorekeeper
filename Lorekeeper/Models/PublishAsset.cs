@@ -27,6 +27,7 @@ public class PublishAsset
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<PublicationImagePlacement> PublicationPlacements { get; set; } = [];
+    public ICollection<PublicationEdition> CoverEditions { get; set; } = [];
     public ICollection<ProjectImageMask> ImageMasks { get; set; } = [];
 
     public ICollection<ProjectImageChatAttachment> ImageChatAttachments { get; set; } = [];

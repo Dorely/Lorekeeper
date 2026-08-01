@@ -411,6 +411,10 @@
     padding: 0.85rem;
 }
 
+.publish-option-fieldset {
+    min-width: 0;
+}
+
 .publish-option-group-wide {
     grid-column: span 2;
 }
@@ -421,12 +425,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.publish-option-group legend {
-    float: none;
+.publish-option-fieldset h3 {
     font-size: 0.76rem;
     font-weight: 750;
     margin: 0 0 0.6rem;
-    width: auto;
 }
 
 .publish-toggle {
@@ -677,7 +679,7 @@
     border-bottom: 1px solid #edf0f4;
     display: grid;
     gap: 0.65rem;
-    grid-template-columns: 1.15rem minmax(0, 1fr) auto;
+    grid-template-columns: auto 1.15rem minmax(0, 1fr);
     min-height: 3.35rem;
     padding: 0.55rem 0.8rem;
 }
@@ -686,31 +688,15 @@
     border-bottom: 0;
 }
 
-.publish-chapter-row.is-cover {
-    background: #fffcf5;
-}
-
 .publish-chapter-control {
     align-items: center;
     display: flex;
     justify-content: center;
 }
 
-.publish-cover-marker {
-    align-items: center;
-    background: #a77a1d;
-    border-radius: 50%;
-    color: #fff;
-    display: inline-flex;
-    font-size: 0.58rem;
-    font-weight: 800;
-    height: 1rem;
-    justify-content: center;
-    width: 1rem;
-}
-
 .publish-chapter-info {
     min-width: 0;
+    text-align: left;
 }
 
 .publish-chapter-info > strong {

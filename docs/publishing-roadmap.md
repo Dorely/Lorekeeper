@@ -289,8 +289,8 @@ Deliverables:
 - semantic Markdown/EPUB projection so authored block/mark/figure intent is not
   flattened at the existing publishing boundary;
 - project export introduced semantic style round-tripping in v9; the current
-  v12 format also carries editions, covers, and complete custom-font binaries,
-  with isolated v8-v11 adapters;
+  v13 format also carries editions, dedicated cover-image references, and complete
+  custom-font binaries, with isolated v8-v12 adapters;
 - removal of the temporary textarea adapter after every editor workflow uses
   schema-driven transactions (implemented);
 - paste/import normalization with warnings;
@@ -339,7 +339,7 @@ Deliverables:
 - edition clone, immutable archive, compare, and audit history; archived
   artifacts remain readable/exportable and changes continue through a clone.
 - project export introduced editions and edition-style mappings in v10; the
-  current v12 format retains isolated older import adapters.
+  current v13 format retains isolated older import adapters.
 
 Assistant parity: a dedicated Publish assistant can read and operate the entire
 edition/matter/style surface through the owning services, including edition-
@@ -359,8 +359,14 @@ SHA-256 verification before immutable PDF bytes are persisted. Semantic block
 anchors produce page maps; actual PDF bytes are served with range requests to
 the embedded Chromium PDF viewer; artifacts report current/stale state and two
 renders can explain page and block movement. The Publish assistant has the same
-request, cancel, inspect, page-map, and comparison surface. The runtime remains
-`Preview`: checked-in cross-platform frozen distributions, macOS verification,
+request, cancel, inspect, page-map, and comparison surface. Runtime execution is
+fail-closed: the UI, assistant, service, and worker share an app-owned bundle
+resolver that rejects machine-installed Python/uv/native-library fallbacks and
+requires release-provisioned, platform-matched integrity evidence before queueing.
+Licensing remains a separate release audit. The current spike's
+license gate remains false, so an unprovisioned source checkout reports PDF
+generation unavailable instead of launching from machine state. The runtime
+remains `Preview`: checked-in cross-platform frozen distributions, macOS verification,
 independent snapshots on every packaged runtime, Acrobat/vendor preflight, and
 physical proofs remain Feature 7 release gates.
 
@@ -403,7 +409,7 @@ remain release validation gates. KDP Preview output now composites a selected
 normalized PNG with focal controls; the Ingram Preview profile fails closed on
 selected cover images until a reviewed CMYK conversion path exists.
 
-Turn existing project images/Picture Pages into edition-aware cover sources.
+Turn existing project images into edition-aware dedicated cover sources.
 
 Deliverables:
 

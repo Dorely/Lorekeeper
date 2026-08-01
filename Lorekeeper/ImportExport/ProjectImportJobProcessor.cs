@@ -125,6 +125,8 @@ public sealed class ProjectImportJobProcessor(
                             state.ActMap,
                             state.ChapterMap,
                             state.ImageMap,
+                            document.FormatVersion,
+                            document.Chapters,
                             cancellationToken);
                     }
                     await StepAsync(job, "Appended exported outline structure and imported publish page settings.", cancellationToken);
@@ -493,10 +495,24 @@ public sealed class ProjectImportJobProcessor(
                 || edition.Description.Trim().Length > 100_000)
                 throw new InvalidOperationException($"Publication edition {edition.Id:N} has invalid product settings.");
             _ = PublicationIsbn.NormalizeValidOrEmpty(edition.Isbn);
-            if (edition.SelectedCoverChapterId is Guid coverId
+            if (document.FormatVersion >= 13)
+            {
+                if (edition.SelectedCoverChapterId is not null)
+                    throw new InvalidOperationException($"Publication edition {edition.Id:N} contains an obsolete cover chapter reference.");
+                if (edition.SelectedCoverImageId is Guid coverImageId && !imageIds.Contains(coverImageId))
+                    throw new InvalidOperationException($"Publication edition {edition.Id:N} references a missing cover image.");
+            }
+            else if (edition.SelectedCoverImageId is not null)
+            {
+                throw new InvalidOperationException(
+                    $"Publication edition {edition.Id:N} contains a cover image field introduced after export format v{document.FormatVersion}.");
+            }
+            else if (edition.SelectedCoverChapterId is Guid coverId
                 && document.Chapters.FirstOrDefault(chapter => chapter.Id == coverId)
                     is not { VisualMode: ChapterVisualMode.PicturePage })
+            {
                 throw new InvalidOperationException($"Publication edition {edition.Id:N} references a missing cover chapter.");
+            }
             if (edition.CoverDesign is { } cover
                 && (!Enum.IsDefined(cover.BarcodeMode)
                     || cover.Title.Trim().Length is < 1 or > 160
@@ -816,6 +832,7 @@ public sealed class ProjectImportJobProcessor(
                 legacy.PageMarginInches,
                 legacy.BodyFontSizePoints,
                 legacy.BodyLineHeight,
+                null,
                 legacy.SelectedCoverChapterId,
                 PublicationBinding.PerfectBound,
                 PublicationPaper.White,
@@ -1285,6 +1302,8 @@ public sealed class ProjectImportJobProcessor(
         IReadOnlyDictionary<Guid, Guid> actMap,
         IReadOnlyDictionary<Guid, Guid> chapterMap,
         IReadOnlyDictionary<Guid, Guid> imageMap,
+        int formatVersion,
+        IReadOnlyList<ProjectExportChapter> importedChapters,
         CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(importedEdition.TitlePageMode)
@@ -1370,16 +1389,29 @@ public sealed class ProjectImportJobProcessor(
             Ink = importedEdition.Ink,
             Bleed = importedEdition.Bleed,
         };
-        if (importedEdition.SelectedCoverChapterId is Guid exportedCoverChapterId
-            && chapterMap.TryGetValue(exportedCoverChapterId, out var localCoverChapterId)
-            && await db.Chapters.AsNoTracking().AnyAsync(
-                chapter => chapter.Id == localCoverChapterId
-                    && chapter.ProjectId == projectId
-                    && chapter.VisualMode == ChapterVisualMode.PicturePage,
-                cancellationToken))
+        var exportedCoverImageId = importedEdition.SelectedCoverImageId;
+        Guid? exportedLegacyCoverChapterId = null;
+        if (exportedCoverImageId is null
+            && formatVersion < 13
+            && importedEdition.SelectedCoverChapterId is Guid exportedCoverChapterId)
         {
-            edition.SelectedCoverChapterId = localCoverChapterId;
+            exportedLegacyCoverChapterId = exportedCoverChapterId;
+            var legacyCoverChapter = importedChapters.FirstOrDefault(chapter => chapter.Id == exportedCoverChapterId);
+            if (legacyCoverChapter is not null)
+            {
+                var layout = JsonSerializer.Deserialize<PicturePageLayout>(
+                    legacyCoverChapter.PageLayoutJson,
+                    ManuscriptCodec.JsonOptions) ?? new PicturePageLayout([], []);
+                var coverImageIds = layout.Images.Select(image => image.ImageId).Distinct().ToList();
+                if (coverImageIds.Count == 1)
+                {
+                    exportedCoverImageId = coverImageIds[0];
+                }
+            }
         }
+        if (exportedCoverImageId is Guid exportedImageId
+            && imageMap.TryGetValue(exportedImageId, out var localCoverImageId))
+            edition.SelectedCoverImageId = localCoverImageId;
         if (importedEdition.CoverDesign is { } cover)
             edition.CoverDesign = new PublicationCoverDesign
             {
@@ -1407,7 +1439,9 @@ public sealed class ProjectImportJobProcessor(
                 TargetId = mappedTarget,
                 ActId = imported.TargetKind == PublishOutlineTargetKind.Act ? mappedTarget : null,
                 ChapterId = imported.TargetKind == PublishOutlineTargetKind.Chapter ? mappedTarget : null,
-                IsIncluded = imported.IsIncluded,
+                IsIncluded = imported.IsIncluded
+                    && !(exportedLegacyCoverChapterId == imported.TargetId
+                        && imported.TargetKind == PublishOutlineTargetKind.Chapter),
                 SortOrder = imported.SortOrder,
             });
         }
@@ -1416,8 +1450,15 @@ public sealed class ProjectImportJobProcessor(
             var order = 0;
             foreach (var mapped in actMap.Values)
                 edition.OutlineItems.Add(new PublicationEditionOutlineItem { TargetKind = PublishOutlineTargetKind.Act, TargetId = mapped, ActId = mapped, SortOrder = order++ });
-            foreach (var mapped in chapterMap.Values)
-                edition.OutlineItems.Add(new PublicationEditionOutlineItem { TargetKind = PublishOutlineTargetKind.Chapter, TargetId = mapped, ChapterId = mapped, SortOrder = order++ });
+            foreach (var mapped in chapterMap)
+                edition.OutlineItems.Add(new PublicationEditionOutlineItem
+                {
+                    TargetKind = PublishOutlineTargetKind.Chapter,
+                    TargetId = mapped.Value,
+                    ChapterId = mapped.Value,
+                    IsIncluded = mapped.Key != exportedLegacyCoverChapterId,
+                    SortOrder = order++,
+                });
         }
         foreach (var imported in importedEdition.Matter)
         {

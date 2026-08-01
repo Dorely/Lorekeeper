@@ -185,7 +185,7 @@ else
                             </div>
                             <div>
                                 <dt>Cover</dt>
-                                <dd>@(SelectedCoverCandidate?.Title ?? "Not selected")</dd>
+                                <dd>@(SelectedCoverImage?.FileName ?? "Not selected")</dd>
                             </div>
                             <div>
                                 <dt>Interior images</dt>
@@ -267,6 +267,13 @@ else
                                         })</span>
                                         <small>@(PdfActions.Kind == PublicationPdfActionKind.Failed ? "Previous generation failed · Retry" : "Create immutable Preview artifacts")</small>
                                     </button>
+                                    @if (!_pressRuntimeReadiness.IsReady)
+                                    {
+                                        <div class="publish-pdf-action-error" role="status">
+                                            <strong>PDF generation unavailable.</strong>
+                                            <span>@_pressRuntimeReadiness.Message</span>
+                                        </div>
+                                    }
                                     @if (PdfActions.Kind == PublicationPdfActionKind.Failed && PdfActions.Job is { } failedRender)
                                     {
                                         <div class="publish-pdf-action-error" role="alert">
@@ -325,7 +332,7 @@ else
                         </label>
                         <label class="publish-field">
                             <span>Vendor</span>
-                            <select class="form-select" @bind="_editionDraft.Vendor" @bind:after="ScheduleEditionAutosave">
+                            <select class="form-select" @bind="_editionDraft.Vendor" @bind:after="ScheduleEditionAutosaveAndRefreshPressRuntime">
                                 <option value="@PublicationVendor.Generic">Generic</option>
                                 <option value="@PublicationVendor.AmazonKdp">Amazon KDP</option>
                                 <option value="@PublicationVendor.IngramSpark">IngramSpark</option>
@@ -593,13 +600,13 @@ else
                         <div>
                             <span class="publish-step">04</span>
                             <h2 id="formatting-title">Contents &amp; formatting</h2>
+                            <p>Control title pages, navigation, headings, numbering, and Picture Page spreads.</p>
                         </div>
-                        <p>Control title pages, navigation, headings, numbering, and Picture Page spreads.</p>
                     </div>
 
                     <div class="publish-option-groups">
-                        <fieldset class="publish-option-group">
-                            <legend>Table of contents</legend>
+                        <div class="publish-option-group publish-option-fieldset" role="group" aria-labelledby="toc-options-title">
+                            <h3 id="toc-options-title">Table of contents</h3>
                             <label class="publish-toggle">
                                 <input class="form-check-input" type="checkbox"
                                        @bind="_editionDraft.IncludeTableOfContents" @bind:after="ScheduleEditionAutosave" />
@@ -616,10 +623,10 @@ else
                                     <small>Render the contents as a page in EPUB and print.</small>
                                 </span>
                             </label>
-                        </fieldset>
+                        </div>
 
-                        <fieldset class="publish-option-group">
-                            <legend>Act presentation</legend>
+                        <div class="publish-option-group publish-option-fieldset" role="group" aria-labelledby="act-options-title">
+                            <h3 id="act-options-title">Act presentation</h3>
                             <label class="publish-toggle">
                                 <input class="form-check-input" type="checkbox"
                                        @bind="_editionDraft.IncludeActHeadings" @bind:after="ScheduleEditionAutosave" />
@@ -635,10 +642,10 @@ else
                                        @bind="_editionDraft.IncludeActSynopses" @bind:after="ScheduleEditionAutosave" />
                                 <span><strong>Include act synopses</strong></span>
                             </label>
-                        </fieldset>
+                        </div>
 
-                        <fieldset class="publish-option-group">
-                            <legend>Chapter presentation</legend>
+                        <div class="publish-option-group publish-option-fieldset" role="group" aria-labelledby="chapter-options-title">
+                            <h3 id="chapter-options-title">Chapter presentation</h3>
                             <label class="publish-toggle">
                                 <input class="form-check-input" type="checkbox"
                                        @bind="_editionDraft.IncludeChapterHeadings" @bind:after="ScheduleEditionAutosave" />
@@ -654,10 +661,10 @@ else
                                        @bind="_editionDraft.IncludeChapterSynopses" @bind:after="ScheduleEditionAutosave" />
                                 <span><strong>Include chapter synopses</strong></span>
                             </label>
-                        </fieldset>
+                        </div>
 
-                        <fieldset class="publish-option-group">
-                            <legend>Title page</legend>
+                        <div class="publish-option-group publish-option-fieldset" role="group" aria-labelledby="title-page-options-title">
+                            <h3 id="title-page-options-title">Title page</h3>
                             <label class="publish-toggle">
                                 <input class="form-check-input" type="checkbox" checked="@IncludeTitlePageEffective"
                                        @onchange="SetTitlePageMode" />
@@ -666,10 +673,10 @@ else
                                     <small>@TitlePageOptionHelp</small>
                                 </span>
                             </label>
-                        </fieldset>
+                        </div>
 
-                        <fieldset class="publish-option-group publish-option-group-wide">
-                            <legend>Page geometry &amp; body type</legend>
+                        <div class="publish-option-group publish-option-group-wide publish-option-fieldset" role="group" aria-labelledby="geometry-options-title">
+                            <h3 id="geometry-options-title">Page geometry &amp; body type</h3>
                             <div class="publish-form-grid">
                                 <label class="publish-field">
                                     <span>Page width (inches)</span>
@@ -699,10 +706,10 @@ else
                                 </label>
                             </div>
                             <small>These values drive editor pagination, snapshots, Picture Page geometry, image guidance, diagnostics, and export rendering.</small>
-                        </fieldset>
+                        </div>
 
-                        <fieldset class="publish-option-group publish-option-group-wide">
-                            <legend>Picture Page spreads</legend>
+                        <div class="publish-option-group publish-option-group-wide publish-option-fieldset" role="group" aria-labelledby="picture-page-options-title">
+                            <h3 id="picture-page-options-title">Picture Page spreads</h3>
                             <div class="publish-spread-options">
                                 <label class="publish-field">
                                     <span>Paperback PDF double spreads</span>
@@ -722,7 +729,7 @@ else
                                     <small>Sideways portrait bakes in the rotation so readers can turn the device to view a larger spread.</small>
                                 </label>
                             </div>
-                        </fieldset>
+                        </div>
                     </div>
                 </section>
 
@@ -913,12 +920,9 @@ else
                         <div>
                             <span class="publish-step">05</span>
                             <h2 id="cover-title">Cover</h2>
-                            <p>Use a Picture Page as the first page of the exported book.</p>
+                            <p>Choose dedicated cover artwork, then compose the title, spine, back copy, and barcode around it.</p>
                         </div>
-                        @if (SelectedCoverCandidate is not null)
-                        {
-                            <a class="btn btn-sm btn-outline-primary" href="@EditorUrl(SelectedCoverCandidate.Id)">Edit picture page</a>
-                        }
+                        <a class="btn btn-sm btn-outline-primary" href="@ImagesUrl">Manage cover artwork</a>
                     </div>
 
                     @if (!string.IsNullOrWhiteSpace(_coverError))
@@ -967,16 +971,22 @@ else
                         </button>
                     }
 
-                    @if (_workspace.CoverCandidates.Count == 0)
+                    @if (!string.IsNullOrWhiteSpace(_imagesLoadError))
+                    {
+                        <div class="publish-inline-error" role="alert">
+                            <span>Cover artwork could not be loaded. @_imagesLoadError</span>
+                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="LoadProjectImagesAsync">Retry</button>
+                        </div>
+                    }
+                    else if (_projectImageLibrary.Count == 0)
                     {
                         <div class="publish-empty-state">
                             <div class="publish-empty-icon" aria-hidden="true">▧</div>
                             <div>
-                                <h3>Create a Picture Page for your cover</h3>
-                                <p>In Outline, create a chapter, then open it in Editor and change its visual mode to Picture page. Design the complete cover there and return here to select it.</p>
+                                <h3>Create or import cover artwork</h3>
+                                <p>Use the Images workspace to generate or import a dedicated portrait image. Keep title, spine, back-cover copy, and barcode text out of the artwork; the cover composer adds those elements for the exact trim and page count.</p>
                                 <div class="d-flex flex-wrap gap-2">
-                                    <a class="btn btn-sm btn-primary" href="@OutlineUrl">Open Outline</a>
-                                    <a class="btn btn-sm btn-outline-secondary" href="@EditorRootUrl">Open Editor</a>
+                                    <a class="btn btn-sm btn-primary" href="@ImagesUrl">Open Images</a>
                                 </div>
                             </div>
                         </div>
@@ -986,43 +996,36 @@ else
                         <div class="publish-cover-grid">
                             <div>
                                 <label class="publish-field">
-                                    <span>Cover picture page</span>
-                                    <select class="form-select" value="@SelectedCoverValue" disabled="@_coverBusy" @onchange="SetCoverChapterAsync">
+                                    <span>Cover artwork</span>
+                                    <select class="form-select" value="@SelectedCoverValue" disabled="@_coverBusy" @onchange="SetCoverImageAsync">
                                         <option value="">No cover</option>
-                                        @foreach (var candidate in _workspace.CoverCandidates)
+                                        @foreach (var candidate in _projectImageLibrary)
                                         {
-                                            <option value="@candidate.Id.ToString("N")">@candidate.OutlineLabel</option>
+                                            <option value="@candidate.Id.ToString("N")">@candidate.FileName</option>
                                         }
                                     </select>
-                                    <small>The chosen page is exported as the cover only and is omitted from the manuscript body.</small>
+                                    <small>This image is used only as cover artwork. Manuscript chapters and Picture Pages remain independent.</small>
                                 </label>
 
-                                @if (SelectedCoverCandidate is { } selectedCover)
+                                @if (SelectedCoverImage is { } selectedCover)
                                 {
                                     <div class="publish-cover-meta">
-                                        <span class="publish-badge publish-badge-picture">Picture page</span>
-                                        <span class="publish-badge">@PageLayoutLabel(selectedCover.PageLayoutKind)</span>
+                                        <span class="publish-badge publish-badge-cover">Dedicated artwork</span>
+                                        <span class="publish-badge">@selectedCover.ContentType</span>
                                     </div>
-                                    @if (IsNonPortraitCover(selectedCover.PageLayoutKind))
-                                    {
-                                        <div class="publish-advisory" role="status">
-                                            <strong>Check the cover shape.</strong>
-                                            <span>This @PageLayoutLabel(selectedCover.PageLayoutKind).ToLowerInvariant() layout can be used, but most book covers are single portrait pages.</span>
-                                        </div>
-                                    }
                                 }
                             </div>
 
-                            <div class="publish-cover-preview @(SelectedCoverCandidate is null ? "is-empty" : null)">
-                                @if (SelectedCoverCandidate is { } cover)
+                            <div class="publish-cover-preview @(SelectedCoverImage is null ? "is-empty" : null)">
+                                @if (SelectedCoverImage is { } cover)
                                 {
-                                    <img src="@cover.PreviewUrl" alt="Preview of @cover.Title" />
+                                    <img src="@cover.PreviewUrl" alt="@(string.IsNullOrWhiteSpace(cover.AltText) ? $"Preview of {cover.FileName}" : cover.AltText)" />
                                 }
                                 else
                                 {
                                     <div>
                                         <span aria-hidden="true">No cover</span>
-                                        <small>Select a Picture Page to preview it here.</small>
+                                        <small>Select dedicated artwork to preview it here.</small>
                                     </div>
                                 }
                             </div>
@@ -1050,10 +1053,6 @@ else
 
                     <div class="publish-outline-summary">
                         <strong>@IncludedChapterCount of @SelectableChapterCount chapters included</strong>
-                        @if (SelectedCoverCandidate is not null)
-                        {
-                            <span>The cover is counted separately.</span>
-                        }
                     </div>
 
                     <div class="publish-outline-list">
@@ -1088,8 +1087,7 @@ else
                                 <div class="publish-chapter-list">
                                     @foreach (var chapter in publishSection.Chapters)
                                     {
-                                        var isCover = IsCoverChapter(chapter.Id);
-                                        <div class="publish-chapter-row @(isCover ? "is-cover" : null)">
+                                        <div class="publish-chapter-row">
                                             <div class="btn-group btn-group-sm" aria-label="Reorder @chapter.Title">
                                                 <button type="button" class="btn btn-outline-secondary" disabled="@OutlineBusy"
                                                         title="Move chapter earlier" @onclick="() => MoveOutlineChapterAsync(publishSection.ActId, chapter.Id, -1)">↑</button>
@@ -1097,17 +1095,10 @@ else
                                                         title="Move chapter later" @onclick="() => MoveOutlineChapterAsync(publishSection.ActId, chapter.Id, 1)">↓</button>
                                             </div>
                                             <div class="publish-chapter-control">
-                                                @if (isCover)
-                                                {
-                                                    <span class="publish-cover-marker" aria-hidden="true">C</span>
-                                                }
-                                                else
-                                                {
-                                                    <input class="form-check-input" type="checkbox" checked="@chapter.IsIncluded"
-                                                           aria-label="Include @chapter.Title"
-                                                           disabled="@OutlineBusy"
-                                                           @onchange="e => SetOutlineSelectionAsync(PublishOutlineTargetKind.Chapter, chapter.Id, e)" />
-                                                }
+                                                <input class="form-check-input" type="checkbox" checked="@chapter.IsIncluded"
+                                                       aria-label="Include @chapter.Title"
+                                                       disabled="@OutlineBusy"
+                                                       @onchange="e => SetOutlineSelectionAsync(PublishOutlineTargetKind.Chapter, chapter.Id, e)" />
                                             </div>
                                             <div class="publish-chapter-info">
                                                 <strong>@chapter.Title</strong>
@@ -1117,16 +1108,8 @@ else
                                                     {
                                                         <span class="publish-badge">@PageLayoutLabel(chapter.PageLayoutKind)</span>
                                                     }
-                                                    @if (isCover)
-                                                    {
-                                                        <span class="publish-badge publish-badge-cover">Cover only</span>
-                                                    }
                                                 </div>
                                             </div>
-                                            @if (isCover)
-                                            {
-                                                <a class="btn btn-sm btn-link" href="@EditorUrl(chapter.Id)">Edit</a>
-                                            }
                                         </div>
                                     }
                                 </div>
@@ -1296,7 +1279,7 @@ else
                                 {
                                     <div class="publish-inline-error" role="alert">
                                         <span>@_imagesLoadError</span>
-                                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="LoadPlacementImagesAsync">Retry</button>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="LoadProjectImagesAsync">Retry</button>
                                     </div>
                                 }
                                 else if (FilteredImages.Count == 0)
@@ -1370,6 +1353,9 @@ else
     private PublicationCoverDesignView? _coverDesign;
     private PublicationPreflightReport? _preflight;
     private IReadOnlyList<PublicationArtifactView> _packageArtifacts = [];
+    private PublicationPressRuntimeReadiness _pressRuntimeReadiness = new(
+        false,
+        "Checking Lorekeeper's app-owned Preview PDF runtime.");
     private EditionDraft _editionDraft = new();
     private Guid? _loadedProjectId;
     private Guid? _selectedEditionId;
@@ -1489,6 +1475,7 @@ else
         && _editionDraft.Format == PublicationEditionFormat.Epub;
     private bool CanRenderPdf => !_renderBusy
         && !HasBusyMutation
+        && _pressRuntimeReadiness.IsReady
         && _workspace?.Edition.Format == PublicationEditionFormat.Paperback
         && IncludedChapterCount > 0
         && !HasPendingEditionSave
@@ -1508,32 +1495,30 @@ else
     {
         PublishTitlePageMode.Include => true,
         PublishTitlePageMode.Omit => false,
-        _ => _workspace?.Edition.SelectedCoverChapterId is null,
+        _ => true,
     };
 
     private string TitlePageOptionHelp => _editionDraft.TitlePageMode switch
     {
-        PublishTitlePageMode.Automatic when _workspace?.Edition.SelectedCoverChapterId is not null =>
-            "Automatically omitted because a cover is selected. Changing this saves an explicit choice.",
         PublishTitlePageMode.Automatic =>
-            "Automatically included because no cover is selected. Changing this saves an explicit choice.",
+            "Automatically included because cover artwork is separate from the manuscript title page. Changing this saves an explicit choice.",
         _ => "This explicit choice is kept when the cover changes.",
     };
 
-    private string SelectedCoverValue => _workspace?.Edition.SelectedCoverChapterId?.ToString("N") ?? string.Empty;
+    private string SelectedCoverValue => _workspace?.Edition.SelectedCoverImageId?.ToString("N") ?? string.Empty;
 
-    private PublishCoverCandidateView? SelectedCoverCandidate =>
-        _workspace?.Edition.SelectedCoverChapterId is Guid coverId
-            ? _workspace.CoverCandidates.FirstOrDefault(candidate => candidate.Id == coverId)
+    private ProjectImageView? SelectedCoverImage =>
+        _workspace?.Edition.SelectedCoverImageId is Guid coverId
+            ? _projectImageLibrary.FirstOrDefault(candidate => candidate.Id == coverId)
             : null;
 
     private int IncludedChapterCount => _workspace?.Sections
         .SelectMany(section => section.Chapters)
-        .Count(chapter => chapter.IsIncluded && !IsCoverChapter(chapter.Id)) ?? 0;
+        .Count(chapter => chapter.IsIncluded) ?? 0;
 
     private int SelectableChapterCount => _workspace?.Sections
         .SelectMany(section => section.Chapters)
-        .Count(chapter => !IsCoverChapter(chapter.Id)) ?? 0;
+        .Count() ?? 0;
 
     private int ActivePlacementCount => _placements.Count(PlacementIsActive);
 
@@ -1544,7 +1529,7 @@ else
             var messages = new List<string>();
             if (IncludedChapterCount == 0)
                 messages.Add("Include at least one manuscript chapter.");
-            if (SelectedCoverCandidate is null)
+            if (SelectedCoverImage is null)
                 messages.Add("No cover is selected. Exports can still be created without one.");
             if (string.IsNullOrWhiteSpace(_editionDraft.Author))
                 messages.Add("Add an author name if this is a reader-facing edition.");
@@ -1564,7 +1549,7 @@ else
                     targets.Add(new(PublishOutlineTargetKind.Act, actId, $"Act: {section.Title}"));
 
                 targets.AddRange(section.Chapters
-                    .Where(chapter => chapter.IsIncluded && !IsCoverChapter(chapter.Id))
+                    .Where(chapter => chapter.IsIncluded)
                     .Select(chapter => new PlacementTarget(PublishOutlineTargetKind.Chapter, chapter.Id, $"Chapter: {chapter.Title}")));
             }
             return targets;
@@ -1639,9 +1624,6 @@ else
     };
 
     private string ImagesUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/images";
-    private string OutlineUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/outline";
-    private string EditorRootUrl => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/editor";
-    private string EditorUrl(Guid chapterId) => Project is null ? "#" : $"/projects/{Uri.EscapeDataString(Project.Slug)}/editor/{chapterId}";
     private string ArtifactViewUrl(Guid artifactId) =>
         Project is null ? "#" : $"/projects/{Project.Id:N}/publish/artifacts/{artifactId:N}";
     private string ArtifactDownloadUrl(Guid artifactId) => $"{ArtifactViewUrl(artifactId)}/download";
@@ -1932,6 +1914,7 @@ else
                 Project.Id,
                 _selectedEditionId.Value);
             _workspace = workspace;
+            await LoadProjectImagesAsync();
             _namedStyles = await ManuscriptStyles.ListAsync(Project.Id);
             _editionAudit = await Editions.GetAuditAsync(Project.Id, _selectedEditionId.Value);
             _renderJobs = await Renders.ListAsync(Project.Id, _selectedEditionId.Value);
@@ -1949,6 +1932,7 @@ else
                 _editionDraftLastSavedAt = null;
                 _editionDraftError = null;
             }
+            RefreshPressRuntimeReadiness();
             PrunePlacementDraft();
             if (_renderJobs.Any(job => job.Status is PublicationRenderStatus.Queued or PublicationRenderStatus.Rendering))
                 StartRenderPolling(Project.Id, _selectedEditionId.Value);
@@ -1971,11 +1955,13 @@ else
         var priorRenderIdentity = CurrentRenderIdentity(_renderJobs);
         var workspace = await Publishing.GetWorkspaceAsync(Project.Id, editionId);
         _workspace = workspace;
+        await LoadProjectImagesAsync();
         _editionAudit = await Editions.GetAuditAsync(Project.Id, editionId);
         _renderJobs = await Renders.ListAsync(Project.Id, editionId);
         _renderStateUncertain = false;
         await LoadCoverDesignAsync(Project.Id, editionId);
         _editionDraft.Revision = workspace.Edition.Revision;
+        RefreshPressRuntimeReadiness();
         _editionSummaries = workspace.Editions;
         _placements = OrderPlacementViews(workspace.Placements);
         if (!string.Equals(priorFingerprint, workspace.SourceFingerprint, StringComparison.Ordinal)
@@ -2383,6 +2369,15 @@ else
         _ = DebouncedEditionSaveAsync(_editionDraftAutosaveCts.Token);
     }
 
+    private void ScheduleEditionAutosaveAndRefreshPressRuntime()
+    {
+        RefreshPressRuntimeReadiness();
+        ScheduleEditionAutosave();
+    }
+
+    private void RefreshPressRuntimeReadiness() =>
+        _pressRuntimeReadiness = Renders.GetRuntimeReadiness(_editionDraft.Vendor);
+
     private void SetTitlePageMode(ChangeEventArgs e)
     {
         _editionDraft.TitlePageMode = e.Value is bool value && value
@@ -2510,23 +2505,23 @@ else
                 .Take(2)
                 .Select(artifact => $"{artifact.Kind}:{artifact.Sha256}"));
 
-    private async Task SetCoverChapterAsync(ChangeEventArgs e)
+    private async Task SetCoverImageAsync(ChangeEventArgs e)
     {
         if (Project is null) return;
         _coverBusy = true;
         _coverError = null;
         try
         {
-            Guid? chapterId = Guid.TryParseExact(e.Value?.ToString(), "N", out var parsedId) ? parsedId : null;
+            Guid? imageId = Guid.TryParseExact(e.Value?.ToString(), "N", out var parsedId) ? parsedId : null;
             if (_selectedEditionId is not Guid editionId) return;
-            var updated = await Editions.SetCoverChapterAsync(
+            var updated = await Editions.SetCoverImageAsync(
                 Project.Id,
                 editionId,
-                chapterId,
+                imageId,
                 _editionDraft.Revision);
             _editionDraft.Revision = updated.Revision;
             await RefreshWorkspaceAsync();
-            _liveMessage = chapterId is null ? "Cover removed." : "Cover picture page selected.";
+            _liveMessage = imageId is null ? "Cover artwork removed." : "Cover artwork selected.";
         }
         catch (Exception ex)
         {
@@ -2815,7 +2810,6 @@ else
             if (section.ActId is Guid actId)
                 updates.Add(new(PublishOutlineTargetKind.Act, actId, included));
             updates.AddRange(section.Chapters
-                .Where(chapter => !IsCoverChapter(chapter.Id))
                 .Select(chapter => new PublicationEditionOutlineItemUpdate(PublishOutlineTargetKind.Chapter, chapter.Id, included)));
         }
         await ApplyOutlineSelectionsAsync(updates);
@@ -2938,10 +2932,10 @@ else
         if (!HasSelectedPlacementTarget)
             _placementTargetKey = string.Empty;
         NormalizePlacementKind();
-        await LoadPlacementImagesAsync();
+        await LoadProjectImagesAsync();
     }
 
-    private async Task LoadPlacementImagesAsync()
+    private async Task LoadProjectImagesAsync()
     {
         if (Project is null) return;
         _imagesLoading = true;
@@ -3218,12 +3212,8 @@ else
         NormalizePlacementKind();
     }
 
-    private bool IsCoverChapter(Guid chapterId) => _workspace?.Edition.SelectedCoverChapterId == chapterId;
-
     private bool PlacementIsActive(PublicationImagePlacementView placement) =>
         PlacementTargets.Any(target => target.Kind == placement.TargetKind && target.Id == placement.TargetId);
-
-    private static bool IsNonPortraitCover(ChapterPageLayoutKind kind) => kind != ChapterPageLayoutKind.SinglePortrait;
 
     private static string TargetKey(PublishOutlineTargetKind kind, Guid id) => $"{kind}:{id:N}";
 

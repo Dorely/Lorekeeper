@@ -328,6 +328,13 @@ public sealed class ProjectImageService(
                 + ". Remove or replace those figures before deleting the image.");
         }
         var entityIds = await AttachedEntityIdsAsync(projectId, imageId, cancellationToken);
+        if (await db.PublicationEditions.AsNoTracking().AnyAsync(
+            edition => edition.ProjectId == projectId && edition.SelectedCoverImageId == imageId,
+            cancellationToken))
+        {
+            throw new InvalidOperationException(
+                $"Image '{asset.FileName}' is selected as a publication cover. Choose another cover in Publish before deleting the image.");
+        }
         if (await db.PublicationImagePlacements.AsNoTracking().AnyAsync(
             placement => placement.Edition.ProjectId == projectId && placement.AssetId == imageId,
             cancellationToken))

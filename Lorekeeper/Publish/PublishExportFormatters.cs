@@ -468,7 +468,7 @@ public sealed class EpubPublishFormatter(IPageGeometryService pageGeometry) : IP
         var items = new List<EpubXhtmlItem>();
         if (CoverImageHref(imageItems) is string coverHref)
         {
-            var viewport = CoverViewport(PageGeometry(document.Profile, document.CoverPageLayoutKind));
+            var viewport = CoverViewport(PageGeometry(document.Profile, ChapterPageLayoutKind.SinglePortrait));
             items.Add(new EpubXhtmlItem(
                 "cover-page",
                 "cover.xhtml",

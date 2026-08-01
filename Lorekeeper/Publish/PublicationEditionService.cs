@@ -270,10 +270,10 @@ public sealed class PublicationEditionService(
         return View(project, edition);
     }
 
-    public async Task<PublicationEditionView> SetCoverChapterAsync(
+    public async Task<PublicationEditionView> SetCoverImageAsync(
         Guid projectId,
         Guid editionId,
-        Guid? chapterId,
+        Guid? imageId,
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
@@ -282,17 +282,15 @@ public sealed class PublicationEditionService(
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedRevision);
         EnsureDraft(edition);
-        if (chapterId is Guid id && !await db.Chapters.AnyAsync(
-            chapter => chapter.ProjectId == projectId
-                && chapter.Id == id
-                && chapter.VisualMode == ChapterVisualMode.PicturePage,
+        if (imageId is Guid id && !await db.PublishAssets.AnyAsync(
+            image => image.ProjectId == projectId && image.Id == id,
             cancellationToken))
         {
-            throw new InvalidOperationException("Cover chapter must be a Picture Page in this project.");
+            throw new InvalidOperationException("Cover image must be an image in this project.");
         }
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        edition.SelectedCoverChapterId = chapterId;
-        await SaveWithAuditAsync(edition, "set-cover", before, new { chapterId }, cancellationToken);
+        edition.SelectedCoverImageId = imageId;
+        await SaveWithAuditAsync(edition, "set-cover-image", before, new { imageId }, cancellationToken);
         return View(project, edition);
     }
 
@@ -874,9 +872,6 @@ public sealed class PublicationEditionService(
             .Where(item => item.TargetKind == PublishOutlineTargetKind.Chapter && item.IsIncluded)
             .Select(item => item.TargetId)
             .ToList();
-        if (edition.SelectedCoverChapterId is Guid coverChapterId
-            && !includedChapterIds.Contains(coverChapterId))
-            includedChapterIds.Add(coverChapterId);
         var project = await db.Projects.AsNoTracking()
             .Where(candidate => candidate.Id == projectId)
             .Select(candidate => new { candidate.Name, candidate.Slug })
@@ -1020,7 +1015,7 @@ public sealed class PublicationEditionService(
                 edition.PageMarginInches,
                 edition.BodyFontSizePoints,
                 edition.BodyLineHeight,
-                edition.SelectedCoverChapterId,
+                edition.SelectedCoverImageId,
             },
             Items = items,
             Acts = acts,
@@ -1342,7 +1337,7 @@ public sealed class PublicationEditionService(
             edition.PageMarginInches,
             edition.BodyFontSizePoints,
             edition.BodyLineHeight,
-            edition.SelectedCoverChapterId,
+            edition.SelectedCoverImageId,
             edition.Binding,
             edition.Paper,
             edition.Ink,
@@ -1485,7 +1480,7 @@ public sealed class PublicationEditionService(
             PageMarginInches = source.PageMarginInches,
             BodyFontSizePoints = source.BodyFontSizePoints,
             BodyLineHeight = source.BodyLineHeight,
-            SelectedCoverChapterId = source.SelectedCoverChapterId,
+            SelectedCoverImageId = source.SelectedCoverImageId,
         };
 
     private static string Clean(string? value) => value?.Trim() ?? string.Empty;

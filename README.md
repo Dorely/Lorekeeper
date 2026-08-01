@@ -36,14 +36,17 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   diagnostics.
 - Independent paperback/EPUB publication editions with product/vendor settings,
   identifiers, included content, semantic matter, named-style mappings, image
-  placements, Picture Page cover sources, clone/archive/compare/audit workflows,
+  placements, dedicated project-image cover artwork, clone/archive/compare/audit workflows,
   deterministic staleness fingerprints, read-only archived editions, and
   a full-height conversational Publish assistant with streaming, persistent
   history, image attachments, Stop/Reset, and matching tools. New paperback editions start on the
   installed 6 × 9 in Preview profile.
 - Preview paperback press jobs with cancellation/restart recovery, immutable
   SHA-256-verified interior and cover PDFs, actual in-app PDF viewing, semantic
-  block-to-page maps, render comparisons, and matching assistant controls.
+  block-to-page maps, render comparisons, and matching assistant controls. PDF
+  generation is enabled only when a release-provisioned press bundle is installed
+  beside Lorekeeper's binaries in its configured app-owned `press-runtime` directory; the app
+  never falls back to machine-installed Python, uv, or native libraries.
 - Edition-aware full-wrap cover design with page-count/paper-caliper geometry,
   copy and background controls, template acknowledgement, ISBN-13/EAN-13
   barcode or KDP overlay-reserve behavior, cover PDF output, and assistant parity.
@@ -53,8 +56,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   records, and matching assistant preflight/package controls. Independent
   EPUBCheck, Acrobat, vendor-upload, and
   physical-production validation remain release gates.
-- Versioned project import/export (current v12
-  manuscripts/styles/editions/covers/custom-font binaries, isolated v8-v11
+- Versioned project import/export (current v13
+  manuscripts/styles/editions/covers/custom-font binaries, isolated v8-v12
   structured adapters, and v1-v7 text adapters) plus TXT,
   Markdown, mixed-layout EPUB, and artifact-backed Generate/Regenerate plus
   separate interior/cover PDF saves. EPUB export is restricted to EPUB editions,
@@ -67,6 +70,12 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 
 - .NET 10 SDK
 - Node.js 22.12 or later for Electron.NET desktop builds
+
+The browser and Electron hosts do not require Python or uv. Preview PDF
+generation requires an app-owned, release-provisioned press bundle containing its
+executable, controlled fonts/licenses, and matching build evidence. When that
+bundle is absent or fails integrity/licensing checks, Publish reports the exact
+readiness problem and disables generation without queueing a doomed job.
 
 ## Web Development
 
@@ -210,3 +219,11 @@ Picture Page and Illustrated Prose layouts also carry revisions. If another
 editor, manuscript save, or image deletion changes the active layout, a stale
 visual save is rejected and the viewer reloads the current layout with a visible
 notice instead of reintroducing removed images or overwriting newer anchors.
+
+The dedicated-cover migration converts a legacy Picture Page cover selection to
+the same project image when that page contains exactly one distinct image. A
+multi-image or text-only Picture Page keeps its Chapter and PageLayout bytes,
+but its edition cover selection is cleared so the author can deliberately choose
+dedicated artwork without Lorekeeper guessing which layer was intended. Every
+former cover page is marked excluded in that edition's outline, preserving the
+old cover-only body behavior without deleting the source chapter.

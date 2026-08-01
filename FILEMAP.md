@@ -60,8 +60,9 @@
 | `EditorManuscriptPreviewServiceTests.cs` | Direct and Review-edits fixtures for compact one-use previews, exact projected-document persistence, stale rejection, and approval payloads. |
 | `EditorRevisionAgentResultTests.cs` | Compact coordinator-result and pending progress-read disposal fixtures for revision-agent completion. |
 | `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
-| `ProjectExportCompatibilityTests.cs` | Current v12 manuscript/style/edition/font fixtures plus v8-v11 fail-closed import-boundary and visual-layout compatibility checks. |
-| `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trip for marked/figured manuscripts and image remapping, plus whole-import rollback on late publication conflicts. |
+| `ProjectExportCompatibilityTests.cs` | Current v13 manuscript/style/edition/cover-image/font fixtures plus v8-v12 fail-closed import-boundary and visual-layout compatibility checks. |
+| `PublicationEditionMigrationTests.cs` | Protected legacy edition cutover plus cover-image forward-migration, missing-outline preservation, and interrupted EF-history retry fixtures. |
+| `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image remapping, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
 | `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, image-backed figures, persisted Picture Page text hydration, ordered user-authored matter, and generated-page conflict rejection in Markdown/EPUB publication rendering. |
 | `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, content-use, and edition-mapping deletion guards. |
 | `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
@@ -112,7 +113,7 @@
 | `src/lorekeeper_press_weasy/inspect.py` | Independent pypdf inspection for PDF version, page boxes, fonts, colors, images, output intents, transparency, annotations, encryption, and actions. |
 | `src/lorekeeper_press_weasy/geometry.py` / `storage.py` | Measured PDF box geometry plus exclusive-lock, staged, fsynced, immutable job publication. |
 | `tests/*.py` | Authorized protocol/semantic-block/matter-order, bounded maximum-request, recursive PDF inspection, measured geometry, and concurrent immutable-publication fixtures. |
-| `scripts/build-windows-spike.ps1` / `scripts/extract-pyinstaller-native.py` / `scripts/audit-pyinstaller-binaries.py` | Archive-owned native extraction, controlled frozen Windows build, and fail-closed source classification/hashing of collected binaries. |
+| `scripts/build-windows-spike.ps1` / `scripts/extract-pyinstaller-native.py` / `scripts/audit-pyinstaller-binaries.py` | Archive-owned native extraction, controlled frozen Windows build with platform/architecture/full-bundle evidence and optional CMYK profile, and fail-closed source classification. |
 | `scripts/verify-spike.ps1` / `scripts/verify-artifacts.py` | Frozen-process adversarial/repeatability harness plus independent PDF parse, text, box, and hash verification. |
 | `scripts/generate-license-inventory.py` | Deterministic uv-lock/package-metadata/license-file hash inventory generator for the active fallback environment. |
 
@@ -323,7 +324,7 @@
 | `ProjectImportJob.cs` | EF entity for durable project import job state: uploaded JSON payload, source format metadata, status/progress counters, import counts, warnings, errors, and timestamps. |
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
-| `PublicationEdition.cs` | Edition aggregate root and product enums for independent paperback/EPUB settings, metadata, geometry, identifier, status, default selection, and Picture Page cover source. |
+| `PublicationEdition.cs` | Edition aggregate root and product enums for independent paperback/EPUB settings, metadata, geometry, identifier, status, default selection, and dedicated project-image cover artwork. |
 | `PublicationEditionOutlineItem.cs` | Edition-owned, ordered act/chapter inclusion records with typed foreign keys. |
 | `PublicationMatter.cs` | Edition-owned semantic front/back matter, named-style mappings, immutable audit entries, and edition-migration journal entities. |
 | `PublicationImagePlacement.cs` | Edition-owned interior image placements before/after acts or chapters and at chapter openings/endings. |
@@ -546,13 +547,13 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | Current v12 portable DTOs with v2 manuscripts, named styles, editions/covers, stable visual refs, and complete custom-font binaries; retains isolated older input adapters. |
+| `ProjectExportModels.cs` | Current v13 portable DTOs with v2 manuscripts, named styles, editions/dedicated cover images, stable visual refs, and complete custom-font binaries; retains isolated older input adapters. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job, importing v12 manuscripts/styles/editions/fonts, adapting v8-v11 structured or v1-v7 text only at the boundary, then refreshing projections and indexes. |
+| `ProjectImportJobProcessor.cs` | Runs one import job, importing v13 manuscripts/styles/editions/cover images/fonts, adapting v8-v12 structured or v1-v7 text only at the boundary, then refreshing projections and indexes. |
 
 ### Images/
 
@@ -607,16 +608,17 @@
 | `PublishModels.cs` | Edition workspace, revision-aware mutations, ordered semantic-matter/style mapping, document projection, export, cover, selection, placement, and rendered Picture Page contracts. |
 | `PageGeometryService.cs` | Default-publication-edition-derived page/spread calculation consumed by viewer pagination, rendering, image targeting, diagnostics, and publishing. |
 | `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning application boundary for edition lifecycle, settings, content, matter, style mappings, placements, audit history, comparison, and deterministic source fingerprints. |
-| `PublicationEditionMigrationService.cs` | Independent v10 online-backup, mapping-hash, validation, and journal boundary for losslessly replacing legacy single-profile publishing state. |
+| `PublicationEditionMigrationService.cs` | Independent v10 backup/hash/journal cutover plus validated, resumable reconciliation of SQLite's split v14 cover-table rebuild and EF history write. |
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
 | `PublishAssistantTools.cs` | Publish tool catalog for editions, matter, styles, placements, covers, renders, preflight, packages, audits, comparisons, exports, and artifact view/download metadata; proof approval is intentionally absent. |
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration, shared active-turn streaming/reconnection, collaborative prompt policy, tool activity, and structured mutation notices. |
 | `PublicationPdfActionState.cs` | Deterministic Generate/active/failed/Regenerate/current selector and correlated current interior/cover artifact projection for the Publish summary. |
+| `PublicationPressRuntime.cs` | Fail-closed installation-root resolver for a release-provisioned app-owned press bundle, integrity evidence, controlled child environment, and shared PDF readiness reporting; no launch-state or machine-tool fallback. |
 | `PublicationRenderService.cs` | Persisted/recoverable render queue, contained ordered-matter press adapter, hash-verified artifact download boundary, semantic page maps, stale-state derivation, and render comparison. |
 | `PublicationCoverService.cs` | Edition full-wrap template calculation, revisioned cover design, ISBN-13/vendor/spine diagnostics, and acknowledgement invalidation. |
 | `PublicationPackageService.cs` | Versioned fail-closed Preview preflight, product-form-specific deterministic package assembly, manifests, reports, and exact-package proof records. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying every included ordered semantic-matter document into edition-scoped TXT, Markdown, EPUB, and contained press output with reciprocal product-form guards. |
-| `PublishEndpoints.cs` | Cacheable/range HTTP endpoints for validated cover/Picture Page surfaces and project-scoped immutable publication artifact viewing/download. |
+| `PublishEndpoints.cs` | Cacheable/range HTTP endpoints for validated interior Picture Page surfaces and project-scoped immutable publication artifact viewing/download. |
 | `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown formatters plus an ordered semantic-matter, mixed-layout EPUB writer using shared geometry for reflowable prose and accessible fixed cover/Picture Page items. |
 
 ### Graph/
@@ -685,7 +687,7 @@
 | `ManuscriptSchemaUpgrade.cs` | Strict lossless v1-to-v2 document and nested historical-payload upgrader used by startup migration and the isolated v8 import adapter. |
 | `ManuscriptStyleService.cs` | Revision-checked named paragraph/character style ownership, validation, immutable semantic keys, and usage-safe deletion. |
 | `IManuscriptService.cs` | Canonical revision-aware chapter manuscript read, replace, and semantic-operation service contract. |
-| `ManuscriptMigrationService.cs` | Cross-process-serialized, WAL-safe Online Backup API migration/recovery owner for resumable schema/data transformation, atomic validation journaling, retention, and confirmed restore. |
+| `ManuscriptMigrationService.cs` | Cross-process-serialized, WAL-safe Online Backup API migration/recovery owner for resumable schema/data transformation, atomic validation journaling, retention, confirmed restore, and non-downgrading later-migration orchestration. |
 
 ### wwwroot/
 

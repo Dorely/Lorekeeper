@@ -14,6 +14,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$FontLicensePath,
 
+    [string]$CmykProfilePath,
+
     [string]$OutputDirectory = (Join-Path $PSScriptRoot "..\dist")
 )
 
@@ -26,6 +28,11 @@ $fontBold = (Resolve-Path $FontBoldPath).Path
 $fontLicense = (Resolve-Path $FontLicensePath).Path
 $fontConfig = (Resolve-Path (Join-Path $projectRoot "assets\fonts.conf")).Path
 $output = [System.IO.Path]::GetFullPath($OutputDirectory)
+if (Test-Path $output) {
+    if (Get-ChildItem -LiteralPath $output -Force | Select-Object -First 1) {
+        throw "The press build output directory must be empty so stale or unreviewed payloads cannot enter the bundle evidence: $output"
+    }
+}
 $temporaryRoot = Join-Path $projectRoot ".tmp"
 $pythonVersion = (& $python -c "import platform; print(platform.python_version())").Trim()
 if ($LASTEXITCODE -ne 0 -or $pythonVersion -notmatch "^3\.(13|14)\.\d+$") {
@@ -41,6 +48,7 @@ $distributionLicenseDirectory = Join-Path $output "licenses"
 $nativeArchiveDirectory = Join-Path $temporaryRoot "verified-native-archive"
 $nativeDirectory = Join-Path $temporaryRoot "verified-native-binaries"
 $nativeManifestPath = Join-Path $output "lorekeeper-press-weasy-native-source.json"
+$distributionProfileDirectory = Join-Path $output "profiles"
 
 $expectedNativeArchiveHash = "330101FF3EA50EBDE4ABF805283B6D703D5F3D71C77C983DB94357EC4524A3EF"
 if ((Get-FileHash $nativeArchive -Algorithm SHA256).Hash -ne $expectedNativeArchiveHash) {
@@ -65,6 +73,11 @@ New-Item -ItemType Directory -Force -Path $distributionFontDirectory, $distribut
 [System.IO.File]::Copy($fontRegular, (Join-Path $distributionFontDirectory "LiberationSerif-Regular.ttf"), $true)
 [System.IO.File]::Copy($fontBold, (Join-Path $distributionFontDirectory "LiberationSerif-Bold.ttf"), $true)
 [System.IO.File]::Copy($fontLicense, (Join-Path $distributionLicenseDirectory "Liberation-Fonts-LICENSE.txt"), $true)
+if (-not [string]::IsNullOrWhiteSpace($CmykProfilePath)) {
+    $profile = (Resolve-Path $CmykProfilePath).Path
+    New-Item -ItemType Directory -Force -Path $distributionProfileDirectory | Out-Null
+    [System.IO.File]::Copy($profile, (Join-Path $distributionProfileDirectory "printing2009.icc"), $true)
+}
 if (-not (Test-Path (Join-Path $environmentPath "Scripts\python.exe"))) {
     & uv venv --python $python $environmentPath
     if ($LASTEXITCODE -ne 0) {
@@ -166,7 +179,9 @@ try {
     }
     $executablePath = Join-Path $output "lorekeeper-press-weasy.exe"
     $buildEvidence = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
+        platform = "windows"
+        architecture = "x64"
         pythonVersion = $pythonVersion
         pythonExecutableSha256 = (Get-FileHash $python -Algorithm SHA256).Hash.ToLowerInvariant()
         weasyPrintVersion = (& $environmentPython -c "import importlib.metadata as m; print(m.version('weasyprint'))").Trim()
@@ -193,6 +208,24 @@ try {
         )
         sourceFiles = $sourceEvidence
     }
+    if (-not [string]::IsNullOrWhiteSpace($CmykProfilePath)) {
+        $bundledProfile = Join-Path $distributionProfileDirectory "printing2009.icc"
+        $buildEvidence["cmykProfile"] = [ordered]@{
+            relativePath = "profiles/printing2009.icc"
+            sha256 = (Get-FileHash $bundledProfile -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    $buildEvidence["bundleFiles"] = @(
+        Get-ChildItem $output -Recurse -File |
+        Where-Object { $_.FullName -ne $buildEvidencePath } |
+        Sort-Object FullName |
+        ForEach-Object {
+            [ordered]@{
+                relativePath = $_.FullName.Substring($output.Length + 1).Replace("\", "/")
+                sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+        }
+    )
     [System.IO.File]::WriteAllText(
         $buildEvidencePath,
         ($buildEvidence | ConvertTo-Json -Depth 20)
