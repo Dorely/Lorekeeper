@@ -136,6 +136,134 @@ else
                                   OnRunningChanged="HandleAssistantRunningChanged" />
             </aside>
             <div class="publish-main">
+                <aside class="publish-sidebar" aria-labelledby="summary-title">
+                    <div class="publish-summary-card">
+                        <div class="publish-summary-heading">
+                            <span class="publish-eyebrow">Export summary</span>
+                            <h2 id="summary-title">@DisplayTitle</h2>
+                            @if (!string.IsNullOrWhiteSpace(_editionDraft.Author))
+                            {
+                                <p>by @_editionDraft.Author</p>
+                            }
+                        </div>
+
+                        <dl class="publish-summary-stats">
+                            <div>
+                                <dt>Manuscript</dt>
+                                <dd>@IncludedChapterCount chapter@(IncludedChapterCount == 1 ? string.Empty : "s")</dd>
+                            </div>
+                            <div>
+                                <dt>Cover</dt>
+                                <dd>@(SelectedCoverCandidate?.Title ?? "Not selected")</dd>
+                            </div>
+                            <div>
+                                <dt>Interior images</dt>
+                                <dd>@ActivePlacementCount placement@(ActivePlacementCount == 1 ? string.Empty : "s")</dd>
+                            </div>
+                        </dl>
+
+                        @if (ReadinessMessages.Count > 0)
+                        {
+                            <div class="publish-readiness">
+                                <h3>Before you export</h3>
+                                <ul>
+                                    @foreach (var message in ReadinessMessages)
+                                    {
+                                        <li>@message</li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="publish-ready-message">
+                                <span aria-hidden="true">✓</span>
+                                <span>Your publishing setup looks ready.</span>
+                            </div>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(_exportError))
+                        {
+                            <div class="alert alert-danger py-2 small" role="alert">@_exportError</div>
+                        }
+
+                        <div class="publish-export-actions" aria-label="Export formats">
+                            <button type="button" class="btn btn-primary" disabled="@(!CanExportEpub)" @onclick="() => ExportAsync(PublishExportFormat.Epub)">
+                                <span>EPUB</span>
+                                <small>@ExportButtonDetail(PublishExportFormat.Epub, "For e-readers")</small>
+                            </button>
+                            <button type="button" class="btn btn-outline-primary" disabled="@(!CanExport)" @onclick="() => ExportAsync(PublishExportFormat.Markdown)">
+                                <span>Markdown</span>
+                                <small>@ExportButtonDetail(PublishExportFormat.Markdown, "With linked images")</small>
+                            </button>
+                            <button type="button" class="btn btn-outline-primary" disabled="@(!CanExport)" @onclick="() => ExportAsync(PublishExportFormat.PlainText)">
+                                <span>Plain text</span>
+                                <small>@ExportButtonDetail(PublishExportFormat.PlainText, "Text only")</small>
+                            </button>
+                            @if (_editionDraft.Format == PublicationEditionFormat.Paperback)
+                            {
+                                @if (PdfActions.Kind == PublicationPdfActionKind.Active && PdfActions.Job is { } activeRender)
+                                {
+                                    <div class="publish-pdf-action-state" aria-live="polite">
+                                        <strong>Generating PDFs</strong>
+                                        <span>@activeRender.ProgressPercent% · @activeRender.ProgressMessage</span>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_renderBusy || _assistantRunning)"
+                                                @onclick="() => CancelRenderAsync(activeRender.Id)">Cancel</button>
+                                    </div>
+                                }
+                                else if (PdfActions.Kind == PublicationPdfActionKind.Current && PdfActions.Interior is { } interiorPdf)
+                                {
+                                    <a class="btn btn-outline-secondary" href="@ArtifactDownloadUrl(interiorPdf.Id)" download="@interiorPdf.FileName">
+                                        <span>Save interior PDF</span>
+                                        <small>@interiorPdf.FileName</small>
+                                    </a>
+                                    @if (PdfActions.Cover is { } coverPdf)
+                                    {
+                                        <a class="btn btn-outline-secondary" href="@ArtifactDownloadUrl(coverPdf.Id)" download="@coverPdf.FileName">
+                                            <span>Save cover PDF</span>
+                                            <small>@coverPdf.FileName</small>
+                                        </a>
+                                    }
+                                }
+                                else
+                                {
+                                    <button type="button" class="btn btn-outline-secondary" disabled="@(!CanRenderPdf)" @onclick="RequestRenderAsync">
+                                        <span>@(PdfActions.Kind switch
+                                        {
+                                            PublicationPdfActionKind.Generate => "Generate PDFs",
+                                            PublicationPdfActionKind.Failed => "Retry",
+                                            _ => "Regenerate PDFs",
+                                        })</span>
+                                        <small>@(PdfActions.Kind == PublicationPdfActionKind.Failed ? "Previous generation failed · Retry" : "Create immutable Preview artifacts")</small>
+                                    </button>
+                                    @if (PdfActions.Kind == PublicationPdfActionKind.Failed && PdfActions.Job is { } failedRender)
+                                    {
+                                        <div class="publish-pdf-action-error" role="alert">
+                                            <strong>PDF generation failed.</strong>
+                                            <span>@failedRender.ProgressMessage</span>
+                                            @foreach (var diagnostic in failedRender.Diagnostics)
+                                            {
+                                                <span><code>@diagnostic.Code</code> @diagnostic.Message</span>
+                                            }
+                                        </div>
+                                    }
+                                }
+                            }
+                            @foreach (var artifact in _packageArtifacts.Where(IsSummaryPackageArtifact))
+                            {
+                                <a class="btn btn-outline-secondary" href="@ArtifactDownloadUrl(artifact.Id)" download="@artifact.FileName">
+                                    <span>Save @SummaryArtifactLabel(artifact.Kind)</span>
+                                    <small>@artifact.FileName</small>
+                                </a>
+                            }
+                        </div>
+
+                        @if (!CanExport && !_exportingFormat.HasValue)
+                        {
+                            <p class="publish-export-note">@ExportBlockedMessage</p>
+                        }
+                    </div>
+                </aside>
                 @if (IsArchivedEdition)
                 {
                     <div class="alert alert-secondary" role="status">
@@ -1055,134 +1183,6 @@ else
                 </fieldset>
             </div>
 
-            <aside class="publish-sidebar" aria-labelledby="summary-title">
-                <div class="publish-summary-card">
-                    <div class="publish-summary-heading">
-                        <span class="publish-eyebrow">Export summary</span>
-                        <h2 id="summary-title">@DisplayTitle</h2>
-                        @if (!string.IsNullOrWhiteSpace(_editionDraft.Author))
-                        {
-                            <p>by @_editionDraft.Author</p>
-                        }
-                    </div>
-
-                    <dl class="publish-summary-stats">
-                        <div>
-                            <dt>Manuscript</dt>
-                            <dd>@IncludedChapterCount chapter@(IncludedChapterCount == 1 ? string.Empty : "s")</dd>
-                        </div>
-                        <div>
-                            <dt>Cover</dt>
-                            <dd>@(SelectedCoverCandidate?.Title ?? "Not selected")</dd>
-                        </div>
-                        <div>
-                            <dt>Interior images</dt>
-                            <dd>@ActivePlacementCount placement@(ActivePlacementCount == 1 ? string.Empty : "s")</dd>
-                        </div>
-                    </dl>
-
-                    @if (ReadinessMessages.Count > 0)
-                    {
-                        <div class="publish-readiness">
-                            <h3>Before you export</h3>
-                            <ul>
-                                @foreach (var message in ReadinessMessages)
-                                {
-                                    <li>@message</li>
-                                }
-                            </ul>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="publish-ready-message">
-                            <span aria-hidden="true">✓</span>
-                            <span>Your publishing setup looks ready.</span>
-                        </div>
-                    }
-
-                    @if (!string.IsNullOrWhiteSpace(_exportError))
-                    {
-                        <div class="alert alert-danger py-2 small" role="alert">@_exportError</div>
-                    }
-
-                    <div class="publish-export-actions" aria-label="Export formats">
-                        <button type="button" class="btn btn-primary" disabled="@(!CanExportEpub)" @onclick="() => ExportAsync(PublishExportFormat.Epub)">
-                            <span>EPUB</span>
-                            <small>@ExportButtonDetail(PublishExportFormat.Epub, "For e-readers")</small>
-                        </button>
-                        <button type="button" class="btn btn-outline-primary" disabled="@(!CanExport)" @onclick="() => ExportAsync(PublishExportFormat.Markdown)">
-                            <span>Markdown</span>
-                            <small>@ExportButtonDetail(PublishExportFormat.Markdown, "With linked images")</small>
-                        </button>
-                        <button type="button" class="btn btn-outline-primary" disabled="@(!CanExport)" @onclick="() => ExportAsync(PublishExportFormat.PlainText)">
-                            <span>Plain text</span>
-                            <small>@ExportButtonDetail(PublishExportFormat.PlainText, "Text only")</small>
-                        </button>
-                        @if (_editionDraft.Format == PublicationEditionFormat.Paperback)
-                        {
-                            @if (PdfActions.Kind == PublicationPdfActionKind.Active && PdfActions.Job is { } activeRender)
-                            {
-                                <div class="publish-pdf-action-state" aria-live="polite">
-                                    <strong>Generating PDFs</strong>
-                                    <span>@activeRender.ProgressPercent% · @activeRender.ProgressMessage</span>
-                                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_renderBusy || _assistantRunning)"
-                                            @onclick="() => CancelRenderAsync(activeRender.Id)">Cancel</button>
-                                </div>
-                            }
-                            else if (PdfActions.Kind == PublicationPdfActionKind.Current && PdfActions.Interior is { } interiorPdf)
-                            {
-                                <a class="btn btn-outline-secondary" href="@ArtifactDownloadUrl(interiorPdf.Id)" download="@interiorPdf.FileName">
-                                    <span>Save interior PDF</span>
-                                    <small>@interiorPdf.FileName</small>
-                                </a>
-                                @if (PdfActions.Cover is { } coverPdf)
-                                {
-                                    <a class="btn btn-outline-secondary" href="@ArtifactDownloadUrl(coverPdf.Id)" download="@coverPdf.FileName">
-                                        <span>Save cover PDF</span>
-                                        <small>@coverPdf.FileName</small>
-                                    </a>
-                                }
-                            }
-                            else
-                            {
-                                <button type="button" class="btn btn-outline-secondary" disabled="@(!CanRenderPdf)" @onclick="RequestRenderAsync">
-                                    <span>@(PdfActions.Kind switch
-                                    {
-                                        PublicationPdfActionKind.Generate => "Generate PDFs",
-                                        PublicationPdfActionKind.Failed => "Retry",
-                                        _ => "Regenerate PDFs",
-                                    })</span>
-                                    <small>@(PdfActions.Kind == PublicationPdfActionKind.Failed ? "Previous generation failed · Retry" : "Create immutable Preview artifacts")</small>
-                                </button>
-                                @if (PdfActions.Kind == PublicationPdfActionKind.Failed && PdfActions.Job is { } failedRender)
-                                {
-                                    <div class="publish-pdf-action-error" role="alert">
-                                        <strong>PDF generation failed.</strong>
-                                        <span>@failedRender.ProgressMessage</span>
-                                        @foreach (var diagnostic in failedRender.Diagnostics)
-                                        {
-                                            <span><code>@diagnostic.Code</code> @diagnostic.Message</span>
-                                        }
-                                    </div>
-                                }
-                            }
-                        }
-                        @foreach (var artifact in _packageArtifacts.Where(IsSummaryPackageArtifact))
-                        {
-                            <a class="btn btn-outline-secondary" href="@ArtifactDownloadUrl(artifact.Id)" download="@artifact.FileName">
-                                <span>Save @SummaryArtifactLabel(artifact.Kind)</span>
-                                <small>@artifact.FileName</small>
-                            </a>
-                        }
-                    </div>
-
-                    @if (!CanExport && !_exportingFormat.HasValue)
-                    {
-                        <p class="publish-export-note">@ExportBlockedMessage</p>
-                    }
-                </div>
-            </aside>
         </div>
 
         <div class="visually-hidden" aria-live="polite" aria-atomic="true">@_liveMessage</div>
