@@ -73,7 +73,7 @@ public sealed class BookFormatGuidanceService : IBookFormatGuidanceService
             yield return new("formats", "Selected publication formats", $"Plan adaptations for the project's current {formatNames} edition(s). Keep flowing content reflowable for EPUB, preserve designed intent in Digital PDF, and require uniform physical leaves for print.");
         }
         yield return new("layout-choice", "Layout choice", "Use a flowing Figure when art belongs to nearby prose, a Designed Page when composition is intrinsic, and a facing spread only when the cross-gutter relationship is worth its print and digital adaptation costs.");
-        yield return new("geometry", "Geometry discipline", "Read a concrete edition geometry before physical layout or image generation. Use Lorekeeper generation targets and never invent dimensions or provider canvas values.");
+        yield return new("geometry", "Geometry discipline", "Read a concrete edition geometry before physical layout or geometry-specific image generation. Reusable and flowing art may remain free-standing; use Lorekeeper targets only when composition must honor a specific page, frame, or cover region.");
     }
 
     private static string Compact(string value, string fallback = "the stated direction")

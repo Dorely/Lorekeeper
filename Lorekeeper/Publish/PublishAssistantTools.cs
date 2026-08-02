@@ -76,7 +76,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid editionId, string targetKind, Guid targetId, Guid? variantId = null) => ReadLayoutGenerationTargetAsync(context, editionId, targetKind, targetId, variantId),
                 name: "read_publication_generation_target",
-                description: "Resolve exact server-owned geometry for a Figure, page surface/frame, or cover surface/frame. Page targets require the exact selected composition variantId. Use this before layout-bound image generation; never invent dimensions."),
+                description: "Resolve optional composition guidance for a concrete Figure placement, page surface/frame, or cover surface/frame. Page targets require the exact selected composition variantId. Use it when artwork must honor protected physical regions; it does not restrict later placement of other source-image shapes."),
             AIFunctionFactory.Create(
                 method: (Guid editionId, Guid variantId) => ValidateCompositionAsync(context, editionId, variantId),
                 name: "validate_publication_page_composition",
@@ -85,7 +85,12 @@ public sealed class PublishAssistantTools(
                 method: (Guid editionId, string targetKind, Guid targetId, ImageGenerationBrief brief, Guid? variantId = null, ImageReferenceUse[]? references = null, string? altText = null) =>
                     QueueLayoutBoundImageAsync(context, editionId, targetKind, targetId, variantId, brief, references, altText),
                 name: "generate_publication_layout_image",
-                description: "Queue one image-library generation for an exact Figure, page frame/surface, or cover frame/surface. Page targets require the exact selected composition variantId. Lorekeeper derives canvas size, aspect ratio, safe regions, bleed, gutter, spine, barcode, and text reserves; this tool accepts no competing dimensions. Returns only compact job and target metadata and never places the output automatically."),
+                description: "Queue one image-library generation composed for a concrete Figure placement, page frame/surface, or cover frame/surface. Page targets require the exact selected composition variantId. Lorekeeper supplies canvas guidance and protected regions; the provider raster remains uncropped for later contain/cover/crop/focal placement. Returns only compact job and target metadata and never places the output automatically."),
+            AIFunctionFactory.Create(
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
+                    QueueFreeStandingImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression),
+                name: "generate_publication_image",
+                description: "Queue one reusable, free-standing image in the project library without an edition or layout target. Use this for ordinary flowing Figures and art that may be placed in more than one format. The generated raster keeps its source shape and is fitted, cropped, or focused only when placed. Returns compact job metadata and never places the output automatically."),
             AIFunctionFactory.Create(
                 method: (Guid compositionId, Guid editionId) => GetOrCreateCompositionVariantAsync(context, compositionId, editionId),
                 name: "get_or_create_publication_composition_variant",
@@ -371,6 +376,59 @@ public sealed class PublishAssistantTools(
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
             return Serialize(new { ok = false, code = "GENERATION_REJECTED", targetId, summary = ex.Message });
+        }
+    }
+
+    private async Task<string> QueueFreeStandingImageAsync(
+        PublishAssistantContext context,
+        ImageGenerationBrief brief,
+        ImageReferenceUse[]? references,
+        string? altText,
+        string? quality,
+        string? outputFormat,
+        int? outputCompression)
+    {
+        if (imagePrompts is null || imageJobs is null || imageRuntime is null)
+            return Serialize(new { ok = false, code = "IMAGE_RUNTIME_UNAVAILABLE", summary = "Image generation is unavailable." });
+        try
+        {
+            var compiled = await imagePrompts.CompileGenerationAsync(
+                context.ProjectId,
+                brief,
+                references,
+                target: null,
+                context.TurnCancellationToken);
+            var job = await imageJobs.CreateGenerateJobAsync(
+                context.ProjectId,
+                new ProjectImageGenerateJobRequest(
+                    compiled.Prompt,
+                    compiled.Size,
+                    string.IsNullOrWhiteSpace(quality) ? "auto" : quality.Trim(),
+                    string.IsNullOrWhiteSpace(outputFormat) ? "png" : outputFormat.Trim(),
+                    outputCompression,
+                    altText?.Trim() ?? string.Empty,
+                    1,
+                    compiled.ReferenceImageIds,
+                    Label: "Publish image",
+                    BriefJson: compiled.BriefJson,
+                    ReferenceManifestJson: compiled.ReferenceManifestJson,
+                    TargetGeometryJson: compiled.TargetGeometryJson),
+                context.TurnCancellationToken);
+            await imageRuntime.EnqueueProjectAsync(context.ProjectId, context.TurnCancellationToken);
+            return Serialize(new
+            {
+                ok = true,
+                targetId = job.Id,
+                jobId = job.Id,
+                status = job.Status,
+                requestedCanvas = compiled.Size,
+                referenceCount = compiled.ReferenceImageIds.Count,
+                summary = "Free-standing generation queued in the project image library; inspect the result before placing it.",
+            });
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            return Serialize(new { ok = false, code = "GENERATION_REJECTED", summary = ex.Message });
         }
     }
 

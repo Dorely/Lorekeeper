@@ -330,6 +330,7 @@ public sealed class ImagePromptComposer(
             string.Empty,
             JsonSerializer.Serialize(new
             {
+                LayoutBound = false,
                 Size = resolvedSize,
                 AspectRatio = aspectLabel,
                 target?.ReservedTextRegions,
@@ -340,13 +341,13 @@ public sealed class ImagePromptComposer(
     {
         var prompt = new StringBuilder();
         prompt.Append("Layout target: ").Append(descriptor.TargetKind)
-            .Append("; exact aspect ratio ").Append(descriptor.AspectRatio)
+            .Append("; intended frame aspect ratio ").Append(descriptor.AspectRatio)
             .Append("; physical surface ")
             .Append(descriptor.WidthInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" x ")
             .Append(descriptor.HeightInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" inches; target ")
             .Append(descriptor.EffectiveDpiExpectation.ToString("0", CultureInfo.InvariantCulture)).AppendLine(" effective DPI.");
         prompt.Append("Lorekeeper selected the provider's ").Append(descriptor.ProviderCanvas)
-            .Append(" canvas and will normalize its raster to the exact target aspect after generation; compose to the exact target aspect rather than the provider canvas edges.").AppendLine();
+            .Append(" canvas. Compose for the target aspect and keep important content within its usable regions. Lorekeeper preserves the returned raster; the selected contain, cover, crop, and focal settings fit it non-destructively during layout.").AppendLine();
         foreach (var region in descriptor.Regions)
         {
             prompt.Append(region.KeepClear ? "Keep clear" : "Layout boundary").Append(": ").Append(region.Label)
@@ -375,38 +376,6 @@ public sealed class ImagePromptComposer(
             return configured.ToLowerInvariant();
         }
         return "1024x1024";
-    }
-
-    private static string ResolveTargetSize(
-        string requestedSize,
-        string requestedAspect,
-        string targetSize,
-        string targetAspect)
-    {
-        var targetGeometryAspect = ParseAspectRatio(targetAspect);
-        var (targetWidth, targetHeight) = ParseAndValidateSize(targetSize);
-        var targetRasterAspect = (double)targetWidth / targetHeight;
-        if (!Approximately(targetRasterAspect, targetGeometryAspect))
-        {
-            throw new InvalidOperationException(
-                $"Target geometry {targetAspect} cannot be represented by the derived gpt-image-2 raster {targetSize} without changing its aspect ratio.");
-        }
-
-        var resolvedSize = targetSize;
-        if (!string.IsNullOrWhiteSpace(requestedSize)
-            && !requestedSize.Equals("auto", StringComparison.OrdinalIgnoreCase))
-        {
-            var (width, height) = ParseAndValidateSize(requestedSize);
-            if (!Approximately((double)width / height, targetGeometryAspect))
-                throw new ArgumentException($"Explicit size {requestedSize} conflicts with target geometry {targetSize}.");
-            resolvedSize = requestedSize.Trim().ToLowerInvariant();
-        }
-        if (!string.IsNullOrWhiteSpace(requestedAspect)
-            && !Approximately(ParseAspectRatio(requestedAspect), targetGeometryAspect))
-        {
-            throw new ArgumentException($"Explicit aspectRatio {requestedAspect} conflicts with target geometry {targetAspect}.");
-        }
-        return resolvedSize;
     }
 
     private static string DeriveSize(double aspect)

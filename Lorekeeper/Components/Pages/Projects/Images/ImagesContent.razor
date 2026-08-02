@@ -107,7 +107,7 @@ else
                     <div class="alert alert-info py-2 small">
                         <strong>@_layoutTarget.TargetKind target</strong><br />
                         @_layoutTarget.WidthInches.ToString("0.###") × @_layoutTarget.HeightInches.ToString("0.###") in · @_layoutTarget.AspectRatio · @_layoutTarget.ProviderCanvas
-                        <div>Lorekeeper controls canvas size and reserved layout regions.</div>
+                        <div>The target guides composition and reserved regions. The generated raster stays intact; its frame's fit, crop, and focal settings control placement.</div>
                     </div>
                 }
                 @if (!_codexConnected)
@@ -151,7 +151,7 @@ else
                             </select>
                             @if (_layoutTarget is not null)
                             {
-                                <small>Layout-bound images are stored as lossless PNG for Press compatibility.</small>
+                                <small>Layout-guided images are stored as lossless PNG without cropping the provider output.</small>
                             }
                         </label>
                         <label>

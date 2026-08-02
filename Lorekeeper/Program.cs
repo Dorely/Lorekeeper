@@ -188,7 +188,10 @@ builder.Services.AddScoped<Lorekeeper.Composition.ICompositionService, Lorekeepe
 builder.Services.Configure<EntityVisualContextOptions>(builder.Configuration.GetSection(EntityVisualContextOptions.SectionName));
 builder.Services.AddScoped<IEntityVisualExampleService, EntityVisualExampleService>();
 builder.Services.AddScoped<IEntityVisualContextService, EntityVisualContextService>();
-builder.Services.Configure<ProjectImageGenerationOptions>(builder.Configuration.GetSection(ProjectImageGenerationOptions.SectionName));
+builder.Services.AddOptions<ProjectImageGenerationOptions>()
+    .Bind(builder.Configuration.GetSection(ProjectImageGenerationOptions.SectionName))
+    .Validate(options => options.MaxProviderOutputBytes > 0, "Images:MaxProviderOutputBytes must be greater than zero.")
+    .ValidateOnStart();
 builder.Services.AddScoped<IProjectImageProvider, CodexProjectImageProvider>();
 builder.Services.AddScoped<IProjectImageJobService, ProjectImageJobService>();
 builder.Services.AddScoped<IImagePromptComposer, ImagePromptComposer>();

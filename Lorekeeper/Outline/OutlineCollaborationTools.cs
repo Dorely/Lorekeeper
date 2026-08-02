@@ -260,7 +260,7 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: (Guid editionId, string targetKind, Guid targetId, Guid? variantId = null) => ReadLayoutGenerationTargetAsync(context, editionId, targetKind, targetId, variantId),
                 name: "read_outline_generation_target",
-                description: "Resolve exact server-owned dimensions and reserved regions for an approved Figure, page surface/frame, or cover surface/frame. Page targets require the exact selected composition variantId. Never invent physical dimensions."),
+                description: "Resolve optional composition guidance and reserved regions for an approved concrete Figure placement, page surface/frame, or cover surface/frame. Page targets require the exact selected composition variantId. The target does not restrict later placement of other source-image shapes."),
 
             AIFunctionFactory.Create(
                 method: (Guid editionId, Guid variantId) => ValidateCompositionAsync(context, editionId, variantId),
@@ -271,7 +271,7 @@ public sealed class OutlineCollaborationTools(
                 method: (Guid editionId, string targetKind, Guid targetId, ImageGenerationBrief brief, Guid? variantId = null, ImageReferenceUse[]? references = null, string? altText = null) =>
                     QueueLayoutBoundImageAsync(context, editionId, targetKind, targetId, variantId, brief, references, altText, cancellationToken),
                 name: "generate_outline_layout_image",
-                description: "Queue one image-library generation for an approved concrete Figure, page frame/surface, or cover frame/surface. Page targets require the exact selected composition variantId. Lorekeeper owns every physical dimension and reserved region; this tool accepts no manual size or aspect ratio and never places the output automatically."),
+                description: "Queue one image-library generation composed for an approved concrete Figure placement, page frame/surface, or cover frame/surface. Page targets require the exact selected composition variantId. Lorekeeper supplies physical guidance and reserved regions; the returned raster is preserved uncropped and is never placed automatically."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int? startLine = null, int? endLine = null) => ReadChapterAsync(context, chapterId, startLine, endLine),

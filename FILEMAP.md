@@ -88,7 +88,7 @@
 | File | Description |
 |------|-------------|
 | `package.json` / `package-lock.json` | Exact-pinned ProseMirror and esbuild dependency graph plus deterministic test/build commands. |
-| `src/semantic-editor.js` | Owned ProseMirror schema/adapter, toolbar, autosave queue, paste diagnostics, outline, counts, and find/replace behavior. |
+| `src/semantic-editor.js` | Owned ProseMirror schema/adapter, disconnect-safe host attachment, toolbar, autosave queue, paste diagnostics, outline, counts, and find/replace behavior. |
 | `test/semantic-editor.test.js` | Node/jsdom fixtures for round-trip fidelity, stable IDs, accessibility/read-only state, save draining, conflicts, paste, links, and marked-text find. |
 | `THIRD_PARTY_NOTICES.md` | Runtime/build dependency inventory and MIT notice for the semantic-editor bundle. |
 
@@ -181,7 +181,7 @@
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter workspace with keyed semantic editor, serialized refresh coordination, resizable Chat/Memory columns, Designed Page workspace, and AI/Contest review. |
-| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with revision-aware save/flush, semantic Figure insertion/inspection/presentation/accessibility controls, paste diagnostics, and JavaScript lifetime ownership. |
+| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, semantic Figure insertion/inspection/presentation/accessibility controls, paste diagnostics, and JavaScript lifetime ownership. |
 | `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Named paragraph/character style manager with revision-aware create/edit/delete controls and stable semantic roles. |
 | `DesignedPageWorkspace.razor` (+ `.razor.css`) | Exact-geometry page/spread scene editor with mode thumbnails, direct move/resize/rotate, semantic bindings, image/text/shape objects, layers, groups, styles, reading order, user guides/snapping, overflow/unplaced diagnostics, generation targets, and revision-safe save. |
 | `CoverCompositionWorkspace.razor` (+ `.razor.css`) | Format-aware print-wrap/digital-front scene editor with direct move/resize/rotate, canonical copy bindings, project images/fonts, layers/groups/styles, safety/barcode overlays, generation targets, and revision-safe save. |
@@ -411,7 +411,7 @@
 | `OpenAIChatToolMetadataClient.cs` | OpenAI-compatible client boundary that preserves unknown streamed tool-call extensions and restores them on the correlated assistant/tool-result request. |
 | `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs Codex or metadata-preserving OpenAI-compatible chat clients, applies exact per-model reasoning effort and Codex timeout, and exposes configured verification probes. |
 | `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image reader for vision probes and PDF transcription, with per-model reasoning effort across Codex Responses and OpenAI-compatible requests. |
-| `AssistantWorkflowInstructions.cs` | Current code-owned AI workflow/tool rules for exact IDs, compact paging/staging, Figures, Designed Pages/covers, target-bound generation, accessibility/geometry validation, proof restrictions, and Contest preparation. |
+| `AssistantWorkflowInstructions.cs` | Current code-owned AI workflow/tool rules for exact IDs, compact paging/staging, Figures, Designed Pages/covers, free-standing and optionally target-guided generation, accessibility/geometry validation, proof restrictions, and Contest preparation. |
 | `SystemPromptComposer.cs` | Central composer for the one actual system-role prompt: professional charter, tool rules, dynamic book/page guidance, Project Guidance, Book Brief, then working context. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |
 | `SeedSystemPrompt.cs` | Frozen historical seed retained only so legacy migrations can identify and clear untouched seeded guidance; runtime prompts no longer use it. |
@@ -554,13 +554,13 @@
 | File | Description |
 |------|-------------|
 | `ProjectImageModels.cs` | Image, normalized crop, and entity-target requests/views plus persisted jobs, output state, masks, provider progress, and runtime snapshots. |
-| `ImagePromptComposer.cs` | Shared structured generation/edit brief compiler with canonical-character reference schema guidance, stable provider-order labels, page geometry/reserved regions, rendered-text policy, and `gpt-image-2` size validation. |
+| `ImagePromptComposer.cs` | Shared structured generation/edit brief compiler with canonical-character reference schema guidance, stable provider-order labels, optional layout guidance/reserved regions, rendered-text policy, and safe provider-size defaults. |
 | `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: metadata-only listing with endpoint URLs, byte reads, upload, deterministic local crop/reuse, legacy blocking generation, metadata, delete, thumbnail, and reference scrubbing. |
-| `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Image job persistence for structured prompt audits, revised prompts/output IDs, lifecycle/state/errors, output saving, and PNG/shape-mask validation. |
+| `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Image job persistence for structured prompt audits, free-standing/layout-target classification, bounded uncropped provider-raster output saving, revised prompts/output IDs, lifecycle/state/errors, and PNG/shape-mask validation. |
 | `IProjectImageGenerationRuntime.cs` / `ProjectImageGenerationRuntime.cs` | Singleton FIFO image queue with one active job per project, per-job cancellation propagated to providers/retries, partial previews, completion waiters, and state notifications. |
 | `ProjectImageGenerationStartupWorker.cs` | Hosted startup worker that marks interrupted running image jobs failed and resumes queued project work. |
 | `IProjectImageProvider.cs` / `CodexProjectImageProvider.cs` | Responses image provider for Codex/OpenAI account generation and masked edits with streamed partials, explicit generate/edit actions, continuity-reference generation semantics, and source-canvas edit semantics. |
-| `ProjectImageGenerationOptions.cs` | Configurable image model defaults, count/reference limits, retry/timeout settings, partial image count, and agent wait timeout. |
+| `ProjectImageGenerationOptions.cs` | Configurable image model defaults, count/reference and provider-output limits, retry/timeout settings, partial image count, and agent wait timeout. |
 | `DataUrl.cs` | Shared data URL parse/format helper for mask and provider payloads. |
 | `ProjectImageBinary.cs` | Validates PNG/JPEG/WebP raster input and normalizes WebP library output. |
 | `ProjectImageResize.cs` | Shared bounded-edge image resize helper for model and preview delivery. |
@@ -604,7 +604,7 @@
 | `PublicationMigrationLock.cs` | Database-scoped process and crash-releasing file lease shared by edition recovery and Press schema advancement so the v14 rebuild/history window has one migration owner. |
 | `PublicationPressMigrationService.cs` | Guarded v15 Press cutover/reconciliation owner with protected backup, atomic marker, integrity and byte/hash invariants, journal evidence, and recovery-shell fallback. |
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
-| `PublishAssistantTools.cs` | Compact Publish tool catalog for editions, matter, styles, placements, Figures, staged compositions/covers, geometry-bound generation, renders, validation, packages, audits, exports, and artifact metadata; proof approval is absent. |
+| `PublishAssistantTools.cs` | Compact Publish tool catalog for editions, matter, styles, placements, Figures, staged compositions/covers, free-standing and geometry-guided generation, renders, validation, packages, audits, exports, and artifact metadata; proof approval is absent. |
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration, shared active-turn streaming/reconnection, collaborative prompt policy, tool activity, and structured mutation notices. |
 | `PublicationPdfActionState.cs` | Deterministic NotGenerated/Rendering/Invalid/Stale/Validated/Legacy selector for paperback interior/cover or one Digital PDF Book artifact. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |

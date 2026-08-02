@@ -16,4 +16,5 @@ public sealed class ProjectImageGenerationOptions
     public int PartialImages { get; set; } = 2;
     public int MaxReferenceImages { get; set; } = 4;
     public int AgentJobWaitTimeoutSeconds { get; set; } = 600;
+    public int MaxProviderOutputBytes { get; set; } = 64 * 1024 * 1024;
 }

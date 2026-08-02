@@ -37,10 +37,11 @@ public enum PublishWorkspaceMutationKind
     Render,
     Preflight,
     Package,
+    ImageLibrary,
 }
 
 public sealed record PublishWorkspaceMutated(
-    Guid EditionId,
+    Guid? EditionId,
     bool SelectEdition,
     PublishWorkspaceMutationKind Kind = PublishWorkspaceMutationKind.Edition) : PublishTurnUpdate;
 

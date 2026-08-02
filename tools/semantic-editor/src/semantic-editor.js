@@ -1179,6 +1179,9 @@ function hydrateFigureImageUrls(document, imageById) {
 }
 
 export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]") {
+    if (!root || typeof root.replaceChildren !== "function" || root.isConnected === false)
+        return null;
+
     const initial = JSON.parse(initialJson);
     const namedStyles = JSON.parse(stylesJson);
     const projectImages = JSON.parse(imagesJson);

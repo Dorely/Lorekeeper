@@ -51,6 +51,7 @@
     private IJSObjectReference? _handle;
     private DotNetObjectReference<ChapterBodyEditor>? _selfRef;
     private bool? _appliedReadOnly;
+    private bool _initializing;
     private bool _disposed;
     private bool _disposing;
     private string? _pasteWarning;
@@ -59,33 +60,67 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_disposed)
+        if (_disposed || _disposing)
             return;
 
-        if (_handle is null)
+        if (_handle is null && !_initializing)
         {
+            _initializing = true;
             try
             {
-                _module ??= await JS.InvokeAsync<IJSObjectReference>(
-                    "import", "./js/semantic-editor.bundle.js");
-                _handle = await _module.InvokeAsync<IJSObjectReference>(
+                var stylesJson = JsonSerializer.Serialize(
+                    await Styles.ListAsync(ProjectId),
+                    ManuscriptCodec.JsonOptions);
+                var imagesJson = JsonSerializer.Serialize(
+                    (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg"),
+                    ManuscriptCodec.JsonOptions);
+                var editionsJson = JsonSerializer.Serialize(
+                    await Editions.ListAsync(ProjectId),
+                    ManuscriptCodec.JsonOptions);
+                if (_disposed || _disposing)
+                    return;
+
+                if (_module is null)
+                {
+                    var importedModule = await JS.InvokeAsync<IJSObjectReference>(
+                        "import", "./js/semantic-editor.bundle.js");
+                    if (_disposed || _disposing)
+                    {
+                        try { await importedModule.DisposeAsync(); } catch { }
+                        return;
+                    }
+                    _module = importedModule;
+                }
+                if (_disposed || _disposing)
+                    return;
+
+                var handle = await _module.InvokeAsync<IJSObjectReference?>(
                     "attach",
                     _root,
                     (_selfRef ??= DotNetObjectReference.Create(this)),
                     750,
                     InitialManuscriptJson,
-                    JsonSerializer.Serialize(
-                        await Styles.ListAsync(ProjectId),
-                        ManuscriptCodec.JsonOptions),
-                    JsonSerializer.Serialize(
-                        (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg"),
-                        ManuscriptCodec.JsonOptions),
-                    JsonSerializer.Serialize(
-                        await Editions.ListAsync(ProjectId),
-                        ManuscriptCodec.JsonOptions));
+                    stylesJson,
+                    imagesJson,
+                    editionsJson);
+                if (_disposed || _disposing)
+                {
+                    if (handle is not null)
+                    {
+                        try { await handle.InvokeVoidAsync("dispose"); } catch { }
+                        try { await handle.DisposeAsync(); } catch { }
+                    }
+                    return;
+                }
+                _handle = handle;
             }
             catch (JSDisconnectedException) { }
             catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) when (_disposing || _disposed) { }
+            finally
+            {
+                _initializing = false;
+            }
         }
 
         if (_handle is not null && _appliedReadOnly != IsReadOnly)

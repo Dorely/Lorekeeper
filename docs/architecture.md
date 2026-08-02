@@ -211,9 +211,19 @@ diagnostics with revision-aware save and undo/redo.
 Figure, page surface/frame, and cover surface/frame image generation. It carries
 the exact physical aspect, recommended raster, provider canvas, effective-DPI
 expectation, geometry fingerprint, and named trim, bleed, safe, gutter, cover,
-barcode, and reserved-text regions. UI and assistants provide only the stable
-edition/target IDs and creative brief; they cannot override the derived size or
-aspect. Free-standing image-library generation remains manually sized.
+barcode, and reserved-text regions. It is optional composition guidance rather
+than an image-acceptance constraint: free-standing generation is the default for
+reusable art and flowing Figures, while a concrete target is used when the art
+must honor physical regions. UI and assistants provide only stable edition and
+target IDs for that mode. Provider raster geometry and pixels are stored without
+layout cropping or resizing (supported format normalization may convert WebP to
+lossless PNG); Figure and scene contain/cover/crop/focal settings fit any source
+aspect ratio non-destructively at layout and render time. Free-standing
+image-library generation remains manually sized, and its size/aspect audit
+metadata is never classified as a physical layout target.
+Provider output validation has a separate configurable 64 MiB default byte
+boundary rather than inheriting the smaller user-upload limit, so a valid
+high-detail generated raster is not rejected after provider completion.
 `IPublicationEditionService` owns the one-to-many paperback, EPUB, and Digital
 PDF edition aggregate: product settings and identifiers, independently ordered
 content, semantic front/back matter, named-style mappings, edition-only image
@@ -562,6 +572,10 @@ ordinal matches taking precedence and ambiguous fallback matches failing
 closed; mutation results return the exact stored ID. Named style semantic roles and
 paragraph/character kinds are immutable stable keys; definitions are
 revision-checked and semantic roles are unique per project and kind.
+The keyed Blazor host rechecks disposal across asynchronous catalog loads, and
+the JavaScript attach boundary rejects missing or detached elements before any
+DOM mutation, so chapter switches or navigation cannot turn a stale element
+reference into a circuit-ending initialization exception.
 
 On a manuscript revision conflict, the browser adapter preserves the unsaved
 v2 JSON in chapter-keyed browser/Electron local storage, locks the stale editor,

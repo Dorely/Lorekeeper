@@ -302,7 +302,7 @@ public sealed class EditorChatTools(
                 GenerateProjectImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression),
             name: "generate_project_image",
             description:
-                $"Generate one unattached library image from a structured brief without placing it. intendedUse and scene are required. State grounded scene requirements and leave unspecified visual details to the image model. For a Figure, designed-page frame or surface, or cover frame or surface, first read its server-owned generation target and use that target without a conflicting size or aspect ratio. Reserved text, safe, gutter, spine, barcode, and bleed regions are hard requirements. Rendered text is disabled unless the user intentionally requests baked-in lettering. Inspect the result before placing it. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
+                $"Generate one unattached library image from a structured brief without placing it. intendedUse and scene are required. State grounded scene requirements and leave unspecified visual details to the image model. Default to free-standing generation for reusable art and ordinary flowing Figures. Use a server-owned Figure, page, or cover target only when the composition must honor that concrete layout; omit manual size/aspect for a bound target. Bound targets guide composition and reserved regions but do not crop the stored output. Rendered text is disabled unless the user intentionally requests baked-in lettering. Inspect the result and choose contain/cover/crop/focal placement separately. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid imageId, string label, ProjectImageMaskShape[] shapes) =>
@@ -322,7 +322,7 @@ public sealed class EditorChatTools(
                 method: (Guid editionId, string targetKind, Guid targetId, Guid? variantId = null) =>
                     ReadLayoutGenerationTargetAsync(context, editionId, targetKind, targetId, variantId),
                 name: "read_layout_generation_target",
-                description: "Read server-owned physical geometry and provider canvas for a Figure, designed-page frame or surface, or cover frame or surface. Page targets require the exact variantId returned by the selected composition read. Use this target for generation; do not invent or override its dimensions."),
+                description: "Read optional composition guidance for a concrete Figure placement, designed-page frame/surface, or cover frame/surface. Page targets require the exact variantId returned by the selected composition read. The descriptor chooses a provider canvas and protected regions but does not restrict which source-image aspect ratios can later be placed."),
             AIFunctionFactory.Create(
                 method: (Guid editionId, Guid variantId) => ValidateCompositionAsync(context, editionId, variantId),
                 name: "validate_page_composition",

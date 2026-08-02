@@ -14,8 +14,12 @@ this feature's authorized checks.
   composition; verify compact IDs/revisions/diagnostics and conflict recovery.
 - Stage a large scene once, apply by stage ID, and verify the payload is neither
   repeated nor replayable.
-- Confirm every assistant uses a geometry-bound generation target and cannot
-  approve a proof, claim vendor acceptance, or claim a URL was downloaded.
+- Confirm every assistant defaults reusable art and ordinary flowing Figures to
+  free-standing generation, and uses a geometry-bound target only when artwork
+  must honor a concrete page, frame, Figure placement, or cover region. Verify
+  bound guidance does not crop or resize the stored raster, and confirm no
+  assistant can approve a proof, claim vendor acceptance, or claim a URL was
+  downloaded.
 
 ## Manuscript Figures
 

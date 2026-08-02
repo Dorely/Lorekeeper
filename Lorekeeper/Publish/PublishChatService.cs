@@ -57,7 +57,7 @@ public sealed class PublishChatService(
         - Generated files are saved only when the user opens a returned download URL. Never claim that you downloaded a file for them.
         - Archived editions are read-only. Recommend cloning when the user wants to change one.
         - Chapters are format-neutral sequences of semantic text, flowing Figures, and Designed Pages. Distinguish those from edition-only opening/ending illustrations, print full-wrap covers, and digital front covers.
-        - Read the active edition geometry before physical layout or image-generation decisions. Use Lorekeeper's target descriptor and never invent dimensions, aspect ratios, safe areas, gutters, spines, barcode reserves, or provider canvas sizes.
+        - Read the active edition geometry before physical layout or geometry-specific image-generation decisions. Use a target descriptor when artwork must honor a concrete Figure placement, page, or cover region; free-standing reusable art needs no edition target. A target guides composition and protected regions but does not crop the stored source raster or make other source-image shapes invalid.
         - Require alt text or an explicit decorative decision for imagery and preserve logical reading order independently of visual z-order.
         - Patch one stable scene object, guide, layer, or style directly. For a large page-composition edit or coupled semantic-and-layout change, submit the complete payload exactly once to the matching staging tool, then apply only its stage ID and expected revision. Do not repeat staged payloads in an apply call or response.
         - Edition format is fixed at creation. Create another edition when the user needs a different output format; do not attempt to convert an existing edition in place.
@@ -100,6 +100,7 @@ public sealed class PublishChatService(
         "apply_publication_composition_semantic_stage",
         "apply_publication_composition_workspace_stage",
         "generate_publication_layout_image",
+        "generate_publication_image",
         "preflight_publication_edition",
         "build_publication_package",
     ];
@@ -431,6 +432,9 @@ public sealed class PublishChatService(
             return null;
         if (!ResultSucceeded(resultJson))
             return null;
+
+        if (toolName == "generate_publication_image")
+            return new PublishWorkspaceMutated(null, false, PublishWorkspaceMutationKind.ImageLibrary);
 
         var selectEdition = toolName is "create_publication_edition" or "clone_publication_edition";
         var kind = toolName switch
