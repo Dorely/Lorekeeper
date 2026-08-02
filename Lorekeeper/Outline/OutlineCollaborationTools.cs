@@ -96,10 +96,10 @@ public sealed class OutlineCollaborationTools(
     IProjectImageService projectImages,
     IManuscriptService manuscripts,
     ICompositionService compositions,
+    IProjectPageSetupService pageSetups,
     IBookBriefService bookBriefs,
     IBookFormatGuidanceService formatGuidance,
     IPublicationEditionService editions,
-    IPublicationCoverService covers,
     AppDbContext db,
     IImagePromptComposer? imagePrompts = null,
     IProjectImageJobService? imageJobs = null,
@@ -210,51 +210,55 @@ public sealed class OutlineCollaborationTools(
                     Guid chapterId,
                     int blockIndex,
                     string name,
-                    Guid? editionId,
                     long expectedRevision,
                     DesignedPageLayoutMode layoutMode = DesignedPageLayoutMode.SinglePage,
                     Guid? imageId = null,
                     string? altText = null,
                     bool decorative = false,
-                    FigureImageFit imageFit = FigureImageFit.Cover,
-                    double focalXPercent = 50,
-                    double focalYPercent = 50) =>
+                    FigureImageFit imageFit = FigureImageFit.Contain,
+                    double cropXPercent = 50,
+                    double cropYPercent = 50) =>
                     InsertDesignedPageAsync(
                         context,
                         chapterId,
                         blockIndex,
                         name,
-                        editionId,
                         expectedRevision,
                         layoutMode,
                         imageId,
                         altText,
                         decorative,
                         imageFit,
-                        focalXPercent,
-                        focalYPercent),
+                        cropXPercent,
+                        cropYPercent),
                 name: "insert_outline_designed_page",
-                description: "Create one complete Designed Page aggregate: manuscript block, exact edition geometry, single-page or facing-spread surface, and optional existing project artwork placed edge-to-edge with fit/focal/accessibility settings. Read layout editions first. When the user identifies artwork, pass its image ID in this call instead of merely adding it to context. Review Edits stages this complete setup and approval applies it atomically; no follow-up configuration turn is required."),
+                description: "Create one complete Designed Page in project authoring geometry. When existing artwork is supplied, explicitly choose Contain (show the whole image) or Cover (fill the frame), and provide its accessibility decision. The complete initial page is applied atomically."),
 
             AIFunctionFactory.Create(
-                method: () => ListLayoutEditionsAsync(context),
-                name: "list_layout_editions",
-                description: "List compact publication-edition IDs and physical page geometry for Figure, Designed Page, spread, cover, and geometry-bound image decisions. Prefer the default compatible edition unless the user specifies another target."),
+                method: () => ReadProjectPageSetupAsync(context),
+                name: "read_project_page_setup",
+                description: "Read the project-owned authoring page geometry and revision used by Figures, Designed Pages, chapter preview, and geometry-bound image generation. This is not a publication edition."),
+
+            AIFunctionFactory.Create(
+                method: (long expectedRevision, double pageWidthInches, double pageHeightInches, double pageMarginInches, double bodyFontSizePoints, double bodyLineHeight) =>
+                    UpdateProjectPageSetupAsync(context, expectedRevision, pageWidthInches, pageHeightInches, pageMarginInches, bodyFontSizePoints, bodyLineHeight),
+                name: "update_project_page_setup",
+                description: "Revision-check the project authoring page setup when the user directly requests it. Read first and preserve values the user did not ask to change."),
 
             AIFunctionFactory.Create(
                 method: (Guid compositionId, Guid variantId, int semanticStart = 0, int semanticCount = 20, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) => ReadPageCompositionAsync(context, compositionId, variantId, semanticStart, semanticCount, objectStart, objectCount, structureStart, structureCount),
                 name: "read_outline_page_composition",
-                description: "Read one selected current variant losslessly in bounded object pages, including complete surface, layers, styles, guides, object fields, semantic excerpts, and revisions."),
+                description: "Read one selected current variant losslessly in bounded object pages, including complete surface, layers, styles, object fields, semantic excerpts, and revisions. Computed page overlays are omitted."),
 
             AIFunctionFactory.Create(
-                method: (Guid compositionId, Guid editionId) => GetOrCreateCompositionVariantAsync(context, compositionId, editionId),
+                method: (Guid compositionId) => GetOrCreateCompositionVariantAsync(context, compositionId),
                 name: "get_or_create_outline_composition_variant",
-                description: "Get or create the exact geometry variant for a Designed Page and edition."),
+                description: "Get or create the active authoring geometry variant for a Designed Page."),
 
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCompositionElementAsync(context, variantId, expectedRevision, targetKind, targetId, patch),
                 name: "patch_outline_composition_element",
-                description: "Revision-check patch one stable object, guide, layer, or style with only the requested changed fields. Preserve unrelated scene state; use full-scene staging for structural edits."),
+                description: "Revision-check patch one stable object, layer, or style with only the requested changed fields. Page overlays are computed and cannot be authored. Preserve unrelated scene state; use full-scene staging for structural edits."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, CompositionScene scene) => StageCompositionAsync(context, variantId, expectedRevision, scene),
                 name: "stage_outline_page_composition",
@@ -284,39 +288,15 @@ public sealed class OutlineCollaborationTools(
                 description: "Apply a coupled content-and-layout stage by one-use stage ID; both stored revisions are checked."),
 
             AIFunctionFactory.Create(
-                method: (Guid editionId, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) => ReadCoverCompositionAsync(context, editionId, objectStart, objectCount, structureStart, structureCount),
-                name: "read_outline_cover_composition",
-                description: "Read current format-aware cover geometry, diagnostics, layers, and one bounded object page when concrete cover planning is requested."),
-
-            AIFunctionFactory.Create(
-                method: (Guid editionId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCoverCompositionElementAsync(context, editionId, expectedRevision, targetKind, targetId, patch),
-                name: "patch_outline_cover_element",
-                description: "Revision-check patch one stable cover object, guide, layer, or style with only the requested changed fields. Preserve unrelated cover state."),
-            AIFunctionFactory.Create(
-                method: (Guid editionId, long expectedRevision, CompositionScene scene) => StageCoverCompositionAsync(context, editionId, expectedRevision, scene),
-                name: "stage_outline_cover_composition",
-                description: "Stage one requested format-aware cover scene without echoing the complete payload."),
-
-            AIFunctionFactory.Create(
-                method: (Guid stageId, long expectedRevision) => ApplyCoverCompositionStageAsync(context, stageId, expectedRevision),
-                name: "apply_outline_cover_composition_stage",
-                description: "Apply a one-use cover stage by ID and exact revision."),
-
-            AIFunctionFactory.Create(
-                method: (Guid editionId, string targetKind, Guid targetId, Guid? variantId = null) => ReadLayoutGenerationTargetAsync(context, editionId, targetKind, targetId, variantId),
+                method: (string targetKind, Guid targetId, Guid? variantId = null) => ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId),
                 name: "read_outline_generation_target",
-                description: "Resolve optional composition guidance and reserved regions for a concrete Figure placement, page surface/frame, or cover surface/frame. Page targets require the exact selected composition variantId. The target does not restrict later placement of other source-image shapes."),
+                description: "Resolve project-owned guidance and reserved regions for a project page, Figure placement, or Designed Page surface/frame. Use the project ID for project-page; composition targets require the active variantId. Publication compatibility belongs in Publish."),
 
             AIFunctionFactory.Create(
-                method: (Guid editionId, Guid variantId) => ValidateCompositionAsync(context, editionId, variantId),
-                name: "validate_outline_page_composition",
-                description: "Validate a selected Designed Page variant for geometry, semantic coverage, reading order, accessibility, overflow, image DPI, font readiness, and edition compatibility. Returns compact prioritized diagnostics."),
-
-            AIFunctionFactory.Create(
-                method: (Guid editionId, string targetKind, Guid targetId, ImageGenerationBrief brief, Guid? variantId = null, ImageReferenceUse[]? references = null, string? altText = null) =>
-                    QueueLayoutBoundImageAsync(context, editionId, targetKind, targetId, variantId, brief, references, altText, cancellationToken),
+                method: (string targetKind, Guid targetId, ImageGenerationBrief brief, Guid? variantId = null, ImageReferenceUse[]? references = null, string? altText = null) =>
+                    QueueLayoutBoundImageAsync(context, targetKind, targetId, variantId, brief, references, altText, cancellationToken),
                 name: "generate_outline_layout_image",
-                description: "Queue one requested image-library generation composed for a concrete Figure placement, page frame/surface, or cover frame/surface. Page targets require the exact selected composition variantId. Lorekeeper supplies physical guidance and reserved regions; the returned raster is preserved uncropped and is never placed automatically."),
+                description: "Queue one requested image-library generation for a project page, Figure placement, or Designed Page frame/surface. Use project-owned geometry and no edition. Lorekeeper supplies physical guidance and reserved regions; the returned raster is preserved uncropped and is never placed automatically."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int? startLine = null, int? endLine = null) => ReadChapterAsync(context, chapterId, startLine, endLine),
@@ -441,31 +421,40 @@ public sealed class OutlineCollaborationTools(
         });
     }
 
-    private async Task<string> ListLayoutEditionsAsync(OutlineCollaborationContext context)
+    private async Task<string> ReadProjectPageSetupAsync(OutlineCollaborationContext context)
     {
-        var items = await editions.ListAsync(context.ProjectId);
+        var setup = await pageSetups.GetOrCreateAsync(context.ProjectId);
         return JsonSerializer.Serialize(new
         {
             ok = true,
-            summary = $"{items.Count} publication edition(s).",
-            items = items.Select(item => new
-            {
-                item.Id,
-                item.Name,
-                item.Format,
-                item.Vendor,
-                item.Status,
-                item.IsDefault,
-                item.Revision,
-                geometry = new
-                {
-                    widthInches = item.PageWidthInches,
-                    heightInches = item.PageHeightInches,
-                    marginInches = item.PageMarginInches,
-                    item.Bleed,
-                    item.AllowDesignedPageOverrides,
-                },
-            }),
+            targetId = context.ProjectId,
+            revision = setup.Revision,
+            summary = $"Authoring pages are {setup.PageWidthInches:0.###} × {setup.PageHeightInches:0.###} inches.",
+            geometry = new { setup.PageWidthInches, setup.PageHeightInches, setup.PageMarginInches },
+            typography = new { setup.BodyFontSizePoints, setup.BodyLineHeight },
+        });
+    }
+
+    private async Task<string> UpdateProjectPageSetupAsync(
+        OutlineCollaborationContext context,
+        long expectedRevision,
+        double pageWidthInches,
+        double pageHeightInches,
+        double pageMarginInches,
+        double bodyFontSizePoints,
+        double bodyLineHeight)
+    {
+        var setup = await pageSetups.UpdateAsync(context.ProjectId, expectedRevision,
+            new(pageWidthInches, pageHeightInches, pageMarginInches, bodyFontSizePoints, bodyLineHeight));
+        context.OnMutated();
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            targetId = setup.ProjectId,
+            revision = setup.Revision,
+            changedFields = new[] { "pageWidthInches", "pageHeightInches", "pageMarginInches", "bodyFontSizePoints", "bodyLineHeight" },
+            summary = "Project page setup updated.",
+            mutation = new { kind = "projectPageSetup", id = setup.ProjectId, revision = setup.Revision },
         });
     }
 
@@ -1127,32 +1116,20 @@ public sealed class OutlineCollaborationTools(
         Guid chapterId,
         int blockIndex,
         string name,
-        Guid? editionId,
         long expectedRevision,
         DesignedPageLayoutMode layoutMode,
         Guid? imageId,
         string? altText,
         bool decorative,
         FigureImageFit imageFit,
-        double focalXPercent,
-        double focalYPercent)
+        double cropXPercent,
+        double cropYPercent)
     {
         var chapter = await chapters.GetAsync(chapterId);
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return JsonSerializer.Serialize(new { ok = false, code = "CHAPTER_NOT_FOUND", targetId = chapterId, summary = "Chapter was not found in this project." });
         try
         {
-            if ((imageId is not null || layoutMode == DesignedPageLayoutMode.FacingSpread) && editionId is null)
-            {
-                return JsonSerializer.Serialize(new
-                {
-                    ok = false,
-                    code = "EDITION_REQUIRED",
-                    targetId = chapterId,
-                    summary = "Illustrated and facing-spread Designed Pages require a current layout edition so their complete geometry can be created.",
-                    recovery = "Call list_layout_editions and retry with a compatible editionId.",
-                });
-            }
             var initialImage = imageId is Guid selectedImageId
                 ? await projectImages.GetAsync(ctx.ProjectId, selectedImageId)
                 : null;
@@ -1165,8 +1142,8 @@ public sealed class OutlineCollaborationTools(
                 AltText = altText ?? string.Empty,
                 Decorative = decorative,
                 ImageFit = imageFit,
-                FocalXPercent = focalXPercent,
-                FocalYPercent = focalYPercent,
+                CropXPercent = cropXPercent,
+                CropYPercent = cropYPercent,
             };
             if (ctx.ManuscriptStaging is not null)
             {
@@ -1175,12 +1152,6 @@ public sealed class OutlineCollaborationTools(
                     : chapter.Manuscript;
                 if (source.Revision != expectedRevision)
                     throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
-                if (editionId is Guid selectedEditionId
-                    && !(await editions.ListAsync(ctx.ProjectId)).Any(item => item.Id == selectedEditionId))
-                {
-                    return JsonSerializer.Serialize(new { ok = false, code = "EDITION_NOT_FOUND", targetId = selectedEditionId, summary = "Publication edition was not found in this project." });
-                }
-
                 var identity = new DesignedPageIdentity(Guid.NewGuid(), Guid.NewGuid().ToString("N"));
                 var applied = ManuscriptOperations.Apply(
                     source,
@@ -1217,22 +1188,13 @@ public sealed class OutlineCollaborationTools(
                 return stagedResult;
             }
 
-            var result = editionId is Guid layoutEditionId
-                ? await compositions.CreateDesignedPageAsync(
-                    ctx.ProjectId,
-                    chapterId,
-                    blockIndex,
-                    name,
-                    layoutEditionId,
-                    expectedRevision,
-                    initialContent)
-                : await compositions.CreateDesignedPageAsync(
-                    ctx.ProjectId,
-                    chapterId,
-                    blockIndex,
-                    name,
-                    editionId,
-                    expectedRevision);
+            var result = await compositions.CreateDesignedPageAsync(
+                ctx.ProjectId,
+                chapterId,
+                blockIndex,
+                name,
+                expectedRevision,
+                initialContent);
             ctx.OnMutated();
             return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Manuscript.Revision, summary = imageId is null ? "Inserted one Designed Page." : "Inserted one Designed Page with its initial artwork.", changedIds = new[] { result.BlockId }, variantId = result.Variant?.Id, initialImageId = imageId, layoutMode = layoutMode.ToString(), mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant?.Id } });
         }
@@ -1262,9 +1224,9 @@ public sealed class OutlineCollaborationTools(
         return result;
     }
 
-    private async Task<string> GetOrCreateCompositionVariantAsync(OutlineCollaborationContext ctx, Guid compositionId, Guid editionId)
+    private async Task<string> GetOrCreateCompositionVariantAsync(OutlineCollaborationContext ctx, Guid compositionId)
     {
-        try { var variant = await compositions.GetOrCreateVariantAsync(ctx.ProjectId, compositionId, editionId); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "Exact geometry variant is ready.", mutation = new { kind = "pageComposition", id = compositionId, selectId = variant.Id } }); }
+        try { var variant = await compositions.GetOrCreateAuthoringVariantAsync(ctx.ProjectId, compositionId); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "Authoring layout is ready.", mutation = new { kind = "pageComposition", id = compositionId, selectId = variant.Id } }); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "INVALID_TARGET", targetId = compositionId, summary = ex.Message }); }
     }
 
@@ -1310,52 +1272,17 @@ public sealed class OutlineCollaborationTools(
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = stageId, summary = ex.Message }); }
     }
 
-    private async Task<string> ReadCoverCompositionAsync(OutlineCollaborationContext ctx, Guid editionId, int objectStart, int objectCount, int structureStart, int structureCount)
-    {
-        try { var cover = await covers.GetAsync(ctx.ProjectId, editionId); var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions) ?? new CompositionScene(); objectStart = Math.Clamp(objectStart, 0, scene.Objects.Count); objectCount = Math.Clamp(objectCount, 1, 50); structureStart = Math.Max(0, structureStart); structureCount = Math.Clamp(structureCount, 1, 50); var objects = scene.Objects.Skip(objectStart).Take(objectCount).ToList(); return JsonSerializer.Serialize(new { ok = true, targetId = cover.Id, editionId, revision = cover.Revision, summary = $"{scene.Objects.Count} cover object(s).", cover.Template, cover.Diagnostics, scene.SchemaVersion, scene.Surface, layers = scene.Layers.Skip(structureStart).Take(structureCount), styles = scene.Styles.Skip(structureStart).Take(structureCount), guides = scene.Guides.Skip(structureStart).Take(structureCount), objects, continuation = new { objects = new { start = objectStart, returned = objects.Count, total = scene.Objects.Count, hasMore = objectStart + objects.Count < scene.Objects.Count, nextStart = objectStart + objects.Count < scene.Objects.Count ? objectStart + objects.Count : (int?)null }, structure = new { start = structureStart, count = structureCount, layerTotal = scene.Layers.Count, styleTotal = scene.Styles.Count, guideTotal = scene.Guides.Count } } }); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "COVER_READ_FAILED", targetId = editionId, summary = ex.Message }); }
-    }
-
-    private async Task<string> PatchCoverCompositionElementAsync(OutlineCollaborationContext ctx, Guid editionId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch)
-    {
-        try { var cover = await covers.PatchElementAsync(ctx.ProjectId, editionId, expectedRevision, targetKind, targetId, patch); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId, revision = cover.Revision, changedIds = new[] { targetId }, summary = $"Patched cover {targetKind} {targetId:N}.", mutation = new { kind = "cover", id = editionId } }); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = ex is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PATCH_REJECTED", targetId, summary = ex.Message, recovery = "Reread the cover and retry only the requested fields." }); }
-    }
-
-    private async Task<string> StageCoverCompositionAsync(OutlineCollaborationContext ctx, Guid editionId, long expectedRevision, CompositionScene scene)
-    {
-        try { var stage = await covers.StageSceneAsync(ctx.ProjectId, ctx.ConversationId, editionId, expectedRevision, scene); return JsonSerializer.Serialize(new { ok = true, targetId = editionId, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {scene.Objects.Count} cover object(s)." }); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "COVER_STAGE_REJECTED", targetId = editionId, summary = ex.Message }); }
-    }
-
-    private async Task<string> ApplyCoverCompositionStageAsync(OutlineCollaborationContext ctx, Guid stageId, long expectedRevision)
-    {
-        try { var cover = await covers.ApplySceneStageAsync(ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = cover.Id, revision = cover.Revision, summary = "Staged cover composition applied.", mutation = new { kind = "cover", id = cover.EditionId } }); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "COVER_STAGE_REJECTED", targetId = stageId, summary = ex.Message }); }
-    }
-
     private static string CompactText(string value, int maximum) =>
         value.Length <= maximum ? value : value[..maximum] + "…";
 
-    private async Task<string> ReadLayoutGenerationTargetAsync(OutlineCollaborationContext ctx, Guid editionId, string targetKind, Guid targetId, Guid? variantId)
+    private async Task<string> ReadLayoutGenerationTargetAsync(OutlineCollaborationContext ctx, string targetKind, Guid targetId, Guid? variantId)
     {
-        try { return JsonSerializer.Serialize(new { ok = true, descriptor = await compositions.DescribeGenerationTargetAsync(ctx.ProjectId, editionId, targetKind, targetId, variantId) }); }
+        try { return JsonSerializer.Serialize(new { ok = true, descriptor = await compositions.DescribeAuthoringGenerationTargetAsync(ctx.ProjectId, targetKind, targetId, variantId) }); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "INVALID_TARGET", targetId, summary = ex.Message }); }
-    }
-
-    private async Task<string> ValidateCompositionAsync(OutlineCollaborationContext ctx, Guid editionId, Guid variantId)
-    {
-        try
-        {
-            var result = await compositions.ValidateVariantAsync(ctx.ProjectId, editionId, variantId);
-            return JsonSerializer.Serialize(new { ok = result.ErrorCount == 0, targetId = result.TargetId, revision = result.Revision, summary = $"Validation found {result.ErrorCount} error(s) and {result.WarningCount} warning(s).", diagnosticCounts = new { errors = result.ErrorCount, warnings = result.WarningCount }, diagnostics = result.Diagnostics });
-        }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "VALIDATION_FAILED", targetId = variantId, summary = ex.Message }); }
     }
 
     private async Task<string> QueueLayoutBoundImageAsync(
         OutlineCollaborationContext context,
-        Guid editionId,
         string targetKind,
         Guid targetId,
         Guid? variantId,
@@ -1372,7 +1299,7 @@ public sealed class OutlineCollaborationTools(
                 context.ProjectId,
                 brief,
                 references,
-                new ImageGenerationTarget { EditionId = editionId, TargetKind = targetKind, TargetId = targetId, VariantId = variantId },
+                new ImageGenerationTarget { TargetKind = targetKind, TargetId = targetId, VariantId = variantId },
                 cancellationToken);
             var job = await imageJobs.CreateGenerateJobAsync(
                 context.ProjectId,

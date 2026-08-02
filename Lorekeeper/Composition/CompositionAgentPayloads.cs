@@ -53,7 +53,6 @@ public static class CompositionAgentPayloads
                 scene.Surface,
                 layers = scene.Layers.Skip(structureStart).Take(structureCount),
                 styles = scene.Styles.Skip(structureStart).Take(structureCount),
-                guides = scene.Guides.Skip(structureStart).Take(structureCount),
                 objects = objectPage,
             },
             semanticBlocks = semanticPage,
@@ -63,7 +62,6 @@ public static class CompositionAgentPayloads
             {
                 layers = Continuation(structureStart, Math.Min(structureCount, Math.Max(0, scene.Layers.Count - structureStart)), scene.Layers.Count),
                 styles = Continuation(structureStart, Math.Min(structureCount, Math.Max(0, scene.Styles.Count - structureStart)), scene.Styles.Count),
-                guides = Continuation(structureStart, Math.Min(structureCount, Math.Max(0, scene.Guides.Count - structureStart)), scene.Guides.Count),
             },
         }, ManuscriptCodec.JsonOptions);
     }

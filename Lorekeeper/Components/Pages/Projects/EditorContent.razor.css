@@ -1122,3 +1122,7 @@
 .editor-column-splitter.editor-column-splitter--active::before { background: var(--lk-accent); }
 .editor-pane-tab { background: var(--lk-soft); color: var(--lk-accent); }
 .index-status { color: var(--lk-muted); }
+.chapter-pages-mode { display: flex; min-height: 0; height: 100%; flex-direction: column; }
+.chapter-pages-selector { display: flex; gap: .45rem; align-items: center; padding: .45rem .65rem; border-bottom: 1px solid var(--lk-line); background: var(--lk-soft); }
+.chapter-pages-selector select { width: min(22rem, 50vw); }
+.chapter-pages-mode ::deep .composition-workspace { flex: 1; border: 0; border-radius: 0; }

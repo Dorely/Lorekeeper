@@ -742,36 +742,24 @@ where
                     source.width as f32 * image.source_width_fraction.clamp(0.01, 1.0);
                 let source_fraction = image.source_width_fraction.clamp(0.01, 1.0);
                 let source_left = image.source_left_fraction.clamp(0.0, 1.0);
-                let (drawn_width, drawn_height, drawn_x, drawn_y) =
-                    if image.fit == LayoutImageFit::Fill {
-                        let drawn_width = image.width / source_fraction;
-                        (
-                            drawn_width,
-                            image.height,
-                            -image.width / 2.0 - drawn_width * source_left,
-                            -image.height / 2.0,
-                        )
-                    } else {
-                        let width_scale = image.width / source_width;
-                        let height_scale = image.height / source.height as f32;
-                        let scale = if image.fit == LayoutImageFit::Contain {
-                            width_scale.min(height_scale)
-                        } else {
-                            width_scale.max(height_scale)
-                        };
-                        let drawn_width = source.width as f32 * scale;
-                        let drawn_height = source.height as f32 * scale;
-                        let visible_width = source_width * scale;
-                        let drawn_x = if source_fraction < 1.0 {
-                            -image.width / 2.0 - drawn_width * source_left
-                        } else {
-                            -image.width / 2.0
-                                + (image.width - visible_width) * image.focal_x.clamp(0.0, 1.0)
-                        };
-                        let drawn_y = -image.height / 2.0
-                            + (image.height - drawn_height) * (1.0 - image.focal_y.clamp(0.0, 1.0));
-                        (drawn_width, drawn_height, drawn_x, drawn_y)
-                    };
+                let width_scale = image.width / source_width;
+                let height_scale = image.height / source.height as f32;
+                let scale = if image.fit == LayoutImageFit::Contain {
+                    width_scale.min(height_scale)
+                } else {
+                    width_scale.max(height_scale)
+                };
+                let drawn_width = source.width as f32 * scale;
+                let drawn_height = source.height as f32 * scale;
+                let visible_width = source_width * scale;
+                let drawn_x = if source_fraction < 1.0 {
+                    -image.width / 2.0 - drawn_width * source_left
+                } else {
+                    -image.width / 2.0
+                        + (image.width - visible_width) * image.focal_x.clamp(0.0, 1.0)
+                };
+                let drawn_y = -image.height / 2.0
+                    + (image.height - drawn_height) * (1.0 - image.focal_y.clamp(0.0, 1.0));
                 let name = format!("Im{}", image_ref.get());
                 content.save_state();
                 apply_opacity(&mut content, image.opacity);

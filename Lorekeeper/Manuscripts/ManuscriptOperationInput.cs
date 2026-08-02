@@ -15,7 +15,8 @@ public sealed record ManuscriptOperationInput(
     string? Value = null,
     Guid? ImageId = null,
     string? AltText = null,
-    int? HeadingLevel = null)
+    int? HeadingLevel = null,
+    ParagraphPresentation? ParagraphPresentation = null)
 {
     public static IReadOnlyList<ManuscriptOperation> ToOperations(
         IReadOnlyList<ManuscriptOperationInput> operations) =>
@@ -47,6 +48,9 @@ public sealed record ManuscriptOperationInput(
                     ParseEnum<ManuscriptMarkType>(operation.Mark, "mark"),
                     operation.Enabled ?? true,
                     operation.Value),
+                "setparagraphpresentation" => new SetParagraphPresentation(
+                    Required(operation.BlockId, "blockId"),
+                    operation.ParagraphPresentation),
                 _ => throw new ArgumentException($"Unsupported manuscript operation '{operation.Operation}'."),
             })
             .ToList();

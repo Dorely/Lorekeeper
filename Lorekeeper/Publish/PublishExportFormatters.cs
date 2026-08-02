@@ -679,8 +679,8 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                     .Append("\" opacity=\"").Append(item.Opacity.ToString(CultureInfo.InvariantCulture)).Append("\" transform=\"").Append(transform).Append("\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"width:100%;height:100%;overflow:hidden\"><img alt=\"")
                     .Append(Html(item.Decorative ? string.Empty : item.AltText)).Append("\" src=\"").Append(Html(Path.GetFileName(image.Href)))
                     .Append("\" style=\"display:block;width:100%;height:100%;object-fit:").Append(ImageFitCss(item.ImageFit))
-                    .Append(";object-position:").Append(item.FocalXPercent.ToString(CultureInfo.InvariantCulture)).Append("% ")
-                    .Append(item.FocalYPercent.ToString(CultureInfo.InvariantCulture)).Append("%\"/></div></foreignObject>");
+                    .Append(";object-position:").Append(item.CropXPercent.ToString(CultureInfo.InvariantCulture)).Append("% ")
+                    .Append(item.CropYPercent.ToString(CultureInfo.InvariantCulture)).Append("%\"/></div></foreignObject>");
             }
             else if (item.Kind == CompositionObjectKind.Text)
             {
@@ -763,7 +763,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             {
                 var item = ResolveCompositionStyle(cover.Scene, sceneItem);
                 var style = FormattableString.Invariant(
-                    $"left:{item.Bounds.XPercent}%;top:{item.Bounds.YPercent}%;width:{item.Bounds.WidthPercent}%;height:{item.Bounds.HeightPercent}%;opacity:{item.Opacity};transform:rotate({item.RotationDegrees}deg);z-index:{item.ZIndex};color:{item.FillColor};background:{BackgroundCss(item.BackgroundColor, item.BackgroundOpacity)};border:{item.StrokeWidthPoints}px solid {item.StrokeColor};font-family:{FontCssFamily(item.FontFamilyKey)};font-weight:{item.FontWeight};font-style:{(item.Italic ? "italic" : "normal")};font-size:{item.FontSizePoints}pt;line-height:{item.LineHeight};letter-spacing:{item.LetterSpacingEm}em;text-align:{(item.TextAlignment == CompositionTextAlignment.Center ? "center" : item.TextAlignment == CompositionTextAlignment.End ? "right" : "left")};align-items:{(item.VerticalAlignment == CompositionVerticalAlignment.Center ? "center" : item.VerticalAlignment == CompositionVerticalAlignment.Bottom ? "flex-end" : "flex-start")};text-shadow:{TextShadowCss(item.TextShadow)};object-fit:{ImageFitCss(item.ImageFit)};object-position:{item.FocalXPercent}% {item.FocalYPercent}%");
+                    $"left:{item.Bounds.XPercent}%;top:{item.Bounds.YPercent}%;width:{item.Bounds.WidthPercent}%;height:{item.Bounds.HeightPercent}%;opacity:{item.Opacity};transform:rotate({item.RotationDegrees}deg);z-index:{item.ZIndex};color:{item.FillColor};background:{BackgroundCss(item.BackgroundColor, item.BackgroundOpacity)};border:{item.StrokeWidthPoints}px solid {item.StrokeColor};font-family:{FontCssFamily(item.FontFamilyKey)};font-weight:{item.FontWeight};font-style:{(item.Italic ? "italic" : "normal")};font-size:{item.FontSizePoints}pt;line-height:{item.LineHeight};letter-spacing:{item.LetterSpacingEm}em;text-align:{(item.TextAlignment == CompositionTextAlignment.Center ? "center" : item.TextAlignment == CompositionTextAlignment.End ? "right" : "left")};align-items:{(item.VerticalAlignment == CompositionVerticalAlignment.Center ? "center" : item.VerticalAlignment == CompositionVerticalAlignment.Bottom ? "flex-end" : "flex-start")};text-shadow:{TextShadowCss(item.TextShadow)};object-fit:{ImageFitCss(item.ImageFit)};object-position:{item.CropXPercent}% {item.CropYPercent}%");
                 if (item.Kind == CompositionObjectKind.Text)
                 {
                     var text = item.TextBinding switch
@@ -904,9 +904,9 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 figureCss += presentation.Alignment switch { FigureAlignment.Start => "margin-left:0;margin-right:auto;", FigureAlignment.End => "margin-left:auto;margin-right:0;", _ => "margin-left:auto;margin-right:auto;" };
             if (presentation.Placement == FigurePlacementIntent.FullBleed)
                 figureCss += "width:100vw;max-width:none;margin-left:calc(50% - 50vw);";
-            var objectFit = presentation.Fit switch { FigureImageFit.Contain => "contain", FigureImageFit.Fill => "fill", _ => "cover" };
+            var objectFit = presentation.Fit == FigureImageFit.Contain ? "contain" : "cover";
             var frameHeight = presentation.Placement is FigurePlacementIntent.DedicatedPage or FigurePlacementIntent.FullBleed ? "75vh" : "40vh";
-            var imageCss = $"display:block;width:100%;height:100%;object-fit:{objectFit};object-position:{presentation.FocalXPercent.ToString(CultureInfo.InvariantCulture)}% {presentation.FocalYPercent.ToString(CultureInfo.InvariantCulture)}%;";
+            var imageCss = $"display:block;width:100%;height:100%;object-fit:{objectFit};object-position:{presentation.CropXPercent.ToString(CultureInfo.InvariantCulture)}% {presentation.CropYPercent.ToString(CultureInfo.InvariantCulture)}%;";
             var alt = placement.Decorative ? string.Empty : placement.AltText;
             var caption = string.IsNullOrWhiteSpace(placement.Caption) || presentation.CaptionPlacement == FigureCaptionPlacement.Hidden
                 ? string.Empty
@@ -970,8 +970,8 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                     sb.Append(" role=\"presentation\" aria-hidden=\"true\"");
                 sb.Append(" style=\"").Append(style)
                     .Append(";object-fit:").Append(ImageFitCss(item.ImageFit)).Append(";object-position:")
-                    .Append(item.FocalXPercent.ToString(CultureInfo.InvariantCulture)).Append("% ")
-                    .Append(item.FocalYPercent.ToString(CultureInfo.InvariantCulture)).AppendLine("%\" />");
+                    .Append(item.CropXPercent.ToString(CultureInfo.InvariantCulture)).Append("% ")
+                    .Append(item.CropYPercent.ToString(CultureInfo.InvariantCulture)).AppendLine("%\" />");
             }
             else if (item.Kind == CompositionObjectKind.Text)
             {
@@ -1524,12 +1524,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         _ => "none",
     };
 
-    private static string ImageFitCss(FigureImageFit fit) => fit switch
-    {
-        FigureImageFit.Contain => "contain",
-        FigureImageFit.Fill => "fill",
-        _ => "cover",
-    };
+    private static string ImageFitCss(FigureImageFit fit) => fit == FigureImageFit.Contain ? "contain" : "cover";
 
     internal static string RenderSemanticInlineRules() =>
         ".small-caps { font-variant-caps: small-caps; }";
@@ -1819,19 +1814,36 @@ internal static class SemanticPublishFormatting
         var language = string.IsNullOrWhiteSpace(block.Language)
             ? string.Empty
             : $" lang=\"{WebUtility.HtmlEncode(block.Language)}\" xml:lang=\"{WebUtility.HtmlEncode(block.Language)}\"";
+        var presentation = ParagraphPresentationAttribute(block.ParagraphPresentation);
         return block.Type switch
         {
             ManuscriptBlockType.Heading =>
-                $"<h{block.HeadingLevel ?? 2} id=\"{anchor}\" data-style-role=\"{role}\"{language}>{content}</h{block.HeadingLevel ?? 2}>",
+                $"<h{block.HeadingLevel ?? 2} id=\"{anchor}\" data-style-role=\"{role}\"{language}{presentation}>{content}</h{block.HeadingLevel ?? 2}>",
             ManuscriptBlockType.SceneBreak =>
                 $"<hr id=\"{anchor}\" class=\"scene-break\" data-style-role=\"{role}\" />",
             ManuscriptBlockType.BlockQuote =>
-                $"<blockquote id=\"{anchor}\" data-style-role=\"{role}\"{language}>{content}</blockquote>",
+                $"<blockquote id=\"{anchor}\" data-style-role=\"{role}\"{language}{presentation}>{content}</blockquote>",
             ManuscriptBlockType.ListItem =>
-                $"<ul><li id=\"{anchor}\" data-style-role=\"{role}\"{language}>{content}</li></ul>",
+                $"<ul><li id=\"{anchor}\" data-style-role=\"{role}\"{language}{presentation}>{content}</li></ul>",
             ManuscriptBlockType.Figure => HtmlFigure(block, content, role, anchor, imageHref),
-            _ => $"<p id=\"{anchor}\" data-style-role=\"{role}\"{language}>{content}</p>",
+            _ => $"<p id=\"{anchor}\" data-style-role=\"{role}\"{language}{presentation}>{content}</p>",
         };
+    }
+
+    private static string ParagraphPresentationAttribute(ParagraphPresentation? presentation)
+    {
+        if (presentation is null) return string.Empty;
+        var declarations = new List<string>();
+        if (presentation.Alignment is { } alignment)
+            declarations.Add($"text-align:{alignment switch { ParagraphAlignment.Start => "start", ParagraphAlignment.End => "end", ParagraphAlignment.Center => "center", _ => "justify" }}");
+        if (presentation.LeftIndentEm is { } left) declarations.Add($"margin-left:{left:R}em");
+        if (presentation.RightIndentEm is { } right) declarations.Add($"margin-right:{right:R}em");
+        if (presentation.FirstLineIndentEm is { } first) declarations.Add($"text-indent:{first:R}em");
+        if (presentation.SpacingBeforePoints is { } before) declarations.Add($"margin-top:{before:R}pt");
+        if (presentation.SpacingAfterPoints is { } after) declarations.Add($"margin-bottom:{after:R}pt");
+        if (presentation.StartOnNewPage == true) declarations.Add("break-before:page");
+        if (presentation.KeepWithNext == true) declarations.Add("break-after:avoid");
+        return declarations.Count == 0 ? string.Empty : $" style=\"{string.Join(';', declarations)}\"";
     }
 
     internal static string HtmlInlineContent(ManuscriptBlock block) =>
@@ -1872,7 +1884,7 @@ internal static class SemanticPublishFormatting
         if (presentation.Placement == FigurePlacementIntent.FullBleed)
             figureStyle.Append("width:100%;max-width:100%;");
         var frameHeight = presentation.Placement is FigurePlacementIntent.DedicatedPage or FigurePlacementIntent.FullBleed ? "75vh" : "40vh";
-        var imageStyle = $"display:block;width:100%;height:100%;object-fit:{presentation.Fit.ToString().ToLowerInvariant()};object-position:{presentation.FocalXPercent.ToString(CultureInfo.InvariantCulture)}% {presentation.FocalYPercent.ToString(CultureInfo.InvariantCulture)}%;";
+        var imageStyle = $"display:block;width:100%;height:100%;object-fit:{presentation.Fit.ToString().ToLowerInvariant()};object-position:{presentation.CropXPercent.ToString(CultureInfo.InvariantCulture)}% {presentation.CropYPercent.ToString(CultureInfo.InvariantCulture)}%;";
         var image = $"<div class=\"figure-media\" style=\"position:relative;width:100%;height:{frameHeight};overflow:hidden\"><img src=\"{WebUtility.HtmlEncode(href)}\" alt=\"{WebUtility.HtmlEncode(block.Decorative ? string.Empty : block.AltText)}\"{decorative} style=\"{imageStyle}\" />{(presentation.CaptionPlacement == FigureCaptionPlacement.Overlay ? $"<div class=\"figure-overlay-caption\" style=\"position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.65);color:white;padding:.5em\">{content}</div>" : string.Empty)}</div>";
         var contents = presentation.CaptionPlacement == FigureCaptionPlacement.Above ? caption + image : image + (presentation.CaptionPlacement == FigureCaptionPlacement.Overlay ? string.Empty : caption);
         return $"<figure id=\"{anchor}\" data-style-role=\"{role}\" data-accessibility-role=\"{(block.AccessibilityRole ?? FigureAccessibilityRole.Figure).ToString().ToLowerInvariant()}\"{language} style=\"{figureStyle}\">{contents}</figure>";

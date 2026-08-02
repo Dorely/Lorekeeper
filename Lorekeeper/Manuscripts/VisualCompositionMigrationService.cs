@@ -470,7 +470,7 @@ public sealed class VisualCompositionMigrationService(
                 ImageFit = image.Fit switch
                 {
                     ChapterImageFit.Contain => FigureImageFit.Contain,
-                    ChapterImageFit.Fill => FigureImageFit.Fill,
+                    ChapterImageFit.Fill => FigureImageFit.Contain,
                     _ => FigureImageFit.Cover,
                 },
                 Opacity = Math.Clamp(image.Opacity, 0, 1),
@@ -916,7 +916,7 @@ public sealed class VisualCompositionMigrationService(
             canonical.AddRange(scene.Objects.OrderBy(item => item.Id).Select(item => string.Join('|',
                 item.Id, item.Kind, item.Bounds.XPercent, item.Bounds.YPercent, item.Bounds.WidthPercent,
                 item.Bounds.HeightPercent, item.RotationDegrees, item.Opacity, item.ZIndex, item.Visible,
-                item.Locked, item.ImageId, item.ImageFit, item.FocalXPercent, item.FocalYPercent,
+                item.Locked, item.ImageId, item.ImageFit, item.CropXPercent, item.CropYPercent,
                 item.AltText, item.Decorative, item.AccessibilityDecisionPending, item.Language,
                 item.SemanticRole, item.ReadingOrder, item.FontFamilyKey,
                 item.FontWeight, item.Italic, item.FontSizePoints, item.LetterSpacingEm, item.LineHeight,

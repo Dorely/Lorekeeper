@@ -48,10 +48,14 @@
                 }
                 <div class="cover-add-row">
                     <button type="button" @onclick="() => AddObject(CompositionObjectKind.Text)">Text</button>
-                    <button type="button" @onclick="() => AddObject(CompositionObjectKind.Image)">Image</button>
                     <button type="button" @onclick="() => AddObject(CompositionObjectKind.Rectangle)">Rectangle</button>
                     <button type="button" @onclick="() => AddObject(CompositionObjectKind.Ellipse)">Ellipse</button>
                     <button type="button" @onclick="() => AddObject(CompositionObjectKind.Line)">Line</button>
+                </div>
+                <div class="cover-image-add">
+                    <select @bind="_newImageId"><option value="">Choose project artwork</option>@foreach (var image in _images) { <option value="@image.Id">@image.FileName</option> }</select>
+                    <select @bind="_newImageFit"><option value="@FigureImageFit.Contain">Show whole image</option><option value="@FigureImageFit.Cover">Fill frame</option></select>
+                    <button type="button" disabled="@(_newImageId is null)" @onclick="AddImageObject">Add image</button>
                 </div>
                 @foreach (var item in _objects.OrderByDescending(item => item.ZIndex))
                 {
@@ -69,7 +73,7 @@
             </aside>
 
             <section class="cover-stage-shell">
-                <div class="cover-toolbar"><button type="button" @onclick="Undo" disabled="@(_undo.Count == 0)">Undo</button><button type="button" @onclick="Redo" disabled="@(_redo.Count == 0)">Redo</button><button type="button" @onclick="() => _zoom = Math.Max(.3, _zoom - .1)">-</button><span>@Math.Round(_zoom * 100)%</span><button type="button" @onclick="() => _zoom = Math.Min(1.6, _zoom + .1)">+</button><label><input type="checkbox" @bind="_snap" /> Snap</label><label><input type="checkbox" @bind="_guides" /> Guides</label></div>
+                <div class="cover-toolbar"><button type="button" @onclick="Undo" disabled="@(_undo.Count == 0)">Undo</button><button type="button" @onclick="Redo" disabled="@(_redo.Count == 0)">Redo</button>@if (Selected is { Kind: CompositionObjectKind.Image, ImageFit: FigureImageFit.Cover }) { <button type="button" class="@(_cropReposition ? "selected" : null)" @onclick="() => _cropReposition = !_cropReposition">@(_cropReposition ? "Finish crop" : "Reposition crop")</button> }<button type="button" @onclick="() => _zoom = Math.Max(.3, _zoom - .1)">-</button><span>@Math.Round(_zoom * 100)%</span><button type="button" @onclick="() => _zoom = Math.Min(1.6, _zoom + .1)">+</button><label><input type="checkbox" @bind="_snap" /> Snap</label><label><input type="checkbox" @bind="_guides" /> Guides</label></div>
                 <div class="cover-stage" style="@StageStyle()" @ref="_stageElement" @onclick="() => _selectedId = null" @onpointermove="ContinueTransform" @onpointerup="EndTransform" @onpointercancel="EndTransform">
                     @if (_guides) { <div class="cover-guide cover-guide-x"></div><div class="cover-guide cover-guide-y"></div> }
                     <div class="cover-safe"></div>
@@ -82,15 +86,15 @@
                     }
                     @foreach (var item in _objects.Where(IsVisible))
                     {
-                        <div role="button" tabindex="0" class="cover-object cover-object--@item.Kind.ToString().ToLowerInvariant() @(item.Id == _selectedId ? "selected" : null)" style="@ObjectStyle(item)" @onclick:stopPropagation="true" @onclick="() => _selectedId = item.Id" @onpointerdown:stopPropagation="true" @onpointerdown="e => BeginTransformAsync(e, item, CoverTransformMode.Move)">
+                        <div role="button" tabindex="0" class="cover-object cover-object--@item.Kind.ToString().ToLowerInvariant() @(item.Id == _selectedId ? "selected" : null)" style="@ObjectStyle(item)" @onclick:stopPropagation="true" @onclick="() => _selectedId = item.Id" @onpointerdown:stopPropagation="true" @onpointerdown:preventDefault="true" @onpointerdown="e => BeginTransformAsync(e, item, _cropReposition && item.Kind == CompositionObjectKind.Image && item.ImageFit == FigureImageFit.Cover ? CoverTransformMode.Crop : CoverTransformMode.Move)">
                             @if (item.Kind == CompositionObjectKind.Text) { <span>@BoundText(item)</span> }
-                            else if (item.Kind == CompositionObjectKind.Image && item.ImageId is Guid imageId && Image(imageId) is { } image) { <img src="@image.PreviewUrl" alt="" style="@ImageStyle(item)" /> }
+                            else if (item.Kind == CompositionObjectKind.Image && item.ImageId is Guid imageId && Image(imageId) is { } image) { <img src="@image.PreviewUrl" alt="" draggable="false" style="@ImageStyle(item)" /> }
                             else if (item.Kind == CompositionObjectKind.Image) { <span>Choose artwork</span> }
                             else if (item.Kind == CompositionObjectKind.Line) { <span class="cover-line" style="@LineStyle(item)"></span> }
                             @if (item.Id == _selectedId && !IsLocked(item))
                             {
-                                <span class="cover-handle cover-handle-resize" title="Drag to resize" @onpointerdown:stopPropagation="true" @onpointerdown="e => BeginTransformAsync(e, item, CoverTransformMode.Resize)"></span>
-                                <span class="cover-handle cover-handle-rotate" title="Drag to rotate" @onpointerdown:stopPropagation="true" @onpointerdown="e => BeginTransformAsync(e, item, CoverTransformMode.Rotate)"></span>
+                                <span class="cover-handle cover-handle-resize" title="Drag to resize" @onpointerdown:stopPropagation="true" @onpointerdown:preventDefault="true" @onpointerdown="e => BeginTransformAsync(e, item, CoverTransformMode.Resize)"></span>
+                                <span class="cover-handle cover-handle-rotate" title="Drag to rotate" @onpointerdown:stopPropagation="true" @onpointerdown:preventDefault="true" @onpointerdown="e => BeginTransformAsync(e, item, CoverTransformMode.Rotate)"></span>
                             }
                         </div>
                     }
@@ -117,8 +121,10 @@
                         <a class="btn btn-sm btn-outline-primary" href="@GenerationUrl("cover-frame", selected.Id)">Generate for this frame</a>
                         <label>Project artwork<select value="@selected.ImageId" @onchange="e => SelectImage(selected, e)"><option value="">Choose artwork</option>@foreach (var image in _images) { <option value="@image.Id">@image.FileName</option> }</select></label>
                         <label>Fit<select value="@selected.ImageFit" @onchange="e => Patch(selected with { ImageFit = Enum.Parse<FigureImageFit>(e.Value!.ToString()!) })">@foreach (var fit in Enum.GetValues<FigureImageFit>()) { <option value="@fit">@fit</option> }</select></label>
-                        <label>Focal X<input type="range" min="0" max="100" value="@selected.FocalXPercent" @onchange="e => Patch(selected with { FocalXPercent = Number(e) })" /></label>
-                        <label>Focal Y<input type="range" min="0" max="100" value="@selected.FocalYPercent" @onchange="e => Patch(selected with { FocalYPercent = Number(e) })" /></label>
+                        @if (selected.ImageFit == FigureImageFit.Cover)
+                        {
+                            <button type="button" class="@(_cropReposition ? "selected" : null)" @onclick="() => _cropReposition = !_cropReposition">@(_cropReposition ? "Finish repositioning" : "Reposition crop")</button>
+                        }
                         <label>Alternative text<textarea value="@selected.AltText" @onchange="e => SetAltText(selected, e.Value?.ToString() ?? string.Empty)"></textarea></label>
                         <label><input type="checkbox" checked="@selected.Decorative" @onchange="e => SetDecorative(selected, (bool)e.Value!)" /> Decorative artwork</label>
                     }
@@ -166,7 +172,9 @@
     private List<CompositionObject> _objects = []; private List<CompositionLayer> _layers = []; private List<CompositionObjectStyle> _styles = []; private IReadOnlyList<ProjectImageView> _images = []; private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = []; private Guid? _selectedId; private Guid? _selectedLayerId; private readonly HashSet<Guid> _groupSelection = [];
     private readonly Stack<WorkspaceSnapshot> _undo = new(); private readonly Stack<WorkspaceSnapshot> _redo = new();
     private Guid _loadedProjectId; private Guid _loadedEditionId;
-    private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private string? _error; private bool _dirty, _saving, _snap = true, _guides = true; private double _zoom = .8;
+    private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private string? _error; private bool _dirty, _saving, _snap = true, _guides = true, _cropReposition; private double _zoom = .8;
+    private Guid? _newImageId;
+    private FigureImageFit _newImageFit = FigureImageFit.Contain;
     private ElementReference _stageElement; private IJSObjectReference? _workspaceModule; private CoverTransformState? _transform;
     private CompositionObject? Selected => _objects.FirstOrDefault(item => item.Id == _selectedId);
     private bool IsPrint => _edition?.Format == PublicationEditionFormat.Paperback;
@@ -185,7 +193,21 @@
     private void Patch(CompositionObject item) { Snapshot(); var index = _objects.FindIndex(candidate => candidate.Id == item.Id); if (index >= 0) _objects[index] = item; _dirty = true; }
     private void PatchBounds(CompositionObject item, double? x = null, double? y = null, double? width = null, double? height = null) => Patch(item with { Bounds = item.Bounds with { XPercent = Snap(x ?? item.Bounds.XPercent), YPercent = Snap(y ?? item.Bounds.YPercent), WidthPercent = Snap(width ?? item.Bounds.WidthPercent), HeightPercent = Snap(height ?? item.Bounds.HeightPercent) } });
     private double Snap(double value) => _snap ? Math.Round(value * 2, MidpointRounding.AwayFromZero) / 2 : value;
-    private void AddObject(CompositionObjectKind kind) { if (_scene is null) return; Snapshot(); var semantic = kind is CompositionObjectKind.Text or CompositionObjectKind.Image; var item = new CompositionObject { Id = Guid.NewGuid(), LayerId = _selectedLayerId ?? _layers.First().Id, Kind = kind, Name = kind.ToString(), Bounds = new CompositionBounds { XPercent = 15, YPercent = 15, WidthPercent = 30, HeightPercent = 20 }, Decorative = !semantic, AccessibilityDecisionPending = kind == CompositionObjectKind.Image, SemanticRole = kind == CompositionObjectKind.Text ? CompositionSemanticRole.Paragraph : kind == CompositionObjectKind.Image ? CompositionSemanticRole.Figure : CompositionSemanticRole.Artifact, ReadingOrder = semantic ? NextReadingOrder() : null }; _objects.Add(item); _selectedId = item.Id; _dirty = true; }
+    private void AddObject(CompositionObjectKind kind) { if (_scene is null || kind == CompositionObjectKind.Image) return; Snapshot(); var semantic = kind == CompositionObjectKind.Text; var item = new CompositionObject { Id = Guid.NewGuid(), LayerId = _selectedLayerId ?? _layers.First().Id, Kind = kind, Name = kind.ToString(), Bounds = new CompositionBounds { XPercent = 15, YPercent = 15, WidthPercent = 30, HeightPercent = 20 }, Decorative = !semantic, SemanticRole = semantic ? CompositionSemanticRole.Paragraph : CompositionSemanticRole.Artifact, ReadingOrder = semantic ? NextReadingOrder() : null }; _objects.Add(item); _selectedId = item.Id; _dirty = true; }
+    private void AddImageObject()
+    {
+        if (_scene is null || _newImageId is not Guid imageId || !_images.Any(image => image.Id == imageId)) return;
+        Snapshot();
+        var item = new CompositionObject
+        {
+            Id = Guid.NewGuid(), LayerId = _selectedLayerId ?? _layers.First().Id,
+            Kind = CompositionObjectKind.Image, Name = "Artwork", ImageId = imageId,
+            ImageFit = _newImageFit, Bounds = new() { XPercent = 10, YPercent = 10, WidthPercent = 80, HeightPercent = 80 },
+            AccessibilityDecisionPending = true, SemanticRole = CompositionSemanticRole.Figure,
+            ReadingOrder = NextReadingOrder(),
+        };
+        _objects.Add(item); _selectedId = item.Id; _newImageId = null; _dirty = true;
+    }
     private void AddLayer() { Snapshot(); var layer = new CompositionLayer(Guid.NewGuid(), $"Layer {_layers.Count + 1}", _layers.Select(item => item.Order).DefaultIfEmpty(-1).Max() + 1); _layers.Add(layer); _selectedLayerId = layer.Id; _dirty = true; }
     private void ToggleLayerVisibility(CompositionLayer layer) { var index = _layers.FindIndex(item => item.Id == layer.Id); if (index >= 0) { Snapshot(); _layers[index] = layer with { Visible = !layer.Visible }; _dirty = true; } }
     private void ToggleLayerLock(CompositionLayer layer) { var index = _layers.FindIndex(item => item.Id == layer.Id); if (index >= 0) { Snapshot(); _layers[index] = layer with { Locked = !layer.Locked }; _dirty = true; } }
@@ -206,7 +228,11 @@
     private void MoveReadingOrder(CompositionObject item, int delta) { var ordered = _objects.Where(candidate => candidate.ReadingOrder is not null).OrderBy(candidate => candidate.ReadingOrder).ToList(); var index = ordered.FindIndex(candidate => candidate.Id == item.Id); var target = index + delta; if (index < 0 || target < 0 || target >= ordered.Count) return; Snapshot(); var other = ordered[target]; var order = item.ReadingOrder; _objects = _objects.Select(candidate => candidate.Id == item.Id ? candidate with { ReadingOrder = other.ReadingOrder } : candidate.Id == other.Id ? candidate with { ReadingOrder = order } : candidate).ToList(); _dirty = true; }
     private void Undo() { if (_undo.Count == 0) return; _redo.Push(Capture()); Restore(_undo.Pop()); _dirty = true; }
     private void Redo() { if (_redo.Count == 0) return; _undo.Push(Capture()); Restore(_redo.Pop()); _dirty = true; }
-    private void SelectImage(CompositionObject item, ChangeEventArgs e) => Patch(item with { ImageId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null });
+    private void SelectImage(CompositionObject item, ChangeEventArgs e)
+    {
+        if (Guid.TryParse(e.Value?.ToString(), out var id) && _images.Any(image => image.Id == id))
+            Patch(item with { ImageId = id });
+    }
     private void SetAltText(CompositionObject item, string altText) { altText = altText.Trim(); Patch(item with { AltText = altText, Decorative = false, AccessibilityDecisionPending = altText.Length == 0, SemanticRole = CompositionSemanticRole.Figure, ReadingOrder = item.ReadingOrder ?? NextReadingOrder() }); }
     private void SetDecorative(CompositionObject item, bool decorative) => Patch(item with { Decorative = decorative, AltText = decorative ? string.Empty : item.AltText, AccessibilityDecisionPending = !decorative && string.IsNullOrWhiteSpace(item.AltText), SemanticRole = decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure, ReadingOrder = decorative ? null : item.ReadingOrder ?? NextReadingOrder() });
     private int NextReadingOrder() => _objects.Where(o => o.ReadingOrder is not null).Select(o => o.ReadingOrder!.Value).DefaultIfEmpty().Max() + 1;
@@ -222,7 +248,7 @@
     private string BarcodeStyle => RegionStyle(_cover!.Template.BleedInches + .25, _cover.Template.FullHeightInches - _cover.Template.BleedInches - 1.45, 2, 1.2);
     private string RegionStyle(double x, double y, double w, double h) => FormattableString.Invariant($"left:{x / _cover!.Template.FullWidthInches * 100}%;top:{y / _cover.Template.FullHeightInches * 100}%;width:{w / _cover.Template.FullWidthInches * 100}%;height:{h / _cover.Template.FullHeightInches * 100}%");
     private string ObjectStyle(CompositionObject item) { var resolved = Resolved(item); var group = item.GroupId is Guid groupId ? _objects.FirstOrDefault(candidate => candidate.Id == groupId) : null; var bounds = group is null ? item.Bounds : EffectiveBounds(item, group); var rotation = item.RotationDegrees + (group?.RotationDegrees ?? 0); var background = item.Kind == CompositionObjectKind.Text ? CssColor(resolved.BackgroundColor, resolved.BackgroundOpacity) : item.Kind is CompositionObjectKind.Rectangle or CompositionObjectKind.Ellipse ? resolved.FillColor : "transparent"; var strokeCqw = resolved.StrokeWidthPoints / _scene!.Surface.WidthPoints * 100; var fontCqw = resolved.FontSizePoints / _scene.Surface.WidthPoints * 100; var border = item.Kind == CompositionObjectKind.Line ? "0" : $"{strokeCqw:R}cqw solid {resolved.StrokeColor}"; var radius = item.Kind == CompositionObjectKind.Ellipse ? "50%" : "0"; return FormattableString.Invariant($"left:{bounds.XPercent}%;top:{bounds.YPercent}%;width:{bounds.WidthPercent}%;height:{bounds.HeightPercent}%;opacity:{item.Opacity * (group?.Opacity ?? 1)};transform:rotate({rotation}deg);z-index:{item.ZIndex + (group?.ZIndex ?? 0)};background:{background};border:{border};border-radius:{radius};color:{resolved.FillColor};font-family:{FontCssName(resolved.FontFamilyKey)};font-size:{fontCqw:R}cqw;font-style:{(resolved.Italic ? "italic" : "normal")};font-weight:{resolved.FontWeight};line-height:{resolved.LineHeight};letter-spacing:{resolved.LetterSpacingEm}em;text-align:{CssTextAlignment(resolved.TextAlignment)};justify-content:{CssVerticalAlignment(resolved.VerticalAlignment)};text-shadow:{CssTextShadow(resolved.TextShadow)}"); }
-    private string ImageStyle(CompositionObject item) => FormattableString.Invariant($"width:100%;height:100%;object-fit:{(item.ImageFit == FigureImageFit.Contain ? "contain" : item.ImageFit == FigureImageFit.Fill ? "fill" : "cover")};object-position:{item.FocalXPercent}% {item.FocalYPercent}%");
+    private string ImageStyle(CompositionObject item) => FormattableString.Invariant($"width:100%;height:100%;object-fit:{(item.ImageFit == FigureImageFit.Contain ? "contain" : "cover")};object-position:{item.CropXPercent}% {item.CropYPercent}%");
     private string LineStyle(CompositionObject item) { var resolved = Resolved(item); return FormattableString.Invariant($"border-top:{resolved.StrokeWidthPoints / _scene!.Surface.WidthPoints * 100:R}cqw solid {resolved.StrokeColor}"); }
     private static string FontCssName(string key) => $"lk-{new string(key.Select(character => char.IsLetterOrDigit(character) ? character : '-').ToArray())}";
     private string FontFaceCss() => string.Join("\n", _fontFamilies.SelectMany(family => family.Faces.Select(face => $"@font-face{{font-family:{FontCssName(family.Key)};src:url('{face.ContentUrl.Replace("'", "%27", StringComparison.Ordinal)}');font-weight:{face.Weight};font-style:{(face.Italic ? "italic" : "normal")};font-display:swap;}}")));
@@ -238,17 +264,24 @@
     private sealed record WorkspaceSnapshot(List<CompositionObject> Objects, List<CompositionLayer> Layers, List<CompositionObjectStyle> Styles);
 
     protected override async Task OnAfterRenderAsync(bool firstRender) { if (firstRender) _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js"); }
-    private async Task BeginTransformAsync(PointerEventArgs e, CompositionObject item, CoverTransformMode mode) { if (IsLocked(item) || _workspaceModule is null) return; Snapshot(); _selectedId = item.Id; var bounds = item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group ? EffectiveBounds(item, group) : item.Bounds; var rect = await _workspaceModule.InvokeAsync<CoverStageRect>("begin", _stageElement, e.PointerId); _transform = new(item.Id, mode, e.ClientX, e.ClientY, bounds, item.Bounds, item.RotationDegrees, rect); }
-    private void ContinueTransform(PointerEventArgs e) { if (_transform is not { } state) return; var index = _objects.FindIndex(item => item.Id == state.ObjectId); if (index < 0) return; var item = _objects[index]; var dx = (e.ClientX - state.StartClientX) / Math.Max(1, state.Stage.Width) * 100; var dy = (e.ClientY - state.StartClientY) / Math.Max(1, state.Stage.Height) * 100; if (item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group) { dx = dx / Math.Max(.01, group.Bounds.WidthPercent) * 100; dy = dy / Math.Max(.01, group.Bounds.HeightPercent) * 100; } item = state.Mode switch { CoverTransformMode.Move => item with { Bounds = state.LocalBounds with { XPercent = Snap(state.LocalBounds.XPercent + dx), YPercent = Snap(state.LocalBounds.YPercent + dy) } }, CoverTransformMode.Resize => item with { Bounds = state.LocalBounds with { WidthPercent = Math.Max(.25, Snap(state.LocalBounds.WidthPercent + dx)), HeightPercent = Math.Max(.25, Snap(state.LocalBounds.HeightPercent + dy)) } }, CoverTransformMode.Rotate => item with { RotationDegrees = state.StartRotation + RotationDelta(e, state) }, _ => item }; _objects[index] = item; _dirty = true; }
+    private async Task BeginTransformAsync(PointerEventArgs e, CompositionObject item, CoverTransformMode mode) { if (IsLocked(item) || _workspaceModule is null) return; Snapshot(); _selectedId = item.Id; var bounds = item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group ? EffectiveBounds(item, group) : item.Bounds; var rect = await _workspaceModule.InvokeAsync<CoverStageRect>("begin", _stageElement, e.PointerId); _transform = new(item.Id, mode, e.ClientX, e.ClientY, bounds, item.Bounds, item.RotationDegrees, item.CropXPercent, item.CropYPercent, e.PointerId, rect); }
+    private void ContinueTransform(PointerEventArgs e) { if (_transform is not { } state) return; var index = _objects.FindIndex(item => item.Id == state.ObjectId); if (index < 0) return; var item = _objects[index]; var dx = (e.ClientX - state.StartClientX) / Math.Max(1, state.Stage.Width) * 100; var dy = (e.ClientY - state.StartClientY) / Math.Max(1, state.Stage.Height) * 100; if (item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group) { dx = dx / Math.Max(.01, group.Bounds.WidthPercent) * 100; dy = dy / Math.Max(.01, group.Bounds.HeightPercent) * 100; } item = state.Mode switch { CoverTransformMode.Move => item with { Bounds = state.LocalBounds with { XPercent = Snap(state.LocalBounds.XPercent + dx), YPercent = Snap(state.LocalBounds.YPercent + dy) } }, CoverTransformMode.Resize => item with { Bounds = state.LocalBounds with { WidthPercent = Math.Max(.25, Snap(state.LocalBounds.WidthPercent + dx)), HeightPercent = Math.Max(.25, Snap(state.LocalBounds.HeightPercent + dy)) } }, CoverTransformMode.Rotate => item with { RotationDegrees = state.StartRotation + RotationDelta(e, state) }, CoverTransformMode.Crop => item with { CropXPercent = Math.Clamp(state.StartCropX - dx * 2, 0, 100), CropYPercent = Math.Clamp(state.StartCropY - dy * 2, 0, 100) }, _ => item }; _objects[index] = item; _dirty = true; }
     private static double RotationDelta(PointerEventArgs e, CoverTransformState state) { var centerX = state.Stage.Left + (state.SurfaceBounds.XPercent + state.SurfaceBounds.WidthPercent / 2) / 100 * state.Stage.Width; var centerY = state.Stage.Top + (state.SurfaceBounds.YPercent + state.SurfaceBounds.HeightPercent / 2) / 100 * state.Stage.Height; return (Math.Atan2(e.ClientY - centerY, e.ClientX - centerX) - Math.Atan2(state.StartClientY - centerY, state.StartClientX - centerX)) * 180 / Math.PI; }
-    private void EndTransform(PointerEventArgs _) => _transform = null;
+    private async Task EndTransform(PointerEventArgs _)
+    {
+        if (_transform is not { } state) return;
+        _transform = null;
+        if (_workspaceModule is not null)
+            await _workspaceModule.InvokeVoidAsync("end", _stageElement, state.PointerId);
+        if (_dirty) await SaveAsync();
+    }
     public async ValueTask DisposeAsync()
     {
         if (_workspaceModule is null) return;
         try { await _workspaceModule.DisposeAsync(); }
         catch (JSDisconnectedException) { }
     }
-    private enum CoverTransformMode { Move, Resize, Rotate }
-    private sealed record CoverTransformState(Guid ObjectId, CoverTransformMode Mode, double StartClientX, double StartClientY, CompositionBounds SurfaceBounds, CompositionBounds LocalBounds, double StartRotation, CoverStageRect Stage);
+    private enum CoverTransformMode { Move, Resize, Rotate, Crop }
+    private sealed record CoverTransformState(Guid ObjectId, CoverTransformMode Mode, double StartClientX, double StartClientY, CompositionBounds SurfaceBounds, CompositionBounds LocalBounds, double StartRotation, double StartCropX, double StartCropY, long PointerId, CoverStageRect Stage);
     private sealed record CoverStageRect(double Left, double Top, double Width, double Height);
 }

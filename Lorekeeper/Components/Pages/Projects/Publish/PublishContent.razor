@@ -1,4 +1,5 @@
 @using Lorekeeper.Images
+@using Lorekeeper.Composition
 @using Lorekeeper.Manuscripts
 @using Lorekeeper.Models
 @using Lorekeeper.Publish
@@ -11,6 +12,7 @@
 @inject IPublicationPackageService Packages
 @inject IManuscriptStyleService ManuscriptStyles
 @inject IProjectImageService ProjectImages
+@inject ICompositionService Compositions
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
@@ -516,7 +518,7 @@ else
                                                            IsReadOnly="@IsArchivedEdition"
                                                            SaveAsync="SaveMatterDocumentAsync" />
                                     </div>
-                                    <small>Use the semantic toolbar for headings, named styles, marks, links, special characters, and project-image figures.</small>
+                                    <small>Use the semantic toolbar for headings, Book Text Styles, marks, links, special characters, and project-image figures.</small>
                                 </label>
                                 <div class="d-flex gap-2">
                                     <button class="btn btn-sm btn-primary" @onclick="SaveMatterAsync">Save matter</button>
@@ -541,7 +543,7 @@ else
                 <section class="publish-card" aria-labelledby="edition-style-title">
                     <div class="publish-card-heading">
                         <div><span class="publish-step">Styles</span><h2 id="edition-style-title">Edition style mappings</h2></div>
-                        <p>Override named manuscript styles for this edition without changing the source manuscript.</p>
+                        <p>Override Book Text Styles for this edition without changing the source manuscript.</p>
                     </div>
                     @foreach (var mapping in _workspace.StyleMappings)
                     {
@@ -554,7 +556,7 @@ else
                     }
                     <div class="publish-form-grid mt-2">
                         <select class="form-select" value="@_styleMappingStyleId" @onchange="SelectStyleMapping">
-                            <option value="">Choose named style</option>
+                            <option value="">Choose Book Text Style</option>
                             @foreach (var style in _namedStyles)
                             {
                                 <option value="@style.Id">@style.Name · @style.Kind</option>
@@ -1049,6 +1051,12 @@ else
                                                     @if (chapter.LayoutDiagnosticCount > 0)
                                                     {
                                                         <span class="publish-badge publish-badge-warning">@chapter.LayoutDiagnosticCount layout issue@(chapter.LayoutDiagnosticCount == 1 ? string.Empty : "s")</span>
+                                                        <button type="button"
+                                                                class="btn btn-sm btn-outline-primary"
+                                                                disabled="@(_layoutCreationChapterId is not null)"
+                                                                @onclick="() => CreateEditionLayoutsAsync(chapter.Id)">
+                                                            @(_layoutCreationChapterId == chapter.Id ? "Creating layout…" : "Create layout for this edition")
+                                                        </button>
                                                     }
                                                 </div>
                                             </div>
@@ -1291,6 +1299,7 @@ else
     private readonly SemaphoreSlim _editionSaveGate = new(1, 1);
     private readonly HashSet<Guid> _deletingPlacementIds = [];
     private PublishWorkspaceView? _workspace;
+    private Guid? _layoutCreationChapterId;
     private IReadOnlyList<PublicationEditionSummary> _editionSummaries = [];
     private IReadOnlyList<PublicationImagePlacementView> _placements = [];
     private IReadOnlyList<ProjectImageView> _projectImageLibrary = [];
@@ -1917,6 +1926,32 @@ else
         PrunePlacementDraft();
         if (_renderJobs.Any(job => job.Status is PublicationRenderStatus.Queued or PublicationRenderStatus.Rendering))
             StartRenderPolling(Project.Id, editionId);
+    }
+
+    private async Task CreateEditionLayoutsAsync(Guid chapterId)
+    {
+        if (Project is null || _selectedEditionId is not Guid editionId || _layoutCreationChapterId is not null)
+            return;
+        _layoutCreationChapterId = chapterId;
+        _loadError = null;
+        try
+        {
+            var pageCompositions = await Compositions.ListAsync(Project.Id, chapterId);
+            foreach (var composition in pageCompositions)
+                await Compositions.GetOrCreateVariantAsync(Project.Id, composition.Id, editionId);
+            _liveMessage = pageCompositions.Count == 0
+                ? "This chapter has no Designed Pages."
+                : $"Created {pageCompositions.Count} edition layout(s) from the authoring layout for review.";
+            await RefreshWorkspaceAsync();
+        }
+        catch (Exception exception)
+        {
+            _loadError = exception.Message;
+        }
+        finally
+        {
+            _layoutCreationChapterId = null;
+        }
     }
 
     private async Task LoadPublicationOutputStateAsync(Guid projectId, Guid editionId)

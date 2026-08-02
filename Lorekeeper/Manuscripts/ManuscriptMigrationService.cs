@@ -933,27 +933,27 @@ public sealed class ManuscriptMigrationService(
                     SELECT 1 FROM Chapters
                     WHERE CASE WHEN json_valid(ManuscriptJson) = 1
                         THEN COALESCE(json_extract(ManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3)
+                        ELSE 0 END NOT IN (1, 2, 3, 4)
                        OR lower(COALESCE(json_extract(ManuscriptJson, '$.manuscriptId'), '')) != lower(Id)
                        OR COALESCE(json_extract(ManuscriptJson, '$.revision'), -1) != ManuscriptRevision)
                 OR EXISTS (
                     SELECT 1 FROM ContestBatches
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                             THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                            ELSE 0 END NOT IN (1, 2, 3)
+                            ELSE 0 END NOT IN (1, 2, 3, 4)
                        OR CASE WHEN json_valid(AcceptedManuscriptJson) = 1
                             THEN COALESCE(json_extract(AcceptedManuscriptJson, '$.schemaVersion'), 0)
-                            ELSE 0 END NOT IN (1, 2, 3))
+                            ELSE 0 END NOT IN (1, 2, 3, 4))
                 OR EXISTS (
                     SELECT 1 FROM ContestCandidates
                     WHERE CASE WHEN json_valid(ProposedManuscriptJson) = 1
                         THEN COALESCE(json_extract(ProposedManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3))
+                        ELSE 0 END NOT IN (1, 2, 3, 4))
                 OR EXISTS (
                     SELECT 1 FROM EditorRevisionSessions
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                         THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3))
+                        ELSE 0 END NOT IN (1, 2, 3, 4))
             THEN 1 ELSE 0 END;
             """;
         if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1)
@@ -1042,11 +1042,12 @@ public sealed class ManuscriptMigrationService(
                     RevisionSessionCount, SourceHash, TargetHash, ValidationReportJson,
                     ErrorDetail, StartedAt, CompletedAt)
                 VALUES (
-                    $id, $name, 1, 3, 'Transform', 'Running',
+                    $id, $name, 1, $targetVersion, 'Transform', 'Running',
                     $backup, 0, 0, 0, 0, '', '', '{}', NULL, $startedAt, NULL);
                 """;
             insertJournal.Parameters.AddWithValue("$id", journalId.ToString());
             insertJournal.Parameters.AddWithValue("$name", SchemaV3MigrationName);
+            insertJournal.Parameters.AddWithValue("$targetVersion", ManuscriptDocument.CurrentSchemaVersion);
             insertJournal.Parameters.AddWithValue("$backup", backupPath);
             insertJournal.Parameters.AddWithValue("$startedAt", startedAt);
             if (await insertJournal.ExecuteNonQueryAsync(cancellationToken) != 1)

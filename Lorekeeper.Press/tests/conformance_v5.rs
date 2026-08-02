@@ -29,7 +29,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
-    assert_eq!(value["protocolVersion"], 4);
+    assert_eq!(value["protocolVersion"], 5);
     assert_eq!(value["rendererVersion"], "2.0.0");
     assert_eq!(
         value["profiles"],
@@ -61,7 +61,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
         stderr(&output)
     );
     let response = response(&output);
-    assert_eq!(response["protocolVersion"], 4);
+    assert_eq!(response["protocolVersion"], 5);
     assert_eq!(response["rendererVersion"], "2.0.0");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
@@ -262,7 +262,7 @@ fn digital_pdf_exposes_semantic_roles_alt_text_bookmarks_and_internal_links() {
           "assetId": "90000000-0000-0000-0000-000000000001", "caption": "An accessible caption",
           "altText": "A black square used as a conformance illustration", "decorative": false,
           "presentation": { "placement": "Centered", "widthPercent": 60, "alignment": "Center",
-            "textWrap": "None", "fit": "Contain", "focalXPercent": 50, "focalYPercent": 50,
+            "textWrap": "None", "fit": "Contain", "cropXPercent": 50, "cropYPercent": 50,
             "spacingBeforePoints": 6, "spacingAfterPoints": 6, "startOnNewPage": false,
             "keepWithCaption": true, "captionPlacement": "Below" },
           "content": [{ "type": "Text", "text": "An accessible caption", "marks": [] }] },
@@ -460,6 +460,17 @@ fn declared_project_font_is_shaped_subsetted_and_embedded_without_fallback() {
     job.request["document"]["styles"][0]["definition"]["fontFamilyKey"] = json!("project:fixture");
     job.write_request();
 
+    let layout = job.layout_trace();
+    let run_faces = layout["pages"]
+        .as_array()
+        .expect("layout pages")
+        .iter()
+        .flat_map(|page| page["lines"].as_array().expect("layout lines"))
+        .flat_map(|line| line["runs"].as_array().expect("layout runs"))
+        .map(|run| run["face"].as_str().expect("stable string face identity"))
+        .collect::<Vec<_>>();
+    assert!(run_faces.contains(&"Custom0"));
+
     let output = job.render();
     assert!(
         output.status.success(),
@@ -567,7 +578,7 @@ fn declared_cff_otf_uses_cidfont_type0_and_an_opentype_fontfile3_stream() {
 }
 
 #[test]
-fn protocol_v4_renders_flow_figures_and_structured_designed_pages_without_legacy_modes() {
+fn protocol_v5_renders_paragraph_presentation_and_structured_page_preview_data() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     let chapter_id = "50000000-0000-0000-0000-000000000001";
     let figure_id = "60000000-0000-0000-0000-000000000001";
@@ -582,7 +593,7 @@ fn protocol_v4_renders_flow_figures_and_structured_designed_pages_without_legacy
                 "assetId": "90000000-0000-0000-0000-000000000001", "caption": "A flowing caption", "altText": "A test illustration",
                 "decorative": false,
                 "presentation": { "placement": "Float", "widthPercent": 45, "alignment": "End",
-                    "textWrap": "Start", "fit": "Cover", "focalXPercent": 25, "focalYPercent": 75,
+                    "textWrap": "Start", "fit": "Cover", "cropXPercent": 25, "cropYPercent": 75,
                     "spacingBeforePoints": 4, "spacingAfterPoints": 8, "startOnNewPage": false,
                     "keepWithCaption": true, "captionPlacement": "Below" },
                 "content": [{ "type": "Text", "text": "A flowing caption", "marks": [] }]
@@ -626,7 +637,7 @@ fn protocol_v4_renders_flow_figures_and_structured_designed_pages_without_legacy
                         { "id": "90000000-0000-0000-0000-000000000001",
                             "layerId": "80000000-0000-0000-0000-000000000001", "kind": "Image",
                             "bounds": { "xPercent": 0, "yPercent": 0, "widthPercent": 100, "heightPercent": 100 },
-                            "imageId": "90000000-0000-0000-0000-000000000001", "imageFit": "Fill", "rotationDegrees": 30,
+                            "imageId": "90000000-0000-0000-0000-000000000001", "imageFit": "Cover", "rotationDegrees": 30,
                             "altText": "A map", "decorative": false,
                             "semanticRole": "Figure", "readingOrder": 1, "zIndex": 0 },
                         { "id": "90000000-0000-0000-0000-000000000014",
@@ -712,10 +723,10 @@ fn protocol_v4_renders_flow_figures_and_structured_designed_pages_without_legacy
             .unwrap()
             .iter()
             .any(|image| {
-                image["fit"] == "Fill"
+                image["fit"] == "Cover"
                     && (image["rotationDegrees"].as_f64().unwrap() - 30.0).abs() < 0.01
             }),
-        "Fill and arbitrary image rotation must survive structured layout"
+        "Cover fit and arbitrary image rotation must survive structured layout"
     );
     let pdf = Document::load(job.artifact(&response, "book-pdf")).expect("Digital PDF");
     let first_page_id = *pdf.get_pages().values().next().expect("digital cover page");
@@ -828,7 +839,7 @@ fn edition_placements_honor_flow_caption_and_accessibility_presentation() {
         "sortOrder": 0,
         "presentation": {
             "placement": "Float", "widthPercent": 42, "alignment": "End", "textWrap": "Start",
-            "fit": "Contain", "focalXPercent": 25, "focalYPercent": 70,
+            "fit": "Contain", "cropXPercent": 25, "cropYPercent": 70,
             "spacingBeforePoints": 4, "spacingAfterPoints": 9, "startOnNewPage": false,
             "keepWithCaption": true, "captionPlacement": "Hidden"
         }
@@ -883,7 +894,7 @@ fn floated_figure_wraps_following_prose_on_the_requested_side() {
         "assetId": "90000000-0000-0000-0000-000000000001", "caption": "Float caption",
         "altText": "A test illustration", "decorative": false,
         "presentation": { "placement": "Float", "widthPercent": 40, "alignment": "End",
-            "textWrap": "Start", "fit": "Contain", "focalXPercent": 30, "focalYPercent": 70,
+            "textWrap": "Start", "fit": "Contain", "cropXPercent": 30, "cropYPercent": 70,
             "spacingBeforePoints": 6, "spacingAfterPoints": 8, "startOnNewPage": false,
             "keepWithCaption": true, "captionPlacement": "Below" },
         "content": [{ "type": "Text", "text": "Float caption", "marks": [] }]
@@ -931,14 +942,14 @@ fn floated_figure_wraps_following_prose_on_the_requested_side() {
 }
 
 #[test]
-fn figure_fit_focal_point_and_above_caption_are_preserved_in_layout() {
+fn figure_fit_crop_position_and_above_caption_are_preserved_in_layout() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([{
         "id": "presented-figure", "type": "Figure", "styleRole": "figure-caption",
         "assetId": "90000000-0000-0000-0000-000000000001", "caption": "Caption above",
         "altText": "A test illustration", "decorative": false,
         "presentation": { "placement": "Centered", "widthPercent": 55, "alignment": "Center",
-            "textWrap": "None", "fit": "Contain", "focalXPercent": 20, "focalYPercent": 80,
+            "textWrap": "None", "fit": "Contain", "cropXPercent": 20, "cropYPercent": 80,
             "spacingBeforePoints": 10, "spacingAfterPoints": 12, "startOnNewPage": false,
             "keepWithCaption": true, "captionPlacement": "Above" },
         "content": [{ "type": "Text", "text": "Caption above", "marks": [] }]
@@ -958,8 +969,8 @@ fn figure_fit_focal_point_and_above_caption_are_preserved_in_layout() {
         .expect("figure page");
     let image = &page["images"][0];
     assert_eq!(image["fit"], "Contain");
-    assert!((image["focalX"].as_f64().unwrap() - 0.2).abs() < 0.001);
-    assert!((image["focalY"].as_f64().unwrap() - 0.8).abs() < 0.001);
+    assert!((image["cropX"].as_f64().unwrap() - 0.2).abs() < 0.001);
+    assert!((image["cropY"].as_f64().unwrap() - 0.8).abs() < 0.001);
     let image_top = image["y"].as_f64().unwrap() + image["height"].as_f64().unwrap();
     let caption_y = page["lines"]
         .as_array()
@@ -986,7 +997,7 @@ fn start_on_new_page_keeps_a_centered_figure_in_normal_flow() {
         "assetId": "90000000-0000-0000-0000-000000000001", "caption": "Flow caption",
         "altText": "A normal-flow illustration", "decorative": false,
         "presentation": { "placement": "Centered", "widthPercent": 45, "alignment": "Center",
-            "textWrap": "None", "fit": "Contain", "focalXPercent": 50, "focalYPercent": 50,
+            "textWrap": "None", "fit": "Contain", "cropXPercent": 50, "cropYPercent": 50,
             "spacingBeforePoints": 6, "spacingAfterPoints": 6, "startOnNewPage": true,
             "keepWithCaption": true, "captionPlacement": "Below" },
         "content": [{ "type": "Text", "text": "Flow caption", "marks": [] }]
@@ -1029,7 +1040,7 @@ fn semantic_matter_figures_render_with_presentation_and_accessibility() {
             "altText": "Accessible matter art", "decorative": false, "language": "en",
             "accessibilityRole": "Illustration",
             "presentation": { "placement": "Centered", "widthPercent": 52, "alignment": "Center",
-                "textWrap": "None", "fit": "Contain", "focalXPercent": 25, "focalYPercent": 75,
+                "textWrap": "None", "fit": "Contain", "cropXPercent": 25, "cropYPercent": 75,
                 "spacingBeforePoints": 4, "spacingAfterPoints": 4, "startOnNewPage": false,
                 "keepWithCaption": true, "captionPlacement": "Above" },
             "content": [{ "type": "Text", "text": "Matter caption", "marks": [] }]
@@ -1046,8 +1057,8 @@ fn semantic_matter_figures_render_with_presentation_and_accessibility() {
         .find(|image| image["altText"] == "Accessible matter art")
         .expect("matter figure image");
     assert_eq!(image["fit"], "Contain");
-    assert!((image["focalX"].as_f64().unwrap() - 0.25).abs() < 0.001);
-    assert!((image["focalY"].as_f64().unwrap() - 0.75).abs() < 0.001);
+    assert!((image["cropX"].as_f64().unwrap() - 0.25).abs() < 0.001);
+    assert!((image["cropY"].as_f64().unwrap() - 0.75).abs() < 0.001);
 }
 
 #[test]
@@ -1058,7 +1069,7 @@ fn overlay_figure_caption_is_rendered_inside_the_image_frame() {
         "assetId": "90000000-0000-0000-0000-000000000001", "caption": "Overlay caption",
         "altText": "A test illustration", "decorative": false,
         "presentation": { "placement": "Centered", "widthPercent": 70, "alignment": "Center",
-            "textWrap": "None", "fit": "Cover", "focalXPercent": 50, "focalYPercent": 50,
+            "textWrap": "None", "fit": "Cover", "cropXPercent": 50, "cropYPercent": 50,
             "spacingBeforePoints": 0, "spacingAfterPoints": 0, "startOnNewPage": false,
             "keepWithCaption": true, "captionPlacement": "Overlay" },
         "content": [{ "type": "Text", "text": "Overlay caption", "marks": [] }]
@@ -1101,7 +1112,7 @@ fn full_bleed_figure_occupies_the_complete_physical_leaf() {
         "assetId": "90000000-0000-0000-0000-000000000001", "caption": "", "altText": "Bleed illustration",
         "decorative": false,
         "presentation": { "placement": "FullBleed", "widthPercent": 100, "alignment": "Center",
-            "textWrap": "None", "fit": "Cover", "focalXPercent": 50, "focalYPercent": 50,
+            "textWrap": "None", "fit": "Cover", "cropXPercent": 50, "cropYPercent": 50,
             "spacingBeforePoints": 0, "spacingAfterPoints": 0, "startOnNewPage": true,
             "keepWithCaption": true, "captionPlacement": "Hidden" }, "content": []
     }]);
@@ -1213,8 +1224,8 @@ fn print_full_bleed_uses_vendor_leaf_and_trim_boxes() {
         "id": "bleed-box-figure", "type": "Figure", "styleRole": "figure-caption",
         "assetId": "90000000-0000-0000-0000-000000000001", "caption": "", "altText": "Bleed box illustration",
         "decorative": false, "presentation": { "placement": "FullBleed", "widthPercent": 100,
-            "alignment": "Center", "textWrap": "None", "fit": "Cover", "focalXPercent": 50,
-            "focalYPercent": 50, "spacingBeforePoints": 0, "spacingAfterPoints": 0,
+            "alignment": "Center", "textWrap": "None", "fit": "Cover", "cropXPercent": 50,
+            "cropYPercent": 50, "spacingBeforePoints": 0, "spacingAfterPoints": 0,
             "startOnNewPage": true, "keepWithCaption": true, "captionPlacement": "Hidden" }, "content": []
     }]);
     job.write_request();
@@ -1492,6 +1503,25 @@ fn layout_trace_keeps_every_line_inside_the_content_box_and_preserves_text() {
 
     let trace = job.layout_trace();
     let pages = trace["pages"].as_array().expect("trace pages");
+    assert!(
+        pages
+            .iter()
+            .all(|page| page["widthPoints"].as_f64().is_some())
+    );
+    assert!(
+        pages
+            .iter()
+            .all(|page| page["heightPoints"].as_f64().is_some())
+    );
+    assert!(pages.iter().all(|page| page["paintOrder"].is_array()));
+    assert!(
+        pages
+            .iter()
+            .flat_map(|page| page["paintOrder"].as_array().into_iter().flatten())
+            .all(|paint| paint["kind"].as_str().is_some() && paint["index"].as_u64().is_some())
+    );
+    assert!(pages.iter().all(|page| page.get("pageLabel").is_some()));
+    assert!(pages.iter().all(|page| page.get("bookmark").is_some()));
     let bottom = job.request["trim"]["marginInches"].as_f64().unwrap() * 72.0;
     let top = (job.request["trim"]["heightInches"].as_f64().unwrap()
         - job.request["trim"]["marginInches"].as_f64().unwrap())
@@ -1508,6 +1538,17 @@ fn layout_trace_keeps_every_line_inside_the_content_box_and_preserves_text() {
     }) {
         let baseline = line["y"].as_f64().expect("baseline");
         let size = line["size"].as_f64().expect("size");
+        assert!(line["rotationDegrees"].as_f64().is_some());
+        assert!(line["opacity"].as_f64().is_some());
+        assert!(
+            line["runs"]
+                .as_array()
+                .is_some_and(|runs| runs.iter().all(|run| run["face"].as_str().is_some()
+                    && run["sizeScale"].as_f64().is_some()
+                    && run["baselineShiftEm"].as_f64().is_some()
+                    && run["underline"].as_bool().is_some()
+                    && run["strikethrough"].as_bool().is_some()))
+        );
         assert!(
             baseline - size * 0.3 >= bottom - 0.01,
             "line below content box: {line}"
@@ -1528,6 +1569,41 @@ fn layout_trace_keeps_every_line_inside_the_content_box_and_preserves_text() {
             "lost sentinel {index:03}"
         );
     }
+}
+
+#[test]
+fn layout_trace_applies_sparse_paragraph_presentation_over_book_text_style() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    let block = &mut job.request["document"]["sections"][0]["chapters"][0]["blocks"][1];
+    block["content"][0]["text"] = Value::String("Indented sentinel paragraph.".to_owned());
+    block["paragraphPresentation"] = json!({
+        "alignment": "Start",
+        "leftIndentEm": 2.0,
+        "rightIndentEm": 1.0,
+        "firstLineIndentEm": 1.5,
+        "spacingBeforePoints": 6.0,
+        "spacingAfterPoints": 4.0,
+        "keepWithNext": false,
+        "startOnNewPage": false
+    });
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let line = trace["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+        .find(|line| {
+            line["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Indented sentinel"))
+        })
+        .expect("indented line");
+    let margin = job.request["trim"]["marginInches"].as_f64().unwrap() * 72.0;
+    let body_size = job.request["trim"]["bodyFontSizePoints"].as_f64().unwrap();
+    let expected_x = margin + body_size * (2.0 + 1.5);
+    assert!((line["x"].as_f64().unwrap() - expected_x).abs() < 0.1);
 }
 
 #[test]
@@ -1957,7 +2033,7 @@ impl PreparedJob {
         fs::create_dir_all(root.path().join("input/assets")).expect("input assets");
         fs::write(root.path().join("input/assets/pixel.png"), PIXEL_PNG).expect("pixel PNG");
         let mut request: Value =
-            serde_json::from_slice(include_bytes!("../fixtures/full-model-v4.json"))
+            serde_json::from_slice(include_bytes!("../fixtures/full-model-v5.json"))
                 .expect("canonical request");
         request["profile"] = Value::String(profile.to_owned());
         request["assets"][0]["byteLength"] = json!(PIXEL_PNG.len());

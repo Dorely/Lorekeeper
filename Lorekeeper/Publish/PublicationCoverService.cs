@@ -19,8 +19,8 @@ public sealed record PublicationCoverDesignView(
     string BackCopy,
     string BackgroundColor,
     PublicationBarcodeMode BarcodeMode,
-    double ImageFocalXPercent,
-    double ImageFocalYPercent,
+    double ImageCropXPercent,
+    double ImageCropYPercent,
     string CompositionSceneJson,
     long Revision,
     PublicationCoverTemplate Template,
@@ -48,8 +48,8 @@ public sealed record PublicationCoverDesignUpdate(
     string BackCopy,
     string BackgroundColor,
     PublicationBarcodeMode BarcodeMode,
-    double ImageFocalXPercent,
-    double ImageFocalYPercent,
+    double ImageCropXPercent,
+    double ImageCropYPercent,
     long ExpectedRevision,
     bool AcknowledgeTemplate);
 
@@ -114,8 +114,8 @@ public sealed class PublicationCoverService(
         design.BackCopy = update.BackCopy.Trim();
         design.BackgroundColor = update.BackgroundColor.Trim().ToLowerInvariant();
         design.BarcodeMode = update.BarcodeMode;
-        design.ImageFocalXPercent = update.ImageFocalXPercent;
-        design.ImageFocalYPercent = update.ImageFocalYPercent;
+        design.ImageCropXPercent = update.ImageCropXPercent;
+        design.ImageCropYPercent = update.ImageCropYPercent;
         design.AcknowledgedTemplateFingerprint = update.AcknowledgeTemplate
             ? template.Fingerprint
             : design.AcknowledgedTemplateFingerprint;
@@ -185,8 +185,8 @@ public sealed class PublicationCoverService(
         design.BackCopy = update.BackCopy.Trim();
         design.BackgroundColor = update.BackgroundColor.Trim().ToLowerInvariant();
         design.BarcodeMode = update.BarcodeMode;
-        design.ImageFocalXPercent = update.ImageFocalXPercent;
-        design.ImageFocalYPercent = update.ImageFocalYPercent;
+        design.ImageCropXPercent = update.ImageCropXPercent;
+        design.ImageCropYPercent = update.ImageCropYPercent;
         design.AcknowledgedTemplateFingerprint = update.AcknowledgeTemplate
             ? template.Fingerprint
             : design.AcknowledgedTemplateFingerprint;
@@ -393,8 +393,8 @@ public sealed class PublicationCoverService(
             design.BackCopy,
             design.BackgroundColor,
             design.BarcodeMode,
-            design.ImageFocalXPercent,
-            design.ImageFocalYPercent,
+            design.ImageCropXPercent,
+            design.ImageCropYPercent,
             System.Text.Json.JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
             design.Revision,
             template,
@@ -601,11 +601,11 @@ public sealed class PublicationCoverService(
             throw new ArgumentException("Cover copy exceeds its allowed length.");
         if (!System.Text.RegularExpressions.Regex.IsMatch(update.BackgroundColor, "^#[0-9a-fA-F]{6}$"))
             throw new ArgumentException("Background color must be a six-digit hex color.");
-        if (!double.IsFinite(update.ImageFocalXPercent)
-            || !double.IsFinite(update.ImageFocalYPercent)
-            || update.ImageFocalXPercent is < 0 or > 100
-            || update.ImageFocalYPercent is < 0 or > 100)
-            throw new ArgumentException("Image focal points must be between 0 and 100 percent.");
+        if (!double.IsFinite(update.ImageCropXPercent)
+            || !double.IsFinite(update.ImageCropYPercent)
+            || update.ImageCropXPercent is < 0 or > 100
+            || update.ImageCropYPercent is < 0 or > 100)
+            throw new ArgumentException("Image crop positions must be between 0 and 100 percent.");
     }
 
     private static void ValidateProduct(PublicationCoverDesignUpdate update, PublicationEdition edition)

@@ -43,8 +43,8 @@ public sealed class ImagesChatService(
         - Use project guidance, outline, facts, chapters, image metadata, and visual layout manifests before making image-prompt decisions.
         - Use rendered snapshot inspection when the user asks about the actual visible layout and the provider is vision-ready.
         - Queue image generation/edit jobs with generate_image or edit_image. These tools wait for completion; after a successful job, the generated images are supplied back to your model context when the provider supports vision.
-        - Read the current manuscript or composition revision before placement. Small Figure, scene-object, guide, layer, and style changes apply directly with an expected revision. Complete page or cover scenes and coupled semantic/layout changes are submitted once to a persisted stage, then applied using only the opaque stage ID; never repeat a staged payload.
-        - Read active edition geometry before physical layout decisions and use only server-owned generation targets. Designed Page targets require the exact selected variant ID. Require alt text or an explicit decorative decision and preserve logical reading order.
+        - Read the current manuscript or composition revision before placement. Small Figure, scene-object, layer, and style changes apply directly with an expected revision. Page guides are computed overlays. Complete page or cover scenes and coupled semantic/layout changes are submitted once to a persisted stage, then applied using only the opaque stage ID; never repeat a staged payload.
+        - Use project page setup and the active authoring variant for manuscript and Designed Page layout decisions. Editions apply only to publication covers. Designed Page targets require the exact selected variant ID. Require alt text or an explicit decorative decision and preserve logical reading order.
         - Do not claim an image was generated or edited unless the tool returns final saved image ids.
         - Keep final responses practical: mention saved image ids/filenames, what changed, any failed outputs, and useful next steps such as placing an image in a chapter.
         """;

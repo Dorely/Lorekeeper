@@ -362,8 +362,8 @@ public sealed class PublicationEditionServiceTests
             cover.BackCopy,
             cover.BackgroundColor,
             cover.BarcodeMode,
-            cover.ImageFocalXPercent,
-            cover.ImageFocalYPercent,
+            cover.ImageCropXPercent,
+            cover.ImageCropYPercent,
             cover.Revision,
             acknowledge);
 

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Fonts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -42,7 +43,6 @@ public sealed class ManuscriptStyleService(
             ManuscriptStyleRoles.BlockQuote,
             ManuscriptStyleRoles.ListItem,
             ManuscriptStyleRoles.FigureCaption,
-            ManuscriptStyleRoles.DesignedPage,
         ],
         StringComparer.OrdinalIgnoreCase);
 
@@ -65,6 +65,7 @@ public sealed class ManuscriptStyleService(
     {
         input = input with { Definition = NormalizeDefinition(input.Definition) };
         ValidateInput(input);
+        await ValidateFontFamilyAsync(projectId, input.Definition.FontFamilyKey, cancellationToken);
         var name = RequiredName(input.Name, "Style name");
         var role = RequiredName(input.SemanticRole, "Semantic role");
         var nameKey = name.ToLowerInvariant();
@@ -113,16 +114,16 @@ public sealed class ManuscriptStyleService(
         }
         else
         {
-            style = existing ?? throw new InvalidOperationException("The named style was not found.");
+            style = existing ?? throw new InvalidOperationException("The Book Text Style was not found.");
             if (style.Revision != input.ExpectedRevision)
                 throw new ManuscriptStyleConflictException(input.ExpectedRevision.Value, style.Revision);
             if (!string.Equals(style.SemanticRoleKey, roleKey, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
-                    "A named style's semantic role is a stable manuscript key and cannot be changed.");
+                    "A Book Text Style's internal semantic key cannot be changed.");
             }
             if (style.Kind != input.Kind)
-                throw new InvalidOperationException("A named style's paragraph/character kind cannot be changed.");
+                throw new InvalidOperationException("A Book Text Style's paragraph/character kind cannot be changed.");
             if (await db.ManuscriptStyleDefinitions.AnyAsync(
                 candidate => candidate.ProjectId == projectId
                     && candidate.Id != style.Id
@@ -156,7 +157,7 @@ public sealed class ManuscriptStyleService(
         catch (DbUpdateException exception)
         {
             throw new InvalidOperationException(
-                "The named style conflicts with another style created or updated at the same time. Refresh styles and try again.",
+                "The Book Text Style conflicts with another style created or updated at the same time. Refresh styles and try again.",
                 exception);
         }
         return ToView(style);
@@ -167,6 +168,7 @@ public sealed class ManuscriptStyleService(
         ManuscriptStyleInput input,
         CancellationToken cancellationToken = default)
     {
+        await ValidateFontFamilyAsync(projectId, input.Definition.FontFamilyKey, cancellationToken);
         var styles = await db.ManuscriptStyleDefinitions
             .AsNoTracking()
             .Where(style => style.ProjectId == projectId)
@@ -207,12 +209,12 @@ public sealed class ManuscriptStyleService(
             ? styles.FirstOrDefault(style => style.Id == id)
             : null;
         if (current is null)
-            throw new InvalidOperationException("The named style was not found.");
+            throw new InvalidOperationException("The Book Text Style was not found.");
         if (current.Revision != input.ExpectedRevision)
             throw new ManuscriptStyleConflictException(input.ExpectedRevision.Value, current.Revision);
         if (current.Kind != input.Kind
             || !string.Equals(current.SemanticRole, role, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("A named style's kind and semantic role are immutable stable keys.");
+            throw new InvalidOperationException("A Book Text Style's kind and internal semantic key are immutable.");
         if (styles.Any(style =>
             style.Id != current.Id
             && style.Kind == input.Kind
@@ -257,7 +259,8 @@ public sealed class ManuscriptStyleService(
             .Select(style => style.SemanticRole)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var unknownParagraph = document.Content.FirstOrDefault(
-            block => !paragraphRoles.Contains(block.StyleRole));
+            block => block.Type != ManuscriptBlockType.DesignedPage
+                && !paragraphRoles.Contains(block.StyleRole));
         if (unknownParagraph is not null)
         {
             throw new InvalidOperationException(
@@ -330,7 +333,7 @@ public sealed class ManuscriptStyleService(
             candidate => candidate.ProjectId == projectId && candidate.Id == styleId,
             cancellationToken);
         if (style is null)
-            throw new InvalidOperationException("The named style was not found.");
+            throw new InvalidOperationException("The Book Text Style was not found.");
         if (style.Revision != expectedRevision)
             throw new ManuscriptStyleConflictException(expectedRevision, style.Revision);
         var requiresDefinition = style.Kind == ManuscriptStyleKind.Character
@@ -358,7 +361,7 @@ public sealed class ManuscriptStyleService(
                             && string.Equals(mark.Value, style.SemanticRole, StringComparison.OrdinalIgnoreCase)));
         }
         if (isUsed)
-            throw new InvalidOperationException("The named style is still used by manuscript or publication-matter content.");
+            throw new InvalidOperationException("The Book Text Style is still used by manuscript or publication-matter content.");
         var mappedEditionNames = await db.PublicationEditionStyleMappings
             .AsNoTracking()
             .Where(mapping =>
@@ -371,7 +374,7 @@ public sealed class ManuscriptStyleService(
         if (mappedEditionNames.Count > 0)
         {
             throw new InvalidOperationException(
-                $"Remove this named style's edition mappings before deleting it. Referenced by: {string.Join(", ", mappedEditionNames)}.");
+                $"Remove this Book Text Style's edition mappings before deleting it. Referenced by: {string.Join(", ", mappedEditionNames)}.");
         }
         return style;
     }
@@ -427,9 +430,9 @@ public sealed class ManuscriptStyleService(
         if (doubles.Any(number => number is double present && !double.IsFinite(present)))
             throw new InvalidOperationException("Style numeric properties must be finite numbers.");
         if (value.FontFamilyKey is { } fontFamily
-            && !new[] { "serif", "sans", "mono" }.Contains(fontFamily.Trim(), StringComparer.OrdinalIgnoreCase))
+            && !IsSupportedFontKey(fontFamily))
         {
-            throw new InvalidOperationException("Font family key must be serif, sans, mono, or omitted.");
+            throw new InvalidOperationException("Choose a bundled, imported, serif, sans-serif, or monospace font family.");
         }
         if (value.TextAlign is { } alignment
             && !new[] { "left", "right", "center", "justify" }.Contains(
@@ -472,6 +475,31 @@ public sealed class ManuscriptStyleService(
             SmallCaps = definition.SmallCaps is true ? true : null,
             KeepWithNext = definition.KeepWithNext is true ? true : null,
         };
+    }
+
+    private static bool IsSupportedFontKey(string value)
+    {
+        var key = value.Trim();
+        return new[] { "serif", "sans", "mono" }.Contains(key, StringComparer.OrdinalIgnoreCase)
+            || PublicationBuiltInFonts.Find(key) is not null
+            || key.StartsWith("project:", StringComparison.OrdinalIgnoreCase)
+                && Guid.TryParse(key["project:".Length..], out var id)
+                && id != Guid.Empty;
+    }
+
+    private async Task ValidateFontFamilyAsync(
+        Guid projectId,
+        string? fontFamilyKey,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(fontFamilyKey)
+            || !fontFamilyKey.StartsWith("project:", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (!Guid.TryParse(fontFamilyKey["project:".Length..], out var familyId)
+            || !await db.ProjectFontFamilies.AsNoTracking().AnyAsync(
+                item => item.Id == familyId && item.ProjectId == projectId,
+                cancellationToken))
+            throw new InvalidOperationException("The selected imported font family does not belong to this project.");
     }
 
     public static ManuscriptStyleProperties NormalizeOverride(

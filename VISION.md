@@ -29,7 +29,7 @@ external tools.
 ### 2. A professional semantic manuscript
 
 - Store the meaning and structure of the book, not only presentation text.
-- Support long-form organization, rich editing, named styles, references,
+- Support long-form organization, rich editing, Book Text Styles, references,
   assets, and stable anchors for review.
 - Preserve one canonical source while allowing paperback, ebook, illustrated,
   and later reference-book editions to differ intentionally.

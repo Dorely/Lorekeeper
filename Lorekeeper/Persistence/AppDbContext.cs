@@ -80,6 +80,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<ProjectFontFamily> ProjectFontFamilies => Set<ProjectFontFamily>();
     public DbSet<ProjectFontFace> ProjectFontFaces => Set<ProjectFontFace>();
     public DbSet<ManuscriptStyleDefinition> ManuscriptStyleDefinitions => Set<ManuscriptStyleDefinition>();
+    public DbSet<ProjectPageSetup> ProjectPageSetups => Set<ProjectPageSetup>();
     public DbSet<PageComposition> PageCompositions => Set<PageComposition>();
     public DbSet<PageCompositionVariant> PageCompositionVariants => Set<PageCompositionVariant>();
     public DbSet<CompositionMutationStage> CompositionMutationStages => Set<CompositionMutationStage>();
@@ -159,6 +160,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<ProjectPageSetup>(entity =>
+        {
+            entity.HasKey(e => e.ProjectId);
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Project)
+                .WithOne(e => e.PageSetup)
+                .HasForeignKey<ProjectPageSetup>(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<Act>(entity =>
         {
             entity.HasIndex(e => new { e.ProjectId, e.Order });
@@ -234,6 +245,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
         modelBuilder.Entity<PageComposition>(entity =>
         {
             entity.HasIndex(e => new { e.ProjectId, e.ChapterId, e.UpdatedAt });
+            entity.HasIndex(e => e.ActiveAuthoringVariantId);
             entity.Property(e => e.Revision).IsConcurrencyToken();
             entity.HasOne(e => e.Project)
                 .WithMany(e => e.PageCompositions)

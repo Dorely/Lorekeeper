@@ -568,7 +568,7 @@ public sealed class PublicationPackageTests
         [
             "list_publication_editions",
             "read_publication_edition",
-            "list_publication_named_styles",
+            "list_publication_book_text_styles",
             "list_publication_project_images",
             "create_publication_edition",
             "clone_publication_edition",

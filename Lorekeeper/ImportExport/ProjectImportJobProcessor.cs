@@ -100,6 +100,7 @@ public sealed class ProjectImportJobProcessor(
                 await outlineGraphSync.RepairProjectAsync(project.Id, cancellationToken);
                 await entityTypeService.EnsureDefaultsAsync(project.Id, cancellationToken);
                 await ImportProjectDirectionAsync(project, document, cancellationToken);
+                await ImportPageSetupAsync(project.Id, document, cancellationToken);
                 await StepAsync(job, "Prepared current project graph.", cancellationToken);
 
                 await SeedProjectNodeMapAsync(project, document, state, cancellationToken);
@@ -233,6 +234,29 @@ public sealed class ProjectImportJobProcessor(
             ? imported
             : null;
 
+    private async Task ImportPageSetupAsync(
+        Guid projectId,
+        ProjectExportDocument document,
+        CancellationToken cancellationToken)
+    {
+        if (document.FormatVersion < 15 || document.PageSetup is not { } imported)
+            return;
+        var setup = await db.ProjectPageSetups.SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
+        if (setup is null)
+        {
+            setup = new ProjectPageSetup { ProjectId = projectId };
+            db.ProjectPageSetups.Add(setup);
+        }
+        setup.PageWidthInches = imported.PageWidthInches;
+        setup.PageHeightInches = imported.PageHeightInches;
+        setup.PageMarginInches = imported.PageMarginInches;
+        setup.BodyFontSizePoints = imported.BodyFontSizePoints;
+        setup.BodyLineHeight = imported.BodyLineHeight;
+        setup.Revision = checked(setup.Revision + 1);
+        setup.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     private async Task<ProjectExportDocument> ReadAndValidateAsync(ProjectImportJob job, CancellationToken cancellationToken)
     {
         ProjectExportDocument document;
@@ -310,7 +334,7 @@ public sealed class ProjectImportJobProcessor(
                     StringComparer.Ordinal)
                 .Any(group => group.Count() > 1))
             {
-                throw new InvalidOperationException("Import file contains duplicate named manuscript styles.");
+                throw new InvalidOperationException("Import file contains duplicate Book Text Styles.");
             }
             if (document.ManuscriptStyles
                 .GroupBy(
@@ -318,7 +342,7 @@ public sealed class ProjectImportJobProcessor(
                     StringComparer.Ordinal)
                 .Any(group => group.Count() > 1))
             {
-                throw new InvalidOperationException("Import file maps more than one named style to the same semantic role.");
+                throw new InvalidOperationException("Import file maps more than one Book Text Style to the same semantic role.");
             }
         }
         var duplicateImage = document.Images
@@ -577,10 +601,10 @@ public sealed class ProjectImportJobProcessor(
                     || cover.SpineText.Trim().Length > 120
                     || cover.BackCopy.Trim().Length > 1_800
                     || !System.Text.RegularExpressions.Regex.IsMatch(cover.BackgroundColor, "^#[0-9a-fA-F]{6}$")
-                    || !double.IsFinite(cover.ImageFocalXPercent)
-                    || !double.IsFinite(cover.ImageFocalYPercent)
-                    || cover.ImageFocalXPercent is < 0 or > 100
-                    || cover.ImageFocalYPercent is < 0 or > 100
+                    || !double.IsFinite(cover.ImageCropXPercent)
+                    || !double.IsFinite(cover.ImageCropYPercent)
+                    || cover.ImageCropXPercent is < 0 or > 100
+                    || cover.ImageCropYPercent is < 0 or > 100
                     || cover.Revision < 0))
                 throw new InvalidOperationException($"Publication edition {edition.Id:N} has an invalid cover design.");
             if (edition.CoverDesign is { CompositionSceneJson.Length: > 0 } coverWithScene)
@@ -657,7 +681,7 @@ public sealed class ProjectImportJobProcessor(
                 ManuscriptStyleService.ValidateDocumentReferences(manuscript, importedStyleViews);
             }
             if (edition.StyleMappings.Any(mapping => !stylesById.ContainsKey(mapping.ManuscriptStyleDefinitionId)))
-                throw new InvalidOperationException($"Publication edition {edition.Id:N} references a missing named style.");
+                throw new InvalidOperationException($"Publication edition {edition.Id:N} references a missing Book Text Style.");
             foreach (var mapping in edition.StyleMappings)
                 _ = ManuscriptStyleService.NormalizeOverride(
                     stylesById[mapping.ManuscriptStyleDefinitionId].Kind,
@@ -756,7 +780,7 @@ public sealed class ProjectImportJobProcessor(
             {
                 if (roleMatch.Definition != imported.Definition)
                     throw new InvalidOperationException(
-                        $"Named style role '{imported.SemanticRole}' conflicts with the target project.");
+                        $"Book Text Style '{imported.Name}' conflicts with the target project.");
                 continue;
             }
             var name = imported.Name.Trim();
@@ -786,7 +810,7 @@ public sealed class ProjectImportJobProcessor(
             await AddReportAsync(
                 job,
                 ProjectImportReportItemKind.Structural,
-                $"Imported named style {created.Name}",
+                $"Imported Book Text Style {created.Name}",
                 $"{created.Kind} style for semantic role {created.SemanticRole}.",
                 "ManuscriptStyle",
                 created.Id.ToString("N"),
@@ -811,7 +835,7 @@ public sealed class ProjectImportJobProcessor(
             if (roleMatch is not null && roleMatch.Definition != imported.Definition)
             {
                 throw new InvalidOperationException(
-                    $"Named style role '{imported.SemanticRole}' conflicts with the target project's "
+                    $"Book Text Style '{imported.Name}' conflicts with the target project's "
                     + $"{imported.Kind.ToString().ToLowerInvariant()} style '{roleMatch.Name}'.");
             }
         }
@@ -995,12 +1019,10 @@ public sealed class ProjectImportJobProcessor(
     {
         if (string.IsNullOrWhiteSpace(chapter.ManuscriptJson))
             throw new InvalidDataException($"The v{formatVersion} manuscript document is missing.");
-        var manuscriptJson = formatVersion == 8
-            ? ManuscriptSchemaUpgrade.UpgradeV1DocumentJson(
-                chapter.ManuscriptJson,
-                chapter.Id,
-                chapter.ManuscriptRevision)
-            : chapter.ManuscriptJson;
+        var manuscriptJson = UpgradeImportedManuscript(
+            chapter.ManuscriptJson,
+            chapter.Id,
+            chapter.ManuscriptRevision);
         return ManuscriptCodec.Deserialize(
             manuscriptJson,
             chapter.Id,
@@ -1361,6 +1383,19 @@ public sealed class ProjectImportJobProcessor(
 
     }
 
+    private static string UpgradeImportedManuscript(string json, Guid id, long revision)
+    {
+        using var parsed = JsonDocument.Parse(json);
+        return parsed.RootElement.GetProperty("schemaVersion").GetInt32() switch
+        {
+            ManuscriptDocument.CurrentSchemaVersion => json,
+            3 => ManuscriptSchemaUpgrade.UpgradeV3DocumentJson(json, id, revision),
+            2 => ManuscriptSchemaUpgrade.UpgradeV2DocumentJson(json, id, revision),
+            1 => ManuscriptSchemaUpgrade.UpgradeV1DocumentJson(json, id, revision),
+            var version => throw new InvalidDataException($"The imported manuscript schema version {version} is unsupported."),
+        };
+    }
+
     private async Task ImportPageCompositionsAsync(
         ProjectImportJob job,
         ProjectExportDocument document,
@@ -1377,7 +1412,7 @@ public sealed class ProjectImportJobProcessor(
             }
 
             var semantic = ManuscriptCodec.Deserialize(
-                imported.SemanticManuscriptJson,
+                UpgradeImportedManuscript(imported.SemanticManuscriptJson, imported.Id, imported.Revision),
                 imported.Id,
                 imported.Revision);
             var remappedSemantic = RemapManuscriptFigures(
@@ -1398,7 +1433,7 @@ public sealed class ProjectImportJobProcessor(
             foreach (var importedVariant in imported.Variants)
             {
                 var scene = JsonSerializer.Deserialize<CompositionScene>(
-                    importedVariant.SceneJson,
+                    AuthoringPageMigrationService.UpgradeJson(importedVariant.SceneJson, removeGuides: true),
                     ManuscriptCodec.JsonOptions)
                     ?? throw new InvalidDataException(
                         $"Page composition variant {importedVariant.Id:N} has an empty scene.");
@@ -1419,13 +1454,17 @@ public sealed class ProjectImportJobProcessor(
                         FontFamilyKey = RemapFontKey(item.FontFamilyKey, state.FontFamilyMap),
                     }).ToList(),
                 };
-                composition.Variants.Add(new PageCompositionVariant
+                var variant = new PageCompositionVariant
                 {
                     GeometryKey = importedVariant.GeometryKey,
                     SceneJson = JsonSerializer.Serialize(remappedScene, ManuscriptCodec.JsonOptions),
                     Revision = importedVariant.Revision,
-                });
+                };
+                composition.Variants.Add(variant);
+                if (imported.ActiveAuthoringVariantId == importedVariant.Id)
+                    composition.ActiveAuthoringVariantId = variant.Id;
             }
+            composition.ActiveAuthoringVariantId ??= composition.Variants.OrderByDescending(item => item.UpdatedAt).Select(item => (Guid?)item.Id).FirstOrDefault();
             db.PageCompositions.Add(composition);
         }
         if (document.PageCompositions.Count > 0)
@@ -1652,8 +1691,8 @@ public sealed class ProjectImportJobProcessor(
                 BackCopy = cover.BackCopy,
                 BackgroundColor = cover.BackgroundColor,
                 BarcodeMode = cover.BarcodeMode,
-                ImageFocalXPercent = cover.ImageFocalXPercent,
-                ImageFocalYPercent = cover.ImageFocalYPercent,
+                ImageCropXPercent = cover.ImageCropXPercent,
+                ImageCropYPercent = cover.ImageCropYPercent,
                 CompositionSceneJson = RemapSceneJson(
                     cover.CompositionSceneJson,
                     imageMap,
@@ -1754,8 +1793,7 @@ public sealed class ProjectImportJobProcessor(
                 Caption = imported.Caption,
                 PresentationJson = JsonSerializer.Serialize(
                     RemapFigurePresentation(
-                        imported.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage, StartOnNewPage = true },
-                        editionMap),
+                        imported.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage, StartOnNewPage = true }),
                     ManuscriptCodec.JsonOptions),
                 AltText = imported.Decorative
                     ? string.Empty
@@ -2083,8 +2121,7 @@ public sealed class ProjectImportJobProcessor(
                                 : throw new InvalidOperationException(
                                     $"Figure block {block.Id} references an image that was not imported."),
                         FigurePresentation = RemapFigurePresentation(
-                            block.FigurePresentation ?? new FigurePresentation(),
-                            editionMap),
+                            block.FigurePresentation ?? new FigurePresentation()),
                     }
                     : block.Type == ManuscriptBlockType.DesignedPage
                         ? block with
@@ -2098,17 +2135,7 @@ public sealed class ProjectImportJobProcessor(
                         : block).ToList(),
         };
 
-    private static FigurePresentation RemapFigurePresentation(
-        FigurePresentation presentation,
-        IReadOnlyDictionary<Guid, Guid>? editionMap)
-    {
-        if (presentation.LayoutTargetEditionId is not Guid exportedEditionId || editionMap is null)
-            return presentation;
-        return editionMap.TryGetValue(exportedEditionId, out var localEditionId)
-            ? presentation with { LayoutTargetEditionId = localEditionId }
-            : throw new InvalidDataException(
-                $"Figure presentation references edition {exportedEditionId:N}, which was not imported.");
-    }
+    private static FigurePresentation RemapFigurePresentation(FigurePresentation presentation) => presentation;
 
     private static string RewritePageLayoutJson(
         string layoutJson,
@@ -2237,7 +2264,7 @@ public sealed class ProjectImportJobProcessor(
                 ImageFit = image.Fit switch
                 {
                     ChapterImageFit.Contain => FigureImageFit.Contain,
-                    ChapterImageFit.Fill => FigureImageFit.Fill,
+                    ChapterImageFit.Fill => FigureImageFit.Contain,
                     _ => FigureImageFit.Cover,
                 },
                 Opacity = Math.Clamp(image.Opacity, 0, 1),

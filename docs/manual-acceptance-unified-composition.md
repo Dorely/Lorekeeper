@@ -24,38 +24,69 @@ this feature's authorized checks.
 ## Manuscript Figures
 
 - Insert/replace a project image and edit caption, alt text, decorative state,
-  alignment, width, wrap, fit, crop/focal point, bleed, caption placement, and
+  alignment, width, wrap, fit, crop position, bleed, caption placement, and
   page-break behavior.
+- Confirm arbitrary portrait, landscape, and square source rasters insert
+  without aspect-ratio rejection. `Contain` must show the whole raster and
+  `Cover` must fill its frame non-destructively.
 - Verify undo/redo, autosave, revision conflict recovery, stable IDs, paste,
   search/index text, and plain-text/Markdown/EPUB projections.
 - Generate art for a Figure target and confirm the displayed aspect, raster,
-  DPI expectation, and named regions match the selected edition.
+  intended fit, and geometry descriptor match the project/page target without
+  requiring a publication edition.
+
+## Edit and Read modes
+
+- Confirm Edit exposes common block style, emphasis, link, alignment, whole
+  paragraph indent, lists, Figure/Designed Page insertion, search, undo, and redo
+  in the primary toolbar; advanced marks, paragraph controls, Figure settings,
+  and Book Text Styles remain available without crowding it.
+- Exercise toolbar and Tab/Shift+Tab indentation, first-line and hanging indent,
+  spacing, keep-with-next, and start-on-new-page. Confirm inline emphasis survives
+  Book Text Style changes and clearing paragraph formatting removes only direct
+  paragraph presentation.
+- Switch to Read with unsaved edits and confirm it flushes, lays out the current
+  chapter through Press, and displays actual lines, captions, images, Designed
+  Pages, boxes, labels, and parity. Exercise single/facing display, fit page,
+  fit width, zoom, presets, custom page setup, failure diagnostics, and retry.
+- Confirm Read leaves selected side panes mounted and never displays the
+  read-only editing surface as a preview.
 
 ## Designed Pages and spreads
 
-- Insert a Designed Page between ordinary blocks without hiding surrounding
-  content; switch among exact edition variants.
-- Exercise single leaf, facing spread, and an allowed independent Digital PDF
-  page. Confirm print rejects mixed leaf geometry.
-- Create/edit image, text, rectangle, ellipse, line, layer, group, and reusable
-  style state; use locks, visibility, z-order, guides, snapping, zoom, keyboard
-  movement, and undo/redo.
+- Insert a Designed Page between ordinary blocks, click its atom, and confirm the
+  center column switches to Pages while assistant/context panes remain mounted.
+  Exercise zero-, one-, and multiple-page selection plus previous/next movement,
+  mode/page switches, autosave, and revision conflicts.
+- Confirm a new page uses project page setup and an existing page retains its
+  authored geometry after project setup changes.
+- Add an existing image only after choosing `Contain` or `Cover`. Confirm native
+  browser dragging is suppressed, frame drag/resize works, Cover crop
+  repositioning pans the raster, and pointer-up saves. Exercise replace image,
+  text binding, z-order, delete, undo/redo, zoom, and computed overlay toggle.
+- Create/edit rectangle, ellipse, and line primitives from Advanced. Confirm no
+  custom-guide, SVG/path, or surface-generation navigation control is present.
 - Bind semantic text, reorder its logical reading sequence independently from
   layers, and confirm unplaced content and overflow block validation.
 - Generate surface/frame art and confirm reserved text and gutter regions reach
-  the generation brief.
+  the generation brief, the provider's returned raster is retained, and the
+  required fit determines letterboxing or crop-to-fill placement.
 
 ## Covers
 
 - Confirm paperback shows back, spine, front, bleed/safe/fold guides, and barcode
   reserve, while Digital PDF/EPUB shows only a front surface.
 - Verify canonical title/subtitle/author/spine/back-copy bindings, project font
-  selection, image crop/focal state, shapes, layers, grouping, styles, and
+  selection, image crop-position state, shapes, layers, grouping, styles, and
   logical reading order.
 - Change trim or page count and confirm constraint-bound objects reflow, free
   objects are not stretched, and overflow is surfaced.
 - Confirm full-wrap generation requires current interior page count while
   front-panel work remains available independently.
+- In Publish, choose an edition whose geometry lacks an exact page layout and
+  confirm compatibility is reported there. Use **Create layout for this
+  edition** and verify it copies the authoring scene into a reviewable edition
+  variant without altering the active authoring layout.
 
 ## Outputs and accessibility
 

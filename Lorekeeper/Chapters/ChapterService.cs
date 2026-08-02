@@ -374,17 +374,6 @@ public class ChapterService(
                     "One or more figure images were not found in this project or are not publication-compatible PNG/JPEG assets.");
             }
         }
-        var editionIds = document.Content
-            .Where(block => block.Type == ManuscriptBlockType.Figure
-                && block.FigurePresentation?.LayoutTargetEditionId is not null)
-            .Select(block => block.FigurePresentation!.LayoutTargetEditionId!.Value)
-            .Distinct()
-            .ToList();
-        if (editionIds.Count > 0
-            && await db.PublicationEditions.AsNoTracking().CountAsync(
-                edition => edition.ProjectId == projectId && editionIds.Contains(edition.Id),
-                cancellationToken) != editionIds.Count)
-            throw new InvalidOperationException("One or more Figure layout targets do not identify a publication edition in this project.");
     }
 
     private async Task ValidateDesignedPageReferencesAsync(

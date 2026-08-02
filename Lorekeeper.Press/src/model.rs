@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,9 +97,9 @@ pub struct Cover {
     pub barcode_mode: String,
     pub asset_id: Option<String>,
     #[serde(default = "default_focal")]
-    pub image_focal_x_percent: f32,
+    pub image_crop_x_percent: f32,
     #[serde(default = "default_focal")]
-    pub image_focal_y_percent: f32,
+    pub image_crop_y_percent: f32,
     pub scene: Option<Value>,
 }
 
@@ -151,7 +151,7 @@ pub struct RenderResponse {
 impl RenderResponse {
     pub fn failed(status: &str, diagnostic: Diagnostic) -> Self {
         Self {
-            protocol_version: 4,
+            protocol_version: 5,
             renderer_version: env!("CARGO_PKG_VERSION"),
             job_id: None,
             status: status.to_owned(),
@@ -313,7 +313,9 @@ pub struct LayoutImage {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    #[serde(rename = "cropX")]
     pub focal_x: f32,
+    #[serde(rename = "cropY")]
     pub focal_y: f32,
     pub source_left_fraction: f32,
     pub source_width_fraction: f32,
@@ -342,7 +344,6 @@ pub enum PageKind {
 pub enum LayoutImageFit {
     Contain,
     Cover,
-    Fill,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -393,7 +394,7 @@ pub struct LayoutRun {
     pub size_scale: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FontFace {
     SerifRegular,
     SerifItalic,
@@ -408,6 +409,30 @@ pub enum FontFace {
     MonoBold,
     MonoBoldItalic,
     Custom(u16),
+}
+
+impl Serialize for FontFace {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let name = match self {
+            Self::SerifRegular => "SerifRegular".to_owned(),
+            Self::SerifItalic => "SerifItalic".to_owned(),
+            Self::SerifBold => "SerifBold".to_owned(),
+            Self::SerifBoldItalic => "SerifBoldItalic".to_owned(),
+            Self::SansRegular => "SansRegular".to_owned(),
+            Self::SansItalic => "SansItalic".to_owned(),
+            Self::SansBold => "SansBold".to_owned(),
+            Self::SansBoldItalic => "SansBoldItalic".to_owned(),
+            Self::MonoRegular => "MonoRegular".to_owned(),
+            Self::MonoItalic => "MonoItalic".to_owned(),
+            Self::MonoBold => "MonoBold".to_owned(),
+            Self::MonoBoldItalic => "MonoBoldItalic".to_owned(),
+            Self::Custom(index) => format!("Custom{index}"),
+        };
+        serializer.serialize_str(&name)
+    }
 }
 
 impl FontFace {

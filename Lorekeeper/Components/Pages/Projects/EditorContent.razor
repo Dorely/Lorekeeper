@@ -2,6 +2,7 @@
 @using System.Text.Json.Serialization
 @using System.Globalization
 @using Lorekeeper.Chapters
+@using Lorekeeper.Composition
 @using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.Context
 @using Lorekeeper.EditorChat
@@ -163,19 +164,28 @@ else
                         aria-pressed="@(_mode == EditorMode.Read)"
                         @onclick="() => SetModeAsync(EditorMode.Read)">Read</button>
                 <button type="button"
+                        class="@ModeButtonClass(EditorMode.Pages)"
+                        disabled="@(ContestReviewActive || DesignedPageIds.Count == 0)"
+                        aria-pressed="@(_mode == EditorMode.Pages)"
+                        title="@(DesignedPageIds.Count == 0 ? "Insert a Designed Page in Edit mode first." : "Edit Designed Pages in this chapter")"
+                        @onclick="() => SetModeAsync(EditorMode.Pages)">Pages</button>
+                <button type="button"
                         class="@ModeButtonClass(EditorMode.Review)"
                         aria-pressed="@(_mode == EditorMode.Review)"
                         title="@ReviewModeTitle"
                         @onclick="OpenReviewModeAsync">@ReviewModeLabel</button>
             </div>
 
-            <details class="manuscript-style-details">
-                <summary>Named manuscript styles</summary>
-                <ManuscriptStylesPanel @key="_styleCatalogVersion"
-                                       ProjectId="Project.Id"
-                                       BeforeChange="FlushAsync"
-                                       Changed="OnManuscriptStylesChangedAsync" />
-            </details>
+            @if (_mode == EditorMode.Edit)
+            {
+                <details class="manuscript-style-details">
+                    <summary>Book Text Styles</summary>
+                    <ManuscriptStylesPanel @key="_styleCatalogVersion"
+                                           ProjectId="Project.Id"
+                                           BeforeChange="FlushAsync"
+                                           Changed="OnManuscriptStylesChangedAsync" />
+                </details>
+            }
 
             <div class="@ChapterEditorClass()">
                 @if (_editorDocument is { } editorDocument)
@@ -183,13 +193,46 @@ else
                     <ChapterBodyEditor @key="EditorKey(editorDocument)"
                                        @ref="_bodyEditor"
                                        ProjectId="Project.Id"
-                                       ProjectSlug="Project.Slug"
                                        ChapterId="@editorDocument.ChapterId"
                                        InitialManuscriptJson="@editorDocument.ManuscriptJson"
-                                       IsVisible="@(_mode is EditorMode.Edit or EditorMode.Read)"
+                                       IsVisible="@(_mode == EditorMode.Edit)"
                                        IsReadOnly="EditorReadOnly"
                                        OpenDesignedPage="OpenDesignedPage"
                                        SaveAsync="SaveDocumentAsync" />
+                }
+
+                @if (_mode == EditorMode.Read && _current is not null)
+                {
+                    <ChapterReadPreview ProjectId="Project.Id"
+                                        ChapterId="_current.Id"
+                                        RefreshSignal="_previewRefreshSignal" />
+                }
+
+                @if (_mode == EditorMode.Pages)
+                {
+                    <div class="chapter-pages-mode">
+                        @if (DesignedPageIds.Count > 1)
+                        {
+                            <nav class="chapter-pages-selector" aria-label="Designed Page selection">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => MoveDesignedPage(-1)">Previous</button>
+                                <select class="form-select form-select-sm" value="@_openCompositionId" @onchange="SelectDesignedPageAsync">
+                                    @for (var index = 0; index < DesignedPageIds.Count; index++)
+                                    {
+                                        <option value="@DesignedPageIds[index]">Page @(index + 1)</option>
+                                    }
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => MoveDesignedPage(1)">Next</button>
+                            </nav>
+                        }
+                        @if (_openCompositionId is { } selectedCompositionId)
+                        {
+                            <DesignedPageWorkspace @key="selectedCompositionId"
+                                                   @ref="_designedPageWorkspace"
+                                                   ProjectId="Project.Id"
+                                                   CompositionId="selectedCompositionId"
+                                                   Closed="CloseDesignedPage" />
+                        }
+                    </div>
                 }
 
                 @if (_mode == EditorMode.Review)
@@ -725,13 +768,6 @@ else
                                     OnClose="CloseImagesModal"
                                     OnPrimaryAction="AddImageToContextAsync" />
 
-    @if (_openCompositionId is { } compositionId)
-    {
-        <DesignedPageWorkspace ProjectId="Project.Id"
-                               ProjectSlug="Project.Slug"
-                               CompositionId="compositionId"
-                               Closed="CloseDesignedPage" />
-    }
 }
 
 @code {
@@ -774,6 +810,7 @@ else
     private EditorDocumentState? _editorDocument;
     private long _styleCatalogVersion;
     private Guid? _openCompositionId;
+    private long _previewRefreshSignal;
 
     private SaveState _saveState = SaveState.Idle;
     private DateTime? _lastSavedAt;
@@ -803,7 +840,7 @@ else
     private string? _rejectingReviewBlockId;
     private string _reviewRejectionMessage = string.Empty;
 
-    private bool EditorReadOnly => _chapterLocked || _mode is EditorMode.Read or EditorMode.Review;
+    private bool EditorReadOnly => _chapterLocked || _mode != EditorMode.Edit;
     private bool LayoutControlsLocked => _chapterLocked;
     private bool ContestReviewActive => _contestReviewProjection is not null;
     private ContestBatch? CurrentChapterContest => _current is null
@@ -821,8 +858,31 @@ else
         ContestBatchStatus.Completed => "Review Contest Mode candidates",
         _ => "Review staged chapter changes",
     };
-    private void OpenDesignedPage(Guid compositionId) => _openCompositionId = compositionId;
-    private void CloseDesignedPage() => _openCompositionId = null;
+    private IReadOnlyList<Guid> DesignedPageIds
+    {
+        get
+        {
+            if (_editorDocument is not { } document) return [];
+            try
+            {
+                return ManuscriptCodec.Deserialize(document.ManuscriptJson, document.ChapterId, document.ManuscriptRevision)
+                    .Content.Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId is not null)
+                    .Select(block => block.PageCompositionId!.Value).ToArray();
+            }
+            catch (InvalidDataException) { return []; }
+        }
+    }
+    private DesignedPageWorkspace? _designedPageWorkspace;
+    private async Task OpenDesignedPage(Guid compositionId)
+    {
+        _openCompositionId = compositionId;
+        await SetModeAsync(EditorMode.Pages);
+    }
+    private async Task CloseDesignedPage()
+    {
+        await SetModeAsync(EditorMode.Edit);
+        _openCompositionId = null;
+    }
     private bool EffectiveChatPaneCollapsed => ContestReviewActive || _chatPaneCollapsed;
     private bool EffectiveRightPaneCollapsed => ContestReviewActive || _rightPaneCollapsed;
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
@@ -1219,6 +1279,7 @@ else
                     ReplaceCachedChapter(updated);
                     RecordEditorSave(updated);
                     UpdateChapterMetrics(updated.PlainText);
+                    _previewRefreshSignal++;
                 }
             }
             catch (Exception exception)
@@ -1280,6 +1341,13 @@ else
 
     private async Task<bool> FlushAsync()
     {
+        if (_mode == EditorMode.Pages && _designedPageWorkspace is not null
+            && !await _designedPageWorkspace.FlushAsync())
+        {
+            _saveState = SaveState.SaveFailed;
+            _saveError ??= "The Designed Page draft could not be saved.";
+            return false;
+        }
         if (_bodyEditor is null) return true;
         var flushed = await _bodyEditor.FlushAsync();
         if (!flushed)
@@ -1360,7 +1428,7 @@ else
         if (_mode == mode) return;
         if (ContestReviewActive && mode != EditorMode.Review) return;
 
-        if (mode is EditorMode.Read or EditorMode.Review)
+        if (mode is EditorMode.Read or EditorMode.Pages or EditorMode.Review)
         {
             if (!await FlushAsync()) return;
             await _saveGate.WaitAsync();
@@ -1368,6 +1436,17 @@ else
         }
 
         _mode = mode;
+        if (mode == EditorMode.Pages)
+        {
+            var pages = DesignedPageIds;
+            if (pages.Count == 0)
+            {
+                _mode = EditorMode.Edit;
+                return;
+            }
+            if (_openCompositionId is null || !pages.Contains(_openCompositionId.Value))
+                _openCompositionId = pages[0];
+        }
         await ApplyEditorReadOnlyAsync(EditorReadOnly);
 
         if (_mode == EditorMode.Review)
@@ -1521,6 +1600,26 @@ else
             await SetModeAsync(EditorMode.Review);
 
         StateHasChanged();
+    }
+
+    private async Task SelectDesignedPageAsync(ChangeEventArgs e)
+    {
+        if (!Guid.TryParse(e.Value?.ToString(), out var compositionId))
+            return;
+        if (_designedPageWorkspace is not null && !await _designedPageWorkspace.FlushAsync())
+            return;
+        _openCompositionId = compositionId;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task MoveDesignedPage(int delta)
+    {
+        var pages = DesignedPageIds;
+        if (pages.Count == 0) return;
+        if (_designedPageWorkspace is not null && !await _designedPageWorkspace.FlushAsync())
+            return;
+        var current = _openCompositionId is Guid id ? pages.ToList().IndexOf(id) : 0;
+        _openCompositionId = pages[(Math.Max(0, current) + delta + pages.Count) % pages.Count];
     }
 
     private void ActivateContestReview(ContestBatch contest)
@@ -3121,7 +3220,7 @@ else
 
     private enum SaveState { Idle, Saving, Saved, IndexFailed, SaveFailed }
 
-    private enum EditorMode { Edit, Read, Review }
+    private enum EditorMode { Edit, Read, Pages, Review }
 
     private readonly record struct EditorDocumentState(
         Guid ChapterId,

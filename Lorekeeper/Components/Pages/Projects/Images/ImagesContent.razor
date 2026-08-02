@@ -107,7 +107,7 @@ else
                     <div class="alert alert-info py-2 small">
                         <strong>@_layoutTarget.TargetKind target</strong><br />
                         @_layoutTarget.WidthInches.ToString("0.###") × @_layoutTarget.HeightInches.ToString("0.###") in · @_layoutTarget.AspectRatio · @_layoutTarget.ProviderCanvas
-                        <div>The target guides composition and reserved regions. The generated raster stays intact; its frame's fit, crop, and focal settings control placement.</div>
+                        <div>The target guides composition and reserved regions. The generated raster stays intact; its frame fit and crop position control placement.</div>
                     </div>
                 }
                 @if (!_codexConnected)
@@ -300,9 +300,23 @@ else
     protected override async Task OnParametersSetAsync()
     {
         if (Project is null) return;
-        if (LayoutEditionId is Guid editionId && LayoutTargetId is Guid targetId && !string.IsNullOrWhiteSpace(LayoutTargetKind))
+        if (LayoutTargetId is Guid targetId && !string.IsNullOrWhiteSpace(LayoutTargetKind))
         {
-            try { _layoutTarget = await Compositions.DescribeGenerationTargetAsync(Project.Id, editionId, LayoutTargetKind, targetId, LayoutVariantId); }
+            try
+            {
+                _layoutTarget = LayoutTargetKind.StartsWith("cover", StringComparison.OrdinalIgnoreCase)
+                    ? await Compositions.DescribeGenerationTargetAsync(
+                        Project.Id,
+                        LayoutEditionId ?? throw new ArgumentException("Cover artwork requires a publication edition."),
+                        LayoutTargetKind,
+                        targetId,
+                        LayoutVariantId)
+                    : await Compositions.DescribeAuthoringGenerationTargetAsync(
+                        Project.Id,
+                        LayoutTargetKind,
+                        targetId,
+                        LayoutVariantId);
+            }
             catch (Exception ex) { _layoutTarget = null; _error = ex.Message; }
         }
         else _layoutTarget = null;

@@ -8,7 +8,7 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V14WritesUnifiedCompositionDataWithoutObsoletePublicationFields()
+    public void V15WritesAuthoringCompositionDataWithoutObsoletePublicationFields()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -17,7 +17,7 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(14, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(15, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
         Assert.Contains($"\"selectedCoverImageId\":\"{coverImageId}\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("selectedCoverChapterId", json, StringComparison.Ordinal);
@@ -228,7 +228,7 @@ public sealed class ProjectExportCompatibilityTests
     }
 
     [Fact]
-    public void V9RejectsV1ManuscriptAndCarriesNamedStyleDefinitions()
+    public void CurrentImportUpgradesV1ManuscriptAndCarriesBookTextStyleDefinitions()
     {
         var chapterId = Guid.NewGuid();
         var current = ManuscriptCodec.FromPlainText(chapterId, "Current", revision: 2);
@@ -256,8 +256,7 @@ public sealed class ProjectExportCompatibilityTests
             ],
         };
 
-        Assert.Throws<InvalidOperationException>(
-            () => ProjectImportJobProcessor.ValidateChapterPayloads(document));
+        ProjectImportJobProcessor.ValidateChapterPayloads(document);
         var roundTrip = JsonSerializer.Deserialize<ProjectExportDocument>(
             JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions),
             ManuscriptCodec.JsonOptions)!;

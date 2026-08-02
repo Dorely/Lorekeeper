@@ -206,6 +206,15 @@ public static class ManuscriptOperations
                     changed.Add(currentFigure.Id);
                     break;
 
+                case SetParagraphPresentation paragraph:
+                    var paragraphIndex = Find(blocks, paragraph.BlockId);
+                    var currentParagraph = blocks[paragraphIndex];
+                    if (currentParagraph.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage)
+                        throw new InvalidOperationException($"Block {paragraph.BlockId} does not support paragraph formatting.");
+                    blocks[paragraphIndex] = currentParagraph with { ParagraphPresentation = paragraph.Presentation };
+                    changed.Add(currentParagraph.Id);
+                    break;
+
                 default:
                     throw new InvalidOperationException($"Unsupported manuscript operation {operation.GetType().Name}.");
             }

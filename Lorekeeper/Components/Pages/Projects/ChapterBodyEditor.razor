@@ -8,8 +8,6 @@
 @inject IManuscriptStyleService Styles
 @inject IProjectImageService Images
 @inject Lorekeeper.Composition.ICompositionService Compositions
-@inject Lorekeeper.Publish.IPublicationEditionService Editions
-@inject NavigationManager Navigation
 
 <div class="@RootClass()">
     <div @ref="_root"></div>
@@ -40,7 +38,6 @@
 @code {
     [Parameter, EditorRequired] public Guid ChapterId { get; set; }
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
-    [Parameter, EditorRequired] public string ProjectSlug { get; set; } = string.Empty;
     [Parameter, EditorRequired] public string InitialManuscriptJson { get; set; } = string.Empty;
     [Parameter] public bool IsVisible { get; set; } = true;
     [Parameter] public bool IsReadOnly { get; set; }
@@ -79,9 +76,6 @@
                 var compositionsJson = JsonSerializer.Serialize(
                     await LoadDesignedPageSummariesAsync(),
                     ManuscriptCodec.JsonOptions);
-                var editionsJson = JsonSerializer.Serialize(
-                    await Editions.ListAsync(ProjectId),
-                    ManuscriptCodec.JsonOptions);
                 if (_disposed || _disposing)
                     return;
 
@@ -107,7 +101,7 @@
                     InitialManuscriptJson,
                     stylesJson,
                     imagesJson,
-                    editionsJson,
+                    "[]",
                     compositionsJson);
                 if (_disposed || _disposing)
                 {
@@ -139,15 +133,11 @@
     [JSInvokable]
     public async Task<object> OnCreateDesignedPage(string name, int blockIndex, long expectedRevision)
     {
-        var editions = await Editions.ListAsync(ProjectId);
-        var editionId = editions.FirstOrDefault(edition => edition.IsDefault)?.Id
-            ?? editions.FirstOrDefault()?.Id;
         var result = await Compositions.CreateDesignedPageAsync(
             ProjectId,
             ChapterId,
             blockIndex,
             name,
-            editionId,
             expectedRevision);
         return new
         {
@@ -230,15 +220,6 @@
             surfaceLabel,
             status,
             previewUrl);
-    }
-
-    [JSInvokable]
-    public Task OnGenerateFigure(string blockId, Guid editionId)
-    {
-        if (!Guid.TryParse(blockId, out var targetId))
-            throw new InvalidOperationException("The selected Figure does not have a generation-compatible stable ID.");
-        Navigation.NavigateTo($"/projects/{Uri.EscapeDataString(ProjectSlug)}/images?editionId={editionId:N}&targetKind=figure&targetId={targetId:N}");
-        return Task.CompletedTask;
     }
 
     [JSInvokable]

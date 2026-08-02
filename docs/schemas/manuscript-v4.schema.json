@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lorekeeper.local/schemas/manuscript-v4.schema.json",
+  "title": "Lorekeeper manuscript v4",
+  "$comment": "Interchange structure only. Runtime validation also enforces unique stable IDs, owner/revision identity, project ownership, style catalogs, safe URLs, Figure accessibility, and Designed Page ownership.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "manuscriptId", "revision", "content"],
+  "properties": {
+    "schemaVersion": { "const": 4 },
+    "manuscriptId": { "type": "string", "format": "uuid" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "content": { "type": "array", "items": { "$ref": "#/$defs/block" } }
+  },
+  "$defs": {
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "styleRole", "headingLevel", "imageId", "altText", "decorative", "language", "figurePresentation", "paragraphPresentation", "pageCompositionId", "content"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["paragraph", "heading", "sceneBreak", "blockQuote", "listItem", "figure", "designedPage"] },
+        "styleRole": { "type": "string", "maxLength": 80, "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$" },
+        "headingLevel": { "type": ["integer", "null"], "minimum": 1, "maximum": 6 },
+        "imageId": { "type": ["string", "null"], "format": "uuid" },
+        "altText": { "type": ["string", "null"] },
+        "decorative": { "type": "boolean" },
+        "language": { "type": ["string", "null"], "pattern": "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$" },
+        "figurePresentation": { "oneOf": [{ "$ref": "#/$defs/figurePresentation" }, { "type": "null" }] },
+        "paragraphPresentation": { "oneOf": [{ "$ref": "#/$defs/paragraphPresentation" }, { "type": "null" }] },
+        "pageCompositionId": { "type": ["string", "null"], "format": "uuid" },
+        "content": { "type": "array", "items": { "$ref": "#/$defs/inline" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "heading" } }, "required": ["type"] },
+          "then": { "properties": { "headingLevel": { "type": "integer", "minimum": 1, "maximum": 6 } } },
+          "else": { "properties": { "headingLevel": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "figure" } }, "required": ["type"] },
+          "then": {
+            "properties": {
+              "imageId": { "type": "string", "format": "uuid" },
+              "figurePresentation": { "$ref": "#/$defs/figurePresentation" },
+              "paragraphPresentation": { "type": "null" },
+              "pageCompositionId": { "type": "null" }
+            },
+            "anyOf": [
+              { "properties": { "decorative": { "const": true } } },
+              { "properties": { "decorative": { "const": false }, "altText": { "type": "string", "pattern": "\\S" } } }
+            ]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "designedPage" } }, "required": ["type"] },
+          "then": {
+            "properties": {
+              "imageId": { "type": "null" }, "altText": { "type": "null" }, "decorative": { "const": false },
+              "figurePresentation": { "type": "null" }, "paragraphPresentation": { "type": "null" },
+              "pageCompositionId": { "type": "string", "format": "uuid" }, "content": { "maxItems": 0 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["paragraph", "heading", "blockQuote", "listItem"] } }, "required": ["type"] },
+          "then": { "properties": { "imageId": { "type": "null" }, "altText": { "type": "null" }, "decorative": { "const": false }, "figurePresentation": { "type": "null" }, "pageCompositionId": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "sceneBreak" } }, "required": ["type"] },
+          "then": { "properties": { "imageId": { "type": "null" }, "altText": { "type": "null" }, "decorative": { "const": false }, "figurePresentation": { "type": "null" }, "paragraphPresentation": { "type": "null" }, "pageCompositionId": { "type": "null" }, "content": { "maxItems": 0 } } }
+        }
+      ]
+    },
+    "figurePresentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["placement", "widthPercent", "alignment", "textWrap", "fit", "cropXPercent", "cropYPercent", "spacingBeforePoints", "spacingAfterPoints", "startOnNewPage", "keepWithCaption", "captionPlacement"],
+      "properties": {
+        "placement": { "enum": ["inline", "centered", "float", "fullWidth", "fullBleed", "dedicatedPage"] },
+        "widthPercent": { "type": "number", "minimum": 1, "maximum": 100 },
+        "alignment": { "enum": ["start", "center", "end"] },
+        "textWrap": { "enum": ["none", "start", "end"] },
+        "fit": { "enum": ["contain", "cover"] },
+        "cropXPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "cropYPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "spacingBeforePoints": { "type": "number", "minimum": 0 },
+        "spacingAfterPoints": { "type": "number", "minimum": 0 },
+        "startOnNewPage": { "type": "boolean" },
+        "keepWithCaption": { "type": "boolean" },
+        "captionPlacement": { "enum": ["below", "above", "overlay", "hidden"] }
+      }
+    },
+    "paragraphPresentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "alignment": { "enum": ["start", "center", "end", "justify", null] },
+        "leftIndentEm": { "type": ["number", "null"], "minimum": 0, "maximum": 12 },
+        "rightIndentEm": { "type": ["number", "null"], "minimum": 0, "maximum": 12 },
+        "firstLineIndentEm": { "type": ["number", "null"], "minimum": -12, "maximum": 12 },
+        "spacingBeforePoints": { "type": ["number", "null"], "minimum": 0, "maximum": 288 },
+        "spacingAfterPoints": { "type": ["number", "null"], "minimum": 0, "maximum": 288 },
+        "keepWithNext": { "type": ["boolean", "null"] },
+        "startOnNewPage": { "type": ["boolean", "null"] }
+      }
+    },
+    "inline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "text", "marks"],
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "type": "string" },
+        "marks": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/mark" } }
+      }
+    },
+    "mark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["emphasis", "strong", "underline", "strikethrough", "code", "link", "language", "smallCaps", "superscript", "subscript", "characterStyle"] },
+        "value": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

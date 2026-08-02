@@ -191,6 +191,7 @@ public static partial class ManuscriptCodec
             }
             if (block.Type != ManuscriptBlockType.DesignedPage && block.PageCompositionId is not null)
                 throw new InvalidDataException($"Block {block.Id} cannot reference a page composition.");
+            ValidateParagraphPresentation(block);
             if (block.Type != ManuscriptBlockType.SceneBreak
                 && block.Content.Any(inline => inline.Type != ManuscriptInlineType.Text))
             {
@@ -395,8 +396,8 @@ public static partial class ManuscriptCodec
             throw new InvalidDataException($"Figure block {block.Id} contains unsupported presentation settings.");
         }
         if (presentation.WidthPercent is <= 0 or > 100
-            || presentation.FocalXPercent is < 0 or > 100
-            || presentation.FocalYPercent is < 0 or > 100
+            || presentation.CropXPercent is < 0 or > 100
+            || presentation.CropYPercent is < 0 or > 100
             || presentation.SpacingBeforePoints is < 0 or > 288
             || presentation.SpacingAfterPoints is < 0 or > 288)
         {
@@ -406,6 +407,25 @@ public static partial class ManuscriptCodec
             && presentation.TextWrap == FigureTextWrap.None)
         {
             throw new InvalidDataException($"Floating figure block {block.Id} requires a text-wrap side.");
+        }
+    }
+
+    private static void ValidateParagraphPresentation(ManuscriptBlock block)
+    {
+        var presentation = block.ParagraphPresentation;
+        if (presentation is null)
+            return;
+        if (block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage)
+            throw new InvalidDataException($"Block {block.Id} cannot contain paragraph presentation settings.");
+        if (presentation.Alignment is { } alignment && !Enum.IsDefined(alignment))
+            throw new InvalidDataException($"Block {block.Id} has an unsupported paragraph alignment.");
+        if (presentation.LeftIndentEm is < 0 or > 12
+            || presentation.RightIndentEm is < 0 or > 12
+            || presentation.FirstLineIndentEm is < -12 or > 12
+            || presentation.SpacingBeforePoints is < 0 or > 288
+            || presentation.SpacingAfterPoints is < 0 or > 288)
+        {
+            throw new InvalidDataException($"Block {block.Id} contains out-of-range paragraph presentation values.");
         }
     }
 

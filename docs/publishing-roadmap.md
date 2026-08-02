@@ -222,7 +222,7 @@ and
 Status: `Implemented; Windows verified locally, native macOS matrix pending`
 
 On 2026-07-31 Lorekeeper replaced both candidate paths with the owned Rust
-`Lorekeeper.Press` subproject. Protocol v4 now carries structured Figures,
+`Lorekeeper.Press` subproject. Protocol v5 now carries structured Figures,
 Designed Pages, covers, custom fonts, semantics, and per-page Digital PDF boxes. Requirements and black-box
 conformance fixtures were written and run against the Typst implementation
 before production work began; the expected failures were recorded in the work
@@ -248,10 +248,10 @@ scope, security boundary, and future phases are in
 Status: `Implementation complete; release validation pending`
 
 Implemented in the application on 2026-07-30 and subsequently advanced to
-manuscript schema v3 by Phase 3. Stable IDs, revisions, migration/recovery,
+manuscript schema v4 by Phase 3. Stable IDs, revisions, migration/recovery,
 assistant operations, contest/revision, import, and projection paths use the
 shared manuscript service. The authorized fixture suite covers codec and mark
-behavior, WAL migration/restore, versioned visual cutover, and current v14
+behavior, WAL migration/restore, versioned visual/authoring cutover, and current v15
 serialization. This status does not close the release gate below:
 production-like copied-database rehearsal and the remaining historical/export,
 permission, retention, failure-injection, and projection evidence are required
@@ -298,7 +298,7 @@ Gate: fixture databases, interruption injection, hash equivalence, multi-text-
 box page-layout fixtures, anchored-image fixtures, import/export, index, projection,
 and restore tests pass before any existing database is contracted.
 
-#### 3. Semantic rich-text editor and named styles
+#### 3. Semantic rich-text editor and Book Text Styles
 
 Status: `Implementation complete; release validation pending`
 
@@ -312,12 +312,14 @@ Deliverables:
   with required alt text and captions;
 - emphasis, strong, small-caps intent, superscript/subscript, language, and
   character-style marks;
-- named paragraph/character styles with edition-independent semantics;
+- user-facing Book Text Styles with edition-independent paragraph/character
+  semantics and generated stable keys;
 - semantic Markdown/EPUB projection so authored block/mark/figure intent is not
   flattened at the existing publishing boundary;
 - project export introduced semantic style round-tripping in v9; the current
-  v14 format also carries manuscript-v3 compositions, editions, cover scenes,
-  and complete custom-font binaries, with isolated older adapters;
+  v15 format also carries manuscript-v4 project page setup, compositions,
+  editions, cover scenes, and complete custom-font binaries, with isolated older
+  adapters;
 - removal of the temporary textarea adapter after every editor workflow uses
   schema-driven transactions (implemented);
 - paste/import normalization with warnings;
@@ -360,13 +362,13 @@ Deliverables:
   builder for dedication, epigraph, acknowledgments, about-author, also-by,
   references, and custom matter; generated page kinds are reserved so they
   cannot be duplicated by user-authored matter;
-- named-style mappings and overrides per edition;
+- Book Text Style mappings and overrides per edition;
 - artifact/proof staleness derived from content, settings, assets, renderer, and
   profile versions;
 - edition clone, immutable archive, compare, and audit history; archived
   artifacts remain readable/exportable and changes continue through a clone.
 - project export introduced editions and edition-style mappings in v10; the
-  current v14 format retains isolated older import adapters.
+  current v15 format retains isolated older import adapters.
 
 Assistant parity: a dedicated Publish assistant can read and operate the entire
 edition/matter/style surface through the owning services, including edition-
@@ -446,7 +448,7 @@ Deliverables:
   while KDP can either contain Lorekeeper's barcode or reserve the area for
   KDP's optional overlay;
 - editable title/subtitle/author/spine/back-copy text;
-- image crop/focal controls, background handling, font licensing diagnostics,
+- direct image crop-position controls, background handling, font licensing diagnostics,
   and metadata consistency checks;
 - conditional spine text based on profile rules;
 - actual cover PDF preview and artifact.
@@ -564,16 +566,19 @@ Implemented:
 - format-neutral chapters containing semantic text, flowing Figures, and
   Designed Page references;
 - inline/centered/floated/full-width/full-bleed/dedicated-page Figure intent,
-  wrap, fit/crop/focal, captions, page breaks, alt/decorative state, and language;
-- single-page, facing-spread, and eligible independent Digital PDF composition
-  variants keyed to exact edition geometry;
+  wrap, contain/cover fit and internal crop position, captions, page breaks,
+  alt/decorative state, and language;
+- project-owned authoring page setup plus single-page, facing-spread, and
+  eligible independent Digital PDF composition variants keyed to exact geometry;
 - shared scene objects, layers, locks, visibility, grouping, z-order, rulers,
-  guides, snapping, zoom, keyboard movement, object styles, reading order,
+  computed overlays, snapping, zoom, keyboard movement, object styles, reading order,
   semantic text bindings, unplaced-content and overflow diagnostics;
+- contextual Edit, Press-backed Read, Pages, and Review chapter modes, including
+  real paginated preview and project page-setup controls;
 - format-aware back/spine/front print covers and front-only digital covers;
 - server-owned geometry descriptors for Figure/page/cover generation, including
   exact raster/aspect, effective DPI, safe/bleed/gutter/barcode/text regions;
-- protocol-v4 structured Figure, page, and cover rendering without rasterized
+- protocol-v5 structured Figure, page, and cover rendering without rasterized
   text, project font embedding, color/grayscale/CMYK paths, bleed, and ink limits;
 - one-file tagged Digital PDF with cover page one, bookmarks, internal links,
   mixed page boxes when explicitly enabled, and accessible semantic structure;
@@ -582,7 +587,7 @@ Implemented:
   captions, alternatives, and composition content in reading order;
 - compact, revision-safe Outline, Editor, Images, and Publish assistant tools,
   one-use persisted staging for large scenes, and genre-aware Outline guidance;
-- guarded protected-backup migration and v14 import/export cutover.
+- guarded protected-backup migration and v15 import/export cutover.
 
 Deferred without changing the semantic/scene ownership model:
 

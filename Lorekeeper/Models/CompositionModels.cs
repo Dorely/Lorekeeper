@@ -13,6 +13,7 @@ public class PageComposition
     public string Name { get; set; } = "Designed page";
     public string SemanticManuscriptJson { get; set; } = string.Empty;
     public long Revision { get; set; }
+    public Guid? ActiveAuthoringVariantId { get; set; }
     public ICollection<PageCompositionVariant> Variants { get; set; } = [];
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
@@ -63,9 +64,9 @@ public sealed record DesignedPageInitialContent
     public Guid? ImageId { get; init; }
     public string AltText { get; init; } = string.Empty;
     public bool Decorative { get; init; }
-    public FigureImageFit ImageFit { get; init; } = FigureImageFit.Cover;
-    public double FocalXPercent { get; init; } = 50;
-    public double FocalYPercent { get; init; } = 50;
+    public FigureImageFit ImageFit { get; init; } = FigureImageFit.Contain;
+    public double CropXPercent { get; init; } = 50;
+    public double CropYPercent { get; init; } = 50;
 }
 
 public sealed record CompositionGuide(Guid Id, CompositionGuideAxis Axis, double PositionPercent);
@@ -125,9 +126,9 @@ public sealed record CompositionObject
     public string Name { get; init; } = string.Empty;
     public Guid? StyleId { get; init; }
     public Guid? ImageId { get; init; }
-    public FigureImageFit ImageFit { get; init; } = FigureImageFit.Cover;
-    public double FocalXPercent { get; init; } = 50;
-    public double FocalYPercent { get; init; } = 50;
+    public FigureImageFit ImageFit { get; init; } = FigureImageFit.Contain;
+    public double CropXPercent { get; init; } = 50;
+    public double CropYPercent { get; init; } = 50;
     public string TextBinding { get; init; } = string.Empty;
     public IReadOnlyList<ManuscriptRangeReference> ContentReferences { get; init; } = [];
     public string FontFamilyKey { get; init; } = "builtin:nunito";
@@ -195,9 +196,10 @@ public sealed record CompositionEditionGeometry(
     bool AllowIndependentPdfPage);
 
 public sealed record LayoutGenerationTargetDescriptor(
-    Guid EditionId,
+    Guid? EditionId,
     Guid? VariantId,
     string GeometryKey,
+    string GeometrySource,
     string TargetKind,
     Guid TargetId,
     double WidthInches,

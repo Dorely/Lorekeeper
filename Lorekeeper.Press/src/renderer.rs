@@ -224,7 +224,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
 
     staging.promote(&output)?;
     let response = RenderResponse {
-        protocol_version: 4,
+        protocol_version: 5,
         renderer_version: env!("CARGO_PKG_VERSION"),
         job_id: Some(request.job_id.clone()),
         status: "completed".to_owned(),
@@ -350,18 +350,41 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             let runs = runs.iter().map(|run| {
                 let size = line.size * run.size_scale;
                 let glyphs = fonts.get(&run.face).map_or_else(Vec::new, |font| font.shape(&run.text, size));
-                serde_json::json!({ "text": run.text, "face": run.face, "glyphs": glyphs })
+                serde_json::json!({
+                    "text": run.text,
+                    "face": run.face,
+                    "underline": run.underline,
+                    "strikethrough": run.strikethrough,
+                    "baselineShiftEm": run.baseline_shift_em,
+                    "sizeScale": run.size_scale,
+                    "glyphs": glyphs,
+                })
             }).collect::<Vec<_>>();
             serde_json::json!({ "text": line.text, "size": line.size, "x": line.x, "y": line.y,
                 "wordSpacing": line.word_spacing, "characterSpacing": line.character_spacing,
+                "rotationDegrees": line.rotation_degrees,
+                "rotationOriginX": line.rotation_origin_x,
+                "rotationOriginY": line.rotation_origin_y,
+                "opacity": line.opacity,
                 "lightText": line.light_text, "fillRgb": line.fill_rgb,
                 "semanticRole": line.semantic_role, "artifact": line.artifact,
-                "language": line.language, "readingOrder": line.reading_order, "runs": runs })
+                "language": line.language, "readingOrder": line.reading_order,
+                "semanticId": line.semantic_id, "semanticParentId": line.semantic_parent_id,
+                "linkPage": line.link_page, "runs": runs })
         }).collect::<Vec<_>>();
         let kind = match page.kind { PageKind::Designed => "DesignedPage", PageKind::Body => "Body", PageKind::Blank => "Blank", PageKind::Cover => "Cover" };
+        let paint_order = page.paint_order.iter().map(|paint| match paint {
+            LayoutPaint::Shape(index) => serde_json::json!({ "kind": "shape", "index": index }),
+            LayoutPaint::Image(index) => serde_json::json!({ "kind": "image", "index": index }),
+            LayoutPaint::Line(index) => serde_json::json!({ "kind": "line", "index": index }),
+        }).collect::<Vec<_>>();
         serde_json::json!({
             "kind": kind,
-            "rotationDegrees": page.images.first().map_or(0.0, |image| image.rotation_degrees),
+            "widthPoints": page.width_points.unwrap_or(request.trim.width_inches * 72.0),
+            "heightPoints": page.height_points.unwrap_or(request.trim.height_inches * 72.0),
+            "pageLabel": page.page_label,
+            "bookmark": page.bookmark,
+            "paintOrder": paint_order,
             "lines": lines,
             "images": page.images,
             "shapes": page.shapes,
@@ -370,7 +393,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "protocolVersion": 4,
+            "protocolVersion": 5,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
             "jobId": request.job_id,
             "pages": pages,
@@ -435,7 +458,7 @@ fn placement_dpi(
     let height_scale = placement.height / image.height as f32;
     let points_per_pixel = match placement.fit {
         LayoutImageFit::Contain => width_scale.min(height_scale),
-        LayoutImageFit::Cover | LayoutImageFit::Fill => width_scale.max(height_scale),
+        LayoutImageFit::Cover => width_scale.max(height_scale),
     };
     Some(72.0 / points_per_pixel)
 }
@@ -483,7 +506,7 @@ fn validate_request(
     request: &RenderRequest,
     job_root: &Path,
 ) -> RenderResult<std::collections::BTreeMap<String, Vec<u8>>> {
-    if request.protocol_version != 4 {
+    if request.protocol_version != 5 {
         return reject(
             "PRESS_PROTOCOL_INVALID",
             "Lorekeeper Press requires protocol version 4.",
@@ -552,12 +575,12 @@ fn validate_request(
         }
         if !(0.0..=0.25).contains(&cover.bleed_inches)
             || !(0.001..=0.01).contains(&cover.paper_caliper_inches_per_page)
-            || !(0.0..=100.0).contains(&cover.image_focal_x_percent)
-            || !(0.0..=100.0).contains(&cover.image_focal_y_percent)
+            || !(0.0..=100.0).contains(&cover.image_crop_x_percent)
+            || !(0.0..=100.0).contains(&cover.image_crop_y_percent)
         {
             return reject(
                 "PRESS_COVER_GEOMETRY_INVALID",
-                "Cover bleed, paper caliper, or focal geometry is outside supported bounds.",
+                "Cover bleed, paper caliper, or crop geometry is outside supported bounds.",
             );
         }
         if cover.title.chars().count() > 240
@@ -1071,6 +1094,9 @@ fn paginate_with_cancellation(
                     size: 18.0,
                     line_height: 1.3,
                     indent: 0.0,
+                    right_indent: 0.0,
+                    first_line_indent: 0.0,
+                    page_break_before: false,
                     keep_with_next: true,
                     alignment: "left".to_owned(),
                     face: FontFace::SansBold,
@@ -1142,6 +1168,9 @@ fn paginate_with_cancellation(
                         size: trim.body_font_size_points,
                         line_height: trim.body_line_height,
                         indent: 18.0,
+                        right_indent: 0.0,
+                        first_line_indent: 0.0,
+                        page_break_before: false,
                         keep_with_next: true,
                         alignment: "left".to_owned(),
                         face: FontFace::SerifItalic,
@@ -1262,11 +1291,11 @@ fn paginate_with_cancellation(
                             _ => "center",
                         };
                         let focal_x = presentation
-                            .get("focalXPercent")
+                            .get("cropXPercent")
                             .and_then(Value::as_f64)
                             .unwrap_or(50.0) as f32;
                         let focal_y = presentation
-                            .get("focalYPercent")
+                            .get("cropYPercent")
                             .and_then(Value::as_f64)
                             .unwrap_or(50.0) as f32;
                         let text_wrap = string(presentation, "textWrap");
@@ -1519,8 +1548,8 @@ fn append_inline_illustration(
     caption: &str,
     asset_id: String,
     width_percent: f32,
-    focal_x_percent: f32,
-    focal_y_percent: f32,
+    crop_x_percent: f32,
+    crop_y_percent: f32,
     alignment: &str,
     text_wrap: &str,
     fit: LayoutImageFit,
@@ -1601,8 +1630,8 @@ fn append_inline_illustration(
         y: image_y,
         width: image_width,
         height: image_height,
-        focal_x: (focal_x_percent / 100.0).clamp(0.0, 1.0),
-        focal_y: (focal_y_percent / 100.0).clamp(0.0, 1.0),
+        focal_x: (crop_x_percent / 100.0).clamp(0.0, 1.0),
+        focal_y: (crop_y_percent / 100.0).clamp(0.0, 1.0),
         source_left_fraction: 0.0,
         source_width_fraction: 1.0,
         rotation_degrees: 0.0,
@@ -1939,12 +1968,12 @@ fn designed_page(
                         width: width * scene_width,
                         height: height * scene_height,
                         focal_x: item
-                            .get("focalXPercent")
+                            .get("cropXPercent")
                             .and_then(Value::as_f64)
                             .unwrap_or(50.0) as f32
                             / 100.0,
                         focal_y: item
-                            .get("focalYPercent")
+                            .get("cropYPercent")
                             .and_then(Value::as_f64)
                             .unwrap_or(50.0) as f32
                             / 100.0,
@@ -2005,6 +2034,9 @@ fn designed_page(
                         size,
                         line_height: 1.0,
                         indent: 0.0,
+                        right_indent: 0.0,
+                        first_line_indent: 0.0,
+                        page_break_before: false,
                         keep_with_next: false,
                         alignment: "left".to_owned(),
                         face,
@@ -2866,8 +2898,8 @@ fn layout_semantic_role(value: &str) -> LayoutSemanticRole {
 fn layout_image_fit(value: &str) -> LayoutImageFit {
     match value {
         "Contain" => LayoutImageFit::Contain,
-        "Fill" => LayoutImageFit::Fill,
-        _ => LayoutImageFit::Cover,
+        "Cover" => LayoutImageFit::Cover,
+        _ => LayoutImageFit::Contain,
     }
 }
 
@@ -2907,11 +2939,11 @@ fn append_matter(
                         .unwrap_or(100.0) as f32
                 };
                 let focal_x = presentation
-                    .get("focalXPercent")
+                    .get("cropXPercent")
                     .and_then(Value::as_f64)
                     .unwrap_or(50.0) as f32;
                 let focal_y = presentation
-                    .get("focalYPercent")
+                    .get("cropYPercent")
                     .and_then(Value::as_f64)
                     .unwrap_or(50.0) as f32;
                 let alignment = match string(presentation, "alignment").as_str() {
@@ -3190,11 +3222,11 @@ fn append_placement_pages(
             _ => "center",
         };
         let focal_x = presentation
-            .get("focalXPercent")
+            .get("cropXPercent")
             .and_then(Value::as_f64)
             .unwrap_or(50.0) as f32;
         let focal_y = presentation
-            .get("focalYPercent")
+            .get("cropYPercent")
             .and_then(Value::as_f64)
             .unwrap_or(50.0) as f32;
         let dedicated = matches!(placement_intent.as_str(), "DedicatedPage" | "FullBleed");
@@ -3337,6 +3369,9 @@ fn build_toc_pages_with_limit(
         size: trim.body_font_size_points,
         line_height: trim.body_line_height,
         indent: 0.0,
+        right_indent: 0.0,
+        first_line_indent: 0.0,
+        page_break_before: false,
         keep_with_next: true,
         alignment: "left".to_owned(),
         face: FontFace::SerifRegular,
@@ -3612,6 +3647,9 @@ struct BlockStyle {
     size: f32,
     line_height: f32,
     indent: f32,
+    right_indent: f32,
+    first_line_indent: f32,
+    page_break_before: bool,
     keep_with_next: bool,
     alignment: String,
     face: FontFace,
@@ -3627,6 +3665,9 @@ impl BlockStyle {
             size: trim.body_font_size_points,
             line_height: trim.body_line_height,
             indent: 0.0,
+            right_indent: 0.0,
+            first_line_indent: 0.0,
+            page_break_before: false,
             keep_with_next: false,
             alignment: "justify".to_owned(),
             face: FontFace::SerifRegular,
@@ -3667,7 +3708,8 @@ fn append_styled_runs(
         return pages.len().max(1);
     }
     let default_x = trim.margin_inches * 72.0 + style.indent;
-    let default_width = (trim.width_inches - 2.0 * trim.margin_inches) * 72.0 - style.indent;
+    let default_width =
+        (trim.width_inches - 2.0 * trim.margin_inches) * 72.0 - style.indent - style.right_indent;
     let flow_region = pages
         .last()
         .and_then(|page| active_float_region(page, trim, style));
@@ -3703,6 +3745,13 @@ fn append_styled_runs(
     let (lines, wrapped_runs): (Vec<_>, Vec<_>) = wrapped.into_iter().unzip();
     let mut offset = 0;
     let mut first_page = None;
+    if style.page_break_before
+        && pages
+            .last()
+            .is_some_and(|page| page.kind == PageKind::Body && !page.lines.is_empty())
+    {
+        pages.push(empty_body_page());
+    }
     if style.keep_with_next
         && pages.last().is_some_and(|page| {
             page.kind == PageKind::Body && remaining_line_capacity(page, trim, style) < 3
@@ -3753,7 +3802,10 @@ fn append_styled_runs(
             } else {
                 default_width
             };
-            let line_x = if uses_float { flow_x } else { default_x };
+            let mut line_x = if uses_float { flow_x } else { default_x };
+            if offset == 0 && relative_index == 0 && !uses_float {
+                line_x += style.first_line_indent;
+            }
             let estimated_width = measured_run_width(&line_runs, style.size);
             let spaces = line.chars().filter(|character| *character == ' ').count();
             let is_final_line = offset + relative_index + 1 == lines.len();
@@ -4100,6 +4152,47 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             .and_then(Value::as_f64)
             .unwrap_or(0.0) as f32;
     }
+    if let Some(presentation) = block
+        .get("paragraphPresentation")
+        .filter(|value| !value.is_null())
+    {
+        if let Some(alignment) = presentation.get("alignment").and_then(Value::as_str) {
+            style.alignment = match alignment.to_ascii_lowercase().as_str() {
+                "start" => "left",
+                "end" => "right",
+                other => other,
+            }
+            .to_owned();
+        }
+        style.indent = presentation
+            .get("leftIndentEm")
+            .and_then(Value::as_f64)
+            .map_or(style.indent, |value| value as f32 * style.size);
+        style.right_indent = presentation
+            .get("rightIndentEm")
+            .and_then(Value::as_f64)
+            .map_or(style.right_indent, |value| value as f32 * style.size);
+        style.first_line_indent = presentation
+            .get("firstLineIndentEm")
+            .and_then(Value::as_f64)
+            .map_or(style.first_line_indent, |value| value as f32 * style.size);
+        style.space_before = presentation
+            .get("spacingBeforePoints")
+            .and_then(Value::as_f64)
+            .unwrap_or(style.space_before as f64) as f32;
+        style.space_after = presentation
+            .get("spacingAfterPoints")
+            .and_then(Value::as_f64)
+            .unwrap_or(style.space_after as f64) as f32;
+        style.keep_with_next = presentation
+            .get("keepWithNext")
+            .and_then(Value::as_bool)
+            .unwrap_or(style.keep_with_next);
+        style.page_break_before = presentation
+            .get("startOnNewPage")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+    }
     style
 }
 
@@ -4332,8 +4425,8 @@ fn dedicated_figure_page_with_layout(
     label: &str,
     asset_id: String,
     width_percent: f32,
-    focal_x_percent: f32,
-    focal_y_percent: f32,
+    crop_x_percent: f32,
+    crop_y_percent: f32,
     alignment: &str,
 ) -> LayoutPage {
     let margin = trim.margin_inches * 72.0;
@@ -4388,8 +4481,8 @@ fn dedicated_figure_page_with_layout(
                 y: image_y,
                 width: image_width,
                 height: image_height,
-                focal_x: (focal_x_percent / 100.0).clamp(0.0, 1.0),
-                focal_y: (focal_y_percent / 100.0).clamp(0.0, 1.0),
+                focal_x: (crop_x_percent / 100.0).clamp(0.0, 1.0),
+                focal_y: (crop_y_percent / 100.0).clamp(0.0, 1.0),
                 source_left_fraction: 0.0,
                 source_width_fraction: 1.0,
                 rotation_degrees: 0.0,
@@ -4551,8 +4644,8 @@ fn cover_layout(request: &RenderRequest, width: f32) -> Result<LayoutPage, Diagn
                 y: bleed,
                 width: panel_width,
                 height: request.trim.height_inches * 72.0,
-                focal_x: cover.image_focal_x_percent / 100.0,
-                focal_y: cover.image_focal_y_percent / 100.0,
+                focal_x: cover.image_crop_x_percent / 100.0,
+                focal_y: cover.image_crop_y_percent / 100.0,
                 source_left_fraction: 0.0,
                 source_width_fraction: 1.0,
                 rotation_degrees: 0.0,
@@ -4634,8 +4727,8 @@ fn digital_cover_layout(request: &RenderRequest) -> Result<LayoutPage, Diagnosti
                 y: 0.0,
                 width,
                 height,
-                focal_x: (cover.image_focal_x_percent / 100.0).clamp(0.0, 1.0),
-                focal_y: (cover.image_focal_y_percent / 100.0).clamp(0.0, 1.0),
+                focal_x: (cover.image_crop_x_percent / 100.0).clamp(0.0, 1.0),
+                focal_y: (cover.image_crop_y_percent / 100.0).clamp(0.0, 1.0),
                 source_left_fraction: 0.0,
                 source_width_fraction: 1.0,
                 rotation_degrees: 0.0,
@@ -5243,7 +5336,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let request = RenderRequest {
-            protocol_version: 4,
+            protocol_version: 5,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v1".to_owned(),
             ink: "BlackAndWhite".to_owned(),
@@ -5391,6 +5484,9 @@ mod tests {
             size: 20.0,
             line_height: 1.4,
             indent: 0.0,
+            right_indent: 0.0,
+            first_line_indent: 0.0,
+            page_break_before: false,
             keep_with_next: true,
             alignment: "left".to_owned(),
             face: FontFace::SansBold,
@@ -5513,8 +5609,8 @@ mod tests {
             isbn: None,
             barcode_mode: "None".to_owned(),
             asset_id: None,
-            image_focal_x_percent: 50.0,
-            image_focal_y_percent: 50.0,
+            image_crop_x_percent: 50.0,
+            image_crop_y_percent: 50.0,
             scene: Some(serde_json::json!({
                 "surface": { "widthPoints": old_width, "heightPoints": height },
                 "layers": [{ "id": "layer", "name": "Content", "order": 0 }],
@@ -5785,8 +5881,8 @@ mod tests {
             isbn: Some("9780306406157".to_owned()),
             barcode_mode: "LorekeeperBarcode".to_owned(),
             asset_id: None,
-            image_focal_x_percent: 50.0,
-            image_focal_y_percent: 50.0,
+            image_crop_x_percent: 50.0,
+            image_crop_y_percent: 50.0,
             scene: None,
         });
         let spine_width = 1.0 * 72.0;
@@ -5824,7 +5920,7 @@ mod tests {
 
     fn request_with_document(document: Value) -> RenderRequest {
         RenderRequest {
-            protocol_version: 4,
+            protocol_version: 5,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v1".to_owned(),
             ink: "BlackAndWhite".to_owned(),

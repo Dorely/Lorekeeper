@@ -52,7 +52,8 @@
 | `docs/decisions/0003-own-lorekeeper-press-renderer.md` | Accepted decision to own the Rust Press renderer, protocol, validation, and packaged runtime boundary. |
 | `docs/schemas/manuscript-v1.schema.json` | Published JSON Schema for canonical structured-manuscript v1 documents, blocks, inline nodes, marks, and semantic style roles. |
 | `docs/schemas/manuscript-v2.schema.json` | Historical semantic-manuscript v2 schema used only by migration/import boundaries. |
-| `docs/schemas/manuscript-v3.schema.json` | Current semantic manuscript schema for format-neutral text, structured Figure presentation/accessibility, and Designed Page references. |
+| `docs/schemas/manuscript-v1.schema.json` / `manuscript-v2.schema.json` / `manuscript-v3.schema.json` | Historical semantic manuscript interchange schemas retained for versioned import documentation. |
+| `docs/schemas/manuscript-v4.schema.json` | Current semantic manuscript schema with paragraph presentation, geometry-neutral Figures, crop positioning, and Designed Page references. |
 
 ## Lorekeeper.Tests/
 
@@ -65,8 +66,7 @@
 | `EditorManuscriptPreviewServiceTests.cs` | Direct and Review-edits fixtures for compact one-use previews, exact projected-document persistence, stale rejection, and approval payloads. |
 | `EditorRevisionAgentResultTests.cs` | Compact coordinator-result and pending progress-read disposal fixtures for revision-agent completion. |
 | `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
-| `ProjectExportCompatibilityTests.cs` | Current v14 manuscript/composition/edition/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
-| `UnifiedCompositionMigrationTests.cs` | Populated protected-backup fixtures for visual-layout-to-Figure/Designed Page/cover-scene migration, geometry-policy isolation, pending Outline replanning, restart/recovery, and byte/hash preservation. |
+| `ProjectExportCompatibilityTests.cs` | Current v15 manuscript/page-setup/composition/edition/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
 | `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image remapping, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
 | `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, Figures, Designed Page reading-order text, ordered matter, and accessible EPUB rendering. |
 | `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, content-use, and edition-mapping deletion guards. |
@@ -78,7 +78,7 @@
 | `PublishChatServiceTests.cs` | Publish conversation persistence/reset, streaming completion/failure/cancellation, selected-edition prompt, non-replayed tools, mutation notices, and active-turn reconnection fixtures. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
 | `LorekeeperPressMigrationTests.cs` | Fully populated pre-Press upgrade, malformed-marker, cross-process ownership, final-profile mapping, recoverable-work, legacy classification, and whole-database byte/hash preservation fixtures. |
-| `LorekeeperPressProcessIntegrationTests.cs` | Real C#-to-packaged-Rust protocol-v4 render of interior and cover with a cleared machine environment. |
+| `LorekeeperPressProcessIntegrationTests.cs` | Real C#-to-packaged-Rust protocol-v5 render of interior and cover with a cleared machine environment. |
 | `DatabaseMigrationRecoveryTests.cs` | Shared migration-recovery pruning fixture proving protected failed/running backup references survive automatic retention. |
 | `OpenAIChatToolMetadataClientTests.cs` | OpenAI-compatible streaming fixture proving Gemini tool-call extension metadata survives the assistant/tool-result round trip. |
 | `CodexAuthServiceTests.cs` | OAuth refresh fixtures for reconnect rejection, cross-scope serialization/cache replacement, rotation preservation, and fail-loud server errors. |
@@ -97,18 +97,18 @@
 | File | Description |
 |------|-------------|
 | `Cargo.toml` / `Cargo.lock` / `rust-toolchain.toml` | Rust 1.97.1 crate with exact permissive serialization, shaping, subsetting, line-breaking, hyphenation, image/color, PDF-writing, hashing, and inspection dependencies. |
-| `src/main.rs` / `src/lib.rs` | Native `describe`, layout trace, and bounded protocol-v4 render CLI plus the independently testable library surface. |
-| `src/model.rs` | Protocol-v4 image/font requests, diagnostics, artifacts, validation evidence, structured layout, accessibility, and page-map contracts. |
+| `src/main.rs` / `src/lib.rs` | Native `describe`, structured chapter-layout trace, and bounded protocol-v5 render CLI plus the independently testable library surface. |
+| `src/model.rs` | Protocol-v5 image/font requests, diagnostics, artifacts, validation evidence, structured page-paint layout, accessibility, and page-map contracts. |
 | `src/renderer.rs` | Contained staging, validation, deterministic pagination, flowing Figures, structured page/cover composition, Digital PDF assembly, barcodes, atomic promotion, and evidence. |
 | `src/font.rs` | Bundled/project TTF and TrueType/CFF OTF validation, shaping, subsetting, widths, embedding, and multi-codepoint ToUnicode mapping. |
-| `src/image.rs` | Bounded PNG/JPEG decoding, alpha flattening, grayscale/registered-profile CMYK conversion, crop/focal handling, and total-ink enforcement. |
+| `src/image.rs` | Bounded PNG/JPEG decoding, alpha flattening, grayscale/registered-profile CMYK conversion, crop-position handling, and total-ink enforcement. |
 | `src/pdf.rs` | Owned deterministic PDF 1.7/PDF 1.3 writer for mixed page boxes, tagged structure, bookmarks/links, ordered vector scenes, PDF 1.7 opacity, bounded PDF/X opacity flattening, fonts, images, output intent, and barcodes. |
 | `src/inspect.rs` | Separate `lopdf` post-write inspection for geometry, fonts, XObject colors, output intent, transparency, encryption, annotations/actions, and tagged-PDF parent-tree/MCID integrity. |
 | `assets/` | Approved OFL font notices plus the registered CGATS21 CRPC1 CMYK profile, source, fingerprint, and redistribution record. |
 | `fixtures/full-model-v4.json` | Canonical complete publication-model protocol fixture used by black-box conformance tests. |
 | `fixtures/negative-cases-v4.json` | Frozen adversarial protocol mutations and expected fail-closed diagnostic codes. |
 | `fixtures/invalid-pdf-structures-v3.json` | Frozen malformed raw-PDF cases proving the black-box harness fails closed independently of production preflight. |
-| `tests/conformance_v4.rs` / `tests/fixtures/` | Test-owned CLI harness/assets and raw-PDF assertions for protocol, containment, atomicity, determinism, Figures, compositions, custom fonts, color/bleed, KDP/PDF-X, tagged Digital PDF, covers, and negatives. |
+| `tests/conformance_v5.rs` / `fixtures/full-model-v5.json` / `tests/fixtures/` | Test-owned CLI harness/assets and raw-PDF/layout assertions for protocol, containment, atomicity, determinism, paragraph presentation, Figures, compositions, custom fonts, color/bleed, KDP/PDF-X, tagged Digital PDF, covers, and negatives. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
 
@@ -180,10 +180,11 @@
 |------|-------------|
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
-| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter workspace with keyed semantic editor, serialized refresh coordination, resizable Chat/Memory columns, Designed Page workspace, and persistent AI/Contest review entry points. |
+| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with keyed semantic editor, serialized refresh coordination, resizable Chat/Memory columns, and persistent AI/Contest review entry points. |
 | `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, semantic Figure controls, and discoverable Designed Page cards with live names, surface/status summaries, artwork thumbnails, and editor actions. |
+| `ChapterReadPreview.razor` (+ `.razor.css`) | Press-backed current-chapter page preview with flush-before-layout, single/facing display, fit/zoom controls, project page setup, images, labels, links, and retryable diagnostics. |
 | `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Named paragraph/character style manager with revision-aware create/edit/delete controls and stable semantic roles. |
-| `DesignedPageWorkspace.razor` (+ `.razor.css`) | Exact-geometry page/spread scene editor with mode thumbnails, direct move/resize/rotate, semantic bindings, image/text/shape objects, layers, groups, styles, reading order, user guides/snapping, overflow/unplaced diagnostics, generation targets, and revision-safe save. |
+| `DesignedPageWorkspace.razor` (+ `.razor.css`) | Contextual exact-geometry page/spread scene editor with page selection, atomic image/fit placement, direct frame/crop manipulation, semantic bindings, layers, computed overlays, advanced vector primitives, diagnostics, undo/redo, and revision-safe save. |
 | `CoverCompositionWorkspace.razor` (+ `.razor.css`) | Format-aware print-wrap/digital-front scene editor with direct move/resize/rotate, canonical copy bindings, project images/fonts, layers/groups/styles, safety/barcode overlays, generation targets, and revision-safe save. |
 | `ProjectFontManagerModal.razor` | Project font catalog manager for TTF/OTF imports, available-face inspection, embedding-right declarations, and guarded in-use deletion. |
 | `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: defers/coalesces transcript hydration, reconciles editor lock state with persistent turns, streams tool/contest updates, routes plain-text changes to Review mode and structured changes to the pending-edits modal, and opens current contests. |
@@ -278,12 +279,13 @@
 | `Project.cs` | EF project root with optional user-owned `ProjectGuidance`, stable slug/settings, one `BookBrief`, and navigation to conversations, images, fonts, jobs, publishing, and graph rows. |
 | `BookBrief.cs` | Canonical high-level authorial-direction model, `BookKind` enum, and partial-patch contract whose null values are unchanged and `ClearFields` explicitly removes values. |
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
-| `Chapter.cs` | EF chapter with canonical manuscript-v3 JSON/revision and computed plain-text/document projections, plus title/synopsis/order, optional act, and vector-index state. |
+| `Chapter.cs` | EF chapter with canonical manuscript-v4 JSON/revision and computed plain-text/document projections, plus title/synopsis/order, optional act, and vector-index state. |
 | `ChapterVisualMode.cs` / `ChapterVisualLayouts.cs` | Isolated legacy import/migration DTOs for interpreting earlier chapter visual records; no current runtime authoring path consumes them. |
-| `CompositionModels.cs` | Page composition/variant/stage entities plus shared scene, surface, layer, object/style, semantic/reading-order, region, and generation-target contracts. |
+| `CompositionModels.cs` | Page composition/variant/stage entities, active authoring-variant ownership, and shared scene, object/style, reading-order, region, and geometry-neutral generation-target contracts. |
+| `ProjectPageSetup.cs` | One-to-one project-owned authoring page geometry, margins, body typography, preset, and revision state. |
 | `ManuscriptMigrationJournal.cs` | Durable structured-manuscript migration phase, counts, hashes, backup path, timing, and redacted failure state. |
 | `ProjectFontFamily.cs` / `ProjectFontFace.cs` | Project-scoped EF entities for imported font families and static face bytes, with weight/italic metadata and project cascade ownership. |
-| `ManuscriptStyleDefinition.cs` | Project-owned named paragraph/character style entity with normalized uniqueness keys, immutable semantic identity, definition JSON, and revision token. |
+| `ManuscriptStyleDefinition.cs` | Project-owned Book Text Style entity with normalized generated keys, immutable semantic identity, paragraph/character definition JSON, and revision token. |
 | `EditorContextPreference.cs` | EF entity for per-chapter Context Feed include/exclude preferences keyed by context item kind + stable item key. |
 | `EditorConversation.cs` | EF entity — one persistent multi-turn editor chat per `Project` (unique on `ProjectId`). Owns ordered `EditorMessage`s; cascade-deleted with the project. |
 | `EditorMessage.cs` | EF Editor transcript row with role/content/tool metadata plus the bounded included/omitted context-provenance snapshot stored on outgoing user turns. |
@@ -320,7 +322,7 @@
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
 | `PublicationEdition.cs` | Edition aggregate root and enums for paperback/EPUB/Digital PDF settings, metadata, geometry/override policy, identifier, status, and default selection. |
 | `PublicationEditionOutlineItem.cs` | Edition-owned, ordered act/chapter inclusion records with typed foreign keys. |
-| `PublicationMatter.cs` | Edition-owned semantic front/back matter, named-style mappings, immutable audit entries, and edition-migration journal entities. |
+| `PublicationMatter.cs` | Edition-owned semantic front/back matter, Book Text Style mappings, immutable audit entries, and edition-migration journal entities. |
 | `PublicationImagePlacement.cs` | Edition-owned interior image placements before/after acts or chapters and at chapter openings/endings. |
 | `PublishAsset.cs` | EF entity for uploaded/generated/edited/cropped project images with bytes, crop lineage/coordinates, alt text, prompt/source metadata, masks, and placement navigation. |
 | `PublicationRender.cs` | Edition render jobs, immutable artifact bytes/provenance, statuses, and stable manuscript-block page-map persistence. |
@@ -341,12 +343,12 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context for projects, providers, chats, writing, graph, ingest/import, publishing, chapter visuals, fonts, and named manuscript styles. Configures relationships/indexes, JSON property bags, and transient SQLite lock retries. |
+| `AppDbContext.cs` | EF Core context for projects, page setup, providers, chats, writing, graph, ingest/import, publishing, composition, fonts, and Book Text Styles. Configures relationships/indexes, JSON property bags, and transient SQLite lock retries. |
 | `DatabaseMigrationRecoveryService.cs` | Shared protected SQLite backup/restore, recovery-shell, expiring confirmation, backup discovery, and reference-aware pruning boundary for guarded migrations. |
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-edition, Publish-chat, and data-preserving Lorekeeper Press forward migrations with the current model snapshot. |
+| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-edition, Publish-chat, Press, and additive authoring-page-setup forward migrations with the current model snapshot. |
 
 ### Persistence/Repositories/
 
@@ -541,13 +543,13 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | Current v14 portable DTOs with v3 manuscripts, page compositions, edition-owned cover scenes, geometry variants, accessibility data, and complete custom-font binaries; retains isolated older input adapters. |
+| `ProjectExportModels.cs` | Current v15 portable DTOs with v4 manuscripts, project page setup, authoring geometry variants, edition-owned cover scenes, accessibility data, and complete custom-font binaries; retains isolated older input adapters. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job, importing v14 manuscripts/compositions/edition cover scenes/fonts, adapting v1-v13 data only at the versioned boundary, then refreshing projections and indexes. |
+| `ProjectImportJobProcessor.cs` | Runs one import job, importing v15 manuscripts/page setup/compositions/edition cover scenes/fonts, adapting older data only at the versioned boundary, then refreshing projections and indexes. |
 
 ### Images/
 
@@ -580,8 +582,10 @@
 
 | File | Description |
 |------|-------------|
-| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service, atomic initial page/spread artwork seeding, scene validation/staging, exact geometry fingerprints, and named geometry-bound image-generation descriptors. |
-| `CompositionAgentPayloads.cs` | Lossless bounded assistant reads and compact revision-safe patch envelopes for semantic fragments, scene objects, layers, styles, and guides. |
+| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service, active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
+| `ProjectPageSetupService.cs` | Revision-aware project authoring page setup presets/custom geometry used by Read preview, new Designed Pages, Figures, and generation targets without publication editions. |
+| `ChapterPreviewService.cs` | Cached Press layout-command adapter that compiles preceding structure, stages declared project images/fonts, and returns the current chapter's structured page-paint response. |
+| `CompositionAgentPayloads.cs` | Lossless bounded assistant reads and compact revision-safe patch envelopes for semantic fragments, scene objects, layers, and styles. |
 | `CompositionSceneResolver.cs` | Shared deterministic group flattener and PDF/X overlap validator used by export and geometry-target consumers so group transforms, opacity, visibility, locks, and z-order have runtime meaning. |
 | `CoverCompositionFactory.cs` | Seeds and reflows shared structured cover scenes across front-only digital and page-count-derived print-wrap geometry. |
 
@@ -608,7 +612,7 @@
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration, shared active-turn streaming/reconnection, collaborative prompt policy, tool activity, and structured mutation notices. |
 | `PublicationPdfActionState.cs` | Deterministic NotGenerated/Rendering/Invalid/Stale/Validated/Legacy selector for paperback interior/cover or one Digital PDF Book artifact. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
-| `PublicationRenderService.cs` | Persisted/recoverable queue, BOM-free protocol-v4 declared image/font staging, native lifecycle, hash-verified paperback/Book PDF artifacts, semantic page maps, legacy/stale derivation, and comparison. |
+| `PublicationRenderService.cs` | Persisted/recoverable queue, BOM-free protocol-v5 declared image/font staging, native lifecycle, hash-verified paperback/Book PDF artifacts, semantic page maps, legacy/stale derivation, and comparison. |
 | `PublicationCoverService.cs` | Revisioned format-aware structured cover aggregate, canonical copy bindings, print-wrap/digital-front geometry reflow, ISBN/vendor/spine diagnostics, and acknowledgement invalidation. |
 | `PublicationPackageService.cs` | Versioned fail-closed Lorekeeper validation preflight, product-form-specific deterministic package assembly, manifests, reports, provenance, legacy guards, and exact-package proof records. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying every included ordered semantic-matter document into edition-scoped TXT, Markdown, EPUB, and contained press output with reciprocal product-form guards. |
@@ -675,18 +679,19 @@
 
 | File | Description |
 |------|-------------|
-| `ManuscriptModels.cs` | Manuscript-v3 document/block/inline/mark model with Figure presentation/accessibility, Designed Page references, semantic operations, snapshots, and revision conflicts. |
+| `ManuscriptModels.cs` | Manuscript-v4 document/block/inline/mark model with sparse paragraph presentation, geometry-neutral Figure presentation/accessibility, Designed Page references, semantic operations, snapshots, and revision conflicts. |
 | `ManuscriptSemanticRoles.cs` | Safe semantic-role identifier validation plus deterministic normalization for manuscript-v1 migration and v8 import. |
 | `ManuscriptCodec.cs` | Plain-text normalization/projection, deterministic migration IDs, validation, serialization, hashing, and stable-ID reparsing. |
 | `ManuscriptRangeResolver.cs` | Validates non-overlapping UTF-16 semantic text ranges, rejects surrogate splits, resolves frame content exactly once, and identifies unplaced composition content. |
 | `ChapterSemanticProjectionService.cs` | Expands Designed Page semantic fragments into chapter reading order exactly once for search, context, indexing, and plain-text projections without duplicating storage. |
 | `ManuscriptOperations.cs` / `ManuscriptOperationInput.cs` | Transactional insert/replace/delete/move/split/merge/type/style/mark transformations with GUID-format-independent stable-ID lookup and assistant-safe DTO conversion. |
 | `ManuscriptInspection.cs` | Shared schema validation, normalization diagnostics, and structural block search used by Editor and revision-worker assistants. |
-| `ManuscriptSchemaUpgrade.cs` | Strict lossless older-to-v3 document and nested historical-payload upgrader used by startup migration and isolated import adapters. |
-| `ManuscriptStyleService.cs` | Revision-checked named paragraph/character style ownership, validation, immutable semantic keys, and usage-safe deletion. |
+| `ManuscriptSchemaUpgrade.cs` | Strict lossless older-to-v4 document and nested historical-payload upgrader used by startup migration and isolated import adapters. |
+| `ManuscriptStyleService.cs` | Revision-checked Book Text Style ownership, built-in/imported font validation, immutable generated semantic keys, and usage-safe deletion. |
 | `IManuscriptService.cs` | Canonical revision-aware chapter manuscript read, replace, and semantic-operation service contract. |
 | `ManuscriptMigrationService.cs` | Cross-process-serialized, WAL-safe Online Backup API migration/recovery owner for resumable schema/data transformation, atomic validation journaling, retention, confirmed restore, and non-downgrading later-migration orchestration. |
 | `VisualCompositionMigrationService.cs` | Guarded protected-backup v3/composition cutover and geometry-policy rekey that preserve semantic IDs/text and visual styles, map Figures/pages/covers/pending Outline state, verify artifacts/hashes/foreign keys, and invoke cleanup. |
+| `AuthoringPageMigrationService.cs` | Guarded protected-backup v4 authoring cutover that seeds page setup/authoring variants, normalizes Figure/scene fit and crop state, removes custom guides and edition links, preserves artifacts/hashes, and validates ownership/count/foreign-key invariants. |
 
 ### wwwroot/
 

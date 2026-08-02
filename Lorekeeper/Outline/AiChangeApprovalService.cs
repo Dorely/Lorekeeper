@@ -486,40 +486,24 @@ public sealed class AiChangeApprovalService(
                     throw new InvalidOperationException("The reviewed Designed Page structure no longer matches its staged creation request.");
                 }
 
-                if (arguments.EditionId is Guid editionId)
-                {
-                    await compositions.CreateDesignedPageAsync(
-                        projectId,
-                        after.Id,
-                        arguments.BlockIndex,
-                        arguments.Name,
-                        editionId,
-                        before.Revision,
-                        new DesignedPageIdentity(compositionId, added.Id),
-                        new DesignedPageInitialContent
-                        {
-                            LayoutMode = arguments.LayoutMode,
-                            ImageId = arguments.ImageId,
-                            AltText = arguments.AltText ?? string.Empty,
-                            Decorative = arguments.Decorative,
-                            ImageFit = arguments.ImageFit,
-                            FocalXPercent = arguments.FocalXPercent,
-                            FocalYPercent = arguments.FocalYPercent,
-                        },
-                        cancellationToken);
-                }
-                else
-                {
-                    await compositions.CreateDesignedPageAsync(
-                        projectId,
-                        after.Id,
-                        arguments.BlockIndex,
-                        arguments.Name,
-                        null,
-                        before.Revision,
-                        new DesignedPageIdentity(compositionId, added.Id),
-                        cancellationToken);
-                }
+                await compositions.CreateDesignedPageAsync(
+                    projectId,
+                    after.Id,
+                    arguments.BlockIndex,
+                    arguments.Name,
+                    before.Revision,
+                    new DesignedPageIdentity(compositionId, added.Id),
+                    new DesignedPageInitialContent
+                    {
+                        LayoutMode = arguments.LayoutMode,
+                        ImageId = arguments.ImageId,
+                        AltText = arguments.AltText ?? string.Empty,
+                        Decorative = arguments.Decorative,
+                        ImageFit = arguments.ImageFit,
+                        CropXPercent = arguments.CropXPercent,
+                        CropYPercent = arguments.CropYPercent,
+                    },
+                    cancellationToken);
                 break;
             }
             case "apply_manuscript_operations":
@@ -550,7 +534,7 @@ public sealed class AiChangeApprovalService(
             {
                 var staged = ReadRequired<ManuscriptStyleChange>(afterJson);
                 var input = staged.After
-                    ?? throw new InvalidOperationException("The staged named-style update has no target state.");
+                    ?? throw new InvalidOperationException("The staged Book Text Style update has no target state.");
                 await manuscriptStyles.UpsertAsync(projectId, input, cancellationToken);
                 break;
             }
@@ -558,7 +542,7 @@ public sealed class AiChangeApprovalService(
             {
                 var staged = ReadRequired<ManuscriptStyleChange>(afterJson);
                 var before = staged.Before
-                    ?? throw new InvalidOperationException("The staged named-style deletion has no source state.");
+                    ?? throw new InvalidOperationException("The staged Book Text Style deletion has no source state.");
                 await manuscriptStyles.DeleteAsync(
                     projectId,
                     before.Id,
@@ -1234,15 +1218,14 @@ public sealed class AiChangeApprovalService(
         public Guid ChapterId { get; init; }
         public int BlockIndex { get; init; }
         public string Name { get; init; } = "Designed page";
-        public Guid? EditionId { get; init; }
         public long ExpectedRevision { get; init; }
         public DesignedPageLayoutMode LayoutMode { get; init; } = DesignedPageLayoutMode.SinglePage;
         public Guid? ImageId { get; init; }
         public string? AltText { get; init; }
         public bool Decorative { get; init; }
         public FigureImageFit ImageFit { get; init; } = FigureImageFit.Cover;
-        public double FocalXPercent { get; init; } = 50;
-        public double FocalYPercent { get; init; } = 50;
+        public double CropXPercent { get; init; } = 50;
+        public double CropYPercent { get; init; } = 50;
     }
 
     private sealed record ChapterBodyReviewLineTarget(

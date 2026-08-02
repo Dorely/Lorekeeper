@@ -10,7 +10,7 @@ import {
 
 test("round-trips Lorekeeper block IDs, semantic roles, and inline marks", () => {
     const document = {
-        schemaVersion: 3,
+        schemaVersion: 4,
         manuscriptId: "59897294-9390-4da6-a4df-a1bbd16e622b",
         revision: 12,
         content: [
@@ -22,6 +22,7 @@ test("round-trips Lorekeeper block IDs, semantic roles, and inline marks", () =>
                 imageId: null,
                 altText: null,
                 language: null,
+                paragraphPresentation: null,
                 content: [{type: "text", text: "Chapter One", marks: []}]
             },
             {
@@ -32,6 +33,7 @@ test("round-trips Lorekeeper block IDs, semantic roles, and inline marks", () =>
                 imageId: null,
                 altText: null,
                 language: null,
+                paragraphPresentation: null,
                 content: [
                     {
                         type: "text",
@@ -53,6 +55,7 @@ test("round-trips Lorekeeper block IDs, semantic roles, and inline marks", () =>
                 imageId: null,
                 altText: null,
                 language: null,
+                paragraphPresentation: null,
                 content: []
             },
             {
@@ -63,6 +66,7 @@ test("round-trips Lorekeeper block IDs, semantic roles, and inline marks", () =>
                 imageId: "29fd4930-0048-45a1-a2d6-3951daa5a1d9",
                 altText: "A map",
                 language: null,
+                paragraphPresentation: null,
                 decorative: false,
                 accessibilityRole: "figure",
                 figurePresentation: {
@@ -71,8 +75,8 @@ test("round-trips Lorekeeper block IDs, semantic roles, and inline marks", () =>
                     alignment: "center",
                     textWrap: "none",
                     fit: "contain",
-                    focalXPercent: 50,
-                    focalYPercent: 50,
+                    cropXPercent: 50,
+                    cropYPercent: 50,
                     spacingBeforePoints: 6,
                     spacingAfterPoints: 6,
                     startOnNewPage: false,
@@ -120,7 +124,7 @@ test("heading levels three through six round-trip", () => {
     }
 });
 
-test("heading-level edits preserve named paragraph roles", () => {
+test("heading-level edits preserve Book Text Style roles", () => {
     installDom();
     const doc = semanticEditorTesting.documentFromDomain(manuscript([{
         id: "named",
@@ -140,7 +144,7 @@ test("heading-level edits preserve named paragraph roles", () => {
     assert.equal(view.state.doc.firstChild.attrs.styleRole, "custom-opening");
 });
 
-test("named paragraph roles apply to selected scene-break atoms", () => {
+test("Book Text Style roles apply to selected scene-break atoms", () => {
     installDom();
     const doc = semanticEditorTesting.documentFromDomain(manuscript([{
         id: "break",
@@ -210,12 +214,13 @@ function manuscript(content = [{
     content: [{type: "text", text: "Hello world", marks: []}]
 }]) {
     return {
-        schemaVersion: 3,
+        schemaVersion: 4,
         manuscriptId: "59897294-9390-4da6-a4df-a1bbd16e622b",
         revision: 4,
         content: content.map(block => ({
             ...block,
             language: block.language ?? null,
+            paragraphPresentation: block.paragraphPresentation ?? null,
             ...(block.type === "figure"
                 ? {accessibilityRole: block.accessibilityRole || "figure"}
                 : {})
@@ -239,7 +244,7 @@ test("block commands preserve stable IDs and toolbar read-only state", async () 
     }, 10_000, JSON.stringify(manuscript()));
 
     const select = root.querySelector("select[aria-label='Block style']");
-    select.value = "heading|subheading|2";
+    select.value = "heading|subheading|3";
     select.dispatchEvent(new window.Event("change", {bubbles: true}));
     await handle.flush();
     assert.equal(saves.at(-1).content[0].id, "stable");
@@ -268,7 +273,7 @@ test("flush drains edits made while a save is in flight", async () => {
         }
     }, 10_000, JSON.stringify(manuscript()));
     const select = root.querySelector("select[aria-label='Block style']");
-    select.value = "heading|subheading|2";
+    select.value = "heading|subheading|3";
     select.dispatchEvent(new window.Event("change", {bubbles: true}));
     const flush = handle.flush();
     while (saved.length === 0)
@@ -552,7 +557,7 @@ test("locked views reject command transactions", async () => {
     }, 10_000, JSON.stringify(manuscript()));
     handle.setReadOnly(true);
     const select = root.querySelector("select[aria-label='Block style']");
-    select.value = "heading|subheading|2";
+    select.value = "heading|subheading|3";
     select.dispatchEvent(new window.Event("change", {bubbles: true}));
     assert.equal(await handle.flush(), true);
     assert.equal(saves.length, 0);
@@ -560,7 +565,7 @@ test("locked views reject command transactions", async () => {
     dom.window.close();
 });
 
-test("reset named paragraph style preserves block type", async () => {
+test("reset Book Text Style preserves block type", async () => {
     const dom = installDom();
     const root = document.createElement("div");
     document.body.append(root);
@@ -587,7 +592,7 @@ test("reset named paragraph style preserves block type", async () => {
         definition: {},
         revision: 1
     }]));
-    const select = root.querySelector("select[aria-label='Named paragraph style']");
+    const select = root.querySelector("select[aria-label='Book Text Style']");
     select.value = "__reset__";
     select.dispatchEvent(new window.Event("change", {bubbles: true}));
     await handle.flush();

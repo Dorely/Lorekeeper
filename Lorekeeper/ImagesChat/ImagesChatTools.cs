@@ -30,6 +30,7 @@ public sealed class ImagesChatTools(
     IImagePromptComposer imagePrompts,
     IManuscriptService manuscripts,
     ICompositionService compositions,
+    IProjectPageSetupService pageSetups,
     IChapterSemanticProjectionService semanticProjection,
     IPublicationCoverService covers,
     IEditorContextService editorContext,
@@ -79,6 +80,17 @@ public sealed class ImagesChatTools(
                 description: "List project image library metadata, ids, preview URLs, source, prompts, model names, and sizes."),
 
             AIFunctionFactory.Create(
+                method: () => ReadProjectPageSetupAsync(context),
+                name: "read_project_page_setup",
+                description: "Read project-owned authoring geometry and its revision for Figures, Designed Pages, preview, and target-bound generation. This is not a publication edition."),
+
+            AIFunctionFactory.Create(
+                method: (long expectedRevision, double pageWidthInches, double pageHeightInches, double pageMarginInches, double bodyFontSizePoints, double bodyLineHeight) =>
+                    UpdateProjectPageSetupAsync(context, expectedRevision, pageWidthInches, pageHeightInches, pageMarginInches, bodyFontSizePoints, bodyLineHeight),
+                name: "update_project_page_setup",
+                description: "Revision-check the project authoring page setup. Read it first, then retain every value the user did not ask to change."),
+
+            AIFunctionFactory.Create(
                 method: (Guid imageId) => ReadProjectImageAsync(context, imageId),
                 name: "read_project_image",
                 description: "Read one project image's metadata and URLs and load it as visual context when the provider supports vision."),
@@ -121,7 +133,7 @@ public sealed class ImagesChatTools(
             AIFunctionFactory.Create(
                 method: (Guid compositionId, Guid variantId, int semanticStart = 0, int semanticCount = 20, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) => ReadPageCompositionAsync(context, compositionId, variantId, semanticStart, semanticCount, objectStart, objectCount, structureStart, structureCount),
                 name: "read_page_composition",
-                description: "Read one selected geometry variant losslessly in bounded object pages, including complete surface, layers, styles, guides, object fields, semantic excerpts, and revisions. No image bytes are returned."),
+                description: "Read one selected geometry variant losslessly in bounded object pages, including complete surface, layers, styles, object fields, semantic excerpts, and revisions. Computed page overlays and image bytes are omitted."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, long expectedRevision, int index, Guid imageId, string? caption, string? altText, bool decorative, string? language, FigureAccessibilityRole accessibilityRole, FigurePresentation presentation) =>
@@ -141,45 +153,43 @@ public sealed class ImagesChatTools(
                     long expectedRevision,
                     int blockIndex,
                     string name,
-                    Guid editionId,
                     DesignedPageLayoutMode layoutMode = DesignedPageLayoutMode.SinglePage,
                     Guid? imageId = null,
                     string? altText = null,
                     bool decorative = false,
-                    FigureImageFit imageFit = FigureImageFit.Cover,
-                    double focalXPercent = 50,
-                    double focalYPercent = 50) =>
+                    FigureImageFit imageFit = FigureImageFit.Contain,
+                    double cropXPercent = 50,
+                    double cropYPercent = 50) =>
                     CreateDesignedPageAsync(
                         context,
                         chapterId,
                         expectedRevision,
                         blockIndex,
                         name,
-                        editionId,
                         layoutMode,
                         imageId,
                         altText,
                         decorative,
                         imageFit,
-                        focalXPercent,
-                        focalYPercent),
+                        cropXPercent,
+                        cropYPercent),
                 name: "create_designed_page",
-                description: "Atomically insert a complete Designed Page with exact edition geometry, single-page or facing-spread layout, and optional existing project artwork placed with explicit fit, focal point, and accessibility settings."),
+                description: "Atomically insert a complete Designed Page in project authoring geometry. Optional existing artwork must include Show whole image (Contain) or Fill frame (Cover), plus accessibility settings. The page opens as the selected authoring layout."),
 
             AIFunctionFactory.Create(
-                method: (Guid compositionId, Guid editionId) => GetOrCreateCompositionVariantAsync(context, compositionId, editionId),
+                method: (Guid compositionId) => GetOrCreateCompositionVariantAsync(context, compositionId),
                 name: "get_or_create_page_composition_variant",
-                description: "Get or create the exact geometry variant for a Designed Page and edition."),
+                description: "Get or create the active project-authoring geometry variant for a Designed Page."),
 
             AIFunctionFactory.Create(
-                method: (Guid editionId, Guid variantId) => ValidateCompositionAsync(context, editionId, variantId),
+                method: (Guid variantId) => ValidateCompositionAsync(context, variantId),
                 name: "validate_page_composition",
-                description: "Validate a Designed Page variant for geometry, semantic coverage, reading order, accessibility, overflow, image DPI, font readiness, and edition compatibility. Returns only compact prioritized diagnostics."),
+                description: "Validate an authoring Designed Page for scene geometry, semantic coverage, reading order, accessibility, overflow, and font readiness. Publication DPI and edition compatibility are checked only in Publish. Returns compact prioritized diagnostics."),
 
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCompositionElementAsync(context, variantId, expectedRevision, targetKind, targetId, patch),
                 name: "patch_page_composition_element",
-                description: "Revision-check patch one stable composition object, guide, layer, or style using only changed fields. Preserve all unrelated scene state; use full-scene staging only for structural edits."),
+                description: "Revision-check patch one stable composition object, layer, or style using only changed fields. Page overlays are computed and cannot be authored. Preserve all unrelated scene state; use full-scene staging only for structural edits."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, CompositionScene scene) => StageCompositionAsync(context, variantId, expectedRevision, scene),
                 name: "stage_page_composition",
@@ -234,9 +244,9 @@ public sealed class ImagesChatTools(
                 description: "Apply a staged cover scene by stage ID and expected revision; never repeat the full scene."),
 
             AIFunctionFactory.Create(
-                method: (Guid editionId, string targetKind, Guid targetId, Guid? variantId = null) => ReadLayoutGenerationTargetAsync(context, editionId, targetKind, targetId, variantId),
+                method: (string targetKind, Guid targetId, Guid? variantId = null, Guid? editionId = null) => ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId, editionId),
                 name: "read_layout_generation_target",
-                description: "Read server-owned dimensions, aspect ratio, provider canvas, and reserved regions for a Figure, page frame/surface, or cover frame/surface. Page targets require the exact selected composition variantId."),
+                description: "Read server-owned dimensions, aspect ratio, provider canvas, and reserved regions. project-page, Figure, and page frame/surface targets use project authoring geometry and omit editionId; use the project ID for project-page. Cover targets require editionId. Composition page targets require the active variantId."),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ProjectImageCropRegion crop, string? fileName = null, string? altText = null, EntityVisualTarget? entityTarget = null) =>
@@ -254,7 +264,7 @@ public sealed class ImagesChatTools(
                 method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, string? label = null) =>
                     GenerateImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression, count, label),
                 name: "generate_image",
-                description: $"Generate unattached library images from a structured brief. Default to free-standing generation for reusable art and flowing Figures. Use a server-owned target only when composing specifically for a concrete Figure placement, page, or cover; omit manual size/aspect and respect its protected regions. The target never crops the stored output, and later layout fit/crop/focal settings accept any source aspect ratio. Rendered text is disabled unless intentionally baked in. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
+                description: $"Generate unattached library images from a structured brief. Default to free-standing generation for reusable art and flowing Figures. Use a server-owned target only for a concrete Figure, page, or cover composition; omit manual size/aspect and respect protected regions. The returned raster is never rejected for aspect-ratio differences. Place it with Contain or Cover, then reposition a Cover crop directly if needed. Rendered text is disabled unless intentionally baked in. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int count = 1, string? label = null) =>
@@ -269,6 +279,43 @@ public sealed class ImagesChatTools(
         ];
 
         return Task.FromResult(tools);
+    }
+
+    private async Task<string> ReadProjectPageSetupAsync(ImagesChatToolContext ctx)
+    {
+        var setup = await pageSetups.GetOrCreateAsync(ctx.ProjectId, ctx.TurnCancellationToken);
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            targetId = setup.ProjectId,
+            revision = setup.Revision,
+            page = new { widthInches = setup.PageWidthInches, heightInches = setup.PageHeightInches, marginInches = setup.PageMarginInches },
+            body = new { fontSizePoints = setup.BodyFontSizePoints, lineHeight = setup.BodyLineHeight },
+        }, JsonOptions);
+    }
+
+    private async Task<string> UpdateProjectPageSetupAsync(
+        ImagesChatToolContext ctx,
+        long expectedRevision,
+        double pageWidthInches,
+        double pageHeightInches,
+        double pageMarginInches,
+        double bodyFontSizePoints,
+        double bodyLineHeight)
+    {
+        var setup = await pageSetups.UpdateAsync(ctx.ProjectId, expectedRevision,
+            new(pageWidthInches, pageHeightInches, pageMarginInches, bodyFontSizePoints, bodyLineHeight),
+            ctx.TurnCancellationToken);
+        ctx.MarkMutated();
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            targetId = setup.ProjectId,
+            revision = setup.Revision,
+            changedFields = new[] { "pageWidthInches", "pageHeightInches", "pageMarginInches", "bodyFontSizePoints", "bodyLineHeight" },
+            summary = "Project page setup updated.",
+            mutation = new { kind = "projectPageSetup", id = setup.ProjectId, revision = setup.Revision },
+        }, JsonOptions);
     }
 
     private async Task<string> ListSearchSourcesAsync(ImagesChatToolContext ctx, string? query, string[]? sourceTypes, int topK)
@@ -628,14 +675,13 @@ public sealed class ImagesChatTools(
         long expectedRevision,
         int blockIndex,
         string name,
-        Guid editionId,
         DesignedPageLayoutMode layoutMode,
         Guid? imageId,
         string? altText,
         bool decorative,
         FigureImageFit imageFit,
-        double focalXPercent,
-        double focalYPercent)
+        double cropXPercent,
+        double cropYPercent)
     {
         try
         {
@@ -644,7 +690,6 @@ public sealed class ImagesChatTools(
                 chapterId,
                 blockIndex,
                 name,
-                editionId,
                 expectedRevision,
                 new DesignedPageInitialContent
                 {
@@ -653,8 +698,8 @@ public sealed class ImagesChatTools(
                     AltText = altText ?? string.Empty,
                     Decorative = decorative,
                     ImageFit = imageFit,
-                    FocalXPercent = focalXPercent,
-                    FocalYPercent = focalYPercent,
+                    CropXPercent = cropXPercent,
+                    CropYPercent = cropYPercent,
                 },
                 ctx.TurnCancellationToken);
             ctx.MarkMutated();
@@ -670,13 +715,13 @@ public sealed class ImagesChatTools(
         }
     }
 
-    private async Task<string> GetOrCreateCompositionVariantAsync(ImagesChatToolContext ctx, Guid compositionId, Guid editionId)
+    private async Task<string> GetOrCreateCompositionVariantAsync(ImagesChatToolContext ctx, Guid compositionId)
     {
         try
         {
-            var variant = await compositions.GetOrCreateVariantAsync(ctx.ProjectId, compositionId, editionId, ctx.TurnCancellationToken);
+            var variant = await compositions.GetOrCreateAuthoringVariantAsync(ctx.ProjectId, compositionId, ctx.TurnCancellationToken);
             ctx.MarkMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "Exact geometry variant is ready.", mutation = new { kind = "pageComposition", id = compositionId, selectId = variant.Id } }, JsonOptions);
+            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "Authoring layout is ready.", mutation = new { kind = "pageComposition", id = compositionId, selectId = variant.Id } }, JsonOptions);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
@@ -809,11 +854,24 @@ public sealed class ImagesChatTools(
         }
     }
 
-    private async Task<string> ReadLayoutGenerationTargetAsync(ImagesChatToolContext ctx, Guid editionId, string targetKind, Guid targetId, Guid? variantId)
+    private async Task<string> ReadLayoutGenerationTargetAsync(ImagesChatToolContext ctx, string targetKind, Guid targetId, Guid? variantId, Guid? editionId)
     {
         try
         {
-            var descriptor = await compositions.DescribeGenerationTargetAsync(ctx.ProjectId, editionId, targetKind, targetId, variantId, ctx.TurnCancellationToken);
+            var descriptor = targetKind.StartsWith("cover", StringComparison.OrdinalIgnoreCase)
+                ? await compositions.DescribeGenerationTargetAsync(
+                    ctx.ProjectId,
+                    editionId ?? throw new ArgumentException("Cover targets require editionId."),
+                    targetKind,
+                    targetId,
+                    variantId,
+                    ctx.TurnCancellationToken)
+                : await compositions.DescribeAuthoringGenerationTargetAsync(
+                    ctx.ProjectId,
+                    targetKind,
+                    targetId,
+                    variantId,
+                    ctx.TurnCancellationToken);
             return JsonSerializer.Serialize(new { ok = true, targetId, summary = $"{descriptor.AspectRatio}; {descriptor.RecommendedWidthPixels}x{descriptor.RecommendedHeightPixels}px.", descriptor }, JsonOptions);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
@@ -822,11 +880,11 @@ public sealed class ImagesChatTools(
         }
     }
 
-    private async Task<string> ValidateCompositionAsync(ImagesChatToolContext ctx, Guid editionId, Guid variantId)
+    private async Task<string> ValidateCompositionAsync(ImagesChatToolContext ctx, Guid variantId)
     {
         try
         {
-            var result = await compositions.ValidateVariantAsync(ctx.ProjectId, editionId, variantId, ctx.TurnCancellationToken);
+            var result = await compositions.ValidateAuthoringVariantAsync(ctx.ProjectId, variantId, ctx.TurnCancellationToken);
             return JsonSerializer.Serialize(new { ok = result.ErrorCount == 0, targetId = result.TargetId, revision = result.Revision, summary = $"Validation found {result.ErrorCount} error(s) and {result.WarningCount} warning(s).", diagnosticCounts = new { errors = result.ErrorCount, warnings = result.WarningCount }, diagnostics = result.Diagnostics }, JsonOptions);
         }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "VALIDATION_FAILED", targetId = variantId, summary = ex.Message }, JsonOptions); }

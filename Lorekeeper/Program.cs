@@ -181,10 +181,13 @@ builder.Services.AddScoped<IManuscriptService>(services => services.GetRequiredS
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
 builder.Services.AddScoped<IVisualCompositionMigrationService, VisualCompositionMigrationService>();
+builder.Services.AddScoped<IAuthoringPageMigrationService, AuthoringPageMigrationService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
 builder.Services.AddScoped<IProjectFontService, ProjectFontService>();
 builder.Services.AddScoped<IManuscriptStyleService, ManuscriptStyleService>();
 builder.Services.AddScoped<Lorekeeper.Composition.ICompositionService, Lorekeeper.Composition.CompositionService>();
+builder.Services.AddScoped<Lorekeeper.Composition.IProjectPageSetupService, Lorekeeper.Composition.ProjectPageSetupService>();
+builder.Services.AddScoped<Lorekeeper.Composition.IChapterPreviewService, Lorekeeper.Composition.ChapterPreviewService>();
 builder.Services.Configure<EntityVisualContextOptions>(builder.Configuration.GetSection(EntityVisualContextOptions.SectionName));
 builder.Services.AddScoped<IEntityVisualExampleService, EntityVisualExampleService>();
 builder.Services.AddScoped<IEntityVisualContextService, EntityVisualContextService>();
@@ -330,6 +333,9 @@ using (var scope = app.Services.CreateScope())
         await visualCompositionMigration.ApplyFinalSchemaAsync(db);
         await visualCompositionMigration.ApplyPendingAsync(db);
     }
+
+    var authoringPageMigration = scope.ServiceProvider.GetRequiredService<IAuthoringPageMigrationService>();
+    await authoringPageMigration.ApplyPendingAsync(db);
 
     var migrationRecovery = scope.ServiceProvider.GetRequiredService<IDatabaseMigrationRecoveryService>();
     if (!await migrationRecovery.IsRecoveryRequiredAsync())

@@ -128,8 +128,8 @@ public sealed class PublicationEditionService(
                 BackCopy = source.CoverDesign.BackCopy,
                 BackgroundColor = source.CoverDesign.BackgroundColor,
                 BarcodeMode = source.CoverDesign.BarcodeMode,
-                ImageFocalXPercent = source.CoverDesign.ImageFocalXPercent,
-                ImageFocalYPercent = source.CoverDesign.ImageFocalYPercent,
+                ImageCropXPercent = source.CoverDesign.ImageCropXPercent,
+                ImageCropYPercent = source.CoverDesign.ImageCropYPercent,
                 CompositionSceneJson = source.CoverDesign.CompositionSceneJson,
             };
         db.PublicationEditions.Add(clone);
@@ -536,7 +536,7 @@ public sealed class PublicationEditionService(
             candidate => candidate.ProjectId == projectId
                 && candidate.Id == input.ManuscriptStyleDefinitionId,
             cancellationToken)
-            ?? throw new InvalidOperationException("Named manuscript style was not found.");
+            ?? throw new InvalidOperationException("Book Text Style was not found.");
         var normalized = ManuscriptStyleService.NormalizeOverride(style.Kind, input.Override);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         var mapping = await db.PublicationEditionStyleMappings.FirstOrDefaultAsync(
@@ -1025,8 +1025,8 @@ public sealed class PublicationEditionService(
                 design.BackCopy,
                 design.BackgroundColor,
                 design.BarcodeMode,
-                design.ImageFocalXPercent,
-                design.ImageFocalYPercent,
+                design.ImageCropXPercent,
+                design.ImageCropYPercent,
                 design.CompositionSceneJson,
             })
             .SingleOrDefaultAsync(cancellationToken);
@@ -1337,8 +1337,8 @@ public sealed class PublicationEditionService(
     {
         if (!Enum.IsDefined(role)
             || presentation.WidthPercent is <= 0 or > 100
-            || presentation.FocalXPercent is < 0 or > 100
-            || presentation.FocalYPercent is < 0 or > 100
+            || presentation.CropXPercent is < 0 or > 100
+            || presentation.CropYPercent is < 0 or > 100
             || presentation.SpacingBeforePoints is < 0 or > 288
             || presentation.SpacingAfterPoints is < 0 or > 288)
         {
@@ -1350,13 +1350,6 @@ public sealed class PublicationEditionService(
             throw new InvalidOperationException("Edition illustrations require alternative text or a decorative decision.");
         if (string.IsNullOrWhiteSpace(language) || language.Trim().Length > 35)
             throw new InvalidOperationException("Edition illustration language must be a compact BCP 47 tag.");
-        if (presentation.LayoutTargetEditionId is Guid targetEditionId
-            && !await db.PublicationEditions.AsNoTracking().AnyAsync(
-                edition => edition.Id == targetEditionId && edition.ProjectId == projectId,
-                cancellationToken))
-        {
-            throw new InvalidOperationException("The illustration layout target edition was not found in this project.");
-        }
     }
 
     private static void ValidatePlacementKind(PublishOutlineTargetKind targetKind, PublicationImagePlacementKind placementKind)

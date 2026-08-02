@@ -129,7 +129,7 @@ public static class AiChangeReviewDiffBuilder
             var before = beforePayload.Before;
             var input = afterPayload.After;
             diff = Build(
-                input is null ? "Delete named style" : before is null ? "Create named style" : "Update named style",
+                input is null ? "Delete Book Text Style" : before is null ? "Create Book Text Style" : "Update Book Text Style",
                 input?.Name ?? before?.Name,
                 [
                     new DiffFieldInput("Name", "Name", before?.Name ?? "(not set)", input?.Name ?? "(deleted)", null),
@@ -312,7 +312,7 @@ public static class AiChangeReviewDiffBuilder
 
             var before = beforePayload.Before;
             var input = afterPayload.After;
-            SetTitle(ref title, "Named style changes");
+            SetTitle(ref title, "Book Text Style changes");
             SetSubtitle(ref subtitle, input?.Name ?? before?.Name ?? string.Empty);
             var prefix = $"Style {input?.Id ?? before?.Id}: ";
             AddOrUpdateField(

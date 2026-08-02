@@ -22,6 +22,8 @@ public class Project
 
     public BookBrief? BookBrief { get; set; }
 
+    public ProjectPageSetup? PageSetup { get; set; }
+
     /// <summary>
     /// When true, the currently-open chapter is included in the assembled system prompt
     /// as a line-numbered block. Toggleable from the Context Feed.

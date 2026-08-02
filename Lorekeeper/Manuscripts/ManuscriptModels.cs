@@ -4,7 +4,7 @@ namespace Lorekeeper.Manuscripts;
 
 public sealed record ManuscriptDocument
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     [JsonRequired]
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
@@ -33,6 +33,7 @@ public sealed record ManuscriptBlock
     public string? Language { get; init; }
     public FigureAccessibilityRole? AccessibilityRole { get; init; }
     public FigurePresentation? FigurePresentation { get; init; }
+    public ParagraphPresentation? ParagraphPresentation { get; init; }
     public Guid? PageCompositionId { get; init; }
     [JsonRequired]
     public List<ManuscriptInline> Content { get; init; } = [];
@@ -72,14 +73,34 @@ public sealed record FigurePresentation
     public FigureAlignment Alignment { get; init; } = FigureAlignment.Center;
     public FigureTextWrap TextWrap { get; init; } = FigureTextWrap.None;
     public FigureImageFit Fit { get; init; } = FigureImageFit.Contain;
-    public double FocalXPercent { get; init; } = 50;
-    public double FocalYPercent { get; init; } = 50;
+    public double CropXPercent { get; init; } = 50;
+    public double CropYPercent { get; init; } = 50;
     public double SpacingBeforePoints { get; init; } = 6;
     public double SpacingAfterPoints { get; init; } = 6;
     public bool StartOnNewPage { get; init; }
     public bool KeepWithCaption { get; init; } = true;
     public FigureCaptionPlacement CaptionPlacement { get; init; } = FigureCaptionPlacement.Below;
-    public Guid? LayoutTargetEditionId { get; init; }
+}
+
+public sealed record ParagraphPresentation
+{
+    public ParagraphAlignment? Alignment { get; init; }
+    public double? LeftIndentEm { get; init; }
+    public double? RightIndentEm { get; init; }
+    public double? FirstLineIndentEm { get; init; }
+    public double? SpacingBeforePoints { get; init; }
+    public double? SpacingAfterPoints { get; init; }
+    public bool? KeepWithNext { get; init; }
+    public bool? StartOnNewPage { get; init; }
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<ParagraphAlignment>))]
+public enum ParagraphAlignment
+{
+    Start,
+    Center,
+    End,
+    Justify,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<FigureAccessibilityRole>))]
@@ -125,7 +146,6 @@ public enum FigureImageFit
 {
     Contain,
     Cover,
-    Fill,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<FigureCaptionPlacement>))]
@@ -197,6 +217,7 @@ public sealed record ManuscriptRangeReference(
 [JsonDerivedType(typeof(SetManuscriptBlockStyle), "setBlockStyle")]
 [JsonDerivedType(typeof(SetManuscriptInlineMark), "setInlineMark")]
 [JsonDerivedType(typeof(SetFigurePresentation), "setFigurePresentation")]
+[JsonDerivedType(typeof(SetParagraphPresentation), "setParagraphPresentation")]
 public abstract record ManuscriptOperation;
 
 public sealed record InsertManuscriptBlock(
@@ -266,6 +287,10 @@ public sealed record SetFigurePresentation(
     string? Language,
     FigurePresentation Presentation,
     FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure) : ManuscriptOperation;
+
+public sealed record SetParagraphPresentation(
+    string BlockId,
+    ParagraphPresentation? Presentation) : ManuscriptOperation;
 
 public sealed class ManuscriptRevisionConflictException(long expected, long actual)
     : InvalidOperationException($"Manuscript revision conflict: expected {expected}, current revision is {actual}.")

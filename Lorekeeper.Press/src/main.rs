@@ -12,7 +12,7 @@ fn main() {
             println!(
                 "{}",
                 serde_json::to_string(&json!({
-                    "protocolVersion": 4,
+                    "protocolVersion": 5,
                     "rendererVersion": env!("CARGO_PKG_VERSION"),
                     "profiles": [
                         "generic-paperback-v1",

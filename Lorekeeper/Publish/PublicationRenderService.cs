@@ -621,7 +621,7 @@ public sealed class PublicationRenderProcessor(
 
         Cleanup(job.Id);
         var result = await InvokeAsync(job.Id, request, cancellationToken);
-        if (result.ProtocolVersion != 4
+        if (result.ProtocolVersion != 5
             || !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a mismatched protocol or job identity.");
         if (!string.Equals(result.RendererVersion, job.RendererVersion, StringComparison.Ordinal))
@@ -863,7 +863,7 @@ public sealed class PublicationRenderProcessor(
             throw new InvalidOperationException($"Create and review an exact layout variant for this edition geometry: {string.Join(", ", missingVariants)}.");
         var payload = new
         {
-            protocolVersion = 4,
+            protocolVersion = 5,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
             ink = job.Edition.Ink == PublicationInk.Digital
@@ -938,8 +938,8 @@ public sealed class PublicationRenderProcessor(
                 isbn = job.Edition.Isbn,
                 barcodeMode = coverDesign.BarcodeMode.ToString(),
                 assetId = document.CoverAsset?.Id,
-                imageFocalXPercent = coverDesign.ImageFocalXPercent,
-                imageFocalYPercent = coverDesign.ImageFocalYPercent,
+                imageCropXPercent = coverDesign.ImageCropXPercent,
+                imageCropYPercent = coverDesign.ImageCropYPercent,
                 scene = coverScene,
             },
             assets = assets.Select(asset => new
@@ -1141,6 +1141,7 @@ public sealed class PublicationRenderProcessor(
         language = block.Language,
         accessibilityRole = block.AccessibilityRole.ToString(),
         presentation = block.FigurePresentation,
+        paragraphPresentation = block.ParagraphPresentation,
         pageCompositionId = block.PageCompositionId,
         content = block.Content.Select(inline => new
         {

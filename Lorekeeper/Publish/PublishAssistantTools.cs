@@ -59,8 +59,8 @@ public sealed class PublishAssistantTools(
                 description: "Read one compact edition workspace: complete edition settings plus section, matter, style, placement, visual, and diagnostic counts. Detailed content is available through focused paginated tools."),
             AIFunctionFactory.Create(
                 method: (int offset = 0, int limit = 30) => ListNamedStylesAsync(context, offset, limit),
-                name: "list_publication_named_styles",
-                description: "List a compact page of project named styles with stable IDs, definitions, revisions, and continuation metadata."),
+                name: "list_publication_book_text_styles",
+                description: "List a compact page of project Book Text Styles with stable IDs, definitions, revisions, and continuation metadata."),
             AIFunctionFactory.Create(
                 method: (int offset = 0, int limit = 30) => ListProjectImagesAsync(context, offset, limit),
                 name: "list_publication_project_images",
@@ -72,9 +72,9 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid compositionId, Guid variantId, int semanticStart = 0, int semanticCount = 20, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) => ReadPageCompositionAsync(context, compositionId, variantId, semanticStart, semanticCount, objectStart, objectCount, structureStart, structureCount),
                 name: "read_publication_page_composition",
-                description: "Read one selected geometry variant losslessly in bounded object pages, including complete surface, layers, styles, guides, object fields, semantic excerpts, and revisions."),
+                description: "Read one selected geometry variant losslessly in bounded object pages, including complete surface, layers, styles, object fields, semantic excerpts, and revisions. Computed page overlays are omitted."),
             AIFunctionFactory.Create(
-                method: (Guid editionId, string targetKind, Guid targetId, Guid? variantId = null) => ReadLayoutGenerationTargetAsync(context, editionId, targetKind, targetId, variantId),
+                method: (string targetKind, Guid targetId, Guid? variantId = null, Guid? editionId = null) => ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId, editionId),
                 name: "read_publication_generation_target",
                 description: "Resolve optional composition guidance for a concrete Figure placement, page surface/frame, or cover surface/frame. Page targets require the exact selected composition variantId. Use it when artwork must honor protected physical regions; it does not restrict later placement of other source-image shapes."),
             AIFunctionFactory.Create(
@@ -82,23 +82,23 @@ public sealed class PublishAssistantTools(
                 name: "validate_publication_page_composition",
                 description: "Validate one Designed Page variant for geometry, semantic coverage, reading order, accessibility, overflow, image DPI, font readiness, and edition compatibility. Returns compact prioritized diagnostics."),
             AIFunctionFactory.Create(
-                method: (Guid editionId, string targetKind, Guid targetId, ImageGenerationBrief brief, Guid? variantId = null, ImageReferenceUse[]? references = null, string? altText = null) =>
-                    QueueLayoutBoundImageAsync(context, editionId, targetKind, targetId, variantId, brief, references, altText),
+                method: (string targetKind, Guid targetId, ImageGenerationBrief brief, Guid? variantId = null, ImageReferenceUse[]? references = null, string? altText = null, Guid? editionId = null) =>
+                    QueueLayoutBoundImageAsync(context, targetKind, targetId, variantId, brief, references, altText, editionId),
                 name: "generate_publication_layout_image",
-                description: "Queue one image-library generation composed for a concrete Figure placement, page frame/surface, or cover frame/surface. Page targets require the exact selected composition variantId. Lorekeeper supplies canvas guidance and protected regions; the provider raster remains uncropped for later contain/cover/crop/focal placement. Returns only compact job and target metadata and never places the output automatically."),
+                description: "Queue image generation for a concrete project page, Figure, page frame/surface, or publication cover frame/surface. Authoring targets derive geometry from project state and omit edition ownership; use the project ID for project-page. Covers use the selected edition. The returned raster accepts any aspect ratio and is later placed with Contain or Cover. Returns compact job metadata and never claims to place or download output."),
             AIFunctionFactory.Create(
                 method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
                     QueueFreeStandingImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression),
                 name: "generate_publication_image",
-                description: "Queue one reusable, free-standing image in the project library without an edition or layout target. Use this for ordinary flowing Figures and art that may be placed in more than one format. The generated raster keeps its source shape and is fitted, cropped, or focused only when placed. Returns compact job metadata and never places the output automatically."),
+                description: "Queue one reusable, free-standing image in the project library without an edition or layout target. Use this for ordinary flowing Figures and art that may be placed in more than one format. The generated raster keeps its source shape and is fitted or crop-positioned only when placed. Returns compact job metadata and never places the output automatically."),
             AIFunctionFactory.Create(
                 method: (Guid compositionId, Guid editionId) => GetOrCreateCompositionVariantAsync(context, compositionId, editionId),
                 name: "get_or_create_publication_composition_variant",
-                description: "Get the exact geometry-keyed variant for a Designed Page and edition, creating an independent default only when absent."),
+                description: "Create layout for this edition when no exact Designed Page geometry exists. Copies the authoring layout into an independent edition geometry variant for review without altering authoring state."),
             AIFunctionFactory.Create(
                 method: (Guid editionId, Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCompositionElementAsync(context, editionId, variantId, expectedRevision, targetKind, targetId, patch),
                 name: "patch_publication_composition_element",
-                description: "Revision-check patch one stable composition object, guide, layer, or style using only changed fields. Preserve unrelated state and reserve full-scene staging for structural edits."),
+                description: "Revision-check patch one stable composition object, layer, or style using only changed fields. Page overlays are computed and cannot be authored. Preserve unrelated state and reserve full-scene staging for structural edits."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, CompositionScene scene) => StageCompositionAsync(context, variantId, expectedRevision, scene),
                 name: "stage_publication_composition",
@@ -172,7 +172,7 @@ public sealed class PublishAssistantTools(
                 method: (Guid editionId, PublicationEditionStyleMappingInput input, long expectedRevision) =>
                     UpsertStyleMappingAsync(context, editionId, input, expectedRevision),
                 name: "upsert_publication_style_mapping",
-                description: "Map a named manuscript style to edition-specific properties through the owning service."),
+                description: "Map a Book Text Style to edition-specific properties through the owning service."),
             AIFunctionFactory.Create(
                 method: (Guid editionId, Guid mappingId, long expectedRevision) =>
                     DeleteStyleMappingAsync(context, editionId, mappingId, expectedRevision),
@@ -327,13 +327,13 @@ public sealed class PublishAssistantTools(
 
     private async Task<string> QueueLayoutBoundImageAsync(
         PublishAssistantContext context,
-        Guid editionId,
         string targetKind,
         Guid targetId,
         Guid? variantId,
         ImageGenerationBrief brief,
         ImageReferenceUse[]? references,
-        string? altText)
+        string? altText,
+        Guid? editionId)
     {
         if (imagePrompts is null || imageJobs is null || imageRuntime is null)
             return Serialize(new { ok = false, code = "IMAGE_RUNTIME_UNAVAILABLE", targetId, summary = "Image generation is unavailable." });
@@ -343,7 +343,9 @@ public sealed class PublishAssistantTools(
                 context.ProjectId,
                 brief,
                 references,
-                new ImageGenerationTarget { EditionId = editionId, TargetKind = targetKind, TargetId = targetId, VariantId = variantId },
+                new ImageGenerationTarget { EditionId = targetKind.StartsWith("cover", StringComparison.OrdinalIgnoreCase)
+                    ? editionId ?? throw new ArgumentException("Cover generation targets require editionId.")
+                    : null, TargetKind = targetKind, TargetId = targetId, VariantId = variantId },
                 context.TurnCancellationToken);
             var job = await imageJobs.CreateGenerateJobAsync(
                 context.ProjectId,
@@ -447,7 +449,7 @@ public sealed class PublishAssistantTools(
         var start = Math.Clamp(offset, 0, all.Count);
         var take = Math.Clamp(limit, 1, 60);
         var items = all.Skip(start).Take(take).ToList();
-        return Serialize(new { ok = true, summary = $"{all.Count} named style(s).", items, continuation = Continuation(start, items.Count, all.Count) });
+        return Serialize(new { ok = true, summary = $"{all.Count} Book Text Style(s).", items, continuation = Continuation(start, items.Count, all.Count) });
     }
 
     private async Task<string> ListProjectImagesAsync(PublishAssistantContext context, int offset, int limit)
@@ -508,9 +510,16 @@ public sealed class PublishAssistantTools(
             patch,
             context.TurnCancellationToken);
 
-    private async Task<string> ReadLayoutGenerationTargetAsync(PublishAssistantContext context, Guid editionId, string targetKind, Guid targetId, Guid? variantId)
+    private async Task<string> ReadLayoutGenerationTargetAsync(PublishAssistantContext context, string targetKind, Guid targetId, Guid? variantId, Guid? editionId)
     {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); return Serialize(new { ok = true, descriptor = await service.DescribeGenerationTargetAsync(context.ProjectId, editionId, targetKind, targetId, variantId, context.TurnCancellationToken) }); }
+        try
+        {
+            var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable.");
+            var descriptor = targetKind.StartsWith("cover", StringComparison.OrdinalIgnoreCase)
+                ? await service.DescribeGenerationTargetAsync(context.ProjectId, editionId ?? throw new ArgumentException("Cover generation targets require editionId."), targetKind, targetId, variantId, context.TurnCancellationToken)
+                : await service.DescribeAuthoringGenerationTargetAsync(context.ProjectId, targetKind, targetId, variantId, context.TurnCancellationToken);
+            return Serialize(new { ok = true, descriptor });
+        }
         catch (Exception ex) { return Serialize(new { ok = false, code = "INVALID_TARGET", targetId, summary = ex.Message }); }
     }
 
@@ -526,7 +535,7 @@ public sealed class PublishAssistantTools(
 
     private async Task<string> GetOrCreateCompositionVariantAsync(PublishAssistantContext context, Guid compositionId, Guid editionId)
     {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var variant = await service.GetOrCreateVariantAsync(context.ProjectId, compositionId, editionId, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "Exact geometry variant is ready.", mutation = new { kind = "pageComposition", id = compositionId, selectId = variant.Id } }); }
+        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var variant = await service.GetOrCreateVariantAsync(context.ProjectId, compositionId, editionId, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "Edition layout copied from the authoring layout and is ready for review.", mutation = new { kind = "pageComposition", id = compositionId, selectId = variant.Id } }); }
         catch (Exception ex) { return Serialize(new { ok = false, code = "INVALID_TARGET", targetId = compositionId, summary = ex.Message }); }
     }
 

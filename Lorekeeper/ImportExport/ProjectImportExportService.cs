@@ -104,6 +104,15 @@ public sealed class ProjectImportExportService(
                 project.ProjectGuidance,
                 project.IncludeCurrentChapterInContext,
                 project.AiChangeApprovalEnabled),
+            PageSetup = await db.ProjectPageSetups.AsNoTracking()
+                .Where(item => item.ProjectId == projectId)
+                .Select(item => new ProjectExportPageSetup(
+                    item.PageWidthInches,
+                    item.PageHeightInches,
+                    item.PageMarginInches,
+                    item.BodyFontSizePoints,
+                    item.BodyLineHeight))
+                .SingleOrDefaultAsync(cancellationToken),
             BookBrief = await db.BookBriefs
                 .AsNoTracking()
                 .Where(brief => brief.ProjectId == projectId)
@@ -177,7 +186,8 @@ public sealed class ProjectImportExportService(
                                 variant.GeometryKey,
                                 variant.SceneJson,
                                 variant.Revision))
-                            .ToList()))
+                            .ToList(),
+                        composition.ActiveAuthoringVariantId))
                     .ToList()
                 : [],
             ManuscriptStyles = kind == ProjectExportKind.Full
@@ -472,8 +482,8 @@ public sealed class ProjectImportExportService(
                 profile.CoverDesign.BackCopy,
                 profile.CoverDesign.BackgroundColor,
                 profile.CoverDesign.BarcodeMode,
-                profile.CoverDesign.ImageFocalXPercent,
-                profile.CoverDesign.ImageFocalYPercent,
+                profile.CoverDesign.ImageCropXPercent,
+                profile.CoverDesign.ImageCropYPercent,
                 profile.CoverDesign.CompositionSceneJson,
                 profile.CoverDesign.Revision));
 

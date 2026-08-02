@@ -1,6 +1,8 @@
 @using Lorekeeper.Manuscripts
 @using Lorekeeper.Models
+@using Lorekeeper.Fonts
 @inject IManuscriptStyleService Styles
+@inject IProjectFontService Fonts
 @inject IJSRuntime JS
 
 <div class="manuscript-styles-panel">
@@ -17,7 +19,6 @@
                 <option value="@ManuscriptStyleKind.Character">Character</option>
             </select>
         </label>
-        <label>Semantic role <input class="form-control" @bind="_semanticRole" /></label>
         <label>
             Font family
             <select class="form-select" @bind="_fontFamilyKey">
@@ -25,6 +26,12 @@
                 <option value="serif">Serif</option>
                 <option value="sans">Sans serif</option>
                 <option value="mono">Monospace</option>
+                <optgroup label="Book fonts">
+                    @foreach (var family in _fontFamilies)
+                    {
+                        <option value="@family.Key">@family.Name</option>
+                    }
+                </optgroup>
             </select>
         </label>
         <label>Font size (pt) <input class="form-control" type="number" min="1" max="288" step="0.5" @bind="_fontSizePoints" /></label>
@@ -49,7 +56,7 @@
             <label><input type="checkbox" @bind="_keepWithNext" /> Keep with next in paginated output</label>
         }
         <button type="button" class="btn btn-sm btn-primary" @onclick="SaveAsync">
-            @(_editingId is null ? "Add style" : "Save style")
+            @(_editingId is null ? "Add book style" : "Save book style")
         </button>
         @if (_editingId is not null)
         {
@@ -57,15 +64,13 @@
         }
     </div>
     <table class="table table-sm">
-        <thead><tr><th>Name</th><th>Kind</th><th>Role</th><th>Revision</th><th></th></tr></thead>
+        <thead><tr><th>Style</th><th>Applies to</th><th></th></tr></thead>
         <tbody>
             @foreach (var style in _styles)
             {
                 <tr @key="style.Id">
                     <td>@style.Name</td>
-                    <td>@style.Kind</td>
-                    <td><code>@style.SemanticRole</code></td>
-                    <td>@style.Revision</td>
+                    <td>@(style.Kind == ManuscriptStyleKind.Paragraph ? "Paragraphs" : "Selected text")</td>
                     <td>
                         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => Edit(style)">Edit</button>
                         <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(style)">Delete</button>
@@ -82,6 +87,7 @@
     [Parameter] public EventCallback Changed { get; set; }
 
     private List<ManuscriptStyleView> _styles = [];
+    private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = [];
     private Guid? _loadedProjectId;
     private Guid? _editingId;
     private long? _expectedRevision;
@@ -105,6 +111,7 @@
         if (_loadedProjectId == ProjectId)
             return;
         _loadedProjectId = ProjectId;
+        _fontFamilies = await Fonts.ListAsync(ProjectId);
         await ReloadAsync();
     }
 
@@ -115,7 +122,7 @@
             _error = null;
             if (BeforeChange is not null && !await BeforeChange())
             {
-                _error = "Save the current manuscript draft before changing named styles.";
+                _error = "Save the current manuscript draft before changing book styles.";
                 return;
             }
             await Styles.UpsertAsync(
@@ -124,7 +131,7 @@
                     _editingId,
                     _name,
                     _kind,
-                    _semanticRole,
+                    string.IsNullOrWhiteSpace(_semanticRole) ? RoleFromName(_name) : _semanticRole,
                     new ManuscriptStyleProperties(
                         _fontFamilyKey,
                         _fontSizePoints,
@@ -173,13 +180,13 @@
             _error = null;
             if (!await JS.InvokeAsync<bool>(
                 "confirm",
-                $"Delete {style.Kind.ToString().ToLowerInvariant()} style '{style.Name}' ({style.SemanticRole})?"))
+                $"Delete book text style '{style.Name}'?"))
             {
                 return;
             }
             if (BeforeChange is not null && !await BeforeChange())
             {
-                _error = "Save the current manuscript draft before deleting a named style.";
+                _error = "Save the current manuscript draft before deleting a book style.";
                 return;
             }
             await Styles.DeleteAsync(ProjectId, style.Id, style.Revision);
@@ -212,5 +219,19 @@
         _spaceAfterPoints = null;
         _keepWithNext = false;
         _textAlign = null;
+    }
+
+    private static string RoleFromName(string name)
+    {
+        var normalized = string.Join(
+            '-',
+            name.Trim().ToLowerInvariant().Split(
+                [' ', '_', '-', '.', '/', '\\'],
+                StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => new string(part.Where(char.IsLetterOrDigit).ToArray()))
+                .Where(part => part.Length > 0));
+        if (string.IsNullOrWhiteSpace(normalized) || !char.IsLetter(normalized[0]))
+            normalized = $"style-{normalized}";
+        return normalized.Length <= 72 ? normalized : normalized[..72];
     }
 }

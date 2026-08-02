@@ -12,12 +12,14 @@ namespace Lorekeeper.Composition;
 
 public interface ICompositionService
 {
-    Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, Guid? editionId, long expectedRevision, CancellationToken cancellationToken = default);
-    Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, Guid? editionId, long expectedRevision, DesignedPageIdentity identity, CancellationToken cancellationToken = default);
-    Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, Guid editionId, long expectedRevision, DesignedPageInitialContent initialContent, CancellationToken cancellationToken = default);
-    Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, Guid editionId, long expectedRevision, DesignedPageIdentity identity, DesignedPageInitialContent initialContent, CancellationToken cancellationToken = default);
+    Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, long expectedRevision, DesignedPageInitialContent? initialContent = null, CancellationToken cancellationToken = default);
+    Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, long expectedRevision, DesignedPageIdentity identity, DesignedPageInitialContent? initialContent = null, CancellationToken cancellationToken = default);
     Task<PageComposition?> GetAsync(Guid projectId, Guid compositionId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PageComposition>> ListAsync(Guid projectId, Guid chapterId, CancellationToken cancellationToken = default);
+    Task<PageCompositionVariant> GetOrCreateAuthoringVariantAsync(Guid projectId, Guid compositionId, CancellationToken cancellationToken = default);
+    Task<PageCompositionVariant> SelectAuthoringVariantAsync(Guid projectId, Guid compositionId, Guid variantId, CancellationToken cancellationToken = default);
     Task<PageCompositionVariant> GetOrCreateVariantAsync(Guid projectId, Guid compositionId, Guid editionId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PageCompositionVariant>> ListVariantsAsync(Guid projectId, Guid compositionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PageCompositionVariant>> ListVariantsAsync(Guid projectId, Guid compositionId, Guid editionId, CancellationToken cancellationToken = default);
     Task<PageCompositionVariant> ReadVariantAsync(Guid projectId, Guid variantId, CancellationToken cancellationToken = default);
     Task<PageCompositionVariant> SelectVariantAsync(Guid projectId, Guid compositionId, Guid editionId, Guid variantId, CancellationToken cancellationToken = default);
@@ -31,7 +33,10 @@ public interface ICompositionService
     Task<CompositionMutationStage> StageWorkspaceAsync(Guid projectId, Guid conversationId, Guid compositionId, long expectedCompositionRevision, Guid variantId, long expectedVariantRevision, IReadOnlyList<ManuscriptOperationInput> semanticOperations, CompositionScene scene, CancellationToken cancellationToken = default);
     Task<CompositionWorkspaceMutationResult> ApplyWorkspaceStageAsync(Guid projectId, Guid conversationId, Guid stageId, long expectedCompositionRevision, CancellationToken cancellationToken = default);
     Task<CompositionEditionGeometry> GetEditionGeometryAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
+    Task<CompositionEditionGeometry> GetAuthoringGeometryAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<LayoutGenerationTargetDescriptor> DescribeAuthoringGenerationTargetAsync(Guid projectId, string targetKind, Guid targetId, Guid? variantId = null, CancellationToken cancellationToken = default);
     Task<LayoutGenerationTargetDescriptor> DescribeGenerationTargetAsync(Guid projectId, Guid editionId, string targetKind, Guid targetId, Guid? variantId = null, CancellationToken cancellationToken = default);
+    Task<LayoutValidationView> ValidateAuthoringVariantAsync(Guid projectId, Guid variantId, CancellationToken cancellationToken = default);
     Task<LayoutValidationView> ValidateVariantAsync(Guid projectId, Guid editionId, Guid variantId, CancellationToken cancellationToken = default);
 }
 
@@ -43,60 +48,28 @@ public sealed class CompositionService(
 {
     private static readonly JsonSerializerOptions JsonOptions = ManuscriptCodec.JsonOptions;
 
-    public async Task<DesignedPageCreationResult> CreateDesignedPageAsync(
+    public async Task<IReadOnlyList<PageComposition>> ListAsync(
         Guid projectId,
         Guid chapterId,
-        int blockIndex,
-        string name,
-        Guid? editionId,
-        long expectedRevision,
         CancellationToken cancellationToken = default) =>
-        await CreateDesignedPageCoreAsync(
-            projectId,
-            chapterId,
-            blockIndex,
-            name,
-            editionId,
-            expectedRevision,
-            identity: null,
-            initialContent: null,
-            cancellationToken);
+        await db.PageCompositions.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && item.ChapterId == chapterId)
+            .OrderBy(item => item.CreatedAt)
+            .ToListAsync(cancellationToken);
 
     public async Task<DesignedPageCreationResult> CreateDesignedPageAsync(
         Guid projectId,
         Guid chapterId,
         int blockIndex,
         string name,
-        Guid? editionId,
         long expectedRevision,
-        DesignedPageIdentity identity,
+        DesignedPageInitialContent? initialContent = null,
         CancellationToken cancellationToken = default) =>
         await CreateDesignedPageCoreAsync(
             projectId,
             chapterId,
             blockIndex,
             name,
-            editionId,
-            expectedRevision,
-            identity,
-            initialContent: null,
-            cancellationToken);
-
-    public async Task<DesignedPageCreationResult> CreateDesignedPageAsync(
-        Guid projectId,
-        Guid chapterId,
-        int blockIndex,
-        string name,
-        Guid editionId,
-        long expectedRevision,
-        DesignedPageInitialContent initialContent,
-        CancellationToken cancellationToken = default) =>
-        await CreateDesignedPageCoreAsync(
-            projectId,
-            chapterId,
-            blockIndex,
-            name,
-            editionId,
             expectedRevision,
             identity: null,
             initialContent,
@@ -107,17 +80,15 @@ public sealed class CompositionService(
         Guid chapterId,
         int blockIndex,
         string name,
-        Guid editionId,
         long expectedRevision,
         DesignedPageIdentity identity,
-        DesignedPageInitialContent initialContent,
+        DesignedPageInitialContent? initialContent = null,
         CancellationToken cancellationToken = default) =>
         await CreateDesignedPageCoreAsync(
             projectId,
             chapterId,
             blockIndex,
             name,
-            editionId,
             expectedRevision,
             identity,
             initialContent,
@@ -128,7 +99,6 @@ public sealed class CompositionService(
         Guid chapterId,
         int blockIndex,
         string name,
-        Guid? editionId,
         long expectedRevision,
         DesignedPageIdentity? identity,
         DesignedPageInitialContent? initialContent,
@@ -149,21 +119,17 @@ public sealed class CompositionService(
         };
         composition.SemanticManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(composition.Id));
         db.PageCompositions.Add(composition);
-        PageCompositionVariant? variant = null;
-        if (editionId is Guid selectedEditionId)
+        var setup = await RequirePageSetupUnderLeaseAsync(projectId, cancellationToken);
+        var scene = await CreateInitialPageSceneAsync(projectId, setup, initialContent, cancellationToken);
+        var variant = new PageCompositionVariant
         {
-            var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(item => item.Id == selectedEditionId && item.ProjectId == projectId, cancellationToken)
-                ?? throw new KeyNotFoundException("Edition was not found in this project.");
-            var scene = await CreateInitialPageSceneAsync(projectId, edition, initialContent, cancellationToken);
-            variant = new PageCompositionVariant
-            {
-                Composition = composition,
-                CompositionId = composition.Id,
-                GeometryKey = GeometryKey(edition, scene),
-                SceneJson = SerializeAndValidate(scene, composition.SemanticManuscriptJson),
-            };
-            db.PageCompositionVariants.Add(variant);
-        }
+            Composition = composition,
+            CompositionId = composition.Id,
+            GeometryKey = SceneGeometryKey(scene),
+            SceneJson = SerializeAndValidate(scene, composition.SemanticManuscriptJson),
+        };
+        composition.ActiveAuthoringVariantId = variant.Id;
+        db.PageCompositionVariants.Add(variant);
         await db.SaveChangesAsync(cancellationToken);
         var manuscript = await manuscripts.ApplyPersistedUnderProjectMutationLeaseAsync(
             chapterId,
@@ -215,8 +181,8 @@ public sealed class CompositionService(
                     Name = image.FileName,
                     ImageId = image.Id,
                     ImageFit = initialContent.ImageFit,
-                    FocalXPercent = Math.Clamp(initialContent.FocalXPercent, 0, 100),
-                    FocalYPercent = Math.Clamp(initialContent.FocalYPercent, 0, 100),
+                    CropXPercent = Math.Clamp(initialContent.CropXPercent, 0, 100),
+                    CropYPercent = Math.Clamp(initialContent.CropYPercent, 0, 100),
                     AltText = altText,
                     Decorative = initialContent.Decorative,
                     AccessibilityDecisionPending = !initialContent.Decorative && string.IsNullOrWhiteSpace(altText),
@@ -232,6 +198,50 @@ public sealed class CompositionService(
         return scene;
     }
 
+    private async Task<CompositionScene> CreateInitialPageSceneAsync(
+        Guid projectId,
+        ProjectPageSetup setup,
+        DesignedPageInitialContent? initialContent,
+        CancellationToken cancellationToken)
+    {
+        var scene = CreatePageScene(setup, initialContent?.LayoutMode ?? DesignedPageLayoutMode.SinglePage);
+        if (initialContent?.ImageId is not Guid imageId)
+            return scene;
+
+        var image = await db.PublishAssets.AsNoTracking().SingleOrDefaultAsync(
+            item => item.Id == imageId && item.ProjectId == projectId
+                && (item.ContentType == "image/png" || item.ContentType == "image/jpeg"),
+            cancellationToken) ?? throw new KeyNotFoundException("The initial Designed Page artwork was not found in this project.");
+        var altText = initialContent.Decorative
+            ? string.Empty
+            : string.IsNullOrWhiteSpace(initialContent.AltText) ? image.AltText.Trim() : initialContent.AltText.Trim();
+        var layer = scene.Layers.Single();
+        scene = scene with
+        {
+            Objects =
+            [
+                new CompositionObject
+                {
+                    Id = Guid.NewGuid(),
+                    LayerId = layer.Id,
+                    Kind = CompositionObjectKind.Image,
+                    Name = image.FileName,
+                    ImageId = image.Id,
+                    ImageFit = initialContent.ImageFit,
+                    CropXPercent = Math.Clamp(initialContent.CropXPercent, 0, 100),
+                    CropYPercent = Math.Clamp(initialContent.CropYPercent, 0, 100),
+                    AltText = altText,
+                    Decorative = initialContent.Decorative,
+                    AccessibilityDecisionPending = !initialContent.Decorative && string.IsNullOrWhiteSpace(altText),
+                    SemanticRole = initialContent.Decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure,
+                    ReadingOrder = initialContent.Decorative ? null : 1,
+                },
+            ],
+        };
+        await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
+        return scene;
+    }
+
     public async Task<PageComposition?> GetAsync(
         Guid projectId,
         Guid compositionId,
@@ -240,6 +250,74 @@ public sealed class CompositionService(
         return await db.PageCompositions.AsNoTracking()
             .Include(item => item.Variants.OrderBy(variant => variant.GeometryKey))
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId, cancellationToken);
+    }
+
+    public async Task<PageCompositionVariant> GetOrCreateAuthoringVariantAsync(
+        Guid projectId,
+        Guid compositionId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var composition = await db.PageCompositions.Include(item => item.Variants)
+            .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId, cancellationToken)
+            ?? throw new KeyNotFoundException("Page composition was not found in this project.");
+        if (composition.ActiveAuthoringVariantId is Guid activeId)
+            return composition.Variants.SingleOrDefault(item => item.Id == activeId)
+                ?? throw new InvalidDataException("The active authoring layout is missing from its Designed Page.");
+        var existing = composition.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
+        if (existing is not null)
+        {
+            composition.ActiveAuthoringVariantId = existing.Id;
+            await db.SaveChangesAsync(cancellationToken);
+            return existing;
+        }
+
+        var setup = await RequirePageSetupUnderLeaseAsync(projectId, cancellationToken);
+        var scene = CreatePageScene(setup);
+        var variant = new PageCompositionVariant
+        {
+            CompositionId = composition.Id,
+            GeometryKey = SceneGeometryKey(scene),
+            SceneJson = SerializeAndValidate(scene, composition.SemanticManuscriptJson),
+        };
+        db.PageCompositionVariants.Add(variant);
+        await TouchProjectAsync(projectId, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        composition.ActiveAuthoringVariantId = variant.Id;
+        composition.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return variant;
+    }
+
+    private async Task<ProjectPageSetup> RequirePageSetupUnderLeaseAsync(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        var setup = await db.ProjectPageSetups.SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
+        if (setup is not null)
+            return setup;
+        setup = new ProjectPageSetup { ProjectId = projectId };
+        db.ProjectPageSetups.Add(setup);
+        return setup;
+    }
+
+    public async Task<PageCompositionVariant> SelectAuthoringVariantAsync(
+        Guid projectId,
+        Guid compositionId,
+        Guid variantId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var composition = await db.PageCompositions.SingleOrDefaultAsync(
+            item => item.Id == compositionId && item.ProjectId == projectId,
+            cancellationToken) ?? throw new KeyNotFoundException("Page composition was not found in this project.");
+        var variant = await db.PageCompositionVariants.SingleOrDefaultAsync(
+            item => item.Id == variantId && item.CompositionId == compositionId,
+            cancellationToken) ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
+        composition.ActiveAuthoringVariantId = variant.Id;
+        composition.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return variant;
     }
 
     public async Task<PageCompositionVariant> GetOrCreateVariantAsync(
@@ -269,9 +347,13 @@ public sealed class CompositionService(
             && item.TargetKind == "page-composition-seed"
             && item.TargetId == composition.Id,
             cancellationToken);
-        var scene = seed is null
-            ? CreatePageScene(edition)
-            : AdaptSeedScene(seed.OperationsJson, edition);
+        var authoring = candidates.FirstOrDefault(item => item.Id == composition.ActiveAuthoringVariantId)
+            ?? candidates.FirstOrDefault();
+        var scene = authoring is not null
+            ? AdaptSeedScene(authoring.SceneJson, edition)
+            : seed is not null
+                ? AdaptSeedScene(seed.OperationsJson, edition)
+                : CreatePageScene(edition);
         var variant = new PageCompositionVariant
         {
             CompositionId = composition.Id,
@@ -285,6 +367,15 @@ public sealed class CompositionService(
         await db.SaveChangesAsync(cancellationToken);
         return variant;
     }
+
+    public async Task<IReadOnlyList<PageCompositionVariant>> ListVariantsAsync(
+        Guid projectId,
+        Guid compositionId,
+        CancellationToken cancellationToken = default) =>
+        await db.PageCompositionVariants.AsNoTracking()
+            .Where(item => item.CompositionId == compositionId && item.Composition.ProjectId == projectId)
+            .OrderByDescending(item => item.UpdatedAt)
+            .ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyList<PageCompositionVariant>> ListVariantsAsync(
         Guid projectId,
@@ -385,6 +476,7 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        scene = scene with { Guides = [] };
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var variant = await db.PageCompositionVariants
             .Include(item => item.Composition)
@@ -444,10 +536,9 @@ public sealed class CompositionService(
         CompositionElementPatch patch) => targetKind.Trim().ToLowerInvariant() switch
         {
             "object" => scene with { Objects = PatchObject(scene.Objects, targetId, patch) },
-            "guide" => scene with { Guides = PatchGuide(scene.Guides, targetId, patch) },
             "layer" => scene with { Layers = PatchLayer(scene.Layers, targetId, patch) },
             "style" => scene with { Styles = PatchStyle(scene.Styles, targetId, patch) },
-            _ => throw new ArgumentException("targetKind must be object, guide, layer, or style.", nameof(targetKind)),
+            _ => throw new ArgumentException("targetKind must be object, layer, or style. Page guides are computed overlays.", nameof(targetKind)),
         };
 
     private static IReadOnlyList<CompositionObject> PatchObject(
@@ -470,8 +561,8 @@ public sealed class CompositionService(
             StyleId = patch.ClearStyle ? null : patch.StyleId ?? item.StyleId,
             ImageId = patch.ImageId ?? item.ImageId,
             ImageFit = patch.ImageFit ?? item.ImageFit,
-            FocalXPercent = patch.FocalXPercent ?? item.FocalXPercent,
-            FocalYPercent = patch.FocalYPercent ?? item.FocalYPercent,
+            CropXPercent = patch.CropXPercent ?? item.CropXPercent,
+            CropYPercent = patch.CropYPercent ?? item.CropYPercent,
             ContentReferences = patch.ContentReferences ?? item.ContentReferences,
             FontFamilyKey = patch.FontFamilyKey ?? item.FontFamilyKey,
             FontWeight = patch.FontWeight ?? item.FontWeight,
@@ -500,20 +591,6 @@ public sealed class CompositionService(
             ReadingOrder = patch.ClearReadingOrder ? null : patch.ReadingOrder ?? item.ReadingOrder,
             RegionConstraint = patch.RegionConstraint ?? item.RegionConstraint,
             GroupId = patch.ClearGroup ? null : patch.GroupId ?? item.GroupId,
-        }).ToList();
-    }
-
-    private static IReadOnlyList<CompositionGuide> PatchGuide(
-        IReadOnlyList<CompositionGuide> source,
-        Guid id,
-        CompositionElementPatch patch)
-    {
-        if (!source.Any(item => item.Id == id))
-            throw new KeyNotFoundException("Composition guide was not found.");
-        return source.Select(item => item.Id != id ? item : item with
-        {
-            Axis = patch.GuideAxis ?? item.Axis,
-            PositionPercent = patch.PositionPercent ?? item.PositionPercent,
         }).ToList();
     }
 
@@ -639,6 +716,7 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        scene = scene with { Guides = [] };
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await db.CompositionMutationStages
             .Where(item => item.ProjectId == projectId
@@ -838,6 +916,7 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        scene = scene with { Guides = [] };
         if (semanticOperations.Count > 200)
             throw new ArgumentException("A composition workspace stage accepts at most 200 focused semantic operations.");
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
@@ -981,19 +1060,15 @@ public sealed class CompositionService(
         var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
             item => item.Id == editionId && item.ProjectId == projectId,
             cancellationToken) ?? throw new KeyNotFoundException("Edition was not found in this project.");
-        var normalizedKind = targetKind.Trim().ToLowerInvariant();
-        if (normalizedKind is "page-surface" or "page-frame" && variantId is null)
-            throw new ArgumentException("Page layout generation targets require the exact composition variant ID.", nameof(variantId));
-        if (normalizedKind is not ("page-surface" or "page-frame") && variantId is not null)
-            throw new ArgumentException("variantId is valid only for page-surface and page-frame targets.", nameof(variantId));
+        var normalizedKind = NormalizeGenerationTargetKind(targetKind);
+        if (normalizedKind is not ("cover-surface" or "cover-frame"))
+            throw new ArgumentException("Publication-edition generation targets are cover-surface or cover-frame. Figures and Designed Pages use project geometry.", nameof(targetKind));
+        if (variantId is not null)
+            throw new ArgumentException("Cover targets do not use a page-composition variant.", nameof(variantId));
         var (width, height, regions, diagnostics) = normalizedKind switch
         {
-            "figure" => await ResolveFigureTargetAsync(projectId, edition, targetId, cancellationToken),
-            "page-surface" => await ResolvePageSurfaceTargetAsync(projectId, edition, targetId, variantId!.Value, cancellationToken),
-            "page-frame" => await ResolvePageFrameTargetAsync(projectId, edition, targetId, variantId!.Value, cancellationToken),
             "cover-surface" => await ResolveCoverSurfaceTargetAsync(projectId, edition, targetId, cancellationToken),
-            "cover-frame" => await ResolveCoverFrameTargetAsync(projectId, edition, targetId, cancellationToken),
-            _ => throw new ArgumentException("targetKind must be figure, page-surface, page-frame, cover-surface, or cover-frame.", nameof(targetKind)),
+            _ => await ResolveCoverFrameTargetAsync(projectId, edition, targetId, cancellationToken),
         };
         var gcd = GreatestCommonDivisor((int)Math.Round(width * 1000), (int)Math.Round(height * 1000));
         var pixelsPerInch = edition.Format == PublicationEditionFormat.Paperback ? 300 : 180;
@@ -1021,6 +1096,7 @@ public sealed class CompositionService(
             edition.Id,
             variantId,
             geometryFingerprint,
+            "publication-edition",
             normalizedKind,
             targetId,
             width,
@@ -1032,6 +1108,60 @@ public sealed class CompositionService(
             pixelsPerInch,
             regions,
             descriptorDiagnostics);
+    }
+
+    public async Task<LayoutGenerationTargetDescriptor> DescribeAuthoringGenerationTargetAsync(
+        Guid projectId,
+        string targetKind,
+        Guid targetId,
+        Guid? variantId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var setup = await ReadPageSetupAsync(projectId, cancellationToken);
+        var normalizedKind = NormalizeGenerationTargetKind(targetKind);
+        if (normalizedKind is "page-surface" or "page-frame" && variantId is null)
+            throw new ArgumentException("Page layout generation targets require the exact composition variant ID.", nameof(variantId));
+        if (normalizedKind is not ("project-page" or "page-surface" or "page-frame" or "figure"))
+            throw new ArgumentException("Authoring targets must be project-page, figure, page-surface, or page-frame.", nameof(targetKind));
+        if (normalizedKind is "figure" or "project-page" && variantId is not null)
+            throw new ArgumentException("Project-page and Figure targets do not use a page variant.", nameof(variantId));
+        if (normalizedKind == "project-page" && targetId != projectId)
+            throw new ArgumentException("A project-page target ID must be the current project ID.", nameof(targetId));
+
+        var (width, height, regions, diagnostics) = normalizedKind switch
+        {
+            "project-page" => (setup.PageWidthInches, setup.PageHeightInches, PageRegions(CreatePageScene(setup), true), []),
+            "figure" => await ResolveAuthoringFigureTargetAsync(projectId, setup, targetId, cancellationToken),
+            "page-surface" => await ResolveAuthoringPageSurfaceTargetAsync(projectId, targetId, variantId!.Value, cancellationToken),
+            _ => await ResolveAuthoringPageFrameTargetAsync(projectId, targetId, variantId!.Value, cancellationToken),
+        };
+        var gcd = GreatestCommonDivisor((int)Math.Round(width * 1000), (int)Math.Round(height * 1000));
+        var aspect = $"{(int)Math.Round(width * 1000) / gcd}:{(int)Math.Round(height * 1000) / gcd}";
+        var providerCanvas = ProviderCanvas(width, height);
+        var fingerprint = TargetGeometryFingerprint(
+            $"project:{setup.Revision}:{setup.PageWidthInches:F4}:{setup.PageHeightInches:F4}:{setup.PageMarginInches:F4}",
+            normalizedKind,
+            targetId,
+            variantId,
+            width,
+            height,
+            regions);
+        return new LayoutGenerationTargetDescriptor(
+            null,
+            variantId,
+            fingerprint,
+            "project-authoring",
+            normalizedKind,
+            targetId,
+            width,
+            height,
+            aspect,
+            (int)Math.Ceiling(width * 300),
+            (int)Math.Ceiling(height * 300),
+            providerCanvas,
+            300,
+            regions,
+            diagnostics);
     }
 
     public async Task<CompositionEditionGeometry> GetEditionGeometryAsync(
@@ -1048,27 +1178,71 @@ public sealed class CompositionService(
             edition.Format == PublicationEditionFormat.DigitalPdf && edition.AllowDesignedPageOverrides);
     }
 
+    public async Task<CompositionEditionGeometry> GetAuthoringGeometryAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        var setup = await ReadPageSetupAsync(projectId, cancellationToken);
+        return new CompositionEditionGeometry(setup.PageWidthInches * 72, setup.PageHeightInches * 72, false);
+    }
+
+    private async Task<ProjectPageSetup> ReadPageSetupAsync(Guid projectId, CancellationToken cancellationToken) =>
+        await db.ProjectPageSetups.AsNoTracking().SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
+        ?? (await db.Projects.AsNoTracking().AnyAsync(item => item.Id == projectId, cancellationToken)
+            ? new ProjectPageSetup { ProjectId = projectId }
+            : throw new KeyNotFoundException("Project was not found."));
+
+    private static string NormalizeGenerationTargetKind(string value)
+    {
+        var key = new string(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        return key switch
+        {
+            "projectpage" => "project-page",
+            "figure" => "figure",
+            "pageframe" => "page-frame",
+            "pagesurface" => "page-surface",
+            "coverframe" => "cover-frame",
+            "coversurface" => "cover-surface",
+            _ => value.Trim().ToLowerInvariant(),
+        };
+    }
+
     public async Task<LayoutValidationView> ValidateVariantAsync(
         Guid projectId,
         Guid editionId,
         Guid variantId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await ValidateVariantCoreAsync(projectId, editionId, variantId, cancellationToken);
+
+    public async Task<LayoutValidationView> ValidateAuthoringVariantAsync(
+        Guid projectId,
+        Guid variantId,
+        CancellationToken cancellationToken = default) =>
+        await ValidateVariantCoreAsync(projectId, editionId: null, variantId, cancellationToken);
+
+    private async Task<LayoutValidationView> ValidateVariantCoreAsync(
+        Guid projectId,
+        Guid? editionId,
+        Guid variantId,
+        CancellationToken cancellationToken)
     {
-        var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
-            item => item.Id == editionId && item.ProjectId == projectId,
-            cancellationToken) ?? throw new KeyNotFoundException("Edition was not found in this project.");
+        var edition = editionId is Guid requestedEditionId
+            ? await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
+                item => item.Id == requestedEditionId && item.ProjectId == projectId,
+                cancellationToken) ?? throw new KeyNotFoundException("Edition was not found in this project.")
+            : null;
         var variant = await db.PageCompositionVariants.AsNoTracking().Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId && item.Composition.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
         var diagnostics = new List<LayoutValidationDiagnostic>();
-        if (!VariantMatchesEdition(variant, edition))
+        if (edition is not null && !VariantMatchesEdition(variant, edition))
             diagnostics.Add(new("error", "GEOMETRY_VARIANT_MISMATCH", "The variant does not belong to the selected edition geometry."));
         var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, JsonOptions)
             ?? throw new InvalidDataException("The composition scene is empty.");
         var semantic = ManuscriptCodec.Deserialize(variant.Composition.SemanticManuscriptJson);
         try
         {
-            ValidateVariantGeometry(edition, scene);
+            if (edition is not null) ValidateVariantGeometry(edition, scene);
             Validate(scene, semantic);
             await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         }
@@ -1076,7 +1250,7 @@ public sealed class CompositionService(
         {
             diagnostics.Add(new("error", "COMPOSITION_INVALID", exception.Message));
         }
-        if (edition.Vendor == PublicationVendor.IngramSpark
+        if (edition?.Vendor == PublicationVendor.IngramSpark
             && CompositionSceneResolver.FindPdfxTransparencyOverlap(scene) is { } opacityOverlap)
         {
             diagnostics.Add(new(
@@ -1141,8 +1315,11 @@ public sealed class CompositionService(
             .Select(item => item.ImageId!.Value).Distinct().ToList();
         var assets = await db.PublishAssets.AsNoTracking().Where(item => item.ProjectId == projectId && imageIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, cancellationToken);
-        var requiredDpi = edition.Format == PublicationEditionFormat.Paperback ? 300d : 180d;
-        foreach (var item in flattened.Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null && IsOutputVisible(scene, item)))
+        var requiredDpi = edition?.Format == PublicationEditionFormat.Paperback ? 300d : 180d;
+        foreach (var item in flattened.Where(item => edition is not null
+            && item.Kind == CompositionObjectKind.Image
+            && item.ImageId is not null
+            && IsOutputVisible(scene, item)))
         {
             if (!assets.TryGetValue(item.ImageId!.Value, out var asset)) continue;
             using var bitmap = SKBitmap.Decode(asset.Data);
@@ -1179,89 +1356,70 @@ public sealed class CompositionService(
         key.StartsWith("project:", StringComparison.OrdinalIgnoreCase)
             && Guid.TryParse(key["project:".Length..], out var id) ? id : null;
 
-    private async Task<(double Width, double Height, IReadOnlyList<LayoutGenerationRegionDescriptor> Regions, IReadOnlyList<string> Diagnostics)> ResolveFigureTargetAsync(
+    private async Task<(double Width, double Height, IReadOnlyList<LayoutGenerationRegionDescriptor> Regions, IReadOnlyList<string> Diagnostics)> ResolveAuthoringFigureTargetAsync(
         Guid projectId,
-        PublicationEdition edition,
+        ProjectPageSetup setup,
         Guid targetId,
         CancellationToken cancellationToken)
     {
         var blockId = targetId.ToString("N");
-        var chapters = await db.Chapters.AsNoTracking()
-            .Where(item => item.ProjectId == projectId)
-            .Select(item => item.ManuscriptJson)
-            .ToListAsync(cancellationToken);
-        var figure = chapters.Select(json => ManuscriptCodec.Deserialize(json).Content
-                .FirstOrDefault(block => block.Type == ManuscriptBlockType.Figure
-                    && string.Equals(block.Id, blockId, StringComparison.OrdinalIgnoreCase)))
+        var chapters = await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId)
+            .Select(item => item.ManuscriptJson).ToListAsync(cancellationToken);
+        var figure = chapters.Select(json => ManuscriptCodec.Deserialize(json).Content.FirstOrDefault(block =>
+                block.Type == ManuscriptBlockType.Figure && string.Equals(block.Id, blockId, StringComparison.OrdinalIgnoreCase)))
             .FirstOrDefault(block => block is not null)
             ?? throw new KeyNotFoundException("Figure target was not found in this project.");
         var presentation = figure.FigurePresentation ?? new FigurePresentation();
-        var pageWidth = edition.PageWidthInches + (presentation.Placement == FigurePlacementIntent.FullBleed && edition.Bleed ? .25 : 0);
-        var pageHeight = edition.PageHeightInches + (presentation.Placement == FigurePlacementIntent.FullBleed && edition.Bleed ? .25 : 0);
-        var contentWidth = Math.Max(.25, edition.PageWidthInches - edition.PageMarginInches * 2);
-        var contentHeight = Math.Max(.25, edition.PageHeightInches - edition.PageMarginInches * 2);
+        var contentWidth = Math.Max(.25, setup.PageWidthInches - setup.PageMarginInches * 2);
+        var contentHeight = Math.Max(.25, setup.PageHeightInches - setup.PageMarginInches * 2);
         var width = presentation.Placement == FigurePlacementIntent.FullBleed
-            ? pageWidth
+            ? setup.PageWidthInches
             : contentWidth * Math.Clamp(presentation.WidthPercent, 5, 100) / 100;
         var height = presentation.Placement switch
         {
-            FigurePlacementIntent.FullBleed => pageHeight,
+            FigurePlacementIntent.FullBleed => setup.PageHeightInches,
             FigurePlacementIntent.DedicatedPage => contentHeight * .75,
             _ => Math.Min(contentHeight * .34, width * 1.25),
         };
-        var regions = presentation.Placement == FigurePlacementIntent.FullBleed
-            ? PageRegions(CreatePageScene(edition), includeReservedText: false)
-            : presentation.Placement == FigurePlacementIntent.DedicatedPage
-                ? PageRegions(CreatePageScene(edition), includeReservedText: true)
-                : Array.Empty<LayoutGenerationRegionDescriptor>();
+        var scene = CreatePageScene(setup);
+        var regions = presentation.Placement is FigurePlacementIntent.FullBleed or FigurePlacementIntent.DedicatedPage
+            ? PageRegions(scene, includeReservedText: presentation.Placement == FigurePlacementIntent.DedicatedPage)
+            : Array.Empty<LayoutGenerationRegionDescriptor>();
         return (width, height, regions, []);
     }
 
-    private async Task<(double Width, double Height, IReadOnlyList<LayoutGenerationRegionDescriptor> Regions, IReadOnlyList<string> Diagnostics)> ResolvePageSurfaceTargetAsync(
+    private async Task<(double Width, double Height, IReadOnlyList<LayoutGenerationRegionDescriptor> Regions, IReadOnlyList<string> Diagnostics)> ResolveAuthoringPageSurfaceTargetAsync(
         Guid projectId,
-        PublicationEdition edition,
         Guid compositionId,
         Guid variantId,
         CancellationToken cancellationToken)
     {
-        var (_, scene) = await ReadExactVariantSceneAsync(projectId, edition, variantId, cancellationToken);
-        var ownsComposition = await db.PageCompositionVariants.AsNoTracking()
-            .AnyAsync(item => item.Id == variantId && item.CompositionId == compositionId, cancellationToken);
-        if (!ownsComposition)
+        var (variant, scene) = await ReadAuthoringVariantSceneAsync(projectId, variantId, cancellationToken);
+        if (variant.CompositionId != compositionId)
             throw new KeyNotFoundException("The selected layout variant does not belong to this page composition.");
-        return (scene.Surface.WidthPoints / 72, scene.Surface.HeightPoints / 72, PageRegions(scene, includeReservedText: true), []);
+        return (scene.Surface.WidthPoints / 72, scene.Surface.HeightPoints / 72, PageRegions(scene, true), []);
     }
 
-    private async Task<(double Width, double Height, IReadOnlyList<LayoutGenerationRegionDescriptor> Regions, IReadOnlyList<string> Diagnostics)> ResolvePageFrameTargetAsync(
+    private async Task<(double Width, double Height, IReadOnlyList<LayoutGenerationRegionDescriptor> Regions, IReadOnlyList<string> Diagnostics)> ResolveAuthoringPageFrameTargetAsync(
         Guid projectId,
-        PublicationEdition edition,
         Guid frameId,
         Guid variantId,
         CancellationToken cancellationToken)
     {
-        var (_, scene) = await ReadExactVariantSceneAsync(projectId, edition, variantId, cancellationToken);
-        var frame = CompositionSceneResolver.Flatten(scene)
-            .FirstOrDefault(item => item.Id == frameId && item.Kind == CompositionObjectKind.Image);
-        if (frame is null)
-            throw new KeyNotFoundException("Image frame target was not found in the selected composition variant.");
-        return FrameDimensions(
-            scene,
-            frame,
-            PageRegions(scene, includeReservedText: true));
+        var (_, scene) = await ReadAuthoringVariantSceneAsync(projectId, variantId, cancellationToken);
+        var frame = CompositionSceneResolver.Flatten(scene).FirstOrDefault(item => item.Id == frameId && item.Kind == CompositionObjectKind.Image)
+            ?? throw new KeyNotFoundException("Image frame target was not found in the selected composition variant.");
+        return FrameDimensions(scene, frame, PageRegions(scene, true));
     }
 
-    private async Task<(PageCompositionVariant Variant, CompositionScene Scene)> ReadExactVariantSceneAsync(
+    private async Task<(PageCompositionVariant Variant, CompositionScene Scene)> ReadAuthoringVariantSceneAsync(
         Guid projectId,
-        PublicationEdition edition,
         Guid variantId,
         CancellationToken cancellationToken)
     {
-        var variant = await db.PageCompositionVariants.AsNoTracking()
-            .Include(item => item.Composition)
+        var variant = await db.PageCompositionVariants.AsNoTracking().Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId && item.Composition.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
-        if (!VariantMatchesEdition(variant, edition))
-            throw new InvalidOperationException("The selected composition variant is not compatible with this edition geometry.");
         var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, JsonOptions)
             ?? throw new InvalidDataException("The composition scene is empty.");
         return (variant, scene);
@@ -1432,13 +1590,12 @@ public sealed class CompositionService(
     public static string GeometryKey(PublicationEdition edition) => GeometryKey(edition, CreatePageScene(edition));
 
     public static string GeometryKey(PublicationEdition edition, CompositionScene scene)
+        => SceneGeometryKey(scene);
+
+    public static string SceneGeometryKey(CompositionScene scene)
     {
-        var canonical = GeometryCanonical(edition)
-            + (edition.Format == PublicationEditionFormat.DigitalPdf && edition.AllowDesignedPageOverrides
-                ? "|independent-pages"
-                : string.Empty)
-            + FormattableString.Invariant(
-                $"|{scene.Surface.Kind}|{scene.Surface.OutputPageMode}|{scene.Surface.WidthPoints:F4}|{scene.Surface.HeightPoints:F4}|{scene.Surface.BleedPoints:F4}|{scene.Surface.SafeInsetPoints:F4}|{scene.Surface.AllowIndependentPdfPage}");
+        var canonical = FormattableString.Invariant(
+            $"authoring|{scene.Surface.Kind}|{scene.Surface.OutputPageMode}|{scene.Surface.WidthPoints:F4}|{scene.Surface.HeightPoints:F4}|{scene.Surface.BleedPoints:F4}|{scene.Surface.SafeInsetPoints:F4}|{scene.Surface.AllowIndependentPdfPage}");
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..24];
     }
 
@@ -1449,10 +1606,7 @@ public sealed class CompositionService(
             var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, JsonOptions);
             if (scene is null) return false;
             ValidateVariantGeometry(edition, scene);
-            return string.Equals(variant.GeometryKey, GeometryKey(edition, scene), StringComparison.Ordinal)
-                // Accept the pre-exact-geometry key only at the isolated upgrade boundary.
-                || string.Equals(variant.GeometryKey, LegacyEditionOnlyGeometryKey(edition), StringComparison.Ordinal)
-                || string.Equals(variant.GeometryKey, LegacyGeometryKey(edition), StringComparison.Ordinal);
+            return true;
         }
         catch (InvalidDataException)
         {
@@ -1466,30 +1620,8 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken)
     {
-        var sourceSceneJson = await db.PageCompositionVariants.AsNoTracking()
-            .Where(item => item.GeometryKey == currentKey)
-            .Select(item => item.SceneJson)
-            .FirstOrDefaultAsync(cancellationToken);
-        var sourceScene = sourceSceneJson is null
-            ? null
-            : JsonSerializer.Deserialize<CompositionScene>(sourceSceneJson, JsonOptions);
-        var editions = await db.PublicationEditions.AsNoTracking()
-            .Where(item => item.ProjectId == projectId)
-            .ToListAsync(cancellationToken);
-        var edition = editions.FirstOrDefault(item =>
-        {
-            try
-            {
-                if (sourceScene is not null)
-                    ValidateVariantGeometry(item, sourceScene);
-                ValidateVariantGeometry(item, scene);
-                return (sourceScene is not null && string.Equals(currentKey, GeometryKey(item, sourceScene), StringComparison.Ordinal))
-                    || string.Equals(currentKey, LegacyEditionOnlyGeometryKey(item), StringComparison.Ordinal)
-                    || string.Equals(currentKey, LegacyGeometryKey(item), StringComparison.Ordinal);
-            }
-            catch (InvalidDataException) { return false; }
-        }) ?? throw new InvalidDataException("The composition variant does not match a current edition geometry.");
-        return GeometryKey(edition, scene);
+        await Task.CompletedTask;
+        return SceneGeometryKey(scene);
     }
 
     internal static string LegacyEditionOnlyGeometryKey(PublicationEdition edition)
@@ -1529,6 +1661,22 @@ public sealed class CompositionService(
         Layers = [new CompositionLayer(Guid.NewGuid(), "Content", 0)],
     };
 
+    public static CompositionScene CreatePageScene(
+        ProjectPageSetup setup,
+        DesignedPageLayoutMode layoutMode = DesignedPageLayoutMode.SinglePage) => new()
+    {
+        Surface = new CompositionSurface
+        {
+            Kind = layoutMode == DesignedPageLayoutMode.FacingSpread
+                ? CompositionSurfaceKind.FacingSpread
+                : CompositionSurfaceKind.SinglePage,
+            WidthPoints = setup.PageWidthInches * 72 * (layoutMode == DesignedPageLayoutMode.FacingSpread ? 2 : 1),
+            HeightPoints = setup.PageHeightInches * 72,
+            SafeInsetPoints = setup.PageMarginInches * 72,
+        },
+        Layers = [new CompositionLayer(Guid.NewGuid(), "Content", 0)],
+    };
+
     private static string SerializeAndValidate(CompositionScene scene, string semanticJson)
     {
         Validate(scene, ManuscriptCodec.Deserialize(semanticJson));
@@ -1560,22 +1708,11 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken)
     {
-        var editions = await db.PublicationEditions.AsNoTracking()
-            .Where(item => item.ProjectId == projectId)
-            .ToListAsync(cancellationToken);
-        var edition = editions.FirstOrDefault(item =>
-        {
-            try
-            {
-                ValidateVariantGeometry(item, scene);
-                return string.Equals(GeometryKey(item, scene), geometryKey, StringComparison.Ordinal)
-                    || string.Equals(LegacyEditionOnlyGeometryKey(item), geometryKey, StringComparison.Ordinal)
-                    || string.Equals(LegacyGeometryKey(item), geometryKey, StringComparison.Ordinal);
-            }
-            catch (InvalidDataException) { return false; }
-        })
-            ?? throw new InvalidDataException("The composition variant does not match a current edition geometry.");
-        ValidateVariantGeometry(edition, scene);
+        await Task.CompletedTask;
+        if (scene.Surface.WidthPoints is < 72 or > 3456 || scene.Surface.HeightPoints is < 72 or > 3456)
+            throw new InvalidDataException("The composition surface dimensions are outside the supported authoring range.");
+        if (string.IsNullOrWhiteSpace(geometryKey))
+            throw new InvalidDataException("The composition geometry fingerprint is missing.");
     }
 
     internal static void ValidateVariantGeometry(PublicationEdition edition, CompositionScene scene)
@@ -1634,7 +1771,7 @@ public sealed class CompositionService(
             if (item.Bounds.WidthPercent is <= 0 or > 400 || item.Bounds.HeightPercent is <= 0 or > 400
                 || item.Opacity is < 0 or > 1 || item.BackgroundOpacity is < 0 or > 1
                 || item.LetterSpacingEm is < -1 or > 10
-                || item.FocalXPercent is < 0 or > 100 || item.FocalYPercent is < 0 or > 100)
+                || item.CropXPercent is < 0 or > 100 || item.CropYPercent is < 0 or > 100)
                 throw new InvalidDataException($"Composition object {item.Id:N} has out-of-range geometry.");
             if (!item.Decorative && item.SemanticRole != CompositionSemanticRole.Artifact
                 && (item.ReadingOrder is null || !readingOrder.Add(item.ReadingOrder.Value)))
@@ -1731,9 +1868,19 @@ public sealed class CompositionService(
         double width,
         double height,
         IReadOnlyList<LayoutGenerationRegionDescriptor> regions)
+        => TargetGeometryFingerprint(GeometryCanonical(edition), targetKind, targetId, variantId, width, height, regions);
+
+    private static string TargetGeometryFingerprint(
+        string geometrySource,
+        string targetKind,
+        Guid targetId,
+        Guid? variantId,
+        double width,
+        double height,
+        IReadOnlyList<LayoutGenerationRegionDescriptor> regions)
     {
         var canonical = new StringBuilder()
-            .Append(GeometryCanonical(edition)).Append('|')
+            .Append(geometrySource).Append('|')
             .Append(targetKind).Append('|').Append(targetId.ToString("N")).Append('|')
             .Append(variantId?.ToString("N") ?? "-").Append('|')
             .Append(width.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)).Append('|')
@@ -1804,8 +1951,8 @@ public sealed record CompositionElementPatch(
     bool ClearStyle = false,
     Guid? ImageId = null,
     FigureImageFit? ImageFit = null,
-    double? FocalXPercent = null,
-    double? FocalYPercent = null,
+    double? CropXPercent = null,
+    double? CropYPercent = null,
     IReadOnlyList<ManuscriptRangeReference>? ContentReferences = null,
     string? FontFamilyKey = null,
     int? FontWeight = null,

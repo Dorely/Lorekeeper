@@ -19,13 +19,14 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 14;
+    public const int CurrentFormatVersion = 15;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
     public ProjectExportKind ExportKind { get; init; }
     public DateTime ExportedAtUtc { get; init; } = DateTime.UtcNow;
     public required ProjectExportProject Project { get; init; }
+    public ProjectExportPageSetup? PageSetup { get; init; }
     public ProjectExportBookBrief? BookBrief { get; init; }
     public List<ProjectExportEntityType> EntityTypes { get; init; } = [];
     public List<ProjectExportImage> Images { get; init; } = [];
@@ -60,6 +61,13 @@ public sealed record ProjectExportProject(
     public string EffectiveProjectGuidance =>
         !string.IsNullOrWhiteSpace(ProjectGuidance) ? ProjectGuidance : LegacySystemPrompt ?? string.Empty;
 }
+
+public sealed record ProjectExportPageSetup(
+    double PageWidthInches,
+    double PageHeightInches,
+    double PageMarginInches,
+    double BodyFontSizePoints,
+    double BodyLineHeight);
 
 // Read-only v13 import boundary. Current exports never populate these values.
 public enum PrintPicturePageSpreadMode { WholeSpread, SidewaysWholeSpread, SplitLeaves }
@@ -206,8 +214,8 @@ public sealed record ProjectExportCoverDesign(
     string BackCopy,
     string BackgroundColor,
     PublicationBarcodeMode BarcodeMode,
-    double ImageFocalXPercent,
-    double ImageFocalYPercent,
+    double ImageCropXPercent,
+    double ImageCropYPercent,
     string CompositionSceneJson,
     long Revision);
 
@@ -316,7 +324,8 @@ public sealed record ProjectExportPageComposition(
     string Name,
     string SemanticManuscriptJson,
     long Revision,
-    List<ProjectExportPageCompositionVariant> Variants);
+    List<ProjectExportPageCompositionVariant> Variants,
+    Guid? ActiveAuthoringVariantId = null);
 
 public sealed record ProjectExportPageCompositionVariant(
     Guid Id,

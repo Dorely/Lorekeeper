@@ -64,7 +64,7 @@ public sealed class PublicationRenderTests
                     architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant(),
                     description = new
                     {
-                        protocolVersion = 4,
+                        protocolVersion = 5,
                         rendererVersion = "2.0.0",
                         profiles = new[] { "generic-paperback-v1", "generic-digital-pdf-v1", "kdp-paperback-v1", "ingram-paperback-pdfx1a-v1" },
                         limits = new { maximumPages = 10_000 },
@@ -420,7 +420,7 @@ public sealed class PublicationRenderTests
     {
         var bytes = PublicationRenderProcessor.SerializeRequest(new
         {
-            protocolVersion = 4,
+            protocolVersion = 5,
             jobId = Guid.Empty.ToString("N"),
         });
 

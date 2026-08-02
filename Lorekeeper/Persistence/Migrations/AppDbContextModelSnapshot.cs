@@ -2146,6 +2146,9 @@ namespace Lorekeeper.Persistence.Migrations
 
             modelBuilder.Entity("Lorekeeper.Models.PageComposition", b =>
                 {
+                    b.Property<Guid?>("ActiveAuthoringVariantId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
@@ -2177,6 +2180,8 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ChapterId");
+
+                    b.HasIndex("ActiveAuthoringVariantId");
 
                     b.HasIndex("ProjectId", "ChapterId", "UpdatedAt");
 
@@ -2216,6 +2221,41 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("PageCompositionVariants");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ProjectPageSetup", b =>
+                {
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("BodyFontSizePoints")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("BodyLineHeight")
+                        .HasColumnType("REAL");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("PageHeightInches")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("PageMarginInches")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("PageWidthInches")
+                        .HasColumnType("REAL");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ProjectId");
+
+                    b.ToTable("ProjectPageSetups");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.Project", b =>
@@ -2962,10 +3002,10 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<Guid>("EditionId")
                         .HasColumnType("TEXT");
 
-                    b.Property<double>("ImageFocalXPercent")
+                    b.Property<double>("ImageCropXPercent")
                         .HasColumnType("REAL");
 
-                    b.Property<double>("ImageFocalYPercent")
+                    b.Property<double>("ImageCropYPercent")
                         .HasColumnType("REAL");
 
                     b.Property<long>("Revision")
@@ -4675,6 +4715,17 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Family");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.ProjectPageSetup", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.Project", "Project")
+                        .WithOne("PageSetup")
+                        .HasForeignKey("Lorekeeper.Models.ProjectPageSetup", "ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.ProjectFontFamily", b =>
                 {
                     b.HasOne("Lorekeeper.Models.Project", "Project")
@@ -5243,6 +5294,8 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("OutlineConversations");
 
                     b.Navigation("PageCompositions");
+
+                    b.Navigation("PageSetup");
 
                     b.Navigation("ProjectImageChatAttachments");
 

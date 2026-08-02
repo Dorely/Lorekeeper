@@ -148,10 +148,11 @@ in the pending-edits modal, which shows body text plus separate structure and
 visual-block diffs. Focused Figure tools and Designed Page insertion obey the
 same Review-edits staging boundary as the general manuscript preview/apply
 protocol. A staged Designed Page preallocates its composition and manuscript
-block IDs and retains its selected edition, page/spread mode, initial project
-artwork, fit, focal point, and accessibility decision in the reviewed tool
-payload. Keeping the change creates the manuscript block, composition, exact
-geometry variant, and initial image object in one transaction; approval never
+block IDs and retains its project authoring geometry, page/spread mode, initial
+project artwork, explicit contain/cover fit, crop position, and accessibility
+decision in the reviewed tool payload. Keeping the change creates the manuscript
+block, composition, exact authoring variant, and initial image object in one
+transaction; approval never
 depends on a later assistant turn to finish the page. Staged visual reads resolve
 against the projected manuscript revision until the user keeps or rejects the
 grouped change.
@@ -191,12 +192,16 @@ entity indexing share these associations as canonical visual evidence. Changes
 to visual ownership or reference semantics must be traced through all of those
 consumers.
 
-Chapters persist one format-neutral manuscript-v3 JSON document plus a monotonic
+Chapters persist one format-neutral manuscript-v4 JSON document plus a monotonic
 revision. The document is a sequence of semantic text blocks, Figure blocks,
 and Designed Page references; there is no chapter-level visual classification.
 Figures own stable IDs, project images, captions, alternative/decorative
 decisions, language and semantic roles, plus flow, wrap, width, spacing,
-fit/crop/focal, bleed, page-break, and caption-placement intent.
+contain/cover fit, internal crop position, bleed, page-break, and
+caption-placement intent. Text-bearing blocks can carry sparse paragraph
+alignment, whole/right/first-line/hanging indent, spacing, and pagination
+overrides; direct overrides take precedence over Book Text Styles and built-in
+defaults.
 `IManuscriptService` is the only runtime manuscript write boundary. Its EF
 optimistic-concurrency token and the project-scoped in-process/file mutation
 lease prevent simultaneous editors, imports, image deletion, and assistants
@@ -214,38 +219,47 @@ results intentionally return only IDs, hashes, revisions, and counts; full
 manuscript text and operations are never echoed into the apply round. Preview
 IDs do not persist across turns, and a newer preview for the same chapter
 supersedes the older one.
+`IProjectPageSetupService` owns each project's authoring width, height, margins,
+body typography, preset selection, and revision. New projects start at 6 x 9 in.
+This setup drives chapter preview, Figures, new Designed Pages, and authoring-time
+generation without creating or selecting a publication edition.
 `ICompositionService` owns Designed Page semantic fragments exactly once and
-stores revisioned `PageCompositionVariant` scenes by exact edition-geometry
+stores revisioned `PageCompositionVariant` scenes by exact geometry
 fingerprint. Text objects bind stable block/range IDs in that fragment, so
 visual layout never duplicates searchable or accessible content. The shared
 scene vocabulary covers image, text, rectangle, ellipse, line, and group
 objects; layers, z-order, locking, visibility, grouping, object styles, named
-regions, and logical reading order remain independent. Single leaves, facing
-spreads, and Digital-PDF-only independent pages share this contract. A missing
-exact geometry variant fails closed instead of stretching another layout.
-Assistant surfaces expose a compact edition-geometry discovery tool containing
-stable edition IDs, physical dimensions, margins, bleed, and override policy so
-agents can select an existing target rather than inventing or omitting known
-geometry.
-The manuscript editor represents a Designed Page with its composition name,
-page/spread mode, layout status, first-image thumbnail when present, and an
-explicit editor action rather than exposing the storage identifier. The Designed
-Page workspace provides page/spread mode thumbnails, direct pointer
-move/resize/rotate, objects, layers, styles, semantic content, reading-order
-reordering, persisted user guides/snapping, crop/focal behavior, and overflow/unplaced-content
-diagnostics with revision-aware save and undo/redo.
+regions, and logical reading order remain independent. Each composition records
+an active authoring variant. New pages use the current project setup; an existing
+page keeps its authored surface when the project setup changes. Publish reports
+edition compatibility and can copy the authoring scene into a new exact edition
+variant for review, but it never rewrites the authoring layout.
+The chapter center column has Edit, Read, Pages, and Review modes. Read flushes
+pending manuscript edits and uses `IChapterPreviewService` plus the Press layout
+command to render the current chapter as clean page canvases with real line
+breaks, images, captions, Designed Pages, page parity, labels, links, and boxes.
+It supports single/facing display, fit-page/fit-width, zoom, and project page
+setup; it never substitutes a read-only ProseMirror view. A Designed Page atom
+shows its name, mode, status, and artwork preview, and selecting it opens the
+contextual Pages mode in the same center column. The workspace provides direct
+pointer move/resize/rotate, atomic image placement with required fit, crop
+repositioning, layers, styles, semantic bindings, reading order, computed
+trim/safe/gutter/center/bleed overlays, diagnostics, revision-aware save, and
+undo/redo. Rectangle, ellipse, and line tools live under Advanced; custom guides
+and SVG/path tooling are not runtime capabilities.
 
-`LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for
-Figure, page surface/frame, and cover surface/frame image generation. It carries
+`LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for a
+project page, Figure, page surface/frame, or publication cover surface/frame.
+Only cover targets are edition-owned. It carries
 the exact physical aspect, recommended raster, provider canvas, effective-DPI
 expectation, geometry fingerprint, and named trim, bleed, safe, gutter, cover,
 barcode, and reserved-text regions. It is optional composition guidance rather
 than an image-acceptance constraint: free-standing generation is the default for
 reusable art and flowing Figures, while a concrete target is used when the art
-must honor physical regions. UI and assistants provide only stable edition and
-target IDs for that mode. Provider raster geometry and pixels are stored without
+must honor physical regions. UI and assistants provide only stable target IDs
+for that mode. Provider raster geometry and pixels are stored without
 layout cropping or resizing (supported format normalization may convert WebP to
-lossless PNG); Figure and scene contain/cover/crop/focal settings fit any source
+lossless PNG); Figure and scene contain/cover/crop-position settings fit any source
 aspect ratio non-destructively at layout and render time. Free-standing
 image-library generation remains manually sized, and its size/aspect audit
 metadata is never classified as a physical layout target.
@@ -254,7 +268,7 @@ boundary rather than inheriting the smaller user-upload limit, so a valid
 high-detail generated raster is not rejected after provider completion.
 `IPublicationEditionService` owns the one-to-many paperback, EPUB, and Digital
 PDF edition aggregate: product settings and identifiers, independently ordered
-content, semantic front/back matter, named-style mappings, edition-only image
+content, semantic front/back matter, Book Text Style mappings, edition-only image
 placements, revision tokens, cloning, archival, comparison, audit history, and
 deterministic source fingerprints. `IPublishService` is projection/export-only;
 UI and assistant mutations use owning services rather than parallel publish
@@ -265,11 +279,13 @@ cover, package-build, and proof writes; their existing artifacts remain readable
 and exportable, and cloning creates the editable continuation. New paperback
 editions use their vendor-owned profile defaults of 6 × 9 in, 0.75 in
 margins, 11 pt body text, and 1.4 line height.
-Project export v14 writes manuscript-v3 documents, page compositions and exact
-geometry variants, cover scenes, the complete edition aggregate, named styles,
+Project export v15 writes manuscript-v4 documents, project page setup, page
+compositions and exact geometry variants with active authoring variants, cover
+scenes, the complete edition aggregate, Book Text Styles,
 visual references, and project-owned font families/faces with binary hashes.
-An isolated v13 transformer maps earlier visual structures into the current
-model; v8-v12 structured and v1-v7 text adapters remain import-only boundaries.
+An isolated versioned transformer maps earlier visual structures into the
+current model; earlier structured and text adapters remain import-only
+boundaries.
 A pre-v12 backup that references a
 project font fails closed because those formats did not carry the required font
 binary; a foreign custom-font key is never persisted. Each coherent database
@@ -292,10 +308,11 @@ browser print. EPUB editions cannot request Press output, and non-EPUB editions
 cannot export EPUB, preventing product-form identifiers and metadata from
 crossing formats.
 
-`Lorekeeper.Press` owns protocol v4, deterministic layout, English/Latin shaping
+`Lorekeeper.Press` owns protocol v5, deterministic layout, English/Latin shaping
 and glyph diagnostics, custom project TTF/OTF staging and embedding, font
 subsetting and ToUnicode maps, inline typography, bounded pagination, TOC
-convergence, stable block/page maps, flowing Figures with wrapping, crop/focal,
+convergence, stable block/page maps, sparse paragraph presentation, flowing
+Figures with wrapping, crop positioning,
 bleed, and captions, structured Designed Pages and cover scenes, reusable
 styles, vector shapes, logical reading order, page-size overrides for eligible
 Digital PDFs, full-wrap cover geometry, EAN-13 bars, and PDF serialization.
@@ -313,7 +330,7 @@ without calling that validator. This is the evidence behind the scoped
 “Lorekeeper validated” state; it is not evidence of vendor upload acceptance or
 a human proof attestation.
 
-Protocol v4 stages `input/request.json` plus declared PNG/JPEG assets and
+Protocol v5 stages `input/request.json` plus declared PNG/JPEG assets and
 approved project TTF/OTF fonts in a bounded job root. Declarations carry media
 type, byte length, dimensions where applicable, rights state, and SHA-256.
 Absolute paths, traversal, links/reparse points, undeclared or changed bytes,
@@ -347,7 +364,7 @@ WeasyPrint, Chromium, machine PDF software, or repository fallback. Runtime
 readiness and the dynamic `describe` contract are checked by the
 UI, assistant, and service before a render can be queued. The processor captures
 bounded stdout/stderr, bounds its lifetime and paths,
-and verifies every returned length/hash before persistence. Protocol-v4
+and verifies every returned length/hash before persistence. Protocol-v5
 requests are serialized as BOM-free UTF-8 JSON; the owned renderer also
 tolerates an optional UTF-8 BOM for compatibility and binds every post-parse
 terminal response to the parsed job identity before the app accepts its
@@ -561,8 +578,17 @@ canonical hash of protected project, edition, asset, font, artifact, package,
 proof, audit, and page-map data while excluding only the explicitly transformed
 fields. Any failed
 validation enters the projectless recovery shell with the original protected
-backup. Project export v14 contains only the current v3/composition model; older
-formats remain importable only through isolated versioned transformers.
+backup. The later authoring-page cutover adds one project-owned page setup,
+selects an active authoring variant for every composition, removes Figure
+edition links and persisted workspace guides, renames stored crop coordinates,
+and supplies `Contain` wherever old image fit is absent or unsupported. It seeds
+appearance from an existing composition surface, then a default publication
+geometry, then 6 x 9 in. Its protected migration validates semantic text and
+hashes, scene/image ownership, references, protected row counts, artifacts,
+packages, proofs, and foreign keys before journaling success. Existing artifact
+bytes and hashes stay unchanged and become Legacy. Project export v15 contains
+only the current v4/page-setup/composition model; older formats remain
+importable only through isolated versioned transformers.
 The manuscript migration owner targets its historical EF schema only when that
 schema migration itself is pending; a later unrelated EF migration never causes
 the startup orchestrator to downgrade current application tables. This preserves
@@ -582,13 +608,13 @@ recording its journal. A failure delegates to the shared database recovery
 service and opens only the projectless recovery shell rather than permitting
 edits against a partially cut-over database.
 
-Manuscript v3 stores structural heading level separately from edition-independent
-style role, so assigning or removing a named paragraph style cannot change a
+Manuscript v4 stores structural heading level separately from edition-independent
+style role, so assigning or removing a Book Text Style cannot change a
 chapter heading into a subheading. Figure blocks own a project image ID,
 alternative/decorative decisions, language/role, presentation, and caption
 content. Designed Page blocks reference project-owned compositions. Manuscript
 saves and assistant previews validate image and composition ownership; image
-deletion refuses live Figure, scene, cover, and edition-placement references; v14
+deletion refuses live Figure, scene, cover, and edition-placement references; v15
 imports preflight and remap figure asset IDs. Current Markdown and EPUB
 publication projections consume the structured manuscript rather than flattening
 these blocks and marks through the plain-text projection.
@@ -604,7 +630,7 @@ known built-in role aliases and the visible `***` scene-break representation;
 unknown custom roles still fail closed. GUID-backed stable block IDs compare by
 identity across strict compact and hyphenated representations, with exact
 ordinal matches taking precedence and ambiguous fallback matches failing
-closed; mutation results return the exact stored ID. Named style semantic roles and
+closed; mutation results return the exact stored ID. Book Text Style semantic roles and
 paragraph/character kinds are immutable stable keys; definitions are
 revision-checked and semantic roles are unique per project and kind.
 The keyed Blazor host rechecks disposal across asynchronous catalog loads, and
@@ -728,7 +754,7 @@ cargo test --locked
 
 `dotnet build Lorekeeper.sln` also builds and packages the same locked native
 runtime used by the app. `LorekeeperPressProcessIntegrationTests` stages a real
-protocol-v4 job through the C# runtime boundary with `PATH` removed and verifies
+protocol-v5 job through the C# runtime boundary with `PATH` removed and verifies
 the generated interior and cover bytes.
 
 Successful compilation does not validate OAuth, provider calls,

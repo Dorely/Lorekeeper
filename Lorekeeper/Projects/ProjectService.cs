@@ -32,6 +32,7 @@ public class ProjectService(
             Name = trimmed,
             Slug = slug,
             ProjectGuidance = string.Empty,
+            PageSetup = new ProjectPageSetup(),
         };
         await repo.AddAsync(project, cancellationToken);
         await repo.SaveChangesAsync(cancellationToken);

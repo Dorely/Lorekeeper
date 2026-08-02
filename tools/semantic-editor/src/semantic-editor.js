@@ -38,8 +38,7 @@ const builtInParagraphRoles = new Set([
     "scene-break",
     "block-quote",
     "list-item",
-    "figure-caption",
-    "designed-page"
+    "figure-caption"
 ]);
 const defaultRoleByNode = {
     paragraph: "body",
@@ -93,12 +92,48 @@ const blockAttrs = {
     language: {default: null},
     accessibilityRole: {default: null},
     presentation: {default: null},
+    paragraphPresentation: {default: null},
     pageCompositionId: {default: null},
     compositionName: {default: null},
     compositionSurfaceLabel: {default: null},
     compositionStatus: {default: null},
     compositionPreviewUrl: {default: null}
 };
+
+function paragraphStyle(presentation) {
+    if (!presentation) return null;
+    const styles = [];
+    const alignment = {start: "left", center: "center", end: "right", justify: "justify"}[presentation.alignment];
+    if (alignment) styles.push(`text-align:${alignment}`);
+    if (Number.isFinite(presentation.leftIndentEm)) styles.push(`margin-left:${presentation.leftIndentEm}em`);
+    if (Number.isFinite(presentation.rightIndentEm)) styles.push(`margin-right:${presentation.rightIndentEm}em`);
+    if (Number.isFinite(presentation.firstLineIndentEm)) styles.push(`text-indent:${presentation.firstLineIndentEm}em`);
+    if (Number.isFinite(presentation.spacingBeforePoints)) styles.push(`margin-top:${presentation.spacingBeforePoints}pt`);
+    if (Number.isFinite(presentation.spacingAfterPoints)) styles.push(`margin-bottom:${presentation.spacingAfterPoints}pt`);
+    return styles.join(";") || null;
+}
+
+function textBlockDom(tag, node, extra = {}) {
+    return [tag, {
+        ...extra,
+        "data-block-id": node.attrs.id,
+        "data-style-role": node.attrs.styleRole,
+        style: paragraphStyle(node.attrs.paragraphPresentation)
+    }, 0];
+}
+
+function figureDomStyle(presentation) {
+    const value = {...defaultFigurePresentation, ...(presentation || {})};
+    const styles = [`width:${Math.max(5, Math.min(100, Number(value.widthPercent || 100)))}%`];
+    if (value.alignment === "start") styles.push("margin-left:0", "margin-right:auto");
+    else if (value.alignment === "end") styles.push("margin-left:auto", "margin-right:0");
+    else styles.push("margin-left:auto", "margin-right:auto");
+    if (value.placement === "float") styles.push(value.textWrap === "start" ? "float:right" : "float:left");
+    if (value.startOnNewPage) styles.push("break-before:page");
+    styles.push(`padding-top:${Number(value.spacingBeforePoints || 0)}pt`);
+    styles.push(`padding-bottom:${Number(value.spacingAfterPoints || 0)}pt`);
+    return styles.join(";");
+}
 
 function designedPageDom(node) {
     const compositionId = node.attrs.pageCompositionId;
@@ -145,7 +180,7 @@ const schema = new Schema({
             content: "inline*",
             attrs: blockAttrs,
             parseDOM: [{tag: "p", getAttrs: element => ({id: element.dataset.blockId, styleRole: element.dataset.styleRole || "body"})}],
-            toDOM: node => ["p", {"data-block-id": node.attrs.id, "data-style-role": node.attrs.styleRole}, 0]
+            toDOM: node => textBlockDom("p", node)
         },
         heading: {
             group: "block",
@@ -159,14 +194,14 @@ const schema = new Schema({
                     level
                 })
             })),
-            toDOM: node => [`h${node.attrs.level}`, {"data-block-id": node.attrs.id, "data-style-role": node.attrs.styleRole}, 0]
+            toDOM: node => textBlockDom(`h${node.attrs.level}`, node)
         },
         blockquote: {
             group: "block",
             content: "inline*",
             attrs: {...blockAttrs, styleRole: {default: "block-quote"}},
             parseDOM: [{tag: "blockquote", getAttrs: element => ({id: element.dataset.blockId, styleRole: element.dataset.styleRole || "block-quote"})}],
-            toDOM: node => ["blockquote", {"data-block-id": node.attrs.id, "data-style-role": node.attrs.styleRole}, 0]
+            toDOM: node => textBlockDom("blockquote", node)
         },
         list_item: {
             group: "block",
@@ -176,7 +211,7 @@ const schema = new Schema({
                 {tag: "li", getAttrs: element => ({id: element.dataset.blockId, styleRole: element.dataset.styleRole || "list-item"})},
                 {tag: "div.semantic-list-item", getAttrs: element => ({id: element.dataset.blockId, styleRole: element.dataset.styleRole || "list-item"})}
             ],
-            toDOM: node => ["div", {class: "semantic-list-item", "data-block-id": node.attrs.id, "data-style-role": node.attrs.styleRole}, 0]
+            toDOM: node => textBlockDom("div", node, {class: "semantic-list-item"})
         },
         scene_break: {
             group: "block",
@@ -221,9 +256,15 @@ const schema = new Schema({
                     "data-decorative": String(node.attrs.decorative),
                     "data-accessibility-role": node.attrs.accessibilityRole || "figure",
                     lang: node.attrs.language || null,
-                    "data-presentation": JSON.stringify(node.attrs.presentation || {})
+                    "data-presentation": JSON.stringify(node.attrs.presentation || {}),
+                    style: figureDomStyle(node.attrs.presentation)
                 },
-                ["img", {src: node.attrs.imageUrl, alt: node.attrs.decorative ? "" : node.attrs.altText}],
+                ["img", {
+                    src: node.attrs.imageUrl,
+                    alt: node.attrs.decorative ? "" : node.attrs.altText,
+                    draggable: "false",
+                    style: `object-fit:${node.attrs.presentation?.fit === "cover" ? "cover" : "contain"};object-position:${node.attrs.presentation?.cropXPercent ?? 50}% ${node.attrs.presentation?.cropYPercent ?? 50}%`
+                }],
                 ["figcaption", 0]
             ]
         },
@@ -343,6 +384,7 @@ function documentFromDomain(document) {
             ,language: block.language || null
             ,accessibilityRole: block.accessibilityRole || (nodeName === "figure" ? "figure" : null)
             ,presentation: block.figurePresentation || null
+            ,paragraphPresentation: block.paragraphPresentation || null
             ,pageCompositionId: block.pageCompositionId || null
             ,compositionName: block.compositionName || null
             ,compositionSurfaceLabel: block.compositionSurfaceLabel || null
@@ -398,6 +440,9 @@ function domainFromDocument(doc, manuscriptId, revision) {
             imageId: node.type.name === "figure" ? node.attrs.imageId : null,
             altText: node.type.name === "figure" ? node.attrs.altText : null,
             language: node.attrs.language || null,
+            paragraphPresentation: ["paragraph", "heading", "blockquote", "list_item"].includes(node.type.name)
+                ? node.attrs.paragraphPresentation || null
+                : null,
             content: inlines
         };
         if (node.type.name === "figure") {
@@ -409,7 +454,7 @@ function domainFromDocument(doc, manuscriptId, revision) {
             block.pageCompositionId = node.attrs.pageCompositionId;
         content.push(block);
     });
-    return {schemaVersion: 3, manuscriptId, revision, content};
+    return {schemaVersion: 4, manuscriptId, revision, content};
 }
 
 export function roundTripManuscriptJson(json) {
@@ -595,6 +640,69 @@ function applyMark(view, markName, value = null) {
     view.focus();
 }
 
+function updateParagraphPresentation(view, update) {
+    const {from, to} = view.state.selection;
+    let transaction = view.state.tr;
+    let changed = false;
+    view.state.doc.nodesBetween(from, to, (node, position) => {
+        if (!["paragraph", "heading", "blockquote", "list_item"].includes(node.type.name))
+            return true;
+        const current = node.attrs.paragraphPresentation || {};
+        const next = update({...current});
+        transaction = transaction.setNodeMarkup(position, undefined, {
+            ...node.attrs,
+            paragraphPresentation: Object.keys(next).length ? next : null
+        }, node.marks);
+        changed = true;
+        return false;
+    });
+    if (changed) view.dispatch(transaction.scrollIntoView());
+    view.focus();
+}
+
+function setParagraphAlignment(view, alignment) {
+    updateParagraphPresentation(view, current => ({...current, alignment}));
+}
+
+function changeParagraphIndent(view, delta) {
+    updateParagraphPresentation(view, current => ({
+        ...current,
+        leftIndentEm: Math.max(0, Math.min(12, Number(current.leftIndentEm || 0) + delta))
+    }));
+}
+
+function editParagraphPresentation(view) {
+    const node = view.state.selection.$from.parent;
+    const current = node.attrs.paragraphPresentation || {};
+    const rightIndent = Number(window.prompt("Right indent in em", String(current.rightIndentEm || 0)));
+    const firstLine = Number(window.prompt("First-line indent in em (use a negative value for hanging indent)", String(current.firstLineIndentEm || 0)));
+    if (!Number.isFinite(rightIndent) || rightIndent < 0 || rightIndent > 12
+        || !Number.isFinite(firstLine) || firstLine < -12 || firstLine > 12) return;
+    const before = Number(window.prompt("Space before in points", String(current.spacingBeforePoints || 0)));
+    const after = Number(window.prompt("Space after in points", String(current.spacingAfterPoints || 0)));
+    if (![before, after].every(value => Number.isFinite(value) && value >= 0 && value <= 288)) return;
+    const keepWithNext = window.prompt(
+        "Keep with the next block in paginated output? yes or no",
+        current.keepWithNext ? "yes" : "no")?.trim().toLowerCase();
+    const startOnNewPage = window.prompt(
+        "Start this block on a new page? yes or no",
+        current.startOnNewPage ? "yes" : "no")?.trim().toLowerCase();
+    if (![keepWithNext, startOnNewPage].every(value => value === "yes" || value === "no")) return;
+    updateParagraphPresentation(view, value => ({
+        ...value,
+        rightIndentEm: rightIndent,
+        firstLineIndentEm: firstLine,
+        spacingBeforePoints: before,
+        spacingAfterPoints: after,
+        keepWithNext: keepWithNext === "yes",
+        startOnNewPage: startOnNewPage === "yes"
+    }));
+}
+
+function clearParagraphPresentation(view) {
+    updateParagraphPresentation(view, () => ({}));
+}
+
 function insertSceneBreak(view) {
     const node = schema.nodes.scene_break.create({id: newBlockId(), styleRole: "scene-break"});
     view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
@@ -615,14 +723,13 @@ const defaultFigurePresentation = Object.freeze({
     alignment: "center",
     textWrap: "none",
     fit: "contain",
-    focalXPercent: 50,
-    focalYPercent: 50,
+    cropXPercent: 50,
+    cropYPercent: 50,
     spacingBeforePoints: 6,
     spacingAfterPoints: 6,
     startOnNewPage: false,
     keepWithCaption: true,
     captionPlacement: "below"
-    ,layoutTargetEditionId: null
 });
 
 function insertFigure(view, image) {
@@ -633,6 +740,11 @@ function insertFigure(view, image) {
         image.altText || "")?.trim();
     const decorative = !altText && window.confirm("Mark this image decorative? Decorative images are skipped by assistive technology.");
     if (!altText && !decorative) return;
+    const fit = window.prompt("Image fit: contain shows the whole image; cover fills the frame", "contain")?.trim().toLowerCase();
+    if (!new Set(["contain", "cover"]).has(fit)) {
+        if (fit !== undefined) window.alert("Choose contain or cover.");
+        return;
+    }
     const content = caption
         ? schema.text(caption)
         : null;
@@ -644,7 +756,7 @@ function insertFigure(view, image) {
         imageUrl: image.previewUrl,
         decorative,
         accessibilityRole: "figure",
-        presentation: {...defaultFigurePresentation}
+        presentation: {...defaultFigurePresentation, fit}
     }, content);
     view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
     view.focus();
@@ -659,7 +771,7 @@ function selectedFigure(view) {
         : null;
 }
 
-function buildFigureInspector(view, projectImages, editionTargets, dotNetRef) {
+function buildFigureInspector(view, projectImages) {
     const panel = document.createElement("section");
     panel.className = "semantic-figure-inspector";
     panel.hidden = true;
@@ -680,13 +792,12 @@ function buildFigureInspector(view, projectImages, editionTargets, dotNetRef) {
         wrapper.append(input); controls.append(wrapper); fields.set(name, input); return input;
     };
     field("imageId", "Project image", "select", projectImages.map(image => [image.id, image.fileName]));
-    field("editionTarget", "Layout target", "select", [["", "All compatible editions"], ...editionTargets.map(edition => [edition.id, `${edition.name} (${edition.format})`])]);
     field("placement", "Placement", "select", [["inline", "Inline"], ["centered", "Centered"], ["float", "Floated"], ["fullWidth", "Full width"], ["fullBleed", "Full bleed"], ["dedicatedPage", "Dedicated page"]]);
     const width = field("widthPercent", "Width %", "number"); width.min = "1"; width.max = "100";
     field("alignment", "Alignment", "select", [["start", "Start"], ["center", "Center"], ["end", "End"]]);
     field("textWrap", "Text wrap", "select", [["none", "None"], ["start", "Text on start side"], ["end", "Text on end side"]]);
-    field("fit", "Crop / fit", "select", [["contain", "Contain"], ["cover", "Cover"], ["fill", "Fill"]]);
-    for (const [name, label] of [["focalXPercent", "Focal X %"], ["focalYPercent", "Focal Y %"], ["spacingBeforePoints", "Space before pt"], ["spacingAfterPoints", "Space after pt"]]) {
+    field("fit", "Crop / fit", "select", [["contain", "Show whole image"], ["cover", "Fill frame"]]);
+    for (const [name, label] of [["cropXPercent", "Crop position X %"], ["cropYPercent", "Crop position Y %"], ["spacingBeforePoints", "Space before pt"], ["spacingAfterPoints", "Space after pt"]]) {
         const input = field(name, label, "number"); input.step = ".5";
     }
     field("captionPlacement", "Caption", "select", [["below", "Below"], ["above", "Above"], ["overlay", "Overlay"], ["hidden", "Hidden"]]);
@@ -718,14 +829,13 @@ function buildFigureInspector(view, projectImages, editionTargets, dotNetRef) {
             alignment: fields.get("alignment").value,
             textWrap: fields.get("textWrap").value,
             fit: fields.get("fit").value,
-            focalXPercent: Math.min(100, Math.max(0, number("focalXPercent"))),
-            focalYPercent: Math.min(100, Math.max(0, number("focalYPercent"))),
+            cropXPercent: Math.min(100, Math.max(0, number("cropXPercent"))),
+            cropYPercent: Math.min(100, Math.max(0, number("cropYPercent"))),
             spacingBeforePoints: Math.max(0, number("spacingBeforePoints")),
             spacingAfterPoints: Math.max(0, number("spacingAfterPoints")),
             startOnNewPage: fields.get("startOnNewPage").checked,
             keepWithCaption: fields.get("keepWithCaption").checked,
             captionPlacement: fields.get("captionPlacement").value
-            ,layoutTargetEditionId: fields.get("editionTarget").value || null
         };
         view.dispatch(view.state.tr.setNodeMarkup(selected.position, undefined, {
             ...selected.node.attrs,
@@ -739,17 +849,6 @@ function buildFigureInspector(view, projectImages, editionTargets, dotNetRef) {
         }).scrollIntoView());
     };
     for (const input of fields.values()) input.addEventListener("change", apply);
-    const generate = button("Generate for layout", "Open geometry-bound image generation for this Figure", () => {
-        const selected = selectedFigure(view);
-        const editionId = fields.get("editionTarget").value;
-        if (!selected || !editionId) {
-            window.alert("Select a layout target edition first.");
-            return;
-        }
-        apply();
-        void dotNetRef.invokeMethodAsync("OnGenerateFigure", selected.node.attrs.id, editionId);
-    });
-    controls.append(generate);
     panel.append(heading, controls);
     return {
         panel,
@@ -757,12 +856,11 @@ function buildFigureInspector(view, projectImages, editionTargets, dotNetRef) {
             const selected = selectedFigure(view); panel.hidden = !selected; if (!selected) return;
             const attrs = selected.node.attrs;
             const presentation = {...defaultFigurePresentation, ...(attrs.presentation || {})};
-            for (const name of ["placement", "widthPercent", "alignment", "textWrap", "fit", "focalXPercent", "focalYPercent", "spacingBeforePoints", "spacingAfterPoints", "captionPlacement"])
+            for (const name of ["placement", "widthPercent", "alignment", "textWrap", "fit", "cropXPercent", "cropYPercent", "spacingBeforePoints", "spacingAfterPoints", "captionPlacement"])
                 fields.get(name).value = presentation[name];
             fields.get("startOnNewPage").checked = presentation.startOnNewPage;
             fields.get("keepWithCaption").checked = presentation.keepWithCaption;
             fields.get("imageId").value = attrs.imageId || "";
-            fields.get("editionTarget").value = presentation.layoutTargetEditionId || "";
             fields.get("altText").value = attrs.altText || "";
             fields.get("decorative").checked = attrs.decorative;
             fields.get("language").value = attrs.language || "";
@@ -833,9 +931,9 @@ function editFigurePresentation(view) {
         window.alert("Width must be between 1 and 100 percent.");
         return;
     }
-    const fit = window.prompt("Image fit: contain, cover, or fill", current.fit)?.trim();
-    if (!new Set(["contain", "cover", "fill"]).has(fit)) {
-        window.alert("Choose contain, cover, or fill.");
+    const fit = window.prompt("Image fit: contain shows the whole image; cover fills the frame", current.fit)?.trim();
+    if (!new Set(["contain", "cover"]).has(fit)) {
+        window.alert("Choose contain or cover.");
         return;
     }
     const presentation = {
@@ -1230,7 +1328,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     const initial = JSON.parse(initialJson);
     const namedStyles = JSON.parse(stylesJson);
     const projectImages = JSON.parse(imagesJson);
-    const editionTargets = JSON.parse(editionsJson);
+    JSON.parse(editionsJson);
     const pageCompositions = JSON.parse(compositionsJson);
     const imageById = new Map(projectImages.map(image => [String(image.id).toLowerCase(), image]));
     const compositionById = new Map(pageCompositions.map(composition => [String(composition.id).toLowerCase(), composition]));
@@ -1359,6 +1457,8 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
                 "Mod-y": redo,
                 "Mod-b": toggleMark(schema.marks.strong),
                 "Mod-i": toggleMark(schema.marks.em),
+                "Tab": (_state, _dispatch, editorView) => { changeParagraphIndent(editorView, 1.5); return true; },
+                "Shift-Tab": (_state, _dispatch, editorView) => { changeParagraphIndent(editorView, -1.5); return true; },
                 "Shift-Enter": insertHardBreak,
                 "Enter": chainCommands(newlineInCode, createParagraphNear, liftEmptyBlock, baseKeymap.Enter)
             }),
@@ -1425,7 +1525,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
 
     const findPanel = buildFindPanel(view);
     const outline = buildOutline(view);
-    const figureInspector = buildFigureInspector(view, projectImages, editionTargets, dotNetRef);
+    const figureInspector = buildFigureInspector(view, projectImages);
     root.insertBefore(figureInspector.panel, surface);
     figureInspector.update();
     const updateStatus = () => {
@@ -1437,11 +1537,13 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     toolbar.append(
         selectControl("Block style", [
             ["", "Block style"],
-            ["paragraph|body|2", "Body"],
-            ["heading|chapter-heading|1", "Chapter heading"],
-            ["heading|subheading|2", "Subheading"],
+            ["paragraph|body|2", "Body text"],
+            ["heading|chapter-heading|1", "Chapter title"],
+            ["heading|heading|2", "Heading"],
+            ["heading|subheading|3", "Subheading"],
             ["blockquote|block-quote|2", "Block quote"],
-            ["list_item|list-item|2", "List item"],
+            ["list_item|list-item|2", "List"],
+            ["paragraph|figure-caption|2", "Caption"],
         ], value => {
             if (!value) return;
             const [node, role, level] = value.split("|");
@@ -1459,8 +1561,8 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             if (value) applyHeadingLevel(view, Number(value));
         }),
         selectControl(
-            "Named paragraph style",
-            [["", "Named paragraph style"], ["__reset__", "Reset to built-in role"]].concat(
+            "Book Text Style",
+            [["", "Book Text Style"], ["__reset__", "Reset to built-in style"]].concat(
                 namedStyles
                     .filter(style => style.kind === "paragraph")
                     .map(style => [style.semanticRole, style.name])),
@@ -1508,8 +1610,8 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             applyMark(view, "language", sanitized);
         }),
         selectControl(
-            "Named character style",
-            [["", "Named character style"], ["__remove__", "Remove character style"]].concat(
+            "Book Text character style",
+            [["", "Book Text character style"], ["__remove__", "Remove character style"]].concat(
                 namedStyles
                     .filter(style => style.kind === "character")
                     .map(style => [style.semanticRole, style.name])),
@@ -1538,6 +1640,40 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         button("Find", "Find and replace", () => findPanel.open()),
         button("Outline", "Toggle document outline", () => outline.open())
     );
+    toolbar.append(
+        button("Left", "Align paragraph left", () => setParagraphAlignment(view, "start")),
+        button("Center", "Center paragraph", () => setParagraphAlignment(view, "center")),
+        button("Right", "Align paragraph right", () => setParagraphAlignment(view, "end")),
+        button("Justify", "Justify paragraph", () => setParagraphAlignment(view, "justify")),
+        button("Indent +", "Increase paragraph indent (Tab)", () => changeParagraphIndent(view, 1.5)),
+        button("Indent -", "Decrease paragraph indent (Shift+Tab)", () => changeParagraphIndent(view, -1.5)),
+        button("List", "Format as a list item", () => applyBlock(view, "list_item", "list-item", 2))
+    );
+    const primaryTitles = new Set([
+        "Bold (Ctrl+B)", "Italic (Ctrl+I)", "Underline", "Add or remove link",
+        "Insert a designed page at the current manuscript position", "Undo (Ctrl+Z)",
+        "Redo (Ctrl+Y)", "Find and replace", "Align paragraph left", "Center paragraph",
+        "Align paragraph right", "Justify paragraph", "Increase paragraph indent (Tab)",
+        "Decrease paragraph indent (Shift+Tab)", "Format as a list item"
+    ]);
+    const primarySelects = new Set(["Block style", "Insert project image as figure"]);
+    const advancedDetails = document.createElement("details");
+    advancedDetails.className = "semantic-editor-advanced";
+    const advancedSummary = document.createElement("summary");
+    advancedSummary.textContent = "Advanced";
+    const advancedControls = document.createElement("div");
+    advancedControls.className = "semantic-editor-advanced-controls";
+    for (const control of [...toolbar.children]) {
+        const selectLabel = control.querySelector?.("select")?.getAttribute("aria-label");
+        if (primaryTitles.has(control.title) || primarySelects.has(selectLabel)) continue;
+        advancedControls.append(control);
+    }
+    advancedControls.append(
+        button("Paragraph...", "Right, first-line, and hanging indents, spacing, and pagination controls", () => editParagraphPresentation(view)),
+        button("Clear paragraph", "Clear direct paragraph formatting", () => clearParagraphPresentation(view))
+    );
+    advancedDetails.append(advancedSummary, advancedControls);
+    toolbar.append(advancedDetails);
     root.append(findPanel.panel, outline.panel);
     updateStatus();
     outline.update();

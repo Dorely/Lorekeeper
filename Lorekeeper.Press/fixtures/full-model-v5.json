@@ -1,5 +1,5 @@
 {
-  "protocolVersion": 4,
+  "protocolVersion": 5,
   "jobId": "11111111111111111111111111111111",
   "profile": "kdp-paperback-v1",
   "ink": "BlackAndWhite",
@@ -93,8 +93,8 @@
                   "alignment": "End",
                   "textWrap": "Start",
                   "fit": "Cover",
-                  "focalXPercent": 50,
-                  "focalYPercent": 50,
+                  "cropXPercent": 50,
+                  "cropYPercent": 50,
                   "startOnNewPage": false,
                   "captionPlacement": "Below"
                 },
@@ -226,8 +226,8 @@
     "isbn": "9780306406157",
     "barcodeMode": "LorekeeperBarcode",
     "assetId": "90000000-0000-0000-0000-000000000001",
-    "imageFocalXPercent": 50,
-    "imageFocalYPercent": 45
+    "imageCropXPercent": 50,
+    "imageCropYPercent": 45
   },
   "assets": [
     {

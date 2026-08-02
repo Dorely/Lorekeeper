@@ -24,8 +24,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Schema-driven semantic chapter editing with persistent heading levels 1-6,
   intentional line breaks, scene
   breaks, quotations, list items, project-image figures with alt text and
-  captions, named paragraph/character styles, rich inline marks, undo/redo,
-  normalized paste, find/replace, and outline navigation. Manual edits and AI
+  captions, Book Text Styles, sparse paragraph alignment/indent/spacing/page
+  controls, rich inline marks, undo/redo, normalized paste, find/replace, and
+  outline navigation. Manual edits and AI
   assistants share one revision-checked manuscript boundary; HTML is not
   authoritative.
 - Outline treats chapters as format-neutral containers and derives concise,
@@ -36,12 +37,18 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Text, EPUB, PDF, image, and webpage ingest with structured source provenance,
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval.
+- Project-owned authoring page setup, Press-backed current-chapter Read preview,
+  and contextual Edit/Read/Pages/Review modes. Read shows actual pagination,
+  line breaks, images, captions, and Designed Pages with single/facing and zoom
+  controls; it does not depend on a publication edition.
 - Project image generation and editing, canonical entity visual references,
-  semantic flowing Figures, Designed Page/spread composition, project font
-  management, format-aware dedicated cover composition, exact geometry-bound
-  generation targets, accessibility state, and layout diagnostics.
+  permissive source-image geometry, semantic flowing Figures, contextual
+  Designed Page/spread composition, project font management, format-aware
+  dedicated cover composition, exact target-bound generation, accessibility
+  state, and layout diagnostics. Placement always chooses non-destructive
+  Contain or Cover fit; crop positioning is adjusted directly in the canvas.
 - Independent paperback, EPUB, and Digital PDF publication editions with product/vendor settings,
-  identifiers, included content, semantic matter, named-style mappings, image
+  identifiers, included content, semantic matter, Book Text Style mappings, image
   placements, dedicated project-image cover artwork, clone/archive/compare/audit workflows,
   deterministic staleness fingerprints, read-only archived editions, and
   a full-height conversational Publish assistant with streaming, persistent
@@ -71,9 +78,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. Recorded vendor acceptance and human proof remain
   separate evidence, never assistant-controlled conformance gates.
-- Versioned project import/export (current v14 manuscript-v3/composition model,
-  styles/editions/covers/custom-font binaries, isolated v13 visual transformer,
-  v8-v12 structured adapters, and v1-v7 text adapters) plus TXT, Markdown,
+- Versioned project import/export (current v15 manuscript-v4/page-setup/
+  composition model, Book Text Styles, editions, covers, custom-font binaries,
+  and isolated older structured/text adapters) plus TXT, Markdown,
   accessible mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is
   restricted to EPUB editions.
@@ -231,11 +238,12 @@ reload, can be downloaded from the conflict banner, and is removed only when
 the user explicitly loads the current saved version. Clearing browser/site data
 removes it; it is not included in database backups or project exports.
 
-The guarded manuscript-v3/composition migration creates a protected SQLite
-backup before transforming Figure presentation, page-layout chapters, cover
-scenes, and pending Outline changes. It verifies semantic text and stable IDs,
-scene bindings and geometry, row counts, foreign keys, artifacts, hashes,
-packages, audits, and proofs before removing obsolete visual columns. A failure
+The guarded manuscript/composition and authoring-page migrations create a
+protected SQLite backup before transforming Figure presentation, page-layout
+chapters, cover scenes, page setup, authoring variants, and pending Outline
+changes. They verify semantic text and stable IDs, scene/image ownership and
+geometry, protected row counts, foreign keys, artifacts, hashes, packages,
+audits, and proofs before removing obsolete visual state. A failure
 opens Lorekeeper's projectless recovery shell and leaves the original database
 available under **Settings > Data Recovery**. Existing generated artifacts keep
 their exact bytes and hashes but are labeled Legacy until regenerated through

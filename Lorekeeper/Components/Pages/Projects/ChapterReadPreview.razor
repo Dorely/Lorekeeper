@@ -1,0 +1,242 @@
+@using Lorekeeper.Composition
+@using Lorekeeper.Models
+@inject IChapterPreviewService Preview
+@inject IProjectPageSetupService PageSetups
+
+<section class="chapter-read-preview" aria-label="Chapter print preview">
+    <style>@((MarkupString)PreviewFontCss())</style>
+    <header class="chapter-preview-toolbar">
+        <div class="btn-group btn-group-sm" role="group" aria-label="Page display">
+            <button type="button" class="btn @ButtonClass(!_facing)" @onclick="() => _facing = false">Single page</button>
+            <button type="button" class="btn @ButtonClass(_facing)" @onclick="() => _facing = true">Facing pages</button>
+        </div>
+        <select class="form-select form-select-sm" value="@_fit" @onchange="ChangeFit">
+            <option value="page">Fit page</option>
+            <option value="width">Fit width</option>
+            <option value="zoom">Custom zoom</option>
+        </select>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ChangeZoom(-.1)">−</button>
+        <span class="chapter-preview-zoom">@Math.Round(_zoom * 100)%</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ChangeZoom(.1)">+</button>
+        @if (_setup is not null)
+        {
+            <select class="form-select form-select-sm chapter-preview-preset" value="@PresetValue()" @onchange="ChangePresetAsync">
+                <option value="6x9">6 × 9 in</option>
+                <option value="5.5x8.5">5.5 × 8.5 in</option>
+                <option value="8.5x11">8.5 × 11 in</option>
+                <option value="custom">Custom</option>
+            </select>
+            <details class="chapter-preview-setup">
+                <summary>Page setup</summary>
+                <div>
+                    <label>Width (in)<input type="number" min="3" max="24" step=".125" @bind="_setupWidth" /></label>
+                    <label>Height (in)<input type="number" min="3" max="24" step=".125" @bind="_setupHeight" /></label>
+                    <label>Margins (in)<input type="number" min=".25" max="3" step=".0625" @bind="_setupMargin" /></label>
+                    <label>Body size (pt)<input type="number" min="6" max="36" step=".25" @bind="_setupFontSize" /></label>
+                    <label>Line height<input type="number" min=".8" max="3" step=".05" @bind="_setupLineHeight" /></label>
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="SaveSetupAsync">Apply</button>
+                </div>
+            </details>
+        }
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_loading" @onclick="LoadAsync">Refresh</button>
+    </header>
+
+    @if (_loading)
+    {
+        <div class="chapter-preview-status"><span class="spinner-border spinner-border-sm"></span> Typesetting chapter preview…</div>
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="chapter-preview-error" role="alert">
+            <strong>Preview could not be generated.</strong>
+            <p>@_error</p>
+            <button type="button" class="btn btn-sm btn-primary" @onclick="LoadAsync">Retry</button>
+        </div>
+    }
+    else if (_result is null || _result.Pages.Count == 0)
+    {
+        <div class="chapter-preview-status">This chapter has no preview pages.</div>
+    }
+    else
+    {
+        <div class="chapter-preview-scroll @(_facing ? "facing" : "single") @($"fit-{_fit}")" style="--preview-zoom:@_zoom.ToString(System.Globalization.CultureInfo.InvariantCulture)">
+            @foreach (var page in _result.Pages)
+            {
+                <article id="@($"page-{page.PhysicalPage}")" class="chapter-preview-page" style="@PageStyle(page)" aria-label="Page @(page.PageLabel ?? page.PhysicalPage.ToString())">
+                    @foreach (var shape in page.Shapes)
+                    {
+                        <span class="chapter-preview-shape" style="@ShapeStyle(page, shape)"></span>
+                    }
+                    @foreach (var image in page.Images)
+                    {
+                        <img class="chapter-preview-image" src="/projects/@ProjectId.ToString("N")/images/@image.AssetId.ToString("N")/content" alt="@(image.Decorative ? string.Empty : image.AltText)" style="@ImageStyle(page, image)" />
+                    }
+                    @foreach (var line in page.Lines)
+                    {
+                        @if (line.Link is { } link)
+                        {
+                            <a class="chapter-preview-line" href="@link" style="@LineStyle(page, line)">@RunContent(line)</a>
+                        }
+                        else
+                        {
+                            <span class="chapter-preview-line" style="@LineStyle(page, line)">@RunContent(line)</span>
+                        }
+                    }
+                    <footer>@(page.PageLabel ?? string.Empty)</footer>
+                </article>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter, EditorRequired] public Guid ChapterId { get; set; }
+    [Parameter] public long RefreshSignal { get; set; }
+
+    private ChapterPreviewResult? _result;
+    private ProjectPageSetup? _setup;
+    private Guid _loadedProject;
+    private Guid _loadedChapter;
+    private long _loadedSignal = -1;
+    private bool _loading;
+    private bool _facing;
+    private string _fit = "page";
+    private double _zoom = 1;
+    private string? _error;
+    private double _setupWidth = 6;
+    private double _setupHeight = 9;
+    private double _setupMargin = .75;
+    private double _setupFontSize = 12;
+    private double _setupLineHeight = 1.55;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedProject == ProjectId && _loadedChapter == ChapterId && _loadedSignal == RefreshSignal)
+            return;
+        _loadedProject = ProjectId;
+        _loadedChapter = ChapterId;
+        _loadedSignal = RefreshSignal;
+        _setup = await PageSetups.GetOrCreateAsync(ProjectId);
+        CopySetup();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try { _result = await Preview.LayoutAsync(ProjectId, ChapterId); }
+        catch (Exception exception) { _result = null; _error = exception.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task ChangePresetAsync(ChangeEventArgs e)
+    {
+        switch (e.Value?.ToString())
+        {
+            case "6x9": _setupWidth = 6; _setupHeight = 9; break;
+            case "5.5x8.5": _setupWidth = 5.5; _setupHeight = 8.5; break;
+            case "8.5x11": _setupWidth = 8.5; _setupHeight = 11; break;
+            default: return;
+        }
+        await SaveSetupAsync();
+    }
+
+    private async Task SaveSetupAsync()
+    {
+        if (_setup is null) return;
+        try
+        {
+            _setup = await PageSetups.UpdateAsync(ProjectId, _setup.Revision, new(_setupWidth, _setupHeight, _setupMargin, _setupFontSize, _setupLineHeight));
+            await LoadAsync();
+        }
+        catch (Exception exception) { _error = exception.Message; }
+    }
+
+    private void CopySetup()
+    {
+        if (_setup is null) return;
+        _setupWidth = _setup.PageWidthInches;
+        _setupHeight = _setup.PageHeightInches;
+        _setupMargin = _setup.PageMarginInches;
+        _setupFontSize = _setup.BodyFontSizePoints;
+        _setupLineHeight = _setup.BodyLineHeight;
+    }
+
+    private string PresetValue() => (_setupWidth, _setupHeight) switch
+    {
+        (6, 9) => "6x9",
+        (5.5, 8.5) => "5.5x8.5",
+        (8.5, 11) => "8.5x11",
+        _ => "custom",
+    };
+    private static string ButtonClass(bool active) => active ? "btn-primary" : "btn-outline-secondary";
+    private void ChangeFit(ChangeEventArgs e) { _fit = e.Value?.ToString() ?? "page"; if (_fit != "zoom") _zoom = 1; }
+    private void ChangeZoom(double amount) { _fit = "zoom"; _zoom = Math.Clamp(_zoom + amount, .35, 2.5); }
+    private string PageStyle(ChapterPreviewPage page) => $"--page-ratio:{page.WidthPoints / page.HeightPoints:R};--page-width:{page.WidthPoints:R};--page-height:{page.HeightPoints:R}";
+    private static string Percent(double value, double total) => (value / total * 100).ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "%";
+    private static string Color(double[]? rgb) => rgb is { Length: >= 3 } ? $"rgb({rgb[0] * 255:0} {rgb[1] * 255:0} {rgb[2] * 255:0})" : "transparent";
+    private static string ShapeStyle(ChapterPreviewPage page, ChapterPreviewShape shape) => $"left:{Percent(shape.X, page.WidthPoints)};bottom:{Percent(shape.Y, page.HeightPoints)};width:{Percent(shape.Width, page.WidthPoints)};height:{Percent(shape.Height, page.HeightPoints)};z-index:{shape.ZIndex};opacity:{shape.Opacity:R};transform:rotate({shape.RotationDegrees:R}deg);background:{Color(shape.FillRgb)};border:{shape.StrokeWidth / page.WidthPoints * 100:R}cqw solid {Color(shape.StrokeRgb)}";
+    private static string ImageStyle(ChapterPreviewPage page, ChapterPreviewImage image) => $"left:{Percent(image.X, page.WidthPoints)};bottom:{Percent(image.Y, page.HeightPoints)};width:{Percent(image.Width, page.WidthPoints)};height:{Percent(image.Height, page.HeightPoints)};z-index:{image.ZIndex};opacity:{image.Opacity:R};transform:rotate({image.RotationDegrees:R}deg);object-fit:{(image.Fit.Equals("Cover", StringComparison.OrdinalIgnoreCase) ? "cover" : "contain")};object-position:{image.CropX:R}% {image.CropY:R}%";
+    private string LineStyle(ChapterPreviewPage page, ChapterPreviewLine line) => $"left:{Percent(line.X, page.WidthPoints)};bottom:{Percent(line.Y - line.Size * .25, page.HeightPoints)};z-index:{line.ZIndex};font-size:{line.Size / page.WidthPoints * 100:R}cqw;font-family:{FontFamily(line.Face)};font-weight:{FontWeight(line.Face)};font-style:{FontStyle(line.Face)};word-spacing:{line.WordSpacing / page.WidthPoints * 100:R}cqw;letter-spacing:{line.CharacterSpacing / page.WidthPoints * 100:R}cqw;opacity:{line.Opacity:R};transform-origin:{((line.RotationOriginX ?? line.X) - line.X) / page.WidthPoints * 100:R}cqw {(line.Y + line.Size * .75 - (line.RotationOriginY ?? line.Y)) / page.WidthPoints * 100:R}cqw;transform:rotate({line.RotationDegrees:R}deg);color:{(line.FillRgb is null ? "#202534" : Color(line.FillRgb))}";
+    private static string FontFamily(string? face)
+    {
+        if (face?.StartsWith("Custom", StringComparison.Ordinal) == true
+            && int.TryParse(face["Custom".Length..], out var customIndex)
+            && customIndex >= 0)
+            return $"'LorekeeperPreviewCustom{customIndex}', serif";
+        return face?.StartsWith("Mono", StringComparison.OrdinalIgnoreCase) == true
+            ? "'Lorekeeper Preview Mono', monospace"
+            : face?.StartsWith("Sans", StringComparison.OrdinalIgnoreCase) == true
+                ? "'Lorekeeper Preview Sans', sans-serif"
+                : "'Lorekeeper Preview Serif', Georgia, serif";
+    }
+    private string PreviewFontCss()
+    {
+        var css = new System.Text.StringBuilder(
+            "@font-face{font-family:'Lorekeeper Preview Serif';src:url('/fonts/lora/Lora-Regular.ttf') format('truetype');font-weight:400;font-style:normal}"
+            + "@font-face{font-family:'Lorekeeper Preview Serif';src:url('/fonts/lora/Lora-Italic.ttf') format('truetype');font-weight:400;font-style:italic}"
+            + "@font-face{font-family:'Lorekeeper Preview Serif';src:url('/fonts/lora/Lora-Bold.ttf') format('truetype');font-weight:700;font-style:normal}"
+            + "@font-face{font-family:'Lorekeeper Preview Serif';src:url('/fonts/lora/Lora-BoldItalic.ttf') format('truetype');font-weight:700;font-style:italic}"
+            + "@font-face{font-family:'Lorekeeper Preview Sans';src:url('/fonts/nunito/Nunito-Regular.ttf') format('truetype');font-weight:400;font-style:normal}"
+            + "@font-face{font-family:'Lorekeeper Preview Sans';src:url('/fonts/nunito/Nunito-Italic.ttf') format('truetype');font-weight:400;font-style:italic}"
+            + "@font-face{font-family:'Lorekeeper Preview Sans';src:url('/fonts/nunito/Nunito-Bold.ttf') format('truetype');font-weight:700;font-style:normal}"
+            + "@font-face{font-family:'Lorekeeper Preview Sans';src:url('/fonts/nunito/Nunito-BoldItalic.ttf') format('truetype');font-weight:700;font-style:italic}"
+            + "@font-face{font-family:'Lorekeeper Preview Mono';src:url('/fonts/roboto-mono/RobotoMono-Regular.ttf') format('truetype');font-weight:400;font-style:normal}"
+            + "@font-face{font-family:'Lorekeeper Preview Mono';src:url('/fonts/roboto-mono/RobotoMono-Italic.ttf') format('truetype');font-weight:400;font-style:italic}"
+            + "@font-face{font-family:'Lorekeeper Preview Mono';src:url('/fonts/roboto-mono/RobotoMono-Bold.ttf') format('truetype');font-weight:700;font-style:normal}"
+            + "@font-face{font-family:'Lorekeeper Preview Mono';src:url('/fonts/roboto-mono/RobotoMono-BoldItalic.ttf') format('truetype');font-weight:700;font-style:italic}");
+        foreach (var font in _result?.Fonts ?? [])
+        {
+            if (!font.Face.StartsWith("Custom", StringComparison.Ordinal)
+                || !int.TryParse(font.Face["Custom".Length..], out var index)
+                || index < 0)
+                continue;
+            var format = font.ContentType == "font/otf" ? "opentype" : "truetype";
+            css.Append($"@font-face{{font-family:'LorekeeperPreviewCustom{index}';src:url('/projects/{ProjectId:N}/fonts/{font.FaceId:N}/content') format('{format}');font-weight:{font.Weight};font-style:{(font.Italic ? "italic" : "normal")}}}");
+        }
+        return css.ToString();
+    }
+    private int FontWeight(string? face) => _result?.Fonts.FirstOrDefault(item => item.Face == face)?.Weight
+        ?? (face?.Contains("Bold", StringComparison.OrdinalIgnoreCase) == true ? 700 : 400);
+    private string FontStyle(string? face) => _result?.Fonts.FirstOrDefault(item => item.Face == face)?.Italic == true
+        || face?.Contains("Italic", StringComparison.OrdinalIgnoreCase) == true ? "italic" : "normal";
+    private RenderFragment RunContent(ChapterPreviewLine line) => builder =>
+    {
+        if (line.Runs.Count == 0)
+        {
+            builder.AddContent(0, line.Text);
+            return;
+        }
+        var sequence = 0;
+        foreach (var run in line.Runs)
+        {
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "style", RunStyle(run));
+            builder.AddContent(sequence++, run.Text);
+            builder.CloseElement();
+        }
+    };
+    private string RunStyle(ChapterPreviewRun run) => $"font-family:{FontFamily(run.Face)};font-weight:{FontWeight(run.Face)};font-style:{FontStyle(run.Face)};font-size:{run.SizeScale:R}em;vertical-align:{run.BaselineShiftEm:R}em;text-decoration:{(run.Underline && run.Strikethrough ? "underline line-through" : run.Underline ? "underline" : run.Strikethrough ? "line-through" : "none")}";
+}

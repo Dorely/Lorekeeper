@@ -61,11 +61,11 @@ public sealed class ImageReferenceUse
 
 public sealed class ImageGenerationTarget
 {
-    [Description("Edition whose exact physical geometry owns this layout-bound generation target.")]
+    [Description("Publication edition ID. Supply only for CoverFrame or CoverSurface targets; manuscript and Designed Page targets use project authoring geometry.")]
     public Guid? EditionId { get; init; }
-    [Description("Figure, PageFrame, PageSurface, CoverFrame, or CoverSurface for layout-bound generation.")]
+    [Description("ProjectPage, Figure, PageFrame, PageSurface, CoverFrame, or CoverSurface for layout-bound generation.")]
     public string TargetKind { get; init; } = string.Empty;
-    [Description("Stable Figure block, composition object/surface, or cover object/surface ID.")]
+    [Description("Project ID for ProjectPage, otherwise the stable Figure block, composition object/surface, or cover object/surface ID.")]
     public Guid? TargetId { get; init; }
     [Description("Exact page-composition variant ID. Required for PageFrame and PageSurface targets; omit for Figure and cover targets.")]
     public Guid? VariantId { get; init; }
@@ -278,25 +278,32 @@ public sealed class ImagePromptComposer(
         ImageGenerationTarget? target,
         CancellationToken cancellationToken)
     {
-        var hasBoundTarget = target?.EditionId is { } editionId && editionId != Guid.Empty
-            || target?.TargetId is { } targetId && targetId != Guid.Empty
+        var hasBoundTarget = target?.TargetId is { } targetId && targetId != Guid.Empty
             || !string.IsNullOrWhiteSpace(target?.TargetKind);
         if (hasBoundTarget)
         {
-            if (target?.EditionId is not { } boundEditionId || boundEditionId == Guid.Empty
-                || target.TargetId is not { } boundTargetId || boundTargetId == Guid.Empty
+            if (target?.TargetId is not { } boundTargetId || boundTargetId == Guid.Empty
                 || string.IsNullOrWhiteSpace(target.TargetKind))
-                throw new ArgumentException("Layout-bound targets require editionId, targetKind, and targetId together.", nameof(target));
+                throw new ArgumentException("Layout-bound targets require targetKind and targetId together.", nameof(target));
             if (!string.IsNullOrWhiteSpace(target.Size) || !string.IsNullOrWhiteSpace(target.AspectRatio)
                 || target.ReservedTextRegions is { Count: > 0 })
                 throw new ArgumentException("Layout-bound targets derive size, aspect ratio, and reserved regions from Lorekeeper; omit manual values.", nameof(target));
-            var descriptor = await compositions.DescribeGenerationTargetAsync(
-                projectId,
-                boundEditionId,
-                target.TargetKind,
-                boundTargetId,
-                target.VariantId,
-                cancellationToken);
+            var coverTarget = target.TargetKind.Trim().StartsWith("cover", StringComparison.OrdinalIgnoreCase);
+            LayoutGenerationTargetDescriptor descriptor;
+            if (coverTarget)
+            {
+                if (target.EditionId is not { } boundEditionId || boundEditionId == Guid.Empty)
+                    throw new ArgumentException("Cover targets require an editionId.", nameof(target));
+                descriptor = await compositions.DescribeGenerationTargetAsync(
+                    projectId, boundEditionId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
+            }
+            else
+            {
+                if (target.EditionId is not null)
+                    throw new ArgumentException("Figure and Designed Page targets use project authoring geometry; omit editionId.", nameof(target));
+                descriptor = await compositions.DescribeAuthoringGenerationTargetAsync(
+                    projectId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
+            }
             var resolvedTargetSize = descriptor.ProviderCanvas switch
             {
                 "portrait" => "1024x1536",
@@ -347,7 +354,7 @@ public sealed class ImagePromptComposer(
             .Append(descriptor.HeightInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" inches; target ")
             .Append(descriptor.EffectiveDpiExpectation.ToString("0", CultureInfo.InvariantCulture)).AppendLine(" effective DPI.");
         prompt.Append("Lorekeeper selected the provider's ").Append(descriptor.ProviderCanvas)
-            .Append(" canvas. Compose for the target aspect and keep important content within its usable regions. Lorekeeper preserves the returned raster; the selected contain, cover, crop, and focal settings fit it non-destructively during layout.").AppendLine();
+            .Append(" canvas. Compose for the target aspect and keep important content within its usable regions. Lorekeeper preserves the returned raster; the selected Show whole image or Fill frame placement fits it non-destructively, and crop position can be adjusted directly afterward.").AppendLine();
         foreach (var region in descriptor.Regions)
         {
             prompt.Append(region.KeepClear ? "Keep clear" : "Layout boundary").Append(": ").Append(region.Label)
