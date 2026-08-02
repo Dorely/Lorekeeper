@@ -13,6 +13,7 @@ namespace Lorekeeper.Composition;
 public interface ICompositionService
 {
     Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, Guid? editionId, long expectedRevision, CancellationToken cancellationToken = default);
+    Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, Guid? editionId, long expectedRevision, DesignedPageIdentity identity, CancellationToken cancellationToken = default);
     Task<PageComposition?> GetAsync(Guid projectId, Guid compositionId, CancellationToken cancellationToken = default);
     Task<PageCompositionVariant> GetOrCreateVariantAsync(Guid projectId, Guid compositionId, Guid editionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PageCompositionVariant>> ListVariantsAsync(Guid projectId, Guid compositionId, Guid editionId, CancellationToken cancellationToken = default);
@@ -47,7 +48,45 @@ public sealed class CompositionService(
         string name,
         Guid? editionId,
         long expectedRevision,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await CreateDesignedPageCoreAsync(
+            projectId,
+            chapterId,
+            blockIndex,
+            name,
+            editionId,
+            expectedRevision,
+            identity: null,
+            cancellationToken);
+
+    public async Task<DesignedPageCreationResult> CreateDesignedPageAsync(
+        Guid projectId,
+        Guid chapterId,
+        int blockIndex,
+        string name,
+        Guid? editionId,
+        long expectedRevision,
+        DesignedPageIdentity identity,
+        CancellationToken cancellationToken = default) =>
+        await CreateDesignedPageCoreAsync(
+            projectId,
+            chapterId,
+            blockIndex,
+            name,
+            editionId,
+            expectedRevision,
+            identity,
+            cancellationToken);
+
+    private async Task<DesignedPageCreationResult> CreateDesignedPageCoreAsync(
+        Guid projectId,
+        Guid chapterId,
+        int blockIndex,
+        string name,
+        Guid? editionId,
+        long expectedRevision,
+        DesignedPageIdentity? identity,
+        CancellationToken cancellationToken)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -57,6 +96,7 @@ public sealed class CompositionService(
             throw new ManuscriptRevisionConflictException(expectedRevision, chapter.ManuscriptRevision);
         var composition = new PageComposition
         {
+            Id = identity?.CompositionId ?? Guid.NewGuid(),
             ProjectId = projectId,
             ChapterId = chapterId,
             Name = string.IsNullOrWhiteSpace(name) ? "Designed page" : name.Trim(),
@@ -81,7 +121,13 @@ public sealed class CompositionService(
         var manuscript = await manuscripts.ApplyPersistedUnderProjectMutationLeaseAsync(
             chapterId,
             expectedRevision,
-            [new InsertManuscriptBlock(blockIndex, ManuscriptBlockType.DesignedPage, string.Empty, ManuscriptStyleRoles.DesignedPage, PageCompositionId: composition.Id)],
+            [new InsertManuscriptBlock(
+                blockIndex,
+                ManuscriptBlockType.DesignedPage,
+                string.Empty,
+                ManuscriptStyleRoles.DesignedPage,
+                PageCompositionId: composition.Id,
+                BlockId: identity?.BlockId)],
             cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         await manuscripts.RefreshDerivedStateAsync(chapterId, cancellationToken);
@@ -1620,6 +1666,8 @@ public sealed record DesignedPageCreationResult(
     PageCompositionVariant? Variant,
     ManuscriptSnapshot Manuscript,
     string BlockId);
+
+public sealed record DesignedPageIdentity(Guid CompositionId, string BlockId);
 
 public sealed record CompositionWorkspaceSaveResult(
     PageComposition Composition,

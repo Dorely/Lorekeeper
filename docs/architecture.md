@@ -145,10 +145,12 @@ Only chapters whose current and proposed manuscripts are plain body paragraphs
 and scene breaks use the line-oriented Review tab. Figure, Designed Page,
 semantic-style, inline-formatting, or other structured manuscript changes remain
 in the pending-edits modal, which shows body text plus separate structure and
-visual-block diffs. Focused Figure tools obey the same Review-edits staging
-boundary as the general manuscript preview/apply protocol; staged visual reads
-resolve against the projected manuscript revision until the user keeps or
-rejects the grouped change.
+visual-block diffs. Focused Figure tools and Designed Page insertion obey the
+same Review-edits staging boundary as the general manuscript preview/apply
+protocol. A staged Designed Page preallocates its composition and manuscript
+block IDs, then creates both atomically only when the reviewed structural change
+is kept. Staged visual reads resolve against the projected manuscript revision
+until the user keeps or rejects the grouped change.
 
 ### Ingest, Research, and Background Work
 
@@ -217,6 +219,10 @@ objects; layers, z-order, locking, visibility, grouping, object styles, named
 regions, and logical reading order remain independent. Single leaves, facing
 spreads, and Digital-PDF-only independent pages share this contract. A missing
 exact geometry variant fails closed instead of stretching another layout.
+Assistant surfaces expose a compact edition-geometry discovery tool containing
+stable edition IDs, physical dimensions, margins, bleed, and override policy so
+agents can select an existing target rather than inventing or omitting known
+geometry.
 The Designed Page workspace provides page/spread mode thumbnails, direct pointer
 move/resize/rotate, objects, layers, styles, semantic content, reading-order
 reordering, persisted user guides/snapping, crop/focal behavior, and overflow/unplaced-content

@@ -1469,7 +1469,19 @@ public sealed class PublicationEditionService(
     }
 
     internal static PublicationEditionSummary Summary(PublicationEdition edition) =>
-        new(edition.Id, edition.Name, edition.Format, edition.Vendor, edition.Status, edition.IsDefault, edition.Revision);
+        new(
+            edition.Id,
+            edition.Name,
+            edition.Format,
+            edition.Vendor,
+            edition.Status,
+            edition.IsDefault,
+            edition.Revision,
+            edition.PageWidthInches,
+            edition.PageHeightInches,
+            edition.PageMarginInches,
+            edition.Bleed,
+            edition.AllowDesignedPageOverrides);
 
     internal static PublicationEditionView View(Project project, PublicationEdition edition) =>
         new(

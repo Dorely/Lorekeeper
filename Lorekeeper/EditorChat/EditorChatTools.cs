@@ -390,7 +390,8 @@ public sealed class EditorChatTools(
             context.ProjectId,
             context.OnMutated,
             context.OutlineStaging,
-            bookBriefUpdatePolicy: BookBriefUpdatePolicy.ExplicitUserRequestOnly), cancellationToken))
+            bookBriefUpdatePolicy: BookBriefUpdatePolicy.ExplicitUserRequestOnly,
+            manuscriptStaging: context.EditorStaging), cancellationToken))
         {
             if (outlineTool is AIFunction function && existingNames.Add(function.Name))
                 tools.Add(outlineTool);

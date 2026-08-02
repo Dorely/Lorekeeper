@@ -28,6 +28,18 @@ public enum BookBriefUpdatePolicy
     Disallowed,
 }
 
+public interface IChapterManuscriptChangeStagingContext
+{
+    bool TryGetChapterManuscriptDraft(Guid chapterId, out ManuscriptDocument document);
+    Task StageChapterManuscriptEditAsync(
+        Chapter chapter,
+        ManuscriptDocument beforeDocument,
+        ManuscriptDocument afterDocument,
+        string summary,
+        string resultJson,
+        CancellationToken cancellationToken = default);
+}
+
 /// <summary>
 /// Per-turn context captured by every Outline collaboration tool. <see cref="OnMutated"/>
 /// is invoked after every successful mutating tool call so the streaming service can emit
@@ -39,12 +51,14 @@ public sealed class OutlineCollaborationContext(
     OutlineToolStagingContext? staging = null,
     bool visionReady = false,
     Action<IEnumerable<EntityVisualContextReference>>? onVisualsQueued = null,
-    BookBriefUpdatePolicy bookBriefUpdatePolicy = BookBriefUpdatePolicy.OutlineMaintainer)
+    BookBriefUpdatePolicy bookBriefUpdatePolicy = BookBriefUpdatePolicy.OutlineMaintainer,
+    IChapterManuscriptChangeStagingContext? manuscriptStaging = null)
 {
     private readonly List<EntityVisualContextReference> _pendingVisuals = [];
     public Guid ProjectId { get; } = projectId;
     public Action OnMutated { get; } = onMutated;
     public OutlineToolStagingContext? Staging { get; } = staging;
+    public IChapterManuscriptChangeStagingContext? ManuscriptStaging { get; } = manuscriptStaging ?? staging;
     public bool VisionReady { get; } = visionReady;
     public BookBriefUpdatePolicy BookBriefUpdatePolicy { get; } = bookBriefUpdatePolicy;
     public Guid ConversationId => Staging?.ConversationId ?? Guid.Empty;
@@ -194,7 +208,12 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int blockIndex, string name, Guid? editionId, long expectedRevision) => InsertDesignedPageAsync(context, chapterId, blockIndex, name, editionId, expectedRevision),
                 name: "insert_outline_designed_page",
-                description: "Atomically insert a requested Designed Page block and owned semantic composition. Pass an edition to seed its exact geometry variant, or null when geometry remains intentionally undecided."),
+                description: "Insert a requested Designed Page block and its owned semantic composition. Read layout editions first and pass the intended edition ID to seed exact geometry; use null only when geometry is deliberately undecided. In Review Edits mode the structural insertion is staged for human review before its composition can be configured."),
+
+            AIFunctionFactory.Create(
+                method: () => ListLayoutEditionsAsync(context),
+                name: "list_layout_editions",
+                description: "List compact publication-edition IDs and physical page geometry for Figure, Designed Page, spread, cover, and geometry-bound image decisions. Prefer the default compatible edition unless the user specifies another target."),
 
             AIFunctionFactory.Create(
                 method: (Guid compositionId, Guid variantId, int semanticStart = 0, int semanticCount = 20, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) => ReadPageCompositionAsync(context, compositionId, variantId, semanticStart, semanticCount, objectStart, objectCount, structureStart, structureCount),
@@ -393,6 +412,34 @@ public sealed class OutlineCollaborationTools(
             offset = Math.Max(0, offset),
             items,
             nextOffset = items.Count == Math.Clamp(limit, 1, 8) ? Math.Max(0, offset) + items.Count : (int?)null,
+        });
+    }
+
+    private async Task<string> ListLayoutEditionsAsync(OutlineCollaborationContext context)
+    {
+        var items = await editions.ListAsync(context.ProjectId);
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            summary = $"{items.Count} publication edition(s).",
+            items = items.Select(item => new
+            {
+                item.Id,
+                item.Name,
+                item.Format,
+                item.Vendor,
+                item.Status,
+                item.IsDefault,
+                item.Revision,
+                geometry = new
+                {
+                    widthInches = item.PageWidthInches,
+                    heightInches = item.PageHeightInches,
+                    marginInches = item.PageMarginInches,
+                    item.Bleed,
+                    item.AllowDesignedPageOverrides,
+                },
+            }),
         });
     }
 
@@ -968,8 +1015,24 @@ public sealed class OutlineCollaborationTools(
             return JsonSerializer.Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = imageId, summary = "Project image was not found." });
         try
         {
-            var result = await manuscripts.ApplyAsync(chapterId, expectedRevision,
-                [new InsertManuscriptBlock(blockIndex, ManuscriptBlockType.Figure, caption ?? string.Empty, ManuscriptStyleRoles.FigureCaption, imageId, altText, Decorative: decorative, FigurePresentation: presentation, Language: language, AccessibilityRole: accessibilityRole)]);
+            var operations = new ManuscriptOperation[]
+            {
+                new InsertManuscriptBlock(blockIndex, ManuscriptBlockType.Figure, caption ?? string.Empty, ManuscriptStyleRoles.FigureCaption, imageId, altText, Decorative: decorative, FigurePresentation: presentation, Language: language, AccessibilityRole: accessibilityRole),
+            };
+            if (ctx.ManuscriptStaging is not null)
+            {
+                var source = ctx.ManuscriptStaging.TryGetChapterManuscriptDraft(chapterId, out var draft)
+                    ? draft
+                    : chapter.Manuscript;
+                if (source.Revision != expectedRevision)
+                    throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
+                var applied = ManuscriptOperations.Apply(source, operations);
+                var stagedResult = JsonSerializer.Serialize(new { ok = true, staged = true, targetId = chapterId, revision = applied.Document.Revision, summary = "Inserted one flowing Figure block.", changedIds = applied.ChangedBlockIds });
+                await ctx.ManuscriptStaging.StageChapterManuscriptEditAsync(chapter, source, applied.Document, "Insert manuscript Figure", stagedResult);
+                return stagedResult;
+            }
+
+            var result = await manuscripts.ApplyAsync(chapterId, expectedRevision, operations);
             ctx.OnMutated();
             return JsonSerializer.Serialize(new { ok = true, targetId = chapterId, revision = result.Snapshot.Revision, summary = "Inserted one flowing Figure block.", changedIds = result.ChangedBlockIds, mutation = new { kind = "manuscript", id = chapterId } });
         }
@@ -1006,6 +1069,19 @@ public sealed class OutlineCollaborationTools(
             };
             if (caption is not null)
                 operations.Insert(0, new ReplaceManuscriptBlockText(blockId, caption));
+            if (ctx.ManuscriptStaging is not null)
+            {
+                var source = ctx.ManuscriptStaging.TryGetChapterManuscriptDraft(chapterId, out var draft)
+                    ? draft
+                    : chapter.Manuscript;
+                if (source.Revision != expectedRevision)
+                    throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
+                var applied = ManuscriptOperations.Apply(source, operations);
+                var stagedResult = JsonSerializer.Serialize(new { ok = true, staged = true, targetId = chapterId, revision = applied.Document.Revision, summary = "Updated one flowing Figure block.", changedIds = applied.ChangedBlockIds, selectId = blockId });
+                await ctx.ManuscriptStaging.StageChapterManuscriptEditAsync(chapter, source, applied.Document, "Update manuscript Figure", stagedResult);
+                return stagedResult;
+            }
+
             var result = await manuscripts.ApplyAsync(
                 chapterId,
                 expectedRevision,
@@ -1028,8 +1104,55 @@ public sealed class OutlineCollaborationTools(
         Guid? editionId,
         long expectedRevision)
     {
+        var chapter = await chapters.GetAsync(chapterId);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return JsonSerializer.Serialize(new { ok = false, code = "CHAPTER_NOT_FOUND", targetId = chapterId, summary = "Chapter was not found in this project." });
         try
         {
+            if (ctx.ManuscriptStaging is not null)
+            {
+                var source = ctx.ManuscriptStaging.TryGetChapterManuscriptDraft(chapterId, out var draft)
+                    ? draft
+                    : chapter.Manuscript;
+                if (source.Revision != expectedRevision)
+                    throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
+                if (editionId is Guid selectedEditionId
+                    && !(await editions.ListAsync(ctx.ProjectId)).Any(item => item.Id == selectedEditionId))
+                {
+                    return JsonSerializer.Serialize(new { ok = false, code = "EDITION_NOT_FOUND", targetId = selectedEditionId, summary = "Publication edition was not found in this project." });
+                }
+
+                var identity = new DesignedPageIdentity(Guid.NewGuid(), Guid.NewGuid().ToString("N"));
+                var applied = ManuscriptOperations.Apply(
+                    source,
+                    [new InsertManuscriptBlock(
+                        blockIndex,
+                        ManuscriptBlockType.DesignedPage,
+                        string.Empty,
+                        ManuscriptStyleRoles.DesignedPage,
+                        PageCompositionId: identity.CompositionId,
+                        BlockId: identity.BlockId)]);
+                var stagedResult = JsonSerializer.Serialize(new
+                {
+                    ok = true,
+                    staged = true,
+                    requiresReview = true,
+                    targetId = identity.CompositionId,
+                    revision = applied.Document.Revision,
+                    summary = "Designed Page insertion is ready for review.",
+                    changedIds = applied.ChangedBlockIds,
+                    variantId = (Guid?)null,
+                    nextAction = "After approval, read the created geometry variant before configuring the page.",
+                });
+                await ctx.ManuscriptStaging.StageChapterManuscriptEditAsync(
+                    chapter,
+                    source,
+                    applied.Document,
+                    $"Insert Designed Page '{(string.IsNullOrWhiteSpace(name) ? "Designed page" : name.Trim())}'",
+                    stagedResult);
+                return stagedResult;
+            }
+
             var result = await compositions.CreateDesignedPageAsync(ctx.ProjectId, chapterId, blockIndex, name, editionId, expectedRevision);
             ctx.OnMutated();
             return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Manuscript.Revision, summary = "Inserted one Designed Page with a separately owned semantic composition.", changedIds = new[] { result.BlockId }, variantId = result.Variant?.Id, mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant?.Id } });

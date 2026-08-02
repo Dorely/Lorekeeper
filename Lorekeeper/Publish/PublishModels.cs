@@ -28,7 +28,12 @@ public sealed record PublicationEditionSummary(
     PublicationVendor Vendor,
     PublicationEditionStatus Status,
     bool IsDefault,
-    long Revision);
+    long Revision,
+    double PageWidthInches,
+    double PageHeightInches,
+    double PageMarginInches,
+    bool Bleed,
+    bool AllowDesignedPageOverrides);
 
 public sealed record PublicationEditionView(
     Guid Id,

@@ -211,7 +211,8 @@ public sealed record InsertManuscriptBlock(
     FigurePresentation? FigurePresentation = null,
     Guid? PageCompositionId = null,
     string? Language = null,
-    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure) : ManuscriptOperation;
+    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure,
+    string? BlockId = null) : ManuscriptOperation;
 
 public sealed record ReplaceManuscriptBlockText(
     string BlockId,

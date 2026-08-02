@@ -27,7 +27,10 @@ public static class ManuscriptOperations
                         insert.FigurePresentation,
                         insert.PageCompositionId,
                         insert.Language,
-                        insert.AccessibilityRole);
+                        insert.AccessibilityRole,
+                        insert.BlockId);
+                    if (blocks.Any(block => string.Equals(block.Id, inserted.Id, StringComparison.Ordinal)))
+                        throw new InvalidOperationException($"Manuscript block {inserted.Id} already exists.");
                     blocks.Insert(insert.Index, inserted);
                     changed.Add(inserted.Id);
                     break;
@@ -126,11 +129,11 @@ public static class ManuscriptOperations
                     var typeIndex = Find(blocks, blockType.BlockId);
                     var current = blocks[typeIndex];
                     var typeIsUnchanged = blockType.Type == current.Type;
-                    if (blockType.Type == ManuscriptBlockType.SceneBreak
+                    if (blockType.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage
                         && !string.IsNullOrEmpty(ManuscriptCodec.Text(current)))
                     {
                         throw new InvalidOperationException(
-                            "A text block must be empty before it can become a scene break.");
+                            "A text block must be empty before it can become a non-flowing block.");
                     }
                     blocks[typeIndex] = current with
                     {
@@ -140,7 +143,7 @@ public static class ManuscriptOperations
                                 ? current.StyleRole
                                 : DefaultStyle(blockType.Type)
                             : blockType.StyleRole.Trim(),
-                        Content = blockType.Type == ManuscriptBlockType.SceneBreak
+                        Content = blockType.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage
                             ? []
                             : current.Content,
                         ImageId = blockType.Type == ManuscriptBlockType.Figure
@@ -292,10 +295,10 @@ public static class ManuscriptOperations
 
     private static void ValidateBlockText(ManuscriptBlockType type, string text)
     {
-        if (type == ManuscriptBlockType.SceneBreak)
+        if (type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage)
         {
             if (!string.IsNullOrWhiteSpace(text))
-                throw new ArgumentException("Scene-break blocks cannot contain text.", nameof(text));
+                throw new ArgumentException("Non-flowing blocks cannot contain text.", nameof(text));
             return;
         }
         if (ManuscriptCodec.ContainsBlockDelimiter(text))
@@ -324,10 +327,11 @@ public static class ManuscriptOperations
         FigurePresentation? figurePresentation = null,
         Guid? pageCompositionId = null,
         string? language = null,
-        FigureAccessibilityRole accessibilityRole = FigureAccessibilityRole.Figure) =>
+        FigureAccessibilityRole accessibilityRole = FigureAccessibilityRole.Figure,
+        string? blockId = null) =>
         NewBlock(
             type,
-            type == ManuscriptBlockType.SceneBreak
+            type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage
                 ? []
                 : [new ManuscriptInline { Text = text }],
             styleRole,
@@ -338,7 +342,8 @@ public static class ManuscriptOperations
             figurePresentation,
             pageCompositionId,
             language,
-            accessibilityRole);
+            accessibilityRole,
+            blockId);
 
     private static ManuscriptBlock NewBlock(
         ManuscriptBlockType type,
@@ -351,13 +356,14 @@ public static class ManuscriptOperations
         FigurePresentation? figurePresentation = null,
         Guid? pageCompositionId = null,
         string? language = null,
-        FigureAccessibilityRole accessibilityRole = FigureAccessibilityRole.Figure) =>
+        FigureAccessibilityRole accessibilityRole = FigureAccessibilityRole.Figure,
+        string? blockId = null) =>
         new()
         {
-            Id = Guid.NewGuid().ToString("N"),
+            Id = string.IsNullOrWhiteSpace(blockId) ? Guid.NewGuid().ToString("N") : blockId,
             Type = type,
             StyleRole = string.IsNullOrWhiteSpace(styleRole) ? DefaultStyle(type) : styleRole.Trim(),
-            Content = type == ManuscriptBlockType.SceneBreak
+            Content = type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage
                 ? []
                 : content,
             ImageId = type == ManuscriptBlockType.Figure ? imageId : null,

@@ -6,6 +6,7 @@ using Lorekeeper.Chapters;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Persistence;
 
@@ -23,7 +24,7 @@ public sealed class OutlineToolStagingContext(
     IEntityTypeService entityTypes,
     IEntityVisualExampleService entityVisualExamples,
     AppDbContext db,
-    Action? onDirectMutationApplied = null)
+    Action? onDirectMutationApplied = null) : IChapterManuscriptChangeStagingContext
 {
     private const string _eventNodeType = "Event";
 
@@ -37,6 +38,7 @@ public sealed class OutlineToolStagingContext(
 
     private readonly Dictionary<Guid, ActState> _acts = [];
     private readonly Dictionary<Guid, ChapterState> _chapters = [];
+    private readonly Dictionary<Guid, ManuscriptDocument> _chapterManuscriptDrafts = [];
     private readonly Dictionary<Guid, EntityState> _entities = [];
     private readonly Dictionary<string, EntityTypeDefinition> _entityTypes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Guid> _createdResourceProducers = new(StringComparer.OrdinalIgnoreCase);
@@ -70,6 +72,53 @@ public sealed class OutlineToolStagingContext(
         var result = _newChanges.ToList();
         _newChanges.Clear();
         return result;
+    }
+
+    public bool TryGetChapterManuscriptDraft(Guid chapterId, out ManuscriptDocument document) =>
+        _chapterManuscriptDrafts.TryGetValue(chapterId, out document!);
+
+    public async Task StageChapterManuscriptEditAsync(
+        Chapter chapter,
+        ManuscriptDocument beforeDocument,
+        ManuscriptDocument afterDocument,
+        string summary,
+        string resultJson,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureLoadedAsync(cancellationToken);
+        if (TryGetChapterManuscriptDraft(chapter.Id, out var currentDraft)
+            && (beforeDocument.Revision != currentDraft.Revision
+                || !ManuscriptCodec.ContentEquals(beforeDocument, currentDraft)))
+        {
+            throw new ManuscriptRevisionConflictException(beforeDocument.Revision, currentDraft.Revision);
+        }
+
+        var before = new ChapterManuscriptChange(
+            chapter.Id,
+            chapter.Title,
+            beforeDocument.Revision,
+            ManuscriptCodec.Serialize(beforeDocument));
+        var after = new ChapterManuscriptChange(
+            chapter.Id,
+            chapter.Title,
+            afterDocument.Revision,
+            ManuscriptCodec.Serialize(afterDocument));
+        await StageChangeAsync(
+            summary,
+            before,
+            after,
+            resultJson,
+            resourceKind: "ChapterManuscript",
+            resourceId: Resource("Chapter", chapter.Id),
+            createdResources: [],
+            referencedResources: [Resource("Chapter", chapter.Id)],
+            cancellationToken);
+        _chapterManuscriptDrafts[chapter.Id] = afterDocument;
+        if (_chapters.TryGetValue(chapter.Id, out var state))
+        {
+            state.FigureCount = afterDocument.Content.Count(block => block.Type == ManuscriptBlockType.Figure);
+            state.DesignedPageCount = afterDocument.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage);
+        }
     }
 
     public async Task<string> ListOutlineAsync(CancellationToken cancellationToken = default)
@@ -1459,6 +1508,8 @@ public sealed class OutlineToolStagingContext(
         public int Order { get; set; } = Order;
         public string Title { get; set; } = Title;
         public string Synopsis { get; set; } = Synopsis;
+        public int FigureCount { get; set; } = FigureCount;
+        public int DesignedPageCount { get; set; } = DesignedPageCount;
         public bool Deleted { get; set; } = Deleted;
 
         public OutlineChapterChange ToChange() => new(Id, ActId, Order, Title, Synopsis);

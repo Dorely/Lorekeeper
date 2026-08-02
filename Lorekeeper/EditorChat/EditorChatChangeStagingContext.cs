@@ -10,7 +10,7 @@ namespace Lorekeeper.EditorChat;
 public sealed class EditorChatChangeStagingContext(
     Guid projectId,
     Guid conversationId,
-    IAiChangeRepository changes)
+    IAiChangeRepository changes) : IChapterManuscriptChangeStagingContext
 {
     private AiChangeBatch? _batch;
     private readonly List<AiChange> _newChanges = [];

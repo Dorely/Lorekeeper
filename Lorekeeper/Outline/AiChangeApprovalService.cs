@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Runtime.ExceptionServices;
 using Lorekeeper.Chapters;
+using Lorekeeper.Composition;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
@@ -19,6 +20,7 @@ public sealed class AiChangeApprovalService(
     IActService acts,
     IChapterService chapters,
     IManuscriptService manuscripts,
+    ICompositionService compositions,
     IManuscriptStyleService manuscriptStyles,
     IEntityService entities,
     IVectorIndexWorkCoordinator indexWork,
@@ -437,10 +439,68 @@ public sealed class AiChangeApprovalService(
                 await chapters.UpdateAsync(after.Id, after.Title, after.Synopsis, new ChapterActAssignment(after.ActId), cancellationToken);
                 break;
             }
+            case "insert_outline_designed_page":
+            {
+                var before = ReadRequired<ChapterManuscriptChange>(change.BeforeJson);
+                var after = ReadRequired<ChapterManuscriptChange>(afterJson);
+                var current = await chapters.GetAsync(after.Id, cancellationToken)
+                    ?? throw new InvalidOperationException($"Chapter {after.Id} not found.");
+                if (current.ManuscriptRevision != before.Revision
+                    || !string.Equals(current.ManuscriptJson, before.ManuscriptJson, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("The chapter body changed after this Designed Page was staged. Reject this change and rerun it against the current manuscript.");
+                }
+
+                var arguments = ReadRequired<DesignedPageToolArguments>(change.ArgumentsJson);
+                if (arguments.ChapterId != after.Id
+                    || arguments.ExpectedRevision != before.Revision)
+                {
+                    throw new InvalidOperationException("The staged Designed Page arguments do not match the reviewed manuscript revision.");
+                }
+
+                var beforeIds = before.Manuscript.Content.Select(block => block.Id).ToHashSet(StringComparer.Ordinal);
+                var addedBlocks = after.Manuscript.Content
+                    .Where(block => !beforeIds.Contains(block.Id))
+                    .ToList();
+                if (addedBlocks is not [var added]
+                    || added.Type != ManuscriptBlockType.DesignedPage
+                    || added.PageCompositionId is not Guid compositionId)
+                {
+                    throw new InvalidOperationException("The reviewed change must add exactly one valid Designed Page block.");
+                }
+
+                var projected = ManuscriptOperations.Apply(
+                    before.Manuscript,
+                    [new InsertManuscriptBlock(
+                        arguments.BlockIndex,
+                        ManuscriptBlockType.DesignedPage,
+                        string.Empty,
+                        ManuscriptStyleRoles.DesignedPage,
+                        PageCompositionId: compositionId,
+                        BlockId: added.Id)]).Document;
+                if (projected.Revision != after.Revision
+                    || !ManuscriptCodec.ContentEquals(projected, after.Manuscript))
+                {
+                    throw new InvalidOperationException("The reviewed Designed Page structure no longer matches its staged creation request.");
+                }
+
+                await compositions.CreateDesignedPageAsync(
+                    projectId,
+                    after.Id,
+                    arguments.BlockIndex,
+                    arguments.Name,
+                    arguments.EditionId,
+                    before.Revision,
+                    new DesignedPageIdentity(compositionId, added.Id),
+                    cancellationToken);
+                break;
+            }
             case "apply_manuscript_operations":
             case "apply_assigned_manuscript_operations":
-            case "insert_figure":
-            case "patch_figure":
+            case "insert_manuscript_figure":
+            case "patch_manuscript_figure":
+            case "insert_outline_figure":
+            case "patch_outline_figure":
             {
                 var before = ReadOptional<ChapterManuscriptChange>(change.BeforeJson);
                 var after = ReadRequired<ChapterManuscriptChange>(afterJson);
@@ -1141,6 +1201,13 @@ public sealed class AiChangeApprovalService(
 
     private static ChapterManuscriptChange Change(Chapter chapter) =>
         new(chapter.Id, chapter.Title, chapter.ManuscriptRevision, chapter.ManuscriptJson);
+
+    private sealed record DesignedPageToolArguments(
+        Guid ChapterId,
+        int BlockIndex,
+        string Name,
+        Guid? EditionId,
+        long ExpectedRevision);
 
     private sealed record ChapterBodyReviewLineTarget(
         Guid ChangeId,
