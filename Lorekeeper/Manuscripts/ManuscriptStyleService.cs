@@ -42,6 +42,7 @@ public sealed class ManuscriptStyleService(
             ManuscriptStyleRoles.BlockQuote,
             ManuscriptStyleRoles.ListItem,
             ManuscriptStyleRoles.FigureCaption,
+            ManuscriptStyleRoles.DesignedPage,
         ],
         StringComparer.OrdinalIgnoreCase);
 
