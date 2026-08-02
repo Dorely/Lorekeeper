@@ -125,7 +125,12 @@ conversation reset atomic against active or newly starting turns across windows.
 
 Assistant tool mutations that require review are stored as `AiChange` batches
 and applied through `IAiChangeApprovalService`. Editor Contest Mode captures a
-terminal context snapshot and stores independent model candidates. Editor
+terminal context snapshot and stores independent model candidates. Its Review
+workspace opens as soon as a batch enters `Running`, renders pending candidates,
+and stays reachable from both the chat controls and the chapter mode bar. The
+Editor chat component remains mounted while its pane is visually collapsed for
+Contest Review, preserving the active-turn subscription that delivers candidate
+status updates through completion. Editor
 revision agents persist one worker session per assigned chapter and return only
 compact IDs, statuses, summaries, and errors to the coordinating Editor turn.
 Full instructions, operations, proposals, raw responses, and transcripts remain

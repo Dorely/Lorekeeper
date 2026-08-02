@@ -46,37 +46,50 @@ else if (_current is null)
 else
 {
     <div class="@EditorGridClass()" @ref="_editorGridRef">
+        <aside class="editor-chat-pane"
+               hidden="@EffectiveChatPaneCollapsed"
+               aria-hidden="@AriaHidden(EffectiveChatPaneCollapsed)">
+            <button type="button"
+                    class="editor-pane-collapse editor-pane-collapse--left"
+                    title="Collapse Editor Chat"
+                    aria-label="Collapse Editor Chat"
+                    @onclick="ToggleChatPane">
+                &lsaquo;
+            </button>
+            <EditorChatPanel ProjectId="Project.Id"
+                             CurrentChapterId="_activeChapterId"
+                             ContextRefreshSignal="_contextRefreshSignal"
+                             ReviewRefreshSignal="_reviewRefreshSignal"
+                             OnAiTurnStarting="OnAiTurnStartingAsync"
+                             OnAiTurnCompleted="OnAiTurnCompletedAsync"
+                             OnAiTurnIdle="OnAiTurnIdleAsync"
+                             OnAiChangesApplied="OnAiChangesAppliedAsync"
+                             OnActiveChapterManuscriptChangesReady="OpenReviewForActiveChapterChangesAsync"
+                             OnContestResultsReady="OpenReviewForContestResultsAsync" />
+        </aside>
+
         @if (EffectiveChatPaneCollapsed)
         {
-            <button type="button"
-                    class="editor-pane-tab editor-pane-tab--left"
-                    title="Open Editor Chat"
-                    aria-label="Open Editor Chat"
-                    @onclick="ToggleChatPane">
-                <span>Chat</span>
-            </button>
-        }
-        else
-        {
-            <aside class="editor-chat-pane">
+            @if (ContestReviewActive)
+            {
                 <button type="button"
-                        class="editor-pane-collapse editor-pane-collapse--left"
-                        title="Collapse Editor Chat"
-                        aria-label="Collapse Editor Chat"
-                        @onclick="ToggleChatPane">
-                    &lsaquo;
+                        class="editor-pane-tab editor-pane-tab--left"
+                        title="Refresh Contest Review"
+                        aria-label="Refresh Contest Review"
+                        @onclick="OpenReviewModeAsync">
+                    <span>Contest</span>
                 </button>
-                <EditorChatPanel ProjectId="Project.Id"
-                                 CurrentChapterId="_activeChapterId"
-                                 ContextRefreshSignal="_contextRefreshSignal"
-                                 ReviewRefreshSignal="_reviewRefreshSignal"
-                                 OnAiTurnStarting="OnAiTurnStartingAsync"
-                                 OnAiTurnCompleted="OnAiTurnCompletedAsync"
-                                 OnAiTurnIdle="OnAiTurnIdleAsync"
-                                 OnAiChangesApplied="OnAiChangesAppliedAsync"
-                                  OnActiveChapterManuscriptChangesReady="OpenReviewForActiveChapterChangesAsync"
-                                  OnContestResultsReady="OpenReviewForContestResultsAsync" />
-            </aside>
+            }
+            else
+            {
+                <button type="button"
+                        class="editor-pane-tab editor-pane-tab--left"
+                        title="Open Editor Chat"
+                        aria-label="Open Editor Chat"
+                        @onclick="ToggleChatPane">
+                    <span>Chat</span>
+                </button>
+            }
         }
 
         <div class='@EditorSplitterClass("chat", EffectiveChatPaneCollapsed)'
@@ -152,7 +165,8 @@ else
                 <button type="button"
                         class="@ModeButtonClass(EditorMode.Review)"
                         aria-pressed="@(_mode == EditorMode.Review)"
-                        @onclick="() => SetModeAsync(EditorMode.Review)">Review</button>
+                        title="@ReviewModeTitle"
+                        @onclick="OpenReviewModeAsync">@ReviewModeLabel</button>
             </div>
 
             <details class="manuscript-style-details">
@@ -215,16 +229,8 @@ else
                                     <div class="chapter-review-error">
                                         <span>@_reviewError</span>
                                         <button type="button" class="btn-close btn-close-sm" aria-label="Dismiss" @onclick="() => _reviewError = null"></button>
-    </div>
-
-    @if (_openCompositionId is { } compositionId)
-    {
-        <DesignedPageWorkspace ProjectId="Project.Id"
-                               ProjectSlug="Project.Slug"
-                               CompositionId="compositionId"
-                               Closed="CloseDesignedPage" />
-    }
-}
+                                    </div>
+                                }
 
                                 <div class="contest-review-columns">
                                     @foreach (var candidate in _contestReviewProjection.Candidates)
@@ -718,6 +724,14 @@ else
                                     PrimaryActionEnabled="@(!LayoutControlsLocked && _activeChapterId is not null)"
                                     OnClose="CloseImagesModal"
                                     OnPrimaryAction="AddImageToContextAsync" />
+
+    @if (_openCompositionId is { } compositionId)
+    {
+        <DesignedPageWorkspace ProjectId="Project.Id"
+                               ProjectSlug="Project.Slug"
+                               CompositionId="compositionId"
+                               Closed="CloseDesignedPage" />
+    }
 }
 
 @code {
@@ -792,6 +806,21 @@ else
     private bool EditorReadOnly => _chapterLocked || _mode is EditorMode.Read or EditorMode.Review;
     private bool LayoutControlsLocked => _chapterLocked;
     private bool ContestReviewActive => _contestReviewProjection is not null;
+    private ContestBatch? CurrentChapterContest => _current is null
+        ? null
+        : _contestReviewBatches.FirstOrDefault(batch => batch.ChapterId == _current.Id && batch.Candidates.Count > 0);
+    private string ReviewModeLabel => CurrentChapterContest?.Status switch
+    {
+        ContestBatchStatus.Running => "Contest running",
+        ContestBatchStatus.Completed => "Contest review",
+        _ => "Review",
+    };
+    private string ReviewModeTitle => CurrentChapterContest?.Status switch
+    {
+        ContestBatchStatus.Running => "Open the running Contest Mode review",
+        ContestBatchStatus.Completed => "Review Contest Mode candidates",
+        _ => "Review staged chapter changes",
+    };
     private void OpenDesignedPage(Guid compositionId) => _openCompositionId = compositionId;
     private void CloseDesignedPage() => _openCompositionId = null;
     private bool EffectiveChatPaneCollapsed => ContestReviewActive || _chatPaneCollapsed;
@@ -897,7 +926,7 @@ else
         _saveError = null;
         _pendingRememberChapterId = targetId;
 
-        if (_mode == EditorMode.Review)
+        if (!await ActivateCurrentContestReviewAsync() && _mode == EditorMode.Review)
         {
             await RefreshReviewChangesAsync();
         }
@@ -1435,12 +1464,7 @@ else
                 .FirstOrDefault(batch => batch.ChapterId == _current.Id && batch.Candidates.Count > 0);
             if (activeContest is not null)
             {
-                _mode = EditorMode.Review;
-                _reviewPendingBatches = [];
-                _reviewProjection = null;
-                _contestReviewProjection = BuildContestReviewProjection(activeContest);
-                _reviewError = null;
-                PruneInlineReviewState();
+                ActivateContestReview(activeContest);
                 return;
             }
 
@@ -1484,18 +1508,40 @@ else
 
     private async Task OpenReviewForContestResultsAsync()
     {
+        await OpenReviewModeAsync();
+    }
+
+    private async Task OpenReviewModeAsync()
+    {
         if (Project is null || _current is null) return;
 
         if (_mode == EditorMode.Review)
-        {
             await RefreshReviewChangesAsync();
-        }
         else
-        {
             await SetModeAsync(EditorMode.Review);
-        }
 
         StateHasChanged();
+    }
+
+    private void ActivateContestReview(ContestBatch contest)
+    {
+        _mode = EditorMode.Review;
+        _reviewPendingBatches = [];
+        _reviewProjection = null;
+        _contestReviewProjection = BuildContestReviewProjection(contest);
+        _reviewError = null;
+        PruneInlineReviewState();
+    }
+
+    private async Task<bool> ActivateCurrentContestReviewAsync()
+    {
+        if (Project is null || _current is null) return false;
+
+        _contestReviewBatches = await Chat.ListCurrentContestBatchesAsync(Project.Id);
+        if (CurrentChapterContest is not { } contest) return false;
+
+        ActivateContestReview(contest);
+        return true;
     }
 
     private async Task GoToNextReviewBlockAsync()
@@ -2839,7 +2885,7 @@ else
         try
         {
             await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
-            if (_mode == EditorMode.Review)
+            if (!await ActivateCurrentContestReviewAsync() && _mode == EditorMode.Review)
             {
                 await RefreshReviewChangesAsync();
             }
@@ -2876,7 +2922,7 @@ else
             // or parameter refresh). Reconcile from persistence even when no active
             // runtime turn remains, but do not signal the chat to reload itself again.
             await ReconcileCurrentChapterAsync(refreshContextSurfaces: false, flushDraft: true);
-            if (_mode == EditorMode.Review)
+            if (!await ActivateCurrentContestReviewAsync() && _mode == EditorMode.Review)
                 await RefreshReviewChangesAsync();
         }
         catch (JSDisconnectedException) { }

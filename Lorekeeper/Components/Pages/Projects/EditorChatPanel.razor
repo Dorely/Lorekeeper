@@ -68,10 +68,17 @@
                     <span>Contest Mode</span>
                 </label>
 
-                @if (PendingReviewCount > 0)
+                @if (PendingChangeCount > 0)
                 {
-                    <button type="button" class="btn btn-link btn-sm editor-chat-pending" title="@PendingReviewTitle" @onclick="OpenPendingChangesAsync">
-                        Pending changes @PendingReviewCount
+                    <button type="button" class="btn btn-link btn-sm editor-chat-pending" title="Review pending AI edits" @onclick="OpenPendingChangesAsync">
+                        Pending changes @PendingChangeCount
+                    </button>
+                }
+
+                @if (ContestCandidateCount > 0)
+                {
+                    <button type="button" class="btn btn-link btn-sm editor-chat-pending" title="@ContestReviewTitle" @onclick="OpenContestReviewAsync">
+                        @(HasRunningContest ? "Contest running" : "Contest review") @ContestCandidateCount
                     </button>
                 }
             </div>
@@ -153,16 +160,11 @@
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
     private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
     private int ContestCandidateCount => _contestBatches.Sum(batch => batch.Candidates.Count);
-    private int ContestReviewCandidateCount => _contestBatches
-        .Where(batch => batch.Status == ContestBatchStatus.Completed)
-        .Sum(batch => batch.Candidates.Count);
     private bool HasRunningContest => _contestBatches.Any(batch => batch.Status == ContestBatchStatus.Running);
-    private int PendingReviewCount => PendingChangeCount > 0 ? PendingChangeCount : ContestCandidateCount;
-    private string PendingReviewTitle => PendingChangeCount > 0
-        ? "Review pending AI edits"
-        : HasRunningContest
-            ? "Contest Mode is still running"
-        : "Review pending Contest Mode candidates";
+    private int PendingReviewCount => PendingChangeCount + ContestCandidateCount;
+    private string ContestReviewTitle => HasRunningContest
+        ? "Open the running Contest Mode review"
+        : "Review Contest Mode candidates";
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
     private string ChatDisabledMessage => _chatAvailability?.Message
         ?? "Configure and test a chat provider in Settings > Providers to enable LLM features.";
@@ -296,7 +298,7 @@
             _contestProviderSlot3Id = contestSettings.ProviderSlot3Id;
             await RefreshSystemPromptAsync(cancellationToken);
             await LoadPendingChangesAsync(openIfPending: false, cancellationToken: cancellationToken);
-            await LoadContestBatchesAsync(openIfAvailable: false, cancellationToken: cancellationToken);
+            await LoadContestBatchesAsync(openIfAvailable: true, cancellationToken: cancellationToken);
             var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
             RebuildRenderable(activeTurn?.StartedAtUtc);
             if (activeTurn is not null)
@@ -723,7 +725,7 @@
         _contestBatches = (await Chat.ListCurrentContestBatchesAsync(ProjectId, cancellationToken)).ToList();
         if (PendingChangeCount > 0)
             return;
-        if (openIfAvailable && ContestReviewCandidateCount > 0)
+        if (openIfAvailable && ContestCandidateCount > 0)
         {
             _showPendingChanges = false;
             if (OnContestResultsReady.HasDelegate)
@@ -777,18 +779,17 @@
             return;
         }
 
-        if (ContestReviewCandidateCount > 0)
-        {
-            _showPendingChanges = false;
-            if (OnContestResultsReady.HasDelegate)
-                await OnContestResultsReady.InvokeAsync();
-            return;
-        }
+        if (ContestCandidateCount > 0)
+            await OpenContestReviewAsync();
+    }
 
-        if (HasRunningContest)
-        {
-            _error = "Wait for the running contest to finish before reviewing candidate changes.";
-        }
+    private async Task OpenContestReviewAsync()
+    {
+        if (ContestCandidateCount == 0) return;
+
+        _showPendingChanges = false;
+        if (OnContestResultsReady.HasDelegate)
+            await OnContestResultsReady.InvokeAsync();
     }
 
     private void ClosePendingChanges() => _showPendingChanges = false;

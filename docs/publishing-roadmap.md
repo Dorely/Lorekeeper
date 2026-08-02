@@ -79,12 +79,10 @@ Development-only validators and vendor upload portals may be used to certify the
 implementation, but users are not required to install or operate another
 conversion/preflight tool.
 
-### Verification and review
+### Verification
 
 - Tests and fixtures are part of the feature when correctness is data-, layout-,
   or conformance-sensitive.
-- Every completed feature receives a fresh independent harsh review before its
-  commit, following `AGENTS.md`.
 - Documentation and the roadmap status change in the same commit as the feature.
 
 ## Phase overview

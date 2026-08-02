@@ -214,7 +214,7 @@ public static class AssistantWorkflowInstructions
 
         Response style:
         - Before start_contest, briefly state what you inspected if useful.
-        - After start_contest, the app will open the contest review modal and stream candidate responses there.
+        - After start_contest, the app will open the contest review workspace and stream candidate status there.
         """;
 
     public const string EditorRevisionWorker = """

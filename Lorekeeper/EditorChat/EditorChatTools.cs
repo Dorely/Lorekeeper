@@ -2104,7 +2104,7 @@ public sealed class EditorChatTools(
 
         ctx.RequestContest(new EditorContestStartRequest(chapterId));
 
-        return "Contest started. Candidate responses will stream into the review modal.";
+        return "Contest started. Candidate status will stream into the Contest Review workspace.";
     }
 
     private async Task<IReadOnlyList<OrderedChapter>> ListOrderedChaptersAsync(Guid projectId)
