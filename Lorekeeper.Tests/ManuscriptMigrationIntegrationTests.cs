@@ -354,6 +354,193 @@ public sealed class ManuscriptMigrationIntegrationTests
     }
 
     [Fact]
+    public async Task HistoricalAuditPayloadsDoNotBlockSchemaV3Upgrade()
+    {
+        using var fixture = new MigrationFixture();
+        var chapterId = await fixture.CreateV7DatabaseAsync("Versioned content");
+        await fixture.AddLegacyAiChangesAsync(chapterId);
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.SetHistoricalTerminalAuditPayloadsAsync();
+        await fixture.DowngradeAllStructuredJsonToV1Async();
+
+        await using (var upgrade = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(upgrade);
+
+        await using var verification = fixture.CreateDbContext();
+        Assert.True(await verification.Projects.AnyAsync());
+        Assert.Equal(
+            "null",
+            await verification.AiChanges.AsNoTracking()
+                .Where(change => change.Status == AiChangeStatus.Applied)
+                .Select(change => change.BeforeJson)
+                .SingleAsync());
+        Assert.Equal(
+            "Linked two entities.",
+            await verification.AiChanges.AsNoTracking()
+                .Where(change => change.Status == AiChangeStatus.Applied)
+                .Select(change => change.ResultJson)
+                .SingleAsync());
+        Assert.False((await service.GetStateAsync()).RecoveryRequired);
+        Assert.False(await fixture.AnySchemaV1PayloadsAsync());
+    }
+
+    [Fact]
+    public async Task MalformedStructuredAuditPayloadStillFailsClosed()
+    {
+        using var fixture = new MigrationFixture();
+        var chapterId = await fixture.CreateV7DatabaseAsync("Versioned content");
+        await fixture.AddLegacyAiChangesAsync(chapterId);
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.SetMalformedStructuredAuditPayloadAsync();
+        await fixture.DowngradeAllStructuredJsonToV1Async();
+
+        await using (var upgrade = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(upgrade);
+
+        await using var verification = fixture.CreateDbContext();
+        Assert.Empty(await verification.Projects.AsNoTracking().ToListAsync());
+        var recovery = await service.GetStateAsync();
+        Assert.True(recovery.RecoveryRequired);
+        var error = Assert.IsType<string>((await fixture.CreateRecoveryService().GetStateAsync()).Error);
+        Assert.Contains("malformed", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StructurallyInvalidJsonResultPayloadStillFailsClosed()
+    {
+        using var fixture = new MigrationFixture();
+        var chapterId = await fixture.CreateV7DatabaseAsync("Versioned content");
+        await fixture.AddLegacyAiChangesAsync(chapterId);
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.DowngradeAllStructuredJsonToV1Async();
+        await fixture.SetStructurallyInvalidCurrentResultPayloadAsync();
+
+        await using (var upgrade = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(upgrade);
+
+        await using var verification = fixture.CreateDbContext();
+        Assert.Empty(await verification.Projects.AsNoTracking().ToListAsync());
+        Assert.True((await service.GetStateAsync()).RecoveryRequired);
+        var error = Assert.IsType<string>((await fixture.CreateRecoveryService().GetStateAsync()).Error);
+        Assert.Contains("manuscript", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MalformedCurrentChapterManuscriptIsNotReinterpretedAsLegacyProse()
+    {
+        using var fixture = new MigrationFixture();
+        _ = await fixture.CreateV7DatabaseAsync("Current content");
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.SetMalformedCurrentChapterManuscriptAsync();
+
+        await using (var restart = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(restart);
+
+        await using var verification = fixture.CreateDbContext();
+        Assert.Empty(await verification.Projects.AsNoTracking().ToListAsync());
+        var recovery = await fixture.CreateRecoveryService().GetStateAsync();
+        Assert.True(recovery.RecoveryRequired);
+        Assert.Contains(
+            "malformed current manuscript",
+            Assert.IsType<string>(recovery.Error),
+            StringComparison.OrdinalIgnoreCase);
+        var backupPath = Assert.IsType<string>(recovery.BackupPath);
+        await using var protectedBackup = new SqliteConnection($"Data Source={backupPath}");
+        await protectedBackup.OpenAsync();
+        await using var select = protectedBackup.CreateCommand();
+        select.CommandText = "SELECT ManuscriptJson FROM Chapters;";
+        Assert.Equal("{malformed", await select.ExecuteScalarAsync());
+    }
+
+    [Fact]
+    public async Task LaterEfBoundaryPreventsMalformedManuscriptResumeWithoutJournal()
+    {
+        using var fixture = new MigrationFixture();
+        _ = await fixture.CreateV7DatabaseAsync("Current content");
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await using (var advancedSchema = fixture.CreateDbContext())
+        {
+            await advancedSchema.GetService<IMigrator>().MigrateAsync(
+                "20260730203619_PublicationEditionsV10");
+            await advancedSchema.ManuscriptMigrationJournals.ExecuteDeleteAsync();
+        }
+        await fixture.SetMalformedCurrentChapterManuscriptAsync();
+
+        var restartedService = fixture.CreateService();
+        await using (var restart = fixture.CreateDbContext())
+            await restartedService.ApplyPendingAsync(restart);
+
+        await using var verification = fixture.CreateDbContext();
+        Assert.Empty(await verification.Projects.AsNoTracking().ToListAsync());
+        var recovery = await fixture.CreateRecoveryService().GetStateAsync();
+        Assert.True(recovery.RecoveryRequired);
+        Assert.Contains(
+            "malformed current manuscript",
+            Assert.IsType<string>(recovery.Error),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ScheduledRecoveryRestoresAndUpgradesDatabaseWithHistoricalAuditPayloads()
+    {
+        using var fixture = new MigrationFixture();
+        var chapterId = await fixture.CreateV7DatabaseAsync("Recover versioned content");
+        await fixture.AddLegacyAiChangesAsync(chapterId);
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.SetHistoricalTerminalAuditPayloadsAsync();
+        await fixture.DowngradeAllStructuredJsonToV1Async();
+
+        var recovery = fixture.CreateRecoveryService();
+        var protectedBackup = await recovery.CreateBackupAsync("manuscripts", "json-null-regression");
+        await using (var failedDatabase = fixture.CreateDbContext())
+        {
+            await recovery.EnterRecoveryModeAsync(
+                failedDatabase,
+                protectedBackup,
+                ManuscriptMigrationService.SchemaV3MigrationName,
+                1,
+                ManuscriptDocument.CurrentSchemaVersion,
+                new InvalidDataException("Simulated prior migration failure."));
+        }
+        Assert.True((await service.GetStateAsync()).RecoveryRequired);
+
+        var restore = await service.PrepareRestoreAsync(protectedBackup);
+        await service.RestoreAsync(restore.BackupPath, restore.ConfirmationToken);
+        var restartedService = fixture.CreateService();
+        await using (var restartedDatabase = fixture.CreateDbContext())
+            await restartedService.ApplyPendingAsync(restartedDatabase);
+
+        await using var verification = fixture.CreateDbContext();
+        Assert.Equal("Recover versioned content", (await verification.Chapters.SingleAsync()).PlainText);
+        Assert.Equal(
+            "null",
+            await verification.AiChanges.AsNoTracking()
+                .Where(change => change.Status == AiChangeStatus.Applied)
+                .Select(change => change.BeforeJson)
+                .SingleAsync());
+        Assert.Equal(
+            "Linked two entities.",
+            await verification.AiChanges.AsNoTracking()
+                .Where(change => change.Status == AiChangeStatus.Applied)
+                .Select(change => change.ResultJson)
+                .SingleAsync());
+        Assert.False((await restartedService.GetStateAsync()).RecoveryRequired);
+        Assert.False(await fixture.AnySchemaV1PayloadsAsync());
+    }
+
+    [Fact]
     public async Task V1CustomRoleIsNormalizedMaterializedAndImmediatelyEditable()
     {
         using var fixture = new MigrationFixture();
@@ -473,6 +660,19 @@ public sealed class ManuscriptMigrationIntegrationTests
                     configuration,
                     NullLogger<DatabaseMigrationRecoveryService>.Instance),
                 NullLogger<ManuscriptMigrationService>.Instance);
+        }
+
+        public DatabaseMigrationRecoveryService CreateRecoveryService()
+        {
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:DefaultConnection"] = ConnectionString,
+                })
+                .Build();
+            return new DatabaseMigrationRecoveryService(
+                configuration,
+                NullLogger<DatabaseMigrationRecoveryService>.Instance);
         }
 
         public async Task<Guid> CreateV7DatabaseAsync(string body)
@@ -722,6 +922,64 @@ public sealed class ManuscriptMigrationIntegrationTests
                 change.Parameters.AddWithValue("$now", now);
                 await change.ExecuteNonQueryAsync();
             }
+        }
+
+        public async Task SetHistoricalTerminalAuditPayloadsAsync()
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "UPDATE AiChanges SET BeforeJson = 'null', ResultJson = 'Linked two entities.' "
+                + "WHERE Status = 'Applied';";
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+
+        public async Task SetMalformedStructuredAuditPayloadAsync()
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "UPDATE AiChanges SET BeforeJson = '{malformed' WHERE Status = 'Applied';";
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+
+        public async Task SetStructurallyInvalidCurrentResultPayloadAsync()
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "UPDATE AiChanges SET ResultJson = $result WHERE Status = 'Applied';";
+            command.Parameters.AddWithValue(
+                "$result",
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    schemaVersion = ManuscriptDocument.CurrentSchemaVersion,
+                    manuscriptId = Guid.NewGuid(),
+                    revision = 1,
+                    content = new[]
+                    {
+                        new
+                        {
+                            id = string.Empty,
+                            type = "paragraph",
+                            styleRole = ManuscriptStyleRoles.Body,
+                            content = Array.Empty<object>(),
+                        },
+                    },
+                }));
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+
+        public async Task SetMalformedCurrentChapterManuscriptAsync()
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE Chapters SET ManuscriptJson = '{malformed';";
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
         }
 
         public async Task AddInvalidIllustrationAsync()

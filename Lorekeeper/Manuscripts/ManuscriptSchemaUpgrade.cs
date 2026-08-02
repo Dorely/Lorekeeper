@@ -123,8 +123,20 @@ public static class ManuscriptSchemaUpgrade
 
     internal static IReadOnlyList<ManuscriptDocument> ExtractCurrentDocuments(string json)
     {
+        JsonNode? root;
+        try
+        {
+            root = JsonNode.Parse(json);
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("The JSON value is malformed.", exception);
+        }
+        if (root is null)
+            return [];
+
         var documents = new List<ManuscriptDocument>();
-        ExtractCurrentDocuments(Parse(json), documents);
+        ExtractCurrentDocuments(root, documents);
         return documents;
     }
 

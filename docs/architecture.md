@@ -489,8 +489,19 @@ the next startup, before normal workers start, and a diagnostic backup is made
 first. Backup files and their directory use owner-only ACLs/permissions.
 The current manuscript schema is v3. Startup safely upgrades older documents in
 live chapters and every historical/review JSON payload under protected backup,
-transaction, projection-hash, and journal boundaries. The visual-composition
-cutover uses two forward EF boundaries: an additive schema creates composition,
+transaction, projection-hash, and journal boundaries. The schema-v3
+legacy-style scan treats the JSON literal `null` as an absent audit snapshot and
+permits legacy plain text only in `AiChanges.ResultJson`, where older tool
+results predate that column's JSON contract; both representations are preserved
+byte-for-byte. Malformed current manuscripts, structurally invalid manuscript
+documents, and malformed non-result audit payloads fail closed into protected
+recovery. The interrupted legacy transform is resumable only at its exact EF
+schema handoff: a completed manuscript journal or any later applied migration
+proves that invalid manuscript-shaped data is current corruption and must never
+be reinterpreted as legacy prose.
+
+The visual-composition cutover uses two forward EF boundaries: an additive
+schema creates composition,
 variant, staging, cover-scene, and Digital PDF fields; a guarded application
 migration then transforms all chapters, covers, and applicable pending Outline
 changes before applying the cleanup migration that removes visual-mode/layout

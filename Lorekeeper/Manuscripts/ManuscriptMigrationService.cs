@@ -51,13 +51,18 @@ public sealed class ManuscriptMigrationService(
         var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
         var manuscriptSchemaPending = pending.Contains(SchemaV2EfMigrationId, StringComparer.Ordinal);
         var hasCurrentColumns = await HasColumnAsync("Chapters", "ManuscriptJson", cancellationToken);
-        var hasInterruptedTransform = hasCurrentColumns
+        var hasNonconformingManuscripts = hasCurrentColumns
             && await ContainsUnstructuredManuscriptsAsync(cancellationToken);
+        var canResumeInterruptedTransform = hasNonconformingManuscripts
+            && await IsResumableInterruptedTransformAsync(db, cancellationToken);
+        var hasInvalidCurrentManuscripts = hasNonconformingManuscripts
+            && !canResumeInterruptedTransform;
         var needsSchemaV2Upgrade = hasCurrentColumns
             && await ContainsSchemaV1ManuscriptsAsync(cancellationToken);
         if (!needsDataMigration
             && !manuscriptSchemaPending
-            && !hasInterruptedTransform
+            && !canResumeInterruptedTransform
+            && !hasInvalidCurrentManuscripts
             && !needsSchemaV2Upgrade)
             return;
 
@@ -74,6 +79,16 @@ public sealed class ManuscriptMigrationService(
                     "manuscripts",
                     "pre-manuscript",
                     cancellationToken);
+            }
+
+            if (hasInvalidCurrentManuscripts)
+            {
+                activeMigrationName = SchemaV3MigrationName;
+                activeSourceVersion = ManuscriptDocument.CurrentSchemaVersion;
+                activeTargetVersion = ManuscriptDocument.CurrentSchemaVersion;
+                throw new InvalidDataException(
+                    "The database contains malformed current manuscript data. "
+                    + "Lorekeeper will not reinterpret it as legacy prose.");
             }
 
             if (needsDataMigration || manuscriptSchemaPending)
@@ -964,6 +979,25 @@ public sealed class ManuscriptMigrationService(
         return false;
     }
 
+    private static async Task<bool> IsResumableInterruptedTransformAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var completedStructuredMigration = await db.ManuscriptMigrationJournals.AsNoTracking()
+            .AnyAsync(
+                journal => journal.Status == ManuscriptMigrationStatus.Completed
+                    && (journal.MigrationName == MigrationName
+                        || journal.MigrationName == SchemaV2MigrationName
+                        || journal.MigrationName == SchemaV3MigrationName),
+                cancellationToken);
+        if (completedStructuredMigration)
+            return false;
+
+        var appliedMigrations = await db.Database.GetAppliedMigrationsAsync(cancellationToken);
+        return !appliedMigrations.Any(
+            migration => string.CompareOrdinal(migration, SchemaV2EfMigrationId) > 0);
+    }
+
     private async Task<bool> ContainsSchemaV1ManuscriptsAsync(CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
@@ -1138,51 +1172,51 @@ public sealed class ManuscriptMigrationService(
             selectPayloads.Transaction = transaction;
             selectPayloads.CommandText =
                 """
-                SELECT ProjectId, ManuscriptJson FROM Chapters
-                UNION ALL SELECT ProjectId, OriginalManuscriptJson FROM ContestBatches
-                UNION ALL SELECT ProjectId, AcceptedManuscriptJson FROM ContestBatches
+                SELECT ProjectId, ManuscriptJson, 0 FROM Chapters
+                UNION ALL SELECT ProjectId, OriginalManuscriptJson, 0 FROM ContestBatches
+                UNION ALL SELECT ProjectId, AcceptedManuscriptJson, 0 FROM ContestBatches
                 UNION ALL
-                    SELECT batch.ProjectId, candidate.ProposedManuscriptJson
+                    SELECT batch.ProjectId, candidate.ProposedManuscriptJson, 0
                     FROM ContestCandidates candidate
                     JOIN ContestBatches batch ON batch.Id = candidate.BatchId
                 UNION ALL
-                    SELECT batch.ProjectId, candidate.ReviewStateJson
+                    SELECT batch.ProjectId, candidate.ReviewStateJson, 0
                     FROM ContestCandidates candidate
                     JOIN ContestBatches batch ON batch.Id = candidate.BatchId
                 UNION ALL
-                    SELECT job.ProjectId, session.OriginalManuscriptJson
+                    SELECT job.ProjectId, session.OriginalManuscriptJson, 0
                     FROM EditorRevisionSessions session
                     JOIN EditorRevisionJobs job ON job.Id = session.JobId
                 UNION ALL
-                    SELECT job.ProjectId, session.OperationsJson
+                    SELECT job.ProjectId, session.OperationsJson, 0
                     FROM EditorRevisionSessions session
                     JOIN EditorRevisionJobs job ON job.Id = session.JobId
                 UNION ALL
-                    SELECT job.ProjectId, session.ProposalJson
+                    SELECT job.ProjectId, session.ProposalJson, 0
                     FROM EditorRevisionSessions session
                     JOIN EditorRevisionJobs job ON job.Id = session.JobId
                 UNION ALL
-                    SELECT batch.ProjectId, change.ArgumentsJson
+                    SELECT batch.ProjectId, change.ArgumentsJson, 0
                     FROM AiChanges change
                     JOIN AiChangeBatches batch ON batch.Id = change.BatchId
                 UNION ALL
-                    SELECT batch.ProjectId, change.BeforeJson
+                    SELECT batch.ProjectId, change.BeforeJson, 0
                     FROM AiChanges change
                     JOIN AiChangeBatches batch ON batch.Id = change.BatchId
                 UNION ALL
-                    SELECT batch.ProjectId, change.AfterJson
+                    SELECT batch.ProjectId, change.AfterJson, 0
                     FROM AiChanges change
                     JOIN AiChangeBatches batch ON batch.Id = change.BatchId
                 UNION ALL
-                    SELECT batch.ProjectId, change.DraftAfterJson
+                    SELECT batch.ProjectId, change.DraftAfterJson, 0
                     FROM AiChanges change
                     JOIN AiChangeBatches batch ON batch.Id = change.BatchId
                 UNION ALL
-                    SELECT batch.ProjectId, change.ReviewStateJson
+                    SELECT batch.ProjectId, change.ReviewStateJson, 0
                     FROM AiChanges change
                     JOIN AiChangeBatches batch ON batch.Id = change.BatchId
                 UNION ALL
-                    SELECT batch.ProjectId, change.ResultJson
+                    SELECT batch.ProjectId, change.ResultJson, 1
                     FROM AiChanges change
                     JOIN AiChangeBatches batch ON batch.Id = change.BatchId;
                 """;
@@ -1192,6 +1226,12 @@ public sealed class ManuscriptMigrationService(
                 if (reader.IsDBNull(1))
                     continue;
                 var projectId = reader.GetString(0);
+                var payload = reader.GetString(1);
+                var manuscripts = reader.GetInt32(2) == 1 && !IsSyntacticallyValidJson(payload)
+                    // ResultJson historically also stored plain-text tool results.
+                    // Preserve those audit bytes; they cannot contain style roles.
+                    ? []
+                    : ManuscriptSchemaUpgrade.ExtractCurrentDocuments(payload);
                 if (!rolesByProject.TryGetValue(projectId, out var rolesByKind))
                 {
                     rolesByKind = new Dictionary<ManuscriptStyleKind, HashSet<string>>
@@ -1201,8 +1241,7 @@ public sealed class ManuscriptMigrationService(
                     };
                     rolesByProject[projectId] = rolesByKind;
                 }
-                foreach (var manuscript in ManuscriptSchemaUpgrade.ExtractCurrentDocuments(
-                    reader.GetString(1)))
+                foreach (var manuscript in manuscripts)
                 {
                     foreach (var role in manuscript.Content
                         .Select(block => block.StyleRole)
@@ -1288,6 +1327,19 @@ public sealed class ManuscriptMigrationService(
             }
         }
         return created;
+    }
+
+    private static bool IsSyntacticallyValidJson(string value)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static string AllocateMigratedStyleName(string requestedName, ISet<string> usedNames)
