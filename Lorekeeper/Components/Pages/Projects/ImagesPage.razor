@@ -5,9 +5,13 @@
 <PageTitle>Images</PageTitle>
 
 <ProjectLayout Slug="@Slug" Tab="images">
-    <ImagesContent />
+    <ImagesContent LayoutEditionId="@EditionId" LayoutTargetKind="@TargetKind" LayoutTargetId="@TargetId" LayoutVariantId="@VariantId" />
 </ProjectLayout>
 
 @code {
     [Parameter] public string Slug { get; set; } = string.Empty;
+    [SupplyParameterFromQuery(Name = "editionId")] public Guid? EditionId { get; set; }
+    [SupplyParameterFromQuery(Name = "targetKind")] public string? TargetKind { get; set; }
+    [SupplyParameterFromQuery(Name = "targetId")] public Guid? TargetId { get; set; }
+    [SupplyParameterFromQuery(Name = "variantId")] public Guid? VariantId { get; set; }
 }

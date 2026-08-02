@@ -290,10 +290,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("IllustrationLayoutJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("ManuscriptJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -304,14 +300,6 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.Property<int>("Order")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("PageLayoutJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PageLayoutKind")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("TEXT");
@@ -335,10 +323,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("VectorIndexedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("VisualMode")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -385,6 +369,54 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId", "Surface", "MessageId", "SortOrder");
 
                     b.ToTable("ChatMessageImageAttachments");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.CompositionMutationStage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("AppliedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ExpectedRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OperationsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadSha256")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TargetId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetKind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PayloadSha256");
+
+                    b.HasIndex("ProjectId", "ConversationId", "ExpiresAt");
+
+                    b.ToTable("CompositionMutationStages");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ContestBatch", b =>
@@ -2112,6 +2144,80 @@ namespace Lorekeeper.Persistence.Migrations
                     b.ToTable("OutlineMessages");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.PageComposition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ChapterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SemanticManuscriptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChapterId");
+
+                    b.HasIndex("ProjectId", "ChapterId", "UpdatedAt");
+
+                    b.ToTable("PageCompositions");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.PageCompositionVariant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CompositionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GeometryKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SceneJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompositionId", "GeometryKey")
+                        .IsUnique();
+
+                    b.ToTable("PageCompositionVariants");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.Project", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2213,11 +2319,18 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("EmbeddingRightsConfirmed")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RightsDeclaration")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -2780,6 +2893,10 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<int?>("PageCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("PaginationFingerprint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ProfileId")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -2835,6 +2952,10 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CompositionSceneJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -2880,6 +3001,9 @@ namespace Lorekeeper.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("AllowDesignedPageOverrides")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Author")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -2905,10 +3029,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("EpubPicturePageSpreadMode")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -2969,10 +3089,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .HasColumnType("REAL");
 
                     b.Property<string>("Paper")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PrintPicturePageSpreadMode")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -3231,7 +3347,15 @@ namespace Lorekeeper.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AccessibilityRole")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("ActId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AltText")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("AssetId")
@@ -3247,10 +3371,21 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("Decorative")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("EditionId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PlacementKind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PresentationJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -3384,6 +3519,10 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.Property<bool>("IsLegacy")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("PaginationFingerprint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("ProfileId")
                         .IsRequired()
@@ -4075,6 +4214,17 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Image");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.CompositionMutationStage", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.Project", "Project")
+                        .WithMany("CompositionMutationStages")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.ContestBatch", b =>
                 {
                     b.HasOne("Lorekeeper.Models.Project", "Project")
@@ -4482,6 +4632,36 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Conversation");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.PageComposition", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.Chapter", "Chapter")
+                        .WithMany("PageCompositions")
+                        .HasForeignKey("ChapterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Lorekeeper.Models.Project", "Project")
+                        .WithMany("PageCompositions")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Chapter");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.PageCompositionVariant", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.PageComposition", "Composition")
+                        .WithMany("Variants")
+                        .HasForeignKey("CompositionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Composition");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectFontFace", b =>
@@ -4929,6 +5109,8 @@ namespace Lorekeeper.Persistence.Migrations
             modelBuilder.Entity("Lorekeeper.Models.Chapter", b =>
                 {
                     b.Navigation("EditorContextPreferences");
+
+                    b.Navigation("PageCompositions");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ContestBatch", b =>
@@ -5019,6 +5201,11 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Messages");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.PageComposition", b =>
+                {
+                    b.Navigation("Variants");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.Project", b =>
                 {
                     b.Navigation("Acts");
@@ -5028,6 +5215,8 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("BookBrief");
 
                     b.Navigation("Chapters");
+
+                    b.Navigation("CompositionMutationStages");
 
                     b.Navigation("ContestBatches");
 
@@ -5052,6 +5241,8 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Nodes");
 
                     b.Navigation("OutlineConversations");
+
+                    b.Navigation("PageCompositions");
 
                     b.Navigation("ProjectImageChatAttachments");
 

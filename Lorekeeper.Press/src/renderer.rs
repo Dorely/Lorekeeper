@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::Cursor;
 use std::path::{Component, Path};
 
 use hypher::{Lang, hyphenate};
@@ -8,12 +7,16 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use unicode_linebreak::linebreaks;
 
-use crate::font::{assert_supported_language, measure_text, subset_for_layout};
+use crate::font::{
+    assert_supported_language, configure_custom_fonts, custom_family, is_italic, measure_text,
+    subset_for_layout,
+};
 use crate::image::prepare_images;
 use crate::inspect;
 use crate::model::{
     Artifact, Diagnostic, FontEvidence, FontFace, FontFamily, ImageEvidence, LayoutDocument,
-    LayoutImage, LayoutLine, LayoutPage, LayoutRun, PageKind, PageMapEntry, RenderRequest,
+    LayoutImage, LayoutImageFit, LayoutLine, LayoutPage, LayoutPaint, LayoutRun,
+    LayoutSemanticRole, LayoutShape, LayoutShapeKind, PageKind, PageMapEntry, RenderRequest,
     RenderResponse, ValidationEvidence,
 };
 use crate::pdf::{PdfOptions, cover_background_total_ink_percent, write_pdf_cancellable};
@@ -35,7 +38,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     ensure_output_is_safe(job_root)?;
     ensure_not_cancelled(job_root)?;
 
-    let layout = paginate_with_cancellation(request, Some(job_root))?;
+    let mut layout = paginate_with_cancellation(request, Some(job_root))?;
     if layout.pages.len() > MAX_PAGES {
         return Err(Box::new(RenderResponse::failed(
             "failed",
@@ -45,18 +48,28 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             ),
         )));
     }
+    let is_digital_pdf = request.profile == "generic-digital-pdf-v1";
     let mut cover_width = 0.0;
     let mut spine_width = 0.0;
-    let cover_page = if let Some(cover) = request.cover.as_ref() {
-        spine_width = layout.pages.len() as f32 * cover.paper_caliper_inches_per_page * 72.0;
-        cover_width = request.trim.width_inches * 144.0 + spine_width + cover.bleed_inches * 144.0;
-        Some(
-            cover_layout(request, cover_width)
-                .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?,
-        )
-    } else {
-        None
-    };
+    let cover_page =
+        if let Some(cover) = request.cover.as_ref() {
+            if is_digital_pdf {
+                cover_width = request.trim.width_inches * 72.0;
+                Some(digital_cover_layout(request).map_err(|diagnostic| {
+                    Box::new(RenderResponse::failed("rejected", diagnostic))
+                })?)
+            } else {
+                spine_width =
+                    layout.pages.len() as f32 * cover.paper_caliper_inches_per_page * 72.0;
+                cover_width =
+                    request.trim.width_inches * 144.0 + spine_width + cover.bleed_inches * 144.0;
+                Some(cover_layout(request, cover_width).map_err(|diagnostic| {
+                    Box::new(RenderResponse::failed("rejected", diagnostic))
+                })?)
+            }
+        } else {
+            None
+        };
     let mut font_pages = layout.pages.clone();
     font_pages.extend(cover_page.iter().cloned());
     let fonts = subset_for_layout(&font_pages)
@@ -86,26 +99,73 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             .max(cover_background_total_ink_percent(&cover.background_color));
     }
     let interior_options = PdfOptions::interior(request, is_pdfx);
-    let interior_bytes = write_pdf_cancellable(
-        &layout.pages,
-        &fonts,
-        &interior_images,
-        &interior_options,
-        || job_root.join("cancel.requested").exists(),
-    )
-    .map_err(pdf_failure)?;
-    let interior_path = staging.path().join("interior.pdf");
-    fs::write(&interior_path, &interior_bytes).map_err(io_failure)?;
-    let interior_inspection = inspect::validate(&interior_path, &interior_options)
-        .map_err(|diagnostic| Box::new(RenderResponse::failed("failed", diagnostic)))?;
-
-    let mut artifacts = vec![artifact(
-        "interior-pdf",
-        "output/interior.pdf",
-        &interior_bytes,
-        layout.pages.len(),
-    )];
-    if let Some(rendered_cover) = &cover_page {
+    let (mut artifacts, interior_inspection) = if is_digital_pdf {
+        let cover = cover_page.as_ref().ok_or_else(|| {
+            Box::new(RenderResponse::failed(
+                "rejected",
+                Diagnostic::error(
+                    "PRESS_DIGITAL_COVER_REQUIRED",
+                    "Digital PDF requires a front cover.",
+                ),
+            ))
+        })?;
+        layout.pages.insert(0, cover.clone());
+        for entry in &mut layout.page_map {
+            entry.page_number += 1;
+        }
+        for page in &mut layout.pages {
+            for line in &mut page.lines {
+                if let Some(target) = &mut line.link_page {
+                    *target += 1;
+                }
+            }
+        }
+        let book_bytes = write_pdf_cancellable(
+            &layout.pages,
+            &fonts,
+            &interior_images,
+            &interior_options,
+            || job_root.join("cancel.requested").exists(),
+        )
+        .map_err(pdf_failure)?;
+        let book_path = staging.path().join("book.pdf");
+        fs::write(&book_path, &book_bytes).map_err(io_failure)?;
+        let inspection = inspect::validate(&book_path, &interior_options)
+            .map_err(|diagnostic| Box::new(RenderResponse::failed("failed", diagnostic)))?;
+        (
+            vec![artifact(
+                "book-pdf",
+                "output/book.pdf",
+                &book_bytes,
+                layout.pages.len(),
+            )],
+            inspection,
+        )
+    } else {
+        let interior_bytes = write_pdf_cancellable(
+            &layout.pages,
+            &fonts,
+            &interior_images,
+            &interior_options,
+            || job_root.join("cancel.requested").exists(),
+        )
+        .map_err(pdf_failure)?;
+        let interior_path = staging.path().join("interior.pdf");
+        fs::write(&interior_path, &interior_bytes).map_err(io_failure)?;
+        let inspection = inspect::validate(&interior_path, &interior_options)
+            .map_err(|diagnostic| Box::new(RenderResponse::failed("failed", diagnostic)))?;
+        (
+            vec![artifact(
+                "interior-pdf",
+                "output/interior.pdf",
+                &interior_bytes,
+                layout.pages.len(),
+            )],
+            inspection,
+        )
+    };
+    let mut cover_inspection = None;
+    if !is_digital_pdf && let Some(rendered_cover) = &cover_page {
         let cover_options = PdfOptions::cover(request, is_pdfx, cover_width, spine_width);
         let cover_bytes = write_pdf_cancellable(
             std::slice::from_ref(rendered_cover),
@@ -117,8 +177,10 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         .map_err(pdf_failure)?;
         let cover_path = staging.path().join("cover.pdf");
         fs::write(&cover_path, &cover_bytes).map_err(io_failure)?;
-        inspect::validate(&cover_path, &cover_options)
-            .map_err(|diagnostic| Box::new(RenderResponse::failed("failed", diagnostic)))?;
+        cover_inspection = Some(
+            inspect::validate(&cover_path, &cover_options)
+                .map_err(|diagnostic| Box::new(RenderResponse::failed("failed", diagnostic)))?,
+        );
         artifacts.push(artifact("cover-pdf", "output/cover.pdf", &cover_bytes, 1));
     }
     ensure_not_cancelled(job_root)?;
@@ -126,7 +188,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     let image_evidence = layout
         .pages
         .iter()
-        .chain(cover_page.iter())
+        .chain((!is_digital_pdf).then_some(cover_page.as_ref()).flatten())
         .enumerate()
         .flat_map(|(page_index, page)| {
             let page_images = if page.kind == PageKind::Cover {
@@ -148,19 +210,21 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         .map(|item| item.effective_dpi)
         .reduce(f32::min);
     let mut diagnostics = Vec::new();
-    if minimum_effective_dpi.is_some_and(|dpi| dpi < 300.0) {
+    let required_dpi = required_effective_dpi(&request.profile);
+    if minimum_effective_dpi.is_some_and(|dpi| dpi < required_dpi) {
         diagnostics.push(Diagnostic::warning(
             "PRESS_IMAGE_DPI_LOW",
             format!(
-                "The lowest effective image resolution is {:.1} DPI; inspect the affected pages at proof size.",
-                minimum_effective_dpi.unwrap_or_default()
+                "The lowest effective image resolution is {:.1} DPI; this profile expects {:.0} DPI. Inspect the affected pages at proof size.",
+                minimum_effective_dpi.unwrap_or_default(),
+                required_dpi
             ),
         ));
     }
 
     staging.promote(&output)?;
     let response = RenderResponse {
-        protocol_version: 3,
+        protocol_version: 4,
         renderer_version: env!("CARGO_PKG_VERSION"),
         job_id: Some(request.job_id.clone()),
         status: "completed".to_owned(),
@@ -174,9 +238,15 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             pdf_version: if is_pdfx { "1.3" } else { "1.7" }.to_owned(),
             toc_converged: layout.toc_converged,
             has_encryption: false,
-            has_transparency: false,
+            has_transparency: interior_inspection.has_transparency
+                || cover_inspection
+                    .as_ref()
+                    .is_some_and(|inspection| inspection.has_transparency),
             has_forbidden_actions: false,
-            annotation_count: 0,
+            annotation_count: interior_inspection.annotation_count
+                + cover_inspection
+                    .as_ref()
+                    .map_or(0, |inspection| inspection.annotation_count),
             fonts_embedded: interior_inspection.fonts_embedded,
             to_unicode_maps_present: interior_inspection.to_unicode,
             output_intent_count: if is_pdfx {
@@ -249,6 +319,14 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     Ok(())
 }
 
+fn required_effective_dpi(profile: &str) -> f32 {
+    if profile == "generic-digital-pdf-v1" {
+        180.0
+    } else {
+        300.0
+    }
+}
+
 pub fn trace(job_root: &Path) -> RenderResult<()> {
     let request = load_request(job_root)?;
     bind_job_id(trace_parsed(job_root, &request), &request.job_id)
@@ -274,20 +352,25 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 let glyphs = fonts.get(&run.face).map_or_else(Vec::new, |font| font.shape(&run.text, size));
                 serde_json::json!({ "text": run.text, "face": run.face, "glyphs": glyphs })
             }).collect::<Vec<_>>();
-            serde_json::json!({ "text": line.text, "size": line.size, "x": line.x, "y": line.y, "runs": runs })
+            serde_json::json!({ "text": line.text, "size": line.size, "x": line.x, "y": line.y,
+                "wordSpacing": line.word_spacing, "characterSpacing": line.character_spacing,
+                "lightText": line.light_text, "fillRgb": line.fill_rgb,
+                "semanticRole": line.semantic_role, "artifact": line.artifact,
+                "language": line.language, "readingOrder": line.reading_order, "runs": runs })
         }).collect::<Vec<_>>();
-        let kind = match page.kind { PageKind::Picture => "PicturePage", PageKind::Body => "Body", PageKind::Blank => "Blank", PageKind::Cover => "Cover" };
+        let kind = match page.kind { PageKind::Designed => "DesignedPage", PageKind::Body => "Body", PageKind::Blank => "Blank", PageKind::Cover => "Cover" };
         serde_json::json!({
             "kind": kind,
             "rotationDegrees": page.images.first().map_or(0.0, |image| image.rotation_degrees),
             "lines": lines,
             "images": page.images,
+            "shapes": page.shapes,
         })
     }).collect::<Vec<_>>();
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "protocolVersion": 3,
+            "protocolVersion": 4,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
             "jobId": request.job_id,
             "pages": pages,
@@ -348,18 +431,11 @@ fn placement_dpi(
         return None;
     }
     let source_width = image.width as f32 * placement.source_width_fraction.clamp(0.01, 1.0);
-    let (target_width, target_height) = if (placement.rotation_degrees - 90.0).abs() < f32::EPSILON
-    {
-        (placement.height, placement.width)
-    } else {
-        (placement.width, placement.height)
-    };
-    let width_scale = target_width / source_width;
-    let height_scale = target_height / image.height as f32;
-    let points_per_pixel = if placement.contain {
-        width_scale.min(height_scale)
-    } else {
-        width_scale.max(height_scale)
+    let width_scale = placement.width / source_width;
+    let height_scale = placement.height / image.height as f32;
+    let points_per_pixel = match placement.fit {
+        LayoutImageFit::Contain => width_scale.min(height_scale),
+        LayoutImageFit::Cover | LayoutImageFit::Fill => width_scale.max(height_scale),
     };
     Some(72.0 / points_per_pixel)
 }
@@ -407,10 +483,10 @@ fn validate_request(
     request: &RenderRequest,
     job_root: &Path,
 ) -> RenderResult<std::collections::BTreeMap<String, Vec<u8>>> {
-    if request.protocol_version != 3 {
+    if request.protocol_version != 4 {
         return reject(
             "PRESS_PROTOCOL_INVALID",
-            "Lorekeeper Press requires protocol version 3.",
+            "Lorekeeper Press requires protocol version 4.",
         );
     }
     if request.job_id.len() != 32 || !request.job_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -421,7 +497,10 @@ fn validate_request(
     }
     if !matches!(
         request.profile.as_str(),
-        "generic-paperback-v1" | "kdp-paperback-v1" | "ingram-paperback-pdfx1a-v1"
+        "generic-paperback-v1"
+            | "generic-digital-pdf-v1"
+            | "kdp-paperback-v1"
+            | "ingram-paperback-pdfx1a-v1"
     ) {
         return reject(
             "PRESS_PROFILE_UNSUPPORTED",
@@ -432,18 +511,6 @@ fn validate_request(
         return reject(
             "PRESS_INK_UNSUPPORTED",
             format!("The ink intent '{}' is unsupported.", request.ink),
-        );
-    }
-    if !matches!(
-        request
-            .document
-            .get("printPicturePageSpreadMode")
-            .and_then(Value::as_str),
-        Some("WholeSpread" | "SidewaysWholeSpread" | "SplitLeaves")
-    ) {
-        return reject(
-            "PRESS_PICTURE_PAGE_MODE_INVALID",
-            "The print Picture Page mode is missing or unsupported.",
         );
     }
     let language = request
@@ -532,10 +599,10 @@ fn validate_request(
                 format!("Asset '{}' has an unsafe path.", asset.id),
             );
         }
-        if asset.media_type != "image/png" {
+        if !matches!(asset.media_type.as_str(), "image/png" | "image/jpeg") {
             return reject(
                 "PRESS_ASSET_FORMAT_UNSUPPORTED",
-                format!("Asset '{}' is not a PNG.", asset.id),
+                format!("Asset '{}' must be PNG or JPEG.", asset.id),
             );
         }
         if asset.width_pixels.is_none()
@@ -578,9 +645,66 @@ fn validate_request(
                 format!("Asset '{}' changed after declaration.", asset.id),
             );
         }
-        validate_png(asset, &bytes)?;
+        crate::image::validate_declared_image(asset, &bytes)
+            .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
         total = total.saturating_add(bytes.len() as u64);
         validated_assets.insert(asset.id.clone(), bytes);
+    }
+    let mut validated_fonts = std::collections::BTreeMap::new();
+    let mut declared_font_faces = BTreeSet::new();
+    for font in &request.fonts {
+        let relative = Path::new(&font.relative_path);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|part| !matches!(part, Component::Normal(_)))
+            || !font.relative_path.replace('\\', "/").starts_with("fonts/")
+        {
+            return reject(
+                "PRESS_FONT_PATH_UNSAFE",
+                format!("Font '{}' has an unsafe path.", font.id),
+            );
+        }
+        if !matches!(font.media_type.as_str(), "font/ttf" | "font/otf")
+            || !font.embedding_rights_confirmed
+            || font.family_key.trim().is_empty()
+            || font.family_key.len() > 120
+            || !matches!(font.weight, 100..=900)
+            || !declared_font_faces.insert((
+                font.family_key.to_ascii_lowercase(),
+                font.weight,
+                font.italic,
+            ))
+            || !declared.insert(normalized_relative(relative))
+        {
+            return reject(
+                "PRESS_FONT_DECLARATION_INVALID",
+                format!(
+                    "Font '{}' requires a unique family/style, supported format, and confirmed embedding rights.",
+                    font.id
+                ),
+            );
+        }
+        let path = input_root.join(relative);
+        if !path.is_file() || is_link_or_reparse(&path) {
+            return reject(
+                "PRESS_FONT_PATH_UNSAFE",
+                format!("Font '{}' is missing or linked.", font.id),
+            );
+        }
+        let bytes = fs::read(&path).map_err(io_failure)?;
+        if bytes.len() as u64 != font.byte_length
+            || bytes.len() as u64 > MAX_ASSET_BYTES
+            || !hex_hash(&bytes).eq_ignore_ascii_case(&font.sha256)
+        {
+            return reject(
+                "PRESS_FONT_HASH_MISMATCH",
+                format!("Font '{}' changed after declaration.", font.id),
+            );
+        }
+        validate_font_embedding(font, &bytes)?;
+        total = total.saturating_add(bytes.len() as u64);
+        validated_fonts.insert(font.id.clone(), bytes);
     }
     if total > MAX_JOB_BYTES {
         return reject(
@@ -588,6 +712,14 @@ fn validate_request(
             "The declared asset bytes exceed the job limit.",
         );
     }
+    configure_custom_fonts(&request.fonts, &validated_fonts)
+        .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
+    let declared_families = request
+        .fonts
+        .iter()
+        .map(|font| font.family_key.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    validate_font_family_references(&request.document, &declared_families)?;
     validate_asset_references(&request.document, &declared_ids)?;
     if let Some(asset_id) = request
         .cover
@@ -611,6 +743,47 @@ fn validate_request(
         );
     }
     Ok(validated_assets)
+}
+
+fn validate_font_embedding(font: &crate::model::FontDeclaration, bytes: &[u8]) -> RenderResult<()> {
+    if bytes.len() < 12 || !matches!(&bytes[..4], b"\0\x01\0\0" | b"OTTO") {
+        return reject(
+            "PRESS_FONT_INVALID",
+            format!("Font '{}' is not a supported OpenType font.", font.id),
+        );
+    }
+    let table_count = u16::from_be_bytes([bytes[4], bytes[5]]) as usize;
+    let os2 = (0..table_count).find_map(|index| {
+        let start = 12 + index * 16;
+        if bytes.get(start..start + 4)? != b"OS/2" {
+            return None;
+        }
+        let offset =
+            u32::from_be_bytes(bytes.get(start + 8..start + 12)?.try_into().ok()?) as usize;
+        let length =
+            u32::from_be_bytes(bytes.get(start + 12..start + 16)?.try_into().ok()?) as usize;
+        bytes.get(offset..offset + length)
+    });
+    let Some(os2) = os2 else {
+        return reject(
+            "PRESS_FONT_EMBEDDING_UNKNOWN",
+            format!("Font '{}' does not declare embedding permissions.", font.id),
+        );
+    };
+    let fs_type = os2
+        .get(8..10)
+        .map(|value| u16::from_be_bytes([value[0], value[1]]))
+        .unwrap_or(0x0002);
+    if fs_type & (0x0002 | 0x0100 | 0x0200) != 0 {
+        return reject(
+            "PRESS_FONT_EMBEDDING_RESTRICTED",
+            format!(
+                "Font '{}' prohibits embedding, subsetting, or outline use.",
+                font.id
+            ),
+        );
+    }
+    Ok(())
 }
 
 fn is_hex_color(value: &str) -> bool {
@@ -653,6 +826,9 @@ fn validate_inline_languages(value: &Value) -> Result<(), Diagnostic> {
             }
         }
         Value::Object(values) => {
+            if let Some(language) = values.get("language").and_then(Value::as_str) {
+                assert_supported_language(language)?;
+            }
             if values
                 .get("type")
                 .and_then(Value::as_str)
@@ -671,27 +847,41 @@ fn validate_inline_languages(value: &Value) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-fn validate_png(asset: &crate::model::AssetDeclaration, bytes: &[u8]) -> RenderResult<()> {
-    let decoder = png::Decoder::new(Cursor::new(bytes));
-    let reader = decoder.read_info().map_err(|error| {
-        Box::new(RenderResponse::failed(
-            "rejected",
-            Diagnostic::error(
-                "PRESS_ASSET_CORRUPT",
-                format!("Asset '{}' is corrupt: {error}", asset.id),
-            ),
-        ))
-    })?;
-    let info = reader.info();
-    if asset.width_pixels.is_some_and(|width| width != info.width)
-        || asset
-            .height_pixels
-            .is_some_and(|height| height != info.height)
-    {
-        return reject(
-            "PRESS_ASSET_DIMENSION_MISMATCH",
-            format!("Asset '{}' dimensions changed.", asset.id),
-        );
+fn validate_font_family_references(value: &Value, declared: &BTreeSet<String>) -> RenderResult<()> {
+    match value {
+        Value::Array(values) => {
+            for child in values {
+                validate_font_family_references(child, declared)?;
+            }
+        }
+        Value::Object(values) => {
+            if let Some(key) = values
+                .get("fontFamilyKey")
+                .and_then(Value::as_str)
+                .filter(|key| !key.trim().is_empty())
+            {
+                let normalized = key.to_ascii_lowercase();
+                if !matches!(
+                    normalized.as_str(),
+                    "serif"
+                        | "sans"
+                        | "mono"
+                        | "builtin:lora"
+                        | "builtin:nunito"
+                        | "builtin:roboto-mono"
+                ) && !declared.contains(&normalized)
+                {
+                    return reject(
+                        "PRESS_FONT_FAMILY_UNSUPPORTED",
+                        format!("Publication content references unsupported font family '{key}'."),
+                    );
+                }
+            }
+            for child in values.values() {
+                validate_font_family_references(child, declared)?;
+            }
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -786,6 +976,7 @@ fn paginate_with_cancellation(
         || !(0.25..=2.0).contains(&trim.margin_inches)
         || !(7.0..=30.0).contains(&trim.body_font_size_points)
         || !(1.0..=2.5).contains(&trim.body_line_height)
+        || !(0.0..=0.25).contains(&trim.bleed_inches)
         || trim.minimum_widow_lines == 0
         || trim.minimum_orphan_lines == 0
     {
@@ -817,6 +1008,7 @@ fn paginate_with_cancellation(
     }
     let mut chapter_entries = Vec::new();
     let mut chapter_ordinal = 0usize;
+    let mut semantic_order = 0i32;
     append_matter(&mut pages, document, "Front", trim);
     let mut features = BTreeSet::new();
     if document
@@ -842,6 +1034,7 @@ fn paginate_with_cancellation(
                 &string(section, "id"),
                 &["BeforeAct"],
                 trim,
+                true,
             );
             let section_title = numbered_title(
                 &string(section, "title"),
@@ -884,6 +1077,7 @@ fn paginate_with_cancellation(
                     small_caps: false,
                     space_before: 12.0,
                     space_after: 6.0,
+                    semantic_role: LayoutSemanticRole::Heading1,
                 };
                 append_styled_text(&mut pages, &section_title, trim, &style);
             }
@@ -899,8 +1093,9 @@ fn paginate_with_cancellation(
                     &mut pages,
                     document,
                     &string(chapter, "id"),
-                    &["BeforeChapter", "ChapterOpening"],
+                    &["BeforeChapter"],
                     trim,
+                    true,
                 );
                 start_recto(&mut pages, trim);
                 let chapter_start = pages.len() + 1;
@@ -916,10 +1111,6 @@ fn paginate_with_cancellation(
                     "Chapter",
                 );
                 chapter_entries.push((chapter_title.clone(), chapter_start));
-                let visual_mode = string(chapter, "visualMode");
-                if visual_mode == "IllustratedProse" {
-                    features.insert("illustrated-prose".to_owned());
-                }
                 let mut blocks = chapter
                     .get("blocks")
                     .and_then(Value::as_array)
@@ -937,6 +1128,14 @@ fn paginate_with_cancellation(
                 if include_chapter_heading && !chapter_title.is_empty() {
                     pages.push(text_page(vec![(chapter_title.clone(), 22.0)], trim));
                 }
+                append_placement_pages(
+                    &mut pages,
+                    document,
+                    &string(chapter, "id"),
+                    &["ChapterOpening"],
+                    trim,
+                    false,
+                );
                 let chapter_synopsis = string(chapter, "synopsis");
                 if !chapter_synopsis.is_empty() {
                     let synopsis_style = BlockStyle {
@@ -949,32 +1148,258 @@ fn paginate_with_cancellation(
                         small_caps: false,
                         space_before: 0.0,
                         space_after: 8.0,
+                        semantic_role: LayoutSemanticRole::Paragraph,
                     };
                     append_styled_text(&mut pages, &chapter_synopsis, trim, &synopsis_style);
                 }
+                let mut active_list_id: Option<String> = None;
                 for block in blocks.drain(..) {
                     check_layout_cancellation(job_root)?;
+                    semantic_order += 1;
+                    let semantic_snapshot = pages
+                        .iter()
+                        .map(|page| (page.lines.len(), page.images.len()))
+                        .collect::<Vec<_>>();
                     let block_id = string(&block, "id");
                     let block_type = string(&block, "type");
+                    let semantic_id = if block_id.is_empty() {
+                        format!("chapter-{chapter_ordinal}-block-{semantic_order}")
+                    } else {
+                        block_id.clone()
+                    };
+                    let semantic_parent_id = if block_type.eq_ignore_ascii_case("ListItem") {
+                        Some(
+                            active_list_id
+                                .get_or_insert_with(|| format!("list-{semantic_id}"))
+                                .clone(),
+                        )
+                    } else {
+                        active_list_id = None;
+                        None
+                    };
                     let text = display_block_text(&block);
                     if block_has_marks(&block) {
                         features.insert("inline-marks".to_owned());
                     }
                     if block_type.eq_ignore_ascii_case("Figure") {
-                        features.insert("semantic-figure".to_owned());
+                        features.insert("flow-figure".to_owned());
+                    }
+                    if block_type.eq_ignore_ascii_case("DesignedPage") {
+                        features.insert("designed-page".to_owned());
                     }
                     features.insert(format!(
                         "semantic-block-{}",
                         block_type.to_ascii_lowercase()
                     ));
+                    if block_type.eq_ignore_ascii_case("DesignedPage") {
+                        let composition_id = string(&block, "pageCompositionId");
+                        let composition = chapter
+                            .get("pageCompositions")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .find(|item| string(item, "id") == composition_id)
+                            .ok_or_else(|| Box::new(RenderResponse::failed(
+                                "rejected",
+                                Diagnostic::error(
+                                    "PRESS_COMPOSITION_MISSING",
+                                    format!("Designed Page {block_id} references a missing composition."),
+                                ),
+                            )))?;
+                        let first_page = pages.len() + 1;
+                        pages.extend(
+                            designed_pages(
+                                composition,
+                                document,
+                                trim,
+                                request.profile == "generic-digital-pdf-v1",
+                                document
+                                    .get("allowDesignedPageOverrides")
+                                    .and_then(Value::as_bool)
+                                    .unwrap_or(false),
+                            )
+                            .map_err(|diagnostic| {
+                                Box::new(RenderResponse::failed("rejected", diagnostic))
+                            })?,
+                        );
+                        assign_semantic_order_since(
+                            &mut pages,
+                            &semantic_snapshot,
+                            semantic_order,
+                            &semantic_id,
+                            semantic_parent_id.as_deref(),
+                        );
+                        if !block_id.is_empty() {
+                            page_map.push(PageMapEntry {
+                                chapter_id: string(chapter, "id"),
+                                block_id,
+                                page_number: first_page.max(chapter_start),
+                            });
+                        }
+                        continue;
+                    }
+                    if block_type.eq_ignore_ascii_case("Figure") {
+                        let presentation = block.get("presentation").unwrap_or(&Value::Null);
+                        let placement = string(presentation, "placement");
+                        let start_on_new_page = presentation
+                            .get("startOnNewPage")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        let dedicated_page =
+                            matches!(placement.as_str(), "DedicatedPage" | "FullBleed");
+                        let width_percent =
+                            if matches!(placement.as_str(), "FullWidth" | "FullBleed") {
+                                100.0
+                            } else {
+                                presentation
+                                    .get("widthPercent")
+                                    .and_then(Value::as_f64)
+                                    .unwrap_or(100.0) as f32
+                            };
+                        let alignment = match string(presentation, "alignment").as_str() {
+                            "Start" => "left",
+                            "End" => "right",
+                            _ => "center",
+                        };
+                        let focal_x = presentation
+                            .get("focalXPercent")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(50.0) as f32;
+                        let focal_y = presentation
+                            .get("focalYPercent")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(50.0) as f32;
+                        let text_wrap = string(presentation, "textWrap");
+                        let image_fit = layout_image_fit(&string(presentation, "fit"));
+                        let spacing_before = presentation
+                            .get("spacingBeforePoints")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(6.0) as f32;
+                        let spacing_after = presentation
+                            .get("spacingAfterPoints")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(6.0) as f32;
+                        let caption_placement = string(presentation, "captionPlacement");
+                        let decorative = block
+                            .get("decorative")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        let alt_text = block
+                            .get("altText")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        let language = block
+                            .get("language")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        let accessibility_role = block
+                            .get("accessibilityRole")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        let first_page;
+                        if start_on_new_page && !dedicated_page {
+                            pages.push(empty_body_page());
+                        }
+                        if dedicated_page {
+                            let mut page = dedicated_figure_page_with_layout(
+                                trim,
+                                &string(&block, "caption"),
+                                string(&block, "assetId"),
+                                width_percent,
+                                focal_x,
+                                focal_y,
+                                alignment,
+                            );
+                            if let Some(image) = page.images.first_mut() {
+                                image.alt_text.clone_from(&alt_text);
+                                image.decorative = decorative;
+                                image.language.clone_from(&language);
+                                image.fit = image_fit;
+                                image.accessibility_role.clone_from(&accessibility_role);
+                                if placement == "FullBleed" {
+                                    let bleed = trim.bleed_inches * 72.0;
+                                    image.x = -bleed;
+                                    image.y = -bleed;
+                                    image.width = trim.width_inches * 72.0 + bleed * 2.0;
+                                    image.height = trim.height_inches * 72.0 + bleed * 2.0;
+                                }
+                            }
+                            if caption_placement == "Hidden" {
+                                page.lines.clear();
+                            } else if caption_placement == "Above" {
+                                let top = trim.height_inches * 72.0 - trim.margin_inches * 72.0;
+                                for (index, line) in page.lines.iter_mut().enumerate() {
+                                    line.y = top - index as f32 * 9.0 * 1.6;
+                                }
+                            } else if caption_placement == "Overlay"
+                                && let Some(image) = page.images.first()
+                            {
+                                for (index, line) in page.lines.iter_mut().enumerate() {
+                                    line.y = image.y + 12.0 + index as f32 * 9.0 * 1.6;
+                                    line.light_text = true;
+                                }
+                            }
+                            for line in &mut page.lines {
+                                line.language.clone_from(&language);
+                                line.artifact = false;
+                            }
+                            pages.push(page);
+                            first_page = pages.len();
+                        } else {
+                            append_inline_illustration(
+                                &mut pages,
+                                trim,
+                                &string(&block, "caption"),
+                                string(&block, "assetId"),
+                                width_percent,
+                                focal_x,
+                                focal_y,
+                                alignment,
+                                &text_wrap,
+                                image_fit,
+                                spacing_before,
+                                spacing_after,
+                                &caption_placement,
+                                presentation
+                                    .get("keepWithCaption")
+                                    .and_then(Value::as_bool)
+                                    .unwrap_or(true),
+                            );
+                            if let Some(image) =
+                                pages.last_mut().and_then(|page| page.images.last_mut())
+                            {
+                                image.alt_text.clone_from(&alt_text);
+                                image.decorative = decorative;
+                                image.language.clone_from(&language);
+                                image.accessibility_role.clone_from(&accessibility_role);
+                            }
+                            if let Some(page) = pages.last_mut() {
+                                for line in page.lines.iter_mut().filter(|line| {
+                                    line.semantic_role == LayoutSemanticRole::Caption
+                                }) {
+                                    line.language.clone_from(&language);
+                                    line.artifact = false;
+                                }
+                            }
+                            first_page = pages.len();
+                        }
+                        if !block_id.is_empty() {
+                            page_map.push(PageMapEntry {
+                                chapter_id: string(chapter, "id"),
+                                block_id,
+                                page_number: first_page.max(chapter_start),
+                            });
+                        }
+                        assign_semantic_order_since(
+                            &mut pages,
+                            &semantic_snapshot,
+                            semantic_order,
+                            &semantic_id,
+                            semantic_parent_id.as_deref(),
+                        );
+                        continue;
+                    }
                     let style = block_style(document, &block, trim);
-                    append_anchored_illustrations(
-                        &mut pages,
-                        chapter,
-                        &block_id,
-                        "BeforeParagraph",
-                        trim,
-                    );
                     let runs = if block_type.eq_ignore_ascii_case("SceneBreak")
                         || block_type.eq_ignore_ascii_case("ListItem")
                     {
@@ -989,19 +1414,20 @@ fn paginate_with_cancellation(
                     } else {
                         block_runs(document, &block, &style)
                     };
-                    let first_page = append_styled_runs(&mut pages, &text, &runs, trim, &style);
-                    if block_type.eq_ignore_ascii_case("Figure") {
-                        let asset_id = string(&block, "assetId");
-                        if !asset_id.is_empty() {
-                            pages.push(picture_page(trim, &string(&block, "caption"), asset_id));
-                        }
-                    }
-                    append_anchored_illustrations(
+                    let first_page = append_styled_runs(
                         &mut pages,
-                        chapter,
-                        &block_id,
-                        "AfterParagraph",
+                        &text,
+                        &runs,
                         trim,
+                        &style,
+                        block.get("language").and_then(Value::as_str),
+                    );
+                    assign_semantic_order_since(
+                        &mut pages,
+                        &semantic_snapshot,
+                        semantic_order,
+                        &semantic_id,
+                        semantic_parent_id.as_deref(),
                     );
                     if !block_id.is_empty() {
                         page_map.push(PageMapEntry {
@@ -1011,65 +1437,25 @@ fn paginate_with_cancellation(
                         });
                     }
                 }
-                if chapter
-                    .get("picturePage")
-                    .is_some_and(|value| !value.is_null())
-                {
-                    features.insert("picture-page-spread".to_owned());
-                    start_recto(&mut pages, trim);
-                    let asset_id = chapter
-                        .get("picturePage")
-                        .map(|value| string(value, "assetId"))
-                        .unwrap_or_default();
-                    match document
-                        .get("printPicturePageSpreadMode")
-                        .and_then(Value::as_str)
-                        .expect("validated Picture Page mode")
-                    {
-                        "SplitLeaves" => {
-                            pages.push(picture_spread_leaf(
-                                trim,
-                                "Picture Page — left leaf",
-                                asset_id.clone(),
-                                false,
-                            ));
-                            pages.push(picture_spread_leaf(
-                                trim,
-                                "Picture Page — right leaf",
-                                asset_id,
-                                true,
-                            ));
-                        }
-                        "SidewaysWholeSpread" => {
-                            let mut page = picture_page(
-                                trim,
-                                "Picture Page — sideways whole spread",
-                                asset_id,
-                            );
-                            if let Some(image) = page.images.first_mut() {
-                                image.rotation_degrees = 90.0;
-                                image.contain = true;
-                            }
-                            pages.push(page);
-                        }
-                        "WholeSpread" => {
-                            let mut page =
-                                picture_page(trim, "Picture Page — whole spread", asset_id);
-                            if let Some(image) = page.images.first_mut() {
-                                image.contain = true;
-                            }
-                            pages.push(page);
-                        }
-                        _ => unreachable!("validated Picture Page mode"),
-                    }
+                if let Some(page) = pages.get_mut(chapter_page_index) {
+                    page.bookmark = (!chapter_title.is_empty()).then_some(chapter_title.clone());
                 }
                 add_running_heads(&mut pages[chapter_page_index..], &chapter_title, trim);
                 append_placement_pages(
                     &mut pages,
                     document,
                     &string(chapter, "id"),
-                    &["ChapterEnding", "AfterChapter"],
+                    &["ChapterEnding"],
                     trim,
+                    false,
+                );
+                append_placement_pages(
+                    &mut pages,
+                    document,
+                    &string(chapter, "id"),
+                    &["AfterChapter"],
+                    trim,
+                    true,
                 );
             }
             append_placement_pages(
@@ -1078,6 +1464,7 @@ fn paginate_with_cancellation(
                 &string(section, "id"),
                 &["AfterAct"],
                 trim,
+                true,
             );
         }
     }
@@ -1091,6 +1478,13 @@ fn paginate_with_cancellation(
         let toc_page_count = replacements.len();
         let delta = toc_page_count - 1;
         pages.splice(index..=index, replacements);
+        for page in &mut pages[index..index + toc_page_count] {
+            for line in &mut page.lines {
+                if let Some(target) = &mut line.link_page {
+                    *target += delta;
+                }
+            }
+        }
         for entry in &mut page_map {
             entry.page_number += delta;
         }
@@ -1101,14 +1495,13 @@ fn paginate_with_cancellation(
     if request.cover.is_some() {
         features.insert("dedicated-cover".to_owned());
     }
-    while pages.len() < 7 {
-        pages.push(LayoutPage {
-            kind: PageKind::Blank,
-            lines: Vec::new(),
-            images: Vec::new(),
-            barcode_modules: None,
-            page_label: None,
-        });
+    for role in pages
+        .iter()
+        .flat_map(|page| &page.images)
+        .filter_map(|image| image.accessibility_role.as_deref())
+        .filter(|role| !role.is_empty())
+    {
+        features.insert(format!("accessibility-role-{}", role.to_ascii_lowercase()));
     }
     assign_page_labels(&mut pages, body_start_page.unwrap_or(1));
     Ok(LayoutDocument {
@@ -1117,67 +1510,6 @@ fn paginate_with_cancellation(
         features: features.into_iter().collect(),
         toc_converged,
     })
-}
-
-fn append_anchored_illustrations(
-    pages: &mut Vec<LayoutPage>,
-    chapter: &Value,
-    block_id: &str,
-    anchor_position: &str,
-    trim: &crate::model::Trim,
-) {
-    for illustration in chapter
-        .get("illustrations")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|illustration| {
-            string(illustration, "anchorBlockId") == block_id
-                && string(illustration, "anchorPosition").eq_ignore_ascii_case(anchor_position)
-        })
-    {
-        let start_on_new_page = illustration
-            .get("startOnNewPage")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let caption = string(illustration, "caption");
-        let asset_id = string(illustration, "assetId");
-        let width_percent = illustration
-            .get("widthPercent")
-            .and_then(Value::as_f64)
-            .unwrap_or(100.0) as f32;
-        let focal_x_percent = illustration
-            .get("focalXPercent")
-            .and_then(Value::as_f64)
-            .unwrap_or(50.0) as f32;
-        let focal_y_percent = illustration
-            .get("focalYPercent")
-            .and_then(Value::as_f64)
-            .unwrap_or(50.0) as f32;
-        let alignment = string(illustration, "alignment");
-        if start_on_new_page {
-            pages.push(picture_page_with_layout(
-                trim,
-                &caption,
-                asset_id,
-                width_percent,
-                focal_x_percent,
-                focal_y_percent,
-                &alignment,
-            ));
-        } else {
-            append_inline_illustration(
-                pages,
-                trim,
-                &caption,
-                asset_id,
-                width_percent,
-                focal_x_percent,
-                focal_y_percent,
-                &alignment,
-            );
-        }
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1190,6 +1522,12 @@ fn append_inline_illustration(
     focal_x_percent: f32,
     focal_y_percent: f32,
     alignment: &str,
+    text_wrap: &str,
+    fit: LayoutImageFit,
+    spacing_before: f32,
+    spacing_after: f32,
+    caption_placement: &str,
+    keep_with_caption: bool,
 ) {
     let margin = trim.margin_inches * 72.0;
     let page_height = trim.height_inches * 72.0;
@@ -1203,14 +1541,32 @@ fn append_inline_illustration(
         _ => margin + (available_width - image_width) / 2.0,
     };
     let line_step = trim.body_font_size_points * trim.body_line_height;
-    let caption_lines = wrapped_caption(caption, image_width);
+    let caption_lines = if caption_placement == "Hidden" {
+        Vec::new()
+    } else {
+        wrapped_caption(
+            caption,
+            if caption_placement == "Overlay" {
+                image_width - 12.0
+            } else {
+                image_width
+            },
+        )
+    };
     let caption_step = 9.0 * 1.6;
-    let caption_extent = if caption_lines.is_empty() {
+    let caption_extent = if caption_lines.is_empty() || caption_placement == "Overlay" {
         0.0
     } else {
         6.0 + 9.0 * 1.12 + (caption_lines.len() - 1) as f32 * caption_step
     };
-    let required_height = image_height + caption_extent;
+    let required_height = image_height
+        + if keep_with_caption {
+            caption_extent
+        } else {
+            0.0
+        }
+        + spacing_before.max(0.0)
+        + spacing_after.max(0.0);
     let remaining_height = pages.last().map_or(0.0, |page| {
         if page.kind != PageKind::Body {
             return 0.0;
@@ -1226,10 +1582,18 @@ fn append_inline_illustration(
         pages.push(empty_body_page());
     }
     let page = pages.last_mut().expect("body page");
-    let image_top = page
+    let content_top = page
         .lines
-        .last()
+        .iter()
+        .rev()
+        .find(|line| line.semantic_role != LayoutSemanticRole::Caption)
         .map_or(page_height - margin, |line| line.y - line.size * 1.6);
+    let content_top = content_top - spacing_before.max(0.0);
+    let image_top = if caption_placement == "Above" {
+        content_top - caption_extent
+    } else {
+        content_top
+    };
     let image_y = image_top - image_height;
     page.images.push(LayoutImage {
         asset_id,
@@ -1242,35 +1606,1268 @@ fn append_inline_illustration(
         source_left_fraction: 0.0,
         source_width_fraction: 1.0,
         rotation_degrees: 0.0,
-        contain: false,
+        opacity: 1.0,
+        fit,
+        alt_text: None,
+        decorative: true,
+        language: None,
+        reading_order: None,
+        semantic_id: None,
+        semantic_parent_id: None,
+        text_wrap: (!text_wrap.is_empty() && text_wrap != "None").then(|| text_wrap.to_owned()),
+        accessibility_role: None,
     });
 
-    let mut spacer_y = image_top;
-    while spacer_y > image_y {
-        page.lines.push(LayoutLine {
-            text: String::new(),
-            runs: Vec::new(),
-            size: trim.body_font_size_points,
-            x: margin,
-            y: spacer_y,
-            word_spacing: 0.0,
-            rotation_degrees: 0.0,
-            light_text: false,
-        });
-        spacer_y -= line_step;
+    let first_caption_y = match caption_placement {
+        "Above" => content_top - 9.0 * 0.82,
+        "Overlay" => image_y + 9.0 + caption_lines.len().saturating_sub(1) as f32 * caption_step,
+        _ => image_y - 6.0 - 9.0 * 0.82,
+    };
+    let caption_bottom = if caption_lines.is_empty() {
+        image_y
+    } else {
+        first_caption_y - caption_lines.len().saturating_sub(1) as f32 * caption_step - 9.0 * 0.30
+    };
+    if text_wrap.is_empty() || text_wrap == "None" {
+        let flow_bottom = if caption_placement == "Below" {
+            caption_bottom
+        } else {
+            image_y
+        } - spacing_after.max(0.0);
+        let mut spacer_y = content_top;
+        while spacer_y > flow_bottom {
+            page.lines.push(LayoutLine {
+                text: String::new(),
+                runs: Vec::new(),
+                size: trim.body_font_size_points,
+                x: margin,
+                y: spacer_y,
+                word_spacing: 0.0,
+                character_spacing: 0.0,
+                rotation_degrees: 0.0,
+                rotation_origin_x: None,
+                rotation_origin_y: None,
+                opacity: 1.0,
+                light_text: false,
+                fill_rgb: None,
+                semantic_role: LayoutSemanticRole::Paragraph,
+                artifact: true,
+                language: None,
+                reading_order: None,
+                semantic_id: None,
+                semantic_parent_id: None,
+                link_page: None,
+            });
+            spacer_y -= line_step;
+        }
     }
-    let first_caption_y = image_y - 6.0 - 9.0 * 0.82;
-    for (index, (text, runs)) in caption_lines.into_iter().enumerate() {
-        page.lines.push(LayoutLine {
-            text,
-            runs,
-            size: 9.0,
-            x: image_x,
-            y: first_caption_y - index as f32 * caption_step,
-            word_spacing: 0.0,
-            rotation_degrees: 0.0,
-            light_text: false,
-        });
+    let detach_caption = !keep_with_caption
+        && caption_placement == "Below"
+        && !caption_lines.is_empty()
+        && caption_bottom < margin;
+    if !detach_caption {
+        for (index, (text, runs)) in caption_lines.iter().cloned().enumerate() {
+            page.lines.push(LayoutLine {
+                text,
+                runs,
+                size: 9.0,
+                x: image_x
+                    + if caption_placement == "Overlay" {
+                        6.0
+                    } else {
+                        0.0
+                    },
+                y: first_caption_y - index as f32 * caption_step,
+                word_spacing: 0.0,
+                character_spacing: 0.0,
+                rotation_degrees: 0.0,
+                rotation_origin_x: None,
+                rotation_origin_y: None,
+                opacity: 1.0,
+                light_text: caption_placement == "Overlay",
+                fill_rgb: None,
+                semantic_role: LayoutSemanticRole::Caption,
+                artifact: true,
+                language: None,
+                reading_order: None,
+                semantic_id: None,
+                semantic_parent_id: None,
+                link_page: None,
+            });
+        }
+    }
+    if detach_caption {
+        pages.push(empty_body_page());
+        let caption_page = pages.last_mut().expect("caption page");
+        let first_y = page_height - margin - 9.0 * 0.82;
+        for (index, (text, runs)) in caption_lines.into_iter().enumerate() {
+            caption_page.lines.push(LayoutLine {
+                text,
+                runs,
+                size: 9.0,
+                x: margin,
+                y: first_y - index as f32 * caption_step,
+                word_spacing: 0.0,
+                character_spacing: 0.0,
+                rotation_degrees: 0.0,
+                rotation_origin_x: None,
+                rotation_origin_y: None,
+                opacity: 1.0,
+                light_text: false,
+                fill_rgb: None,
+                semantic_role: LayoutSemanticRole::Caption,
+                artifact: true,
+                language: None,
+                reading_order: None,
+                semantic_id: None,
+                semantic_parent_id: None,
+                link_page: None,
+            });
+        }
+    }
+}
+
+fn assign_semantic_order_since(
+    pages: &mut [LayoutPage],
+    snapshot: &[(usize, usize)],
+    block_order: i32,
+    semantic_id: &str,
+    semantic_parent_id: Option<&str>,
+) {
+    for (page_index, page) in pages.iter_mut().enumerate() {
+        let (line_start, image_start) = snapshot.get(page_index).copied().unwrap_or_default();
+        let has_new_image = image_start < page.images.len();
+        for line in page.lines.iter_mut().skip(line_start) {
+            let local_order = line.reading_order.unwrap_or_default().clamp(0, 999);
+            line.reading_order = Some(block_order * 1_000 + local_order);
+            if line.semantic_id.is_none() {
+                if line.semantic_role == LayoutSemanticRole::Caption && has_new_image {
+                    line.semantic_id = Some(format!("{semantic_id}:caption"));
+                    line.semantic_parent_id = Some(semantic_id.to_owned());
+                } else {
+                    line.semantic_id = Some(semantic_id.to_owned());
+                    line.semantic_parent_id = semantic_parent_id.map(str::to_owned);
+                }
+            }
+        }
+        for image in page.images.iter_mut().skip(image_start) {
+            let local_order = image.reading_order.unwrap_or_default().clamp(0, 999);
+            image.reading_order = Some(block_order * 1_000 + local_order);
+            image
+                .semantic_id
+                .get_or_insert_with(|| semantic_id.to_owned());
+            if image.semantic_parent_id.is_none() {
+                image.semantic_parent_id = semantic_parent_id.map(str::to_owned);
+            }
+        }
+    }
+}
+
+fn designed_page(
+    composition: &Value,
+    document: &Value,
+    trim: &crate::model::Trim,
+) -> Result<LayoutPage, Diagnostic> {
+    let variant = composition
+        .get("variants")
+        .and_then(Value::as_array)
+        .and_then(|variants| variants.first())
+        .ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_COMPOSITION_VARIANT_MISSING",
+                format!(
+                    "Designed Page '{}' has no geometry variant.",
+                    string(composition, "name")
+                ),
+            )
+        })?;
+    let scene = variant.get("scene").unwrap_or(&Value::Null);
+    let surface = scene.get("surface").unwrap_or(&Value::Null);
+    let scene_width = surface
+        .get("widthPoints")
+        .and_then(Value::as_f64)
+        .unwrap_or(trim.width_inches as f64 * 72.0) as f32;
+    let scene_height = surface
+        .get("heightPoints")
+        .and_then(Value::as_f64)
+        .unwrap_or(trim.height_inches as f64 * 72.0) as f32;
+    if !(72.0..=2_880.0).contains(&scene_width) || !(72.0..=2_880.0).contains(&scene_height) {
+        return Err(Diagnostic::error(
+            "PRESS_COMPOSITION_GEOMETRY_INVALID",
+            "Designed Page geometry must be between 1 and 40 inches per side.",
+        ));
+    }
+    let mut page = LayoutPage {
+        kind: PageKind::Designed,
+        width_points: Some(scene_width),
+        height_points: Some(scene_height),
+        lines: Vec::new(),
+        images: Vec::new(),
+        shapes: Vec::new(),
+        paint_order: Vec::new(),
+        barcode_modules: None,
+        page_label: None,
+        bookmark: None,
+    };
+    let semantic_blocks = composition
+        .get("semanticBlocks")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let flattened_objects = flatten_composition_objects(scene)?;
+    let visible_layers = scene
+        .get("layers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|layer| {
+            layer
+                .get("visible")
+                .and_then(Value::as_bool)
+                .unwrap_or(true)
+        })
+        .map(|layer| string(layer, "id"))
+        .collect::<std::collections::HashSet<_>>();
+    let content_references = flattened_objects
+        .iter()
+        .filter(|item| {
+            string(item, "kind") == "Text"
+                && item.get("visible").and_then(Value::as_bool).unwrap_or(true)
+                && visible_layers.contains(&string(item, "layerId"))
+        })
+        .flat_map(|item| {
+            item.get("contentReferences")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    validate_semantic_coverage(&semantic_blocks, &content_references)?;
+    let layer_order = scene
+        .get("layers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|layer| {
+            (
+                string(layer, "id"),
+                layer
+                    .get("order")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default(),
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut objects = flattened_objects;
+    objects.sort_by_key(|item| {
+        (
+            layer_order
+                .get(&string(item, "layerId"))
+                .copied()
+                .unwrap_or_default(),
+            item.get("zIndex")
+                .and_then(Value::as_i64)
+                .unwrap_or_default(),
+            string(item, "id"),
+        )
+    });
+    for item in objects {
+        if !item.get("visible").and_then(Value::as_bool).unwrap_or(true)
+            || !visible_layers.contains(&string(&item, "layerId"))
+        {
+            continue;
+        }
+        let bounds = item.get("bounds").unwrap_or(&Value::Null);
+        let x = bounds
+            .get("xPercent")
+            .and_then(Value::as_f64)
+            .unwrap_or_default() as f32
+            / 100.0;
+        let y = bounds
+            .get("yPercent")
+            .and_then(Value::as_f64)
+            .unwrap_or_default() as f32
+            / 100.0;
+        let width = bounds
+            .get("widthPercent")
+            .and_then(Value::as_f64)
+            .unwrap_or(100.0) as f32
+            / 100.0;
+        let height = bounds
+            .get("heightPercent")
+            .and_then(Value::as_f64)
+            .unwrap_or(100.0) as f32
+            / 100.0;
+        if x < 0.0
+            || y < 0.0
+            || width <= 0.0
+            || height <= 0.0
+            || x + width > 1.0001
+            || y + height > 1.0001
+        {
+            return Err(Diagnostic::error(
+                "PRESS_COMPOSITION_BOUNDS_INVALID",
+                format!(
+                    "Composition object '{}' lies outside its surface.",
+                    string(&item, "id")
+                ),
+            ));
+        }
+        match string(&item, "kind").as_str() {
+            "Image" => {
+                if item
+                    .get("accessibilityDecisionPending")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    return Err(Diagnostic::error(
+                        "PRESS_ALT_DECISION_REQUIRED",
+                        format!(
+                            "Image object '{}' requires alternative text or an explicit decorative decision.",
+                            string(&item, "id")
+                        ),
+                    ));
+                }
+                let asset_id = string(&item, "imageId");
+                if !asset_id.is_empty() {
+                    let image_index = page.images.len();
+                    page.images.push(LayoutImage {
+                        asset_id,
+                        x: x * scene_width,
+                        y: scene_height - (y + height) * scene_height,
+                        width: width * scene_width,
+                        height: height * scene_height,
+                        focal_x: item
+                            .get("focalXPercent")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(50.0) as f32
+                            / 100.0,
+                        focal_y: item
+                            .get("focalYPercent")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(50.0) as f32
+                            / 100.0,
+                        source_left_fraction: 0.0,
+                        source_width_fraction: 1.0,
+                        rotation_degrees: item
+                            .get("rotationDegrees")
+                            .and_then(Value::as_f64)
+                            .unwrap_or_default() as f32,
+                        opacity: item.get("opacity").and_then(Value::as_f64).unwrap_or(1.0) as f32,
+                        fit: layout_image_fit(&string(&item, "imageFit")),
+                        alt_text: item
+                            .get("altText")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                        decorative: item
+                            .get("decorative")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                        language: item
+                            .get("language")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                        reading_order: item
+                            .get("readingOrder")
+                            .and_then(Value::as_i64)
+                            .map(|value| value as i32),
+                        semantic_id: Some(string(&item, "id")),
+                        semantic_parent_id: None,
+                        text_wrap: None,
+                        accessibility_role: item
+                            .get("accessibilityRole")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                    });
+                    page.paint_order.push(LayoutPaint::Image(image_index));
+                }
+            }
+            "Text" => {
+                let size = scene_style_value(scene, &item, "fontSizePoints")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(12.0) as f32;
+                let font_family_key = scene_style_value(scene, &item, "fontFamilyKey")
+                    .and_then(Value::as_str)
+                    .unwrap_or("builtin:nunito");
+                let face = regular_face(font_family(font_family_key)).with_emphasis(
+                    scene_style_value(scene, &item, "fontWeight")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(400)
+                        >= 600,
+                    scene_style_value(scene, &item, "italic")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                );
+                let mut text = string(&item, "textBinding");
+                let source_runs = if text.is_empty() {
+                    let style = BlockStyle {
+                        size,
+                        line_height: 1.0,
+                        indent: 0.0,
+                        keep_with_next: false,
+                        alignment: "left".to_owned(),
+                        face,
+                        small_caps: false,
+                        space_before: 0.0,
+                        space_after: 0.0,
+                        semantic_role: LayoutSemanticRole::Paragraph,
+                    };
+                    let resolved = item
+                        .get("contentReferences")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .map(|reference| {
+                            resolve_content_reference_runs(
+                                document,
+                                &semantic_blocks,
+                                reference,
+                                &style,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let references = item
+                        .get("contentReferences")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    let separators = references
+                        .windows(2)
+                        .map(|pair| {
+                            if string(&pair[0], "blockId") == string(&pair[1], "blockId") {
+                                ""
+                            } else {
+                                "\n"
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    text = resolved.iter().enumerate().fold(
+                        String::new(),
+                        |mut output, (index, (value, _))| {
+                            if index > 0 {
+                                output.push_str(separators[index - 1]);
+                            }
+                            output.push_str(value);
+                            output
+                        },
+                    );
+                    let mut runs = Vec::new();
+                    for (index, (_, reference_runs)) in resolved.into_iter().enumerate() {
+                        if index > 0 {
+                            runs.push(LayoutRun {
+                                text: separators[index - 1].to_owned(),
+                                face,
+                                underline: false,
+                                strikethrough: false,
+                                baseline_shift_em: 0.0,
+                                size_scale: 1.0,
+                            });
+                        }
+                        runs.extend(reference_runs);
+                    }
+                    runs
+                } else {
+                    single_run(&text, face)
+                };
+                if text.trim().is_empty() && string(composition, "id") != "cover" {
+                    return Err(Diagnostic::error(
+                        "PRESS_COMPOSITION_TEXT_UNBOUND",
+                        format!(
+                            "Text frame '{}' is not bound to semantic content.",
+                            string(&item, "id")
+                        ),
+                    ));
+                }
+                let wrapped = wrap_layout_runs(&text, &source_runs, size, width * scene_width);
+                let line_height = size
+                    * scene_style_value(scene, &item, "lineHeight")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(1.2) as f32;
+                let character_spacing = scene_style_value(scene, &item, "letterSpacingEm")
+                    .and_then(Value::as_f64)
+                    .unwrap_or_default() as f32
+                    * size;
+                let fill_rgb = scene_style_value(scene, &item, "fillColor")
+                    .and_then(Value::as_str)
+                    .and_then(|value| parse_hex_color(Some(value)));
+                let light_text = fill_rgb.is_some_and(|[red, green, blue]| {
+                    red * 0.2126 + green * 0.7152 + blue * 0.0722 >= 0.6
+                });
+                let text_height = wrapped.len() as f32 * line_height;
+                if text_height > height * scene_height + 0.01 {
+                    return Err(Diagnostic::error(
+                        "PRESS_COMPOSITION_TEXT_OVERFLOW",
+                        format!("Text frame '{}' overflows its bounds.", string(&item, "id")),
+                    ));
+                }
+                let object_opacity =
+                    item.get("opacity").and_then(Value::as_f64).unwrap_or(1.0) as f32;
+                if let Some(background_rgb) = scene_style_value(scene, &item, "backgroundColor")
+                    .and_then(Value::as_str)
+                    .and_then(|value| parse_hex_color(Some(value)))
+                {
+                    let shape_index = page.shapes.len();
+                    page.shapes.push(LayoutShape {
+                        kind: LayoutShapeKind::Rectangle,
+                        x: x * scene_width,
+                        y: scene_height - (y + height) * scene_height,
+                        width: width * scene_width,
+                        height: height * scene_height,
+                        fill_rgb: Some(background_rgb),
+                        stroke_rgb: None,
+                        stroke_width: 0.0,
+                        opacity: object_opacity
+                            * scene_style_value(scene, &item, "backgroundOpacity")
+                                .and_then(Value::as_f64)
+                                .unwrap_or(1.0) as f32,
+                        rotation_degrees: item
+                            .get("rotationDegrees")
+                            .and_then(Value::as_f64)
+                            .unwrap_or_default() as f32,
+                    });
+                    page.paint_order.push(LayoutPaint::Shape(shape_index));
+                }
+                let stroke_width = scene_style_value(scene, &item, "strokeWidthPoints")
+                    .and_then(Value::as_f64)
+                    .unwrap_or_default() as f32;
+                let stroke_rgb = scene_style_value(scene, &item, "strokeColor")
+                    .and_then(Value::as_str)
+                    .and_then(|value| parse_hex_color(Some(value)));
+                if stroke_width > 0.0 && stroke_rgb.is_some() {
+                    let shape_index = page.shapes.len();
+                    page.shapes.push(LayoutShape {
+                        kind: LayoutShapeKind::Rectangle,
+                        x: x * scene_width,
+                        y: scene_height - (y + height) * scene_height,
+                        width: width * scene_width,
+                        height: height * scene_height,
+                        fill_rgb: None,
+                        stroke_rgb,
+                        stroke_width,
+                        opacity: object_opacity,
+                        rotation_degrees: item
+                            .get("rotationDegrees")
+                            .and_then(Value::as_f64)
+                            .unwrap_or_default() as f32,
+                    });
+                    page.paint_order.push(LayoutPaint::Shape(shape_index));
+                }
+                let vertical_offset = match scene_style_value(scene, &item, "verticalAlignment")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Top")
+                {
+                    "Center" => (height * scene_height - text_height) / 2.0,
+                    "Bottom" => height * scene_height - text_height,
+                    _ => 0.0,
+                };
+                for (line_index, (line_text, runs)) in wrapped.into_iter().enumerate() {
+                    let measured_width = measured_run_width(&runs, size)
+                        + character_spacing * line_text.chars().count().saturating_sub(1) as f32;
+                    if measured_width > width * scene_width + 0.01 {
+                        return Err(Diagnostic::error(
+                            "PRESS_COMPOSITION_TEXT_OVERFLOW",
+                            format!(
+                                "Text frame '{}' overflows its bounds after letter spacing.",
+                                string(&item, "id")
+                            ),
+                        ));
+                    }
+                    let line_x = x * scene_width
+                        + match scene_style_value(scene, &item, "textAlignment")
+                            .and_then(Value::as_str)
+                            .unwrap_or("Start")
+                        {
+                            "Center" => (width * scene_width - measured_width) / 2.0,
+                            "End" => width * scene_width - measured_width,
+                            _ => 0.0,
+                        };
+                    let line_y = scene_height
+                        - y * scene_height
+                        - vertical_offset
+                        - size
+                        - line_index as f32 * line_height;
+                    let shadow = scene_style_value(scene, &item, "textShadow")
+                        .and_then(Value::as_str)
+                        .unwrap_or("None");
+                    if shadow != "None" {
+                        let shadow_index = page.lines.len();
+                        let shadow_offset = if shadow == "Strong" { 2.0 } else { 1.0 };
+                        page.lines.push(LayoutLine {
+                            text: line_text.clone(),
+                            runs: runs.clone(),
+                            size,
+                            x: line_x + shadow_offset,
+                            y: line_y - shadow_offset,
+                            word_spacing: 0.0,
+                            character_spacing,
+                            rotation_degrees: item
+                                .get("rotationDegrees")
+                                .and_then(Value::as_f64)
+                                .unwrap_or_default()
+                                as f32,
+                            rotation_origin_x: Some((x + width / 2.0) * scene_width),
+                            rotation_origin_y: Some(
+                                scene_height - (y + height / 2.0) * scene_height,
+                            ),
+                            opacity: item.get("opacity").and_then(Value::as_f64).unwrap_or(1.0)
+                                as f32
+                                * if shadow == "Glow" { 0.35 } else { 0.55 },
+                            light_text: false,
+                            fill_rgb: Some([0.0, 0.0, 0.0]),
+                            semantic_role: LayoutSemanticRole::Paragraph,
+                            artifact: true,
+                            language: None,
+                            reading_order: None,
+                            semantic_id: None,
+                            semantic_parent_id: None,
+                            link_page: None,
+                        });
+                        page.paint_order.push(LayoutPaint::Line(shadow_index));
+                    }
+                    let paint_index = page.lines.len();
+                    page.lines.push(LayoutLine {
+                        text: line_text,
+                        runs,
+                        size,
+                        x: line_x,
+                        y: line_y,
+                        word_spacing: 0.0,
+                        character_spacing,
+                        rotation_degrees: item
+                            .get("rotationDegrees")
+                            .and_then(Value::as_f64)
+                            .unwrap_or_default() as f32,
+                        rotation_origin_x: Some((x + width / 2.0) * scene_width),
+                        rotation_origin_y: Some(scene_height - (y + height / 2.0) * scene_height),
+                        opacity: item.get("opacity").and_then(Value::as_f64).unwrap_or(1.0) as f32,
+                        light_text,
+                        fill_rgb,
+                        semantic_role: layout_semantic_role(&string(&item, "semanticRole")),
+                        artifact: string(&item, "semanticRole") == "Artifact",
+                        language: item
+                            .get("language")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                        reading_order: item
+                            .get("readingOrder")
+                            .and_then(Value::as_i64)
+                            .map(|value| value as i32),
+                        semantic_id: Some(string(&item, "id")),
+                        semantic_parent_id: None,
+                        link_page: None,
+                    });
+                    page.paint_order.push(LayoutPaint::Line(paint_index));
+                }
+            }
+            kind @ ("Rectangle" | "Ellipse" | "Line") => {
+                let shape_index = page.shapes.len();
+                page.shapes.push(LayoutShape {
+                    kind: match kind {
+                        "Ellipse" => LayoutShapeKind::Ellipse,
+                        "Line" => LayoutShapeKind::Line,
+                        _ => LayoutShapeKind::Rectangle,
+                    },
+                    x: x * scene_width,
+                    y: scene_height - (y + height) * scene_height,
+                    width: width * scene_width,
+                    height: height * scene_height,
+                    fill_rgb: parse_hex_color(
+                        scene_style_value(scene, &item, "fillColor").and_then(Value::as_str),
+                    ),
+                    stroke_rgb: parse_hex_color(
+                        scene_style_value(scene, &item, "strokeColor").and_then(Value::as_str),
+                    ),
+                    stroke_width: scene_style_value(scene, &item, "strokeWidthPoints")
+                        .and_then(Value::as_f64)
+                        .unwrap_or_default() as f32,
+                    opacity: item
+                        .get("opacity")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(1.0)
+                        .clamp(0.0, 1.0) as f32,
+                    rotation_degrees: item
+                        .get("rotationDegrees")
+                        .and_then(Value::as_f64)
+                        .unwrap_or_default() as f32,
+                });
+                page.paint_order.push(LayoutPaint::Shape(shape_index));
+            }
+            _ => {}
+        }
+    }
+    Ok(page)
+}
+
+fn flatten_composition_objects(scene: &Value) -> Result<Vec<Value>, Diagnostic> {
+    let source = scene
+        .get("objects")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let groups = source
+        .iter()
+        .filter(|item| string(item, "kind") == "Group")
+        .map(|item| (string(item, "id"), item.clone()))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut result = Vec::new();
+    for mut item in source {
+        if string(&item, "kind") == "Group" {
+            continue;
+        }
+        let group_id = string(&item, "groupId");
+        if !group_id.is_empty() {
+            let group = groups.get(&group_id).ok_or_else(|| {
+                Diagnostic::error(
+                    "PRESS_COMPOSITION_GROUP_INVALID",
+                    format!(
+                        "Composition object '{}' references a missing group.",
+                        string(&item, "id")
+                    ),
+                )
+            })?;
+            let group_bounds = group.get("bounds").unwrap_or(&Value::Null);
+            let child_bounds = item.get("bounds").unwrap_or(&Value::Null);
+            let gx = group_bounds
+                .get("xPercent")
+                .and_then(Value::as_f64)
+                .unwrap_or_default();
+            let gy = group_bounds
+                .get("yPercent")
+                .and_then(Value::as_f64)
+                .unwrap_or_default();
+            let gw = group_bounds
+                .get("widthPercent")
+                .and_then(Value::as_f64)
+                .unwrap_or(100.0);
+            let gh = group_bounds
+                .get("heightPercent")
+                .and_then(Value::as_f64)
+                .unwrap_or(100.0);
+            let cx = child_bounds
+                .get("xPercent")
+                .and_then(Value::as_f64)
+                .unwrap_or_default();
+            let cy = child_bounds
+                .get("yPercent")
+                .and_then(Value::as_f64)
+                .unwrap_or_default();
+            let cw = child_bounds
+                .get("widthPercent")
+                .and_then(Value::as_f64)
+                .unwrap_or(100.0);
+            let ch = child_bounds
+                .get("heightPercent")
+                .and_then(Value::as_f64)
+                .unwrap_or(100.0);
+            let group_rotation = group
+                .get("rotationDegrees")
+                .and_then(Value::as_f64)
+                .unwrap_or_default();
+            let rotation = item
+                .get("rotationDegrees")
+                .and_then(Value::as_f64)
+                .unwrap_or_default()
+                + group_rotation;
+            let surface = scene.get("surface").unwrap_or(&Value::Null);
+            let surface_width = surface
+                .get("widthPoints")
+                .and_then(Value::as_f64)
+                .filter(|value| *value > 0.0)
+                .unwrap_or(100.0);
+            let surface_height = surface
+                .get("heightPoints")
+                .and_then(Value::as_f64)
+                .filter(|value| *value > 0.0)
+                .unwrap_or(100.0);
+            let width = cw / 100.0 * gw;
+            let height = ch / 100.0 * gh;
+            let child_center_x = (gx + (cx + cw / 2.0) / 100.0 * gw) / 100.0 * surface_width;
+            let child_center_y = (gy + (cy + ch / 2.0) / 100.0 * gh) / 100.0 * surface_height;
+            let group_center_x = (gx + gw / 2.0) / 100.0 * surface_width;
+            let group_center_y = (gy + gh / 2.0) / 100.0 * surface_height;
+            let angle = group_rotation.to_radians();
+            let delta_x = child_center_x - group_center_x;
+            let delta_y = child_center_y - group_center_y;
+            let rotated_center_x = group_center_x + delta_x * angle.cos() - delta_y * angle.sin();
+            let rotated_center_y = group_center_y + delta_x * angle.sin() + delta_y * angle.cos();
+            let x = (rotated_center_x - width / 200.0 * surface_width) / surface_width * 100.0;
+            let y = (rotated_center_y - height / 200.0 * surface_height) / surface_height * 100.0;
+            let opacity = item.get("opacity").and_then(Value::as_f64).unwrap_or(1.0)
+                * group.get("opacity").and_then(Value::as_f64).unwrap_or(1.0);
+            let visible = item.get("visible").and_then(Value::as_bool).unwrap_or(true)
+                && group
+                    .get("visible")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true);
+            let z_index = item
+                .get("zIndex")
+                .and_then(Value::as_i64)
+                .unwrap_or_default()
+                + group
+                    .get("zIndex")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default();
+            let object = item.as_object_mut().ok_or_else(|| {
+                Diagnostic::error(
+                    "PRESS_COMPOSITION_OBJECT_INVALID",
+                    "Composition object must be an object.",
+                )
+            })?;
+            object.insert(
+                "bounds".to_owned(),
+                serde_json::json!({
+                    "xPercent": x,
+                    "yPercent": y,
+                    "widthPercent": width,
+                    "heightPercent": height,
+                }),
+            );
+            object.insert("rotationDegrees".to_owned(), Value::from(rotation));
+            object.insert("opacity".to_owned(), Value::from(opacity));
+            object.insert("visible".to_owned(), Value::from(visible));
+            object.insert("zIndex".to_owned(), Value::from(z_index));
+        }
+        result.push(item);
+    }
+    Ok(result)
+}
+
+fn resolve_content_reference(
+    semantic_blocks: &[Value],
+    reference: &Value,
+) -> Result<String, Diagnostic> {
+    let block_id = string(reference, "blockId");
+    let block = semantic_blocks
+        .iter()
+        .find(|block| string(block, "id") == block_id)
+        .ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_COMPOSITION_REFERENCE_MISSING",
+                format!("Composition content reference '{block_id}' does not exist."),
+            )
+        })?;
+    let text = display_block_text(block);
+    let utf16_len = text.encode_utf16().count();
+    let start = reference
+        .get("startOffset")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or(0);
+    let end = reference
+        .get("endOffset")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or(utf16_len);
+    if end <= start || end > utf16_len {
+        return Err(Diagnostic::error(
+            "PRESS_COMPOSITION_RANGE_INVALID",
+            format!("Composition content reference '{block_id}' has an invalid range."),
+        ));
+    }
+    let start_byte = utf16_offset_to_byte(&text, start).ok_or_else(|| {
+        Diagnostic::error(
+            "PRESS_COMPOSITION_RANGE_INVALID",
+            format!("Composition content reference '{block_id}' splits a Unicode character."),
+        )
+    })?;
+    let end_byte = utf16_offset_to_byte(&text, end).ok_or_else(|| {
+        Diagnostic::error(
+            "PRESS_COMPOSITION_RANGE_INVALID",
+            format!("Composition content reference '{block_id}' splits a Unicode character."),
+        )
+    })?;
+    Ok(text[start_byte..end_byte].to_owned())
+}
+
+fn resolve_content_reference_runs(
+    document: &Value,
+    semantic_blocks: &[Value],
+    reference: &Value,
+    style: &BlockStyle,
+) -> Result<(String, Vec<LayoutRun>), Diagnostic> {
+    let text = resolve_content_reference(semantic_blocks, reference)?;
+    let block_id = string(reference, "blockId");
+    let block = semantic_blocks
+        .iter()
+        .find(|block| string(block, "id") == block_id)
+        .ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_COMPOSITION_REFERENCE_MISSING",
+                format!("Composition content reference '{block_id}' does not exist."),
+            )
+        })?;
+    let full_text = display_block_text(block);
+    let start = reference
+        .get("startOffset")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or(0);
+    let end = reference
+        .get("endOffset")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or_else(|| full_text.encode_utf16().count());
+    let mut cursor = 0usize;
+    let mut sliced_spans = Vec::new();
+    for span in block
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let source = span.get("text").and_then(Value::as_str).unwrap_or("");
+        let span_len = source.encode_utf16().count();
+        let span_start = cursor;
+        let span_end = cursor + span_len;
+        cursor = span_end;
+        let slice_start = start.max(span_start);
+        let slice_end = end.min(span_end);
+        if slice_end <= slice_start {
+            continue;
+        }
+        let relative_start = slice_start - span_start;
+        let relative_end = slice_end - span_start;
+        let start_byte = utf16_offset_to_byte(source, relative_start).ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_COMPOSITION_RANGE_INVALID",
+                format!("Composition content reference '{block_id}' splits a Unicode character."),
+            )
+        })?;
+        let end_byte = utf16_offset_to_byte(source, relative_end).ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_COMPOSITION_RANGE_INVALID",
+                format!("Composition content reference '{block_id}' splits a Unicode character."),
+            )
+        })?;
+        let mut sliced = span.clone();
+        sliced["text"] = Value::String(source[start_byte..end_byte].to_owned());
+        sliced_spans.push(sliced);
+    }
+    let mut sliced_block = block.clone();
+    sliced_block["content"] = Value::Array(sliced_spans);
+    Ok((text, block_runs(document, &sliced_block, style)))
+}
+
+fn validate_semantic_coverage(
+    semantic_blocks: &[Value],
+    references: &[Value],
+) -> Result<(), Diagnostic> {
+    let mut ranges = std::collections::BTreeMap::<String, Vec<(usize, usize)>>::new();
+    for reference in references {
+        let block_id = string(reference, "blockId");
+        let block = semantic_blocks
+            .iter()
+            .find(|block| string(block, "id") == block_id)
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    "PRESS_COMPOSITION_REFERENCE_MISSING",
+                    format!("Composition content reference '{block_id}' does not exist."),
+                )
+            })?;
+        let text = display_block_text(block);
+        let utf16_len = text.encode_utf16().count();
+        let start = reference
+            .get("startOffset")
+            .and_then(Value::as_u64)
+            .map(|value| value as usize)
+            .unwrap_or(0);
+        let end = reference
+            .get("endOffset")
+            .and_then(Value::as_u64)
+            .map(|value| value as usize)
+            .unwrap_or(utf16_len);
+        resolve_content_reference(semantic_blocks, reference)?;
+        let entry = ranges.entry(block_id.clone()).or_default();
+        if entry
+            .iter()
+            .any(|(existing_start, existing_end)| start < *existing_end && *existing_start < end)
+        {
+            return Err(Diagnostic::error(
+                "PRESS_COMPOSITION_RANGE_OVERLAP",
+                format!("Composition content reference '{block_id}' overlaps another frame."),
+            ));
+        }
+        entry.push((start, end));
+    }
+    let mut unplaced = 0;
+    for block in semantic_blocks {
+        let text = display_block_text(block);
+        if text.trim().is_empty() {
+            continue;
+        }
+        let block_id = string(block, "id");
+        let mut block_ranges = ranges.remove(&block_id).unwrap_or_default();
+        block_ranges.sort_unstable();
+        let mut cursor = 0;
+        let mut has_gap = false;
+        for (start, end) in block_ranges {
+            let start_byte = utf16_offset_to_byte(&text, start).expect("validated reference start");
+            let cursor_byte = utf16_offset_to_byte(&text, cursor).expect("validated cursor");
+            if !text[cursor_byte..start_byte].trim().is_empty() {
+                has_gap = true;
+                break;
+            }
+            cursor = end;
+        }
+        let cursor_byte = utf16_offset_to_byte(&text, cursor).expect("validated cursor");
+        if has_gap || !text[cursor_byte..].trim().is_empty() {
+            unplaced += 1;
+        }
+    }
+    if unplaced > 0 {
+        return Err(Diagnostic::error(
+            "PRESS_COMPOSITION_CONTENT_UNPLACED",
+            format!("Designed Page contains {unplaced} unplaced semantic content block(s)."),
+        ));
+    }
+    Ok(())
+}
+
+fn utf16_offset_to_byte(text: &str, offset: usize) -> Option<usize> {
+    if offset == 0 {
+        return Some(0);
+    }
+    let mut utf16_offset = 0;
+    for (byte_index, character) in text.char_indices() {
+        if utf16_offset == offset {
+            return Some(byte_index);
+        }
+        utf16_offset += character.len_utf16();
+        if utf16_offset > offset {
+            return None;
+        }
+    }
+    (utf16_offset == offset).then_some(text.len())
+}
+
+fn scene_style_value<'a>(scene: &'a Value, item: &'a Value, key: &str) -> Option<&'a Value> {
+    item.get("styleId")
+        .and_then(Value::as_str)
+        .and_then(|style_id| {
+            scene
+                .get("styles")
+                .and_then(Value::as_array)
+                .and_then(|styles| styles.iter().find(|style| string(style, "id") == style_id))
+        })
+        .and_then(|style| style.get(key))
+        .or_else(|| item.get(key))
+}
+
+fn parse_hex_color(value: Option<&str>) -> Option<[f32; 3]> {
+    let value = value?.trim();
+    if value.eq_ignore_ascii_case("transparent") {
+        return None;
+    }
+    let hex = value.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let red = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let green = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let blue = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some([
+        red as f32 / 255.0,
+        green as f32 / 255.0,
+        blue as f32 / 255.0,
+    ])
+}
+
+fn designed_pages(
+    composition: &Value,
+    document: &Value,
+    trim: &crate::model::Trim,
+    digital: bool,
+    allow_independent_page: bool,
+) -> Result<Vec<LayoutPage>, Diagnostic> {
+    let page = designed_page(composition, document, trim)?;
+    let trim_width = trim.width_inches * 72.0;
+    let trim_height = trim.height_inches * 72.0;
+    let width = page.width_points.unwrap_or(trim_width);
+    let height = page.height_points.unwrap_or(trim_height);
+    let variant = composition
+        .get("variants")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first());
+    let surface_kind = variant
+        .and_then(|item| item.get("scene"))
+        .and_then(|scene| scene.get("surface"))
+        .map(|surface| string(surface, "kind"))
+        .unwrap_or_default();
+    if digital {
+        if !allow_independent_page
+            && surface_kind == "FacingSpread"
+            && (width - trim_width * 2.0).abs() <= 0.02
+            && (height - trim_height).abs() <= 0.02
+        {
+            validate_facing_spread_text(&page, trim_width)?;
+            return Ok(split_facing_spread(page, trim_width));
+        }
+        if !allow_independent_page
+            && ((width - trim_width).abs() > 0.02 || (height - trim_height).abs() > 0.02)
+        {
+            return Err(Diagnostic::error(
+                "PRESS_DIGITAL_PAGE_OVERRIDE_DISABLED",
+                "This Digital PDF edition uses uniform page geometry; enable Designed Page overrides for an independent page box.",
+            ));
+        }
+        return Ok(vec![page]);
+    }
+    if (width - trim_width).abs() <= 0.02 && (height - trim_height).abs() <= 0.02 {
+        return Ok(vec![LayoutPage {
+            width_points: None,
+            height_points: None,
+            ..page
+        }]);
+    }
+    if surface_kind == "FacingSpread"
+        && (width - trim_width * 2.0).abs() <= 0.02
+        && (height - trim_height).abs() <= 0.02
+    {
+        validate_facing_spread_text(&page, trim_width)?;
+        return Ok(split_facing_spread(page, trim_width));
+    }
+    Err(Diagnostic::error(
+        "PRESS_PRINT_PAGE_GEOMETRY_INCONSISTENT",
+        "Print Designed Pages must be one trim-sized leaf or a two-leaf facing spread.",
+    ))
+}
+
+fn split_facing_spread(page: LayoutPage, leaf_width: f32) -> Vec<LayoutPage> {
+    [0.0, leaf_width]
+        .into_iter()
+        .map(|leaf_start| {
+            let mut line_map = vec![None; page.lines.len()];
+            let lines = page
+                .lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| line.x >= leaf_start && line.x < leaf_start + leaf_width)
+                .map(|(index, line)| {
+                    let mapped = line_map.iter().flatten().count();
+                    line_map[index] = Some(mapped);
+                    LayoutLine {
+                        x: line.x - leaf_start,
+                        rotation_origin_x: line.rotation_origin_x.map(|value| value - leaf_start),
+                        ..line.clone()
+                    }
+                })
+                .collect();
+            let mut shape_map = vec![None; page.shapes.len()];
+            let shapes = page
+                .shapes
+                .iter()
+                .enumerate()
+                .filter(|(_, shape)| {
+                    shape.x < leaf_start + leaf_width && shape.x + shape.width > leaf_start
+                })
+                .map(|(index, shape)| {
+                    let mapped = shape_map.iter().flatten().count();
+                    shape_map[index] = Some(mapped);
+                    LayoutShape {
+                        x: shape.x - leaf_start,
+                        ..shape.clone()
+                    }
+                })
+                .collect();
+            let mut image_map = vec![None; page.images.len()];
+            let mut leaf = LayoutPage {
+                kind: page.kind,
+                width_points: None,
+                height_points: None,
+                lines,
+                images: Vec::new(),
+                shapes,
+                paint_order: Vec::new(),
+                barcode_modules: None,
+                page_label: None,
+                bookmark: None,
+            };
+            for (index, image) in page.images.iter().enumerate() {
+                let left = image.x.max(leaf_start);
+                let right = (image.x + image.width).min(leaf_start + leaf_width);
+                if right <= left {
+                    continue;
+                }
+                let consumed_start = (left - image.x) / image.width;
+                let consumed_width = (right - left) / image.width;
+                image_map[index] = Some(leaf.images.len());
+                leaf.images.push(LayoutImage {
+                    x: left - leaf_start,
+                    width: right - left,
+                    source_left_fraction: image.source_left_fraction
+                        + consumed_start * image.source_width_fraction,
+                    source_width_fraction: consumed_width * image.source_width_fraction,
+                    ..image.clone()
+                });
+            }
+            leaf.paint_order = page
+                .paint_order
+                .iter()
+                .filter_map(|paint| match *paint {
+                    LayoutPaint::Shape(index) => shape_map[index].map(LayoutPaint::Shape),
+                    LayoutPaint::Image(index) => image_map[index].map(LayoutPaint::Image),
+                    LayoutPaint::Line(index) => line_map[index].map(LayoutPaint::Line),
+                })
+                .collect();
+            leaf
+        })
+        .collect()
+}
+
+fn validate_facing_spread_text(page: &LayoutPage, gutter_x: f32) -> Result<(), Diagnostic> {
+    if page.lines.iter().filter(|line| !line.artifact).any(|line| {
+        let width = measured_run_width(&line.runs, line.size)
+            + line.word_spacing
+                * line
+                    .text
+                    .chars()
+                    .filter(|character| character.is_whitespace())
+                    .count() as f32
+            + line.character_spacing * line.text.chars().count().saturating_sub(1) as f32;
+        let height = line.size * 1.2;
+        let origin_x = line.rotation_origin_x.unwrap_or(line.x);
+        let origin_y = line.rotation_origin_y.unwrap_or(line.y);
+        let radians = line.rotation_degrees.to_radians();
+        let (sin, cos) = radians.sin_cos();
+        let mut minimum_x = f32::INFINITY;
+        let mut maximum_x = f32::NEG_INFINITY;
+        for (x, y) in [
+            (line.x, line.y - height),
+            (line.x + width, line.y - height),
+            (line.x, line.y),
+            (line.x + width, line.y),
+        ] {
+            let rotated_x = origin_x + (x - origin_x) * cos - (y - origin_y) * sin;
+            minimum_x = minimum_x.min(rotated_x);
+            maximum_x = maximum_x.max(rotated_x);
+        }
+        minimum_x < gutter_x - 0.01 && maximum_x > gutter_x + 0.01
+    }) {
+        return Err(Diagnostic::error(
+            "PRESS_FACING_SPREAD_TEXT_CROSSES_GUTTER",
+            "A semantic text line crosses the facing-spread gutter. Move or resize the text frame so each line belongs to one leaf.",
+        ));
+    }
+    Ok(())
+}
+
+fn layout_semantic_role(value: &str) -> LayoutSemanticRole {
+    match value {
+        "Heading1" => LayoutSemanticRole::Heading1,
+        "Heading2" => LayoutSemanticRole::Heading2,
+        "Heading3" => LayoutSemanticRole::Heading3,
+        "Caption" => LayoutSemanticRole::Caption,
+        "Credit" => LayoutSemanticRole::Credit,
+        _ => LayoutSemanticRole::Paragraph,
+    }
+}
+
+fn layout_image_fit(value: &str) -> LayoutImageFit {
+    match value {
+        "Contain" => LayoutImageFit::Contain,
+        "Fill" => LayoutImageFit::Fill,
+        _ => LayoutImageFit::Cover,
     }
 }
 
@@ -1294,6 +2891,144 @@ fn append_matter(
             .into_iter()
             .flatten()
         {
+            if string(block, "type").eq_ignore_ascii_case("Figure") {
+                let presentation = block.get("presentation").unwrap_or(&Value::Null);
+                let placement = string(presentation, "placement");
+                let start_on_new_page = presentation
+                    .get("startOnNewPage")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let width_percent = if matches!(placement.as_str(), "FullWidth" | "FullBleed") {
+                    100.0
+                } else {
+                    presentation
+                        .get("widthPercent")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(100.0) as f32
+                };
+                let focal_x = presentation
+                    .get("focalXPercent")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(50.0) as f32;
+                let focal_y = presentation
+                    .get("focalYPercent")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(50.0) as f32;
+                let alignment = match string(presentation, "alignment").as_str() {
+                    "Start" => "left",
+                    "End" => "right",
+                    _ => "center",
+                };
+                let caption_placement = string(presentation, "captionPlacement");
+                let decorative = block
+                    .get("decorative")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let alt_text = block
+                    .get("altText")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let language = block
+                    .get("language")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let accessibility_role = block
+                    .get("accessibilityRole")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let dedicated = matches!(placement.as_str(), "DedicatedPage" | "FullBleed");
+                if start_on_new_page && !dedicated {
+                    pages.push(empty_body_page());
+                }
+                if dedicated {
+                    let mut page = dedicated_figure_page_with_layout(
+                        trim,
+                        &string(block, "caption"),
+                        string(block, "assetId"),
+                        width_percent,
+                        focal_x,
+                        focal_y,
+                        alignment,
+                    );
+                    if let Some(image) = page.images.first_mut() {
+                        image.alt_text.clone_from(&alt_text);
+                        image.decorative = decorative;
+                        image.language.clone_from(&language);
+                        image.fit = layout_image_fit(&string(presentation, "fit"));
+                        image.accessibility_role.clone_from(&accessibility_role);
+                        if placement == "FullBleed" {
+                            let bleed = trim.bleed_inches * 72.0;
+                            image.x = -bleed;
+                            image.y = -bleed;
+                            image.width = trim.width_inches * 72.0 + bleed * 2.0;
+                            image.height = trim.height_inches * 72.0 + bleed * 2.0;
+                        }
+                    }
+                    if caption_placement == "Hidden" {
+                        page.lines.clear();
+                    } else if caption_placement == "Above" {
+                        let top = trim.height_inches * 72.0 - trim.margin_inches * 72.0;
+                        for (index, line) in page.lines.iter_mut().enumerate() {
+                            line.y = top - index as f32 * 9.0 * 1.6;
+                        }
+                    } else if caption_placement == "Overlay"
+                        && let Some(image) = page.images.first()
+                    {
+                        for (index, line) in page.lines.iter_mut().enumerate() {
+                            line.y = image.y + 12.0 + index as f32 * 9.0 * 1.6;
+                            line.light_text = true;
+                        }
+                    }
+                    for line in &mut page.lines {
+                        line.language.clone_from(&language);
+                        line.artifact = false;
+                    }
+                    pages.push(page);
+                } else {
+                    append_inline_illustration(
+                        pages,
+                        trim,
+                        &string(block, "caption"),
+                        string(block, "assetId"),
+                        width_percent,
+                        focal_x,
+                        focal_y,
+                        alignment,
+                        &string(presentation, "textWrap"),
+                        layout_image_fit(&string(presentation, "fit")),
+                        presentation
+                            .get("spacingBeforePoints")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(6.0) as f32,
+                        presentation
+                            .get("spacingAfterPoints")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(6.0) as f32,
+                        &caption_placement,
+                        presentation
+                            .get("keepWithCaption")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(true),
+                    );
+                    if let Some(image) = pages.last_mut().and_then(|page| page.images.last_mut()) {
+                        image.alt_text = alt_text;
+                        image.decorative = decorative;
+                        image.language = language.clone();
+                        image.accessibility_role = accessibility_role;
+                    }
+                    if let Some(page) = pages.last_mut() {
+                        for line in page
+                            .lines
+                            .iter_mut()
+                            .filter(|line| line.semantic_role == LayoutSemanticRole::Caption)
+                        {
+                            line.language.clone_from(&language);
+                            line.artifact = false;
+                        }
+                    }
+                }
+                continue;
+            }
             let text = display_block_text(block);
             let style = block_style(document, block, trim);
             let runs = if string(block, "type").eq_ignore_ascii_case("SceneBreak")
@@ -1303,7 +3038,14 @@ fn append_matter(
             } else {
                 block_runs(document, block, &style)
             };
-            append_styled_runs(pages, &text, &runs, trim, &style);
+            append_styled_runs(
+                pages,
+                &text,
+                &runs,
+                trim,
+                &style,
+                block.get("language").and_then(Value::as_str),
+            );
         }
     }
 }
@@ -1320,8 +3062,20 @@ fn centered_page(title: &str, subtitle: &str, trim: &crate::model::Trim) -> Layo
             x: width * 0.16,
             y: height * 0.62,
             word_spacing: 0.0,
+            character_spacing: 0.0,
             rotation_degrees: 0.0,
+            rotation_origin_x: None,
+            rotation_origin_y: None,
+            opacity: 1.0,
             light_text: false,
+            fill_rgb: None,
+            semantic_role: LayoutSemanticRole::Paragraph,
+            artifact: true,
+            language: None,
+            reading_order: None,
+            semantic_id: None,
+            semantic_parent_id: None,
+            link_page: None,
         });
     }
     if !subtitle.is_empty() {
@@ -1332,16 +3086,33 @@ fn centered_page(title: &str, subtitle: &str, trim: &crate::model::Trim) -> Layo
             x: width * 0.16,
             y: height * 0.54,
             word_spacing: 0.0,
+            character_spacing: 0.0,
             rotation_degrees: 0.0,
+            rotation_origin_x: None,
+            rotation_origin_y: None,
+            opacity: 1.0,
             light_text: false,
+            fill_rgb: None,
+            semantic_role: LayoutSemanticRole::Paragraph,
+            artifact: false,
+            language: None,
+            reading_order: None,
+            semantic_id: None,
+            semantic_parent_id: None,
+            link_page: None,
         });
     }
     LayoutPage {
         kind: PageKind::Body,
+        width_points: None,
+        height_points: None,
         lines,
         images: Vec::new(),
+        shapes: Vec::new(),
+        paint_order: Vec::new(),
         barcode_modules: None,
         page_label: None,
+        bookmark: None,
     }
 }
 
@@ -1363,8 +3134,20 @@ fn add_running_heads(pages: &mut [LayoutPage], title: &str, trim: &crate::model:
             x,
             y,
             word_spacing: 0.0,
+            character_spacing: 0.0,
             rotation_degrees: 0.0,
+            rotation_origin_x: None,
+            rotation_origin_y: None,
+            opacity: 1.0,
             light_text: false,
+            fill_rgb: None,
+            semantic_role: LayoutSemanticRole::Paragraph,
+            artifact: true,
+            language: None,
+            reading_order: None,
+            semantic_id: None,
+            semantic_parent_id: None,
+            link_page: None,
         });
     }
 }
@@ -1375,6 +3158,7 @@ fn append_placement_pages(
     target_id: &str,
     kinds: &[&str],
     trim: &crate::model::Trim,
+    isolate_flowing_boundary: bool,
 ) {
     for placement in document
         .get("placements")
@@ -1386,11 +3170,152 @@ fn append_placement_pages(
                 && kinds.contains(&string(placement, "placementKind").as_str())
         })
     {
-        pages.push(picture_page(
+        let presentation = placement.get("presentation").unwrap_or(&Value::Null);
+        let placement_intent = match string(presentation, "placement") {
+            value if value.is_empty() => "DedicatedPage".to_owned(),
+            value => value,
+        };
+        let caption_placement = string(presentation, "captionPlacement");
+        let width_percent = if matches!(placement_intent.as_str(), "FullWidth" | "FullBleed") {
+            100.0
+        } else {
+            presentation
+                .get("widthPercent")
+                .and_then(Value::as_f64)
+                .unwrap_or(100.0) as f32
+        };
+        let alignment = match string(presentation, "alignment").as_str() {
+            "Start" => "left",
+            "End" => "right",
+            _ => "center",
+        };
+        let focal_x = presentation
+            .get("focalXPercent")
+            .and_then(Value::as_f64)
+            .unwrap_or(50.0) as f32;
+        let focal_y = presentation
+            .get("focalYPercent")
+            .and_then(Value::as_f64)
+            .unwrap_or(50.0) as f32;
+        let dedicated = matches!(placement_intent.as_str(), "DedicatedPage" | "FullBleed");
+        if dedicated {
+            let mut page = dedicated_figure_page_with_layout(
+                trim,
+                &string(placement, "caption"),
+                string(placement, "assetId"),
+                width_percent,
+                focal_x,
+                focal_y,
+                alignment,
+            );
+            if caption_placement == "Hidden" {
+                page.lines.clear();
+            } else if caption_placement == "Above" {
+                let top = trim.height_inches * 72.0 - trim.margin_inches * 72.0;
+                for (index, line) in page.lines.iter_mut().enumerate() {
+                    line.y = top - index as f32 * 9.0 * 1.6;
+                }
+            } else if caption_placement == "Overlay"
+                && let Some(image) = page.images.first()
+            {
+                for (index, line) in page.lines.iter_mut().enumerate() {
+                    line.y = image.y + 12.0 + index as f32 * 9.0 * 1.6;
+                    line.light_text = true;
+                }
+            }
+            if let Some(image) = page.images.first_mut() {
+                if placement_intent == "FullBleed" {
+                    let bleed = trim.bleed_inches * 72.0;
+                    image.x = -bleed;
+                    image.y = -bleed;
+                    image.width = trim.width_inches * 72.0 + bleed * 2.0;
+                    image.height = trim.height_inches * 72.0 + bleed * 2.0;
+                }
+                apply_placement_accessibility(image, placement);
+                image.fit = layout_image_fit(&string(presentation, "fit"));
+            }
+            apply_placement_caption_language(&mut page, placement);
+            pages.push(page);
+            continue;
+        }
+
+        if isolate_flowing_boundary {
+            pages.push(empty_body_page());
+        }
+        if presentation
+            .get("startOnNewPage")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            pages.push(empty_body_page());
+        }
+        append_inline_illustration(
+            pages,
             trim,
             &string(placement, "caption"),
             string(placement, "assetId"),
-        ));
+            width_percent,
+            focal_x,
+            focal_y,
+            alignment,
+            &string(presentation, "textWrap"),
+            layout_image_fit(&string(presentation, "fit")),
+            presentation
+                .get("spacingBeforePoints")
+                .and_then(Value::as_f64)
+                .unwrap_or(6.0) as f32,
+            presentation
+                .get("spacingAfterPoints")
+                .and_then(Value::as_f64)
+                .unwrap_or(6.0) as f32,
+            &caption_placement,
+            presentation
+                .get("keepWithCaption")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        );
+        if let Some(image) = pages.last_mut().and_then(|page| page.images.last_mut()) {
+            apply_placement_accessibility(image, placement);
+        }
+        if let Some(page) = pages.last_mut() {
+            apply_placement_caption_language(page, placement);
+        }
+    }
+}
+
+fn apply_placement_accessibility(image: &mut LayoutImage, placement: &Value) {
+    image.alt_text = placement
+        .get("altText")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned);
+    image.decorative = placement
+        .get("decorative")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    image.language = placement
+        .get("language")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    image.reading_order = (!image.decorative).then_some(1);
+    image.accessibility_role = placement
+        .get("accessibilityRole")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+}
+
+fn apply_placement_caption_language(page: &mut LayoutPage, placement: &Value) {
+    for line in page
+        .lines
+        .iter_mut()
+        .filter(|line| line.semantic_role == LayoutSemanticRole::Caption)
+    {
+        line.language = placement
+            .get("language")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        line.artifact = false;
+        line.reading_order = Some(2);
     }
 }
 
@@ -1418,6 +3343,7 @@ fn build_toc_pages_with_limit(
         small_caps: false,
         space_before: 0.0,
         space_after: 0.0,
+        semantic_role: LayoutSemanticRole::Toc,
     };
     let available_width = (trim.width_inches - trim.margin_inches * 2.0) * 72.0;
     let mut previous_page_count = None;
@@ -1457,18 +3383,35 @@ fn build_toc_pages_with_limit(
                     x: trim.margin_inches * 72.0,
                     y,
                     word_spacing: 0.0,
+                    character_spacing: 0.0,
                     rotation_degrees: 0.0,
+                    rotation_origin_x: None,
+                    rotation_origin_y: None,
+                    opacity: 1.0,
                     light_text: false,
+                    fill_rgb: None,
+                    semantic_role: LayoutSemanticRole::Toc,
+                    artifact: false,
+                    language: None,
+                    reading_order: None,
+                    semantic_id: None,
+                    semantic_parent_id: None,
+                    link_page: Some(*chapter_page),
                 });
             }
         }
         if pages.len().is_multiple_of(2) {
             pages.push(LayoutPage {
                 kind: PageKind::Blank,
+                width_points: None,
+                height_points: None,
                 lines: Vec::new(),
                 images: Vec::new(),
+                shapes: Vec::new(),
+                paint_order: Vec::new(),
                 barcode_modules: None,
                 page_label: None,
+                bookmark: None,
             });
         }
         if previous_page_count == Some(pages.len()) {
@@ -1491,6 +3434,8 @@ fn toc_page(continued: bool, trim: &crate::model::Trim) -> LayoutPage {
     };
     LayoutPage {
         kind: PageKind::Body,
+        width_points: None,
+        height_points: None,
         lines: vec![LayoutLine {
             text: text.to_owned(),
             runs: single_run(text, FontFace::SansBold),
@@ -1498,12 +3443,27 @@ fn toc_page(continued: bool, trim: &crate::model::Trim) -> LayoutPage {
             x: trim.margin_inches * 72.0,
             y: trim.height_inches * 72.0 - trim.margin_inches * 72.0 - size * 0.82,
             word_spacing: 0.0,
+            character_spacing: 0.0,
             rotation_degrees: 0.0,
+            rotation_origin_x: None,
+            rotation_origin_y: None,
+            opacity: 1.0,
             light_text: false,
+            fill_rgb: None,
+            semantic_role: LayoutSemanticRole::Paragraph,
+            artifact: false,
+            language: None,
+            reading_order: None,
+            semantic_id: None,
+            semantic_parent_id: None,
+            link_page: None,
         }],
         images: Vec::new(),
+        shapes: Vec::new(),
+        paint_order: Vec::new(),
         barcode_modules: None,
         page_label: None,
+        bookmark: None,
     }
 }
 
@@ -1614,8 +3574,20 @@ fn text_page(lines: Vec<(String, f32)>, trim: &crate::model::Trim) -> LayoutPage
                 x,
                 y,
                 word_spacing: 0.0,
+                character_spacing: 0.0,
                 rotation_degrees: 0.0,
+                rotation_origin_x: None,
+                rotation_origin_y: None,
+                opacity: 1.0,
                 light_text: false,
+                fill_rgb: None,
+                semantic_role: LayoutSemanticRole::Paragraph,
+                artifact: false,
+                language: None,
+                reading_order: None,
+                semantic_id: None,
+                semantic_parent_id: None,
+                link_page: None,
             };
             y -= size * 1.6;
             line
@@ -1623,10 +3595,15 @@ fn text_page(lines: Vec<(String, f32)>, trim: &crate::model::Trim) -> LayoutPage
         .collect();
     LayoutPage {
         kind: PageKind::Body,
+        width_points: None,
+        height_points: None,
         lines,
         images: Vec::new(),
+        shapes: Vec::new(),
+        paint_order: Vec::new(),
         barcode_modules: None,
         page_label: None,
+        bookmark: None,
     }
 }
 
@@ -1641,6 +3618,7 @@ struct BlockStyle {
     small_caps: bool,
     space_before: f32,
     space_after: f32,
+    semantic_role: LayoutSemanticRole,
 }
 
 impl BlockStyle {
@@ -1655,6 +3633,7 @@ impl BlockStyle {
             small_caps: false,
             space_before: 0.0,
             space_after: 0.0,
+            semantic_role: LayoutSemanticRole::Paragraph,
         }
     }
 }
@@ -1673,7 +3652,7 @@ fn append_styled_text(
         baseline_shift_em: 0.0,
         size_scale: 1.0,
     }];
-    append_styled_runs(pages, text, &runs, trim, style)
+    append_styled_runs(pages, text, &runs, trim, style, None)
 }
 
 fn append_styled_runs(
@@ -1682,12 +3661,45 @@ fn append_styled_runs(
     source_runs: &[LayoutRun],
     trim: &crate::model::Trim,
     style: &BlockStyle,
+    language: Option<&str>,
 ) -> usize {
     if text.is_empty() {
         return pages.len().max(1);
     }
-    let available_width = (trim.width_inches - 2.0 * trim.margin_inches) * 72.0 - style.indent;
-    let wrapped = wrap_layout_runs(text, source_runs, style.size, available_width);
+    let default_x = trim.margin_inches * 72.0 + style.indent;
+    let default_width = (trim.width_inches - 2.0 * trim.margin_inches) * 72.0 - style.indent;
+    let flow_region = pages
+        .last()
+        .and_then(|page| active_float_region(page, trim, style));
+    let available_width = flow_region.map_or(default_width, |region| region.1);
+    let flow_x = flow_region.map_or(default_x, |region| region.0);
+    let mut wrapped = wrap_layout_runs(text, source_runs, style.size, available_width);
+    let mut float_line_count = 0usize;
+    if let Some((_, _, float_bottom)) = flow_region {
+        let baseline = pages
+            .last()
+            .map_or(0.0, |page| next_flow_baseline(page, trim, style, true));
+        let step = (style.size * 1.6).max(style.size * style.line_height.max(1.0));
+        let capacity =
+            (((baseline - float_bottom) / step).ceil().max(0.0) as usize).min(wrapped.len());
+        if capacity < wrapped.len() {
+            let mut consumed = 0usize;
+            for (line, _) in wrapped.iter().take(capacity) {
+                consumed = consumed_text_offset(text, consumed, line);
+            }
+            let remainder = text.get(consumed..).unwrap_or("").trim_start();
+            let skipped = text
+                .get(consumed..)
+                .map_or(0, |tail| tail.len() - tail.trim_start().len());
+            consumed += skipped;
+            let remainder_runs = slice_layout_runs(source_runs, consumed);
+            let mut full_width =
+                wrap_layout_runs(remainder, &remainder_runs, style.size, default_width);
+            wrapped.truncate(capacity);
+            wrapped.append(&mut full_width);
+        }
+        float_line_count = capacity;
+    }
     let (lines, wrapped_runs): (Vec<_>, Vec<_>) = wrapped.into_iter().unzip();
     let mut offset = 0;
     let mut first_page = None;
@@ -1733,24 +3745,30 @@ fn append_styled_runs(
         let page = pages.last_mut().expect("body page");
         first_page.get_or_insert(page_number);
         for (relative_index, line) in lines[offset..offset + take].iter().enumerate() {
-            let available_width =
-                (trim.width_inches - 2.0 * trim.margin_inches) * 72.0 - style.indent;
             let line_runs = wrapped_runs[offset + relative_index].clone();
+            let uses_float = offset + relative_index < float_line_count
+                && page_number == first_page.unwrap_or(page_number);
+            let line_width = if uses_float {
+                available_width
+            } else {
+                default_width
+            };
+            let line_x = if uses_float { flow_x } else { default_x };
             let estimated_width = measured_run_width(&line_runs, style.size);
             let spaces = line.chars().filter(|character| *character == ' ').count();
             let is_final_line = offset + relative_index + 1 == lines.len();
             let word_spacing = if style.alignment == "justify"
                 && !is_final_line
                 && spaces > 0
-                && estimated_width < available_width
+                && estimated_width < line_width
             {
-                ((available_width - estimated_width) / spaces as f32).clamp(0.0, style.size * 0.25)
+                ((line_width - estimated_width) / spaces as f32).clamp(0.0, style.size * 0.25)
             } else {
                 0.0
             };
             let alignment_offset = match style.alignment.as_str() {
-                "center" => ((available_width - estimated_width) / 2.0).max(0.0),
-                "right" => (available_width - estimated_width).max(0.0),
+                "center" => ((line_width - estimated_width) / 2.0).max(0.0),
+                "right" => (line_width - estimated_width).max(0.0),
                 _ => 0.0,
             };
             let y = next_baseline(page, trim, style, offset == 0 && relative_index == 0);
@@ -1758,11 +3776,23 @@ fn append_styled_runs(
                 text: line.clone(),
                 runs: line_runs,
                 size: style.size,
-                x: trim.margin_inches * 72.0 + style.indent + alignment_offset,
+                x: line_x + alignment_offset,
                 y,
                 word_spacing,
+                character_spacing: 0.0,
                 rotation_degrees: 0.0,
+                rotation_origin_x: None,
+                rotation_origin_y: None,
+                opacity: 1.0,
                 light_text: false,
+                fill_rgb: None,
+                semantic_role: style.semantic_role,
+                artifact: false,
+                language: language.map(str::to_owned),
+                reading_order: None,
+                semantic_id: None,
+                semantic_parent_id: None,
+                link_page: None,
             });
         }
         offset += take;
@@ -1781,20 +3811,98 @@ fn append_styled_runs(
             x: trim.margin_inches * 72.0,
             y,
             word_spacing: 0.0,
+            character_spacing: 0.0,
             rotation_degrees: 0.0,
+            rotation_origin_x: None,
+            rotation_origin_y: None,
+            opacity: 1.0,
             light_text: false,
+            fill_rgb: None,
+            semantic_role: style.semantic_role,
+            artifact: true,
+            language: None,
+            reading_order: None,
+            semantic_id: None,
+            semantic_parent_id: None,
+            link_page: None,
         });
     }
     first_page.unwrap_or_else(|| pages.len().max(1))
 }
 
-fn next_baseline(
+fn active_float_region(
+    page: &LayoutPage,
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
+) -> Option<(f32, f32, f32)> {
+    let baseline = next_flow_baseline(page, trim, style, true);
+    let margin = trim.margin_inches * 72.0;
+    let right = trim.width_inches * 72.0 - margin;
+    let gutter = 8.0;
+    page.images.iter().rev().find_map(|image| {
+        let wrap = image.text_wrap.as_deref()?;
+        if baseline <= image.y || baseline >= image.y + image.height {
+            return None;
+        }
+        match wrap {
+            "Start" if image.x - gutter > margin => Some((
+                margin + style.indent,
+                image.x - gutter - margin - style.indent,
+                image.y,
+            )),
+            "End" if image.x + image.width + gutter < right => Some((
+                image.x + image.width + gutter,
+                right - image.x - image.width - gutter,
+                image.y,
+            )),
+            _ => None,
+        }
+    })
+}
+
+fn consumed_text_offset(full_text: &str, search_offset: usize, line: &str) -> usize {
+    let searchable = line.strip_suffix('-').unwrap_or(line);
+    full_text
+        .get(search_offset..)
+        .and_then(|remaining| {
+            remaining
+                .find(searchable)
+                .map(|relative| search_offset + relative + searchable.len())
+        })
+        .unwrap_or(search_offset)
+}
+
+fn slice_layout_runs(source_runs: &[LayoutRun], offset: usize) -> Vec<LayoutRun> {
+    let mut cursor = 0usize;
+    let mut output = Vec::new();
+    for run in source_runs {
+        let end = cursor + run.text.len();
+        if end > offset {
+            let start = offset.saturating_sub(cursor);
+            if let Some(text) = run.text.get(start..) {
+                output.push(LayoutRun {
+                    text: text.to_owned(),
+                    ..run.clone()
+                });
+            }
+        }
+        cursor = end;
+    }
+    output
+}
+
+fn next_flow_baseline(
     page: &LayoutPage,
     trim: &crate::model::Trim,
     style: &BlockStyle,
     first_block_line: bool,
 ) -> f32 {
-    page.lines.last().map_or(
+    let previous = page
+        .lines
+        .iter()
+        .rev()
+        .find(|line| line.semantic_role != LayoutSemanticRole::Caption);
+    previous.map_or(
         trim.height_inches * 72.0
             - trim.margin_inches * 72.0
             - style.size * 0.82
@@ -1803,9 +3911,9 @@ fn next_baseline(
             } else {
                 0.0
             },
-        |previous| {
-            previous.y
-                - (previous.size * 1.6).max(style.size * style.line_height)
+        |line| {
+            line.y
+                - (line.size * 1.6).max(style.size * style.line_height)
                 - if first_block_line {
                     style.space_before
                 } else {
@@ -1813,6 +3921,15 @@ fn next_baseline(
                 }
         },
     )
+}
+
+fn next_baseline(
+    page: &LayoutPage,
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
+    first_block_line: bool,
+) -> f32 {
+    next_flow_baseline(page, trim, style, first_block_line)
 }
 
 fn remaining_line_capacity(
@@ -1885,10 +4002,15 @@ fn runs_for_line(
 fn empty_body_page() -> LayoutPage {
     LayoutPage {
         kind: PageKind::Body,
+        width_points: None,
+        height_points: None,
         lines: Vec::new(),
         images: Vec::new(),
+        shapes: Vec::new(),
+        paint_order: Vec::new(),
         barcode_modules: None,
         page_label: None,
+        bookmark: None,
     }
 }
 
@@ -1905,6 +4027,15 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             style.keep_with_next = true;
             style.alignment = "left".to_owned();
             style.face = FontFace::SansBold;
+            style.semantic_role = match block
+                .get("headingLevel")
+                .and_then(Value::as_u64)
+                .unwrap_or(2)
+            {
+                1 => LayoutSemanticRole::Heading1,
+                2 => LayoutSemanticRole::Heading2,
+                _ => LayoutSemanticRole::Heading3,
+            };
         }
         "blockquote" => {
             style.indent = 24.0;
@@ -1914,7 +4045,10 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             style.alignment = "center".to_owned();
             style.keep_with_next = true;
         }
-        "listitem" => style.alignment = "left".to_owned(),
+        "listitem" => {
+            style.alignment = "left".to_owned();
+            style.semantic_role = LayoutSemanticRole::ListItem;
+        }
         _ => {}
     }
     let semantic_role = string(block, "styleRole");
@@ -2008,6 +4142,10 @@ fn block_runs(document: &Value, block: &Value, style: &BlockStyle) -> Vec<Layout
                         | FontFace::MonoItalic
                         | FontFace::MonoBoldItalic
                 );
+            if matches!(style.face, FontFace::Custom(_)) {
+                bold |= false;
+                italic |= is_italic(style.face);
+            }
             let mut family = if is_code {
                 FontFamily::Mono
             } else {
@@ -2076,6 +4214,9 @@ fn block_runs(document: &Value, block: &Value, style: &BlockStyle) -> Vec<Layout
 }
 
 fn font_family(value: &str) -> FontFamily {
+    if let Some(index) = custom_family(value) {
+        return FontFamily::Custom(index);
+    }
     let normalized = value.to_ascii_lowercase();
     if normalized.contains("mono") || normalized.contains("code") {
         FontFamily::Mono
@@ -2096,6 +4237,7 @@ fn regular_face(family: FontFamily) -> FontFace {
         FontFamily::Serif => FontFace::SerifRegular,
         FontFamily::Sans => FontFace::SansRegular,
         FontFamily::Mono => FontFace::MonoRegular,
+        FontFamily::Custom(index) => FontFace::Custom(index),
     }
 }
 
@@ -2185,30 +4327,7 @@ fn wrap(text: &str, limit: usize) -> Vec<String> {
     lines
 }
 
-fn picture_page(trim: &crate::model::Trim, label: &str, asset_id: String) -> LayoutPage {
-    picture_page_with_focal(trim, label, asset_id, 100.0, 50.0, 50.0)
-}
-
-fn picture_page_with_focal(
-    trim: &crate::model::Trim,
-    label: &str,
-    asset_id: String,
-    width_percent: f32,
-    focal_x_percent: f32,
-    focal_y_percent: f32,
-) -> LayoutPage {
-    picture_page_with_layout(
-        trim,
-        label,
-        asset_id,
-        width_percent,
-        focal_x_percent,
-        focal_y_percent,
-        "Center",
-    )
-}
-
-fn picture_page_with_layout(
+fn dedicated_figure_page_with_layout(
     trim: &crate::model::Trim,
     label: &str,
     asset_id: String,
@@ -2229,13 +4348,13 @@ fn picture_page_with_layout(
     let caption_step = 9.0 * 1.6;
     let first_caption_y =
         margin + 9.0 * 0.30 + caption_lines.len().saturating_sub(1) as f32 * caption_step;
-    let image_y = if caption_lines.is_empty() {
-        margin * 1.5
-    } else {
-        first_caption_y + 9.0 * 0.82 + 8.0
-    };
+    let available_height = trim.height_inches * 72.0 - margin * 2.0;
+    let image_y = margin + available_height * 0.2;
+    let image_height = available_height * 0.75;
     LayoutPage {
-        kind: PageKind::Picture,
+        kind: PageKind::Designed,
+        width_points: None,
+        height_points: None,
         lines: caption_lines
             .into_iter()
             .enumerate()
@@ -2246,8 +4365,20 @@ fn picture_page_with_layout(
                 x: image_x,
                 y: first_caption_y - index as f32 * caption_step,
                 word_spacing: 0.0,
+                character_spacing: 0.0,
                 rotation_degrees: 0.0,
+                rotation_origin_x: None,
+                rotation_origin_y: None,
+                opacity: 1.0,
                 light_text: false,
+                fill_rgb: None,
+                semantic_role: LayoutSemanticRole::Caption,
+                artifact: false,
+                language: None,
+                reading_order: None,
+                semantic_id: None,
+                semantic_parent_id: None,
+                link_page: None,
             })
             .collect(),
         images: (!asset_id.is_empty())
@@ -2256,33 +4387,31 @@ fn picture_page_with_layout(
                 x: image_x,
                 y: image_y,
                 width: image_width,
-                height: trim.height_inches * 72.0 - margin - image_y,
+                height: image_height,
                 focal_x: (focal_x_percent / 100.0).clamp(0.0, 1.0),
                 focal_y: (focal_y_percent / 100.0).clamp(0.0, 1.0),
                 source_left_fraction: 0.0,
                 source_width_fraction: 1.0,
                 rotation_degrees: 0.0,
-                contain: false,
+                opacity: 1.0,
+                fit: LayoutImageFit::Cover,
+                alt_text: None,
+                decorative: true,
+                language: None,
+                reading_order: None,
+                semantic_id: None,
+                semantic_parent_id: None,
+                text_wrap: None,
+                accessibility_role: None,
             })
             .into_iter()
             .collect(),
+        shapes: Vec::new(),
+        paint_order: Vec::new(),
         barcode_modules: None,
         page_label: None,
+        bookmark: None,
     }
-}
-
-fn picture_spread_leaf(
-    trim: &crate::model::Trim,
-    label: &str,
-    asset_id: String,
-    right_leaf: bool,
-) -> LayoutPage {
-    let mut page = picture_page_with_layout(trim, label, asset_id, 100.0, 50.0, 50.0, "Center");
-    if let Some(image) = page.images.first_mut() {
-        image.source_left_fraction = if right_leaf { 0.5 } else { 0.0 };
-        image.source_width_fraction = 0.5;
-    }
-    page
 }
 
 fn cover_layout(request: &RenderRequest, width: f32) -> Result<LayoutPage, Diagnostic> {
@@ -2293,6 +4422,9 @@ fn cover_layout(request: &RenderRequest, width: f32) -> Result<LayoutPage, Diagn
             .map_or(0.0, |cover| cover.bleed_inches * 2.0))
         * 72.0;
     let cover = request.cover.as_ref().expect("cover");
+    if cover.scene.is_some() {
+        return cover_scene_layout(request, width, height, false);
+    }
     let bleed = cover.bleed_inches * 72.0;
     let spine_width = (width - bleed * 2.0 - request.trim.width_inches * 144.0).max(0.0);
     let spine_center = bleed + request.trim.width_inches * 72.0 + spine_width / 2.0;
@@ -2363,8 +4495,20 @@ fn cover_layout(request: &RenderRequest, width: f32) -> Result<LayoutPage, Diagn
             x: spine_center,
             y: bleed + 36.0,
             word_spacing: 0.0,
+            character_spacing: 0.0,
             rotation_degrees: 90.0,
+            rotation_origin_x: None,
+            rotation_origin_y: None,
+            opacity: 1.0,
             light_text: true,
+            fill_rgb: None,
+            semantic_role: LayoutSemanticRole::Paragraph,
+            artifact: true,
+            language: None,
+            reading_order: None,
+            semantic_id: None,
+            semantic_parent_id: None,
+            link_page: None,
         });
     }
     if cover.barcode_mode == "LorekeeperBarcode"
@@ -2377,12 +4521,26 @@ fn cover_layout(request: &RenderRequest, width: f32) -> Result<LayoutPage, Diagn
             x: width * 0.08,
             y: height * 0.10 - 12.0,
             word_spacing: 0.0,
+            character_spacing: 0.0,
             rotation_degrees: 0.0,
+            rotation_origin_x: None,
+            rotation_origin_y: None,
+            opacity: 1.0,
             light_text: false,
+            fill_rgb: None,
+            semantic_role: LayoutSemanticRole::Paragraph,
+            artifact: false,
+            language: None,
+            reading_order: None,
+            semantic_id: None,
+            semantic_parent_id: None,
+            link_page: None,
         });
     }
     Ok(LayoutPage {
         kind: PageKind::Cover,
+        width_points: None,
+        height_points: None,
         lines,
         images: cover
             .asset_id
@@ -2398,17 +4556,265 @@ fn cover_layout(request: &RenderRequest, width: f32) -> Result<LayoutPage, Diagn
                 source_left_fraction: 0.0,
                 source_width_fraction: 1.0,
                 rotation_degrees: 0.0,
-                contain: false,
+                opacity: 1.0,
+                fit: LayoutImageFit::Cover,
+                alt_text: None,
+                decorative: true,
+                language: None,
+                reading_order: None,
+                semantic_id: None,
+                semantic_parent_id: None,
+                text_wrap: None,
+                accessibility_role: None,
             })
             .into_iter()
             .collect(),
+        shapes: Vec::new(),
+        paint_order: Vec::new(),
         barcode_modules: if cover.barcode_mode == "LorekeeperBarcode" {
             cover.isbn.as_deref().and_then(ean13_modules)
         } else {
             None
         },
         page_label: None,
+        bookmark: None,
     })
+}
+
+fn digital_cover_layout(request: &RenderRequest) -> Result<LayoutPage, Diagnostic> {
+    let cover = request.cover.as_ref().expect("cover");
+    let width = request.trim.width_inches * 72.0;
+    let height = request.trim.height_inches * 72.0;
+    if cover.scene.is_some() {
+        return cover_scene_layout(request, width, height, true);
+    }
+    let margin = (request.trim.margin_inches * 72.0).max(24.0);
+    let safe_width = width - margin * 2.0;
+    let mut lines = cover_text_lines(
+        &cover.title,
+        FontFace::SansBold,
+        28.0,
+        margin,
+        height - margin - 54.0,
+        safe_width,
+        4,
+        35.0,
+    )?;
+    lines.extend(cover_text_lines(
+        &cover.subtitle,
+        FontFace::SerifItalic,
+        14.0,
+        margin,
+        height - margin - 180.0,
+        safe_width,
+        4,
+        20.0,
+    )?);
+    lines.extend(cover_text_lines(
+        &cover.author,
+        FontFace::SansRegular,
+        14.0,
+        margin,
+        margin + 36.0,
+        safe_width,
+        2,
+        20.0,
+    )?);
+    Ok(LayoutPage {
+        kind: PageKind::Cover,
+        width_points: None,
+        height_points: None,
+        lines,
+        images: cover
+            .asset_id
+            .as_ref()
+            .map(|asset_id| LayoutImage {
+                asset_id: asset_id.clone(),
+                x: 0.0,
+                y: 0.0,
+                width,
+                height,
+                focal_x: (cover.image_focal_x_percent / 100.0).clamp(0.0, 1.0),
+                focal_y: (cover.image_focal_y_percent / 100.0).clamp(0.0, 1.0),
+                source_left_fraction: 0.0,
+                source_width_fraction: 1.0,
+                rotation_degrees: 0.0,
+                opacity: 1.0,
+                fit: LayoutImageFit::Cover,
+                alt_text: None,
+                decorative: true,
+                language: None,
+                reading_order: None,
+                semantic_id: None,
+                semantic_parent_id: None,
+                text_wrap: None,
+                accessibility_role: None,
+            })
+            .into_iter()
+            .collect(),
+        shapes: Vec::new(),
+        paint_order: Vec::new(),
+        barcode_modules: None,
+        page_label: Some("Cover".to_owned()),
+        bookmark: None,
+    })
+}
+
+fn cover_scene_layout(
+    request: &RenderRequest,
+    width: f32,
+    height: f32,
+    digital: bool,
+) -> Result<LayoutPage, Diagnostic> {
+    let cover = request.cover.as_ref().expect("cover");
+    let mut scene = cover.scene.clone().expect("cover scene");
+    let old_width = scene["surface"]["widthPoints"]
+        .as_f64()
+        .unwrap_or(width as f64) as f32;
+    let old_height = scene["surface"]["heightPoints"]
+        .as_f64()
+        .unwrap_or(height as f64) as f32;
+    let bleed = if digital {
+        0.0
+    } else {
+        cover.bleed_inches * 72.0
+    };
+    let panel = request.trim.width_inches * 72.0;
+    let spine = if digital {
+        0.0
+    } else {
+        (width - bleed * 2.0 - panel * 2.0).max(0.0)
+    };
+    let old_spine = if digital {
+        0.0
+    } else {
+        (old_width - bleed * 2.0 - panel * 2.0).max(0.0)
+    };
+    scene["surface"]["widthPoints"] = Value::from(width);
+    scene["surface"]["heightPoints"] = Value::from(height);
+    let objects = scene
+        .get_mut("objects")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_COVER_SCENE_INVALID",
+                "Cover scene objects are missing.",
+            )
+        })?;
+    for item in objects {
+        if string(item, "kind") == "Image" && item.get("decorative").is_none() {
+            item["decorative"] = Value::Bool(true);
+        }
+        if string(item, "kind") == "Text" {
+            let binding = string(item, "textBinding");
+            let resolved = match binding.as_str() {
+                "title" => &cover.title,
+                "subtitle" => &cover.subtitle,
+                "author" => &cover.author,
+                "spineText" => &cover.spine_text,
+                "backCopy" => &cover.back_copy,
+                _ => &binding,
+            };
+            item["textBinding"] = Value::String(resolved.clone());
+        }
+        // Group children are stored in parent-local percentages. Their group is
+        // the surface-space object that participates in cover-region reflow.
+        if !string(item, "groupId").is_empty() {
+            continue;
+        }
+        let region = string(item, "regionConstraint");
+        let old_region = cover_region(
+            &region, old_width, old_height, bleed, panel, old_spine, digital,
+        );
+        let new_region = cover_region(&region, width, height, bleed, panel, spine, digital);
+        let bounds = item.get("bounds").cloned().unwrap_or(Value::Null);
+        let surface_x = bounds
+            .get("xPercent")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0) as f32
+            / 100.0
+            * old_width;
+        let surface_y = bounds
+            .get("yPercent")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0) as f32
+            / 100.0
+            * old_height;
+        let surface_width = bounds
+            .get("widthPercent")
+            .and_then(Value::as_f64)
+            .unwrap_or(100.0) as f32
+            / 100.0
+            * old_width;
+        let surface_height = bounds
+            .get("heightPercent")
+            .and_then(Value::as_f64)
+            .unwrap_or(100.0) as f32
+            / 100.0
+            * old_height;
+        let (x, y, object_width, object_height) = if region == "Page" {
+            (surface_x, surface_y, surface_width, surface_height)
+        } else {
+            let local_x = (surface_x - old_region.0) / old_region.2.max(0.01);
+            let local_y = (surface_y - old_region.1) / old_region.3.max(0.01);
+            let local_width = surface_width / old_region.2.max(0.01);
+            let local_height = surface_height / old_region.3.max(0.01);
+            (
+                new_region.0 + local_x * new_region.2,
+                new_region.1 + local_y * new_region.3,
+                local_width * new_region.2,
+                local_height * new_region.3,
+            )
+        };
+        item["bounds"] = serde_json::json!({
+            "xPercent": x / width * 100.0,
+            "yPercent": y / height * 100.0,
+            "widthPercent": object_width / width * 100.0,
+            "heightPercent": object_height / height * 100.0
+        });
+    }
+    let composition = serde_json::json!({
+        "id": "cover",
+        "name": "Cover",
+        "semanticBlocks": [],
+        "variants": [{ "scene": scene }]
+    });
+    let mut page = designed_page(&composition, &request.document, &request.trim)?;
+    page.kind = PageKind::Cover;
+    page.width_points = Some(width);
+    page.height_points = Some(height);
+    page.page_label = digital.then(|| "Cover".to_owned());
+    if !digital && cover.barcode_mode == "LorekeeperBarcode" {
+        page.barcode_modules = cover.isbn.as_deref().and_then(ean13_modules);
+    }
+    Ok(page)
+}
+
+fn cover_region(
+    region: &str,
+    width: f32,
+    height: f32,
+    bleed: f32,
+    panel: f32,
+    spine: f32,
+    digital: bool,
+) -> (f32, f32, f32, f32) {
+    if digital {
+        return (0.0, 0.0, width, height);
+    }
+    match region {
+        "Back" => (bleed, bleed, panel, height - bleed * 2.0),
+        "Spine" | "Gutter" => (bleed + panel, bleed, spine.max(0.01), height - bleed * 2.0),
+        "Front" => (bleed + panel + spine, bleed, panel, height - bleed * 2.0),
+        "SafeArea" => (
+            bleed + 18.0,
+            bleed + 18.0,
+            width - bleed * 2.0 - 36.0,
+            height - bleed * 2.0 - 36.0,
+        ),
+        "BarcodeReserve" => (bleed + 18.0, height - bleed - 104.4, 144.0, 86.4),
+        _ => (0.0, 0.0, width, height),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2453,8 +4859,20 @@ fn cover_text_lines(
             x,
             y: start_y - index as f32 * line_height,
             word_spacing: 0.0,
+            character_spacing: 0.0,
             rotation_degrees: 0.0,
+            rotation_origin_x: None,
+            rotation_origin_y: None,
+            opacity: 1.0,
             light_text: true,
+            fill_rgb: None,
+            semantic_role: LayoutSemanticRole::Paragraph,
+            artifact: false,
+            language: None,
+            reading_order: None,
+            semantic_id: None,
+            semantic_parent_id: None,
+            link_page: None,
         })
         .collect())
 }
@@ -2463,10 +4881,15 @@ fn start_recto(pages: &mut Vec<LayoutPage>, trim: &crate::model::Trim) {
     if trim.recto_chapter_starts && (pages.len() + 1).is_multiple_of(2) {
         pages.push(LayoutPage {
             kind: PageKind::Blank,
+            width_points: None,
+            height_points: None,
             lines: Vec::new(),
             images: Vec::new(),
+            shapes: Vec::new(),
+            paint_order: Vec::new(),
             barcode_modules: None,
             page_label: None,
+            bookmark: None,
         });
     }
 }
@@ -2661,6 +5084,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn digital_and_print_profiles_apply_their_declared_dpi_thresholds() {
+        assert_eq!(required_effective_dpi("generic-digital-pdf-v1"), 180.0);
+        assert_eq!(required_effective_dpi("kdp-paperback-v1"), 300.0);
+        assert_eq!(required_effective_dpi("ingram-paperback-pdfx1a-v1"), 300.0);
+    }
+
+    #[test]
     fn wraps_only_at_unicode_boundaries() {
         let lines = wrap("A measured café sentence breaks safely.", 12);
         assert!(lines.len() > 1);
@@ -2696,7 +5126,7 @@ mod tests {
             size_scale: 1.0,
         }];
         let mut pages = Vec::new();
-        append_styled_runs(&mut pages, &text, &runs, &trim, &style);
+        append_styled_runs(&mut pages, &text, &runs, &trim, &style, None);
         let available = (trim.width_inches - 2.0 * trim.margin_inches) * 72.0;
 
         for line in pages.iter().flat_map(|page| page.lines.iter()) {
@@ -2718,6 +5148,53 @@ mod tests {
     }
 
     #[test]
+    fn paragraph_releases_float_exclusion_below_image_and_on_later_pages() {
+        let trim = standard_trim();
+        let mut pages = vec![empty_body_page()];
+        append_inline_illustration(
+            &mut pages,
+            &trim,
+            "",
+            "asset".to_owned(),
+            42.0,
+            50.0,
+            50.0,
+            "left",
+            "End",
+            LayoutImageFit::Contain,
+            0.0,
+            0.0,
+            "Hidden",
+            true,
+        );
+        let margin = trim.margin_inches * 72.0;
+        let text = "Measured words continue beside the illustration and then reclaim the complete text measure below it. ".repeat(120);
+        append_styled_text(&mut pages, &text, &trim, &BlockStyle::body(&trim));
+        let body_lines = pages
+            .iter()
+            .flat_map(|page| page.lines.iter())
+            .filter(|line| !line.artifact)
+            .collect::<Vec<_>>();
+        assert!(
+            body_lines.iter().any(|line| line.x > margin + 1.0),
+            "some lines must flow beside the float"
+        );
+        assert!(
+            body_lines.iter().any(|line| (line.x - margin).abs() < 0.01),
+            "lines below the float must return to the full measure"
+        );
+        assert!(
+            pages
+                .iter()
+                .skip(1)
+                .flat_map(|page| &page.lines)
+                .filter(|line| !line.artifact)
+                .all(|line| (line.x - margin).abs() < 0.01),
+            "the float must never constrain later pages"
+        );
+    }
+
+    #[test]
     fn pagination_enforces_widow_and_orphan_minimums() {
         let trim = crate::model::Trim {
             width_inches: 3.5,
@@ -2725,6 +5202,7 @@ mod tests {
             margin_inches: 1.0,
             body_font_size_points: 30.0,
             body_line_height: 2.5,
+            bleed_inches: 0.0,
             mirror_margins: false,
             recto_chapter_starts: false,
             minimum_widow_lines: 2,
@@ -2765,7 +5243,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let request = RenderRequest {
-            protocol_version: 3,
+            protocol_version: 4,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v1".to_owned(),
             ink: "BlackAndWhite".to_owned(),
@@ -2782,6 +5260,7 @@ mod tests {
                 margin_inches: 0.75,
                 body_font_size_points: 11.0,
                 body_line_height: 1.4,
+                bleed_inches: 0.0,
                 mirror_margins: true,
                 recto_chapter_starts: true,
                 minimum_widow_lines: 2,
@@ -2789,6 +5268,7 @@ mod tests {
             },
             cover: None,
             assets: Vec::new(),
+            fonts: Vec::new(),
         };
         let layout = paginate(&request).expect("layout");
         let toc_pages = layout
@@ -2864,6 +5344,7 @@ mod tests {
             margin_inches: 0.75,
             body_font_size_points: 11.0,
             body_line_height: 1.4,
+            bleed_inches: 0.0,
             mirror_margins: true,
             recto_chapter_starts: true,
             minimum_widow_lines: 2,
@@ -2899,6 +5380,7 @@ mod tests {
             margin_inches: 0.75,
             body_font_size_points: 11.0,
             body_line_height: 1.4,
+            bleed_inches: 0.0,
             mirror_margins: true,
             recto_chapter_starts: true,
             minimum_widow_lines: 2,
@@ -2915,6 +5397,7 @@ mod tests {
             small_caps: false,
             space_before: 0.0,
             space_after: 0.0,
+            semantic_role: LayoutSemanticRole::Heading2,
         };
         append_styled_text(&mut pages, "Section heading", &trim, &heading);
         append_styled_text(
@@ -2985,13 +5468,86 @@ mod tests {
     }
 
     #[test]
+    fn rotated_group_moves_child_around_the_group_center_on_a_non_square_surface() {
+        let scene = serde_json::json!({
+            "surface": { "widthPoints": 200.0, "heightPoints": 100.0 },
+            "objects": [
+                {
+                    "id": "group",
+                    "kind": "Group",
+                    "rotationDegrees": 90.0,
+                    "bounds": { "xPercent": 20.0, "yPercent": 20.0, "widthPercent": 40.0, "heightPercent": 40.0 }
+                },
+                {
+                    "id": "child",
+                    "kind": "Rectangle",
+                    "groupId": "group",
+                    "bounds": { "xPercent": 0.0, "yPercent": 0.0, "widthPercent": 20.0, "heightPercent": 20.0 }
+                }
+            ]
+        });
+
+        let flattened = flatten_composition_objects(&scene).expect("flattened scene");
+        let bounds = &flattened[0]["bounds"];
+
+        assert!((bounds["xPercent"].as_f64().unwrap() - 44.0).abs() < 0.001);
+        assert!((bounds["yPercent"].as_f64().unwrap() - 4.0).abs() < 0.001);
+        assert_eq!(flattened[0]["rotationDegrees"], 90.0);
+    }
+
+    #[test]
+    fn cover_reflow_transforms_group_once_and_preserves_child_local_geometry() {
+        let mut request = request_with_document(serde_json::json!({}));
+        let panel = request.trim.width_inches * 72.0;
+        let old_width = panel * 2.0 + 12.0;
+        let height = request.trim.height_inches * 72.0;
+        request.cover = Some(crate::model::Cover {
+            bleed_inches: 0.0,
+            paper_caliper_inches_per_page: 0.0,
+            back_copy: String::new(),
+            title: "Grouped title".to_owned(),
+            subtitle: String::new(),
+            author: String::new(),
+            spine_text: String::new(),
+            background_color: "#ffffff".to_owned(),
+            isbn: None,
+            barcode_mode: "None".to_owned(),
+            asset_id: None,
+            image_focal_x_percent: 50.0,
+            image_focal_y_percent: 50.0,
+            scene: Some(serde_json::json!({
+                "surface": { "widthPoints": old_width, "heightPoints": height },
+                "layers": [{ "id": "layer", "name": "Content", "order": 0 }],
+                "objects": [
+                    { "id": "group", "layerId": "layer", "kind": "Group", "regionConstraint": "Front", "bounds": { "xPercent": 55.0, "yPercent": 10.0, "widthPercent": 35.0, "heightPercent": 30.0 } },
+                    { "id": "child", "layerId": "layer", "kind": "Text", "groupId": "group", "textBinding": "title", "fontSizePoints": 12.0, "semanticRole": "Paragraph", "readingOrder": 1, "bounds": { "xPercent": 10.0, "yPercent": 20.0, "widthPercent": 50.0, "heightPercent": 40.0 } }
+                ]
+            })),
+        });
+        let unchanged =
+            cover_scene_layout(&request, old_width, height, false).expect("same geometry");
+        let expanded =
+            cover_scene_layout(&request, old_width + 18.0, height, false).expect("changed spine");
+        assert_eq!(unchanged.lines.len(), 1);
+        assert_eq!(expanded.lines.len(), 1);
+        let local_width = unchanged.lines[0].x - old_width * 0.55;
+        assert!(
+            (local_width - old_width * 0.35 * 0.10).abs() < 0.05,
+            "child local offset must be applied exactly once"
+        );
+        assert!(
+            expanded.lines[0].x > unchanged.lines[0].x,
+            "front-bound group must move with an expanded spine"
+        );
+    }
+
+    #[test]
     fn front_and_back_matter_surround_the_body_in_reading_order() {
         let request = request_with_document(serde_json::json!({
             "title": "Ordered matter",
             "author": "Author",
             "language": "en",
             "includeTitlePage": false,
-            "printPicturePageSpreadMode": "SplitLeaves",
             "matter": [
                 { "location": "Back", "title": "Acknowledgments", "blocks": [] },
                 { "location": "Front", "title": "Dedication", "blocks": [] }
@@ -3052,153 +5608,16 @@ mod tests {
     }
 
     #[test]
-    fn anchored_illustrations_honor_side_alignment_and_new_page_requests() {
-        let request = request_with_document(serde_json::json!({
-            "title": "Illustrated",
-            "author": "Author",
-            "language": "en",
-            "includeTitlePage": false,
-            "sections": [{
-                "chapters": [{
-                    "id": "chapter",
-                    "title": "Chapter",
-                    "visualMode": "IllustratedProse",
-                    "illustrations": [{
-                        "assetId": "asset",
-                        "anchorBlockId": "block",
-                        "anchorPosition": "BeforeParagraph",
-                        "widthPercent": 40,
-                        "alignment": "Right",
-                        "startOnNewPage": true
-                    }],
-                    "blocks": [{ "id": "block", "type": "Paragraph", "content": [{ "text": "Anchored paragraph" }] }]
-                }]
-            }]
-        }));
-
-        let layout = paginate(&request).expect("layout");
-        let paragraph_page = page_containing(&layout, "Anchored paragraph");
-        let image_page = layout
-            .pages
-            .iter()
-            .position(|page| page.images.iter().any(|image| image.asset_id == "asset"))
-            .expect("image page");
-        let image = &layout.pages[image_page].images[0];
-        let right_edge = request.trim.width_inches * 72.0 - request.trim.margin_inches * 72.0;
-
-        assert!(image_page < paragraph_page);
-        assert!((image.x + image.width - right_edge).abs() < 0.01);
-        assert_eq!(layout.pages[image_page].lines.len(), 0);
-    }
-
-    #[test]
-    fn anchored_illustrations_without_a_page_break_flow_with_the_paragraph() {
-        let request = request_with_document(serde_json::json!({
-            "title": "Illustrated",
-            "author": "Author",
-            "language": "en",
-            "includeTitlePage": false,
-            "sections": [{
-                "chapters": [{
-                    "id": "chapter",
-                    "title": "Chapter",
-                    "visualMode": "IllustratedProse",
-                    "illustrations": [{
-                        "assetId": "asset",
-                        "anchorBlockId": "block",
-                        "anchorPosition": "BeforeParagraph",
-                        "caption": "A deliberately long in-flow figure caption that must wrap within a narrow right-aligned image without touching later prose.",
-                        "widthPercent": 35,
-                        "alignment": "Right",
-                        "startOnNewPage": false
-                    }],
-                    "blocks": [{ "id": "block", "type": "Paragraph", "content": [{ "text": "Anchored paragraph" }] }]
-                }]
-            }]
-        }));
-
-        let layout = paginate(&request).expect("layout");
-        let paragraph_page = page_containing(&layout, "Anchored paragraph");
-        let image_page = layout
-            .pages
-            .iter()
-            .position(|page| page.images.iter().any(|image| image.asset_id == "asset"))
-            .expect("image page");
-        let page = &layout.pages[image_page];
-        let image = &page.images[0];
-        let paragraph = page
-            .lines
-            .iter()
-            .find(|line| line.text == "Anchored paragraph")
-            .expect("paragraph line");
-
-        assert_eq!(image_page, paragraph_page);
-        assert_eq!(page.kind, PageKind::Body);
-        let captions = page
-            .lines
-            .iter()
-            .filter(|line| {
-                line.runs
-                    .first()
-                    .is_some_and(|run| run.face == FontFace::SerifItalic)
-            })
-            .collect::<Vec<_>>();
-        assert!(captions.len() >= 3);
-        assert!(captions.iter().all(|line| {
-            (line.x - image.x).abs() < 0.01
-                && measured_run_width(&line.runs, line.size) <= image.width + 0.01
-                && line.y < image.y
-        }));
-        assert!(paragraph.y < image.y);
-        assert!(paragraph.y < captions.last().unwrap().y);
-    }
-
-    #[test]
-    fn picture_page_spreads_crop_distinct_left_and_right_leaves() {
-        let request = request_with_document(serde_json::json!({
-            "title": "Spread",
-            "author": "Author",
-            "language": "en",
-            "includeTitlePage": false,
-            "printPicturePageSpreadMode": "SplitLeaves",
-            "sections": [{
-                "chapters": [{
-                    "id": "chapter",
-                    "title": "Spread",
-                    "visualMode": "PicturePage",
-                    "pageLayoutKind": "DoublePortrait",
-                    "picturePage": { "assetId": "surface", "leafCount": 2 },
-                    "blocks": [{ "id": "block", "type": "Paragraph", "content": [{ "text": "Body" }] }]
-                }]
-            }]
-        }));
-
-        let layout = paginate(&request).expect("layout");
-        let spread_images = layout
-            .pages
-            .iter()
-            .flat_map(|page| page.images.iter())
-            .filter(|image| image.asset_id == "surface")
-            .collect::<Vec<_>>();
-
-        assert_eq!(spread_images.len(), 2);
-        assert_eq!(spread_images[0].source_left_fraction, 0.0);
-        assert_eq!(spread_images[0].source_width_fraction, 0.5);
-        assert_eq!(spread_images[1].source_left_fraction, 0.5);
-        assert_eq!(spread_images[1].source_width_fraction, 0.5);
-    }
-
-    #[test]
-    fn picture_page_caption_sits_below_and_aligns_with_the_image() {
+    fn designed_page_caption_sits_below_and_aligns_with_the_image() {
         let request = request_with_document(serde_json::json!({
             "title": "Caption",
             "author": "Author",
             "language": "en",
             "sections": []
         }));
-        let page = picture_page_with_layout(
+        let page = dedicated_figure_page_with_layout(
             &request.trim,
-            "A deliberately long Picture Page caption that wraps safely beneath narrow right-aligned artwork.",
+            "A deliberately long Designed Page caption that wraps safely beneath narrow right-aligned artwork.",
             "surface".to_owned(),
             30.0,
             50.0,
@@ -3216,6 +5635,134 @@ mod tests {
                 && caption.y < image.y
                 && caption.y - caption.size * 0.30 >= request.trim.margin_inches * 72.0 - 0.01
         }));
+    }
+
+    #[test]
+    fn composition_references_resolve_disjoint_utf16_ranges_without_repeating_blocks() {
+        let blocks = vec![serde_json::json!({
+            "id": "copy",
+            "type": "Paragraph",
+            "content": [{ "text": "Alpha 😀 Omega" }]
+        })];
+        let first = serde_json::json!({
+            "blockId": "copy",
+            "startOffset": 0,
+            "endOffset": 5
+        });
+        let second = serde_json::json!({
+            "blockId": "copy",
+            "startOffset": 9,
+            "endOffset": 14
+        });
+
+        assert_eq!(resolve_content_reference(&blocks, &first).unwrap(), "Alpha");
+        assert_eq!(
+            resolve_content_reference(&blocks, &second).unwrap(),
+            "Omega"
+        );
+        assert!(validate_semantic_coverage(&blocks, &[first, second]).is_err());
+    }
+
+    #[test]
+    fn composition_references_reject_surrogate_splits_and_overlap() {
+        let blocks = vec![serde_json::json!({
+            "id": "copy",
+            "type": "Paragraph",
+            "content": [{ "text": "A😀B" }]
+        })];
+        let split = serde_json::json!({ "blockId": "copy", "startOffset": 1, "endOffset": 2 });
+        assert!(resolve_content_reference(&blocks, &split).is_err());
+        let references = vec![
+            serde_json::json!({ "blockId": "copy", "startOffset": 0, "endOffset": 3 }),
+            serde_json::json!({ "blockId": "copy", "startOffset": 2, "endOffset": 4 }),
+        ];
+        assert!(validate_semantic_coverage(&blocks, &references).is_err());
+    }
+
+    #[test]
+    fn designed_page_preserves_layer_then_z_paint_order_and_object_opacity() {
+        let composition = serde_json::json!({
+            "id": "composition",
+            "name": "Layered",
+            "semanticBlocks": [{"id":"copy","type":"Paragraph","content":[{"text":"Copy"}]}],
+            "variants": [{"scene": {
+                "surface": {"widthPoints":432,"heightPoints":648},
+                "layers": [
+                    {"id":"lower","order":0,"visible":true},
+                    {"id":"upper","order":1,"visible":true}
+                ],
+                "objects": [
+                    {"id":"text","layerId":"upper","kind":"Text","zIndex":0,"opacity":0.75,"bounds":{"xPercent":10,"yPercent":10,"widthPercent":80,"heightPercent":20},"contentReferences":[{"blockId":"copy"}],"semanticRole":"Paragraph","readingOrder":1},
+                    {"id":"shape","layerId":"lower","kind":"Rectangle","zIndex":9,"opacity":0.5,"bounds":{"xPercent":0,"yPercent":0,"widthPercent":100,"heightPercent":100},"fillColor":"#ff0000","semanticRole":"Artifact"}
+                ]
+            }}]
+        });
+        let page = designed_page(&composition, &serde_json::json!({}), &standard_trim())
+            .expect("designed page");
+        assert_eq!(
+            page.paint_order,
+            vec![LayoutPaint::Shape(0), LayoutPaint::Line(0)]
+        );
+        assert!((page.shapes[0].opacity - 0.5).abs() < 0.001);
+        assert!((page.lines[0].opacity - 0.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn facing_spread_split_preserves_authored_paint_order_on_each_leaf() {
+        let composition = serde_json::json!({
+            "id": "composition",
+            "name": "Spread",
+            "semanticBlocks": [{"id":"copy","type":"Paragraph","content":[{"text":"Copy"}]}],
+            "variants": [{"scene": {
+                "surface": {"kind":"FacingSpread","widthPoints":864,"heightPoints":648},
+                "layers": [{"id":"layer","order":0,"visible":true}],
+                "objects": [
+                    {"id":"shape","layerId":"layer","kind":"Rectangle","zIndex":0,"bounds":{"xPercent":0,"yPercent":0,"widthPercent":100,"heightPercent":100},"fillColor":"#ffffff","semanticRole":"Artifact"},
+                    {"id":"image","layerId":"layer","kind":"Image","zIndex":1,"bounds":{"xPercent":0,"yPercent":0,"widthPercent":100,"heightPercent":100},"imageId":"asset","decorative":true,"semanticRole":"Artifact"},
+                    {"id":"text","layerId":"layer","kind":"Text","zIndex":2,"bounds":{"xPercent":5,"yPercent":10,"widthPercent":30,"heightPercent":20},"contentReferences":[{"blockId":"copy"}],"semanticRole":"Paragraph","readingOrder":1}
+                ]
+            }}]
+        });
+        let page = designed_page(&composition, &serde_json::json!({}), &standard_trim())
+            .expect("spread page");
+        let leaves = split_facing_spread(page, 432.0);
+
+        assert_eq!(
+            leaves[0].paint_order,
+            vec![
+                LayoutPaint::Shape(0),
+                LayoutPaint::Image(0),
+                LayoutPaint::Line(0)
+            ]
+        );
+        assert_eq!(
+            leaves[1].paint_order,
+            vec![LayoutPaint::Shape(0), LayoutPaint::Image(0)]
+        );
+    }
+
+    #[test]
+    fn facing_spread_rejects_semantic_text_that_crosses_the_gutter() {
+        let composition = serde_json::json!({
+            "id": "composition",
+            "name": "Spread",
+            "semanticBlocks": [{"id":"copy","type":"Paragraph","content":[{"text":"This semantic line crosses the gutter"}]}],
+            "variants": [{"scene": {
+                "surface": {"kind":"FacingSpread","widthPoints":864,"heightPoints":648},
+                "layers": [{"id":"layer","order":0,"visible":true}],
+                "objects": [{"id":"text","layerId":"layer","kind":"Text","bounds":{"xPercent":49,"yPercent":10,"widthPercent":45,"heightPercent":20},"contentReferences":[{"blockId":"copy"}],"fontSizePoints":18,"semanticRole":"Paragraph","readingOrder":1}]
+            }}]
+        });
+
+        let error = designed_pages(
+            &composition,
+            &serde_json::json!({}),
+            &standard_trim(),
+            false,
+            false,
+        )
+        .expect_err("gutter-crossing text must be blocked");
+        assert_eq!(error.code, "PRESS_FACING_SPREAD_TEXT_CROSSES_GUTTER");
     }
 
     #[test]
@@ -3240,6 +5787,7 @@ mod tests {
             asset_id: None,
             image_focal_x_percent: 50.0,
             image_focal_y_percent: 50.0,
+            scene: None,
         });
         let spine_width = 1.0 * 72.0;
         let cover_width = request.trim.width_inches * 144.0
@@ -3266,6 +5814,7 @@ mod tests {
             margin_inches: 0.75,
             body_font_size_points: 11.0,
             body_line_height: 1.4,
+            bleed_inches: 0.0,
             mirror_margins: true,
             recto_chapter_starts: false,
             minimum_widow_lines: 2,
@@ -3275,7 +5824,7 @@ mod tests {
 
     fn request_with_document(document: Value) -> RenderRequest {
         RenderRequest {
-            protocol_version: 3,
+            protocol_version: 4,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v1".to_owned(),
             ink: "BlackAndWhite".to_owned(),
@@ -3283,6 +5832,7 @@ mod tests {
             trim: standard_trim(),
             cover: None,
             assets: Vec::new(),
+            fonts: Vec::new(),
         }
     }
 

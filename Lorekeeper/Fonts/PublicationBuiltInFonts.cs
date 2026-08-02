@@ -1,6 +1,6 @@
 namespace Lorekeeper.Fonts;
 
-public static class PicturePageBuiltInFonts
+public static class PublicationBuiltInFonts
 {
     public const string DefaultKey = "builtin:andika";
 
@@ -45,6 +45,8 @@ public static class PicturePageBuiltInFonts
             name,
             category,
             IsBuiltIn: true,
+            EmbeddingRightsConfirmed: true,
+            RightsDeclaration: "Bundled under the font license recorded in the Lorekeeper distribution notices.",
             faces.Select(face => new ProjectFontFaceView(
                 Id: null,
                 face.SubfamilyName,
@@ -63,4 +65,3 @@ public static class PicturePageBuiltInFonts
 
     private sealed record BuiltInFace(string SubfamilyName, int Weight, bool Italic);
 }
-

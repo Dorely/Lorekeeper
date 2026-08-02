@@ -227,9 +227,7 @@ public static class AiChangeReviewDrafts
 
         if (draft.Id != original.Id
             || draft.Order != original.Order
-            || draft.ActId != original.ActId
-            || draft.VisualMode != original.VisualMode
-            || draft.PageLayoutKind != original.PageLayoutKind)
+            || draft.ActId != original.ActId)
         {
             error = "The chapter draft changed immutable metadata.";
             return false;

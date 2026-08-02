@@ -12,7 +12,8 @@ const blockTypeToNode = {
     sceneBreak: "scene_break",
     blockQuote: "blockquote",
     listItem: "list_item",
-    figure: "figure"
+    figure: "figure",
+    designedPage: "designed_page"
 };
 const nodeToBlockType = Object.fromEntries(Object.entries(blockTypeToNode).map(([key, value]) => [value, key]));
 const markTypeToName = {
@@ -37,7 +38,8 @@ const builtInParagraphRoles = new Set([
     "scene-break",
     "block-quote",
     "list-item",
-    "figure-caption"
+    "figure-caption",
+    "designed-page"
 ]);
 const defaultRoleByNode = {
     paragraph: "body",
@@ -45,7 +47,8 @@ const defaultRoleByNode = {
     blockquote: "block-quote",
     list_item: "list-item",
     scene_break: "scene-break",
-    figure: "figure-caption"
+    figure: "figure-caption",
+    designed_page: "designed-page"
 };
 
 function newBlockId() {
@@ -85,7 +88,12 @@ const blockAttrs = {
     styleRole: {default: "body"},
     imageId: {default: null},
     altText: {default: null},
-    imageUrl: {default: null}
+    imageUrl: {default: null},
+    decorative: {default: false},
+    language: {default: null},
+    accessibilityRole: {default: null},
+    presentation: {default: null},
+    pageCompositionId: {default: null}
 };
 
 const schema = new Schema({
@@ -162,7 +170,13 @@ const schema = new Schema({
                     styleRole: element.dataset.styleRole || "figure-caption",
                     imageId: element.dataset.imageId,
                     altText: element.querySelector("img")?.getAttribute("alt") || "",
-                    imageUrl: element.querySelector("img")?.getAttribute("src") || ""
+                    imageUrl: element.querySelector("img")?.getAttribute("src") || "",
+                    decorative: element.dataset.decorative === "true",
+                    language: element.getAttribute("lang") || null,
+                    accessibilityRole: element.dataset.accessibilityRole || "figure",
+                    presentation: element.dataset.presentation
+                        ? JSON.parse(element.dataset.presentation)
+                        : null
                 })
             }],
             toDOM: node => [
@@ -170,11 +184,35 @@ const schema = new Schema({
                 {
                     "data-block-id": node.attrs.id,
                     "data-style-role": node.attrs.styleRole,
-                    "data-image-id": node.attrs.imageId
+                    "data-image-id": node.attrs.imageId,
+                    "data-decorative": String(node.attrs.decorative),
+                    "data-accessibility-role": node.attrs.accessibilityRole || "figure",
+                    lang: node.attrs.language || null,
+                    "data-presentation": JSON.stringify(node.attrs.presentation || {})
                 },
-                ["img", {src: node.attrs.imageUrl, alt: node.attrs.altText}],
+                ["img", {src: node.attrs.imageUrl, alt: node.attrs.decorative ? "" : node.attrs.altText}],
                 ["figcaption", 0]
             ]
+        },
+        designed_page: {
+            group: "block",
+            atom: true,
+            selectable: true,
+            attrs: {...blockAttrs, styleRole: {default: "designed-page"}},
+            parseDOM: [{
+                tag: "section[data-page-composition-id]",
+                getAttrs: element => ({
+                    id: element.dataset.blockId,
+                    styleRole: "designed-page",
+                    pageCompositionId: element.dataset.pageCompositionId
+                })
+            }],
+            toDOM: node => ["section", {
+                class: "semantic-designed-page",
+                "data-block-id": node.attrs.id,
+                "data-style-role": "designed-page",
+                "data-page-composition-id": node.attrs.pageCompositionId
+            }, ["strong", "Designed page"], ["span", `Composition ${node.attrs.pageCompositionId}`]]
         }
     },
     marks: {
@@ -273,10 +311,15 @@ function documentFromDomain(document) {
             imageId: block.imageId || null,
             altText: block.altText || null,
             imageUrl: block.imageUrl || null
+            ,decorative: block.decorative === true
+            ,language: block.language || null
+            ,accessibilityRole: block.accessibilityRole || (nodeName === "figure" ? "figure" : null)
+            ,presentation: block.figurePresentation || null
+            ,pageCompositionId: block.pageCompositionId || null
         };
         if (nodeName === "heading")
             attrs.level = block.headingLevel || 2;
-        const content = nodeName === "scene_break"
+        const content = ["scene_break", "designed_page"].includes(nodeName)
             ? null
             : (block.content || []).flatMap(inlineFromDomain);
         return nodeType.create(attrs, content);
@@ -315,17 +358,26 @@ function domainFromDocument(doc, manuscriptId, revision) {
                     inlines.push({type: "text", text, marks});
             });
         }
-        content.push({
+        const block = {
             id: node.attrs.id || newBlockId(),
             type: nodeToBlockType[node.type.name] || "paragraph",
             styleRole: node.attrs.styleRole || "body",
             headingLevel: node.type.name === "heading" ? node.attrs.level : null,
             imageId: node.type.name === "figure" ? node.attrs.imageId : null,
             altText: node.type.name === "figure" ? node.attrs.altText : null,
+            language: node.attrs.language || null,
             content: inlines
-        });
+        };
+        if (node.type.name === "figure") {
+            block.decorative = node.attrs.decorative === true;
+            block.accessibilityRole = node.attrs.accessibilityRole || "figure";
+            block.figurePresentation = node.attrs.presentation || {...defaultFigurePresentation};
+        }
+        if (node.type.name === "designed_page")
+            block.pageCompositionId = node.attrs.pageCompositionId;
+        content.push(block);
     });
-    return {schemaVersion: 2, manuscriptId, revision, content};
+    return {schemaVersion: 3, manuscriptId, revision, content};
 }
 
 export function roundTripManuscriptJson(json) {
@@ -525,16 +577,30 @@ function insertHardBreak(state, dispatch) {
     return true;
 }
 
+const defaultFigurePresentation = Object.freeze({
+    placement: "centered",
+    widthPercent: 100,
+    alignment: "center",
+    textWrap: "none",
+    fit: "contain",
+    focalXPercent: 50,
+    focalYPercent: 50,
+    spacingBeforePoints: 6,
+    spacingAfterPoints: 6,
+    startOnNewPage: false,
+    keepWithCaption: true,
+    captionPlacement: "below"
+    ,layoutTargetEditionId: null
+});
+
 function insertFigure(view, image) {
     if (!image?.id) return;
     const caption = window.prompt("Figure caption", "") ?? "";
     const altText = window.prompt(
         "Alternative text",
-        image.altText || image.fileName || "")?.trim();
-    if (!altText) {
-        window.alert("Alternative text is required for a figure.");
-        return;
-    }
+        image.altText || "")?.trim();
+    const decorative = !altText && window.confirm("Mark this image decorative? Decorative images are skipped by assistive technology.");
+    if (!altText && !decorative) return;
     const content = caption
         ? schema.text(caption)
         : null;
@@ -543,7 +609,10 @@ function insertFigure(view, image) {
         styleRole: "figure-caption",
         imageId: image.id,
         altText,
-        imageUrl: image.previewUrl
+        imageUrl: image.previewUrl,
+        decorative,
+        accessibilityRole: "figure",
+        presentation: {...defaultFigurePresentation}
     }, content);
     view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
     view.focus();
@@ -551,9 +620,123 @@ function insertFigure(view, image) {
 
 function selectedFigure(view) {
     const {$from} = view.state.selection;
+    if (view.state.selection.node?.type?.name === "figure")
+        return {node: view.state.selection.node, position: view.state.selection.from};
     return $from.parent.type.name === "figure"
         ? {node: $from.parent, position: $from.before()}
         : null;
+}
+
+function buildFigureInspector(view, projectImages, editionTargets, dotNetRef) {
+    const panel = document.createElement("section");
+    panel.className = "semantic-figure-inspector";
+    panel.hidden = true;
+    const heading = document.createElement("strong");
+    heading.textContent = "Figure layout and accessibility";
+    const controls = document.createElement("div");
+    controls.className = "semantic-figure-controls";
+    const fields = new Map();
+    const field = (name, label, kind, options = []) => {
+        const wrapper = document.createElement("label");
+        wrapper.textContent = label;
+        const input = kind === "select" ? document.createElement("select") : document.createElement("input");
+        if (kind !== "select") input.type = kind;
+        for (const [value, text] of options) {
+            const option = document.createElement("option");
+            option.value = value; option.textContent = text; input.append(option);
+        }
+        wrapper.append(input); controls.append(wrapper); fields.set(name, input); return input;
+    };
+    field("imageId", "Project image", "select", projectImages.map(image => [image.id, image.fileName]));
+    field("editionTarget", "Layout target", "select", [["", "All compatible editions"], ...editionTargets.map(edition => [edition.id, `${edition.name} (${edition.format})`])]);
+    field("placement", "Placement", "select", [["inline", "Inline"], ["centered", "Centered"], ["float", "Floated"], ["fullWidth", "Full width"], ["fullBleed", "Full bleed"], ["dedicatedPage", "Dedicated page"]]);
+    const width = field("widthPercent", "Width %", "number"); width.min = "1"; width.max = "100";
+    field("alignment", "Alignment", "select", [["start", "Start"], ["center", "Center"], ["end", "End"]]);
+    field("textWrap", "Text wrap", "select", [["none", "None"], ["start", "Text on start side"], ["end", "Text on end side"]]);
+    field("fit", "Crop / fit", "select", [["contain", "Contain"], ["cover", "Cover"], ["fill", "Fill"]]);
+    for (const [name, label] of [["focalXPercent", "Focal X %"], ["focalYPercent", "Focal Y %"], ["spacingBeforePoints", "Space before pt"], ["spacingAfterPoints", "Space after pt"]]) {
+        const input = field(name, label, "number"); input.step = ".5";
+    }
+    field("captionPlacement", "Caption", "select", [["below", "Below"], ["above", "Above"], ["overlay", "Overlay"], ["hidden", "Hidden"]]);
+    field("startOnNewPage", "Start on new page", "checkbox");
+    field("keepWithCaption", "Keep with caption", "checkbox");
+    const alt = document.createElement("label"); alt.textContent = "Alternative text";
+    const altInput = document.createElement("textarea"); altInput.rows = 2; alt.append(altInput); controls.append(alt); fields.set("altText", altInput);
+    field("decorative", "Decorative image", "checkbox");
+    field("language", "Language", "text");
+    field("accessibilityRole", "Semantic role", "select", [["figure", "Figure"], ["illustration", "Illustration"], ["diagram", "Diagram"], ["map", "Map"], ["photograph", "Photograph"], ["ornament", "Ornament"]]);
+    const apply = () => {
+        const selected = selectedFigure(view); if (!selected) return;
+        const current = {...defaultFigurePresentation, ...(selected.node.attrs.presentation || {})};
+        const number = name => Number(fields.get(name).value);
+        const decorative = fields.get("decorative").checked;
+        const altText = fields.get("altText").value.trim();
+        if (!decorative && !altText) {
+            fields.get("altText").setCustomValidity("Describe the image or mark it decorative.");
+            fields.get("altText").reportValidity();
+            return;
+        }
+        fields.get("altText").setCustomValidity("");
+        const imageId = fields.get("imageId").value;
+        const image = projectImages.find(candidate => candidate.id === imageId);
+        const presentation = {
+            ...current,
+            placement: fields.get("placement").value,
+            widthPercent: Math.min(100, Math.max(1, number("widthPercent"))),
+            alignment: fields.get("alignment").value,
+            textWrap: fields.get("textWrap").value,
+            fit: fields.get("fit").value,
+            focalXPercent: Math.min(100, Math.max(0, number("focalXPercent"))),
+            focalYPercent: Math.min(100, Math.max(0, number("focalYPercent"))),
+            spacingBeforePoints: Math.max(0, number("spacingBeforePoints")),
+            spacingAfterPoints: Math.max(0, number("spacingAfterPoints")),
+            startOnNewPage: fields.get("startOnNewPage").checked,
+            keepWithCaption: fields.get("keepWithCaption").checked,
+            captionPlacement: fields.get("captionPlacement").value
+            ,layoutTargetEditionId: fields.get("editionTarget").value || null
+        };
+        view.dispatch(view.state.tr.setNodeMarkup(selected.position, undefined, {
+            ...selected.node.attrs,
+            imageId,
+            imageUrl: image?.previewUrl || selected.node.attrs.imageUrl,
+            altText: decorative ? null : altText,
+            decorative,
+            language: fields.get("language").value.trim() || null,
+            accessibilityRole: fields.get("accessibilityRole").value,
+            presentation
+        }).scrollIntoView());
+    };
+    for (const input of fields.values()) input.addEventListener("change", apply);
+    const generate = button("Generate for layout", "Open geometry-bound image generation for this Figure", () => {
+        const selected = selectedFigure(view);
+        const editionId = fields.get("editionTarget").value;
+        if (!selected || !editionId) {
+            window.alert("Select a layout target edition first.");
+            return;
+        }
+        apply();
+        void dotNetRef.invokeMethodAsync("OnGenerateFigure", selected.node.attrs.id, editionId);
+    });
+    controls.append(generate);
+    panel.append(heading, controls);
+    return {
+        panel,
+        update() {
+            const selected = selectedFigure(view); panel.hidden = !selected; if (!selected) return;
+            const attrs = selected.node.attrs;
+            const presentation = {...defaultFigurePresentation, ...(attrs.presentation || {})};
+            for (const name of ["placement", "widthPercent", "alignment", "textWrap", "fit", "focalXPercent", "focalYPercent", "spacingBeforePoints", "spacingAfterPoints", "captionPlacement"])
+                fields.get(name).value = presentation[name];
+            fields.get("startOnNewPage").checked = presentation.startOnNewPage;
+            fields.get("keepWithCaption").checked = presentation.keepWithCaption;
+            fields.get("imageId").value = attrs.imageId || "";
+            fields.get("editionTarget").value = presentation.layoutTargetEditionId || "";
+            fields.get("altText").value = attrs.altText || "";
+            fields.get("decorative").checked = attrs.decorative;
+            fields.get("language").value = attrs.language || "";
+            fields.get("accessibilityRole").value = attrs.accessibilityRole || "figure";
+        }
+    };
 }
 
 function setFigureImage(view, image) {
@@ -565,11 +748,9 @@ function setFigureImage(view, image) {
     }
     const altText = window.prompt(
         "Alternative text",
-        selected.node.attrs.altText || image.altText || image.fileName || "")?.trim();
-    if (!altText) {
-        window.alert("Alternative text is required for a figure.");
-        return;
-    }
+        selected.node.attrs.altText || image.altText || "")?.trim();
+    const decorative = !altText && window.confirm("Mark this image decorative?");
+    if (!altText && !decorative) return;
     view.dispatch(view.state.tr.setNodeMarkup(
         selected.position,
         undefined,
@@ -577,7 +758,8 @@ function setFigureImage(view, image) {
             ...selected.node.attrs,
             imageId: image.id,
             imageUrl: image.previewUrl,
-            altText
+            altText: decorative ? null : altText,
+            decorative
         }).scrollIntoView());
     view.focus();
 }
@@ -589,14 +771,68 @@ function editFigureAltText(view) {
         return;
     }
     const altText = window.prompt("Alternative text", selected.node.attrs.altText || "")?.trim();
-    if (!altText) {
-        window.alert("Alternative text is required for a figure.");
-        return;
-    }
+    const decorative = !altText && window.confirm("Mark this image decorative?");
+    if (!altText && !decorative) return;
     view.dispatch(view.state.tr.setNodeMarkup(
         selected.position,
         undefined,
-        {...selected.node.attrs, altText}).scrollIntoView());
+        {...selected.node.attrs, altText: decorative ? null : altText, decorative}).scrollIntoView());
+    view.focus();
+}
+
+function editFigurePresentation(view) {
+    const selected = selectedFigure(view);
+    if (!selected) {
+        window.alert("Place the cursor in a figure caption first.");
+        return;
+    }
+    const current = {...defaultFigurePresentation, ...(selected.node.attrs.presentation || {})};
+    const placement = window.prompt(
+        "Placement: inline, centered, float, fullWidth, fullBleed, or dedicatedPage",
+        current.placement)?.trim();
+    if (placement === null) return;
+    const allowed = new Set(["inline", "centered", "float", "fullWidth", "fullBleed", "dedicatedPage"]);
+    if (!allowed.has(placement)) {
+        window.alert("Choose inline, centered, float, fullWidth, fullBleed, or dedicatedPage.");
+        return;
+    }
+    const width = Number(window.prompt("Width percent (1-100)", String(current.widthPercent)));
+    if (!Number.isFinite(width) || width <= 0 || width > 100) {
+        window.alert("Width must be between 1 and 100 percent.");
+        return;
+    }
+    const fit = window.prompt("Image fit: contain, cover, or fill", current.fit)?.trim();
+    if (!new Set(["contain", "cover", "fill"]).has(fit)) {
+        window.alert("Choose contain, cover, or fill.");
+        return;
+    }
+    const presentation = {
+        ...current,
+        placement,
+        widthPercent: width,
+        fit,
+        textWrap: placement === "float" ? (current.textWrap === "none" ? "end" : current.textWrap) : "none"
+    };
+    view.dispatch(view.state.tr.setNodeMarkup(
+        selected.position,
+        undefined,
+        {...selected.node.attrs, presentation}).scrollIntoView());
+    view.focus();
+}
+
+async function insertDesignedPage(view, dotNetRef, getRevision, flush, replaceDocument) {
+    const name = window.prompt("Designed page name", "Designed page")?.trim();
+    if (name === undefined) return;
+    if (!await flush()) return;
+    const resolved = view.state.selection.$from;
+    const blockIndex = resolved.index(0) + (resolved.parentOffset > 0 ? 1 : 0);
+    const composition = await dotNetRef.invokeMethodAsync(
+        "OnCreateDesignedPage",
+        name || "Designed page",
+        blockIndex,
+        getRevision());
+    if (!composition?.id || !composition?.manuscriptJson) return;
+    replaceDocument(composition.manuscriptJson);
     view.focus();
 }
 
@@ -846,7 +1082,7 @@ function sanitizePastedSlice(slice, paragraphRoles, characterRoles, imageById) {
                     {id: newBlockId(), styleRole: "body"},
                     content);
             }
-            const altText = node.attrs.altText?.trim() || image.altText?.trim() || image.fileName;
+            const altText = node.attrs.altText?.trim() || image.altText?.trim() || "";
             return schema.nodes.figure.create({
                 ...node.attrs,
                 id: newBlockId(),
@@ -917,6 +1153,7 @@ function installNamedStyleRules(root, styles) {
 function canonicalPlainText(doc, manuscriptId, revision) {
     const domain = domainFromDocument(doc, manuscriptId, revision);
     return domain.content
+        .filter(block => block.type !== "designedPage")
         .map(block => block.type === "sceneBreak"
             ? "***"
             : block.content.map(inline => inline.text).join(""))
@@ -926,7 +1163,7 @@ function canonicalPlainText(doc, manuscriptId, revision) {
 function editorialText(doc, manuscriptId, revision) {
     const domain = domainFromDocument(doc, manuscriptId, revision);
     return domain.content
-        .filter(block => block.type !== "sceneBreak")
+        .filter(block => !["sceneBreak", "designedPage"].includes(block.type))
         .map(block => block.content.map(inline => inline.text).join(""))
         .join("\n\n");
 }
@@ -941,10 +1178,11 @@ function hydrateFigureImageUrls(document, imageById) {
     return document;
 }
 
-export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]") {
+export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]") {
     const initial = JSON.parse(initialJson);
     const namedStyles = JSON.parse(stylesJson);
     const projectImages = JSON.parse(imagesJson);
+    const editionTargets = JSON.parse(editionsJson);
     const imageById = new Map(projectImages.map(image => [String(image.id).toLowerCase(), image]));
     const paragraphRoles = new Set([
         ...builtInParagraphRoles,
@@ -1040,6 +1278,21 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         timer = setTimeout(() => { void saveNow(); }, debounceMs);
     };
 
+    const replaceDocument = json => {
+        const incoming = hydrateFigureImageUrls(JSON.parse(json), imageById);
+        manuscriptId = incoming.manuscriptId;
+        revision = incoming.revision;
+        changeGeneration = 0;
+        savedGeneration = 0;
+        view.updateState(EditorState.create({
+            doc: documentFromDomain(incoming),
+            plugins: view.state.plugins
+        }));
+        updateStatus();
+        outline.update();
+        figureInspector.update();
+    };
+
     const state = EditorState.create({
         doc: documentFromDomain(initial),
         plugins: [
@@ -1071,7 +1324,18 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             }
             findPanel.update();
             outline.update();
+            figureInspector.update();
             updateStatus();
+        },
+        handleDOMEvents: {
+            dblclick(_view, event) {
+                const element = event.target instanceof Element
+                    ? event.target.closest("[data-page-composition-id]")
+                    : null;
+                if (!element?.dataset.pageCompositionId) return false;
+                void dotNetRef.invokeMethodAsync("OnOpenDesignedPage", element.dataset.pageCompositionId);
+                return true;
+            }
         },
         handlePaste(_view, event) {
             const warnings = pasteNormalizationWarnings(
@@ -1097,6 +1361,9 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
 
     const findPanel = buildFindPanel(view);
     const outline = buildOutline(view);
+    const figureInspector = buildFigureInspector(view, projectImages, editionTargets, dotNetRef);
+    root.insertBefore(figureInspector.panel, surface);
+    figureInspector.update();
     const updateStatus = () => {
         const text = editorialText(view.state.doc, manuscriptId, revision);
         const words = text.trim() ? text.trim().split(/\s+/u).length : 0;
@@ -1142,6 +1409,10 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
                 projectImages.map(image => [image.id, image.fileName])),
             value => setFigureImage(view, imageById.get(value))),
         button("Figure alt", "Edit selected figure alternative text", () => editFigureAltText(view)),
+        button("Figure layout", "Edit selected figure placement, width, and crop behavior", () =>
+            editFigurePresentation(view)),
+        button("Designed page", "Insert a designed page at the current manuscript position", () =>
+            void insertDesignedPage(view, dotNetRef, () => revision, saveNow, replaceDocument)),
         button("Figure to text", "Convert selected figure to a paragraph", () =>
             applyBlock(view, "paragraph", "body", 2)),
         button("B", "Bold (Ctrl+B)", () => applyMark(view, "strong")),
@@ -1225,17 +1496,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             applyEffectiveReadOnly();
         },
         setDocument(json) {
-            const incoming = hydrateFigureImageUrls(JSON.parse(json), imageById);
-            manuscriptId = incoming.manuscriptId;
-            revision = incoming.revision;
-            changeGeneration = 0;
-            savedGeneration = 0;
-            view.updateState(EditorState.create({
-                doc: documentFromDomain(incoming),
-                plugins: view.state.plugins
-            }));
-            updateStatus();
-            outline.update();
+            replaceDocument(json);
         },
         resolveConflictWithCurrent(json, restoreReadOnly) {
             this.setDocument(json);

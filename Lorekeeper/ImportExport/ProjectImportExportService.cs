@@ -156,6 +156,30 @@ public sealed class ProjectImportExportService(
                     .Select(ProjectPublicationEdition)
                     .ToList()
                 : [],
+            PageCompositions = kind == ProjectExportKind.Full
+                ? (await db.PageCompositions
+                    .AsNoTracking()
+                    .Include(composition => composition.Variants)
+                    .Where(composition => composition.ProjectId == projectId)
+                    .OrderBy(composition => composition.ChapterId)
+                    .ThenBy(composition => composition.CreatedAt)
+                    .ToListAsync(cancellationToken))
+                    .Select(composition => new ProjectExportPageComposition(
+                        composition.Id,
+                        composition.ChapterId,
+                        composition.Name,
+                        composition.SemanticManuscriptJson,
+                        composition.Revision,
+                        composition.Variants
+                            .OrderBy(variant => variant.GeometryKey, StringComparer.Ordinal)
+                            .Select(variant => new ProjectExportPageCompositionVariant(
+                                variant.Id,
+                                variant.GeometryKey,
+                                variant.SceneJson,
+                                variant.Revision))
+                            .ToList()))
+                    .ToList()
+                : [],
             ManuscriptStyles = kind == ProjectExportKind.Full
                 ? (await db.ManuscriptStyleDefinitions
                     .AsNoTracking()
@@ -197,7 +221,9 @@ public sealed class ProjectImportExportService(
                                 face.Italic,
                                 face.Data,
                                 Convert.ToHexStringLower(SHA256.HashData(face.Data))))
-                            .ToList()))
+                            .ToList(),
+                        family.EmbeddingRightsConfirmed,
+                        family.RightsDeclaration))
                     .ToList()
                 : [],
             Acts = kind == ProjectExportKind.Full
@@ -376,19 +402,17 @@ public sealed class ProjectImportExportService(
             profile.NumberActs,
             profile.NumberChapters,
             profile.TitlePageMode,
-            profile.PrintPicturePageSpreadMode,
-            profile.EpubPicturePageSpreadMode,
             profile.PageWidthInches,
             profile.PageHeightInches,
             profile.PageMarginInches,
             profile.BodyFontSizePoints,
             profile.BodyLineHeight,
             profile.SelectedCoverImageId,
-            null,
             profile.Binding,
             profile.Paper,
             profile.Ink,
             profile.Bleed,
+            profile.AllowDesignedPageOverrides,
             profile.OutlineItems
                 .OrderBy(item => item.SortOrder)
                 .Select(item => new ProjectExportEditionOutlineItem(
@@ -433,7 +457,12 @@ public sealed class ProjectImportExportService(
                     item.TargetId,
                     item.PlacementKind,
                     item.Caption,
-                    item.SortOrder))
+                    item.SortOrder,
+                    JsonSerializer.Deserialize<FigurePresentation>(item.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
+                    item.AltText,
+                    item.Decorative,
+                    item.Language,
+                    item.AccessibilityRole))
                 .ToList(),
             profile.CoverDesign is null ? null : new ProjectExportCoverDesign(
                 profile.CoverDesign.Title,
@@ -445,6 +474,7 @@ public sealed class ProjectImportExportService(
                 profile.CoverDesign.BarcodeMode,
                 profile.CoverDesign.ImageFocalXPercent,
                 profile.CoverDesign.ImageFocalYPercent,
+                profile.CoverDesign.CompositionSceneJson,
                 profile.CoverDesign.Revision));
 
     private static ProjectExportChapter ProjectChapter(
@@ -459,10 +489,6 @@ public sealed class ProjectImportExportService(
             ManuscriptRevision = chapter.ManuscriptRevision,
             Synopsis = chapter.Synopsis,
             Order = chapter.Order,
-            VisualMode = chapter.VisualMode,
-            PageLayoutKind = chapter.PageLayoutKind,
-            PageLayoutJson = chapter.PageLayoutJson,
-            IllustrationLayoutJson = chapter.IllustrationLayoutJson,
             ExplicitImageContextImageIds = exportedImageContextIds.TryGetValue(chapter.Id, out var imageIds)
                 ? imageIds.ToList()
                 : [],

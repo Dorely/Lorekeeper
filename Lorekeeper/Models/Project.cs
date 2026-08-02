@@ -55,6 +55,9 @@ public class Project
 
     public ICollection<Chapter> Chapters { get; set; } = [];
 
+    public ICollection<PageComposition> PageCompositions { get; set; } = [];
+    public ICollection<CompositionMutationStage> CompositionMutationStages { get; set; } = [];
+
     public ICollection<OutlineConversation> OutlineConversations { get; set; } = [];
 
     public ICollection<EditorConversation> EditorConversations { get; set; } = [];

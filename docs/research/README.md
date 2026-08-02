@@ -14,6 +14,7 @@ These briefs are engineering references for Lorekeeper's prompts, automation, co
 - [Image generation prompting](image-generation-prompting.md) — production prompt structure, references, edits, masks, story-page targeting, and direct mappings to Lorekeeper's structured image contracts.
 - [Story writing and editorial practice](story-writing-and-editorial-practice.md) — professional editorial stages, narrative craft, picture-book practice, and the requirements for Lorekeeper's code-owned system role.
 - [Page composition and typesetting](page-composition-and-typesetting.md) — page/spread design, typography, accessibility, diagnostic thresholds, and shared page geometry.
+- [Genre-aware book-format guidance](book-format-guidance.md) — current Book Brief-derived Outline guidance, format-neutral structure, and compact assistant contract.
 - [Publishing industry workflow and file standards](publishing-industry-and-file-standards.md)
   — print/ebook production stages, common service inputs, vendor constraints,
   metadata, preflight, and Lorekeeper's edition/package decisions.

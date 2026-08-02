@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{OnceLock, RwLock};
 
 use harfrust::{FontRef, ShapeOptions, ShaperData, UnicodeBuffer};
 use subsetter::GlyphRemapper;
 
-use crate::model::{Diagnostic, FontFace, LayoutPage};
+use crate::model::{Diagnostic, FontDeclaration, FontFace, LayoutPage};
 
 pub const BODY_FONT: &[u8] = include_bytes!("../../Lorekeeper/wwwroot/fonts/lora/Lora-Regular.ttf");
 const LORA_ITALIC: &[u8] = include_bytes!("../../Lorekeeper/wwwroot/fonts/lora/Lora-Italic.ttf");
@@ -31,6 +32,7 @@ const MONO_BOLD_ITALIC: &[u8] =
 pub struct EmbeddedFont {
     pub face: FontFace,
     pub postscript_name: &'static str,
+    pub open_type: bool,
     pub bytes: Vec<u8>,
     pub character_ids: BTreeMap<char, u16>,
     pub unicode_sequences: BTreeMap<u16, Vec<char>>,
@@ -38,6 +40,121 @@ pub struct EmbeddedFont {
     glyph_ids: BTreeMap<u16, u16>,
     source: &'static [u8],
     units_per_em: f32,
+}
+
+#[derive(Debug, Clone)]
+struct CustomFont {
+    family_key: String,
+    weight: u16,
+    italic: bool,
+    source: &'static [u8],
+    postscript_name: &'static str,
+    open_type: bool,
+}
+
+static CUSTOM_FONTS: OnceLock<RwLock<Vec<CustomFont>>> = OnceLock::new();
+
+fn custom_fonts() -> &'static RwLock<Vec<CustomFont>> {
+    CUSTOM_FONTS.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+pub fn configure_custom_fonts(
+    declarations: &[FontDeclaration],
+    sources: &BTreeMap<String, Vec<u8>>,
+) -> Result<(), Diagnostic> {
+    let mut configured = Vec::with_capacity(declarations.len());
+    for declaration in declarations {
+        let bytes = sources.get(&declaration.id).ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_FONT_MISSING",
+                format!("Declared font '{}' was not staged.", declaration.id),
+            )
+        })?;
+        let leaked_source = Box::leak(bytes.clone().into_boxed_slice());
+        let safe_family = declaration
+            .family_key
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>();
+        let style = if declaration.italic {
+            "Italic"
+        } else {
+            "Roman"
+        };
+        let name = format!(
+            "LorekeeperCustom-{safe_family}-{}-{style}",
+            declaration.weight
+        );
+        let leaked_name = Box::leak(name.into_boxed_str());
+        configured.push(CustomFont {
+            family_key: declaration.family_key.clone(),
+            weight: declaration.weight,
+            italic: declaration.italic,
+            source: leaked_source,
+            postscript_name: leaked_name,
+            open_type: declaration.media_type == "font/otf",
+        });
+    }
+    *custom_fonts()
+        .write()
+        .expect("custom font registry poisoned") = configured;
+    Ok(())
+}
+
+pub fn custom_family(value: &str) -> Option<u16> {
+    custom_fonts()
+        .read()
+        .expect("custom font registry poisoned")
+        .iter()
+        .position(|font| font.family_key.eq_ignore_ascii_case(value))
+        .map(|index| index as u16)
+}
+
+pub fn custom_face(index: u16, weight: u16, italic: bool) -> FontFace {
+    let fonts = custom_fonts()
+        .read()
+        .expect("custom font registry poisoned");
+    let Some(base) = fonts.get(index as usize) else {
+        return FontFace::SerifRegular;
+    };
+    fonts
+        .iter()
+        .enumerate()
+        .filter(|(_, candidate)| candidate.family_key == base.family_key)
+        .min_by_key(|(_, candidate)| {
+            u32::from(candidate.weight.abs_diff(weight))
+                + if candidate.italic == italic {
+                    0
+                } else {
+                    10_000
+                }
+        })
+        .map_or(FontFace::Custom(index), |(candidate, _)| {
+            FontFace::Custom(candidate as u16)
+        })
+}
+
+pub fn is_italic(face: FontFace) -> bool {
+    match face {
+        FontFace::SerifItalic
+        | FontFace::SerifBoldItalic
+        | FontFace::SansItalic
+        | FontFace::SansBoldItalic
+        | FontFace::MonoItalic
+        | FontFace::MonoBoldItalic => true,
+        FontFace::Custom(index) => custom_fonts()
+            .read()
+            .expect("custom font registry poisoned")
+            .get(index as usize)
+            .is_some_and(|font| font.italic),
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -272,6 +389,11 @@ fn subset_for_face(face: FontFace, text: &str) -> Result<EmbeddedFont, Diagnosti
     Ok(EmbeddedFont {
         face,
         postscript_name: postscript_name(face),
+        open_type: matches!(face, FontFace::Custom(index) if custom_fonts()
+            .read()
+            .expect("custom font registry poisoned")
+            .get(index as usize)
+            .is_some_and(|font| font.open_type)),
         bytes: subset,
         character_ids,
         unicode_sequences,
@@ -324,6 +446,11 @@ fn font_source(face: FontFace) -> &'static [u8] {
         FontFace::MonoItalic => MONO_ITALIC,
         FontFace::MonoBold => MONO_BOLD,
         FontFace::MonoBoldItalic => MONO_BOLD_ITALIC,
+        FontFace::Custom(index) => custom_fonts()
+            .read()
+            .expect("custom font registry poisoned")
+            .get(index as usize)
+            .map_or(BODY_FONT, |font| font.source),
     }
 }
 
@@ -341,6 +468,11 @@ fn postscript_name(face: FontFace) -> &'static str {
         FontFace::MonoItalic => "LKMITA+RobotoMono-Italic",
         FontFace::MonoBold => "LKMBOL+RobotoMono-Bold",
         FontFace::MonoBoldItalic => "LKMZBI+RobotoMono-BoldItalic",
+        FontFace::Custom(index) => custom_fonts()
+            .read()
+            .expect("custom font registry poisoned")
+            .get(index as usize)
+            .map_or("LKLRAR+Lora-Regular", |font| font.postscript_name),
     }
 }
 

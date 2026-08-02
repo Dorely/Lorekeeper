@@ -12,10 +12,11 @@ fn main() {
             println!(
                 "{}",
                 serde_json::to_string(&json!({
-                    "protocolVersion": 3,
+                    "protocolVersion": 4,
                     "rendererVersion": env!("CARGO_PKG_VERSION"),
                     "profiles": [
                         "generic-paperback-v1",
+                        "generic-digital-pdf-v1",
                         "ingram-paperback-pdfx1a-v1",
                         "kdp-paperback-v1"
                     ],

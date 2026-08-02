@@ -14,7 +14,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Project-scoped outline, Book Brief, story-graph, project-fact, writing-sample,
   and chapter workspaces.
 - Six persistent assistant surfaces for outline collaboration, chapter editing,
-  writing coaching, research, and project images, including streaming tools,
+  writing coaching, research, project images, and publishing, including streaming tools,
   reviewable changes, visual context, and background revision agents.
 - Versioned structured chapter manuscripts with stable block anchors,
   revision-aware manual and assistant operations, plain-text reading projections,
@@ -28,45 +28,55 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   normalized paste, find/replace, and outline navigation. Manual edits and AI
   assistants share one revision-checked manuscript boundary; HTML is not
   authoritative.
+- Outline treats chapters as format-neutral containers and derives concise,
+  non-prescriptive genre-format guidance from the Book Brief. Outline, Editor,
+  Images, and Publish share revision-safe Figure/composition/cover tools,
+  server-owned image-generation geometry, compact paginated reads, and one-use
+  persisted stages for large scenes so payloads are not repeated.
 - Text, EPUB, PDF, image, and webpage ingest with structured source provenance,
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval.
 - Project image generation and editing, canonical entity visual references,
-  illustrated prose, Picture Page composition, font management, and layout
-  diagnostics.
-- Independent paperback/EPUB publication editions with product/vendor settings,
+  semantic flowing Figures, Designed Page/spread composition, project font
+  management, format-aware dedicated cover composition, exact geometry-bound
+  generation targets, accessibility state, and layout diagnostics.
+- Independent paperback, EPUB, and Digital PDF publication editions with product/vendor settings,
   identifiers, included content, semantic matter, named-style mappings, image
   placements, dedicated project-image cover artwork, clone/archive/compare/audit workflows,
   deterministic staleness fingerprints, read-only archived editions, and
   a full-height conversational Publish assistant with streaming, persistent
   history, image attachments, Stop/Reset, and matching tools. New paperback editions start on the
   owned 6 × 9 in KDP, Ingram, or generic profile selected for the edition.
-- Lorekeeper-owned paperback press jobs with cancellation/restart recovery,
+- Lorekeeper-owned paperback and Digital PDF press jobs with cancellation/restart recovery,
   immutable SHA-256-verified interior and full-wrap cover PDFs, actual in-app
   PDF viewing, semantic block-to-page maps, render comparisons, and matching
   assistant controls. The exact-pinned Rust renderer is built and packaged in
   both Debug and Release; the running app invokes only that integrity-checked
   native executable and never uses machine-installed PDF software.
   Black-and-white editions produce grayscale interior imagery while full-wrap
-  cover color remains independently preserved. Renderer/profile upgrades make
-  older owned PDFs stale until regenerated.
-- Edition-aware full-wrap cover design with page-count/paper-caliper geometry,
-  copy and background controls, template acknowledgement, ISBN-13/EAN-13
-  barcode or KDP overlay-reserve behavior, cover PDF output, and assistant parity.
+  cover color remains independently preserved. Digital PDF produces one tagged
+  Book PDF with its front cover as page one, searchable/selectable text,
+  bookmarks, internal links, semantic structure, and logical reading order.
+  Renderer/profile upgrades make older owned PDFs stale until regenerated.
+- Edition-aware structured cover design with shared image/text/shape/layer/style
+  tools: page-count/paper-caliper back/spine/front geometry for print and a
+  front-only canvas for Digital PDF/EPUB, canonical copy bindings, safe zones,
+  ISBN-13/EAN-13 barcode or KDP reserve behavior, and assistant parity.
 - Versioned Lorekeeper validation with independent post-write inspection,
   deterministic EPUB 3/package assembly, downloadable manifests and reports,
   exact-package digital proof records plus paperback-only physical-proof
   records, and matching assistant preflight/package controls. The owned KDP
   profile emits PDF 1.7, and the owned Ingram profile emits restricted PDF 1.3
   with PDF/X-1a:2001 identification, embedded CMYK output intent, CMYK/gray
-  content, flattened transparency, embedded subset fonts, ToUnicode maps, and a
+  content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. Recorded vendor acceptance and human proof remain
   separate evidence, never assistant-controlled conformance gates.
-- Versioned project import/export (current v13
-  manuscripts/styles/editions/covers/custom-font binaries, isolated v8-v12
-  structured adapters, and v1-v7 text adapters) plus TXT,
-  Markdown, mixed-layout EPUB, and artifact-backed Generate/Regenerate plus
-  separate interior/cover PDF saves. EPUB export is restricted to EPUB editions.
+- Versioned project import/export (current v14 manuscript-v3/composition model,
+  styles/editions/covers/custom-font binaries, isolated v13 visual transformer,
+  v8-v12 structured adapters, and v1-v7 text adapters) plus TXT, Markdown,
+  accessible mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
+  paperback interior/cover saves, and one Digital PDF Book save. EPUB export is
+  restricted to EPUB editions.
 - Configurable Codex/OpenAI-compatible chat and embedding providers, configurable
   web search, and local SQLite persistence.
 
@@ -221,15 +231,12 @@ reload, can be downloaded from the conflict banner, and is removed only when
 the user explicitly loads the current saved version. Clearing browser/site data
 removes it; it is not included in database backups or project exports.
 
-Picture Page and Illustrated Prose layouts also carry revisions. If another
-editor, manuscript save, or image deletion changes the active layout, a stale
-visual save is rejected and the viewer reloads the current layout with a visible
-notice instead of reintroducing removed images or overwriting newer anchors.
-
-The dedicated-cover migration converts a legacy Picture Page cover selection to
-the same project image when that page contains exactly one distinct image. A
-multi-image or text-only Picture Page keeps its Chapter and PageLayout bytes,
-but its edition cover selection is cleared so the author can deliberately choose
-dedicated artwork without Lorekeeper guessing which layer was intended. Every
-former cover page is marked excluded in that edition's outline, preserving the
-old cover-only body behavior without deleting the source chapter.
+The guarded manuscript-v3/composition migration creates a protected SQLite
+backup before transforming Figure presentation, page-layout chapters, cover
+scenes, and pending Outline changes. It verifies semantic text and stable IDs,
+scene bindings and geometry, row counts, foreign keys, artifacts, hashes,
+packages, audits, and proofs before removing obsolete visual columns. A failure
+opens Lorekeeper's projectless recovery shell and leaves the original database
+available under **Settings > Data Recovery**. Existing generated artifacts keep
+their exact bytes and hashes but are labeled Legacy until regenerated through
+the current renderer.

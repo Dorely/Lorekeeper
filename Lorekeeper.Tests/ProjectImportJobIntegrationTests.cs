@@ -3,6 +3,7 @@ using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Fonts;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Manuscripts;
@@ -14,6 +15,8 @@ using Lorekeeper.Projects;
 using Lorekeeper.Publish;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 using SkiaSharp;
 
@@ -21,6 +24,16 @@ namespace Lorekeeper.Tests;
 
 public sealed class ProjectImportJobIntegrationTests
 {
+    private sealed class TestWebHostEnvironment(string webRootPath) : IWebHostEnvironment
+    {
+        public string ApplicationName { get; set; } = "Lorekeeper.Tests";
+        public IFileProvider WebRootFileProvider { get; set; } = new PhysicalFileProvider(webRootPath);
+        public string WebRootPath { get; set; } = webRootPath;
+        public string EnvironmentName { get; set; } = "Development";
+        public string ContentRootPath { get; set; } = Directory.GetParent(webRootPath)!.FullName;
+        public IFileProvider ContentRootFileProvider { get; set; } = new PhysicalFileProvider(Directory.GetParent(webRootPath)!.FullName);
+    }
+
     [Fact]
     public async Task V12CoverImportPreservesLegacyBodyExclusionAndClearsAmbiguousArtwork()
     {
@@ -105,7 +118,11 @@ public sealed class ProjectImportJobIntegrationTests
             item.EditionId == ambiguous.Id && item.ChapterId == importedAmbiguousChapter.Id).IsIncluded);
         Assert.True(outlines.Single(item =>
             item.EditionId == ambiguous.Id && item.ChapterId == importedValidChapter.Id).IsIncluded);
-        var rendered = await new PublishService(db, null!, null!, []).GetDocumentAsync(project.Id, converted.Id);
+        var webRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "Lorekeeper", "wwwroot"));
+        var fonts = new ProjectFontService(db, new TestWebHostEnvironment(webRoot));
+        var rendered = await new PublishService(db, null!, fonts, []).GetDocumentAsync(project.Id, converted.Id);
         Assert.DoesNotContain(
             rendered.Sections.SelectMany(section => section.Chapters),
             chapter => chapter.Id == importedValidChapter.Id);
@@ -315,19 +332,17 @@ public sealed class ProjectImportJobIntegrationTests
                     NumberActs: false,
                     NumberChapters: false,
                     TitlePageMode: PublishTitlePageMode.Automatic,
-                    PrintPicturePageSpreadMode: PrintPicturePageSpreadMode.WholeSpread,
-                    EpubPicturePageSpreadMode: EpubPicturePageSpreadMode.RequestLandscape,
                     PageWidthInches: 8.5,
                     PageHeightInches: 11,
                     PageMarginInches: 0.75,
                     BodyFontSizePoints: 12,
                     BodyLineHeight: 1.55,
                     SelectedCoverImageId: null,
-                    SelectedCoverChapterId: null,
                     Binding: PublicationBinding.Digital,
                     Paper: PublicationPaper.Digital,
                     Ink: PublicationInk.Digital,
                     Bleed: false,
+                    AllowDesignedPageOverrides: false,
                     OutlineItems: [],
                     Matter: [],
                     StyleMappings: [],
@@ -463,6 +478,7 @@ public sealed class ProjectImportJobIntegrationTests
                     StyleRole = ManuscriptStyleRoles.FigureCaption,
                     ImageId = exportedImageId,
                     AltText = "A regional map",
+                    FigurePresentation = new FigurePresentation(),
                     Content = [new ManuscriptInline { Text = "Eastern road" }],
                 },
             ],
@@ -690,10 +706,14 @@ public sealed class ProjectImportJobIntegrationTests
             "preview-1", PublicationEditionStatus.Draft, false, 0, string.Empty, string.Empty,
             "Author", "en", string.Empty, string.Empty, string.Empty, string.Empty, true, true,
             false, false, true, true, false, false, PublishTitlePageMode.Automatic,
-            PrintPicturePageSpreadMode.WholeSpread, EpubPicturePageSpreadMode.RequestLandscape,
-            6, 9, 0.75, 11, 1.3, selectedCoverImageId, selectedCoverChapterId,
+            6, 9, 0.75, 11, 1.3, selectedCoverImageId,
             PublicationBinding.PerfectBound, PublicationPaper.White, PublicationInk.BlackAndWhite,
-            false, outline, [], [], [], null);
+            false, false, outline, [], [], [], null)
+        {
+            PrintPicturePageSpreadMode = PrintPicturePageSpreadMode.WholeSpread,
+            EpubPicturePageSpreadMode = EpubPicturePageSpreadMode.RequestLandscape,
+            SelectedCoverChapterId = selectedCoverChapterId,
+        };
 
     private static byte[] TinyPng()
     {

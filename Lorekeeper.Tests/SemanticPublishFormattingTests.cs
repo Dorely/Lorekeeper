@@ -1,7 +1,5 @@
 using System.IO.Compression;
 using System.Text;
-using System.Text.Json;
-using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Publish;
@@ -11,64 +9,61 @@ namespace Lorekeeper.Tests;
 public sealed class SemanticPublishFormattingTests
 {
     [Fact]
-    public void MarkdownExportHydratesPersistedPicturePageTextFromManuscript()
+    public void MarkdownExportIncludesDesignedPageSemanticContentOnce()
     {
         var chapterId = Guid.NewGuid();
-        var manuscript = ManuscriptCodec.FromPlainText(
-            chapterId,
-            "Referenced Picture Page Prose",
-            revision: 1,
-            deterministicIds: true);
-        var referencedLayout = ChapterTextLayoutSynchronizer.AttachReferences(
-            new PicturePageLayout(
-                [],
-                [
-                    new PicturePageTextElement(
-                        Guid.NewGuid(),
-                        "Referenced Picture Page Prose",
-                        0,
-                        0,
-                        100,
-                        100,
-                        0,
-                        0,
-                        PicturePageFontKeys.Default,
-                        400,
-                        false,
-                        12,
-                        0,
-                        1.4,
-                        "#000000",
-                        "#ffffff",
-                        0,
-                        PicturePageTextAlign.Left,
-                        ChapterTextVerticalAlign.Top,
-                        PicturePageTextShadow.None),
-                ]),
-            manuscript);
-        var chapter = new Chapter
+        var compositionId = Guid.NewGuid();
+        var manuscript = new ManuscriptDocument
         {
-            Id = chapterId,
-            Title = "Picture Page",
-            VisualMode = ChapterVisualMode.PicturePage,
-            ManuscriptJson = ManuscriptCodec.Serialize(manuscript),
-            ManuscriptRevision = manuscript.Revision,
-            PageLayoutJson = JsonSerializer.Serialize(referencedLayout, ManuscriptCodec.JsonOptions),
+            ManuscriptId = chapterId,
+            Revision = 1,
+            Content =
+            [
+                new ManuscriptBlock
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Type = ManuscriptBlockType.DesignedPage,
+                    StyleRole = ManuscriptStyleRoles.DesignedPage,
+                    PageCompositionId = compositionId,
+                    Content = [],
+                },
+            ],
         };
-        var pageLayout = PublishService.ReadPageLayout(chapter);
+        var semantic = ManuscriptCodec.FromPlainText(compositionId, "Designed page prose", revision: 1, deterministicIds: true);
+        var layerId = Guid.NewGuid();
+        var scene = new CompositionScene
+        {
+            Surface = new CompositionSurface { WidthPoints = 432, HeightPoints = 648 },
+            Layers = [new CompositionLayer(layerId, "Content", 0)],
+            Objects =
+            [
+                new CompositionObject
+                {
+                    Id = Guid.NewGuid(),
+                    LayerId = layerId,
+                    Kind = CompositionObjectKind.Text,
+                    Bounds = new CompositionBounds { XPercent = 10, YPercent = 10, WidthPercent = 80, HeightPercent = 30 },
+                    ContentReferences = [new ManuscriptRangeReference(semantic.Content[0].Id)],
+                    SemanticRole = CompositionSemanticRole.Paragraph,
+                    ReadingOrder = 1,
+                },
+            ],
+        };
         var chapterDocument = new PublishChapterDocument(
             chapterId,
             ActId: null,
-            chapter.Title,
-            chapter.PlainText,
-            chapter.Synopsis,
+            "Designed page",
+            string.Empty,
+            string.Empty,
             Order: 0,
             IncludeHeading: true,
-            chapter.VisualMode,
-            chapter.PageLayoutKind,
-            new IllustratedProseLayout([]),
-            pageLayout,
-            manuscript);
+            manuscript,
+            [new PublishPageCompositionDocument(
+                compositionId,
+                "Page",
+                semantic,
+                1,
+                [new PublishPageCompositionVariantDocument(Guid.NewGuid(), "fixture", scene, 1)])]);
         var document = MinimalPublishDocument() with
         {
             Sections =
@@ -87,7 +82,7 @@ public sealed class SemanticPublishFormattingTests
 
         var markdown = Encoding.UTF8.GetString(new MarkdownPublishFormatter().Render(document));
 
-        Assert.Contains("Referenced Picture Page Prose", markdown, StringComparison.Ordinal);
+        Assert.Equal(1, markdown.Split("Designed page prose", StringSplitOptions.None).Length - 1);
     }
 
     [Fact]
@@ -105,7 +100,7 @@ public sealed class SemanticPublishFormattingTests
             .ToList();
         var document = MinimalPublishDocument() with { Matter = matter };
 
-        var epub = new EpubPublishFormatter(new PageGeometryService(null!)).Render(document);
+        var epub = new EpubPublishFormatter().Render(document);
 
         using var archive = new ZipArchive(new MemoryStream(epub), ZipArchiveMode.Read);
         var renderedMatterEntries = archive.Entries
@@ -142,7 +137,7 @@ public sealed class SemanticPublishFormattingTests
         };
 
         var exception = Assert.Throws<InvalidOperationException>(
-            () => new EpubPublishFormatter(new PageGeometryService(null!)).Render(document));
+            () => new EpubPublishFormatter().Render(document));
 
         Assert.Contains("generated from edition settings", exception.Message, StringComparison.Ordinal);
     }
@@ -153,7 +148,7 @@ public sealed class SemanticPublishFormattingTests
         var first = MinimalPublishDocument();
         var second = first with { EditionId = Guid.NewGuid() };
 
-        var formatter = new EpubPublishFormatter(new PageGeometryService(null!));
+        var formatter = new EpubPublishFormatter();
         var firstOpf = ReadEpubEntry(formatter.Render(first), "OEBPS/package.opf");
         var secondOpf = ReadEpubEntry(formatter.Render(second), "OEBPS/package.opf");
 
@@ -190,11 +185,8 @@ public sealed class SemanticPublishFormattingTests
             string.Empty,
             0,
             true,
-            ChapterVisualMode.Prose,
-            ChapterPageLayoutKind.SinglePortrait,
-            new IllustratedProseLayout([]),
-            new PicturePageLayout([], []),
-            manuscript);
+            manuscript,
+            []);
         var document = MinimalPublishDocument() with
         {
             Assets = [asset],
@@ -212,7 +204,7 @@ public sealed class SemanticPublishFormattingTests
             ],
         };
 
-        var epub = new EpubPublishFormatter(new PageGeometryService(null!)).Render(document);
+        var epub = new EpubPublishFormatter().Render(document);
         var imagePath = $"OEBPS/images/{imageId:N}.png";
         using var archive = new ZipArchive(new MemoryStream(epub), ZipArchiveMode.Read);
 
@@ -583,8 +575,6 @@ public sealed class SemanticPublishFormattingTests
                 NumberActs: false,
                 NumberChapters: false,
                 IncludeTitlePage: true,
-                PrintPicturePageSpreadMode: PrintPicturePageSpreadMode.WholeSpread,
-                EpubPicturePageSpreadMode: EpubPicturePageSpreadMode.RequestLandscape,
                 PageWidthInches: 6,
                 PageHeightInches: 9,
                 PageMarginInches: 0.75,

@@ -22,7 +22,12 @@ public static class ManuscriptOperations
                         insert.StyleRole,
                         insert.ImageId,
                         insert.AltText,
-                        insert.HeadingLevel);
+                        insert.HeadingLevel,
+                        insert.Decorative,
+                        insert.FigurePresentation,
+                        insert.PageCompositionId,
+                        insert.Language,
+                        insert.AccessibilityRole);
                     blocks.Insert(insert.Index, inserted);
                     changed.Add(inserted.Id);
                     break;
@@ -144,6 +149,22 @@ public static class ManuscriptOperations
                         AltText = blockType.Type == ManuscriptBlockType.Figure
                             ? blockType.AltText?.Trim() ?? (typeIsUnchanged ? current.AltText : null)
                             : null,
+                        Decorative = blockType.Type == ManuscriptBlockType.Figure
+                            && (blockType.Decorative || typeIsUnchanged && current.Decorative),
+                        FigurePresentation = blockType.Type == ManuscriptBlockType.Figure
+                            ? blockType.FigurePresentation
+                                ?? (typeIsUnchanged ? current.FigurePresentation : new FigurePresentation())
+                            : null,
+                        Language = blockType.Type == ManuscriptBlockType.Figure
+                            ? blockType.Language?.Trim() ?? (typeIsUnchanged ? current.Language : null)
+                            : null,
+                        AccessibilityRole = blockType.Type == ManuscriptBlockType.Figure
+                            ? blockType.AccessibilityRole
+                            : null,
+                        PageCompositionId = blockType.Type == ManuscriptBlockType.DesignedPage
+                            ? blockType.PageCompositionId
+                                ?? (typeIsUnchanged ? current.PageCompositionId : null)
+                            : null,
                         HeadingLevel = blockType.Type == ManuscriptBlockType.Heading
                             ? blockType.HeadingLevel ?? current.HeadingLevel ?? 2
                             : null,
@@ -163,6 +184,23 @@ public static class ManuscriptOperations
                 case SetManuscriptInlineMark mark:
                     ApplyMark(blocks, mark);
                     changed.Add(blocks[Find(blocks, mark.BlockId)].Id);
+                    break;
+
+                case SetFigurePresentation figure:
+                    var figureIndex = Find(blocks, figure.BlockId);
+                    var currentFigure = blocks[figureIndex];
+                    if (currentFigure.Type != ManuscriptBlockType.Figure)
+                        throw new InvalidOperationException($"Block {figure.BlockId} is not a Figure.");
+                    blocks[figureIndex] = currentFigure with
+                    {
+                        ImageId = figure.ImageId,
+                        AltText = figure.Decorative ? null : figure.AltText?.Trim(),
+                        Decorative = figure.Decorative,
+                        Language = string.IsNullOrWhiteSpace(figure.Language) ? null : figure.Language.Trim(),
+                        FigurePresentation = figure.Presentation,
+                        AccessibilityRole = figure.AccessibilityRole,
+                    };
+                    changed.Add(currentFigure.Id);
                     break;
 
                 default:
@@ -281,7 +319,12 @@ public static class ManuscriptOperations
         string? styleRole,
         Guid? imageId = null,
         string? altText = null,
-        int? headingLevel = null) =>
+        int? headingLevel = null,
+        bool decorative = false,
+        FigurePresentation? figurePresentation = null,
+        Guid? pageCompositionId = null,
+        string? language = null,
+        FigureAccessibilityRole accessibilityRole = FigureAccessibilityRole.Figure) =>
         NewBlock(
             type,
             type == ManuscriptBlockType.SceneBreak
@@ -290,7 +333,12 @@ public static class ManuscriptOperations
             styleRole,
             imageId,
             altText,
-            headingLevel);
+            headingLevel,
+            decorative,
+            figurePresentation,
+            pageCompositionId,
+            language,
+            accessibilityRole);
 
     private static ManuscriptBlock NewBlock(
         ManuscriptBlockType type,
@@ -298,7 +346,12 @@ public static class ManuscriptOperations
         string? styleRole,
         Guid? imageId = null,
         string? altText = null,
-        int? headingLevel = null) =>
+        int? headingLevel = null,
+        bool decorative = false,
+        FigurePresentation? figurePresentation = null,
+        Guid? pageCompositionId = null,
+        string? language = null,
+        FigureAccessibilityRole accessibilityRole = FigureAccessibilityRole.Figure) =>
         new()
         {
             Id = Guid.NewGuid().ToString("N"),
@@ -309,6 +362,13 @@ public static class ManuscriptOperations
                 : content,
             ImageId = type == ManuscriptBlockType.Figure ? imageId : null,
             AltText = type == ManuscriptBlockType.Figure ? altText?.Trim() : null,
+            Decorative = type == ManuscriptBlockType.Figure && decorative,
+            Language = type == ManuscriptBlockType.Figure && !string.IsNullOrWhiteSpace(language) ? language.Trim() : null,
+            AccessibilityRole = type == ManuscriptBlockType.Figure ? accessibilityRole : null,
+            FigurePresentation = type == ManuscriptBlockType.Figure
+                ? figurePresentation ?? new FigurePresentation()
+                : null,
+            PageCompositionId = type == ManuscriptBlockType.DesignedPage ? pageCompositionId : null,
             HeadingLevel = type == ManuscriptBlockType.Heading ? headingLevel ?? 2 : null,
         };
 
@@ -395,8 +455,8 @@ public static class ManuscriptOperations
 
     private static void RequireTextBlock(ManuscriptBlock block)
     {
-        if (block.Type == ManuscriptBlockType.SceneBreak)
-            throw new InvalidOperationException($"Scene-break block {block.Id} has no editable text.");
+        if (block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage)
+            throw new InvalidOperationException($"Block {block.Id} does not contain directly editable text.");
     }
 
     private static string DefaultStyle(ManuscriptBlockType type) =>
@@ -407,6 +467,7 @@ public static class ManuscriptOperations
             ManuscriptBlockType.BlockQuote => ManuscriptStyleRoles.BlockQuote,
             ManuscriptBlockType.ListItem => ManuscriptStyleRoles.ListItem,
             ManuscriptBlockType.Figure => ManuscriptStyleRoles.FigureCaption,
+            ManuscriptBlockType.DesignedPage => ManuscriptStyleRoles.DesignedPage,
             _ => ManuscriptStyleRoles.Body,
         };
 }

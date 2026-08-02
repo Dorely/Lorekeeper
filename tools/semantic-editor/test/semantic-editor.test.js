@@ -10,7 +10,7 @@ import {
 
 test("round-trips Lorekeeper block IDs, semantic roles, and inline marks", () => {
     const document = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         manuscriptId: "59897294-9390-4da6-a4df-a1bbd16e622b",
         revision: 12,
         content: [
@@ -21,6 +21,7 @@ test("round-trips Lorekeeper block IDs, semantic roles, and inline marks", () =>
                 headingLevel: 1,
                 imageId: null,
                 altText: null,
+                language: null,
                 content: [{type: "text", text: "Chapter One", marks: []}]
             },
             {
@@ -30,6 +31,7 @@ test("round-trips Lorekeeper block IDs, semantic roles, and inline marks", () =>
                 headingLevel: null,
                 imageId: null,
                 altText: null,
+                language: null,
                 content: [
                     {
                         type: "text",
@@ -50,6 +52,7 @@ test("round-trips Lorekeeper block IDs, semantic roles, and inline marks", () =>
                 headingLevel: null,
                 imageId: null,
                 altText: null,
+                language: null,
                 content: []
             },
             {
@@ -59,6 +62,23 @@ test("round-trips Lorekeeper block IDs, semantic roles, and inline marks", () =>
                 headingLevel: null,
                 imageId: "29fd4930-0048-45a1-a2d6-3951daa5a1d9",
                 altText: "A map",
+                language: null,
+                decorative: false,
+                accessibilityRole: "figure",
+                figurePresentation: {
+                    placement: "centered",
+                    widthPercent: 100,
+                    alignment: "center",
+                    textWrap: "none",
+                    fit: "contain",
+                    focalXPercent: 50,
+                    focalYPercent: 50,
+                    spacingBeforePoints: 6,
+                    spacingAfterPoints: 6,
+                    startOnNewPage: false,
+                    keepWithCaption: true,
+                    captionPlacement: "below"
+                },
                 content: [{type: "text", text: "Figure caption", marks: []}]
             }
         ]
@@ -190,10 +210,16 @@ function manuscript(content = [{
     content: [{type: "text", text: "Hello world", marks: []}]
 }]) {
     return {
-        schemaVersion: 2,
+        schemaVersion: 3,
         manuscriptId: "59897294-9390-4da6-a4df-a1bbd16e622b",
         revision: 4,
-        content
+        content: content.map(block => ({
+            ...block,
+            language: block.language ?? null,
+            ...(block.type === "figure"
+                ? {accessibilityRole: block.accessibilityRole || "figure"}
+                : {})
+        }))
     };
 }
 

@@ -8,6 +8,7 @@ using Lorekeeper.EntityVisuals;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
+using Lorekeeper.Publish;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
@@ -23,6 +24,7 @@ public sealed class OutlineCollaborationService(
     IEntityVisualContextService entityVisualContext,
     IAiChangeApprovalService changeApproval,
     IBookBriefService bookBriefs,
+    IPublicationEditionService editions,
     ISystemPromptComposer systemPrompts,
     ChatTurnEngine turnEngine,
     IOptions<AgentOptions> options,
@@ -161,11 +163,13 @@ they commit to a direction, act on it without a second confirmation.
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         var brief = await bookBriefs.GetOrCreateAsync(projectId, cancellationToken);
+        var formats = (await editions.ListAsync(projectId, cancellationToken)).Select(item => item.Format).Distinct().ToArray();
         return systemPrompts.Compose(new(
             project,
             brief,
             SystemPromptAgentRole.Outline,
-            CollaborationOperatingRules)).Prompt;
+            CollaborationOperatingRules,
+            PublicationFormats: formats)).Prompt;
     }
 
     public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
@@ -269,11 +273,13 @@ they commit to a direction, act on it without a second confirmation.
             var project = await projects.GetByIdAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
             var brief = await bookBriefs.GetOrCreateAsync(projectId, cancellationToken);
+            var formats = (await editions.ListAsync(projectId, cancellationToken)).Select(item => item.Format).Distinct().ToArray();
             systemPrompt = systemPrompts.Compose(new(
                 project,
                 brief,
                 SystemPromptAgentRole.Outline,
-                CollaborationOperatingRules)).Prompt;
+                CollaborationOperatingRules,
+                PublicationFormats: formats)).Prompt;
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
 
             if (project.AiChangeApprovalEnabled)
@@ -386,11 +392,7 @@ they commit to a direction, act on it without a second confirmation.
 
             // Tool round: persist this assistant row with text + tool-call manifest, then invoke each.
             var manifest = pendingCalls
-                .Select(pendingCall => new ChatToolCallManifest(
-                    pendingCall.CallId,
-                    pendingCall.Name,
-                    pendingCall.ArgumentsJson,
-                    pendingCall.TextOffset))
+                .Select(ChatToolCallManifest.From)
                 .ToList();
             activeAssistant.Content = textBuilder.ToString();
             activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);

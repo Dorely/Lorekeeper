@@ -1,3 +1,5 @@
+using Lorekeeper.Manuscripts;
+
 namespace Lorekeeper.Models;
 
 public class PublicationImagePlacement
@@ -19,6 +21,11 @@ public class PublicationImagePlacement
     public PublicationImagePlacementKind PlacementKind { get; set; }
     public int SortOrder { get; set; }
     public string Caption { get; set; } = string.Empty;
+    public string PresentationJson { get; set; } = "{}";
+    public string AltText { get; set; } = string.Empty;
+    public bool Decorative { get; set; }
+    public string Language { get; set; } = "en";
+    public FigureAccessibilityRole AccessibilityRole { get; set; } = FigureAccessibilityRole.Figure;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

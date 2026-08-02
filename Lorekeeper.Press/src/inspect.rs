@@ -10,6 +10,9 @@ use crate::pdf::PdfOptions;
 pub struct InspectionEvidence {
     pub fonts_embedded: bool,
     pub to_unicode: bool,
+    pub has_transparency: bool,
+    pub annotation_count: usize,
+    pub tagged: bool,
 }
 
 pub fn validate(path: &Path, expected: &PdfOptions) -> Result<InspectionEvidence, Diagnostic> {
@@ -66,13 +69,20 @@ pub fn validate(path: &Path, expected: &PdfOptions) -> Result<InspectionEvidence
     let mut saw_font = false;
     let mut fonts_embedded = true;
     let mut to_unicode = true;
-    for page_id in pages.values() {
+    let mut has_transparency = false;
+    let mut annotation_count = 0;
+    for (page_index, page_id) in pages.values().enumerate() {
         let page = document.get_dictionary(*page_id).map_err(|_| {
             Diagnostic::error(
                 "PRESS_PDF_PAGE_TREE_INVALID",
                 "A page dictionary is unreadable.",
             )
         })?;
+        let trim_x = if expected.interior_bleed > 0.0 && page_index % 2 == 1 {
+            expected.interior_bleed
+        } else {
+            expected.trim.x1
+        };
         for (key, expected_box) in [
             (
                 b"MediaBox".as_slice(),
@@ -81,10 +91,22 @@ pub fn validate(path: &Path, expected: &PdfOptions) -> Result<InspectionEvidence
             (
                 b"TrimBox".as_slice(),
                 [
-                    expected.trim.x1,
-                    expected.trim.y1,
-                    expected.trim.x2,
-                    expected.trim.y2,
+                    trim_x,
+                    if expected.interior_bleed > 0.0 {
+                        expected.interior_bleed
+                    } else {
+                        expected.trim.y1
+                    },
+                    if expected.interior_bleed > 0.0 {
+                        trim_x + expected.trim_width
+                    } else {
+                        expected.trim.x2
+                    },
+                    if expected.interior_bleed > 0.0 {
+                        expected.interior_bleed + expected.trim_height
+                    } else {
+                        expected.trim.y2
+                    },
                 ],
             ),
             (
@@ -98,7 +120,16 @@ pub fn validate(path: &Path, expected: &PdfOptions) -> Result<InspectionEvidence
             ),
         ] {
             let actual = inherited(&document, page, key).and_then(object_rect);
-            if actual.is_none_or(|actual| !rect_matches(actual, expected_box)) {
+            let valid_mixed_box = expected.allow_mixed_page_boxes
+                && actual.is_some_and(|actual| {
+                    actual[0].abs() < 0.01
+                        && actual[1].abs() < 0.01
+                        && actual[2] > 72.0
+                        && actual[3] > 72.0
+                        && actual[2] <= 2_880.0
+                        && actual[3] <= 2_880.0
+                });
+            if !valid_mixed_box && actual.is_none_or(|actual| !rect_matches(actual, expected_box)) {
                 return Err(Diagnostic::error(
                     "PRESS_PDF_PAGE_BOX_INVALID",
                     format!(
@@ -108,17 +139,29 @@ pub fn validate(path: &Path, expected: &PdfOptions) -> Result<InspectionEvidence
                 ));
             }
         }
-        if page.has(b"Annots") || page.has(b"AA") {
+        if page.has(b"AA") {
             return Err(Diagnostic::error(
                 "PRESS_PDF_ANNOTATIONS_FORBIDDEN",
-                "Publication PDFs cannot contain annotations.",
+                "Publication PDFs cannot contain page-level additional actions.",
             ));
         }
+        if page.has(b"Annots") && (!expected.tagged || !valid_internal_links(&document, page)) {
+            return Err(Diagnostic::error(
+                "PRESS_PDF_ANNOTATIONS_FORBIDDEN",
+                "Only bounded internal GoTo links are allowed in Digital PDFs.",
+            ));
+        }
+        annotation_count += page
+            .get(b"Annots")
+            .ok()
+            .and_then(|value| dereference(&document, value))
+            .and_then(|value| value.as_array().ok())
+            .map_or(0, Vec::len);
         if let Some(resources) = inherited(&document, page, b"Resources")
             .and_then(|value| dereference(&document, value))
             .and_then(|value| value.as_dict().ok())
         {
-            validate_resources(
+            has_transparency |= validate_resources(
                 &document,
                 resources,
                 expected.pdf_x,
@@ -173,6 +216,9 @@ pub fn validate(path: &Path, expected: &PdfOptions) -> Result<InspectionEvidence
                 ));
             }
         }
+    }
+    if expected.tagged {
+        validate_tagged_pdf(&document, catalog, &pages)?;
     }
     if !saw_font || !fonts_embedded || !to_unicode {
         return Err(Diagnostic::error(
@@ -235,7 +281,53 @@ pub fn validate(path: &Path, expected: &PdfOptions) -> Result<InspectionEvidence
     Ok(InspectionEvidence {
         fonts_embedded,
         to_unicode,
+        has_transparency,
+        annotation_count,
+        tagged: expected.tagged,
     })
+}
+
+fn valid_internal_links(document: &Document, page: &Dictionary) -> bool {
+    let Some(annotations) = page
+        .get(b"Annots")
+        .ok()
+        .and_then(|value| dereference(document, value))
+        .and_then(|value| value.as_array().ok())
+    else {
+        return false;
+    };
+    !annotations.is_empty()
+        && annotations.iter().all(|value| {
+            let Some(annotation) =
+                dereference(document, value).and_then(|value| value.as_dict().ok())
+            else {
+                return false;
+            };
+            if annotation
+                .get(b"Subtype")
+                .ok()
+                .and_then(|value| value.as_name().ok())
+                != Some(b"Link".as_slice())
+            {
+                return false;
+            }
+            let Some(action) = annotation
+                .get(b"A")
+                .ok()
+                .and_then(|value| dereference(document, value))
+                .and_then(|value| value.as_dict().ok())
+            else {
+                return false;
+            };
+            action.get(b"S").ok().and_then(|value| value.as_name().ok()) == Some(b"GoTo".as_slice())
+                && action.has(b"D")
+                && !action.has(b"URI")
+                && annotation
+                    .get(b"StructParent")
+                    .ok()
+                    .and_then(|value| value.as_i64().ok())
+                    .is_some()
+        })
 }
 
 fn validate_resources(
@@ -243,11 +335,12 @@ fn validate_resources(
     resources: &Dictionary,
     pdf_x: bool,
     expected_image_color_space: crate::pdf::ImageColorSpace,
-) -> Result<(), Diagnostic> {
-    if resources.has(b"ExtGState") {
+) -> Result<bool, Diagnostic> {
+    let mut has_transparency = resources.has(b"ExtGState");
+    if pdf_x && has_transparency {
         return Err(Diagnostic::error(
             "PRESS_PDF_TRANSPARENCY_FORBIDDEN",
-            "Transparency is forbidden.",
+            "Transparency is forbidden in PDF/X-1a output.",
         ));
     }
     let Some(xobjects) = resources
@@ -256,7 +349,7 @@ fn validate_resources(
         .and_then(|value| dereference(document, value))
         .and_then(|value| value.as_dict().ok())
     else {
-        return Ok(());
+        return Ok(has_transparency);
     };
     for (_, value) in xobjects.iter() {
         let Some(stream) = dereference(document, value).and_then(|value| value.as_stream().ok())
@@ -346,10 +439,243 @@ fn validate_resources(
             && let Some(nested) =
                 dereference(document, nested).and_then(|value| value.as_dict().ok())
         {
-            validate_resources(document, nested, pdf_x, expected_image_color_space)?;
+            has_transparency |=
+                validate_resources(document, nested, pdf_x, expected_image_color_space)?;
+        }
+    }
+    Ok(has_transparency)
+}
+
+fn validate_tagged_pdf(
+    document: &Document,
+    catalog: &Dictionary,
+    pages: &std::collections::BTreeMap<u32, lopdf::ObjectId>,
+) -> Result<(), Diagnostic> {
+    let marked = catalog
+        .get(b"MarkInfo")
+        .ok()
+        .and_then(|value| dereference(document, value))
+        .and_then(|value| value.as_dict().ok())
+        .and_then(|value| value.get(b"Marked").ok())
+        .and_then(|value| value.as_bool().ok())
+        == Some(true);
+    let has_language = catalog
+        .get(b"Lang")
+        .ok()
+        .and_then(|value| value.as_str().ok())
+        .is_some_and(|value| !value.is_empty());
+    let Some(root) = catalog
+        .get(b"StructTreeRoot")
+        .ok()
+        .and_then(|value| dereference(document, value))
+        .and_then(|value| value.as_dict().ok())
+    else {
+        return Err(Diagnostic::error(
+            "PRESS_TAG_TREE_MISSING",
+            "A tagged Digital PDF requires a readable StructTreeRoot.",
+        ));
+    };
+    if !marked || !has_language || !root.has(b"ParentTree") || !root.has(b"K") {
+        return Err(Diagnostic::error(
+            "PRESS_TAG_TREE_INVALID",
+            "The tagged PDF catalog, language, structure root, or parent tree is incomplete.",
+        ));
+    }
+    let parent_tree = root
+        .get(b"ParentTree")
+        .ok()
+        .and_then(|value| dereference(document, value))
+        .and_then(|value| value.as_dict().ok())
+        .ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_TAG_PARENT_TREE_INVALID",
+                "The tagged PDF parent tree is unreadable.",
+            )
+        })?;
+    let nums = parent_tree
+        .get(b"Nums")
+        .ok()
+        .and_then(|value| dereference(document, value))
+        .and_then(|value| value.as_array().ok())
+        .ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_TAG_PARENT_TREE_INVALID",
+                "The tagged PDF parent tree has no number tree entries.",
+            )
+        })?;
+    for (page_index, page_id) in pages.values().enumerate() {
+        let page = document.get_dictionary(*page_id).map_err(|_| {
+            Diagnostic::error("PRESS_TAG_PAGE_INVALID", "A tagged page is unreadable.")
+        })?;
+        if page
+            .get(b"StructParents")
+            .ok()
+            .and_then(|value| value.as_i64().ok())
+            != Some(page_index as i64)
+        {
+            return Err(Diagnostic::error(
+                "PRESS_TAG_PARENT_TREE_INVALID",
+                "A tagged page is not connected to its parent-tree entry.",
+            ));
+        }
+        let parent_array = nums
+            .chunks_exact(2)
+            .find(|pair| pair[0].as_i64().ok() == Some(page_index as i64))
+            .and_then(|pair| dereference(document, &pair[1]))
+            .and_then(|value| value.as_array().ok())
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    "PRESS_TAG_PARENT_TREE_INVALID",
+                    "A tagged page has no matching parent-tree array.",
+                )
+            })?;
+        let content = document.get_page_content(*page_id);
+        let operations = Content::decode(&content).map_err(|_| {
+            Diagnostic::error(
+                "PRESS_TAG_CONTENT_INVALID",
+                "A tagged page content stream could not be parsed.",
+            )
+        })?;
+        let mut mcids = std::collections::BTreeSet::new();
+        for operation in &operations.operations {
+            if operation.operator == "BDC"
+                && let Some(properties) = operation.operands.get(1)
+                && let Some(dictionary) =
+                    dereference(document, properties).and_then(|value| value.as_dict().ok())
+                && let Some(mcid) = dictionary
+                    .get(b"MCID")
+                    .ok()
+                    .and_then(|value| value.as_i64().ok())
+            {
+                mcids.insert(mcid as usize);
+            }
+        }
+        for mcid in mcids {
+            let Some(element) = parent_array
+                .get(mcid)
+                .and_then(|value| dereference(document, value))
+                .and_then(|value| value.as_dict().ok())
+            else {
+                return Err(Diagnostic::error(
+                    "PRESS_TAG_PARENT_TREE_INVALID",
+                    "A marked-content ID has no structure element.",
+                ));
+            };
+            let role = element
+                .get(b"S")
+                .ok()
+                .and_then(|value| value.as_name().ok());
+            if role.is_none() || (role == Some(b"Figure") && !element.has(b"Alt")) {
+                return Err(Diagnostic::error(
+                    "PRESS_TAG_ELEMENT_INVALID",
+                    format!(
+                        "Page {} MCID {} has no semantic role or a Figure lacks alternative text (role={}, alt={}).",
+                        page_index + 1,
+                        mcid,
+                        role.map_or("missing".to_owned(), |value| String::from_utf8_lossy(value)
+                            .into_owned()),
+                        element.has(b"Alt")
+                    ),
+                ));
+            }
+        }
+        if let Some(annotations) = page
+            .get(b"Annots")
+            .ok()
+            .and_then(|value| dereference(document, value))
+            .and_then(|value| value.as_array().ok())
+        {
+            for annotation_reference in annotations {
+                let annotation_id = annotation_reference.as_reference().map_err(|_| {
+                    Diagnostic::error(
+                        "PRESS_TAG_ANNOTATION_INVALID",
+                        "A tagged link annotation must be an indirect object.",
+                    )
+                })?;
+                let annotation = document
+                    .get_object(annotation_id)
+                    .ok()
+                    .and_then(|value| value.as_dict().ok())
+                    .ok_or_else(|| {
+                        Diagnostic::error(
+                            "PRESS_TAG_ANNOTATION_INVALID",
+                            "A tagged link annotation is unreadable.",
+                        )
+                    })?;
+                let parent_key = annotation
+                    .get(b"StructParent")
+                    .ok()
+                    .and_then(|value| value.as_i64().ok())
+                    .ok_or_else(|| {
+                        Diagnostic::error(
+                            "PRESS_TAG_ANNOTATION_INVALID",
+                            "A tagged link annotation has no StructParent key.",
+                        )
+                    })?;
+                let structure_element = nums
+                    .chunks_exact(2)
+                    .find(|pair| pair[0].as_i64().ok() == Some(parent_key))
+                    .and_then(|pair| dereference(document, &pair[1]))
+                    .and_then(|value| value.as_dict().ok())
+                    .ok_or_else(|| {
+                        Diagnostic::error(
+                            "PRESS_TAG_PARENT_TREE_INVALID",
+                            "A tagged link annotation has no parent-tree structure element.",
+                        )
+                    })?;
+                if !structure_element_references_annotation(
+                    document,
+                    structure_element,
+                    annotation_id,
+                ) {
+                    return Err(Diagnostic::error(
+                        "PRESS_TAG_ANNOTATION_INVALID",
+                        "A tagged link annotation is not represented by an OBJR structure child.",
+                    ));
+                }
+            }
         }
     }
     Ok(())
+}
+
+fn structure_element_references_annotation(
+    document: &Document,
+    structure_element: &Dictionary,
+    annotation_id: lopdf::ObjectId,
+) -> bool {
+    structure_element
+        .get(b"K")
+        .ok()
+        .is_some_and(|value| object_references_annotation(document, value, annotation_id))
+}
+
+fn object_references_annotation(
+    document: &Document,
+    value: &Object,
+    annotation_id: lopdf::ObjectId,
+) -> bool {
+    let Some(value) = dereference(document, value) else {
+        return false;
+    };
+    match value {
+        Object::Array(values) => values
+            .iter()
+            .any(|value| object_references_annotation(document, value, annotation_id)),
+        Object::Dictionary(dictionary) => {
+            dictionary
+                .get(b"Type")
+                .ok()
+                .and_then(|value| value.as_name().ok())
+                == Some(b"OBJR".as_slice())
+                && dictionary
+                    .get(b"Obj")
+                    .ok()
+                    .and_then(|value| value.as_reference().ok())
+                    == Some(annotation_id)
+        }
+        _ => false,
+    }
 }
 
 fn color_space_is_rgb(document: &Document, value: &Object) -> bool {
@@ -512,6 +838,12 @@ mod tests {
             title: "Inspector fixture".to_owned(),
             author: "Lorekeeper".to_owned(),
             background_rgb: None,
+            tagged: false,
+            language: "en".to_owned(),
+            allow_mixed_page_boxes: false,
+            trim_width: 432.0,
+            trim_height: 648.0,
+            interior_bleed: 0.0,
             expected_image_color_space: if pdf_x {
                 crate::pdf::ImageColorSpace::Cmyk
             } else {
@@ -522,6 +854,8 @@ mod tests {
         let fonts = BTreeMap::from([(FontFace::SerifRegular, font)]);
         let page = LayoutPage {
             kind: PageKind::Body,
+            width_points: None,
+            height_points: None,
             lines: vec![LayoutLine {
                 text: "Inspector fixture".to_owned(),
                 runs: Vec::new(),
@@ -529,12 +863,27 @@ mod tests {
                 x: 54.0,
                 y: 594.0,
                 word_spacing: 0.0,
+                character_spacing: 0.0,
                 rotation_degrees: 0.0,
+                rotation_origin_x: None,
+                rotation_origin_y: None,
+                opacity: 1.0,
                 light_text: false,
+                fill_rgb: None,
+                semantic_role: crate::model::LayoutSemanticRole::Paragraph,
+                artifact: false,
+                language: None,
+                reading_order: None,
+                semantic_id: None,
+                semantic_parent_id: None,
+                link_page: None,
             }],
             images: Vec::new(),
+            shapes: Vec::new(),
+            paint_order: Vec::new(),
             barcode_modules: None,
             page_label: Some("1".to_owned()),
+            bookmark: None,
         };
         let bytes = write_pdf(&[page], &fonts, &BTreeMap::new(), &options).expect("write");
         fs::write(&path, bytes).expect("fixture PDF");

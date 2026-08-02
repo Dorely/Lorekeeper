@@ -1,4 +1,5 @@
-using Lorekeeper.ChapterVisuals;
+using System.Text.Json;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +19,7 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
             .OrderBy(family => family.Name)
             .ToListAsync(cancellationToken);
 
-        return PicturePageBuiltInFonts.Families
+        return PublicationBuiltInFonts.Families
             .Concat(custom.Select(family => ToView(projectId, family)))
             .ToList();
     }
@@ -30,6 +31,8 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
     {
         var project = await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
             ?? throw new InvalidOperationException("Project was not found.");
+        if (!upload.EmbeddingRightsConfirmed || string.IsNullOrWhiteSpace(upload.RightsDeclaration))
+            throw new InvalidOperationException("Confirm and record your right to embed and distribute this font with publication files.");
         var normalized = ProjectFontBinary.Normalize(upload.Data, upload.FileName);
         var family = await db.ProjectFontFamilies
             .Include(candidate => candidate.Faces)
@@ -42,6 +45,8 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
             {
                 ProjectId = projectId,
                 Name = normalized.FamilyName,
+                EmbeddingRightsConfirmed = true,
+                RightsDeclaration = upload.RightsDeclaration.Trim(),
             };
             await db.ProjectFontFamilies.AddAsync(family, cancellationToken);
         }
@@ -49,6 +54,11 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
         {
             throw new InvalidOperationException(
                 $"{normalized.FamilyName} already has a {normalized.Weight}{(normalized.Italic ? " italic" : string.Empty)} face.");
+        }
+        else
+        {
+            family.EmbeddingRightsConfirmed = true;
+            family.RightsDeclaration = upload.RightsDeclaration.Trim();
         }
 
         var face = new ProjectFontFace
@@ -80,25 +90,47 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
             return;
 
         var key = CustomKey(family.Id);
-        var usedBy = (await db.Chapters
+        var usedBy = (await db.PageCompositionVariants
                 .AsNoTracking()
-                .Where(chapter => chapter.ProjectId == projectId && chapter.PageLayoutJson != string.Empty)
-                .Select(chapter => new { chapter.Title, chapter.PageLayoutJson })
+                .Where(variant => variant.Composition.ProjectId == projectId)
+                .Select(variant => new { variant.Composition.Name, variant.SceneJson })
                 .ToListAsync(cancellationToken))
-            .Where(chapter => ChapterTextLayoutSynchronizer.ReadLayout(chapter.PageLayoutJson).TextElements
-                .Any(text => string.Equals(text.FontFamilyKey, key, StringComparison.OrdinalIgnoreCase)))
-            .Select(chapter => chapter.Title)
+            .Where(item => SceneUsesFont(item.SceneJson, key))
+            .Select(item => item.Name)
+            .Concat((await db.PublicationCoverDesigns
+                    .AsNoTracking()
+                    .Where(cover => cover.Edition.ProjectId == projectId)
+                    .Select(cover => new { cover.Edition.Name, cover.CompositionSceneJson })
+                    .ToListAsync(cancellationToken))
+                .Where(item => SceneUsesFont(item.CompositionSceneJson, key))
+                .Select(item => item.Name))
+            .Distinct(StringComparer.Ordinal)
             .ToList();
         if (usedBy.Count > 0)
         {
             throw new InvalidOperationException(
-                $"{family.Name} is used by {usedBy.Count} chapter(s): {string.Join(", ", usedBy)}. Choose another font before deleting it.");
+                $"{family.Name} is used by {usedBy.Count} page or cover composition(s): {string.Join(", ", usedBy)}. Choose another font before deleting it.");
         }
 
         db.ProjectFontFamilies.Remove(family);
         var project = await db.Projects.FirstAsync(project => project.Id == projectId, cancellationToken);
         project.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static bool SceneUsesFont(string json, string key)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try
+        {
+            var scene = JsonSerializer.Deserialize<CompositionScene>(json, ManuscriptCodec.JsonOptions);
+            return scene is not null && (scene.Objects.Any(item => string.Equals(item.FontFamilyKey, key, StringComparison.OrdinalIgnoreCase))
+                || scene.Styles.Any(style => string.Equals(style.FontFamilyKey, key, StringComparison.OrdinalIgnoreCase)));
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     public async Task<ProjectFontFaceData?> GetFaceDataAsync(
@@ -121,7 +153,7 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
         bool requireExact = false,
         CancellationToken cancellationToken = default)
     {
-        if (PicturePageBuiltInFonts.Find(familyKey) is { } builtIn)
+        if (PublicationBuiltInFonts.Find(familyKey) is { } builtIn)
         {
             var face = SelectFace(builtIn.Faces, weight, italic, requireExact);
             if (face is null)
@@ -162,6 +194,8 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
             family.Name,
             "Imported",
             IsBuiltIn: false,
+            family.EmbeddingRightsConfirmed,
+            family.RightsDeclaration,
             family.Faces
                 .OrderBy(face => face.Weight)
                 .ThenBy(face => face.Italic)

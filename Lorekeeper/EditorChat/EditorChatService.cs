@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.ChatTurns;
-using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
@@ -23,7 +22,6 @@ public sealed class EditorChatService(
     IEditorConversationRepository conversations,
     IChatImageAttachmentService imageAttachments,
     IContextBuilder contextBuilder,
-    IChapterVisualService chapterVisuals,
     IProjectImageService projectImages,
     IEntityVisualContextService entityVisualContext,
     IProjectImageGenerationRuntime imageRuntime,
@@ -271,7 +269,6 @@ public sealed class EditorChatService(
         {
             messages.Add(entityVisualMessage);
         }
-        await AddAutomaticVisualSnapshotsAsync(messages, currentChapter, providerAvailability.Provider, cancellationToken);
         foreach (var persistedMessage in history)
         {
             if (persistedMessage.Id == userMessage.Id && imageIds.Count > 0)
@@ -344,28 +341,6 @@ public sealed class EditorChatService(
                 activeAssistant.Status = EditorMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
 
-                var unverifiedPicturePages = editorContext.PicturePageChaptersAwaitingVerification;
-                    if (unverifiedPicturePages.Count > 0)
-                    {
-                        messages.Add(new ChatMessage(ChatRole.Assistant, activeAssistant.Content));
-                        messages[0] = new ChatMessage(
-                            ChatRole.System,
-                            systemPrompt
-                            + "\n\n## Required final-render preflight\nThe previous response attempted to finish while Picture Page verification is still pending for chapter id(s): "
-                            + string.Join(", ", unverifiedPicturePages.Select(id => id.ToString("N")))
-                            + ". Before giving a final response, call read_chapter_visual_layout for every listed chapter after its latest mutation and inspect the newest render, element inventory, layout diagnostics, and textFit.allTextFits. If you make a correction, render again afterward.");
-
-                    if (iteration == maxIterations - 1)
-                    {
-                        yield return new EditorChatTurnError(
-                            $"Tool-call loop hit cap of {maxIterations} iterations with Picture Page verification still pending.",
-                            Cancelled: false);
-                        yield break;
-                    }
-
-                    continue;
-                }
-
                 conversation.UpdatedAt = DateTime.UtcNow;
                 await conversations.SaveChangesAsync(CancellationToken.None);
                 yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
@@ -391,11 +366,7 @@ public sealed class EditorChatService(
             }
 
             var manifest = pendingCalls
-                .Select(pendingCall => new ChatToolCallManifest(
-                    pendingCall.CallId,
-                    pendingCall.Name,
-                    pendingCall.ArgumentsJson,
-                    pendingCall.TextOffset))
+                .Select(ChatToolCallManifest.From)
                 .ToList();
             activeAssistant.Content = textBuilder.ToString();
             activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
@@ -785,50 +756,6 @@ public sealed class EditorChatService(
         }
 
         return new ChatMessage(ChatRole.User, contents);
-    }
-
-    private async Task AddAutomaticVisualSnapshotsAsync(
-        List<ChatMessage> messages,
-        Chapter? currentChapter,
-        LlmProvider? provider,
-        CancellationToken cancellationToken)
-    {
-        if (currentChapter is null || provider is null)
-            return;
-        if (!await providerService.IsVisionProviderWorkingAsync(provider.Id, cancellationToken))
-            return;
-
-        IReadOnlyList<ChapterVisualSnapshot> snapshots;
-        try
-        {
-            snapshots = await chapterVisuals.RenderSnapshotsAsync(currentChapter.Id, cancellationToken: cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to render automatic chapter visual snapshots for chapter {ChapterId}", currentChapter.Id);
-            return;
-        }
-
-        if (snapshots.Count == 0)
-            return;
-
-        var contents = new List<AIContent>
-        {
-            new TextContent(
-                currentChapter.VisualMode == ChapterVisualMode.PicturePage
-                    ? "Automatic visual context for the current chapter follows. These are rendered fixed-layout snapshots, provided with the text visual manifest already included in system context."
-                    : "Automatic visual context for the current chapter follows. These rendered prose pages are composition previews; pagination is advisory because reflowable EPUB reading systems repaginate for each device and reader setting."),
-        };
-        foreach (var snapshot in snapshots)
-        {
-            contents.Add(new TextContent($"\nPage {snapshot.PageNumber}: {snapshot.FileName}"));
-            contents.Add(new DataContent(snapshot.Data, snapshot.ContentType)
-            {
-                Name = snapshot.FileName,
-            });
-        }
-
-        messages.Add(new ChatMessage(ChatRole.User, contents));
     }
 
     private static IReadOnlyList<ContestChatMessageSnapshot> BuildContestSnapshotMessages(

@@ -3,8 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Lorekeeper.Chapters;
-using Lorekeeper.ChapterVisuals;
+using Lorekeeper.Composition;
 using Lorekeeper.Models;
 using Lorekeeper.Publish;
 using Microsoft.Extensions.Options;
@@ -29,7 +28,7 @@ public sealed class ImageGenerationBrief
     public string LightingMood { get; init; } = string.Empty;
     [Description("Only meaningful story, continuity, safety, or output constraints. Prefer positive requirements and avoid invented exclusions such as 'and nothing else'.")]
     public string Constraints { get; init; } = string.Empty;
-    [Description("Disabled for normal page art. Enable only for intentionally baked-in text or the temporary text-bearing image in a two-pass PicturePage fallback.")]
+    [Description("Disabled for normal page and cover art. Enable only for intentionally baked-in text.")]
     public bool AllowRenderedText { get; init; }
     public string RenderedText { get; init; } = string.Empty;
 }
@@ -62,12 +61,17 @@ public sealed class ImageReferenceUse
 
 public sealed class ImageGenerationTarget
 {
-    public Guid? ChapterId { get; init; }
-    public Guid? PictureImageElementId { get; init; }
-    public string PageSlot { get; init; } = string.Empty;
+    [Description("Edition whose exact physical geometry owns this layout-bound generation target.")]
+    public Guid? EditionId { get; init; }
+    [Description("Figure, PageFrame, PageSurface, CoverFrame, or CoverSurface for layout-bound generation.")]
+    public string TargetKind { get; init; } = string.Empty;
+    [Description("Stable Figure block, composition object/surface, or cover object/surface ID.")]
+    public Guid? TargetId { get; init; }
+    [Description("Exact page-composition variant ID. Required for PageFrame and PageSurface targets; omit for Figure and cover targets.")]
+    public Guid? VariantId { get; init; }
     public string AspectRatio { get; init; } = string.Empty;
     public string Size { get; init; } = string.Empty;
-    [Description("Canvas-local percentage rectangles that the illustration must preserve as natural, quiet negative space for editable overlaid text. For a full-page target, use the corresponding page bounds for the text boxes; for an image-slot target, translate through the slot geometry.")]
+    [Description("Only for free-standing library generation. Layout-bound targets derive every reserved region from Lorekeeper.")]
     public IReadOnlyList<ImageReservedRegion>? ReservedTextRegions { get; init; }
 }
 
@@ -122,10 +126,8 @@ public interface IImagePromptComposer
 }
 
 public sealed class ImagePromptComposer(
-    IChapterService chapters,
-    IChapterVisualService chapterVisuals,
+    ICompositionService compositions,
     IProjectImageService images,
-    IPageGeometryService pageGeometry,
     IOptions<ProjectImageGenerationOptions> options) : IImagePromptComposer
 {
     private const int SizeMultiple = 16;
@@ -276,49 +278,37 @@ public sealed class ImagePromptComposer(
         ImageGenerationTarget? target,
         CancellationToken cancellationToken)
     {
-        if (target?.PictureImageElementId is { } elementId && elementId != Guid.Empty
-            && (target.ChapterId is null || target.ChapterId == Guid.Empty))
+        var hasBoundTarget = target?.EditionId is { } editionId && editionId != Guid.Empty
+            || target?.TargetId is { } targetId && targetId != Guid.Empty
+            || !string.IsNullOrWhiteSpace(target?.TargetKind);
+        if (hasBoundTarget)
         {
-            throw new ArgumentException("pictureImageElementId requires chapterId.", nameof(target));
-        }
-
-        if (target?.ChapterId is { } targetChapterId && targetChapterId != Guid.Empty)
-        {
-            var chapter = await chapters.GetAsync(targetChapterId, cancellationToken);
-            if (chapter is null || chapter.ProjectId != projectId)
-                throw new InvalidOperationException($"Target chapter {targetChapterId:N} was not found in this project.");
-            var state = await chapterVisuals.GetAsync(targetChapterId, cancellationToken)
-                ?? throw new InvalidOperationException($"Target chapter {targetChapterId:N} has no visual layout.");
-            var geometry = await pageGeometry.GetAsync(projectId, state.PageLayoutKind, cancellationToken);
-            if (!PicturePageImageGenerationGuidance.TryResolveTarget(
-                    state,
-                    geometry,
-                    target.PictureImageElementId,
-                    out var pageTarget,
-                    out var error))
+            if (target?.EditionId is not { } boundEditionId || boundEditionId == Guid.Empty
+                || target.TargetId is not { } boundTargetId || boundTargetId == Guid.Empty
+                || string.IsNullOrWhiteSpace(target.TargetKind))
+                throw new ArgumentException("Layout-bound targets require editionId, targetKind, and targetId together.", nameof(target));
+            if (!string.IsNullOrWhiteSpace(target.Size) || !string.IsNullOrWhiteSpace(target.AspectRatio)
+                || target.ReservedTextRegions is { Count: > 0 })
+                throw new ArgumentException("Layout-bound targets derive size, aspect ratio, and reserved regions from Lorekeeper; omit manual values.", nameof(target));
+            var descriptor = await compositions.DescribeGenerationTargetAsync(
+                projectId,
+                boundEditionId,
+                target.TargetKind,
+                boundTargetId,
+                target.VariantId,
+                cancellationToken);
+            var resolvedTargetSize = descriptor.ProviderCanvas switch
             {
-                throw new InvalidOperationException(error);
-            }
-
-            var recommended = pageTarget!;
-            var resolvedTargetSize = ResolveTargetSize(
-                target.Size,
-                target.AspectRatio,
-                recommended.RecommendedSize,
-                recommended.AspectRatio);
-            var appendix = PicturePageImageGenerationGuidance.BuildPromptAppendix(recommended, state.PageLayout.TextElements);
+                "portrait" => "1024x1536",
+                "landscape" => "1536x1024",
+                _ => "1024x1024",
+            };
+            var appendix = BuildLayoutTargetAppendix(descriptor);
             return new(
                 resolvedTargetSize,
-                recommended.AspectRatio,
-                appendix.Trim(),
-                JsonSerializer.Serialize(new
-                {
-                    target.ChapterId,
-                    target.PictureImageElementId,
-                    target.PageSlot,
-                    PageTarget = recommended,
-                    ReservedTextRegions = target.ReservedTextRegions,
-                }, JsonOptions));
+                descriptor.AspectRatio,
+                appendix,
+                JsonSerializer.Serialize(descriptor, JsonOptions));
         }
 
         var requestedSize = Clean(target?.Size);
@@ -340,11 +330,32 @@ public sealed class ImagePromptComposer(
             string.Empty,
             JsonSerializer.Serialize(new
             {
-                target?.PageSlot,
                 Size = resolvedSize,
                 AspectRatio = aspectLabel,
                 target?.ReservedTextRegions,
             }, JsonOptions));
+    }
+
+    private static string BuildLayoutTargetAppendix(LayoutGenerationTargetDescriptor descriptor)
+    {
+        var prompt = new StringBuilder();
+        prompt.Append("Layout target: ").Append(descriptor.TargetKind)
+            .Append("; exact aspect ratio ").Append(descriptor.AspectRatio)
+            .Append("; physical surface ")
+            .Append(descriptor.WidthInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" x ")
+            .Append(descriptor.HeightInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" inches; target ")
+            .Append(descriptor.EffectiveDpiExpectation.ToString("0", CultureInfo.InvariantCulture)).AppendLine(" effective DPI.");
+        prompt.Append("Lorekeeper selected the provider's ").Append(descriptor.ProviderCanvas)
+            .Append(" canvas and will normalize its raster to the exact target aspect after generation; compose to the exact target aspect rather than the provider canvas edges.").AppendLine();
+        foreach (var region in descriptor.Regions)
+        {
+            prompt.Append(region.KeepClear ? "Keep clear" : "Layout boundary").Append(": ").Append(region.Label)
+                .Append(" (x=").Append(region.Bounds.XPercent.ToString("0.##", CultureInfo.InvariantCulture))
+                .Append("%, y=").Append(region.Bounds.YPercent.ToString("0.##", CultureInfo.InvariantCulture))
+                .Append("%, width=").Append(region.Bounds.WidthPercent.ToString("0.##", CultureInfo.InvariantCulture))
+                .Append("%, height=").Append(region.Bounds.HeightPercent.ToString("0.##", CultureInfo.InvariantCulture)).AppendLine("%).");
+        }
+        return prompt.ToString().Trim();
     }
 
     private string ResolveExplicitSize(string requestedSize, string requestedAspect)

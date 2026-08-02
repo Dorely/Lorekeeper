@@ -10,26 +10,12 @@ public enum PublishTitlePageMode
     Omit = 2,
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<PrintPicturePageSpreadMode>))]
-public enum PrintPicturePageSpreadMode
-{
-    WholeSpread = 0,
-    SidewaysWholeSpread = 1,
-    SplitLeaves = 2,
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter<EpubPicturePageSpreadMode>))]
-public enum EpubPicturePageSpreadMode
-{
-    RequestLandscape = 0,
-    SidewaysPortrait = 1,
-}
-
 [JsonConverter(typeof(JsonStringEnumConverter<PublicationEditionFormat>))]
 public enum PublicationEditionFormat
 {
     Paperback,
     Epub,
+    DigitalPdf,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<PublicationVendor>))]
@@ -102,12 +88,11 @@ public class PublicationEdition
     public bool NumberActs { get; set; }
     public bool NumberChapters { get; set; }
     public PublishTitlePageMode TitlePageMode { get; set; } = PublishTitlePageMode.Automatic;
-    public PrintPicturePageSpreadMode PrintPicturePageSpreadMode { get; set; } = PrintPicturePageSpreadMode.WholeSpread;
-    public EpubPicturePageSpreadMode EpubPicturePageSpreadMode { get; set; } = EpubPicturePageSpreadMode.RequestLandscape;
     public PublicationBinding Binding { get; set; } = PublicationBinding.PerfectBound;
     public PublicationPaper Paper { get; set; } = PublicationPaper.White;
     public PublicationInk Ink { get; set; } = PublicationInk.BlackAndWhite;
     public bool Bleed { get; set; }
+    public bool AllowDesignedPageOverrides { get; set; }
 
     public double PageWidthInches { get; set; } = 8.5;
 

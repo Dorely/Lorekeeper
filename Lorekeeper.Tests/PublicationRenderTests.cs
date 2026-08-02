@@ -64,11 +64,11 @@ public sealed class PublicationRenderTests
                     architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant(),
                     description = new
                     {
-                        protocolVersion = 3,
-                        rendererVersion = "1.0.0",
-                        profiles = new[] { "generic-paperback-v1", "kdp-paperback-v1", "ingram-paperback-pdfx1a-v1" },
+                        protocolVersion = 4,
+                        rendererVersion = "2.0.0",
+                        profiles = new[] { "generic-paperback-v1", "generic-digital-pdf-v1", "kdp-paperback-v1", "ingram-paperback-pdfx1a-v1" },
                         limits = new { maximumPages = 10_000 },
-                        capabilities = new { picturePages = true },
+                        capabilities = new { designedPages = true, flowFigures = true, digitalBookPdf = true, taggedPdf = true, projectFonts = true },
                     },
                     files = new[]
                     {
@@ -111,7 +111,7 @@ public sealed class PublicationRenderTests
             Assert.Equal(new[] { "render", "--job-root", Path.GetFullPath(output) }, start.ArgumentList);
             Assert.False(start.RedirectStandardInput);
             Assert.DoesNotContain(start.Environment.Keys, key => key.Contains("PYTHON", StringComparison.OrdinalIgnoreCase));
-            Assert.Equal("1.0.0", runtime.GetDescription().RendererVersion);
+            Assert.Equal("2.0.0", runtime.GetDescription().RendererVersion);
 
             File.WriteAllText(Path.Combine(runtimeRoot, "unreviewed.dll"), "payload");
             var withUnexpectedPayload = runtime.GetReadiness();
@@ -143,7 +143,7 @@ public sealed class PublicationRenderTests
     }
 
     [Fact]
-    public void JpegCoverIsNormalizedToTheBoundedPngRendererContract()
+    public void JpegCoverIsStagedWithoutCsharpRasterization()
     {
         using var bitmap = new SKBitmap(2, 3);
         bitmap.Erase(SKColors.CornflowerBlue);
@@ -156,15 +156,14 @@ public sealed class PublicationRenderTests
             encoded.ToArray(),
             string.Empty);
 
-        var normalized = PublicationRenderProcessor.NormalizeAsset(asset);
+        var staged = PublicationRenderProcessor.StageAsset(asset);
 
-        Assert.Equal($"assets/{asset.Id:N}.png", normalized.RelativePath);
-        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(normalized.Data)), normalized.Sha256);
-        using var decoded = SKCodec.Create(new SKMemoryStream(normalized.Data));
-        Assert.NotNull(decoded);
-        Assert.Equal(SKEncodedImageFormat.Png, decoded.EncodedFormat);
-        Assert.Equal(2, decoded.Info.Width);
-        Assert.Equal(3, decoded.Info.Height);
+        Assert.Equal($"assets/{asset.Id:N}.jpg", staged.RelativePath);
+        Assert.Equal("image/jpeg", staged.ContentType);
+        Assert.Equal(asset.Data, staged.Data);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(asset.Data)), staged.Sha256);
+        Assert.Equal(2, staged.WidthPixels);
+        Assert.Equal(3, staged.HeightPixels);
     }
 
     [Fact]
@@ -342,8 +341,8 @@ public sealed class PublicationRenderTests
             new FixedPressRuntime(profiles: ["generic-paperback-v1"]),
             null!);
 
-        Assert.True(service.GetRuntimeReadiness(PublicationVendor.Generic).IsReady);
-        var kdp = service.GetRuntimeReadiness(PublicationVendor.AmazonKdp);
+        Assert.True(service.GetRuntimeReadiness(PublicationEditionFormat.Paperback, PublicationVendor.Generic).IsReady);
+        var kdp = service.GetRuntimeReadiness(PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp);
         Assert.False(kdp.IsReady);
         Assert.Contains("kdp-paperback-v1", kdp.Message, StringComparison.Ordinal);
     }
@@ -421,7 +420,7 @@ public sealed class PublicationRenderTests
     {
         var bytes = PublicationRenderProcessor.SerializeRequest(new
         {
-            protocolVersion = 3,
+            protocolVersion = 4,
             jobId = Guid.Empty.ToString("N"),
         });
 

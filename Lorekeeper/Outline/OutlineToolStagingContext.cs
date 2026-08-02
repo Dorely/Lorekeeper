@@ -1,12 +1,13 @@
 using System.Text.Json;
+using Lorekeeper.ChatTurns;
 using System.Text.Json.Nodes;
-using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Context;
 using Lorekeeper.Chapters;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Persistence;
 
 namespace Lorekeeper.Outline;
 
@@ -18,10 +19,10 @@ public sealed class OutlineToolStagingContext(
     IProjectRepository projects,
     IActService acts,
     IChapterService chapters,
-    IChapterVisualService chapterVisuals,
     IEntityService entities,
     IEntityTypeService entityTypes,
     IEntityVisualExampleService entityVisualExamples,
+    AppDbContext db,
     Action? onDirectMutationApplied = null)
 {
     private const string _eventNodeType = "Event";
@@ -74,6 +75,7 @@ public sealed class OutlineToolStagingContext(
     public async Task<string> ListOutlineAsync(CancellationToken cancellationToken = default)
     {
         await EnsureLoadedAsync(cancellationToken);
+        var visualMetrics = await OutlineVisualMetrics.ReadAsync(db, ProjectId, cancellationToken);
 
         object ProjectChapter(ChapterState chapter) => new
         {
@@ -81,8 +83,11 @@ public sealed class OutlineToolStagingContext(
             order = chapter.Order,
             title = chapter.Title,
             synopsis = chapter.Synopsis,
-            visualMode = chapter.VisualMode,
-            pageLayoutKind = chapter.VisualMode == ChapterVisualMode.Prose ? null : chapter.PageLayoutKind.ToString(),
+            figureCount = chapter.FigureCount,
+            designedPageCount = chapter.DesignedPageCount,
+            designedSpreadCount = visualMetrics.GetValueOrDefault(chapter.Id)?.DesignedSpreadCount ?? 0,
+            layoutDiagnosticCount = visualMetrics.GetValueOrDefault(chapter.Id)?.LayoutDiagnosticCount ?? 0,
+            visualTreatment = visualMetrics.GetValueOrDefault(chapter.Id)?.Summary,
             beatCount = _entities.Values.Count(entity =>
                 !entity.Deleted
                 && string.Equals(entity.Type, _eventNodeType, StringComparison.OrdinalIgnoreCase)
@@ -385,31 +390,14 @@ public sealed class OutlineToolStagingContext(
         Guid? actId,
         string title,
         string? synopsis,
-        string? visualMode,
-        string? pageLayoutKind,
         CancellationToken cancellationToken = default)
     {
         await EnsureLoadedAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(title)) return "Error: title is required.";
         if (actId is not null && !TryGetAct(actId.Value, out _)) return $"Error: act {actId} not found in this project.";
 
-        var visual = ResolveChapterVisualArgs(
-            currentMode: ChapterVisualMode.Prose,
-            currentLayoutKind: ChapterPageLayoutKind.SinglePortrait,
-            visualMode,
-            pageLayoutKind);
-        if (visual.Error is not null) return visual.Error;
-
         var created = await chapters.CreateAsync(ProjectId, actId, title.Trim(), synopsis?.Trim(), cancellationToken: cancellationToken);
-        if (visual.ShouldApply)
-        {
-            var state = await chapterVisuals.SetModeAsync(created.Id, new ChapterVisualModeUpdate(visual.Mode, visual.LayoutKind), cancellationToken);
-            created.VisualMode = state.VisualMode;
-            if (state.VisualMode != ChapterVisualMode.Prose)
-                created.PageLayoutKind = state.PageLayoutKind;
-        }
-
-        var chapter = new ChapterState(created.Id, created.ActId, created.Order, created.Title, created.Synopsis, created.VisualMode, created.PageLayoutKind, Deleted: false);
+        var chapter = ChapterState.From(created);
         _chapters[chapter.Id] = chapter;
         MarkDirectlyCreated(Resource("Chapter", chapter.Id));
         onDirectMutationApplied?.Invoke();
@@ -424,31 +412,17 @@ public sealed class OutlineToolStagingContext(
         string? synopsis,
         Guid? newActId,
         bool moveChapter,
-        string? visualMode,
-        string? pageLayoutKind,
         CancellationToken cancellationToken = default)
     {
         await EnsureLoadedAsync(cancellationToken);
         if (!TryGetChapter(chapterId, out var chapter)) return $"Error: chapter {chapterId} not found in this project.";
         if (moveChapter && newActId is not null && !TryGetAct(newActId.Value, out _)) return $"Error: act {newActId} not found in this project.";
 
-        var visual = ResolveChapterVisualArgs(chapter.VisualMode, chapter.PageLayoutKind, visualMode, pageLayoutKind);
-        if (visual.Error is not null) return visual.Error;
-
         if (IsDirectlyCreated(Resource("Chapter", chapterId)))
         {
             var assignment = moveChapter ? new ChapterActAssignment(newActId) : (ChapterActAssignment?)null;
             var updated = await chapters.UpdateAsync(chapterId, title?.Trim(), synopsis?.Trim(), assignment, cancellationToken);
-            if (visual.ShouldApply
-                && (updated.VisualMode != visual.Mode || updated.PageLayoutKind != visual.LayoutKind))
-            {
-                var state = await chapterVisuals.SetModeAsync(updated.Id, new ChapterVisualModeUpdate(visual.Mode, visual.LayoutKind), cancellationToken);
-                updated.VisualMode = state.VisualMode;
-                if (state.VisualMode != ChapterVisualMode.Prose)
-                    updated.PageLayoutKind = state.PageLayoutKind;
-            }
-
-            _chapters[updated.Id] = new ChapterState(updated.Id, updated.ActId, updated.Order, updated.Title, updated.Synopsis, updated.VisualMode, updated.PageLayoutKind, Deleted: false);
+            _chapters[updated.Id] = ChapterState.From(updated);
             onDirectMutationApplied?.Invoke();
             return Serialize(ChapterPayload(_chapters[updated.Id]));
         }
@@ -456,11 +430,6 @@ public sealed class OutlineToolStagingContext(
         var before = chapter.ToChange();
         if (title is not null) chapter.Title = title.Trim();
         if (synopsis is not null) chapter.Synopsis = synopsis.Trim();
-        if (visual.ShouldApply)
-        {
-            chapter.VisualMode = visual.Mode;
-            chapter.PageLayoutKind = visual.LayoutKind;
-        }
         if (moveChapter && chapter.ActId != newActId)
         {
             chapter.ActId = newActId;
@@ -823,15 +792,7 @@ public sealed class OutlineToolStagingContext(
             _acts[act.Id] = new ActState(act.Id, act.Order, act.Title, act.Synopsis, Deleted: false);
 
         foreach (var chapter in await chapters.ListAsync(ProjectId, cancellationToken))
-            _chapters[chapter.Id] = new ChapterState(
-                chapter.Id,
-                chapter.ActId,
-                chapter.Order,
-                chapter.Title,
-                chapter.Synopsis,
-                chapter.VisualMode,
-                chapter.PageLayoutKind,
-                Deleted: false);
+            _chapters[chapter.Id] = ChapterState.From(chapter);
 
         var typeList = await entityTypes.ListAsync(ProjectId, includeStructural: true, cancellationToken);
         foreach (var typeDefinition in typeList)
@@ -902,7 +863,7 @@ public sealed class OutlineToolStagingContext(
             Order = _nextOrder++,
             ToolCallId = _currentToolCallId,
             ToolName = _currentToolName,
-            ArgumentsJson = _currentArgumentsJson,
+            ArgumentsJson = ChatToolCallManifest.CompactPersistedArguments(_currentToolName, _currentArgumentsJson),
             Summary = summary,
             BeforeJson = beforeJson,
             AfterJson = afterJson,
@@ -1468,59 +1429,11 @@ public sealed class OutlineToolStagingContext(
         order = chapter.Order,
         title = chapter.Title,
         synopsis = chapter.Synopsis,
-        visualMode = chapter.VisualMode,
-        pageLayoutKind = chapter.VisualMode == ChapterVisualMode.Prose ? null : chapter.PageLayoutKind.ToString(),
+        figureCount = chapter.FigureCount,
+        designedPageCount = chapter.DesignedPageCount,
     };
 
-    private static ChapterVisualArgResolution ResolveChapterVisualArgs(
-        ChapterVisualMode currentMode,
-        ChapterPageLayoutKind currentLayoutKind,
-        string? visualMode,
-        string? pageLayoutKind)
-    {
-        var mode = currentMode;
-        var layoutKind = currentLayoutKind;
-        var shouldApply = false;
-
-        if (!string.IsNullOrWhiteSpace(visualMode))
-        {
-            if (!Enum.TryParse<ChapterVisualMode>(visualMode.Trim(), ignoreCase: true, out mode)
-                || !Enum.IsDefined(mode))
-            {
-                return ChapterVisualArgResolution.Fail("Error: visualMode must be Prose, IllustratedProse, or PicturePage.");
-            }
-
-            shouldApply = true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(pageLayoutKind))
-        {
-            if (!Enum.TryParse<ChapterPageLayoutKind>(pageLayoutKind.Trim(), ignoreCase: true, out layoutKind)
-                || !Enum.IsDefined(layoutKind))
-            {
-                return ChapterVisualArgResolution.Fail("Error: pageLayoutKind must be SinglePortrait, SingleLandscape, DoublePortrait, or DoubleLandscape.");
-            }
-
-            shouldApply = true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(pageLayoutKind) && mode == ChapterVisualMode.Prose)
-            return ChapterVisualArgResolution.Fail("Error: pageLayoutKind only applies to IllustratedProse or PicturePage chapters. Set visualMode first or omit pageLayoutKind.");
-
-        return new ChapterVisualArgResolution(mode, layoutKind, shouldApply, Error: null);
-    }
-
     private static string Serialize(object? value) => JsonSerializer.Serialize(value, JsonSerializerOptions.Default);
-
-    private sealed record ChapterVisualArgResolution(
-        ChapterVisualMode Mode,
-        ChapterPageLayoutKind LayoutKind,
-        bool ShouldApply,
-        string? Error)
-    {
-        public static ChapterVisualArgResolution Fail(string error) =>
-            new(ChapterVisualMode.Prose, ChapterPageLayoutKind.SinglePortrait, ShouldApply: false, error);
-    }
 
     private sealed record ActState(Guid Id, int Order, string Title, string Synopsis, bool Deleted)
     {
@@ -1538,19 +1451,31 @@ public sealed class OutlineToolStagingContext(
         int Order,
         string Title,
         string Synopsis,
-        ChapterVisualMode VisualMode,
-        ChapterPageLayoutKind PageLayoutKind,
+        int FigureCount,
+        int DesignedPageCount,
         bool Deleted)
     {
         public Guid? ActId { get; set; } = ActId;
         public int Order { get; set; } = Order;
         public string Title { get; set; } = Title;
         public string Synopsis { get; set; } = Synopsis;
-        public ChapterVisualMode VisualMode { get; set; } = VisualMode;
-        public ChapterPageLayoutKind PageLayoutKind { get; set; } = PageLayoutKind;
         public bool Deleted { get; set; } = Deleted;
 
-        public OutlineChapterChange ToChange() => new(Id, ActId, Order, Title, Synopsis, VisualMode, PageLayoutKind);
+        public OutlineChapterChange ToChange() => new(Id, ActId, Order, Title, Synopsis);
+
+        public static ChapterState From(Chapter chapter)
+        {
+            var manuscript = chapter.Manuscript;
+            return new ChapterState(
+                chapter.Id,
+                chapter.ActId,
+                chapter.Order,
+                chapter.Title,
+                chapter.Synopsis,
+                manuscript.Content.Count(block => block.Type == Lorekeeper.Manuscripts.ManuscriptBlockType.Figure),
+                manuscript.Content.Count(block => block.Type == Lorekeeper.Manuscripts.ManuscriptBlockType.DesignedPage),
+                Deleted: false);
+        }
     }
 
     private sealed record EntityState(

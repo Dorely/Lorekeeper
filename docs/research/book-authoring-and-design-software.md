@@ -1,7 +1,13 @@
 # Book authoring and visual-design software gap analysis
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-08-01
 Research access date: 2026-07-29
+
+Implementation update: the unified manuscript-v3 Figure/Designed Page model,
+shared page/cover scene engine, geometry-bound generation, project fonts,
+color/bleed Press rendering, tagged Digital PDF, fixed-layout EPUB, and compact
+assistant parity are implemented. The original gap inventory below is retained
+as the research basis; `docs/publishing-roadmap.md` is the current status source.
 
 ## Executive conclusion
 
@@ -207,11 +213,14 @@ Evolve the current Publish tab around editions:
 - dedicated cover mode: template, spine, back/front frames, safety, and barcode
   reserve.
 
-### Picture Page workspace
+### Designed Page and cover workspaces
 
-Retain its current structured composition, but make it one implementation of a
-shared page-object vocabulary. Phase 3 can add general frames, layers, guides,
-and master pages without creating a second incompatible layout engine.
+Use one scene vocabulary for Designed Pages/spreads and format-aware covers,
+while keeping page semantic fragments project-owned and cover copy edition-owned.
+Implemented core objects, layers, styles, guides, grouping, reading order, and
+exact geometry variants leave master pages, linked frames, SVG/path tooling,
+advanced effects, and manual page intervention as additive future work rather
+than a competing layout stack.
 
 ### AI assistants
 

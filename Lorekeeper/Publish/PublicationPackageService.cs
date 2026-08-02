@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
+using Lorekeeper.Composition;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
@@ -113,6 +114,12 @@ public sealed class PublicationPackageService(
         "Confirm title, author, identifiers, reading order, landmarks, and intentional page breaks.",
         "Confirm the package manifest hashes match the files being approved.",
     ];
+    private static readonly string[] DigitalPdfProofChecklist =
+    [
+        "Inspect the complete book PDF, including its front cover as page one.",
+        "Confirm bookmarks, internal links, selectable text, reading order, alternative text, and any intentional mixed page sizes.",
+        "Confirm the package manifest hashes match the file being approved.",
+    ];
     private static readonly string[] PhysicalProofChecklist =
     [
         "Inspect trim, bleed, crop, binding, spine alignment, and cover safety.",
@@ -165,6 +172,33 @@ public sealed class PublicationPackageService(
                 "https://www.w3.org/TR/epub-33/",
             ]),
         new(
+            PublicationEditionFormat.DigitalPdf,
+            PublicationVendor.Generic,
+            "generic-digital-pdf",
+            "generic-digital-pdf-v1",
+            new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc),
+            1,
+            5000,
+            ["https://www.adobe.com/accessibility/pdf/pdf-accessibility-overview.html"]),
+        new(
+            PublicationEditionFormat.DigitalPdf,
+            PublicationVendor.AmazonKdp,
+            "generic-digital-pdf",
+            "generic-digital-pdf-v1",
+            new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc),
+            1,
+            5000,
+            ["https://www.adobe.com/accessibility/pdf/pdf-accessibility-overview.html"]),
+        new(
+            PublicationEditionFormat.DigitalPdf,
+            PublicationVendor.IngramSpark,
+            "generic-digital-pdf",
+            "generic-digital-pdf-v1",
+            new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc),
+            1,
+            5000,
+            ["https://www.adobe.com/accessibility/pdf/pdf-accessibility-overview.html"]),
+        new(
             PublicationEditionFormat.Epub,
             PublicationVendor.Generic,
             "generic-epub3",
@@ -202,11 +236,13 @@ public sealed class PublicationPackageService(
         var artifacts = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
                 && (artifact.Kind == PublicationArtifactKind.InteriorPdf
-                    || artifact.Kind == PublicationArtifactKind.CoverPdf))
+                    || artifact.Kind == PublicationArtifactKind.CoverPdf
+                    || artifact.Kind == PublicationArtifactKind.BookPdf))
             .OrderByDescending(artifact => artifact.CreatedAt)
             .ToListAsync(cancellationToken);
         var interior = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf);
         var coverArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.CoverPdf);
+        var bookArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.BookPdf);
         var items = new List<PublicationPreflightItem>();
         var profile = Profiles.Single(candidate =>
             candidate.Format == edition.Format && candidate.Vendor == edition.Vendor);
@@ -275,8 +311,38 @@ public sealed class PublicationPackageService(
             }
             await AddPressEvidenceAsync(edition, interior, coverArtifact, coverDesign.Template, currentRendererVersion, items, cancellationToken);
         }
+        else if (edition.Format == PublicationEditionFormat.DigitalPdf)
+        {
+            string? currentRendererVersion = null;
+            if (pressRuntime is not null)
+            {
+                var readiness = pressRuntime.GetReadiness();
+                if (!readiness.IsReady)
+                    items.Add(Error("PRESS_RUNTIME_UNAVAILABLE", readiness.Message));
+                else
+                {
+                    var description = pressRuntime.GetDescription();
+                    currentRendererVersion = description.RendererVersion;
+                    if (!description.Profiles.Contains(edition.VendorProfileVersion, StringComparer.Ordinal))
+                        items.Add(Error("PRESS_PROFILE_STALE", "The selected profile is not available in the installed Lorekeeper Press runtime."));
+                }
+            }
+            ValidatePdf(bookArtifact, fingerprint, currentRendererVersion, edition.VendorProfileVersion, PublicationArtifactKind.BookPdf, "BOOK", items);
+            if (bookArtifact?.IsLegacy == true)
+                items.Add(Error("PRESS_RENDERER_LEGACY", "A legacy book PDF cannot satisfy current validation or package readiness."));
+            coverDesign = await covers.GetAsync(projectId, editionId, cancellationToken);
+            items.AddRange(coverDesign.Diagnostics.Select(message => new PublicationPreflightItem(
+                message.Contains("requires", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("must contain", StringComparison.OrdinalIgnoreCase)
+                    ? "error"
+                    : "warning",
+                "COVER_DESIGN",
+                message,
+                PublicationArtifactKind.BookPdf)));
+            await AddDigitalPressEvidenceAsync(edition, bookArtifact, currentRendererVersion, items, cancellationToken);
+        }
         var document = await publishing.GetDocumentAsync(projectId, editionId, cancellationToken);
-        ValidateProfile(edition, profile, interior, document, coverDesign, items);
+        ValidateProfile(edition, profile, interior ?? bookArtifact, document, coverDesign, items);
         var matter = await db.PublicationMatter.AsNoTracking()
             .Where(item => item.EditionId == editionId && item.IsIncluded)
             .OrderBy(item => item.Location)
@@ -296,7 +362,8 @@ public sealed class PublicationPackageService(
             "info",
             "LOREKEEPER_VALIDATED_SCOPE",
             "Lorekeeper validation covers the generated file structure and selected profile. Human proof and recorded vendor results remain separate evidence."));
-        var packageIdentity = PackageIdentity(profile, fingerprint, interior, coverArtifact);
+        var primaryPdf = edition.Format == PublicationEditionFormat.DigitalPdf ? bookArtifact : interior;
+        var packageIdentity = PackageIdentity(profile, fingerprint, primaryPdf, coverArtifact);
         var currentPackageEntity = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
                 && artifact.Kind == PublicationArtifactKind.PublicationPackage
@@ -348,8 +415,8 @@ public sealed class PublicationPackageService(
             profile.Sources,
             fingerprint,
             packageIdentity,
-            edition.Format == PublicationEditionFormat.Paperback
-                ? artifacts.Where(artifact => artifact.Id == interior?.Id || artifact.Id == coverArtifact?.Id)
+            edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.DigitalPdf
+                ? artifacts.Where(artifact => artifact.Id == primaryPdf?.Id || artifact.Id == coverArtifact?.Id)
                     .Select(artifact => new PublicationValidatedArtifact(
                         artifact.Kind,
                         artifact.Sha256,
@@ -367,8 +434,8 @@ public sealed class PublicationPackageService(
             physicalProof,
             items)
         {
-            ValidatedArtifactIds = edition.Format == PublicationEditionFormat.Paperback
-                ? new[] { interior?.Id ?? Guid.Empty, coverArtifact?.Id ?? Guid.Empty }
+            ValidatedArtifactIds = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.DigitalPdf
+                ? new[] { primaryPdf?.Id ?? Guid.Empty, coverArtifact?.Id ?? Guid.Empty }
                     .Where(id => id != Guid.Empty)
                     .ToList()
                 : [],
@@ -401,9 +468,11 @@ public sealed class PublicationPackageService(
         }
         var interiorArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf);
         var coverArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.CoverPdf);
+        var bookArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.BookPdf);
         var profile = Profiles.Single(candidate =>
             candidate.Format == edition.Format && candidate.Vendor == edition.Vendor);
-        var packageIdentity = PackageIdentity(profile, report.SourceFingerprint, interiorArtifact, coverArtifact);
+        var primaryPdf = edition.Format == PublicationEditionFormat.DigitalPdf ? bookArtifact : interiorArtifact;
+        var packageIdentity = PackageIdentity(profile, report.SourceFingerprint, primaryPdf, coverArtifact);
         if (!string.Equals(packageIdentity, report.PackageIdentity, StringComparison.Ordinal))
             throw new InvalidOperationException("The press artifacts changed after preflight. Run preflight again.");
         var files = new Dictionary<string, (PublicationArtifactKind Kind, string MediaType, byte[] Data)>(
@@ -413,6 +482,8 @@ public sealed class PublicationPackageService(
             files["interior.pdf"] = (PublicationArtifactKind.InteriorPdf, "application/pdf", interiorArtifact!.Data);
             files["cover.pdf"] = (PublicationArtifactKind.CoverPdf, "application/pdf", coverArtifact!.Data);
         }
+        if (edition.Format == PublicationEditionFormat.DigitalPdf)
+            files["book.pdf"] = (PublicationArtifactKind.BookPdf, "application/pdf", bookArtifact!.Data);
         if (edition.Format == PublicationEditionFormat.Epub)
         {
             var epub = await publishing.ExportAsync(projectId, editionId, PublishExportFormat.Epub, cancellationToken);
@@ -422,7 +493,7 @@ public sealed class PublicationPackageService(
         }
 
         var document = await publishing.GetDocumentAsync(projectId, editionId, cancellationToken);
-        if (document.CoverAsset is { } frontCover)
+        if (document.Cover is null && document.CoverAsset is { } frontCover)
             files[$"front-cover{ExtensionFor(frontCover.ContentType)}"] =
                 (PublicationArtifactKind.FrontCoverImage, frontCover.ContentType, frontCover.Data);
         var packagedReport = report with
@@ -472,18 +543,24 @@ public sealed class PublicationPackageService(
                 && !artifact.IsLegacy
                 && artifact.SourceFingerprint == report.SourceFingerprint
                 && (artifact.Kind == PublicationArtifactKind.InteriorPdf
-                    || artifact.Kind == PublicationArtifactKind.CoverPdf))
+                    || artifact.Kind == PublicationArtifactKind.CoverPdf
+                    || artifact.Kind == PublicationArtifactKind.BookPdf))
             .OrderByDescending(artifact => artifact.CreatedAt)
             .ToListAsync(cancellationToken);
         var finalPackageIdentity = PackageIdentity(
             profile,
             report.SourceFingerprint,
-            latestArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf),
+            latestArtifacts.FirstOrDefault(artifact => artifact.Kind ==
+                (edition.Format == PublicationEditionFormat.DigitalPdf
+                    ? PublicationArtifactKind.BookPdf
+                    : PublicationArtifactKind.InteriorPdf)),
             latestArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.CoverPdf));
         if (!string.Equals(finalPackageIdentity, packageIdentity, StringComparison.Ordinal))
             throw new InvalidOperationException("The press artifacts changed while the publication package was being built.");
         var generated = new List<PublicationArtifact>();
-        foreach (var file in files.Where(file => file.Value.Kind is not PublicationArtifactKind.InteriorPdf and not PublicationArtifactKind.CoverPdf))
+        foreach (var file in files.Where(file => file.Value.Kind is not PublicationArtifactKind.InteriorPdf
+            and not PublicationArtifactKind.CoverPdf
+            and not PublicationArtifactKind.BookPdf))
             generated.Add(Artifact(
                 editionId,
                 file.Value.Kind,
@@ -974,39 +1051,65 @@ public sealed class PublicationPackageService(
         var chapters = document.Sections.SelectMany(section => section.Chapters).ToList();
         if (chapters.Count == 0)
             items.Add(Error("CONTENT_EMPTY", "Include at least one chapter."));
-        if (chapters.Any(chapter => string.IsNullOrWhiteSpace(chapter.PlainText)))
-            items.Add(Error("CONTENT_CHAPTER_EMPTY", "Every included chapter must contain publication text."));
+        if (chapters.Any(chapter => !ChapterHasRenderableContent(chapter)))
+            items.Add(Error("CONTENT_CHAPTER_EMPTY", "Every included chapter must contain semantic text, a Figure, or a Designed Page with renderable objects."));
 
-        if (edition.Format == PublicationEditionFormat.Epub)
+        if (edition.Format is PublicationEditionFormat.Epub or PublicationEditionFormat.DigitalPdf)
         {
             if (edition.Binding != PublicationBinding.Digital
                 || edition.Paper != PublicationPaper.Digital
                 || edition.Ink != PublicationInk.Digital)
             {
-                items.Add(Error("EPUB_PRODUCT_SETTINGS", "EPUB editions require digital binding, paper, and ink settings."));
+                items.Add(Error(
+                    "DIGITAL_PRODUCT_SETTINGS",
+                    $"{(edition.Format == PublicationEditionFormat.Epub ? "EPUB" : "Digital PDF")} editions require digital binding, paper, and ink settings."));
             }
-            if (document.CoverAsset is null)
-                items.Add(Error("EPUB_COVER_REQUIRED", "Select a front-cover source for the EPUB edition."));
-            else if (string.IsNullOrWhiteSpace(document.CoverAsset.AltText))
+            if (edition.Format == PublicationEditionFormat.Epub && document.Cover is null && document.CoverAsset is null)
+                items.Add(Error("EPUB_COVER_REQUIRED", "Create a composed front cover for the EPUB edition."));
+            else if (edition.Format == PublicationEditionFormat.Epub
+                && document.Cover is null
+                && string.IsNullOrWhiteSpace(document.CoverAsset?.AltText))
                 items.Add(Error("EPUB_COVER_ALT_TEXT_REQUIRED", "The EPUB cover requires alternative text."));
-            var missingAssetAlt = document.Assets
-                .Concat(document.Placements.Select(placement => placement.Asset))
-                .DistinctBy(asset => asset.Id)
-                .Any(asset => string.IsNullOrWhiteSpace(asset.AltText));
+            if (edition.Format == PublicationEditionFormat.DigitalPdf && coverDesign is null)
+                items.Add(Error("DIGITAL_PDF_COVER_REQUIRED", "Create the front cover for this Digital PDF edition."));
             var semanticManuscripts = chapters.Select(chapter => chapter.Manuscript)
+                .Concat(chapters.SelectMany(chapter => chapter.PageCompositions).Select(composition => composition.SemanticManuscript))
                 .Concat(document.Matter.Select(item => item.Manuscript));
             var missingFigureAlt = semanticManuscripts.Any(manuscript =>
                     manuscript.Content.Any(block =>
                         block.Type == ManuscriptBlockType.Figure
+                        && !block.Decorative
                         && (string.IsNullOrWhiteSpace(block.AltText)
                             || block.ImageId is not Guid imageId
                             || document.Assets.All(asset => asset.Id != imageId))))
-                || chapters.Any(chapter =>
-                    chapter.IllustrationLayout.Images.Any(image =>
-                        string.IsNullOrWhiteSpace(image.AltTextOverride)
-                        && string.IsNullOrWhiteSpace(document.Assets.FirstOrDefault(asset => asset.Id == image.ImageId)?.AltText)));
-            if (missingAssetAlt || missingFigureAlt)
-                items.Add(Error("EPUB_ALT_TEXT_REQUIRED", "Every EPUB image requires alternative text."));
+                || document.Placements.Any(placement =>
+                    !placement.Decorative && string.IsNullOrWhiteSpace(placement.AltText))
+                || chapters.SelectMany(chapter => chapter.PageCompositions)
+                    .SelectMany(composition => composition.Variants)
+                    .Any(variant =>
+                    {
+                        var visibleLayers = variant.Scene.Layers.Where(layer => layer.Visible).Select(layer => layer.Id).ToHashSet();
+                        return CompositionSceneResolver.Flatten(variant.Scene).Any(item => item.Kind == CompositionObjectKind.Image
+                            && item.Visible
+                            && visibleLayers.Contains(item.LayerId)
+                            && !item.Decorative
+                            && (item.AccessibilityDecisionPending || string.IsNullOrWhiteSpace(item.AltText)));
+                    });
+            var missingCoverAlt = document.Cover is { } composedCover
+                && CompositionSceneResolver.Flatten(composedCover.Scene).Any(item =>
+                    item.Kind == CompositionObjectKind.Image
+                    && item.Visible
+                    && !item.Decorative
+                    && (item.AccessibilityDecisionPending || string.IsNullOrWhiteSpace(item.AltText)));
+            if (missingFigureAlt || missingCoverAlt)
+                items.Add(Error("DIGITAL_ALT_TEXT_REQUIRED", "Every meaningful digital-publication image requires alternative text or an explicit decorative designation."));
+            if (interior?.PageCount is int digitalPages
+                && (digitalPages < profile.MinimumPages || digitalPages > profile.MaximumPages))
+            {
+                items.Add(Error(
+                    "DIGITAL_PAGE_COUNT_UNSUPPORTED",
+                    $"The installed profile supports {profile.MinimumPages}–{profile.MaximumPages} pages."));
+            }
             return;
         }
 
@@ -1014,8 +1117,8 @@ public sealed class PublicationPackageService(
             items.Add(Error("PRINT_BINDING_UNSUPPORTED", "The current paperback profiles support perfect binding only."));
         if (edition.Paper is not PublicationPaper.White and not PublicationPaper.Cream)
             items.Add(Error("PRINT_PAPER_UNSUPPORTED", "The current paperback profiles support white or cream paper."));
-        if (edition.Ink != PublicationInk.BlackAndWhite)
-            items.Add(Error("PRINT_INK_UNSUPPORTED", "The current paperback profiles support black-and-white interiors only."));
+        if (edition.Ink is not PublicationInk.BlackAndWhite and not PublicationInk.Color)
+            items.Add(Error("PRINT_INK_UNSUPPORTED", "Paperback interiors require either grayscale or color output."));
         if (edition.PageWidthInches is < 3.5 or > 12
             || edition.PageHeightInches is < 5 or > 15)
         {
@@ -1049,6 +1152,17 @@ public sealed class PublicationPackageService(
             "BLANK_PAGE_PROOF_REQUIRED",
             "Confirm intentional and accidental blank pages in the exact digital proof before approval."));
     }
+
+    private static bool ChapterHasRenderableContent(PublishChapterDocument chapter) =>
+        chapter.Manuscript.Content.Any(block => block.Type switch
+        {
+            ManuscriptBlockType.Figure => block.ImageId is not null,
+            ManuscriptBlockType.DesignedPage => block.PageCompositionId is Guid compositionId
+                && chapter.PageCompositions.FirstOrDefault(item => item.Id == compositionId) is { } composition
+                && composition.Variants.Any(variant => CompositionSceneResolver.Flatten(variant.Scene).Any(item => item.Visible)),
+            ManuscriptBlockType.SceneBreak => true,
+            _ => !string.IsNullOrWhiteSpace(ManuscriptCodec.Text(block)),
+        });
 
     private static string PackageIdentity(
         PublicationPreflightProfile profile,
@@ -1106,11 +1220,13 @@ public sealed class PublicationPackageService(
                 ($"chapter {chapter.Id:N} synopsis", chapter.Synopsis),
             }));
         renderedText.AddRange(document.Sections.SelectMany(section => section.Chapters).SelectMany(chapter =>
-            chapter.IllustrationLayout.Images.SelectMany(image => new[]
-            {
-                ($"chapter {chapter.Id:N} illustration {image.Id:N} caption", image.Caption),
-                ($"chapter {chapter.Id:N} illustration {image.Id:N} alternative text override", image.AltTextOverride),
-            })));
+            chapter.PageCompositions.SelectMany(composition => composition.Variants)
+                .SelectMany(variant => variant.Scene.Objects)
+                .SelectMany(item => new[]
+                {
+                    ($"composition object {item.Id:N} text binding", item.TextBinding),
+                    ($"composition object {item.Id:N} alternative text", item.AltText),
+                })));
         renderedText.AddRange(document.Placements.SelectMany(placement =>
             new[]
             {
@@ -1255,9 +1371,12 @@ public sealed class PublicationPackageService(
     }
 
     private static IReadOnlyList<string> DigitalProofChecklist(PublicationEditionFormat format) =>
-        format == PublicationEditionFormat.Epub
-            ? EpubDigitalProofChecklist
-            : PaperbackDigitalProofChecklist;
+        format switch
+        {
+            PublicationEditionFormat.Epub => EpubDigitalProofChecklist,
+            PublicationEditionFormat.DigitalPdf => DigitalPdfProofChecklist,
+            _ => PaperbackDigitalProofChecklist,
+        };
 
     private static PublicationProofStatus ProofStatus(
         PublicationProofRecord? record,
@@ -1423,6 +1542,69 @@ public sealed class PublicationPackageService(
         catch (JsonException)
         {
             items.Add(Error("PRESS_EVIDENCE_INVALID", "Stored press evidence could not be read."));
+        }
+    }
+
+    private async Task AddDigitalPressEvidenceAsync(
+        PublicationEdition edition,
+        PublicationArtifact? book,
+        string? currentRendererVersion,
+        List<PublicationPreflightItem> items,
+        CancellationToken cancellationToken)
+    {
+        if (book?.RenderJobId is not Guid renderJobId)
+        {
+            items.Add(Error("PRESS_EVIDENCE_REQUIRED", "The current book PDF must come from a completed Lorekeeper Press render.", PublicationArtifactKind.BookPdf));
+            return;
+        }
+        var job = await db.PublicationRenderJobs.AsNoTracking().FirstOrDefaultAsync(
+            candidate => candidate.Id == renderJobId
+                && candidate.EditionId == edition.Id
+                && candidate.Status == PublicationRenderStatus.Completed,
+            cancellationToken);
+        if (job is null)
+        {
+            items.Add(Error("PRESS_EVIDENCE_REQUIRED", "The current book PDF does not have completed Press evidence.", PublicationArtifactKind.BookPdf));
+            return;
+        }
+        if (currentRendererVersion is not null
+            && !string.Equals(job.RendererVersion, currentRendererVersion, StringComparison.Ordinal))
+        {
+            items.Add(Error("PRESS_RENDERER_STALE", "The completed render evidence belongs to a different Lorekeeper Press renderer.", PublicationArtifactKind.BookPdf));
+        }
+        if (!string.Equals(job.ProfileId, edition.VendorProfileVersion, StringComparison.Ordinal))
+            items.Add(Error("PRESS_PROFILE_STALE", "The completed render evidence belongs to a different publication profile.", PublicationArtifactKind.BookPdf));
+        try
+        {
+            var diagnostics = JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(
+                job.DiagnosticsJson,
+                JsonOptions) ?? [];
+            items.AddRange(diagnostics.Select(diagnostic => new PublicationPreflightItem(
+                diagnostic.Severity,
+                diagnostic.Code,
+                diagnostic.Message,
+                PublicationArtifactKind.BookPdf)));
+
+            using var evidence = JsonDocument.Parse(job.EvidenceJson);
+            var root = evidence.RootElement;
+            if (!root.TryGetProperty("validationStatus", out var validation)
+                || validation.GetString() != "validated")
+            {
+                items.Add(Error("PRESS_EVIDENCE_INVALID", "Lorekeeper Press did not record a validated Digital PDF result.", PublicationArtifactKind.BookPdf));
+            }
+            RequireTrue(root, "interiorPageBoxesConsistent", "BOOK_PAGE_BOXES", "Book page boxes are inconsistent.", items);
+            RequireFalse(root, "hasEncryption", "PDF_ENCRYPTED", "The book PDF must not be encrypted.", items);
+            RequireFalse(root, "hasForbiddenActions", "PDF_FORBIDDEN_ACTIONS", "The book PDF contains forbidden actions.", items);
+            if (!root.TryGetProperty("pdfVersion", out var pdfVersion) || pdfVersion.GetString() != "1.7")
+                items.Add(Error("PDF_VERSION_UNSUPPORTED", "The Digital PDF profile requires PDF 1.7.", PublicationArtifactKind.BookPdf));
+            if (!root.TryGetProperty("fontsEmbedded", out var embedded) || embedded.ValueKind != JsonValueKind.True)
+                items.Add(Error("PDF_FONTS_NOT_EMBEDDED", "Every Digital PDF font must be embedded.", PublicationArtifactKind.BookPdf));
+            if (!root.TryGetProperty("toUnicodeMapsPresent", out var toUnicode) || toUnicode.ValueKind != JsonValueKind.True)
+                items.Add(Error("PDF_TOUNICODE_REQUIRED", "Digital PDF fonts require ToUnicode maps for selectable, accessible text.", PublicationArtifactKind.BookPdf));
+        }
+        catch (JsonException)
+        {
+            items.Add(Error("PRESS_EVIDENCE_INVALID", "Stored Digital PDF evidence could not be read.", PublicationArtifactKind.BookPdf));
         }
     }
 

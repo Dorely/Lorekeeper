@@ -2,7 +2,6 @@ using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Publish;
-using Lorekeeper.Components.Pages.Projects.Publish;
 using Lorekeeper.Llm;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -13,43 +12,6 @@ namespace Lorekeeper.Tests;
 
 public sealed class PublicationEditionServiceTests
 {
-    [Fact]
-    public void CoverUiDraftIncludesEditedFocalCoordinates()
-    {
-        var current = new PublicationCoverDesignView(
-            Guid.NewGuid(),
-            Guid.NewGuid(),
-            "Title",
-            string.Empty,
-            "Author",
-            "Spine",
-            "Back",
-            "#ffffff",
-            PublicationBarcodeMode.VendorOverlay,
-            50,
-            50,
-            7,
-            new PublicationCoverTemplate(100, 6, 9, 0, 0.2252, 12.2252, 9, 0.25, 2, 1.2, "fixture", true),
-            []);
-
-        var update = PublishContent.CreateCoverDesignUpdate(
-            current,
-            current.Title,
-            current.Subtitle,
-            current.Author,
-            current.SpineText,
-            current.BackCopy,
-            current.BackgroundColor,
-            current.BarcodeMode,
-            23,
-            74);
-
-        Assert.Equal(23, update.ImageFocalXPercent);
-        Assert.Equal(74, update.ImageFocalYPercent);
-        Assert.Equal(current.Revision, update.ExpectedRevision);
-        Assert.True(update.AcknowledgeTemplate);
-    }
-
     [Fact]
     public async Task NewPaperbackUsesTheOwnedKdpProfileDefaults()
     {
@@ -144,7 +106,9 @@ public sealed class PublicationEditionServiceTests
                     archivedRevision));
             var coverService = new PublicationCoverService(
                 db,
-                new ProjectMutationCoordinator(db.Database.GetConnectionString()!));
+                new ProjectMutationCoordinator(db.Database.GetConnectionString()!),
+                service,
+                new TestPublicationPressRuntime());
             var cover = await coverService.GetAsync(project.Id, edition.Id);
             await Assert.ThrowsAsync<InvalidOperationException>(
                 () => coverService.UpdateAsync(
@@ -198,7 +162,7 @@ public sealed class PublicationEditionServiceTests
             first = await service.UpdateAsync(
                 project.Id,
                 first.Id,
-                Update(first, isbn: "9780306406157", PublicationVendor.AmazonKdp, "kdp-preview-1"));
+                Update(first, isbn: "9780306406157", PublicationVendor.AmazonKdp, "kdp-paperback-v1"));
             var clone = await service.CloneAsync(
                 project.Id,
                 first.Id,
@@ -208,14 +172,14 @@ public sealed class PublicationEditionServiceTests
             clone = await service.UpdateAsync(
                 project.Id,
                 clone.Id,
-                Update(clone, isbn: "978-0-306-40615-7", PublicationVendor.IngramSpark, "ingram-preview-1"));
+                Update(clone, isbn: "978-0-306-40615-7", PublicationVendor.IngramSpark, "ingram-paperback-pdfx1a-v1"));
 
             Assert.Equal("9780306406157", clone.Isbn);
             var drifting = Update(
                 clone,
                 clone.Isbn,
                 PublicationVendor.IngramSpark,
-                "ingram-preview-2") with
+                "ingram-paperback-pdfx1a-v1") with
             {
                 IncludeVisibleTableOfContents = !clone.IncludeVisibleTableOfContents,
             };
@@ -279,6 +243,7 @@ public sealed class PublicationEditionServiceTests
                 StyleRole = ManuscriptStyleRoles.FigureCaption,
                 ImageId = Guid.NewGuid(),
                 AltText = "Missing image",
+                FigurePresentation = new FigurePresentation(),
             };
             var figureException = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.UpsertMatterAsync(
@@ -306,7 +271,11 @@ public sealed class PublicationEditionServiceTests
                 project.Id,
                 new PublicationEditionCreate("Paperback", PublicationEditionFormat.Paperback));
             var coordinator = new ProjectMutationCoordinator(db.Database.GetConnectionString()!);
-            var covers = new PublicationCoverService(db, coordinator);
+            var covers = new PublicationCoverService(
+                db,
+                coordinator,
+                service,
+                new TestPublicationPressRuntime());
             var initial = await covers.GetAsync(project.Id, edition.Id);
             initial = await covers.UpdateAsync(
                 project.Id,
@@ -366,8 +335,6 @@ public sealed class PublicationEditionServiceTests
             edition.NumberActs,
             edition.NumberChapters,
             edition.TitlePageMode,
-            edition.PrintPicturePageSpreadMode,
-            edition.EpubPicturePageSpreadMode,
             edition.PageWidthInches,
             edition.PageHeightInches,
             edition.PageMarginInches,
@@ -381,7 +348,8 @@ public sealed class PublicationEditionServiceTests
             edition.Binding,
             edition.Paper,
             edition.Ink,
-            edition.Bleed);
+            edition.Bleed,
+            edition.AllowDesignedPageOverrides);
 
     private static PublicationCoverDesignUpdate CoverUpdate(
         PublicationCoverDesignView cover,

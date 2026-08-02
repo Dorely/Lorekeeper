@@ -1,6 +1,8 @@
 using System.Text;
 using Lorekeeper.Models;
 using Lorekeeper.Projects;
+using Lorekeeper.Outline;
+using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.Llm;
 
@@ -43,7 +45,8 @@ public sealed record SystemPromptComposeRequest(
     SystemPromptAgentRole AgentRole,
     string OperatingRules,
     Chapter? ActiveChapter = null,
-    IReadOnlyList<SystemPromptSourceSection>? WorkingContext = null);
+    IReadOnlyList<SystemPromptSourceSection>? WorkingContext = null,
+    IReadOnlyCollection<PublicationEditionFormat>? PublicationFormats = null);
 
 public sealed record SystemPromptComposition(
     string Prompt,
@@ -58,7 +61,9 @@ public interface ISystemPromptComposer
 /// Owns the actual system-role instructions. Project Guidance is deliberately only one
 /// user-authored section inside the assembled prompt.
 /// </summary>
-public sealed class SystemPromptComposer(IBookBriefService bookBriefs) : ISystemPromptComposer
+public sealed class SystemPromptComposer(
+    IBookBriefService bookBriefs,
+    IBookFormatGuidanceService formatGuidance) : ISystemPromptComposer
 {
     public SystemPromptComposition Compose(SystemPromptComposeRequest request)
     {
@@ -80,7 +85,7 @@ public sealed class SystemPromptComposer(IBookBriefService bookBriefs) : ISystem
                 "dynamic-guidance",
                 SystemPromptSectionKind.DynamicGuidance,
                 "Book and Active-Page Guidance",
-                DynamicGuidanceFor(request.BookBrief, request.ActiveChapter)),
+                DynamicGuidanceFor(request.BookBrief, request.ActiveChapter, request.PublicationFormats, formatGuidance)),
             new(
                 "project-guidance",
                 SystemPromptSectionKind.ProjectGuidance,
@@ -155,10 +160,14 @@ public sealed class SystemPromptComposer(IBookBriefService bookBriefs) : ISystem
             """;
     }
 
-    private static string DynamicGuidanceFor(BookBrief brief, Chapter? chapter)
+    private static string DynamicGuidanceFor(
+        BookBrief brief,
+        Chapter? chapter,
+        IReadOnlyCollection<PublicationEditionFormat>? formats,
+        IBookFormatGuidanceService formatGuidance)
     {
         var builder = new StringBuilder();
-        builder.Append(BookKindGuidance(brief.BookKind));
+        builder.Append(formatGuidance.GetConcise(brief, formats));
 
         if (chapter is null)
         {
@@ -166,45 +175,14 @@ public sealed class SystemPromptComposer(IBookBriefService bookBriefs) : ISystem
             return builder.ToString();
         }
 
+        var manuscript = chapter.Manuscript;
         builder.Append("\n\nActive chapter: ")
             .Append(chapter.Title)
-            .Append(" (visual mode: ")
-            .Append(chapter.VisualMode)
-            .Append(", layout: ")
-            .Append(chapter.PageLayoutKind)
-            .Append(").\n")
-            .Append(ChapterModeGuidance(chapter.VisualMode));
+            .Append(". It is a format-neutral sequence of semantic text, ")
+            .Append(manuscript.Content.Count(block => block.Type == ManuscriptBlockType.Figure))
+            .Append(" Figure block(s), and ")
+            .Append(manuscript.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage))
+            .Append(" Designed Page block(s). Keep semantic reading order independent from page-object layering.");
         return builder.ToString();
     }
-
-    private static string BookKindGuidance(BookKind kind) => kind switch
-    {
-        BookKind.Novel or BookKind.Novella or BookKind.ShortStory or BookKind.StoryCollection =>
-            "Fiction guidance: maintain causal narrative logic, character agency, viewpoint discipline, escalating pressure, scene-level purpose, continuity, and a deliberate balance of scene and summary.",
-        BookKind.NarrativeNonfiction =>
-            "Narrative-nonfiction guidance: preserve factual integrity and source boundaries while shaping chronology, narrative tension, explanation, attribution, and reader orientation.",
-        BookKind.GeneralNonfiction =>
-            "Nonfiction guidance: organize around reader questions and purpose; make claims, evidence, definitions, examples, transitions, and signposting accurate and logically ordered.",
-        BookKind.PictureBook =>
-            "Picture-book guidance: build an economical arc across page turns and spreads; prioritize read-aloud musicality, child-accessible meaning, character agency, visual opportunities, and word/image counterpoint. Do not describe in prose what the illustration can carry better.",
-        BookKind.IllustratedBook =>
-            "Illustrated-book guidance: coordinate prose and images as one reading experience, plan visual beats and hierarchy, preserve text readability, and avoid decorative art that competes with essential content.",
-        BookKind.Poetry =>
-            "Poetry guidance: protect lineation, stanza architecture, image, sound, rhythm, ambiguity, and typographic intent. Do not normalize unconventional grammar or punctuation without a clear editorial reason.",
-        BookKind.Other =>
-            "Special-format guidance: infer the governing genre and production conventions from the Book Brief and active material, and state any consequential assumption.",
-        _ =>
-            "General book guidance: infer the relevant fiction, nonfiction, picture-book, illustrated-book, or poetry discipline from the material without forcing conventions from another form. Treat the missing book kind as an outlining priority, not a blocker to a concrete request.",
-    };
-
-    private static string ChapterModeGuidance(ChapterVisualMode mode) => mode switch
-    {
-        ChapterVisualMode.Prose =>
-            "Prose: the editable chapter body is primary. Shape paragraphs, scenes, sections, transitions, and advisory pagination; do not invent a visual layout unless the user requests one.",
-        ChapterVisualMode.IllustratedProse =>
-            "IllustratedProse: keep prose as editable flowing text and coordinate anchored images with nearby narrative beats. Check that image placement supports rather than interrupts the reading sequence.",
-        ChapterVisualMode.PicturePage =>
-            "PicturePage: compose page or spread as a fixed visual surface. Story copy belongs in editable text elements. Before generating page art, plan the copy's actual text-box geometry and reserve those same coordinates as naturally quiet, low-detail negative space in the image. Place the text in that prepared space with a transparent background by default; if the generated art does not provide a usable landing zone, edit or regenerate it instead of covering focal content or dropping text arbitrarily. Also protect focal areas, gutter and trim safety, reading order, hierarchy, contrast, and the page-turn relationship to adjacent pages.",
-        _ => throw new ArgumentOutOfRangeException(nameof(mode)),
-    };
 }

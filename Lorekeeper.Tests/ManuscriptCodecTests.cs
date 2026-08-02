@@ -473,6 +473,7 @@ public sealed class ManuscriptCodecTests
             StyleRole = "custom-figure",
             ImageId = imageId,
             AltText = "Old alternative text",
+            FigurePresentation = new FigurePresentation(),
         };
 
         var (result, _) = ManuscriptOperations.Apply(

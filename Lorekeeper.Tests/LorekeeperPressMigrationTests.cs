@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Publish;
@@ -36,26 +37,19 @@ public sealed class LorekeeperPressMigrationTests
             var chapterId = Guid.NewGuid();
             var styleId = Guid.NewGuid();
             var assetId = Guid.NewGuid();
+            var coverDesignId = Guid.NewGuid();
             var assetBytes = "preserved publish image bytes"u8.ToArray();
             var bytes = "%PDF-1.7\nimmutable legacy bytes"u8.ToArray();
             var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
             var now = DateTime.UtcNow;
             var emptyJson = "{}";
+            var legacyManuscriptJson = "{\"schemaVersion\":1,\"blocks\":[]}";
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
                 db.Projects.Add(new Project { Id = projectId, Name = "Existing", Slug = $"existing-{projectId:N}" });
                 db.Acts.Add(new Act { Id = actId, ProjectId = projectId, Title = "Existing act" });
-                db.Chapters.Add(new Chapter
-                {
-                    Id = chapterId,
-                    ProjectId = projectId,
-                    ActId = actId,
-                    Title = "Existing chapter",
-                    ManuscriptJson = "{\"schemaVersion\":1,\"blocks\":[]}",
-                    ManuscriptRevision = 7,
-                });
                 db.ManuscriptStyleDefinitions.Add(new ManuscriptStyleDefinition
                 {
                     Id = styleId,
@@ -68,6 +62,17 @@ public sealed class LorekeeperPressMigrationTests
                     DefinitionJson = "{\"font\":\"Lora\"}",
                 });
                 await db.SaveChangesAsync();
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    INSERT INTO Chapters (
+                        Id, ProjectId, ActId, Title, Synopsis, "Order", VisualMode,
+                        IllustrationLayoutJson, PageLayoutJson, PageLayoutKind,
+                        ManuscriptJson, ManuscriptRevision, VectorIndexState, VectorIndexError,
+                        VectorIndexedAt, CreatedAt, UpdatedAt)
+                    VALUES ({chapterId}, {projectId}, {actId}, 'Existing chapter', '', 0, 'Prose',
+                        '', '', 'SinglePortrait', {legacyManuscriptJson}, 7,
+                        'Pending', NULL, NULL, {now}, {now});
+                    """);
                 await db.Database.ExecuteSqlInterpolatedAsync(
                     $"""
                     INSERT INTO PublicationEditions (
@@ -161,25 +166,6 @@ public sealed class LorekeeperPressMigrationTests
                     OverrideJson = "{\"size\":11}",
                     Revision = 3,
                 });
-                db.PublicationImagePlacements.Add(new PublicationImagePlacement
-                {
-                    EditionId = editionId,
-                    AssetId = assetId,
-                    TargetKind = PublishOutlineTargetKind.Chapter,
-                    TargetId = chapterId,
-                    ActId = actId,
-                    ChapterId = chapterId,
-                    PlacementKind = PublicationImagePlacementKind.ChapterOpening,
-                    Caption = "Existing caption",
-                });
-                db.PublicationCoverDesigns.Add(new PublicationCoverDesign
-                {
-                    EditionId = editionId,
-                    Title = "Existing cover",
-                    Author = "Author",
-                    BackCopy = "Existing back copy",
-                    Revision = 5,
-                });
                 db.PublicationEditionAuditEntries.Add(new PublicationEditionAuditEntry
                 {
                     EditionId = editionId,
@@ -205,6 +191,24 @@ public sealed class LorekeeperPressMigrationTests
                     Content = "Preserve this publishing decision.",
                 });
                 await db.SaveChangesAsync();
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    INSERT INTO PublicationImagePlacements (
+                        Id, EditionId, AssetId, TargetKind, TargetId, ActId, ChapterId,
+                        PlacementKind, SortOrder, Caption, CreatedAt, UpdatedAt)
+                    VALUES ({Guid.NewGuid()}, {editionId}, {assetId}, 'Chapter', {chapterId}, {actId},
+                        {chapterId}, 'ChapterOpening', 0, 'Existing caption', {now}, {now});
+                    """);
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    INSERT INTO PublicationCoverDesigns (
+                        Id, EditionId, Title, Subtitle, Author, SpineText, BackCopy,
+                        BackgroundColor, BarcodeMode, ImageFocalXPercent, ImageFocalYPercent,
+                        AcknowledgedTemplateFingerprint, Revision, CreatedAt, UpdatedAt)
+                    VALUES ({coverDesignId}, {editionId}, 'Existing cover', '', 'Author', '',
+                        'Existing back copy', '#5c7ca5', 'VendorOverlay', 50, 50, '', 5,
+                        {now}, {now});
+                    """);
             }
 
             var configuration = new ConfigurationBuilder()
@@ -221,7 +225,16 @@ public sealed class LorekeeperPressMigrationTests
                 recovery,
                 NullLogger<PublicationPressMigrationService>.Instance);
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
                 await migration.ApplyPendingAsync(db);
+                var recoveryState = await recovery.GetStateAsync();
+                Assert.False(recoveryState.RecoveryRequired, recoveryState.Error);
+                await db.GetService<IMigrator>().MigrateAsync(
+                    VisualCompositionMigrationService.AdditiveMigrationId);
+                await db.GetService<IMigrator>().MigrateAsync(
+                    VisualCompositionMigrationService.CleanupMigrationId);
+                await db.GetService<IMigrator>().MigrateAsync();
+            }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {

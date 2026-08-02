@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
 
@@ -59,8 +58,6 @@ public sealed record PublicationEditionView(
     bool NumberActs,
     bool NumberChapters,
     PublishTitlePageMode TitlePageMode,
-    PrintPicturePageSpreadMode PrintPicturePageSpreadMode,
-    EpubPicturePageSpreadMode EpubPicturePageSpreadMode,
     double PageWidthInches,
     double PageHeightInches,
     double PageMarginInches,
@@ -70,7 +67,8 @@ public sealed record PublicationEditionView(
     PublicationBinding Binding,
     PublicationPaper Paper,
     PublicationInk Ink,
-    bool Bleed);
+    bool Bleed,
+    bool AllowDesignedPageOverrides);
 
 public sealed record PublicationEditionUpdate(
     string TitleOverride,
@@ -90,8 +88,6 @@ public sealed record PublicationEditionUpdate(
     bool NumberActs,
     bool NumberChapters,
     PublishTitlePageMode TitlePageMode,
-    PrintPicturePageSpreadMode PrintPicturePageSpreadMode,
-    EpubPicturePageSpreadMode EpubPicturePageSpreadMode,
     double PageWidthInches,
     double PageHeightInches,
     double PageMarginInches,
@@ -105,7 +101,8 @@ public sealed record PublicationEditionUpdate(
     PublicationBinding Binding,
     PublicationPaper Paper,
     PublicationInk Ink,
-    bool Bleed);
+    bool Bleed,
+    bool AllowDesignedPageOverrides);
 
 public sealed record PublicationEditionCreate(
     string Name,
@@ -171,8 +168,9 @@ public sealed record PublishChapterView(
     Guid? ActId,
     string Title,
     bool IsIncluded,
-    ChapterVisualMode VisualMode,
-    ChapterPageLayoutKind PageLayoutKind);
+    int FigureCount,
+    int DesignedPageCount,
+    int LayoutDiagnosticCount);
 
 public sealed record PublicationImagePlacementView(
     Guid Id,
@@ -184,7 +182,12 @@ public sealed record PublicationImagePlacementView(
     string TargetTitle,
     PublicationImagePlacementKind PlacementKind,
     string Caption,
-    int SortOrder);
+    FigurePresentation? Presentation = null,
+    string AltText = "",
+    bool Decorative = false,
+    string Language = "en",
+    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure,
+    int SortOrder = 0);
 
 public sealed record PublicationEditionOutlineItemUpdate(
     PublishOutlineTargetKind TargetKind,
@@ -200,14 +203,24 @@ public sealed record PublicationImagePlacementCreate(
     PublishOutlineTargetKind TargetKind,
     Guid TargetId,
     PublicationImagePlacementKind PlacementKind,
-    string Caption);
+    string Caption,
+    FigurePresentation? Presentation = null,
+    string AltText = "",
+    bool Decorative = false,
+    string Language = "en",
+    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure);
 
 public sealed record PublicationImagePlacementUpdate(
     Guid AssetId,
     PublishOutlineTargetKind TargetKind,
     Guid TargetId,
     PublicationImagePlacementKind PlacementKind,
-    string Caption);
+    string Caption,
+    FigurePresentation? Presentation = null,
+    string AltText = "",
+    bool Decorative = false,
+    string Language = "en",
+    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure);
 
 public sealed record PublishDocument(
     Guid EditionId,
@@ -223,12 +236,34 @@ public sealed record PublishDocument(
 {
     public string SourceFingerprint { get; init; } = string.Empty;
     public IReadOnlyList<PublishManuscriptStyleDocument> NamedStyles { get; init; } = [];
+    public IReadOnlyList<PublishFontDocument> Fonts { get; init; } = [];
     public IReadOnlyList<PublishMatterDocument> Matter { get; init; } = [];
+    public PublishCoverDocument? Cover { get; init; }
 
     public string DisplayTitle => string.IsNullOrWhiteSpace(Profile.TitleOverride)
         ? ProjectName
         : Profile.TitleOverride.Trim();
 }
+
+public sealed record PublishFontDocument(
+    string FamilyKey,
+    Guid FamilyId,
+    string FamilyName,
+    Guid FaceId,
+    string FileName,
+    string ContentType,
+    int Weight,
+    bool Italic,
+    byte[] Data);
+
+public sealed record PublishCoverDocument(
+    string Title,
+    string Subtitle,
+    string Author,
+    string SpineText,
+    string BackCopy,
+    string BackgroundColor,
+    CompositionScene Scene);
 
 public sealed record PublishMatterDocument(
     Guid Id,
@@ -262,8 +297,6 @@ public sealed record PublishDocumentProfile(
     bool NumberActs,
     bool NumberChapters,
     bool IncludeTitlePage,
-    PrintPicturePageSpreadMode PrintPicturePageSpreadMode,
-    EpubPicturePageSpreadMode EpubPicturePageSpreadMode,
     double PageWidthInches,
     double PageHeightInches,
     double PageMarginInches,
@@ -288,24 +321,21 @@ public sealed record PublishChapterDocument(
     string Synopsis,
     int Order,
     bool IncludeHeading,
-    ChapterVisualMode VisualMode,
-    ChapterPageLayoutKind PageLayoutKind,
-    IllustratedProseLayout IllustrationLayout,
-    PicturePageLayout PageLayout,
-    ManuscriptDocument Manuscript)
-{
-    public PublishPicturePageDocument? RenderedPicturePage { get; init; }
-}
+    ManuscriptDocument Manuscript,
+    IReadOnlyList<PublishPageCompositionDocument> PageCompositions);
 
-public sealed record PublishPicturePageDocument(
-    PublishAssetDocument Surface,
-    int PhysicalPageWidthPixels,
-    int PhysicalPageHeightPixels,
-    int LeafCount,
-    int SurfaceWidthPixels,
-    int SurfaceHeightPixels,
-    ChapterPicturePageSurfaceRotation Rotation,
-    string AccessibleText);
+public sealed record PublishPageCompositionDocument(
+    Guid Id,
+    string Name,
+    ManuscriptDocument SemanticManuscript,
+    long Revision,
+    IReadOnlyList<PublishPageCompositionVariantDocument> Variants);
+
+public sealed record PublishPageCompositionVariantDocument(
+    Guid Id,
+    string GeometryKey,
+    CompositionScene Scene,
+    long Revision);
 
 public sealed record PublishAssetDocument(
     Guid Id,
@@ -321,4 +351,9 @@ public sealed record PublicationImagePlacementDocument(
     Guid TargetId,
     PublicationImagePlacementKind PlacementKind,
     string Caption,
-    int SortOrder);
+    FigurePresentation? Presentation = null,
+    string AltText = "",
+    bool Decorative = false,
+    string Language = "en",
+    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure,
+    int SortOrder = 0);

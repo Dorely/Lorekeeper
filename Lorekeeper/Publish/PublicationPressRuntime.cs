@@ -185,7 +185,7 @@ public sealed class PublicationPressRuntime(
                 .Select(item => item.GetString() ?? string.Empty)
                 .Where(item => item.Length > 0)
                 .ToArray();
-            if (protocol != 3 || renderer.Length == 0 || profiles.Length == 0)
+            if (protocol != 4 || renderer.Length == 0 || profiles.Length == 0)
                 throw new InvalidDataException("The renderer capability contract is incomplete.");
             return new(
                 protocol,

@@ -202,7 +202,8 @@ public sealed class ManuscriptMigrationIntegrationTests
         using var fixture = new MigrationFixture();
         _ = await fixture.CreateV7DatabaseAsync("Resume after schema");
         await using (var interruptedDb = fixture.CreateDbContext())
-            await interruptedDb.Database.MigrateAsync();
+            await interruptedDb.GetService<IMigrator>().MigrateAsync(
+                ManuscriptMigrationService.SchemaV2EfMigrationId);
 
         var service = fixture.CreateService();
         await using (var resumedDb = fixture.CreateDbContext())
@@ -241,7 +242,8 @@ public sealed class ManuscriptMigrationIntegrationTests
         using var fixture = new MigrationFixture();
         _ = await fixture.CreateV7DatabaseAsync("{}");
         await using (var interruptedDb = fixture.CreateDbContext())
-            await interruptedDb.Database.MigrateAsync();
+            await interruptedDb.GetService<IMigrator>().MigrateAsync(
+                ManuscriptMigrationService.SchemaV2EfMigrationId);
 
         var service = fixture.CreateService();
         await using (var resumedDb = fixture.CreateDbContext())
@@ -337,7 +339,7 @@ public sealed class ManuscriptMigrationIntegrationTests
             .ToListAsync();
         var v2Journal = Assert.Single(
             journals,
-            journal => journal.MigrationName == ManuscriptMigrationService.SchemaV2MigrationName);
+            journal => journal.MigrationName == ManuscriptMigrationService.SchemaV3MigrationName);
         Assert.Equal(ManuscriptMigrationStatus.Completed, v2Journal.Status);
         Assert.Equal(v2Journal.SourceHash, v2Journal.TargetHash);
         Assert.True(File.Exists(v2Journal.BackupPath));
@@ -765,7 +767,7 @@ public sealed class ManuscriptMigrationIntegrationTests
                     + string.Join(
                         ", ",
                         columns.Select(column =>
-                            $"{column} = replace(replace({column}, '\"schemaVersion\":2', '\"schemaVersion\":1'), 'schemaVersion\\\":2', 'schemaVersion\\\":1')"))
+                            $"{column} = replace(replace(replace(replace({column}, '\"schemaVersion\":3', '\"schemaVersion\":1'), '\"schemaVersion\":2', '\"schemaVersion\":1'), 'schemaVersion\\\":3', 'schemaVersion\\\":1'), 'schemaVersion\\\":2', 'schemaVersion\\\":1')"))
                     + ";";
                 await command.ExecuteNonQueryAsync();
             }

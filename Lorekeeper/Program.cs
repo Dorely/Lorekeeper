@@ -7,7 +7,6 @@ using Lorekeeper.EditorChat;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Graph;
 using Lorekeeper.Fonts;
-using Lorekeeper.ChapterVisuals;
 using Lorekeeper.ChatTurns;
 using Lorekeeper.Images;
 using Lorekeeper.ImagesChat;
@@ -28,6 +27,8 @@ using Lorekeeper.Writing;
 using ElectronNET.API;
 using ElectronNET.API.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 var builder = WebApplication.CreateBuilder(args);
 var desktopUpdates = new DesktopUpdateService();
@@ -174,14 +175,16 @@ builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>(
 
 // Chapters
 builder.Services.AddScoped<ChapterService>();
+builder.Services.AddScoped<IChapterSemanticProjectionService, ChapterSemanticProjectionService>();
 builder.Services.AddScoped<IChapterService>(services => services.GetRequiredService<ChapterService>());
 builder.Services.AddScoped<IManuscriptService>(services => services.GetRequiredService<ChapterService>());
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
-builder.Services.AddScoped<IChapterVisualService, ChapterVisualService>();
+builder.Services.AddScoped<IVisualCompositionMigrationService, VisualCompositionMigrationService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
 builder.Services.AddScoped<IProjectFontService, ProjectFontService>();
 builder.Services.AddScoped<IManuscriptStyleService, ManuscriptStyleService>();
+builder.Services.AddScoped<Lorekeeper.Composition.ICompositionService, Lorekeeper.Composition.CompositionService>();
 builder.Services.Configure<EntityVisualContextOptions>(builder.Configuration.GetSection(EntityVisualContextOptions.SectionName));
 builder.Services.AddScoped<IEntityVisualExampleService, EntityVisualExampleService>();
 builder.Services.AddScoped<IEntityVisualContextService, EntityVisualContextService>();
@@ -201,6 +204,7 @@ builder.Services.AddScoped<IOutlineGraphSync, OutlineGraphSync>();
 builder.Services.AddScoped<OutlineCollaborationTools>();
 builder.Services.AddScoped<IAiChangeApprovalService, AiChangeApprovalService>();
 builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationService>();
+builder.Services.AddSingleton<IBookFormatGuidanceService, BookFormatGuidanceService>();
 builder.Services.AddSingleton<IOutlineChatTurnRunner, OutlineChatTurnRunner>();
 
 // Writing samples
@@ -266,7 +270,6 @@ builder.Services.AddScoped<IPublishChatService, PublishChatService>();
 builder.Services.AddSingleton<IPublishChatTurnRunner, PublishChatTurnRunner>();
 builder.Services.AddSingleton<IPublicationEditionMigrationService, PublicationEditionMigrationService>();
 builder.Services.AddSingleton<IPublicationPressMigrationService, PublicationPressMigrationService>();
-builder.Services.AddScoped<IPageGeometryService, PageGeometryService>();
 
 // Context + editor chat
 builder.Services.AddScoped<ContextBuilder>();
@@ -305,23 +308,38 @@ using (var scope = app.Services.CreateScope())
     await editionMigration.ApplyPendingAsync(db);
     var pressMigration = scope.ServiceProvider.GetRequiredService<IPublicationPressMigrationService>();
     await pressMigration.ApplyPendingAsync(db);
-    // The guarded manuscript and edition transformations intentionally stop at
-    // their owned schema boundaries. Apply later additive migrations only after
-    // both validated cutovers have completed.
-    await db.Database.MigrateAsync();
+    var appliedMigrations = (await db.Database.GetAppliedMigrationsAsync()).ToHashSet(StringComparer.Ordinal);
+    if (!appliedMigrations.Contains(VisualCompositionMigrationService.CleanupMigrationId))
+    {
+        // The composition tables must exist while the legacy columns remain readable.
+        // The guarded transformation validates and journals the cutover before the
+        // cleanup migration is permitted to remove those columns.
+        await db.GetService<IMigrator>().MigrateAsync(VisualCompositionMigrationService.AdditiveMigrationId);
+        var visualCompositionMigration = scope.ServiceProvider.GetRequiredService<IVisualCompositionMigrationService>();
+        await visualCompositionMigration.ApplyPendingAsync(db);
+        var recovery = scope.ServiceProvider.GetRequiredService<IDatabaseMigrationRecoveryService>();
+        if (!await recovery.IsRecoveryRequiredAsync())
+            await visualCompositionMigration.ApplyFinalSchemaAsync(db);
+    }
+    else
+    {
+        var visualCompositionMigration = scope.ServiceProvider.GetRequiredService<IVisualCompositionMigrationService>();
+        await visualCompositionMigration.ApplyFinalSchemaAsync(db);
+        await visualCompositionMigration.ApplyPendingAsync(db);
+    }
 
-    var embeddingConfiguration = await db.EmbeddingConfigurations.AsNoTracking().FirstOrDefaultAsync();
-    var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();
-    vectorMaintenance.Initialize(embeddingConfiguration?.Dimensions);
+    var migrationRecovery = scope.ServiceProvider.GetRequiredService<IDatabaseMigrationRecoveryService>();
+    if (!await migrationRecovery.IsRecoveryRequiredAsync())
+    {
+        var embeddingConfiguration = await db.EmbeddingConfigurations.AsNoTracking().FirstOrDefaultAsync();
+        var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();
+        vectorMaintenance.Initialize(embeddingConfiguration?.Dimensions);
 
-    var projectRepository = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
-    var outlineGraphSync = scope.ServiceProvider.GetRequiredService<IOutlineGraphSync>();
-    var chapterVisuals = scope.ServiceProvider.GetRequiredService<IChapterVisualService>();
-    var repairedTextLayouts = await chapterVisuals.RepairTextLayoutsAsync();
-    if (repairedTextLayouts > 0)
-        startupLogger.LogInformation("Repaired {ChapterCount} chapter Picture Page text layout(s).", repairedTextLayouts);
-    foreach (var project in await projectRepository.ListAsync())
-        await outlineGraphSync.RepairProjectAsync(project.Id);
+        var projectRepository = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+        var outlineGraphSync = scope.ServiceProvider.GetRequiredService<IOutlineGraphSync>();
+        foreach (var project in await projectRepository.ListAsync())
+            await outlineGraphSync.RepairProjectAsync(project.Id);
+    }
 }
 
 // Configure the HTTP request pipeline.

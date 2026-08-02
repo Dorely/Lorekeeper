@@ -1,5 +1,5 @@
 {
-  "protocolVersion": 3,
+  "protocolVersion": 4,
   "jobId": "11111111111111111111111111111111",
   "profile": "kdp-paperback-v1",
   "ink": "BlackAndWhite",
@@ -12,7 +12,6 @@
     "copyright": "Copyright 2026 Mara Vale",
     "includeTitlePage": true,
     "includeVisibleTableOfContents": true,
-    "printPicturePageSpreadMode": "SplitLeaves",
     "matter": [
       {
         "id": "20000000-0000-0000-0000-000000000001",
@@ -54,22 +53,6 @@
             "title": "The First Coordinate",
             "synopsis": "Mara follows the light.",
             "includeHeading": true,
-            "visualMode": "IllustratedProse",
-            "pageLayoutKind": "SinglePortrait",
-            "illustrations": [
-              {
-                "assetId": "90000000-0000-0000-0000-000000000001",
-                "anchorBlockId": "60000000-0000-0000-0000-000000000002",
-                "anchorPosition": "BeforeParagraph",
-                "caption": "The lantern beneath the old map.",
-                "widthPercent": 42,
-                "focalXPercent": 50,
-                "focalYPercent": 50,
-                "alignment": "Right",
-                "startOnNewPage": false
-              }
-            ],
-            "picturePage": null,
             "blocks": [
               {
                 "id": "60000000-0000-0000-0000-000000000001",
@@ -102,6 +85,19 @@
                 "headingLevel": 0,
                 "assetId": "90000000-0000-0000-0000-000000000001",
                 "caption": "A field sketch.",
+                "altText": "A lantern resting beneath an old map.",
+                "decorative": false,
+                "presentation": {
+                  "placement": "Float",
+                  "widthPercent": 42,
+                  "alignment": "End",
+                  "textWrap": "Start",
+                  "fit": "Cover",
+                  "focalXPercent": 50,
+                  "focalYPercent": 50,
+                  "startOnNewPage": false,
+                  "captionPlacement": "Below"
+                },
                 "content": [{ "type": "Text", "text": "A field sketch.", "marks": [] }]
               },
               {
@@ -135,35 +131,48 @@
                 "headingLevel": 0,
                 "content": [{ "type": "Text", "text": "A measured list item.", "marks": [] }]
               }
-            ]
+            ],
+            "pageCompositions": []
           },
           {
             "id": "50000000-0000-0000-0000-000000000002",
             "title": "The Folded Sea",
             "synopsis": "A spread crosses the binding.",
             "includeHeading": true,
-            "visualMode": "PicturePage",
-            "pageLayoutKind": "DoublePortrait",
-            "illustrations": [],
-            "picturePage": {
-              "assetId": "90000000-0000-0000-0000-000000000001",
-              "physicalPageWidthPixels": 1800,
-              "physicalPageHeightPixels": 2700,
-              "leafCount": 2,
-              "surfaceWidthPixels": 3600,
-              "surfaceHeightPixels": 2700,
-              "rotation": "None",
-              "accessibleText": "An illustrated sea chart spanning two pages."
-            },
             "blocks": [
               {
                 "id": "60000000-0000-0000-0000-000000000005",
+                "type": "DesignedPage",
+                "styleRole": "designed-page",
+                "pageCompositionId": "70000000-0000-0000-0000-000000000002",
+                "content": []
+              }
+            ],
+            "pageCompositions": [{
+              "id": "70000000-0000-0000-0000-000000000002",
+              "name": "The Folded Sea",
+              "revision": 1,
+              "semanticBlocks": [{
+                "id": "71000000-0000-0000-0000-000000000001",
                 "type": "Paragraph",
                 "styleRole": "body",
-                "headingLevel": 0,
                 "content": [{ "type": "Text", "text": "The sea occupied both leaves.", "marks": [] }]
-              }
-            ]
+              }],
+              "variants": [{
+                "id": "72000000-0000-0000-0000-000000000001",
+                "geometryKey": "fixture-facing-spread",
+                "revision": 1,
+                "scene": {
+                  "schemaVersion": 1,
+                  "surface": { "kind": "FacingSpread", "outputPageMode": "EditionLeaves", "widthPoints": 864, "heightPoints": 648, "bleedPoints": 0, "safeInsetPoints": 36, "allowIndependentPdfPage": false },
+                  "layers": [{ "id": "73000000-0000-0000-0000-000000000001", "name": "Content", "order": 0 }],
+                  "objects": [
+                    { "id": "74000000-0000-0000-0000-000000000001", "layerId": "73000000-0000-0000-0000-000000000001", "kind": "Image", "bounds": { "xPercent": 0, "yPercent": 0, "widthPercent": 100, "heightPercent": 100 }, "imageId": "90000000-0000-0000-0000-000000000001", "imageFit": "Cover", "altText": "An illustrated sea chart spanning two pages.", "decorative": false, "semanticRole": "Figure", "readingOrder": 1, "zIndex": 0 },
+                    { "id": "74000000-0000-0000-0000-000000000002", "layerId": "73000000-0000-0000-0000-000000000001", "kind": "Text", "bounds": { "xPercent": 58, "yPercent": 70, "widthPercent": 32, "heightPercent": 12 }, "contentReferences": [{ "blockId": "71000000-0000-0000-0000-000000000001" }], "fontFamilyKey": "sans", "fontSizePoints": 16, "fillColor": "#ffffff", "semanticRole": "Paragraph", "readingOrder": 2, "zIndex": 1 }
+                  ]
+                }
+              }]
+            }]
           }
         ]
       }

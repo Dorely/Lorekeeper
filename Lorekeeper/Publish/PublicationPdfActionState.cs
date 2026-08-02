@@ -16,7 +16,8 @@ public sealed record PublicationPdfActionState(
     PublicationPdfActionKind Kind,
     PublicationRenderJobView? Job,
     PublicationArtifactView? Interior,
-    PublicationArtifactView? Cover)
+    PublicationArtifactView? Cover,
+    PublicationArtifactView? Book = null)
 {
     public static PublicationPdfActionState Resolve(
         IReadOnlyList<PublicationRenderJobView> jobs,
@@ -29,7 +30,7 @@ public sealed record PublicationPdfActionState(
 
         if (sourceMayHaveChanged && jobs.Any(job =>
                 job.Artifacts.Any(artifact =>
-                    artifact.Kind == PublicationArtifactKind.InteriorPdf && !artifact.IsLegacy)))
+                    (artifact.Kind is PublicationArtifactKind.InteriorPdf or PublicationArtifactKind.BookPdf) && !artifact.IsLegacy)))
         {
             return new(PublicationPdfActionKind.Stale, jobs.FirstOrDefault(), null, null);
         }
@@ -37,7 +38,7 @@ public sealed record PublicationPdfActionState(
         var currentJob = jobs.FirstOrDefault(job =>
             job.Status == PublicationRenderStatus.Completed
             && job.Artifacts.Any(artifact =>
-                artifact.Kind == PublicationArtifactKind.InteriorPdf
+                (artifact.Kind is PublicationArtifactKind.InteriorPdf or PublicationArtifactKind.BookPdf)
                     && !artifact.IsLegacy
                     && !artifact.IsStale));
         if (currentJob is not null)
@@ -45,12 +46,16 @@ public sealed record PublicationPdfActionState(
             return new(
                 PublicationPdfActionKind.Validated,
                 currentJob,
-                currentJob.Artifacts.First(artifact =>
+                currentJob.Artifacts.FirstOrDefault(artifact =>
                     artifact.Kind == PublicationArtifactKind.InteriorPdf
                         && !artifact.IsLegacy
                         && !artifact.IsStale),
                 currentJob.Artifacts.FirstOrDefault(artifact =>
                     artifact.Kind == PublicationArtifactKind.CoverPdf
+                        && !artifact.IsLegacy
+                        && !artifact.IsStale),
+                currentJob.Artifacts.FirstOrDefault(artifact =>
+                    artifact.Kind == PublicationArtifactKind.BookPdf
                         && !artifact.IsLegacy
                         && !artifact.IsStale));
         }
@@ -61,14 +66,14 @@ public sealed record PublicationPdfActionState(
 
         var staleJob = jobs.FirstOrDefault(job =>
             job.Artifacts.Any(artifact =>
-                artifact.Kind == PublicationArtifactKind.InteriorPdf
+                (artifact.Kind is PublicationArtifactKind.InteriorPdf or PublicationArtifactKind.BookPdf)
                     && !artifact.IsLegacy
                     && artifact.IsStale));
         if (staleJob is not null)
             return new(PublicationPdfActionKind.Stale, staleJob, null, null);
 
         var legacyJob = jobs.FirstOrDefault(job => job.Artifacts.Any(artifact =>
-            artifact.Kind == PublicationArtifactKind.InteriorPdf && artifact.IsLegacy));
+            (artifact.Kind is PublicationArtifactKind.InteriorPdf or PublicationArtifactKind.BookPdf) && artifact.IsLegacy));
         if (legacyJob is not null)
             return new(PublicationPdfActionKind.Legacy, legacyJob, null, null);
 

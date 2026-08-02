@@ -1,6 +1,6 @@
 # Image generation prompting for Lorekeeper
 
-Last reviewed: 2026-07-14  
+Last reviewed: 2026-08-01
 Time-sensitive: yes — model aliases, snapshots, dimensions, supported parameters, and Responses API behavior must be rechecked.
 
 ## Executive finding
@@ -117,16 +117,20 @@ The OpenAI guide recommends explicit placement and negative-space instructions w
 
 ### Lorekeeper interpretation
 
-Story copy belongs in editable `PicturePageTextElement` objects. Art prompts should reserve quiet regions around those boxes and protect focal subjects from trim and gutter loss. In-image words are appropriate only when the words are intrinsically pictorial — for example a hand-lettered sign inside the scene — and the user explicitly requests them.
+Story copy belongs in semantic manuscript blocks bound to editable Designed Page
+or cover text frames. Art prompts reserve the exact named text regions supplied
+by the geometry target and protect focal subjects from trim, bleed, gutter,
+spine, and barcode loss. In-image words are appropriate only when intrinsically
+pictorial—for example a hand-lettered sign—and explicitly requested.
 
 ### Implementation decisions
 
 - `allowRenderedText` defaults to false and the compiler adds “no text, logos, or watermarks.”
 - A true value requires explicit desired text; otherwise validation fails.
-- Page targets derive aspect and valid raster size from `PublishProfile` geometry.
+- Layout-bound Figure, page-frame/surface, and cover-frame/surface targets derive aspect, provider canvas, and valid raster size from the selected edition and exact geometry fingerprint.
 - Full-page prompts add bleed-aware edges, trim safety, gutter avoidance for spreads, focal-detail safety, and buffered reserved-text rectangles.
 - Alt text is stored separately and describes the resulting image's relevant subject, action, setting, and composition. It is never baked into the image.
-- The final composed page is rendered and inspected after `PicturePage` mutations.
+- The final composed page or cover is validated and rendered after scene mutations.
 
 ## Reusable Lorekeeper examples
 
@@ -154,14 +158,14 @@ Preserve: facial structure, age, cropped curls, copper cape design, brass compas
 Must change: running three-quarter pose, alarmed sideward gaze, windblown cape, night lighting, low camera, ruined-market background.
 ```
 
-### `PicturePage` art
+### Designed Page art
 
 ```text
 intendedUse: Background art for a two-page picture-book spread with editable story text overlaid later.
 scene: A tiny fox and an enormous sleepy moon share tea on a rooftop above a quiet blue town.
 composition: Fox and teapot in the lower-left leaf; moon occupies the upper-right leaf; make the exact regions supplied by the target geometry into a natural twilight band with simple forms, low detail, low contrast variation, and a stable value for transparent editable type—not visible caption panels.
 constraints: Keep faces and the teapot away from trim and center gutter; no rendered text.
-target: chapterId plus optional pictureImageElementId; aspect and raster omitted so Lorekeeper derives both.
+target: editionId, targetKind, and stable Figure/page/cover target ID; aspect and raster omitted so Lorekeeper derives both.
 ```
 
 ### Localized edit
@@ -179,7 +183,7 @@ constraints: Match contact shadow and watercolor edge texture; add nothing else;
 | Stable labeled prompt order | Application automation | `IImagePromptComposer`, `ImageGenerationBrief`, `ImageEditBrief` |
 | Reference index and role | Automation + persisted audit | `ImageReferenceUse`, compiled reference manifest |
 | Preserve/change separation | Contract + code-owned tool rule | Required edit fields; per-reference preserve/change fields |
-| Page geometry and quiet text regions | Automation | `ImageGenerationTarget`, shared page geometry, reserved-region appendix |
+| Page geometry and quiet text regions | Automation | `LayoutGenerationTargetDescriptor`, exact variant/cover geometry, named-region appendix |
 | No story text by default | Contract validation | `AllowRenderedText = false`; explicit exact text required to enable |
 | Local edits | Tooling | Editor and Images edit tools plus shape masks |
 | Provider revision and output IDs | Persistence/UI | Image-generation job audit fields and job detail display |

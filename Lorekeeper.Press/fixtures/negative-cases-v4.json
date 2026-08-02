@@ -44,12 +44,6 @@
       "diagnostic": "PRESS_INK_UNSUPPORTED"
     },
     {
-      "name": "unsupported Picture Page mode",
-      "pointer": "/document/printPicturePageSpreadMode",
-      "value": "Foldout",
-      "diagnostic": "PRESS_PICTURE_PAGE_MODE_INVALID"
-    },
-    {
       "name": "incorrect declared image width",
       "pointer": "/assets/0/widthPixels",
       "value": 2,

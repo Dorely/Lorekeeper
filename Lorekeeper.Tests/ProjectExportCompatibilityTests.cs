@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Lorekeeper.ChapterVisuals;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
@@ -9,7 +8,7 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V13WritesDedicatedCoverImageWithoutObsoletePublicationFields()
+    public void V14WritesUnifiedCompositionDataWithoutObsoletePublicationFields()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -18,7 +17,7 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(13, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(14, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
         Assert.Contains($"\"selectedCoverImageId\":\"{coverImageId}\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("selectedCoverChapterId", json, StringComparison.Ordinal);
@@ -287,7 +286,7 @@ public sealed class ProjectExportCompatibilityTests
     }
 
     [Fact]
-    public void V8ImportPrevalidationRejectsIncompletePicturePageProjection()
+    public void V8ImportPrevalidationPreservesIncompletePicturePageProjectionForTheUnplacedTray()
     {
         var chapterId = Guid.NewGuid();
         var manuscript = ManuscriptCodec.FromPlainText(chapterId, "First\n\nSecond", revision: 6);
@@ -328,8 +327,7 @@ public sealed class ProjectExportCompatibilityTests
                 PageLayoutJson = JsonSerializer.Serialize(incomplete, ManuscriptCodec.JsonOptions),
             });
 
-        Assert.Throws<InvalidOperationException>(
-            () => ProjectImportJobProcessor.ValidateChapterPayloads(document));
+        ProjectImportJobProcessor.ValidateChapterPayloads(document);
     }
 
     [Fact]
@@ -393,6 +391,7 @@ public sealed class ProjectExportCompatibilityTests
                     StyleRole = ManuscriptStyleRoles.FigureCaption,
                     ImageId = imageId,
                     AltText = "A map",
+                    FigurePresentation = new FigurePresentation(),
                     Content = [new ManuscriptInline { Text = "Known lands" }],
                 },
             ],
@@ -603,6 +602,7 @@ public sealed class ProjectExportCompatibilityTests
                     StyleRole = ManuscriptStyleRoles.FigureCaption,
                     ImageId = exportedImageId,
                     AltText = "A detailed map",
+                    FigurePresentation = new FigurePresentation(),
                     Content = [new ManuscriptInline { Text = "The eastern road" }],
                 },
             ],
@@ -671,22 +671,25 @@ public sealed class ProjectExportCompatibilityTests
             false,
             false,
             PublishTitlePageMode.Automatic,
-            PrintPicturePageSpreadMode.WholeSpread,
-            EpubPicturePageSpreadMode.RequestLandscape,
             6,
             9,
             0.75,
             11,
             1.3,
             coverImageId,
-            legacyCoverChapterId,
             PublicationBinding.PerfectBound,
             PublicationPaper.White,
             PublicationInk.BlackAndWhite,
+            false,
             false,
             outlineItems,
             [],
             [],
             [],
-            null);
+            null)
+        {
+            PrintPicturePageSpreadMode = PrintPicturePageSpreadMode.WholeSpread,
+            EpubPicturePageSpreadMode = EpubPicturePageSpreadMode.RequestLandscape,
+            SelectedCoverChapterId = legacyCoverChapterId,
+        };
 }

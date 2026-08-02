@@ -3,6 +3,10 @@ use std::io::Cursor;
 
 use moxcms::{ColorProfile, Layout, TransformOptions};
 use png::{ColorType, Transformations};
+use zune_core::bytestream::ZCursor;
+use zune_core::colorspace::ColorSpace;
+use zune_core::options::DecoderOptions;
+use zune_jpeg::JpegDecoder;
 
 use crate::model::{Diagnostic, RenderRequest};
 
@@ -33,7 +37,16 @@ pub fn prepare_images(
                 "Validated asset bytes were unavailable.",
             )
         })?;
-        let (width, height, rgb) = decode_png(&declaration.id, bytes)?;
+        let (width, height, rgb) = match declaration.media_type.as_str() {
+            "image/png" => decode_png(&declaration.id, bytes)?,
+            "image/jpeg" => decode_jpeg(&declaration.id, bytes)?,
+            _ => {
+                return Err(Diagnostic::error(
+                    "PRESS_ASSET_FORMAT_UNSUPPORTED",
+                    format!("Asset '{}' must be PNG or JPEG.", declaration.id),
+                ));
+            }
+        };
         let (samples, cmyk, grayscale, maximum_total_ink_percent) = if black_and_white {
             let gray = rgb
                 .chunks_exact(3)
@@ -81,6 +94,66 @@ pub fn prepare_images(
         );
     }
     Ok(result)
+}
+
+fn decode_jpeg(id: &str, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Diagnostic> {
+    let options = DecoderOptions::default()
+        .set_strict_mode(true)
+        .set_max_width(16_000)
+        .set_max_height(16_000)
+        .jpeg_set_out_colorspace(ColorSpace::RGB);
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
+    let pixels = decoder.decode().map_err(|error| {
+        Diagnostic::error(
+            "PRESS_ASSET_CORRUPT",
+            format!("Asset '{id}' is corrupt: {error}"),
+        )
+    })?;
+    let (width, height) = decoder.dimensions().ok_or_else(|| {
+        Diagnostic::error(
+            "PRESS_ASSET_CORRUPT",
+            format!("Asset '{id}' has no dimensions."),
+        )
+    })?;
+    let width = u32::try_from(width).map_err(|_| {
+        Diagnostic::error("PRESS_ASSET_LIMIT", "JPEG width exceeds renderer limits.")
+    })?;
+    let height = u32::try_from(height).map_err(|_| {
+        Diagnostic::error("PRESS_ASSET_LIMIT", "JPEG height exceeds renderer limits.")
+    })?;
+    if pixels.len() != width as usize * height as usize * 3 {
+        return Err(Diagnostic::error(
+            "PRESS_ASSET_CORRUPT",
+            format!("Asset '{id}' did not decode to RGB pixels."),
+        ));
+    }
+    Ok((width, height, pixels))
+}
+
+pub fn validate_declared_image(
+    declaration: &crate::model::AssetDeclaration,
+    bytes: &[u8],
+) -> Result<(), Diagnostic> {
+    let (width, height, _) = match declaration.media_type.as_str() {
+        "image/png" => decode_png(&declaration.id, bytes)?,
+        "image/jpeg" => decode_jpeg(&declaration.id, bytes)?,
+        _ => {
+            return Err(Diagnostic::error(
+                "PRESS_ASSET_FORMAT_UNSUPPORTED",
+                format!("Asset '{}' must be PNG or JPEG.", declaration.id),
+            ));
+        }
+    };
+    if declaration.width_pixels != Some(width) || declaration.height_pixels != Some(height) {
+        return Err(Diagnostic::error(
+            "PRESS_ASSET_DIMENSION_MISMATCH",
+            format!(
+                "Asset '{}' dimensions do not match its declaration.",
+                declaration.id
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn decode_png(id: &str, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Diagnostic> {

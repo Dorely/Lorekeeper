@@ -24,6 +24,17 @@ public interface IManuscriptService
         IReadOnlyList<ManuscriptOperation> operations,
         CancellationToken cancellationToken = default);
 
+    Task<ManuscriptMutationResult> ApplyPersistedUnderProjectMutationLeaseAsync(
+        Guid chapterId,
+        long expectedRevision,
+        IReadOnlyList<ManuscriptOperation> operations,
+        CancellationToken cancellationToken = default) =>
+        ApplyUnderProjectMutationLeaseAsync(chapterId, expectedRevision, operations, cancellationToken);
+
+    Task RefreshDerivedStateAsync(
+        Guid chapterId,
+        CancellationToken cancellationToken = default) => Task.CompletedTask;
+
     Task ValidateDocumentReferencesAsync(
         Guid chapterId,
         ManuscriptDocument document,

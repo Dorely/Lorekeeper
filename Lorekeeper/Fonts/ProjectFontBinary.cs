@@ -23,6 +23,7 @@ public static class ProjectFontBinary
             throw new InvalidOperationException("The font has an invalid or truncated OpenType table directory.");
         if (tables.Contains("fvar", StringComparer.Ordinal))
             throw new InvalidOperationException("Variable fonts are not supported yet. Import static TTF or OTF faces instead.");
+        ValidateEmbeddingPermissions(data, tables);
 
         using var skData = SKData.CreateCopy(data);
         using var typeface = SKTypeface.FromData(skData)
@@ -53,6 +54,30 @@ public static class ProjectFontBinary
         var trueType = data[0] == 0 && data[1] == 1 && data[2] == 0 && data[3] == 0;
         var openType = data[0] == (byte)'O' && data[1] == (byte)'T' && data[2] == (byte)'T' && data[3] == (byte)'O';
         return extension == ".ttf" ? trueType : openType;
+    }
+
+    private static void ValidateEmbeddingPermissions(byte[] data, IReadOnlyList<string> tables)
+    {
+        if (!tables.Contains("OS/2", StringComparer.Ordinal))
+            throw new InvalidOperationException("The font has no OS/2 embedding-permissions table.");
+        var tableCount = ReadUInt16BigEndian(data, 4);
+        for (var index = 0; index < tableCount; index++)
+        {
+            var offset = 12 + index * 16;
+            if (System.Text.Encoding.ASCII.GetString(data, offset, 4) != "OS/2")
+                continue;
+            var tableOffset = checked((int)ReadUInt32BigEndian(data, offset + 8));
+            if (tableOffset < 0 || tableOffset + 10 > data.Length)
+                throw new InvalidOperationException("The font's OS/2 permissions table is truncated.");
+            var fsType = ReadUInt16BigEndian(data, tableOffset + 8);
+            if ((fsType & 0x0002) != 0)
+                throw new InvalidOperationException("This font declares restricted embedding and cannot be used in publication output.");
+            if ((fsType & 0x0100) != 0)
+                throw new InvalidOperationException("This font prohibits subsetting and is not supported by Lorekeeper Press.");
+            if ((fsType & 0x0200) != 0)
+                throw new InvalidOperationException("This font permits bitmap embedding only and cannot be used for selectable publication text.");
+            return;
+        }
     }
 
     private static bool TryReadTableDirectory(byte[] data, out IReadOnlyList<string> tables)

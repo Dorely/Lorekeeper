@@ -4,24 +4,32 @@ use serde_json::Value;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
-    pub picture_pages: bool,
-    pub illustrated_prose: bool,
+    pub designed_pages: bool,
+    pub flow_figures: bool,
+    pub digital_book_pdf: bool,
+    pub tagged_pdf: bool,
+    pub mixed_page_geometry: bool,
     pub publication_placements: bool,
     pub dedicated_full_wrap_cover: bool,
     pub english_hyphenation: bool,
     pub font_shaping: bool,
+    pub project_fonts: bool,
     pub pdf_x_1a_2001: bool,
 }
 
 impl Capabilities {
     pub fn all() -> Self {
         Self {
-            picture_pages: true,
-            illustrated_prose: true,
+            designed_pages: true,
+            flow_figures: true,
+            digital_book_pdf: true,
+            tagged_pdf: true,
+            mixed_page_geometry: true,
             publication_placements: true,
             dedicated_full_wrap_cover: true,
             english_hyphenation: true,
             font_shaping: true,
+            project_fonts: true,
             pdf_x_1a_2001: true,
         }
     }
@@ -39,6 +47,8 @@ pub struct RenderRequest {
     pub cover: Option<Cover>,
     #[serde(default)]
     pub assets: Vec<AssetDeclaration>,
+    #[serde(default)]
+    pub fonts: Vec<FontDeclaration>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -49,6 +59,8 @@ pub struct Trim {
     pub margin_inches: f32,
     pub body_font_size_points: f32,
     pub body_line_height: f32,
+    #[serde(default)]
+    pub bleed_inches: f32,
     #[serde(default)]
     pub mirror_margins: bool,
     #[serde(default)]
@@ -88,6 +100,7 @@ pub struct Cover {
     pub image_focal_x_percent: f32,
     #[serde(default = "default_focal")]
     pub image_focal_y_percent: f32,
+    pub scene: Option<Value>,
 }
 
 fn default_focal() -> f32 {
@@ -104,6 +117,20 @@ pub struct AssetDeclaration {
     pub sha256: String,
     pub width_pixels: Option<u32>,
     pub height_pixels: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FontDeclaration {
+    pub id: String,
+    pub family_key: String,
+    pub weight: u16,
+    pub italic: bool,
+    pub relative_path: String,
+    pub media_type: String,
+    pub byte_length: u64,
+    pub sha256: String,
+    pub embedding_rights_confirmed: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,7 +151,7 @@ pub struct RenderResponse {
 impl RenderResponse {
     pub fn failed(status: &str, diagnostic: Diagnostic) -> Self {
         Self {
-            protocol_version: 3,
+            protocol_version: 4,
             renderer_version: env!("CARGO_PKG_VERSION"),
             job_id: None,
             status: status.to_owned(),
@@ -238,10 +265,44 @@ pub struct FontEvidence {
 #[serde(rename_all = "camelCase")]
 pub struct LayoutPage {
     pub kind: PageKind,
+    pub width_points: Option<f32>,
+    pub height_points: Option<f32>,
     pub lines: Vec<LayoutLine>,
     pub images: Vec<LayoutImage>,
+    pub shapes: Vec<LayoutShape>,
+    pub paint_order: Vec<LayoutPaint>,
     pub barcode_modules: Option<Vec<bool>>,
     pub page_label: Option<String>,
+    pub bookmark: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum LayoutPaint {
+    Shape(usize),
+    Image(usize),
+    Line(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum LayoutShapeKind {
+    Rectangle,
+    Ellipse,
+    Line,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayoutShape {
+    pub kind: LayoutShapeKind,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub fill_rgb: Option<[f32; 3]>,
+    pub stroke_rgb: Option<[f32; 3]>,
+    pub stroke_width: f32,
+    pub opacity: f32,
+    pub rotation_degrees: f32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -257,15 +318,31 @@ pub struct LayoutImage {
     pub source_left_fraction: f32,
     pub source_width_fraction: f32,
     pub rotation_degrees: f32,
-    pub contain: bool,
+    pub opacity: f32,
+    pub fit: LayoutImageFit,
+    pub alt_text: Option<String>,
+    pub decorative: bool,
+    pub language: Option<String>,
+    pub reading_order: Option<i32>,
+    pub semantic_id: Option<String>,
+    pub semantic_parent_id: Option<String>,
+    pub text_wrap: Option<String>,
+    pub accessibility_role: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum PageKind {
     Body,
-    Picture,
+    Designed,
     Blank,
     Cover,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum LayoutImageFit {
+    Contain,
+    Cover,
+    Fill,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -277,8 +354,32 @@ pub struct LayoutLine {
     pub x: f32,
     pub y: f32,
     pub word_spacing: f32,
+    pub character_spacing: f32,
     pub rotation_degrees: f32,
+    pub rotation_origin_x: Option<f32>,
+    pub rotation_origin_y: Option<f32>,
+    pub opacity: f32,
     pub light_text: bool,
+    pub fill_rgb: Option<[f32; 3]>,
+    pub semantic_role: LayoutSemanticRole,
+    pub artifact: bool,
+    pub language: Option<String>,
+    pub reading_order: Option<i32>,
+    pub semantic_id: Option<String>,
+    pub semantic_parent_id: Option<String>,
+    pub link_page: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum LayoutSemanticRole {
+    Paragraph,
+    Heading1,
+    Heading2,
+    Heading3,
+    ListItem,
+    Caption,
+    Credit,
+    Toc,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -306,6 +407,7 @@ pub enum FontFace {
     MonoItalic,
     MonoBold,
     MonoBoldItalic,
+    Custom(u16),
 }
 
 impl FontFace {
@@ -323,6 +425,9 @@ impl FontFace {
             (FontFamily::Mono, false, true) => Self::MonoItalic,
             (FontFamily::Mono, true, false) => Self::MonoBold,
             (FontFamily::Mono, true, true) => Self::MonoBoldItalic,
+            (FontFamily::Custom(index), bold, italic) => {
+                crate::font::custom_face(index, if bold { 700 } else { 400 }, italic)
+            }
         }
     }
 
@@ -337,6 +442,7 @@ impl FontFace {
             Self::MonoRegular | Self::MonoItalic | Self::MonoBold | Self::MonoBoldItalic => {
                 FontFamily::Mono
             }
+            Self::Custom(index) => FontFamily::Custom(index),
         }
     }
 }
@@ -346,6 +452,7 @@ pub enum FontFamily {
     Serif,
     Sans,
     Mono,
+    Custom(u16),
 }
 
 #[derive(Debug, Clone)]

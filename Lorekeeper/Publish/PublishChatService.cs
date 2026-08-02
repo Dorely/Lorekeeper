@@ -56,6 +56,12 @@ public sealed class PublishChatService(
         - Tool results are not replayed into later model turns. Summarize durable decisions, exact changes, important diagnostics, resulting revisions, and unresolved questions in the assistant response.
         - Generated files are saved only when the user opens a returned download URL. Never claim that you downloaded a file for them.
         - Archived editions are read-only. Recommend cloning when the user wants to change one.
+        - Chapters are format-neutral sequences of semantic text, flowing Figures, and Designed Pages. Distinguish those from edition-only opening/ending illustrations, print full-wrap covers, and digital front covers.
+        - Read the active edition geometry before physical layout or image-generation decisions. Use Lorekeeper's target descriptor and never invent dimensions, aspect ratios, safe areas, gutters, spines, barcode reserves, or provider canvas sizes.
+        - Require alt text or an explicit decorative decision for imagery and preserve logical reading order independently of visual z-order.
+        - Patch one stable scene object, guide, layer, or style directly. For a large page-composition edit or coupled semantic-and-layout change, submit the complete payload exactly once to the matching staging tool, then apply only its stage ID and expected revision. Do not repeat staged payloads in an apply call or response.
+        - Edition format is fixed at creation. Create another edition when the user needs a different output format; do not attempt to convert an existing edition in place.
+        - Validate accessibility, overflow, font embedding, image DPI, geometry, and profile compatibility before requesting a render.
 
         Publishing trust:
         - Report owned-renderer validation exactly as returned by preflight. Lorekeeper can internally validate KDP PDF 1.7 and Ingram PDF/X-1a:2001 output; do not turn optional human proof or recorded vendor upload results into gates, and never imply vendor acceptance that the user did not record.
@@ -73,7 +79,6 @@ public sealed class PublishChatService(
         "update_publication_edition",
         "set_default_publication_edition",
         "archive_publication_edition",
-        "set_publication_cover_image",
         "set_publication_content",
         "reorder_publication_content",
         "upsert_publication_matter",
@@ -87,6 +92,14 @@ public sealed class PublishChatService(
         "request_publication_render",
         "cancel_publication_render",
         "update_publication_cover_design",
+        "get_or_create_publication_composition_variant",
+        "patch_publication_composition_element",
+        "apply_publication_cover_composition_stage",
+        "patch_publication_cover_element",
+        "apply_publication_composition_stage",
+        "apply_publication_composition_semantic_stage",
+        "apply_publication_composition_workspace_stage",
+        "generate_publication_layout_image",
         "preflight_publication_edition",
         "build_publication_package",
     ];
@@ -207,7 +220,7 @@ public sealed class PublishChatService(
         try
         {
             chat = await clients.CreateChatClientAsync(availability.Provider.Id, cancellationToken);
-            aiTools = await tools.BuildAsync(new PublishAssistantContext(projectId), cancellationToken);
+            aiTools = await tools.BuildAsync(new PublishAssistantContext(projectId, conversation.Id, cancellationToken), cancellationToken);
             systemPrompt = await GetSystemPromptAsync(projectId, selectedEditionId, cancellationToken);
         }
         catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
@@ -331,8 +344,8 @@ public sealed class PublishChatService(
                 }
 
                 activeAssistant.Content = completedRound.Text;
-                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(completedRound.ToolCalls.Select(call =>
-                    new ChatToolCallManifest(call.CallId, call.Name, call.ArgumentsJson, call.TextOffset)));
+                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(
+                    completedRound.ToolCalls.Select(ChatToolCallManifest.From));
                 activeAssistant.Status = PublishMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
                 messages.Add(new ChatMessage(
@@ -416,6 +429,8 @@ public sealed class PublishChatService(
     {
         if (!MutationTools.Contains(toolName))
             return null;
+        if (!ResultSucceeded(resultJson))
+            return null;
 
         var selectEdition = toolName is "create_publication_edition" or "clone_publication_edition";
         var kind = toolName switch
@@ -427,7 +442,10 @@ public sealed class PublishChatService(
         };
         var editionId = selectEdition
             ? ReadGuid(resultJson, "id")
-            : ReadGuid(argumentsJson, "editionId");
+            : ReadGuid(argumentsJson, "editionId")
+                ?? (toolName == "apply_publication_cover_composition_stage"
+                    ? ReadGuid(resultJson, "targetId")
+                    : null);
         return editionId is { } id ? new PublishWorkspaceMutated(id, selectEdition, kind) : null;
     }
 
@@ -450,6 +468,19 @@ public sealed class PublishChatService(
         {
         }
         return null;
+    }
+
+    private static bool ResultSucceeded(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return !document.RootElement.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.False;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private async Task PersistTerminalAssistantAsync(

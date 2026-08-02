@@ -156,22 +156,41 @@ public static partial class ManuscriptCodec
                 throw new InvalidDataException($"Non-heading block {block.Id} cannot contain a heading level.");
             if (block.Content is null)
                 throw new InvalidDataException($"Block {block.Id} has no inline-content collection.");
-            if (block.Type == ManuscriptBlockType.SceneBreak && block.Content.Count != 0)
-                throw new InvalidDataException($"Scene-break block {block.Id} cannot contain inline text.");
+            if (block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage
+                && block.Content.Count != 0)
+            {
+                throw new InvalidDataException($"Non-flowing block {block.Id} cannot contain inline text.");
+            }
             if (block.Type == ManuscriptBlockType.Figure
-                && (block.ImageId is null || block.ImageId == Guid.Empty || string.IsNullOrWhiteSpace(block.AltText)))
+                && (block.ImageId is null || block.ImageId == Guid.Empty))
             {
                 throw new InvalidDataException(
-                    $"Figure block {block.Id} requires a project image ID and non-empty alternative text.");
+                    $"Figure block {block.Id} requires a project image.");
             }
+            if (block.Type == ManuscriptBlockType.Figure && block.Decorative && !string.IsNullOrWhiteSpace(block.AltText))
+                throw new InvalidDataException($"Decorative figure block {block.Id} cannot carry alternative text.");
+            if (block.Type == ManuscriptBlockType.Figure)
+                ValidateFigurePresentation(block);
             if (block.AltText is not null && !ContainsOnlyXmlCharacters(block.AltText))
                 throw new InvalidDataException($"Figure block {block.Id} contains XML-forbidden alternative text.");
+            if (block.Language is not null
+                && (string.IsNullOrWhiteSpace(block.Language) || block.Language.Length > 35))
+                throw new InvalidDataException($"Block {block.Id} language must be a compact BCP 47 tag.");
             if (block.Type != ManuscriptBlockType.Figure
-                && (block.ImageId is not null || block.AltText is not null))
+                && (block.ImageId is not null || block.AltText is not null
+                    || block.Decorative || block.AccessibilityRole is not null
+                    || block.FigurePresentation is not null))
             {
                 throw new InvalidDataException(
                     $"Non-figure block {block.Id} cannot contain figure image metadata.");
             }
+            if (block.Type == ManuscriptBlockType.DesignedPage
+                && (block.PageCompositionId is not { } compositionId || compositionId == Guid.Empty))
+            {
+                throw new InvalidDataException($"Designed-page block {block.Id} requires a page composition ID.");
+            }
+            if (block.Type != ManuscriptBlockType.DesignedPage && block.PageCompositionId is not null)
+                throw new InvalidDataException($"Block {block.Id} cannot reference a page composition.");
             if (block.Type != ManuscriptBlockType.SceneBreak
                 && block.Content.Any(inline => inline.Type != ManuscriptInlineType.Text))
             {
@@ -254,9 +273,11 @@ public static partial class ManuscriptCodec
     public static string ProjectPlainText(ManuscriptDocument document) =>
         string.Join(
             "\n\n",
-            document.Content.Select(block => block.Type == ManuscriptBlockType.SceneBreak
-                ? "***"
-                : string.Concat(block.Content.Select(inline => inline.Text))));
+            document.Content
+                .Where(block => block.Type != ManuscriptBlockType.DesignedPage)
+                .Select(block => block.Type == ManuscriptBlockType.SceneBreak
+                    ? "***"
+                    : string.Concat(block.Content.Select(inline => inline.Text))));
 
     public static string ProjectPlainText(string json, Guid manuscriptId, long revision) =>
         ProjectPlainText(Deserialize(json, manuscriptId, revision));
@@ -359,6 +380,33 @@ public static partial class ManuscriptCodec
             return FragmentLinkRegex().IsMatch(value);
         return Uri.TryCreate(value, UriKind.Absolute, out var uri)
             && uri.Scheme is "http" or "https" or "mailto" or "tel";
+    }
+
+    private static void ValidateFigurePresentation(ManuscriptBlock block)
+    {
+        var presentation = block.FigurePresentation
+            ?? throw new InvalidDataException($"Figure block {block.Id} requires presentation settings.");
+        if (!Enum.IsDefined(presentation.Placement)
+            || !Enum.IsDefined(presentation.Alignment)
+            || !Enum.IsDefined(presentation.TextWrap)
+            || !Enum.IsDefined(presentation.Fit)
+            || !Enum.IsDefined(presentation.CaptionPlacement))
+        {
+            throw new InvalidDataException($"Figure block {block.Id} contains unsupported presentation settings.");
+        }
+        if (presentation.WidthPercent is <= 0 or > 100
+            || presentation.FocalXPercent is < 0 or > 100
+            || presentation.FocalYPercent is < 0 or > 100
+            || presentation.SpacingBeforePoints is < 0 or > 288
+            || presentation.SpacingAfterPoints is < 0 or > 288)
+        {
+            throw new InvalidDataException($"Figure block {block.Id} contains out-of-range presentation values.");
+        }
+        if (presentation.Placement == FigurePlacementIntent.Float
+            && presentation.TextWrap == FigureTextWrap.None)
+        {
+            throw new InvalidDataException($"Floating figure block {block.Id} requires a text-wrap side.");
+        }
     }
 
     private static string DeterministicBlockId(

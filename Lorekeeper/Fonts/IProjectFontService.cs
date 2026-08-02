@@ -15,7 +15,11 @@ public interface IProjectFontService
         CancellationToken cancellationToken = default);
 }
 
-public sealed record ProjectFontUpload(string FileName, byte[] Data);
+public sealed record ProjectFontUpload(
+    string FileName,
+    byte[] Data,
+    bool EmbeddingRightsConfirmed,
+    string RightsDeclaration);
 
 public sealed record ProjectFontFamilyView(
     string Key,
@@ -23,6 +27,8 @@ public sealed record ProjectFontFamilyView(
     string Name,
     string Category,
     bool IsBuiltIn,
+    bool EmbeddingRightsConfirmed,
+    string RightsDeclaration,
     IReadOnlyList<ProjectFontFaceView> Faces);
 
 public sealed record ProjectFontFaceView(
@@ -41,4 +47,3 @@ public sealed record ProjectFontFaceData(
     int Weight,
     bool Italic,
     byte[] Data);
-

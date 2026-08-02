@@ -1,4 +1,4 @@
-# Bundled PicturePage fonts
+# Bundled publication fonts
 
 All bundled families were sourced from the Google Fonts repository at commit
 `ec0464b978de222073645d6d3366f3fdf03376d8`. Each family directory contains

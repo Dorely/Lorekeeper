@@ -7,6 +7,7 @@
 @inject IProjectImageJobService ImageJobs
 @inject IProjectImageGenerationRuntime ImageRuntime
 @inject IImagePromptComposer ImagePrompts
+@inject Lorekeeper.Composition.ICompositionService Compositions
 @inject IImagesChatService ImagesChat
 @inject IEntityVisualExampleService EntityVisuals
 @inject ILlmProviderService Providers
@@ -101,6 +102,14 @@ else
 
             <section class="image-tool-panel">
                 <h6>Generate</h6>
+                @if (_layoutTarget is not null)
+                {
+                    <div class="alert alert-info py-2 small">
+                        <strong>@_layoutTarget.TargetKind target</strong><br />
+                        @_layoutTarget.WidthInches.ToString("0.###") × @_layoutTarget.HeightInches.ToString("0.###") in · @_layoutTarget.AspectRatio · @_layoutTarget.ProviderCanvas
+                        <div>Lorekeeper controls canvas size and reserved layout regions.</div>
+                    </div>
+                }
                 @if (!_codexConnected)
                 {
                     <p class="text-muted small mb-0">Connect Codex in Providers to generate images.</p>
@@ -112,15 +121,18 @@ else
                         <textarea class="form-control form-control-sm" rows="6" @bind="_imagePrompt"></textarea>
                     </label>
                     <div class="image-form-grid">
-                        <label>
-                            <span>Size</span>
-                            <select class="form-select form-select-sm" @bind="_imageSize">
-                                <option value="auto">Auto</option>
-                                <option value="1024x1024">Square</option>
-                                <option value="1024x1536">Portrait</option>
-                                <option value="1536x1024">Landscape</option>
-                            </select>
-                        </label>
+                        @if (_layoutTarget is null)
+                        {
+                            <label>
+                                <span>Size</span>
+                                <select class="form-select form-select-sm" @bind="_imageSize">
+                                    <option value="auto">Auto</option>
+                                    <option value="1024x1024">Square</option>
+                                    <option value="1024x1536">Portrait</option>
+                                    <option value="1536x1024">Landscape</option>
+                                </select>
+                            </label>
+                        }
                         <label>
                             <span>Quality</span>
                             <select class="form-select form-select-sm" @bind="_imageQuality">
@@ -132,11 +144,15 @@ else
                         </label>
                         <label>
                             <span>Format</span>
-                            <select class="form-select form-select-sm" @bind="_imageFormat">
+                            <select class="form-select form-select-sm" @bind="_imageFormat" disabled="@(_layoutTarget is not null)">
                                 <option value="png">PNG</option>
                                 <option value="jpeg">JPEG</option>
                                 <option value="webp">WebP</option>
                             </select>
+                            @if (_layoutTarget is not null)
+                            {
+                                <small>Layout-bound images are stored as lossless PNG for Press compatibility.</small>
+                            }
                         </label>
                         <label>
                             <span>JPEG compression</span>
@@ -260,6 +276,11 @@ else
     private bool _sendingMaskEdit;
     private Guid? _loadedProjectId;
     private int _attachmentRefreshKey;
+    [Parameter] public Guid? LayoutEditionId { get; set; }
+    [Parameter] public string? LayoutTargetKind { get; set; }
+    [Parameter] public Guid? LayoutTargetId { get; set; }
+    [Parameter] public Guid? LayoutVariantId { get; set; }
+    private LayoutGenerationTargetDescriptor? _layoutTarget;
 
     private IReadOnlyList<ProjectImageView> FilteredImages =>
         string.IsNullOrWhiteSpace(_query)
@@ -278,7 +299,14 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        if (Project is null || _loadedProjectId == Project.Id) return;
+        if (Project is null) return;
+        if (LayoutEditionId is Guid editionId && LayoutTargetId is Guid targetId && !string.IsNullOrWhiteSpace(LayoutTargetKind))
+        {
+            try { _layoutTarget = await Compositions.DescribeGenerationTargetAsync(Project.Id, editionId, LayoutTargetKind, targetId, LayoutVariantId); }
+            catch (Exception ex) { _layoutTarget = null; _error = ex.Message; }
+        }
+        else _layoutTarget = null;
+        if (_loadedProjectId == Project.Id) return;
         _loadedProjectId = Project.Id;
         await ReloadAsync();
     }
@@ -386,7 +414,9 @@ else
                     AllowRenderedText = false,
                 },
                 references: null,
-                target: new ImageGenerationTarget { Size = _imageSize });
+                target: _layoutTarget is null
+                    ? new ImageGenerationTarget { Size = _imageSize }
+                    : new ImageGenerationTarget { EditionId = _layoutTarget.EditionId, TargetKind = _layoutTarget.TargetKind, TargetId = _layoutTarget.TargetId, VariantId = _layoutTarget.VariantId });
             await ImageJobs.CreateGenerateJobAsync(Project.Id, new ProjectImageGenerateJobRequest(
                 compiled.Prompt,
                 compiled.Size,

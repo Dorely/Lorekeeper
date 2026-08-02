@@ -1,19 +1,21 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Lorekeeper.ChapterVisuals;
+using Lorekeeper.Composition;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Persistence;
+using Lorekeeper.Fonts;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Publish;
 
 public sealed class PublishService(
     AppDbContext db,
-    IChapterVisualService chapterVisuals,
     IPublicationEditionService editions,
+    IProjectFontService projectFonts,
     IEnumerable<IPublishExportFormatter> formatters) : IPublishService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -54,6 +56,11 @@ public sealed class PublishService(
                 placement.TargetId,
                 placement.PlacementKind,
                 placement.Caption,
+                placement.PresentationJson,
+                placement.AltText,
+                placement.Decorative,
+                placement.Language,
+                placement.AccessibilityRole,
                 placement.SortOrder))
             .ToListAsync(cancellationToken);
 
@@ -108,8 +115,6 @@ public sealed class PublishService(
                 "EPUB export is available only from an EPUB publication edition so print ISBN and product metadata cannot leak into a digital product.");
         }
         var document = await GetDocumentAsync(projectId, editionId, cancellationToken);
-        if (format == PublishExportFormat.Epub)
-            document = await AttachRenderedPicturePagesAsync(document, cancellationToken);
 
         return new ProjectExportFile(
             FileName: ExportFileName(document, formatter.FileExtension),
@@ -141,6 +146,11 @@ public sealed class PublishService(
         var placements = await db.PublicationImagePlacements
             .AsNoTracking()
             .Where(placement => placement.EditionId == editionId)
+            .ToListAsync(cancellationToken);
+        var compositions = await db.PageCompositions
+            .AsNoTracking()
+            .Where(composition => composition.ProjectId == projectId)
+            .Include(composition => composition.Variants)
             .ToListAsync(cancellationToken);
         var matter = await db.PublicationMatter
             .AsNoTracking()
@@ -189,7 +199,11 @@ public sealed class PublishService(
             foreach (var chapter in includedChapters)
             {
                 chapterNumber++;
-                chapterDocuments.Add(ChapterDocument(chapter, profile, chapterNumber));
+                chapterDocuments.Add(ChapterDocument(
+                    chapter,
+                    profile,
+                    chapterNumber,
+                    compositions.Where(composition => composition.ChapterId == chapter.Id).ToList()));
             }
 
             if (source.Act is null)
@@ -232,18 +246,34 @@ public sealed class PublishService(
                 item.SortOrder,
                 ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision)))
             .ToList();
+        var coverDesign = await db.PublicationCoverDesigns
+            .AsNoTracking()
+            .FirstOrDefaultAsync(design => design.EditionId == editionId, cancellationToken);
+        var coverScene = string.IsNullOrWhiteSpace(coverDesign?.CompositionSceneJson)
+            ? null
+            : JsonSerializer.Deserialize<CompositionScene>(coverDesign.CompositionSceneJson, ManuscriptCodec.JsonOptions);
+        var coverSceneImageIds = coverScene is null
+            ? []
+            : CompositionSceneResolver.Flatten(coverScene)
+                .Where(item => item.Visible && item.ImageId is not null)
+                .Select(item => item.ImageId!.Value)
+                .ToArray();
         var referencedAssetIds = sections
             .SelectMany(section => section.Chapters)
-            .SelectMany(chapter => chapter.IllustrationLayout.Images.Select(image => image.ImageId)
-                .Concat(chapter.PageLayout.Images.Select(image => image.ImageId))
-                .Concat(chapter.Manuscript.Content
+            .SelectMany(chapter => chapter.Manuscript.Content
                     .Where(block => block.Type == ManuscriptBlockType.Figure)
-                    .Select(block => block.ImageId!.Value)))
+                    .Select(block => block.ImageId!.Value)
+                .Concat(chapter.PageCompositions
+                    .SelectMany(composition => composition.Variants)
+                    .SelectMany(variant => CompositionSceneResolver.Flatten(variant.Scene))
+                    .Where(item => item.ImageId is not null)
+                    .Select(item => item.ImageId!.Value)))
             .Concat(matterDocuments
                 .SelectMany(item => item.Manuscript.Content)
                 .Where(block => block.Type == ManuscriptBlockType.Figure)
                 .Select(block => block.ImageId!.Value))
             .Concat(validPlacements.Select(placement => placement.AssetId))
+            .Concat(coverSceneImageIds)
             .Concat(profile.SelectedCoverImageId is Guid coverImageId ? [coverImageId] : [])
             .ToHashSet();
         var assets = referencedAssetIds.Count == 0
@@ -262,6 +292,11 @@ public sealed class PublishService(
                 placement.TargetId,
                 placement.PlacementKind,
                 placement.Caption,
+                JsonSerializer.Deserialize<FigurePresentation>(placement.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
+                placement.AltText,
+                placement.Decorative,
+                placement.Language,
+                placement.AccessibilityRole,
                 placement.SortOrder))
             .ToList();
         var cover = profile.SelectedCoverImageId is Guid selectedCoverImageId
@@ -302,6 +337,76 @@ public sealed class PublishService(
                     MergeStyleDefinition(definition, mapping.Override));
             })
             .ToList();
+        var fontFamilies = await db.ProjectFontFamilies.AsNoTracking()
+            .Include(family => family.Faces)
+            .Where(family => family.ProjectId == projectId)
+            .OrderBy(family => family.Id)
+            .ToListAsync(cancellationToken);
+        var referencedFontKeys = namedStyles
+            .Select(item => item.Definition.FontFamilyKey)
+            .Concat(sections.SelectMany(section => section.Chapters)
+                .SelectMany(chapter => chapter.PageCompositions)
+                .SelectMany(composition => composition.Variants)
+                .SelectMany(variant => CompositionSceneResolver.Flatten(variant.Scene).Select(item => item.FontFamilyKey)
+                    .Concat(variant.Scene.Styles.Select(style => style.FontFamilyKey))))
+            .Concat(coverScene is null
+                ? []
+                : coverScene.Objects.Select(item => item.FontFamilyKey)
+                    .Concat(coverScene.Styles.Select(style => style.FontFamilyKey)))
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Select(key => key!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var referencedFontIds = referencedFontKeys
+            .Where(key => key.StartsWith("project:", StringComparison.OrdinalIgnoreCase))
+            .Select(key => Guid.TryParse(key["project:".Length..], out var familyId) ? familyId : Guid.Empty)
+            .ToHashSet();
+        foreach (var familyId in referencedFontIds)
+        {
+            var family = fontFamilies.FirstOrDefault(item => item.Id == familyId)
+                ?? throw new InvalidOperationException($"Publication content references missing project font family '{familyId}'.");
+            if (!family.EmbeddingRightsConfirmed)
+                throw new InvalidOperationException($"Embedding rights must be confirmed for project font family '{family.Name}' before publication export.");
+            if (family.Faces.Count == 0)
+                throw new InvalidOperationException($"Project font family '{family.Name}' has no usable font faces.");
+        }
+        var publishFonts = fontFamilies
+            .Where(family => family.EmbeddingRightsConfirmed)
+            .SelectMany(family => family.Faces
+                .OrderBy(face => face.Weight)
+                .ThenBy(face => face.Italic)
+                .ThenBy(face => face.Id)
+                .Select(face => new PublishFontDocument(
+                    ProjectFontService.CustomKey(family.Id),
+                    family.Id,
+                    family.Name,
+                    face.Id,
+                    face.FileName,
+                    face.ContentType,
+                    face.Weight,
+                    face.Italic,
+                    face.Data)))
+            .ToList();
+        foreach (var familyKey in referencedFontKeys.Where(key => key.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase)).Order())
+        {
+            var family = PublicationBuiltInFonts.Find(familyKey)
+                ?? throw new InvalidOperationException($"Publication content references unsupported bundled font '{familyKey}'.");
+            var familyId = DeterministicFontId(family.Key);
+            foreach (var faceView in family.Faces)
+            {
+                var face = await projectFonts.ResolveFaceAsync(projectId, family.Key, faceView.Weight, faceView.Italic, requireExact: true, cancellationToken)
+                    ?? throw new InvalidOperationException($"Bundled publication font '{family.Name}' is missing {faceView.SubfamilyName}.");
+                publishFonts.Add(new PublishFontDocument(
+                    family.Key,
+                    familyId,
+                    family.Name,
+                    DeterministicFontId($"{family.Key}|{face.Weight}|{face.Italic}"),
+                    face.FileName,
+                    face.ContentType,
+                    face.Weight,
+                    face.Italic,
+                    face.Data));
+            }
+        }
 
         return new PublishDocument(
             editionId,
@@ -316,69 +421,23 @@ public sealed class PublishService(
             placementDocuments)
         {
             NamedStyles = namedStyles,
+            Fonts = publishFonts,
             Matter = matterDocuments,
+            Cover = coverDesign is null || coverScene is null
+                ? null
+                : new PublishCoverDocument(
+                    coverDesign.Title,
+                    coverDesign.Subtitle,
+                    coverDesign.Author,
+                    coverDesign.SpineText,
+                    coverDesign.BackCopy,
+                    coverDesign.BackgroundColor,
+                    coverScene),
         };
     }
 
-    private async Task<PublishDocument> AttachRenderedPicturePagesAsync(
-        PublishDocument document,
-        CancellationToken cancellationToken)
-    {
-        var picturePageIds = document.Sections
-            .SelectMany(section => section.Chapters)
-            .Where(chapter => chapter.VisualMode == ChapterVisualMode.PicturePage)
-            .Select(chapter => chapter.Id)
-            .Distinct()
-            .ToList();
-        if (picturePageIds.Count == 0)
-            return document;
-
-        var rotation = document.Profile.EpubPicturePageSpreadMode == EpubPicturePageSpreadMode.SidewaysPortrait
-            ? ChapterPicturePageSurfaceRotation.Clockwise90
-            : ChapterPicturePageSurfaceRotation.None;
-        var surfaces = await chapterVisuals.RenderPicturePageSurfacesAsync(
-            picturePageIds,
-            physicalPageLongEdgePixels: 2400,
-            rotation: rotation,
-            geometry: PicturePageGeometry(document.Profile),
-            cancellationToken: cancellationToken);
-        var missingChapterIds = picturePageIds.Where(chapterId => !surfaces.ContainsKey(chapterId)).ToList();
-        if (missingChapterIds.Count > 0)
-            throw new InvalidOperationException("One or more Picture Pages could not be rendered for EPUB export.");
-
-        var sections = document.Sections
-            .Select(section => section with
-            {
-                Chapters = section.Chapters
-                    .Select(chapter => chapter.VisualMode != ChapterVisualMode.PicturePage
-                        ? chapter
-                        : AttachRenderedPicturePage(chapter, surfaces[chapter.Id]))
-                    .ToList(),
-            })
-            .ToList();
-        return document with { Sections = sections };
-    }
-
-    private static PublishChapterDocument AttachRenderedPicturePage(
-        PublishChapterDocument chapter,
-        ChapterPicturePageSurface surface) =>
-        chapter with
-        {
-            RenderedPicturePage = new PublishPicturePageDocument(
-                new PublishAssetDocument(
-                    chapter.Id,
-                    surface.FileName,
-                    surface.ContentType,
-                    surface.Data,
-                    chapter.Title),
-                surface.PhysicalPageWidthPixels,
-                surface.PhysicalPageHeightPixels,
-                surface.LeafCount,
-                surface.SurfaceWidthPixels,
-                surface.SurfaceHeightPixels,
-                surface.Rotation,
-                surface.AccessibleText),
-        };
+    private static Guid DeterministicFontId(string value) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
 
     private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
         await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
@@ -392,14 +451,6 @@ public sealed class PublishService(
             edition => edition.ProjectId == projectId && edition.Id == editionId,
             cancellationToken)
         ?? throw new InvalidOperationException("Publication edition was not found.");
-
-    private static ChapterPicturePageGeometryProfile PicturePageGeometry(PublishDocumentProfile profile) =>
-        new(
-            profile.PageWidthInches,
-            profile.PageHeightInches,
-            profile.PageMarginInches,
-            profile.BodyFontSizePoints,
-            profile.BodyLineHeight);
 
     private static PublishDocumentProfile ProfileDocument(PublicationEdition profile) =>
         new(
@@ -420,8 +471,6 @@ public sealed class PublishService(
             profile.NumberActs,
             profile.NumberChapters,
             IncludeTitlePage(profile),
-            profile.PrintPicturePageSpreadMode,
-            profile.EpubPicturePageSpreadMode,
             profile.PageWidthInches,
             profile.PageHeightInches,
             profile.PageMarginInches,
@@ -501,14 +550,18 @@ public sealed class PublishService(
 
     private static PublishChapterView ChapterView(
         Chapter chapter,
-        IReadOnlyList<PublicationEditionOutlineItem> selections) =>
-        new(
+        IReadOnlyList<PublicationEditionOutlineItem> selections)
+    {
+        var manuscript = chapter.Manuscript;
+        return new(
             chapter.Id,
             chapter.ActId,
             chapter.Title,
             IsIncluded(selections, PublishOutlineTargetKind.Chapter, chapter.Id),
-            chapter.VisualMode,
-            chapter.PageLayoutKind);
+            manuscript.Content.Count(block => block.Type == ManuscriptBlockType.Figure),
+            manuscript.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage),
+            0);
+    }
 
     private static PublicationImagePlacementView PlacementView(
         Guid projectId,
@@ -525,6 +578,11 @@ public sealed class PublishService(
             TargetTitle(placement.TargetKind, placement.TargetId, acts, chapters),
             placement.PlacementKind,
             placement.Caption,
+            JsonSerializer.Deserialize<FigurePresentation>(placement.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
+            placement.AltText,
+            placement.Decorative,
+            placement.Language,
+            placement.AccessibilityRole,
             placement.SortOrder);
 
     private static string AssetPreviewUrl(Guid projectId, Guid assetId) =>
@@ -576,17 +634,12 @@ public sealed class PublishService(
             _ => int.MaxValue,
         };
 
-    private static PublishChapterDocument ChapterDocument(Chapter chapter, PublicationEdition profile, int chapterNumber)
+    private static PublishChapterDocument ChapterDocument(
+        Chapter chapter,
+        PublicationEdition profile,
+        int chapterNumber,
+        IReadOnlyList<PageComposition> compositions)
     {
-        var illustrationLayout = chapter.VisualMode == ChapterVisualMode.IllustratedProse
-            ? ReadIllustrationLayout(chapter)
-            : new IllustratedProseLayout([]);
-        var pageLayout = chapter.VisualMode == ChapterVisualMode.PicturePage
-            ? ReadPageLayout(chapter)
-            : new PicturePageLayout([], []);
-        var pageLayoutKind = chapter.VisualMode == ChapterVisualMode.Prose
-            ? ChapterPageLayoutKind.SinglePortrait
-            : chapter.PageLayoutKind;
         return new(
             chapter.Id,
             chapter.ActId,
@@ -595,47 +648,26 @@ public sealed class PublishService(
             chapter.Synopsis,
             chapterNumber - 1,
             profile.IncludeChapterHeadings,
-            chapter.VisualMode,
-            pageLayoutKind,
-            illustrationLayout,
-            pageLayout,
-            chapter.Manuscript);
+            chapter.Manuscript,
+            compositions.Select(composition => new PublishPageCompositionDocument(
+                composition.Id,
+                composition.Name,
+                ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision),
+                composition.Revision,
+                composition.Variants
+                    .Where(variant => CompositionService.VariantMatchesEdition(variant, profile))
+                    .OrderByDescending(variant => variant.UpdatedAt)
+                    .Take(1)
+                    .Select(variant => new PublishPageCompositionVariantDocument(
+                    variant.Id,
+                    variant.GeometryKey,
+                    JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
+                        ?? throw new InvalidOperationException($"Page composition {composition.Id:N} has no scene."),
+                    variant.Revision)).ToList())).ToList());
     }
 
     private static PublishAssetDocument AssetDocument(PublishAsset asset) =>
         new(asset.Id, asset.FileName, asset.ContentType, asset.Data, asset.AltText);
-
-    private static IllustratedProseLayout ReadIllustrationLayout(Chapter chapter)
-    {
-        if (string.IsNullOrWhiteSpace(chapter.IllustrationLayoutJson))
-            return new IllustratedProseLayout([]);
-
-        try
-        {
-            return JsonSerializer.Deserialize<IllustratedProseLayout>(chapter.IllustrationLayoutJson, JsonOptions)
-                ?? new IllustratedProseLayout([]);
-        }
-        catch (JsonException)
-        {
-            return new IllustratedProseLayout([]);
-        }
-    }
-
-    internal static PicturePageLayout ReadPageLayout(Chapter chapter)
-    {
-        if (string.IsNullOrWhiteSpace(chapter.PageLayoutJson))
-            return new PicturePageLayout([], []);
-
-        try
-        {
-            var layout = ChapterTextLayoutSynchronizer.DeserializePersistedLayout(chapter.PageLayoutJson);
-            return ChapterTextLayoutSynchronizer.Hydrate(layout, chapter.Manuscript);
-        }
-        catch (JsonException)
-        {
-            return new PicturePageLayout([], []);
-        }
-    }
 
     private static bool IsIncluded(
         IReadOnlyList<PublicationEditionOutlineItem> selections,
@@ -714,6 +746,11 @@ public sealed class PublishService(
         Guid TargetId,
         PublicationImagePlacementKind PlacementKind,
         string Caption,
+        string PresentationJson,
+        string AltText,
+        bool Decorative,
+        string Language,
+        FigureAccessibilityRole AccessibilityRole,
         int SortOrder);
 
     private sealed record SectionSource(Act? Act, int SortOrder);

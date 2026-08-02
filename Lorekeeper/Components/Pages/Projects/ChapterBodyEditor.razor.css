@@ -113,6 +113,26 @@
     outline-offset: 0.25rem;
 }
 
+.semantic-editor ::deep .semantic-prosemirror .semantic-designed-page {
+    display: grid;
+    min-height: 8rem;
+    margin: 1.25rem 0;
+    padding: 1.5rem;
+    place-content: center;
+    border: 1px dashed var(--lk-border-strong, #8a93a6);
+    border-radius: .65rem;
+    background: linear-gradient(135deg, rgba(92, 124, 165, .10), rgba(92, 124, 165, .03));
+    text-align: center;
+    cursor: pointer;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .semantic-designed-page span {
+    display: block;
+    margin-top: .35rem;
+    color: var(--lk-text-muted, #596274);
+    font-size: .78rem;
+}
+
 .semantic-editor ::deep .semantic-prosemirror h1 {
     margin: 1.5em 0 1em;
     text-align: center;
@@ -223,6 +243,11 @@
     background: var(--bs-warning-bg-subtle, #fff3cd);
     color: var(--bs-warning-text-emphasis, #664d03);
 }
+
+.semantic-editor :deep(.semantic-figure-inspector) { margin: .35rem 0; padding: .65rem; border: 1px solid var(--lk-border, #ccd2dd); border-radius: .55rem; background: var(--lk-surface-subtle, #f7f8fb); }
+.semantic-editor :deep(.semantic-figure-controls) { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .5rem; margin-top: .45rem; }
+.semantic-editor :deep(.semantic-figure-controls label) { display: grid; gap: .18rem; color: var(--lk-muted, #667085); font-size: .72rem; }
+.semantic-editor :deep(.semantic-figure-controls input),.semantic-editor :deep(.semantic-figure-controls select),.semantic-editor :deep(.semantic-figure-controls textarea) { min-width: 0; padding: .3rem .4rem; border: 1px solid var(--lk-border, #ccd2dd); border-radius: .35rem; background: white; color: inherit; }
 
 .chapter-edit-surface--locked ::deep .semantic-prosemirror {
     cursor: not-allowed;

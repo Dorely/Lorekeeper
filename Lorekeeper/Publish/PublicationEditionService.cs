@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Composition;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -43,6 +44,12 @@ public sealed class PublicationEditionService(
         var isFirst = !await db.PublicationEditions.AnyAsync(
             edition => edition.ProjectId == projectId,
             cancellationToken);
+        var defaultGeometry = input.Format == PublicationEditionFormat.DigitalPdf
+            ? await db.PublicationEditions.AsNoTracking()
+                .Where(edition => edition.ProjectId == projectId && edition.IsDefault)
+                .Select(edition => new { edition.PageWidthInches, edition.PageHeightInches, edition.PageMarginInches })
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
         var edition = new PublicationEdition
         {
             ProjectId = projectId,
@@ -52,18 +59,18 @@ public sealed class PublicationEditionService(
             VendorProfileVersion = DefaultProfile(input.Format, input.Vendor),
             IsDefault = isFirst,
             TitleOverride = project.Name,
-            Binding = input.Format == PublicationEditionFormat.Epub
+            Binding = input.Format != PublicationEditionFormat.Paperback
                 ? PublicationBinding.Digital
                 : PublicationBinding.PerfectBound,
-            Paper = input.Format == PublicationEditionFormat.Epub
+            Paper = input.Format != PublicationEditionFormat.Paperback
                 ? PublicationPaper.Digital
                 : PublicationPaper.White,
-            Ink = input.Format == PublicationEditionFormat.Epub
+            Ink = input.Format != PublicationEditionFormat.Paperback
                 ? PublicationInk.Digital
                 : PublicationInk.BlackAndWhite,
-            PageWidthInches = input.Format == PublicationEditionFormat.Paperback ? 6 : 8.5,
-            PageHeightInches = input.Format == PublicationEditionFormat.Paperback ? 9 : 11,
-            PageMarginInches = 0.75,
+            PageWidthInches = input.Format == PublicationEditionFormat.Epub ? 8.5 : defaultGeometry?.PageWidthInches ?? 6,
+            PageHeightInches = input.Format == PublicationEditionFormat.Epub ? 11 : defaultGeometry?.PageHeightInches ?? 9,
+            PageMarginInches = defaultGeometry?.PageMarginInches ?? 0.75,
             BodyFontSizePoints = input.Format == PublicationEditionFormat.Paperback ? 11 : 12,
             BodyLineHeight = input.Format == PublicationEditionFormat.Paperback ? 1.4 : 1.55,
             Bleed = false,
@@ -77,7 +84,7 @@ public sealed class PublicationEditionService(
     internal static string DefaultProfile(PublicationEditionFormat format, PublicationVendor vendor) =>
         format == PublicationEditionFormat.Epub
             ? "epub3-v1"
-            : PublicationRenderProcessor.ProfileFor(vendor);
+            : PublicationRenderProcessor.ProfileFor(format, vendor);
 
     public async Task<PublicationEditionView> CloneAsync(
         Guid projectId,
@@ -123,6 +130,7 @@ public sealed class PublicationEditionService(
                 BarcodeMode = source.CoverDesign.BarcodeMode,
                 ImageFocalXPercent = source.CoverDesign.ImageFocalXPercent,
                 ImageFocalYPercent = source.CoverDesign.ImageFocalYPercent,
+                CompositionSceneJson = source.CoverDesign.CompositionSceneJson,
             };
         db.PublicationEditions.Add(clone);
         await SaveWithAuditAsync(clone, "clone", string.Empty, new { sourceEditionId = source.Id }, cancellationToken);
@@ -141,6 +149,9 @@ public sealed class PublicationEditionService(
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, input.ExpectedRevision);
         EnsureDraft(edition);
+        if (edition.Format != input.Format)
+            throw new InvalidOperationException("An edition's product format cannot be changed after creation because its cover and page compositions are format-aware. Create a new edition for the other format.");
+        ValidateProductCombination(input, edition);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         var name = input.Name.Trim();
         var normalizedIsbn = PublicationIsbn.NormalizeValidOrEmpty(input.Isbn);
@@ -191,6 +202,8 @@ public sealed class PublicationEditionService(
         edition.Paper = input.Paper;
         edition.Ink = input.Ink;
         edition.Bleed = input.Bleed;
+        edition.AllowDesignedPageOverrides = input.Format == PublicationEditionFormat.DigitalPdf
+            && input.AllowDesignedPageOverrides;
         edition.TitleOverride = Clean(input.TitleOverride);
         edition.Subtitle = Clean(input.Subtitle);
         edition.Author = Clean(input.Author);
@@ -208,8 +221,6 @@ public sealed class PublicationEditionService(
         edition.NumberActs = input.NumberActs;
         edition.NumberChapters = input.NumberChapters;
         edition.TitlePageMode = input.TitlePageMode;
-        edition.PrintPicturePageSpreadMode = input.PrintPicturePageSpreadMode;
-        edition.EpubPicturePageSpreadMode = input.EpubPicturePageSpreadMode;
         edition.PageWidthInches = input.PageWidthInches;
         edition.PageHeightInches = input.PageHeightInches;
         edition.PageMarginInches = input.PageMarginInches;
@@ -273,30 +284,6 @@ public sealed class PublicationEditionService(
         }
         edition.IsDefault = true;
         await SaveWithAuditAsync(edition, "set-default", before, new { }, cancellationToken);
-        return View(project, edition);
-    }
-
-    public async Task<PublicationEditionView> SetCoverImageAsync(
-        Guid projectId,
-        Guid editionId,
-        Guid? imageId,
-        long expectedRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var project = await GetProjectAsync(projectId, cancellationToken);
-        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
-        EnsureRevision(edition, expectedRevision);
-        EnsureDraft(edition);
-        if (imageId is Guid id && !await db.PublishAssets.AnyAsync(
-            image => image.ProjectId == projectId && image.Id == id,
-            cancellationToken))
-        {
-            throw new InvalidOperationException("Cover image must be an image in this project.");
-        }
-        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        edition.SelectedCoverImageId = imageId;
-        await SaveWithAuditAsync(edition, "set-cover-image", before, new { imageId }, cancellationToken);
         return View(project, edition);
     }
 
@@ -448,6 +435,8 @@ public sealed class PublicationEditionService(
             input.ManuscriptJson,
             input.Id ?? Guid.Empty,
             input.ExpectedRevision ?? 0);
+        if (document.Content.Any(block => block.Type == ManuscriptBlockType.DesignedPage))
+            throw new InvalidOperationException("Publication matter cannot own Designed Pages; insert them in a chapter where their composition has explicit semantic ownership.");
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedEditionRevision);
@@ -610,6 +599,9 @@ public sealed class PublicationEditionService(
         EnsureDraft(edition);
         await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
         var metadata = await ValidatePlacementAsync(projectId, editionId, input.AssetId, input.TargetKind, input.TargetId, input.PlacementKind, cancellationToken);
+        var presentation = input.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage };
+        var altText = FirstNonEmpty(input.AltText, metadata.AssetAltText);
+        await ValidatePlacementPresentationAsync(projectId, presentation, altText, input.Decorative, input.Language, input.AccessibilityRole, cancellationToken);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         var order = await db.PublicationImagePlacements
             .Where(placement => placement.EditionId == editionId
@@ -628,6 +620,11 @@ public sealed class PublicationEditionService(
             ChapterId = input.TargetKind == PublishOutlineTargetKind.Chapter ? input.TargetId : null,
             PlacementKind = input.PlacementKind,
             Caption = Clean(input.Caption),
+            PresentationJson = JsonSerializer.Serialize(presentation, ManuscriptCodec.JsonOptions),
+            AltText = input.Decorative ? string.Empty : altText,
+            Decorative = input.Decorative,
+            Language = Clean(input.Language),
+            AccessibilityRole = input.AccessibilityRole,
             SortOrder = order + 1,
         };
         db.PublicationImagePlacements.Add(placement);
@@ -653,6 +650,9 @@ public sealed class PublicationEditionService(
             cancellationToken)
             ?? throw new InvalidOperationException("Image placement was not found.");
         var metadata = await ValidatePlacementAsync(projectId, editionId, input.AssetId, input.TargetKind, input.TargetId, input.PlacementKind, cancellationToken);
+        var presentation = input.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage };
+        var altText = FirstNonEmpty(input.AltText, metadata.AssetAltText);
+        await ValidatePlacementPresentationAsync(projectId, presentation, altText, input.Decorative, input.Language, input.AccessibilityRole, cancellationToken);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         var oldGroup = (placement.TargetKind, placement.TargetId, placement.PlacementKind);
         var moved = oldGroup != (input.TargetKind, input.TargetId, input.PlacementKind);
@@ -682,6 +682,11 @@ public sealed class PublicationEditionService(
         placement.ChapterId = input.TargetKind == PublishOutlineTargetKind.Chapter ? input.TargetId : null;
         placement.PlacementKind = input.PlacementKind;
         placement.Caption = Clean(input.Caption);
+        placement.PresentationJson = JsonSerializer.Serialize(presentation, ManuscriptCodec.JsonOptions);
+        placement.AltText = input.Decorative ? string.Empty : altText;
+        placement.Decorative = input.Decorative;
+        placement.Language = Clean(input.Language);
+        placement.AccessibilityRole = input.AccessibilityRole;
         placement.UpdatedAt = DateTime.UtcNow;
         await SaveWithAuditAsync(edition, "update-image-placement", before, new { placementId }, cancellationToken);
         return PlacementView(projectId, placement, metadata.AssetFileName, metadata.TargetTitle);
@@ -839,6 +844,12 @@ public sealed class PublicationEditionService(
         CancellationToken cancellationToken = default) =>
         await FingerprintAsync(projectId, editionId, cancellationToken);
 
+    public async Task<string> GetPaginationFingerprintAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken = default) =>
+        await FingerprintAsync(projectId, editionId, cancellationToken, includeCover: false);
+
     private async Task SaveWithAuditAsync(
         PublicationEdition edition,
         string action,
@@ -866,7 +877,11 @@ public sealed class PublicationEditionService(
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private async Task<string> FingerprintAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken)
+    private async Task<string> FingerprintAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken,
+        bool includeCover = true)
     {
         var edition = await GetReadOnlyAsync(projectId, editionId, cancellationToken);
         var items = await db.PublicationEditionOutlineItems.AsNoTracking()
@@ -874,8 +889,8 @@ public sealed class PublicationEditionService(
             .OrderBy(item => item.SortOrder)
             .Select(item => new { item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder })
             .ToListAsync(cancellationToken);
-        var includedChapterIds = items
-            .Where(item => item.TargetKind == PublishOutlineTargetKind.Chapter && item.IsIncluded)
+        var excludedChapterIds = items
+            .Where(item => item.TargetKind == PublishOutlineTargetKind.Chapter && !item.IsIncluded)
             .Select(item => item.TargetId)
             .ToList();
         var project = await db.Projects.AsNoTracking()
@@ -888,7 +903,7 @@ public sealed class PublicationEditionService(
             .Select(act => new { act.Id, act.Title, act.Synopsis, act.Order })
             .ToListAsync(cancellationToken);
         var chapters = await db.Chapters.AsNoTracking()
-            .Where(chapter => chapter.ProjectId == projectId && includedChapterIds.Contains(chapter.Id))
+            .Where(chapter => chapter.ProjectId == projectId && !excludedChapterIds.Contains(chapter.Id))
             .OrderBy(chapter => chapter.Id)
             .Select(chapter => new
             {
@@ -899,10 +914,38 @@ public sealed class PublicationEditionService(
                 chapter.Order,
                 chapter.ManuscriptRevision,
                 chapter.ManuscriptJson,
-                chapter.VisualMode,
-                chapter.PageLayoutKind,
-                chapter.PageLayoutJson,
-                chapter.IllustrationLayoutJson,
+            })
+            .ToListAsync(cancellationToken);
+        var compositionIds = chapters
+            .SelectMany(chapter => ManuscriptCodec.Deserialize(
+                chapter.ManuscriptJson,
+                chapter.Id,
+                chapter.ManuscriptRevision).Content)
+            .Where(block => block.Type == ManuscriptBlockType.DesignedPage
+                && block.PageCompositionId is not null)
+            .Select(block => block.PageCompositionId!.Value)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+        var compositions = await db.PageCompositions.AsNoTracking()
+            .Where(composition => compositionIds.Contains(composition.Id))
+            .OrderBy(composition => composition.Id)
+            .Select(composition => new
+            {
+                composition.Id,
+                composition.ChapterId,
+                composition.Name,
+                composition.SemanticManuscriptJson,
+                composition.Revision,
+                Variants = composition.Variants
+                    .Select(variant => new
+                    {
+                        variant.Id,
+                        variant.GeometryKey,
+                        variant.SceneJson,
+                        variant.Revision,
+                        variant.UpdatedAt,
+                    }),
             })
             .ToListAsync(cancellationToken);
         var matter = await db.PublicationMatter.AsNoTracking()
@@ -919,19 +962,20 @@ public sealed class PublicationEditionService(
             .Where(placement => placement.EditionId == editionId)
             .OrderBy(placement => placement.TargetKind).ThenBy(placement => placement.TargetId)
             .ThenBy(placement => placement.PlacementKind).ThenBy(placement => placement.SortOrder)
-            .Select(placement => new { placement.Id, placement.AssetId, placement.TargetKind, placement.TargetId, placement.PlacementKind, placement.Caption, placement.SortOrder })
-            .ToListAsync(cancellationToken);
-        var assets = await db.PublishAssets.AsNoTracking()
-            .Where(asset => asset.ProjectId == projectId)
-            .OrderBy(asset => asset.Id)
-            .Select(asset => new
+            .Select(placement => new
             {
-                asset.Id,
-                asset.FileName,
-                asset.ContentType,
-                asset.AltText,
-                asset.Data,
-                asset.SourceMetadataJson,
+                placement.Id,
+                placement.AssetId,
+                placement.TargetKind,
+                placement.TargetId,
+                placement.PlacementKind,
+                placement.Caption,
+                placement.PresentationJson,
+                placement.AltText,
+                placement.Decorative,
+                placement.Language,
+                placement.AccessibilityRole,
+                placement.SortOrder,
             })
             .ToListAsync(cancellationToken);
         var styles = await db.ManuscriptStyleDefinitions.AsNoTracking()
@@ -954,6 +998,8 @@ public sealed class PublicationEditionService(
             {
                 family.Id,
                 family.Name,
+                family.EmbeddingRightsConfirmed,
+                family.RightsDeclaration,
                 Faces = family.Faces
                     .OrderBy(face => face.Id)
                     .Select(face => new
@@ -981,8 +1027,40 @@ public sealed class PublicationEditionService(
                 design.BarcodeMode,
                 design.ImageFocalXPercent,
                 design.ImageFocalYPercent,
+                design.CompositionSceneJson,
             })
             .SingleOrDefaultAsync(cancellationToken);
+        var referencedAssetIds = new HashSet<Guid>(placements.Select(placement => placement.AssetId));
+        foreach (var chapter in chapters)
+            CollectReferencedImageIds(chapter.ManuscriptJson, referencedAssetIds);
+        foreach (var item in matter.Where(item => item.IsIncluded))
+            CollectReferencedImageIds(item.ManuscriptJson, referencedAssetIds);
+        foreach (var composition in compositions)
+        {
+            CollectReferencedImageIds(composition.SemanticManuscriptJson, referencedAssetIds);
+            foreach (var variant in composition.Variants)
+                CollectReferencedImageIds(variant.SceneJson, referencedAssetIds);
+        }
+        if (includeCover)
+        {
+            if (edition.SelectedCoverImageId is { } selectedCoverImageId)
+                referencedAssetIds.Add(selectedCoverImageId);
+            if (coverDesign is not null)
+                CollectReferencedImageIds(coverDesign.CompositionSceneJson, referencedAssetIds);
+        }
+        var assets = await db.PublishAssets.AsNoTracking()
+            .Where(asset => asset.ProjectId == projectId && referencedAssetIds.Contains(asset.Id))
+            .OrderBy(asset => asset.Id)
+            .Select(asset => new
+            {
+                asset.Id,
+                asset.FileName,
+                asset.ContentType,
+                asset.AltText,
+                asset.Data,
+                asset.SourceMetadataJson,
+            })
+            .ToListAsync(cancellationToken);
         var canonical = JsonSerializer.Serialize(new
         {
             Project = project,
@@ -1010,31 +1088,63 @@ public sealed class PublicationEditionService(
                 edition.NumberActs,
                 edition.NumberChapters,
                 edition.TitlePageMode,
-                edition.PrintPicturePageSpreadMode,
-                edition.EpubPicturePageSpreadMode,
                 edition.Binding,
                 edition.Paper,
                 edition.Ink,
                 edition.Bleed,
+                edition.AllowDesignedPageOverrides,
                 edition.PageWidthInches,
                 edition.PageHeightInches,
                 edition.PageMarginInches,
                 edition.BodyFontSizePoints,
                 edition.BodyLineHeight,
-                edition.SelectedCoverImageId,
+                SelectedCoverImageId = includeCover ? edition.SelectedCoverImageId : null,
             },
             Items = items,
             Acts = acts,
             Chapters = chapters,
+            Compositions = compositions,
             Matter = matter,
             Mappings = mappings,
             Placements = placements,
             Assets = assets,
             Styles = styles,
             Fonts = fonts,
-            CoverDesign = coverDesign,
+            CoverDesign = includeCover ? coverDesign : null,
         }, ManuscriptCodec.JsonOptions);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+
+    private static void CollectReferencedImageIds(string json, ISet<Guid> target)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return;
+        using var document = JsonDocument.Parse(json);
+        Visit(document.RootElement);
+        return;
+
+        void Visit(JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (property.Name is "imageId" or "assetId"
+                        && property.Value.ValueKind == JsonValueKind.String
+                        && Guid.TryParse(property.Value.GetString(), out var id)
+                        && id != Guid.Empty)
+                    {
+                        target.Add(id);
+                    }
+                    Visit(property.Value);
+                }
+            }
+            else if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in element.EnumerateArray())
+                    Visit(item);
+            }
+        }
     }
 
     private async Task<string> BibliographicContentHashAsync(
@@ -1129,12 +1239,11 @@ public sealed class PublicationEditionService(
         && edition.NumberActs == input.NumberActs
         && edition.NumberChapters == input.NumberChapters
         && edition.TitlePageMode == input.TitlePageMode
-        && edition.PrintPicturePageSpreadMode == input.PrintPicturePageSpreadMode
-        && edition.EpubPicturePageSpreadMode == input.EpubPicturePageSpreadMode
         && edition.Binding == input.Binding
         && edition.Paper == input.Paper
         && edition.Ink == input.Ink
         && edition.Bleed == input.Bleed
+        && edition.AllowDesignedPageOverrides == input.AllowDesignedPageOverrides
         && edition.PageWidthInches.Equals(input.PageWidthInches)
         && edition.PageHeightInches.Equals(input.PageHeightInches)
         && edition.PageMarginInches.Equals(input.PageMarginInches)
@@ -1189,11 +1298,13 @@ public sealed class PublicationEditionService(
         CancellationToken cancellationToken)
     {
         ValidatePlacementKind(targetKind, placementKind);
-        var assetName = await db.PublishAssets
+        var asset = await db.PublishAssets
             .Where(asset => asset.ProjectId == projectId && asset.Id == assetId)
-            .Select(asset => asset.FileName)
+            .Select(asset => new { asset.FileName, asset.AltText, asset.ContentType })
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException("Project image was not found.");
+        if (asset.ContentType is not ("image/png" or "image/jpeg"))
+            throw new InvalidOperationException("Edition illustrations must use publication-compatible PNG or JPEG assets.");
         var targetTitle = targetKind switch
         {
             PublishOutlineTargetKind.Act => await db.Acts
@@ -1212,7 +1323,40 @@ public sealed class PublicationEditionService(
             .FirstOrDefaultAsync(cancellationToken) ?? true;
         if (!included)
             throw new InvalidOperationException("Images can only be placed on included edition content.");
-        return new(assetName, targetTitle);
+        return new(asset.FileName, asset.AltText, targetTitle);
+    }
+
+    private async Task ValidatePlacementPresentationAsync(
+        Guid projectId,
+        FigurePresentation presentation,
+        string altText,
+        bool decorative,
+        string language,
+        FigureAccessibilityRole role,
+        CancellationToken cancellationToken)
+    {
+        if (!Enum.IsDefined(role)
+            || presentation.WidthPercent is <= 0 or > 100
+            || presentation.FocalXPercent is < 0 or > 100
+            || presentation.FocalYPercent is < 0 or > 100
+            || presentation.SpacingBeforePoints is < 0 or > 288
+            || presentation.SpacingAfterPoints is < 0 or > 288)
+        {
+            throw new InvalidOperationException("Edition illustration presentation is outside supported limits.");
+        }
+        if (decorative && !string.IsNullOrWhiteSpace(altText))
+            throw new InvalidOperationException("Decorative edition illustrations cannot carry alternative text.");
+        if (!decorative && string.IsNullOrWhiteSpace(altText))
+            throw new InvalidOperationException("Edition illustrations require alternative text or a decorative decision.");
+        if (string.IsNullOrWhiteSpace(language) || language.Trim().Length > 35)
+            throw new InvalidOperationException("Edition illustration language must be a compact BCP 47 tag.");
+        if (presentation.LayoutTargetEditionId is Guid targetEditionId
+            && !await db.PublicationEditions.AsNoTracking().AnyAsync(
+                edition => edition.Id == targetEditionId && edition.ProjectId == projectId,
+                cancellationToken))
+        {
+            throw new InvalidOperationException("The illustration layout target edition was not found in this project.");
+        }
     }
 
     private static void ValidatePlacementKind(PublishOutlineTargetKind targetKind, PublicationImagePlacementKind placementKind)
@@ -1240,9 +1384,7 @@ public sealed class PublicationEditionService(
     {
         ValidateIdentity(input.Name, input.Format, input.Vendor);
         if (!Enum.IsDefined(input.Binding) || !Enum.IsDefined(input.Paper) || !Enum.IsDefined(input.Ink)
-            || !Enum.IsDefined(input.TitlePageMode)
-            || !Enum.IsDefined(input.PrintPicturePageSpreadMode)
-            || !Enum.IsDefined(input.EpubPicturePageSpreadMode))
+            || !Enum.IsDefined(input.TitlePageMode))
             throw new InvalidOperationException("One or more edition settings are invalid.");
         var boundedFields = new (string Label, string? Value, int Maximum)[]
         {
@@ -1273,6 +1415,28 @@ public sealed class PublicationEditionService(
             || input.BodyFontSizePoints is < 7 or > 72
             || input.BodyLineHeight is < 1 or > 2.4)
             throw new InvalidOperationException("Edition geometry or body typography is outside supported limits.");
+    }
+
+    private static void ValidateProductCombination(PublicationEditionUpdate input, PublicationEdition current)
+    {
+        var digital = input.Format is PublicationEditionFormat.Epub or PublicationEditionFormat.DigitalPdf;
+        if (digital && (input.Vendor != PublicationVendor.Generic
+            || input.Binding != PublicationBinding.Digital
+            || input.Paper != PublicationPaper.Digital
+            || input.Ink != PublicationInk.Digital
+            || input.Bleed))
+            throw new InvalidOperationException("EPUB and Digital PDF editions require the Generic vendor, digital binding/paper/ink, and no print bleed.");
+        if (input.Format == PublicationEditionFormat.Paperback
+            && (input.Binding == PublicationBinding.Digital
+                || input.Paper == PublicationPaper.Digital
+                || input.Ink == PublicationInk.Digital))
+            throw new InvalidOperationException("Paperback editions require physical binding, paper, and print ink settings.");
+        var expectedProfile = DefaultProfile(input.Format, input.Vendor);
+        var productIdentityChanged = input.Format != current.Format || input.Vendor != current.Vendor;
+        if (!string.Equals(input.VendorProfileVersion.Trim(), expectedProfile, StringComparison.Ordinal)
+            && (productIdentityChanged
+                || !string.Equals(input.VendorProfileVersion.Trim(), current.VendorProfileVersion, StringComparison.Ordinal)))
+            throw new InvalidOperationException($"The selected format and vendor require profile '{expectedProfile}'.");
     }
 
     private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
@@ -1336,8 +1500,6 @@ public sealed class PublicationEditionService(
             edition.NumberActs,
             edition.NumberChapters,
             edition.TitlePageMode,
-            edition.PrintPicturePageSpreadMode,
-            edition.EpubPicturePageSpreadMode,
             edition.PageWidthInches,
             edition.PageHeightInches,
             edition.PageMarginInches,
@@ -1347,7 +1509,8 @@ public sealed class PublicationEditionService(
             edition.Binding,
             edition.Paper,
             edition.Ink,
-            edition.Bleed);
+            edition.Bleed,
+            edition.AllowDesignedPageOverrides);
 
     internal static PublicationMatterView MatterView(PublicationMatter matter) =>
         new(
@@ -1388,6 +1551,11 @@ public sealed class PublicationEditionService(
             targetTitle,
             placement.PlacementKind,
             placement.Caption,
+            JsonSerializer.Deserialize<FigurePresentation>(placement.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
+            placement.AltText,
+            placement.Decorative,
+            placement.Language,
+            placement.AccessibilityRole,
             placement.SortOrder);
 
     private static PublicationEditionOutlineItem NewOutlineItem(
@@ -1448,6 +1616,11 @@ public sealed class PublicationEditionService(
             PlacementKind = source.PlacementKind,
             SortOrder = source.SortOrder,
             Caption = source.Caption,
+            PresentationJson = source.PresentationJson,
+            AltText = source.AltText,
+            Decorative = source.Decorative,
+            Language = source.Language,
+            AccessibilityRole = source.AccessibilityRole,
         };
 
     private static PublicationEdition CopyEdition(PublicationEdition source, string name) =>
@@ -1475,8 +1648,6 @@ public sealed class PublicationEditionService(
             NumberActs = source.NumberActs,
             NumberChapters = source.NumberChapters,
             TitlePageMode = source.TitlePageMode,
-            PrintPicturePageSpreadMode = source.PrintPicturePageSpreadMode,
-            EpubPicturePageSpreadMode = source.EpubPicturePageSpreadMode,
             Binding = source.Binding,
             Paper = source.Paper,
             Ink = source.Ink,
@@ -1487,6 +1658,7 @@ public sealed class PublicationEditionService(
             BodyFontSizePoints = source.BodyFontSizePoints,
             BodyLineHeight = source.BodyLineHeight,
             SelectedCoverImageId = source.SelectedCoverImageId,
+            AllowDesignedPageOverrides = source.AllowDesignedPageOverrides,
         };
 
     private static string Clean(string? value) => value?.Trim() ?? string.Empty;
@@ -1497,5 +1669,8 @@ public sealed class PublicationEditionService(
             differences.Add($"{label}: {left} → {right}");
     }
 
-    private sealed record PlacementMetadata(string AssetFileName, string TargetTitle);
+    private static string FirstNonEmpty(params string[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
+
+    private sealed record PlacementMetadata(string AssetFileName, string AssetAltText, string TargetTitle);
 }

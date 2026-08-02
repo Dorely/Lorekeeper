@@ -242,9 +242,13 @@ public sealed class PublicationPackageTests
 
             var coordinator = new ProjectMutationCoordinator(connectionString);
             var editionService = new PublicationEditionService(db, coordinator, new PublicationActorContext());
-            var coverService = new PublicationCoverService(db, coordinator);
+            var coverService = new PublicationCoverService(
+                db,
+                coordinator,
+                editionService,
+                new TestPublicationPressRuntime());
             var publishDocument = MinimalEpubDocument(project.Id, edition.Id, chapter, manuscript);
-            var epub = new EpubPublishFormatter(new PageGeometryService(db)).Render(publishDocument);
+            var epub = new EpubPublishFormatter().Render(publishDocument);
             PublicationPackageService.ValidateEpubStructure(epub);
             var publishing = new FixturePublishService(publishDocument, epub);
             var packages = new PublicationPackageService(
@@ -309,6 +313,7 @@ public sealed class PublicationPackageTests
                 Type = ManuscriptBlockType.Figure,
                 ImageId = figureImageId,
                 AltText = "\u0418\u043b\u043b\u044e\u0441\u0442\u0440\u0430\u0446\u0438\u044f",
+                FigurePresentation = new FigurePresentation(),
             };
             var figureAsset = new PublishAssetDocument(
                 figureImageId,
@@ -332,20 +337,6 @@ public sealed class PublicationPackageTests
                             publishDocument.Sections[0].Chapters[0] with
                             {
                                 Manuscript = figureManuscript,
-                                IllustrationLayout = new IllustratedProseLayout(
-                                [
-                                    new IllustratedProseImageBlock(
-                                        Guid.NewGuid(),
-                                        figureImageId,
-                                        ChapterImageAnchorPosition.AfterParagraph,
-                                        figureManuscript.Content[0].Id,
-                                        50,
-                                        ChapterImageAlignment.Center,
-                                        "\u041f\u043e\u0434\u043f\u0438\u0441\u044c",
-                                        "\u041e\u043f\u0438\u0441\u0430\u043d\u0438\u0435",
-                                        0,
-                                        false),
-                                ]),
                             },
                         ],
                     },
@@ -357,7 +348,7 @@ public sealed class PublicationPackageTests
                 && item.Message.Contains(figureManuscript.Content[0].Id, StringComparison.Ordinal));
             Assert.Contains(unvalidatedFigureText.Items, item =>
                 item.Code == "SCRIPT_SCOPE_UNSUPPORTED"
-                && item.Message.Contains("illustration", StringComparison.Ordinal));
+                && item.Message.Contains("alternative text", StringComparison.Ordinal));
             var localizedMatterDocument = ManuscriptCodec.FromPlainText(
                 Guid.NewGuid(),
                 "Благодарности.",
@@ -393,7 +384,7 @@ public sealed class PublicationPackageTests
                         chapter.Id,
                         PublicationImagePlacementKind.AfterChapter,
                         "Подпись",
-                        0),
+                        SortOrder: 0),
                 ],
             };
             var renderedTextScope = await packages.PreflightAsync(project.Id, edition.Id);
@@ -584,7 +575,6 @@ public sealed class PublicationPackageTests
             "update_publication_edition",
             "set_default_publication_edition",
             "archive_publication_edition",
-            "set_publication_cover_image",
             "set_publication_content",
             "reorder_publication_content",
             "upsert_publication_matter",
@@ -607,6 +597,8 @@ public sealed class PublicationPackageTests
             "compare_publication_renders",
             "read_publication_cover_design",
             "update_publication_cover_design",
+            "stage_publication_cover_composition",
+            "apply_publication_cover_composition_stage",
             "preflight_publication_edition",
             "export_publication_edition",
             "build_publication_package",
@@ -681,7 +673,11 @@ public sealed class PublicationPackageTests
 
             var coordinator = new ProjectMutationCoordinator(connectionString);
             var editionService = new PublicationEditionService(db, coordinator, new PublicationActorContext());
-            var coverService = new PublicationCoverService(db, coordinator);
+            var coverService = new PublicationCoverService(
+                db,
+                coordinator,
+                editionService,
+                new TestPublicationPressRuntime());
             var fingerprint = await editionService.GetSourceFingerprintAsync(project.Id, edition.Id);
             var firstJob = AddRenderPair(
                 db,
@@ -708,7 +704,7 @@ public sealed class PublicationPackageTests
                     BodyLineHeight = 1.4,
                 },
             };
-            var epub = new EpubPublishFormatter(new PageGeometryService(db)).Render(document);
+            var epub = new EpubPublishFormatter().Render(document);
             var publishing = new FixturePublishService(document, epub);
             var packages = new PublicationPackageService(
                 db,
@@ -871,8 +867,6 @@ public sealed class PublicationPackageTests
             false,
             false,
             true,
-            PrintPicturePageSpreadMode.WholeSpread,
-            EpubPicturePageSpreadMode.RequestLandscape,
             6,
             9,
             0.75,
@@ -886,11 +880,8 @@ public sealed class PublicationPackageTests
             string.Empty,
             0,
             true,
-            ChapterVisualMode.Prose,
-            ChapterPageLayoutKind.SinglePortrait,
-            new IllustratedProseLayout([]),
-            new PicturePageLayout([], []),
-            manuscript);
+            manuscript,
+            []);
         return new(
             editionId,
             projectId,

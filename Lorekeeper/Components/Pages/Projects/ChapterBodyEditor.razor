@@ -5,6 +5,9 @@
 @inject IJSRuntime JS
 @inject IManuscriptStyleService Styles
 @inject IProjectImageService Images
+@inject Lorekeeper.Composition.ICompositionService Compositions
+@inject Lorekeeper.Publish.IPublicationEditionService Editions
+@inject NavigationManager Navigation
 
 <div class="@RootClass()">
     <div @ref="_root"></div>
@@ -35,9 +38,11 @@
 @code {
     [Parameter, EditorRequired] public Guid ChapterId { get; set; }
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter, EditorRequired] public string ProjectSlug { get; set; } = string.Empty;
     [Parameter, EditorRequired] public string InitialManuscriptJson { get; set; } = string.Empty;
     [Parameter] public bool IsVisible { get; set; } = true;
     [Parameter] public bool IsReadOnly { get; set; }
+    [Parameter] public EventCallback<Guid> OpenDesignedPage { get; set; }
     [Parameter, EditorRequired]
     public Func<Guid, long, string, Task<SemanticEditorSaveResult>> SaveAsync { get; set; } = null!;
 
@@ -73,7 +78,10 @@
                         await Styles.ListAsync(ProjectId),
                         ManuscriptCodec.JsonOptions),
                     JsonSerializer.Serialize(
-                        await Images.ListAsync(ProjectId),
+                        (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg"),
+                        ManuscriptCodec.JsonOptions),
+                    JsonSerializer.Serialize(
+                        await Editions.ListAsync(ProjectId),
                         ManuscriptCodec.JsonOptions));
             }
             catch (JSDisconnectedException) { }
@@ -85,6 +93,39 @@
             await ApplyReadOnlyAsync(IsReadOnly);
             _appliedReadOnly = IsReadOnly;
         }
+    }
+
+    [JSInvokable]
+    public async Task<object> OnCreateDesignedPage(string name, int blockIndex, long expectedRevision)
+    {
+        var editions = await Editions.ListAsync(ProjectId);
+        var editionId = editions.FirstOrDefault(edition => edition.IsDefault)?.Id
+            ?? editions.FirstOrDefault()?.Id;
+        var result = await Compositions.CreateDesignedPageAsync(
+            ProjectId,
+            ChapterId,
+            blockIndex,
+            name,
+            editionId,
+            expectedRevision);
+        return new
+        {
+            id = result.Composition.Id,
+            result.Composition.Name,
+            manuscriptJson = ManuscriptCodec.Serialize(result.Manuscript.Document),
+        };
+    }
+
+    [JSInvokable]
+    public Task OnOpenDesignedPage(Guid compositionId) => OpenDesignedPage.InvokeAsync(compositionId);
+
+    [JSInvokable]
+    public Task OnGenerateFigure(string blockId, Guid editionId)
+    {
+        if (!Guid.TryParse(blockId, out var targetId))
+            throw new InvalidOperationException("The selected Figure does not have a generation-compatible stable ID.");
+        Navigation.NavigateTo($"/projects/{Uri.EscapeDataString(ProjectSlug)}/images?editionId={editionId:N}&targetKind=figure&targetId={targetId:N}");
+        return Task.CompletedTask;
     }
 
     [JSInvokable]

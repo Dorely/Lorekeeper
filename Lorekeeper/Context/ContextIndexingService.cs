@@ -4,6 +4,7 @@ using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -24,6 +25,7 @@ public sealed class ContextIndexingService(
     IChapterRepository chapters,
     IIngestRepository ingest,
     AppDbContext db,
+    IChapterSemanticProjectionService semanticProjection,
     IVectorIndexWorkCoordinator indexWork,
     ILogger<ContextIndexingService> logger) : IContextIndexingService
 {
@@ -171,7 +173,7 @@ public sealed class ContextIndexingService(
 
     private async Task ReindexChapterCoreAsync(Chapter chapter, CancellationToken cancellationToken)
     {
-        var text = BuildChapterText(chapter);
+        var text = await BuildChapterTextAsync(chapter, cancellationToken);
         await StoreChunksAsync(
             chapter.ProjectId,
             ContextVectorSourceTypes.Chapter,
@@ -371,13 +373,13 @@ public sealed class ContextIndexingService(
         return sb.ToString().TrimEnd();
     }
 
-    private static string BuildChapterText(Chapter chapter)
+    private async Task<string> BuildChapterTextAsync(Chapter chapter, CancellationToken cancellationToken)
     {
         var sb = new StringBuilder();
         sb.Append("Type: Chapter\n");
         sb.Append("Title: ").AppendLine(chapter.Title);
         AppendOptional(sb, "Synopsis", chapter.Synopsis);
-        AppendOptional(sb, "Body", chapter.PlainText);
+        AppendOptional(sb, "Body", await semanticProjection.ExpandPlainTextAsync(chapter, cancellationToken));
         return sb.ToString().TrimEnd();
     }
 

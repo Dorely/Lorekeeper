@@ -1,4 +1,3 @@
-using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Context;
 using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
@@ -14,7 +13,6 @@ public sealed class ProjectImageService(
     IProjectImageJobService imageJobs,
     IProjectImageGenerationRuntime imageRuntime,
     IOptions<ProjectImageGenerationOptions> imageOptions,
-    IChapterVisualService chapterVisuals,
     IContextIndexingService contextIndexing,
     IProjectMutationCoordinator projectMutations) : IProjectImageService
 {
@@ -327,6 +325,30 @@ public sealed class ProjectImageService(
                 + string.Join(", ", figureMatter)
                 + ". Remove or replace those figures before deleting the image.");
         }
+        var compositionUses = (await db.PageCompositionVariants
+            .AsNoTracking()
+            .Where(variant => variant.Composition.ProjectId == projectId)
+            .Select(variant => new { variant.Composition.Name, variant.SceneJson })
+            .ToListAsync(cancellationToken))
+            .Where(item => SceneUsesImage(item.SceneJson, imageId))
+            .Select(item => item.Name)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var coverUses = (await db.PublicationCoverDesigns
+            .AsNoTracking()
+            .Where(cover => cover.Edition.ProjectId == projectId)
+            .Select(cover => new { cover.Edition.Name, cover.CompositionSceneJson })
+            .ToListAsync(cancellationToken))
+            .Where(item => SceneUsesImage(item.CompositionSceneJson, imageId))
+            .Select(item => item.Name)
+            .ToList();
+        if (compositionUses.Count > 0 || coverUses.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Image '{asset.FileName}' is used by a page or cover composition: "
+                + string.Join(", ", compositionUses.Concat(coverUses))
+                + ". Remove or replace those scene objects before deleting the image.");
+        }
         var entityIds = await AttachedEntityIdsAsync(projectId, imageId, cancellationToken);
         if (await db.PublicationEditions.AsNoTracking().AnyAsync(
             edition => edition.ProjectId == projectId && edition.SelectedCoverImageId == imageId,
@@ -342,11 +364,6 @@ public sealed class ProjectImageService(
             throw new InvalidOperationException(
                 $"Image '{asset.FileName}' is used by a publication-edition placement. Remove the placement in Publish before deleting the image.");
         }
-
-        await chapterVisuals.RemoveImageReferencesUnderProjectMutationLeaseAsync(
-            projectId,
-            imageId,
-            cancellationToken);
 
         db.PublishAssets.Remove(asset);
         project.UpdatedAt = DateTime.UtcNow;
@@ -402,6 +419,20 @@ public sealed class ProjectImageService(
             crop.YPercent == 0 ? 0 : crop.YPercent,
             crop.WidthPercent,
             crop.HeightPercent);
+    }
+
+    private static bool SceneUsesImage(string json, Guid imageId)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try
+        {
+            var scene = System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(json, ManuscriptCodec.JsonOptions);
+            return scene?.Objects.Any(item => item.ImageId == imageId) == true;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
     }
 
     private static string CropFileName(string? requestedFileName, string sourceFileName, string contentType)

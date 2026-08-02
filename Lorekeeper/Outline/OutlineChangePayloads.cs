@@ -11,9 +11,7 @@ public sealed record OutlineChapterChange(
     Guid? ActId,
     int Order,
     string Title,
-    string Synopsis,
-    ChapterVisualMode VisualMode,
-    ChapterPageLayoutKind PageLayoutKind);
+    string Synopsis);
 
 public sealed record ChapterManuscriptChange(
     Guid Id,

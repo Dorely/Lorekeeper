@@ -89,11 +89,11 @@ conversion/preflight tool.
 
 ## Phase overview
 
-| Phase | Outcome | Initial status |
+| Phase | Outcome | Current status |
 |---|---|---|
-| 1. Publisher-ready novel foundation | Structured editing and independently validated paperback/EPUB artifacts for a narrow certified scope | Planned |
+| 1. Publisher-ready novel foundation | Structured editing and independently validated paperback/EPUB artifacts for a narrow certified scope | Implemented; native release-matrix verification pending |
 | 2. Professional editing and proofing | Track changes, comments, comparisons, house style, and page-proof workflows | Researched |
-| 3. Illustrated and picture-book design | General page-layout system, master pages, object tools, advanced color, and fixed-layout EPUB | Researched |
+| 3. Illustrated and picture-book design | Semantic Figures, Designed Pages, cover composition, color/bleed, fixed-layout EPUB, and tagged Digital PDF | Implemented core; advanced DTP additions deferred |
 | 4. Nonfiction and reference books | Notes, citations, tables, figures, cross-references, generated references, equations, and code | Researched |
 | 5. Publisher operations | Imprints, contributors, rights, identifiers, ONIX, proofs, catalog, team audit, and controlled distribution | Researched |
 
@@ -121,8 +121,7 @@ dictionaries. Language marks remain semantic, but preflight blocks a certified
 export when the manuscript uses an unverified script, direction, shaping path,
 or dictionary. Phase 3 owns the later complex-script expansion.
 
-Color interiors, hardcover/dust jackets, fixed-layout EPUB, arbitrary page
-design, rich nonfiction, direct retailer submission, and collaborative editing
+Hardcover/dust jackets, rich nonfiction, direct retailer submission, and collaborative editing
 are explicitly outside this phase.
 
 ### Implementation prerequisite
@@ -225,7 +224,8 @@ and
 Status: `Implemented; Windows verified locally, native macOS matrix pending`
 
 On 2026-07-31 Lorekeeper replaced both candidate paths with the owned Rust
-`Lorekeeper.Press` subproject and protocol v3. Requirements and black-box
+`Lorekeeper.Press` subproject. Protocol v4 now carries structured Figures,
+Designed Pages, covers, custom fonts, semantics, and per-page Digital PDF boxes. Requirements and black-box
 conformance fixtures were written and run against the Typst implementation
 before production work began; the expected failures were recorded in the work
 log. The current suite independently parses raw objects, streams, fonts, page
@@ -249,12 +249,12 @@ scope, security boundary, and future phases are in
 
 Status: `Implementation complete; release validation pending`
 
-Implemented in the application on 2026-07-30. The canonical chapter body is now manuscript schema
-v1 with stable block IDs and revisions; migration, recovery, visual-anchor,
-assistant-operation, contest/revision, import v8, and projection paths use the
+Implemented in the application on 2026-07-30 and subsequently advanced to
+manuscript schema v3 by Phase 3. Stable IDs, revisions, migration/recovery,
+assistant operations, contest/revision, import, and projection paths use the
 shared manuscript service. The authorized fixture suite covers codec and mark
-behavior, WAL migration/restore, Picture Page and illustrated-prose anchors, and
-v8 serialization. This status does not close the release gate below:
+behavior, WAL migration/restore, versioned visual cutover, and current v14
+serialization. This status does not close the release gate below:
 production-like copied-database rehearsal and the remaining historical/export,
 permission, retention, failure-injection, and projection evidence are required
 before distributing this migration to existing users.
@@ -270,17 +270,17 @@ Deliverables:
 - WAL-safe backup, migration journal, expand/transform/validate/contract
   migrations, recovery screen, and restore drill;
 - conversion of every live and historical body-bearing record;
-- lossless migration of Picture Page text boxes to stable manuscript block/range
+- lossless migration of legacy page-layout text boxes to stable manuscript block/range
   references while preserving element identity, geometry, typography, z-order,
   and reading order;
-- remapping of illustrated-prose paragraph index/hash anchors to stable block
+- remapping of legacy anchored-image paragraph index/hash anchors to stable block
   IDs with hash validation and fail-closed ambiguity handling;
 - project export v8 for structured manuscripts and stable visual-layout
   references, with isolated v1–v7 import adapters;
 - the temporary textarea adapter used during the cutover (removed when Feature
   3 installed the schema-driven editor), which translated revision-aware saves
   through the manuscript service and never wrote `Chapter.Body`;
-- rebuilt search/vector/graph/Picture Page projections;
+- rebuilt search/vector/graph and visual-content projections;
 - removal of direct obsolete runtime body access after cutover.
 
 Assistant parity:
@@ -289,7 +289,7 @@ Assistant parity:
 - insert/replace/delete/move/split/merge block operations;
 - inline-mark and style-role operations;
 - semantic diffs, expected revisions, and reviewable changes;
-- existing Picture Page and illustrated-prose assistant operations resolve and
+- then-existing page-layout and anchored-image assistant operations resolve and
   mutate the same stable blocks/anchors as their UI services;
 - migration preflight, journal, validation-report, and recovery-state reads,
   with safe retry diagnostics; restore remains an explicit user-confirmed
@@ -297,7 +297,7 @@ Assistant parity:
 - complete removal of obsolete line/whole-string mutation tools.
 
 Gate: fixture databases, interruption injection, hash equivalence, multi-text-
-box Picture Pages, illustrated-prose anchors, import/export, index, projection,
+box page-layout fixtures, anchored-image fixtures, import/export, index, projection,
 and restore tests pass before any existing database is contracted.
 
 #### 3. Semantic rich-text editor and named styles
@@ -318,15 +318,15 @@ Deliverables:
 - semantic Markdown/EPUB projection so authored block/mark/figure intent is not
   flattened at the existing publishing boundary;
 - project export introduced semantic style round-tripping in v9; the current
-  v13 format also carries editions, dedicated cover-image references, and complete
-  custom-font binaries, with isolated v8-v12 adapters;
+  v14 format also carries manuscript-v3 compositions, editions, cover scenes,
+  and complete custom-font binaries, with isolated older adapters;
 - removal of the temporary textarea adapter after every editor workflow uses
   schema-driven transactions (implemented);
 - paste/import normalization with warnings;
 - undo/redo, keyboard behavior, special characters, find/replace preview,
   document outline, counts, autosave/conflict handling, and accessible focus;
-- existing context, contest, revision-agent, Picture Page, and review workflows
-  operating through structured commands. Picture Page whole-block edits,
+- context, contest, revision-agent, visual-layout, and review workflows
+  operating through structured commands. Whole-block visual text edits,
   insertions, deletions, and reading-order moves preserve stable references;
   partial-block range edits deliberately fail closed and are routed to the
   manuscript editor. Visual layouts use monotonic revisions and project-scoped
@@ -368,7 +368,7 @@ Deliverables:
 - edition clone, immutable archive, compare, and audit history; archived
   artifacts remain readable/exportable and changes continue through a clone.
 - project export introduced editions and edition-style mappings in v10; the
-  current v13 format retains isolated older import adapters.
+  current v14 format retains isolated older import adapters.
 
 Assistant parity: a dedicated Publish assistant can read and operate the entire
 edition/matter/style surface through the owning services, including edition-
@@ -480,7 +480,7 @@ TXT, Markdown, EPUB, and contained press rendering. The EPUB path
 emits and validates TOC and landmark navigation,
 spine XHTML, internal resources, and alternative text; mixed unsupported
 scripts and language marks fail closed for the initial English/Latin scope,
-including manuscript-figure and illustrated-prose captions/alternative text.
+including manuscript Figure and legacy anchored-image captions/alternative text.
 Missing, malformed, empty, RGB, or unknown Ingram color-space evidence also
 fails closed.
 Package identity includes stable validated input hashes/provenance and every
@@ -559,31 +559,49 @@ accept/reject reversibility, comparison accuracy, and proof invalidation.
 
 ## Phase 3 — illustrated and picture-book design
 
-Status: `Researched`
+Status: `Implemented core; advanced DTP additions deferred`
 
-Outcome:
+Implemented:
 
-- parent/master pages, templates, reusable components, and object styles;
-- page/spread thumbnails, page insertion/reorder, recto/verso, and sections;
-- rulers, guides, grids, baseline grids, snapping, alignment, and distribution;
-- text/image frames, linked overflow, columns, wrap, crop, focal point, and
-  fitting;
-- shapes, paths, fills, strokes, gradients, masks, groups, layers, locking, and
-  visibility;
-- reading order, alt text, and semantic roles independent of visual z-order;
-- ICC-aware color workflow, CMYK policy, ink limits, separations, and soft proof;
-- fixed-layout EPUB and accessible alternatives;
-- additional color-interior and illustrated-book vendor profiles;
-- complex-script expansion covering bidirectional/RTL text, CJK line breaking,
-  vertical text where supported, complex shaping, fallback fonts,
-  locale-specific punctuation, and matching assistant/preflight behavior;
-- complete Publish assistant parity for page/object/layer/guide/color commands.
+- format-neutral chapters containing semantic text, flowing Figures, and
+  Designed Page references;
+- inline/centered/floated/full-width/full-bleed/dedicated-page Figure intent,
+  wrap, fit/crop/focal, captions, page breaks, alt/decorative state, and language;
+- single-page, facing-spread, and eligible independent Digital PDF composition
+  variants keyed to exact edition geometry;
+- shared scene objects, layers, locks, visibility, grouping, z-order, rulers,
+  guides, snapping, zoom, keyboard movement, object styles, reading order,
+  semantic text bindings, unplaced-content and overflow diagnostics;
+- format-aware back/spine/front print covers and front-only digital covers;
+- server-owned geometry descriptors for Figure/page/cover generation, including
+  exact raster/aspect, effective DPI, safe/bleed/gutter/barcode/text regions;
+- protocol-v4 structured Figure, page, and cover rendering without rasterized
+  text, project font embedding, color/grayscale/CMYK paths, bleed, and ink limits;
+- one-file tagged Digital PDF with cover page one, bookmarks, internal links,
+  mixed page boxes when explicitly enabled, and accessible semantic structure;
+- fixed-layout EPUB scenes with real text, semantic Figures, reading order, and
+  alternatives plus EPUB accessibility metadata; Markdown/TXT preserve
+  captions, alternatives, and composition content in reading order;
+- compact, revision-safe Outline, Editor, Images, and Publish assistant tools,
+  one-use persisted staging for large scenes, and genre-aware Outline guidance;
+- guarded protected-backup migration and v14 import/export cutover.
 
-Integration principle: generalize the existing Picture Page model into the
-shared page-object system; do not create a competing layout stack.
+Deferred without changing the semantic/scene ownership model:
 
-Verification emphasis: geometry determinism, text overflow, reading order,
-color conversion, visual regression, device behavior, and physical proofs.
+- formal PDF/UA validation or certification;
+- SVG/vector import and editing, arbitrary paths, gradients, masks, advanced
+  effects, spot colors, separations/soft proofing, and PDF/X-4;
+- parent/master pages, reusable templates/components, baseline/column grids,
+  linked text frames, alignment/distribution commands, and manual page
+  intervention;
+- multilingual shaping beyond the certified English/Latin left-to-right scope,
+  including RTL/bidirectional text, CJK/vertical layout, script fallback, and
+  locale-specific hyphenation/punctuation;
+- hardcover/dust-jacket and additional illustrated-book vendor profiles.
+
+Future verification emphasis: formal accessibility validation, geometry and
+reading-order regression, advanced color/vector correctness, multilingual
+fixtures, device matrices, and physical proofs.
 
 ## Phase 4 — nonfiction and reference books
 

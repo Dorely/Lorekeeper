@@ -55,6 +55,7 @@ public sealed class ProjectImageJobService(
         var referenceIds = await ValidateReferenceIdsAsync(projectId, request.ReferenceImageIds, sourceImageId: null, cancellationToken);
         var entityTargets = await ValidateEntityTargetsAsync(projectId, request.EntityTargets, cancellationToken);
         var count = ClampCount(request.Count);
+        var layoutBound = HasTargetGeometry(request.TargetGeometryJson);
         var now = DateTime.UtcNow;
         var job = new ProjectImageGenerationJob
         {
@@ -68,8 +69,8 @@ public sealed class ProjectImageJobService(
             TargetGeometryJson = CleanJson(request.TargetGeometryJson, "{}"),
             Size = NormalizeSize(request.Size),
             Quality = NormalizeQuality(request.Quality),
-            OutputFormat = NormalizeOutputFormat(request.OutputFormat),
-            OutputCompression = request.OutputCompression,
+            OutputFormat = layoutBound ? "png" : NormalizeOutputFormat(request.OutputFormat),
+            OutputCompression = layoutBound ? null : request.OutputCompression,
             Count = count,
             AltText = Clean(request.AltText),
             ReferenceImageIdsJson = SerializeIds(referenceIds),
@@ -98,6 +99,7 @@ public sealed class ProjectImageJobService(
         var source = await GetImageAssetAsync(projectId, request.SourceImageId, cancellationToken);
         var referenceIds = await ValidateReferenceIdsAsync(projectId, request.ReferenceImageIds, source.Id, cancellationToken);
         var count = ClampCount(request.Count);
+        var layoutBound = HasTargetGeometry(request.TargetGeometryJson);
         var targets = (await ValidateEntityTargetsAsync(projectId, request.EntityTargets, cancellationToken)).ToList();
         if (request.InheritSourceEntityTargets)
             targets.AddRange((await entityVisualExamples.ListForImageAsync(projectId, source.Id, cancellationToken))
@@ -137,8 +139,8 @@ public sealed class ProjectImageJobService(
             TargetGeometryJson = CleanJson(request.TargetGeometryJson, "{}"),
             Size = NormalizeSize(request.Size),
             Quality = NormalizeQuality(request.Quality),
-            OutputFormat = NormalizeOutputFormat(request.OutputFormat),
-            OutputCompression = request.OutputCompression,
+            OutputFormat = layoutBound ? "png" : NormalizeOutputFormat(request.OutputFormat),
+            OutputCompression = layoutBound ? null : request.OutputCompression,
             Count = count,
             AltText = Clean(request.AltText),
             SourceImageId = source.Id,
@@ -297,15 +299,16 @@ public sealed class ProjectImageJobService(
         var mask = job.MaskId is Guid maskId
             ? await db.ProjectImageMasks.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == maskId, cancellationToken)
             : null;
+        var normalizedImage = NormalizeLayoutBoundOutput(job.TargetGeometryJson, image);
 
         var now = DateTime.UtcNow;
         var asset = new PublishAsset
         {
             ProjectId = projectId,
             Source = job.Kind == ProjectImageGenerationJobKind.Edit ? PublishAssetSource.Edited : PublishAssetSource.Generated,
-            FileName = $"{SafeFileNameStem(job.Label, job.Kind == ProjectImageGenerationJobKind.Edit ? "edited" : "generated")}-{outputIndex + 1}.{ExtensionForContentType(image.ContentType)}",
-            ContentType = image.ContentType,
-            Data = image.Data,
+            FileName = $"{SafeFileNameStem(job.Label, job.Kind == ProjectImageGenerationJobKind.Edit ? "edited" : "generated")}-{outputIndex + 1}.{ExtensionForContentType(normalizedImage.ContentType)}",
+            ContentType = normalizedImage.ContentType,
+            Data = normalizedImage.Data,
             AltText = job.AltText,
             Prompt = job.Prompt,
             GenerationModel = result.ImageModel,
@@ -324,6 +327,7 @@ public sealed class ProjectImageJobService(
                 TargetGeometry = JsonNodeOrString(job.TargetGeometryJson),
                 image.ResponseId,
                 image.CallId,
+                RasterNormalization = normalizedImage.Normalization,
                 SourceImage = source is null ? null : new { source.Id, source.FileName, source.ContentType },
                 Mask = mask is null ? null : new { mask.Id, mask.Label, mask.ContentType, mask.Width, mask.Height },
                 ReferenceImages = references,
@@ -358,6 +362,51 @@ public sealed class ProjectImageJobService(
         foreach (var target in DeserializeTargets(job.EntityVisualTargetsJson))
             await entityVisualExamples.AttachAsync(projectId, target.EntityId, asset.Id, target.Label, EntityVisualExampleOrigin.Agent, cancellationToken: cancellationToken);
         return ProjectImageService.ToView(projectId, asset);
+    }
+
+    private static NormalizedProviderImage NormalizeLayoutBoundOutput(
+        string targetGeometryJson,
+        ProjectImageProviderImage image)
+    {
+        if (!HasTargetGeometry(targetGeometryJson))
+            return new(image.Data, image.ContentType, null);
+        using var target = JsonDocument.Parse(targetGeometryJson);
+        if (!target.RootElement.TryGetProperty("widthInches", out var widthValue)
+            || !target.RootElement.TryGetProperty("heightInches", out var heightValue)
+            || widthValue.GetDouble() <= 0
+            || heightValue.GetDouble() <= 0)
+            throw new InvalidDataException("Layout-bound image geometry is missing a valid physical aspect ratio.");
+        using var source = SKBitmap.Decode(image.Data)
+            ?? throw new InvalidDataException("The image provider returned an unreadable raster.");
+        var targetAspect = widthValue.GetDouble() / heightValue.GetDouble();
+        var sourceAspect = (double)source.Width / source.Height;
+        var cropWidth = source.Width;
+        var cropHeight = source.Height;
+        if (sourceAspect > targetAspect)
+            cropWidth = Math.Max(1, (int)Math.Round(source.Height * targetAspect));
+        else
+            cropHeight = Math.Max(1, (int)Math.Round(source.Width / targetAspect));
+        var cropLeft = (source.Width - cropWidth) / 2;
+        var cropTop = (source.Height - cropHeight) / 2;
+        var crop = new SKRectI(cropLeft, cropTop, cropLeft + cropWidth, cropTop + cropHeight);
+        using var normalized = new SKBitmap(crop.Width, crop.Height, SKColorType.Rgba8888, SKAlphaType.Premul);
+        if (!source.ExtractSubset(normalized, crop))
+            throw new InvalidDataException("The generated raster could not be normalized to its layout target.");
+        using var rendered = SKImage.FromBitmap(normalized);
+        using var encoded = rendered.Encode(SKEncodedImageFormat.Png, 100)
+            ?? throw new InvalidDataException("The normalized layout raster could not be encoded.");
+        return new(
+            encoded.ToArray(),
+            "image/png",
+            new
+            {
+                SourceWidth = source.Width,
+                SourceHeight = source.Height,
+                Width = normalized.Width,
+                Height = normalized.Height,
+                TargetAspectRatio = targetAspect,
+                Method = "center-crop-to-layout-aspect",
+            });
     }
 
     public async Task CompleteJobAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
@@ -663,6 +712,22 @@ public sealed class ProjectImageJobService(
             _ => "png",
         };
 
+    private static bool HasTargetGeometry(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.EnumerateObject().Any();
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private static string? NormalizeImageContentType(string contentType) =>
         contentType.Trim().ToLowerInvariant() switch
         {
@@ -879,4 +944,6 @@ public sealed class ProjectImageJobService(
     private sealed record ImagePayload(string ContentType, byte[] Data, int Width, int Height);
 
     private sealed record ImageSize(int Width, int Height);
+
+    private sealed record NormalizedProviderImage(byte[] Data, string ContentType, object? Normalization);
 }

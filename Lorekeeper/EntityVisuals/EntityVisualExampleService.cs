@@ -356,9 +356,11 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
         var idD = imageId.ToString();
         if (await db.EditorContextPreferences.AnyAsync(preference => preference.ProjectId == projectId && (preference.Key.Contains(idN) || preference.Key.Contains(idD)), cancellationToken)) return true;
         if (await db.Chapters.AnyAsync(chapter => chapter.ProjectId == projectId
-            && (chapter.PageLayoutJson.Contains(idN) || chapter.PageLayoutJson.Contains(idD)
-                || chapter.IllustrationLayoutJson.Contains(idN) || chapter.IllustrationLayoutJson.Contains(idD)
-                || chapter.ManuscriptJson.Contains(idN) || chapter.ManuscriptJson.Contains(idD)), cancellationToken)) return true;
+            && (chapter.ManuscriptJson.Contains(idN) || chapter.ManuscriptJson.Contains(idD)), cancellationToken)) return true;
+        if (await db.PageCompositionVariants.AnyAsync(variant => variant.Composition.ProjectId == projectId
+            && (variant.SceneJson.Contains(idN) || variant.SceneJson.Contains(idD)), cancellationToken)) return true;
+        if (await db.PublicationCoverDesigns.AnyAsync(cover => cover.Edition.ProjectId == projectId
+            && (cover.CompositionSceneJson.Contains(idN) || cover.CompositionSceneJson.Contains(idD)), cancellationToken)) return true;
         if (await db.PublicationMatter.AnyAsync(matter => matter.Edition.ProjectId == projectId
             && (matter.ManuscriptJson.Contains(idN) || matter.ManuscriptJson.Contains(idD)), cancellationToken)) return true;
         if (await db.PublicationImagePlacements.AnyAsync(placement =>

@@ -153,29 +153,27 @@ public sealed class PublicationPressMigrationService(
         AppDbContext db,
         CancellationToken cancellationToken)
     {
-        var recovered = await db.PublicationRenderJobs
-            .Where(job => !job.IsLegacy
-                && job.RendererVersion == string.Empty
-                && job.Status == PublicationRenderStatus.Queued
-                && job.ProgressMessage == "Recovered for Lorekeeper Press 1.0")
-            .OrderByDescending(job => job.CreatedAt)
-            .ToListAsync(cancellationToken);
-        foreach (var group in recovered.GroupBy(job => job.EditionId))
-        {
-            var current = group.First();
-            foreach (var outdated in group.Skip(1))
-            {
-                outdated.Status = PublicationRenderStatus.Failed;
-                outdated.IsLegacy = true;
-                outdated.ProgressPercent = 100;
-                outdated.ProgressMessage = "Source changed before Lorekeeper Press recovery";
-                outdated.DiagnosticsJson =
-                    """[{"severity":"error","code":"PRESS_SOURCE_STALE","message":"A newer interrupted render superseded this source during the Lorekeeper Press cutover."}]""";
-                outdated.CompletedAt = DateTime.UtcNow;
-            }
-            current.ProgressMessage = "Recovered for Lorekeeper Press 1.0";
-        }
-        await db.SaveChangesAsync(cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            WITH recovered AS (
+                SELECT Id,
+                       ROW_NUMBER() OVER (PARTITION BY EditionId ORDER BY CreatedAt DESC, Id DESC) AS RecoveryRank
+                FROM PublicationRenderJobs
+                WHERE IsLegacy = 0
+                  AND RendererVersion = ''
+                  AND Status = 'Queued'
+                  AND ProgressMessage = 'Recovered for Lorekeeper Press 1.0'
+            )
+            UPDATE PublicationRenderJobs
+            SET Status = 'Failed',
+                IsLegacy = 1,
+                ProgressPercent = 100,
+                ProgressMessage = 'Source changed before Lorekeeper Press recovery',
+                DiagnosticsJson = '[{{"severity":"error","code":"PRESS_SOURCE_STALE","message":"A newer interrupted render superseded this source during the Lorekeeper Press cutover."}}]',
+                CompletedAt = CURRENT_TIMESTAMP
+            WHERE Id IN (SELECT Id FROM recovered WHERE RecoveryRank > 1);
+            """,
+            cancellationToken);
     }
 
     private async Task AddJournalAsync(

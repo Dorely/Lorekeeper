@@ -251,7 +251,7 @@ try
         }
     }
     $pressDescription = (& $packagedPressExecutable describe --json | ConvertFrom-Json)
-    if ($LASTEXITCODE -ne 0 -or $pressDescription.protocolVersion -ne 3)
+    if ($LASTEXITCODE -ne 0 -or $pressDescription.protocolVersion -ne 4)
     {
         throw 'The packaged Lorekeeper Press executable failed its capability probe.'
     }

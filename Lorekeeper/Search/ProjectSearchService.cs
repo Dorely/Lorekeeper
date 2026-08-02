@@ -5,6 +5,7 @@ using Lorekeeper.Context;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
@@ -19,6 +20,7 @@ public sealed class ProjectSearchService(
     IActRepository acts,
     IGraphNodeRepository nodes,
     IIngestRepository ingest,
+    IChapterSemanticProjectionService semanticProjection,
     ILogger<ProjectSearchService> logger) : IProjectSearchService
 {
     private const int RrfK = 60;
@@ -137,16 +139,19 @@ public sealed class ProjectSearchService(
 
         if (Include(ProjectSearchSourceTypes.Chapter) || Include(ProjectSearchSourceTypes.ContextChapter))
         {
-            foreach (var chapter in await chapters.ListByProjectAsync(projectId, cancellationToken))
+            var projectChapters = await chapters.ListByProjectAsync(projectId, cancellationToken);
+            var expanded = await semanticProjection.ExpandPlainTextAsync(projectChapters, cancellationToken);
+            foreach (var chapter in projectChapters)
             {
-                if (!Matches(chapter.Title, chapter.Synopsis, chapter.PlainText)) continue;
+                var plainText = expanded.GetValueOrDefault(chapter.Id, chapter.PlainText);
+                if (!Matches(chapter.Title, chapter.Synopsis, plainText)) continue;
                 results.Add(new ProjectSearchSource(
                     ProjectSearchSourceTypes.Chapter,
                     chapter.Id,
                     null,
                     chapter.Title,
                     $"Chapter {chapter.Order + 1}",
-                    Preview(!string.IsNullOrWhiteSpace(chapter.Synopsis) ? chapter.Synopsis : chapter.PlainText)));
+                    Preview(!string.IsNullOrWhiteSpace(chapter.Synopsis) ? chapter.Synopsis : plainText)));
             }
         }
 
@@ -342,10 +347,11 @@ public sealed class ProjectSearchService(
     {
         var chapter = await chapters.GetByIdAsync(chapterId, cancellationToken);
         if (chapter is null || chapter.ProjectId != projectId) return (null, null, null);
+        var plainText = await semanticProjection.ExpandPlainTextAsync(chapter, cancellationToken);
         var sb = new StringBuilder();
         sb.Append("# ").AppendLine(chapter.Title);
         AppendOptional(sb, "Synopsis", chapter.Synopsis);
-        AppendOptional(sb, "Body", ChapterFormatting.WithLineNumbers(chapter.PlainText));
+        AppendOptional(sb, "Body", ChapterFormatting.WithLineNumbers(plainText));
         return (chapter.Title, null, sb.ToString().TrimEnd());
     }
 

@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using System.Runtime.ExceptionServices;
-using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
@@ -21,7 +20,6 @@ public sealed class AiChangeApprovalService(
     IChapterService chapters,
     IManuscriptService manuscripts,
     IManuscriptStyleService manuscriptStyles,
-    IChapterVisualService chapterVisuals,
     IEntityService entities,
     IVectorIndexWorkCoordinator indexWork,
     IEntityVisualExampleService entityVisualExamples,
@@ -430,15 +428,13 @@ public sealed class AiChangeApprovalService(
             case "create_chapter":
             {
                 var after = ReadRequired<OutlineChapterChange>(afterJson);
-                var chapter = await chapters.CreateAsync(projectId, after.ActId, after.Title, after.Synopsis, after.Id, cancellationToken);
-                await ApplyChapterVisualAsync(chapter, after.VisualMode, after.PageLayoutKind, cancellationToken);
+                await chapters.CreateAsync(projectId, after.ActId, after.Title, after.Synopsis, after.Id, cancellationToken);
                 break;
             }
             case "update_chapter":
             {
                 var after = ReadRequired<OutlineChapterChange>(afterJson);
-                var chapter = await chapters.UpdateAsync(after.Id, after.Title, after.Synopsis, new ChapterActAssignment(after.ActId), cancellationToken);
-                await ApplyChapterVisualAsync(chapter, after.VisualMode, after.PageLayoutKind, cancellationToken);
+                await chapters.UpdateAsync(after.Id, after.Title, after.Synopsis, new ChapterActAssignment(after.ActId), cancellationToken);
                 break;
             }
             case "apply_manuscript_operations":
@@ -1119,18 +1115,6 @@ public sealed class AiChangeApprovalService(
         if (!Guid.TryParse(guidText, out var result))
             throw new InvalidOperationException($"AI change {change.Id} does not have a Guid resource id.");
         return result;
-    }
-
-    private async Task ApplyChapterVisualAsync(
-        Chapter chapter,
-        ChapterVisualMode visualMode,
-        ChapterPageLayoutKind pageLayoutKind,
-        CancellationToken cancellationToken)
-    {
-        if (chapter.VisualMode == visualMode && chapter.PageLayoutKind == pageLayoutKind)
-            return;
-
-        await chapterVisuals.SetModeAsync(chapter.Id, new ChapterVisualModeUpdate(visualMode, pageLayoutKind), cancellationToken);
     }
 
     private static T ReadRequired<T>(string json) =>

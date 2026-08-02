@@ -41,15 +41,18 @@ public sealed class PublishConversationMigrationTests
                     Name = "Existing book",
                     Slug = $"existing-{projectId:N}",
                 });
-                db.Chapters.Add(new Chapter
-                {
-                    Id = chapterId,
-                    ProjectId = projectId,
-                    Title = "Existing chapter",
-                    ManuscriptJson = manuscriptJson,
-                    ManuscriptRevision = 4,
-                });
                 await db.SaveChangesAsync();
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     INSERT INTO Chapters (
+                         Id, ProjectId, ActId, Title, Synopsis, "Order", VisualMode,
+                         IllustrationLayoutJson, PageLayoutJson, PageLayoutKind,
+                         ManuscriptJson, ManuscriptRevision, VectorIndexState, VectorIndexError,
+                         VectorIndexedAt, CreatedAt, UpdatedAt)
+                     VALUES ({chapterId}, {projectId}, NULL, 'Existing chapter', '', 0, 'Prose',
+                         '', '', 'SinglePortrait', {manuscriptJson}, 4, 'Stale', NULL, NULL,
+                         {DateTime.UtcNow}, {DateTime.UtcNow});
+                     """);
                 await db.Database.ExecuteSqlInterpolatedAsync(
                     $"""
                      INSERT INTO PublicationEditions (

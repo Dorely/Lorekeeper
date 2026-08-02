@@ -2,6 +2,7 @@ using System.Text;
 using Lorekeeper.Chapters;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
@@ -18,6 +19,7 @@ public sealed class ContextRecommendationService(
     IConfiguration configuration,
     IEmbeddingService embeddings,
     IVectorStore vectors,
+    IChapterSemanticProjectionService semanticProjection,
     ILogger<ContextRecommendationService> logger) : IContextRecommendationService
 {
     private const int RecommendationLimit = 50;
@@ -144,7 +146,7 @@ public sealed class ContextRecommendationService(
         var sb = new StringBuilder();
         sb.Append("Current chapter: ").AppendLine(chapter.Title);
         AppendOptional(sb, "Synopsis", chapter.Synopsis);
-        AppendOptional(sb, "Body", Truncate(chapter.PlainText, SemanticQueryBodyChars));
+        AppendOptional(sb, "Body", Truncate(await semanticProjection.ExpandPlainTextAsync(chapter, cancellationToken), SemanticQueryBodyChars));
 
         foreach (var entityId in includedEntityIds.Take(12))
         {
@@ -217,13 +219,16 @@ public sealed class ContextRecommendationService(
             if (!includedKeys.Contains(recommendation.Key)) AddOrMerge(results, recommendation, searchRank);
         }
 
-        foreach (var chapter in await chapters.ListAsync(projectId, cancellationToken))
+        var projectChapters = await chapters.ListAsync(projectId, cancellationToken);
+        var expanded = await semanticProjection.ExpandPlainTextAsync(projectChapters, cancellationToken);
+        foreach (var chapter in projectChapters)
         {
             if (chapter.Id == currentChapterId) continue;
-            var searchRank = SearchRank(chapter, query);
+            var plainText = expanded.GetValueOrDefault(chapter.Id, chapter.PlainText);
+            var searchRank = SearchRank(chapter, plainText, query);
             if (searchRank is null) continue;
 
-            var recommendation = ProjectChapter(chapter, ["Matched manual search"], isSearchResult: true);
+            var recommendation = ProjectChapter(chapter, plainText, ["Matched manual search"], isSearchResult: true);
             if (!includedKeys.Contains(recommendation.Key)) AddOrMerge(results, recommendation, searchRank.Value);
         }
 
@@ -304,7 +309,12 @@ public sealed class ContextRecommendationService(
         var chapter = await chapters.GetAsync(chapterId, cancellationToken);
         return chapter is null || chapter.ProjectId != projectId
             ? null
-            : ProjectChapter(chapter, [reason], isSearchResult, distance);
+            : ProjectChapter(
+                chapter,
+                await semanticProjection.ExpandPlainTextAsync(chapter, cancellationToken),
+                [reason],
+                isSearchResult,
+                distance);
     }
 
     private async Task<ContextRecommendation?> BuildActRecommendationAsync(
@@ -366,13 +376,13 @@ public sealed class ContextRecommendationService(
             isSearchResult,
             distance);
 
-    private static ContextRecommendation ProjectChapter(Chapter chapter, IReadOnlyList<string> reasons, bool isSearchResult, double? distance = null) =>
+    private static ContextRecommendation ProjectChapter(Chapter chapter, string plainText, IReadOnlyList<string> reasons, bool isSearchResult, double? distance = null) =>
         new(
             EditorContextKeys.ChapterReference(chapter.Id),
             ContextItemKind.ChapterReference,
             "Chapter",
             chapter.Title,
-            Preview(!string.IsNullOrWhiteSpace(chapter.Synopsis) ? chapter.Synopsis : chapter.PlainText),
+            Preview(!string.IsNullOrWhiteSpace(chapter.Synopsis) ? chapter.Synopsis : plainText),
             reasons,
             isSearchResult,
             distance);
@@ -456,7 +466,7 @@ public sealed class ContextRecommendationService(
             : null;
     }
 
-    private static int? SearchRank(Chapter chapter, string query)
+    private static int? SearchRank(Chapter chapter, string plainText, string query)
     {
         var titleRank = BestTitleSearchRank(
             query,
@@ -465,7 +475,7 @@ public sealed class ContextRecommendationService(
             $"Chapter {chapter.Order + 1} {chapter.Title}");
         if (titleRank is not null) return titleRank.Value;
 
-        return Contains(chapter.Synopsis, query) || Contains(chapter.PlainText, query)
+        return Contains(chapter.Synopsis, query) || Contains(plainText, query)
             ? DetailSearchRank
             : null;
     }

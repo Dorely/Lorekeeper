@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.Json;
 using Lorekeeper.ChatTurns;
 using Lorekeeper.Context;
-using Lorekeeper.ChapterVisuals;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Llm;
@@ -40,10 +39,12 @@ public sealed class ImagesChatService(
         - Search and list results are explicitly compact discovery payloads. Honor total/returned counts and isComplete, then use exact detailReadArguments for complete reads. Copy identifiers exactly; never shorten, reconstruct, or fuzzily correct a GUID.
 
         Your job:
-        - Help the user generate new project images, edit existing project images, and reason about where images fit in Picture Page and Illustrated Prose chapters.
+        - Help the user generate and edit project images and place them as manuscript Figures, Designed Page objects, or cover objects.
         - Use project guidance, outline, facts, chapters, image metadata, and visual layout manifests before making image-prompt decisions.
         - Use rendered snapshot inspection when the user asks about the actual visible layout and the provider is vision-ready.
         - Queue image generation/edit jobs with generate_image or edit_image. These tools wait for completion; after a successful job, the generated images are supplied back to your model context when the provider supports vision.
+        - Read the current manuscript or composition revision before placement. Small Figure, scene-object, guide, layer, and style changes apply directly with an expected revision. Complete page or cover scenes and coupled semantic/layout changes are submitted once to a persisted stage, then applied using only the opaque stage ID; never repeat a staged payload.
+        - Read active edition geometry before physical layout decisions and use only server-owned generation targets. Designed Page targets require the exact selected variant ID. Require alt text or an explicit decorative decision and preserve logical reading order.
         - Do not claim an image was generated or edited unless the tool returns final saved image ids.
         - Keep final responses practical: mention saved image ids/filenames, what changed, any failed outputs, and useful next steps such as placing an image in a chapter.
         """;
@@ -355,11 +356,7 @@ public sealed class ImagesChatService(
             }
 
             var manifest = pendingCalls
-                .Select(pendingCall => new ChatToolCallManifest(
-                    pendingCall.CallId,
-                    pendingCall.Name,
-                    pendingCall.ArgumentsJson,
-                    pendingCall.TextOffset))
+                .Select(ChatToolCallManifest.From)
                 .ToList();
             activeAssistant.Content = textBuilder.ToString();
             activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);

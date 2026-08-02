@@ -3,12 +3,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using Lorekeeper.Composition;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using SkiaSharp;
 
 namespace Lorekeeper.Publish;
 
@@ -66,7 +66,9 @@ public sealed record PublicationPageMovement(Guid ChapterId, Guid BlockId, int F
 
 public interface IPublicationRenderService
 {
-    PublicationPressRuntimeReadiness GetRuntimeReadiness(PublicationVendor? vendor = null);
+    PublicationPressRuntimeReadiness GetRuntimeReadiness(
+        PublicationEditionFormat? format = null,
+        PublicationVendor? vendor = null);
     PublicationPressDescription GetRuntimeDescription();
     Task<PublicationRenderJobView> RequestAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
     Task<PublicationRenderJobView> CancelAsync(Guid projectId, Guid editionId, Guid jobId, CancellationToken cancellationToken = default);
@@ -141,12 +143,14 @@ public sealed class PublicationRenderService(
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public PublicationPressRuntimeReadiness GetRuntimeReadiness(PublicationVendor? vendor = null)
+    public PublicationPressRuntimeReadiness GetRuntimeReadiness(
+        PublicationEditionFormat? format = null,
+        PublicationVendor? vendor = null)
     {
         var readiness = pressRuntime.GetReadiness();
-        if (!readiness.IsReady || vendor is null)
+        if (!readiness.IsReady || format is null || vendor is null)
             return readiness;
-        var profile = PublicationRenderProcessor.ProfileFor(vendor.Value);
+        var profile = PublicationRenderProcessor.ProfileFor(format.Value, vendor.Value);
         return pressRuntime.GetDescription().Profiles.Contains(profile, StringComparer.Ordinal)
             ? readiness
             : new(false, $"Lorekeeper Press does not advertise the required profile '{profile}'.");
@@ -165,9 +169,9 @@ public sealed class PublicationRenderService(
             cancellationToken) ?? throw new KeyNotFoundException("Publication edition not found.");
         if (edition.Status != PublicationEditionStatus.Draft)
             throw new InvalidOperationException("Archived editions cannot be rendered.");
-        if (edition.Format != PublicationEditionFormat.Paperback)
-            throw new InvalidOperationException("PDF rendering is available only for paperback editions.");
-        var runtimeReadiness = GetRuntimeReadiness(edition.Vendor);
+        if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.DigitalPdf))
+            throw new InvalidOperationException("PDF rendering is available for paperback and Digital PDF editions.");
+        var runtimeReadiness = GetRuntimeReadiness(edition.Format, edition.Vendor);
         if (!runtimeReadiness.IsReady)
             throw new InvalidOperationException(runtimeReadiness.Message);
         var active = await db.PublicationRenderJobs.AnyAsync(
@@ -181,7 +185,8 @@ public sealed class PublicationRenderService(
         {
             EditionId = editionId,
             SourceFingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken),
-            ProfileId = PublicationRenderProcessor.ProfileFor(edition.Vendor),
+            PaginationFingerprint = await editions.GetPaginationFingerprintAsync(projectId, editionId, cancellationToken),
+            ProfileId = PublicationRenderProcessor.ProfileFor(edition.Format, edition.Vendor),
             RendererVersion = pressRuntime.GetDescription().RendererVersion,
         };
         db.PublicationRenderJobs.Add(job);
@@ -281,14 +286,18 @@ public sealed class PublicationRenderService(
                 rightMap[key].PageNumber))
             .OrderBy(movement => movement.FromPage)
             .ToList();
-        var leftPages = left.Artifacts.FirstOrDefault(a => a.Kind == PublicationArtifactKind.InteriorPdf)?.PageCount;
-        var rightPages = right.Artifacts.FirstOrDefault(a => a.Kind == PublicationArtifactKind.InteriorPdf)?.PageCount;
+        var leftPages = PrimaryBookArtifact(left.Artifacts)?.PageCount;
+        var rightPages = PrimaryBookArtifact(right.Artifacts)?.PageCount;
         var delta = (rightPages ?? 0) - (leftPages ?? 0);
         var explanation = left.SourceFingerprint == right.SourceFingerprint
             ? $"The same source produced a {delta:+#;-#;0}-page difference; inspect renderer/profile versions."
-            : $"Content or edition settings changed, moving {movements.Count} mapped blocks and changing the interior by {delta:+#;-#;0} pages.";
+            : $"Content or edition settings changed, moving {movements.Count} mapped blocks and changing the publication by {delta:+#;-#;0} pages.";
         return new(leftJobId, rightJobId, leftPages, rightPages, delta, movements.Count, movements, explanation);
     }
+
+    private static PublicationArtifactView? PrimaryBookArtifact(IReadOnlyList<PublicationArtifactView> artifacts) =>
+        artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.BookPdf)
+        ?? artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf);
 
     public async Task<PublicationArtifact?> GetArtifactAsync(
         Guid projectId,
@@ -549,7 +558,10 @@ public sealed class PublicationRenderProcessor(
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public static string ProfileFor(PublicationVendor vendor) => vendor == PublicationVendor.IngramSpark
+    public static string ProfileFor(PublicationEditionFormat format, PublicationVendor vendor) =>
+        format == PublicationEditionFormat.DigitalPdf
+            ? "generic-digital-pdf-v1"
+            : vendor == PublicationVendor.IngramSpark
         ? "ingram-paperback-pdfx1a-v1"
         : vendor == PublicationVendor.AmazonKdp
             ? "kdp-paperback-v1"
@@ -602,14 +614,14 @@ public sealed class PublicationRenderProcessor(
         if (coverDesign.Diagnostics.Any(diagnostic => diagnostic.Contains("requires", StringComparison.OrdinalIgnoreCase)
             || diagnostic.Contains("must contain", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException(string.Join(" ", coverDesign.Diagnostics));
-        var request = BuildRequest(job, document, coverDesign);
+        var request = await BuildRequestAsync(job, document, coverDesign, cancellationToken);
         job.ProgressPercent = 30;
         job.ProgressMessage = "Typesetting interior and cover";
         await db.SaveChangesAsync(cancellationToken);
 
         Cleanup(job.Id);
         var result = await InvokeAsync(job.Id, request, cancellationToken);
-        if (result.ProtocolVersion != 3
+        if (result.ProtocolVersion != 4
             || !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a mismatched protocol or job identity.");
         if (!string.Equals(result.RendererVersion, job.RendererVersion, StringComparison.Ordinal))
@@ -628,13 +640,18 @@ public sealed class PublicationRenderProcessor(
         var resultArtifacts = result.Artifacts
             ?? throw new InvalidOperationException("The press renderer omitted its artifact list.");
         var resultKinds = resultArtifacts.Select(artifact => artifact.Kind).Order().ToArray();
-        if (!resultKinds.SequenceEqual(new[] { "cover-pdf", "interior-pdf" }, StringComparer.Ordinal))
-            throw new InvalidOperationException("The press renderer must return exactly one interior and one cover PDF.");
-        var interiorResult = resultArtifacts.Single(artifact => artifact.Kind == "interior-pdf");
-        var coverResult = resultArtifacts.Single(artifact => artifact.Kind == "cover-pdf");
+        var expectedKinds = job.Edition.Format == PublicationEditionFormat.DigitalPdf
+            ? new[] { "book-pdf" }
+            : new[] { "cover-pdf", "interior-pdf" };
+        if (!resultKinds.SequenceEqual(expectedKinds, StringComparer.Ordinal))
+            throw new InvalidOperationException(job.Edition.Format == PublicationEditionFormat.DigitalPdf
+                ? "The press renderer must return exactly one Digital PDF book artifact."
+                : "The press renderer must return exactly one interior and one cover PDF.");
+        var interiorResult = resultArtifacts.Single(artifact => artifact.Kind is "interior-pdf" or "book-pdf");
         if (interiorResult.PageCount is not > 0 or > 100_000)
             throw new InvalidOperationException("The renderer returned an invalid interior page count.");
-        if (coverResult.PageCount != 1)
+        if (job.Edition.Format != PublicationEditionFormat.DigitalPdf
+            && resultArtifacts.Single(artifact => artifact.Kind == "cover-pdf").PageCount != 1)
             throw new InvalidOperationException("The renderer must return a one-page full-wrap cover.");
         job.ProgressPercent = 80;
         job.ProgressMessage = "Verifying immutable artifacts";
@@ -676,6 +693,7 @@ public sealed class PublicationRenderProcessor(
                 ByteLength = data.LongLength,
                 PageCount = resultArtifact.PageCount,
                 SourceFingerprint = job.SourceFingerprint,
+                PaginationFingerprint = job.PaginationFingerprint,
                 RendererVersion = job.RendererVersion,
                 ProfileId = job.ProfileId,
             });
@@ -718,6 +736,7 @@ public sealed class PublicationRenderProcessor(
 
     private static bool IsSupportedProfile(string profile) => profile is
         "generic-paperback-v1" or
+        "generic-digital-pdf-v1" or
         "kdp-paperback-v1" or
         "ingram-paperback-pdfx1a-v1";
 
@@ -750,19 +769,43 @@ public sealed class PublicationRenderProcessor(
         return true;
     }
 
-    private PressPreparedRequest BuildRequest(
+    private async Task<PressPreparedRequest> BuildRequestAsync(
         PublicationRenderJob job,
         PublishDocument document,
-        PublicationCoverDesignView coverDesign)
+        PublicationCoverDesignView coverDesign,
+        CancellationToken cancellationToken)
     {
         var assets = document.Assets
-            .Concat(document.Sections
-                .SelectMany(section => section.Chapters)
-                .Select(chapter => chapter.RenderedPicturePage?.Surface)
-                .OfType<PublishAssetDocument>())
             .GroupBy(asset => asset.Id)
-            .Select(group => NormalizeAsset(group.First()))
+            .Select(group => StageAsset(group.First()))
             .ToArray();
+        var coverScene = JsonSerializer.Deserialize<CompositionScene>(
+            coverDesign.CompositionSceneJson,
+            ManuscriptCodec.JsonOptions);
+        var usedFontKeys = document.NamedStyles
+            .Select(style => style.Definition.FontFamilyKey)
+            .Concat(document.Sections.SelectMany(section => section.Chapters)
+                .SelectMany(chapter => chapter.PageCompositions)
+                .SelectMany(composition => composition.Variants)
+                .SelectMany(variant => variant.Scene.Objects.Select(item => item.FontFamilyKey)
+                    .Concat(variant.Scene.Styles.Select(style => style.FontFamilyKey))))
+            .Concat(coverScene?.Objects.Select(item => item.FontFamilyKey) ?? [])
+            .Concat(coverScene?.Styles.Select(style => style.FontFamilyKey) ?? [])
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Select(key => key!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var stagedFonts = document.Fonts
+            .Where(font => usedFontKeys.Contains(font.FamilyKey))
+            .OrderBy(font => font.FamilyKey, StringComparer.Ordinal)
+            .ThenBy(font => font.Weight)
+            .ThenBy(font => font.Italic)
+            .ThenBy(font => font.FaceId)
+            .Select(StageFont)
+            .ToArray();
+        var stagedFamilyKeys = stagedFonts.Select(font => font.FamilyKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingFontKeys = usedFontKeys.Where(key => !stagedFamilyKeys.Contains(key)).Order().ToArray();
+        if (missingFontKeys.Length > 0)
+            throw new InvalidOperationException($"Publication styles reference unavailable project fonts: {string.Join(", ", missingFontKeys)}.");
         var sections = document.Sections.Select(section => new
         {
             id = section.ActId,
@@ -776,36 +819,23 @@ public sealed class PublicationRenderProcessor(
                 title = string.IsNullOrWhiteSpace(chapter.Title) ? "Untitled chapter" : chapter.Title,
                 synopsis = document.Profile.IncludeChapterSynopses ? chapter.Synopsis : string.Empty,
                 chapter.IncludeHeading,
-                visualMode = chapter.VisualMode.ToString(),
-                pageLayoutKind = chapter.PageLayoutKind.ToString(),
-                illustrations = chapter.IllustrationLayout.Images
-                    .OrderBy(image => image.SortOrder)
-                    .Select(image => new
-                    {
-                        assetId = image.ImageId,
-                        anchorBlockId = image.BlockId,
-                        anchorPosition = image.AnchorPosition.ToString(),
-                        image.Caption,
-                        image.WidthPercent,
-                        alignment = image.Alignment.ToString(),
-                        focalXPercent = 50,
-                        focalYPercent = 50,
-                        image.StartOnNewPage,
-                    }).ToArray(),
-                picturePage = chapter.RenderedPicturePage is not { } picturePage
-                    ? null
-                    : new
-                    {
-                        assetId = picturePage.Surface.Id,
-                        picturePage.PhysicalPageWidthPixels,
-                        picturePage.PhysicalPageHeightPixels,
-                        picturePage.LeafCount,
-                        picturePage.SurfaceWidthPixels,
-                        picturePage.SurfaceHeightPixels,
-                        rotation = picturePage.Rotation.ToString(),
-                        picturePage.AccessibleText,
-                    },
                 blocks = chapter.Manuscript.Content.Select(BlockPayload).ToArray(),
+                pageCompositions = chapter.PageCompositions.Select(composition => new
+                {
+                    id = composition.Id,
+                    composition.Name,
+                    revision = composition.Revision,
+                    semanticBlocks = composition.SemanticManuscript.Content.Select(BlockPayload).ToArray(),
+                    variants = composition.Variants.Select(variant => new
+                    {
+                        id = variant.Id,
+                        variant.GeometryKey,
+                        variant.Revision,
+                        scene = CompositionService.WithDerivedTextSemanticRoles(
+                            variant.Scene,
+                            composition.SemanticManuscript),
+                    }).ToArray(),
+                }).ToArray(),
             }).ToArray(),
         }).ToArray();
         var matter = document.Matter
@@ -823,12 +853,22 @@ public sealed class PublicationRenderProcessor(
             .ToArray();
         if (sections.Sum(section => section.chapters.Length) == 0)
             throw new InvalidOperationException("Include at least one non-empty chapter before rendering.");
+        var missingVariants = sections.SelectMany(section => section.chapters)
+            .SelectMany(chapter => chapter.pageCompositions)
+            .Where(composition => composition.variants.Length != 1)
+            .Select(composition => composition.Name)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (missingVariants.Count > 0)
+            throw new InvalidOperationException($"Create and review an exact layout variant for this edition geometry: {string.Join(", ", missingVariants)}.");
         var payload = new
         {
-            protocolVersion = 3,
+            protocolVersion = 4,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
-            ink = job.Edition.Ink.ToString(),
+            ink = job.Edition.Ink == PublicationInk.Digital
+                ? PublicationInk.Color.ToString()
+                : job.Edition.Ink.ToString(),
             document = new
             {
                 title = string.IsNullOrWhiteSpace(document.DisplayTitle) ? document.ProjectName : document.DisplayTitle,
@@ -844,7 +884,6 @@ public sealed class PublicationRenderProcessor(
                 includeChapterHeadings = document.Profile.IncludeChapterHeadings,
                 numberActs = document.Profile.NumberActs,
                 numberChapters = document.Profile.NumberChapters,
-                printPicturePageSpreadMode = document.Profile.PrintPicturePageSpreadMode.ToString(),
                 sections,
                 styles = document.NamedStyles.Select(style => new
                 {
@@ -863,8 +902,15 @@ public sealed class PublicationRenderProcessor(
                         placement.TargetId,
                         placementKind = placement.PlacementKind.ToString(),
                         placement.Caption,
+                        presentation = placement.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage },
+                        placement.AltText,
+                        placement.Decorative,
+                        placement.Language,
+                        accessibilityRole = placement.AccessibilityRole.ToString(),
                         placement.SortOrder,
                     }).ToArray(),
+                outputMode = job.Edition.Format == PublicationEditionFormat.DigitalPdf ? "DigitalPdf" : "Print",
+                allowDesignedPageOverrides = job.Edition.AllowDesignedPageOverrides,
             },
             trim = new
             {
@@ -873,6 +919,7 @@ public sealed class PublicationRenderProcessor(
                 marginInches = document.Profile.PageMarginInches,
                 bodyFontSizePoints = document.Profile.BodyFontSizePoints,
                 bodyLineHeight = document.Profile.BodyLineHeight,
+                bleedInches = job.Edition.Bleed && job.Edition.Format == PublicationEditionFormat.Paperback ? 0.125 : 0,
                 mirrorMargins = true,
                 rectoChapterStarts = true,
                 minimumWidowLines = 2,
@@ -893,50 +940,109 @@ public sealed class PublicationRenderProcessor(
                 assetId = document.CoverAsset?.Id,
                 imageFocalXPercent = coverDesign.ImageFocalXPercent,
                 imageFocalYPercent = coverDesign.ImageFocalYPercent,
+                scene = coverScene,
             },
             assets = assets.Select(asset => new
             {
                 id = asset.Id,
                 asset.RelativePath,
-                mediaType = "image/png",
+                mediaType = asset.ContentType,
                 byteLength = asset.Data.LongLength,
                 asset.Sha256,
                 asset.WidthPixels,
                 asset.HeightPixels,
                 asset.AltText,
             }).ToArray(),
+            fonts = stagedFonts.Select(font => new
+            {
+                font.Id,
+                font.FamilyKey,
+                font.Weight,
+                font.Italic,
+                font.RelativePath,
+                font.MediaType,
+                byteLength = font.Data.LongLength,
+                font.Sha256,
+                embeddingRightsConfirmed = true,
+            }).ToArray(),
         };
-        return new PressPreparedRequest(payload, assets);
+        return new PressPreparedRequest(payload, assets, stagedFonts);
     }
 
-    internal static PressStagedAsset NormalizeAsset(PublishAssetDocument asset)
+    private static PressStagedFont StageFont(PublishFontDocument face)
+    {
+        _ = Lorekeeper.Fonts.ProjectFontBinary.Normalize(face.Data, face.FileName);
+        var extension = face.ContentType == "font/otf" ? ".otf" : ".ttf";
+        return new PressStagedFont(
+            face.FaceId.ToString("N"),
+            face.FamilyKey,
+            face.Weight,
+            face.Italic,
+            $"fonts/{face.FaceId:N}{extension}",
+            face.ContentType,
+            face.Data,
+            Convert.ToHexStringLower(SHA256.HashData(face.Data)));
+    }
+
+    internal static PressStagedAsset StageAsset(PublishAssetDocument asset)
     {
         if (asset.Data.Length is 0 or > 20_000_000)
             throw new InvalidOperationException($"Publication image '{asset.FileName}' must be non-empty and no larger than 20 MB.");
-
-        using var bitmap = SKBitmap.Decode(asset.Data)
-            ?? throw new InvalidOperationException($"Publication image '{asset.FileName}' is not a supported raster image.");
-        if (bitmap.Width <= 0
-            || bitmap.Height <= 0
-            || (long)bitmap.Width * bitmap.Height > 16_000_000)
+        var contentType = asset.ContentType.Trim().ToLowerInvariant() switch
+        {
+            "image/png" => "image/png",
+            "image/jpeg" or "image/jpg" => "image/jpeg",
+            _ => throw new InvalidOperationException($"Publication image '{asset.FileName}' must be PNG or JPEG."),
+        };
+        var (width, height) = ReadRasterDimensions(asset.Data, contentType);
+        if (width <= 0 || height <= 0 || (long)width * height > 16_000_000)
         {
             throw new InvalidOperationException($"Publication image '{asset.FileName}' dimensions exceed the renderer limit.");
         }
-
-        using var image = SKImage.FromBitmap(bitmap);
-        using var encoded = image.Encode(SKEncodedImageFormat.Png, 100)
-            ?? throw new InvalidOperationException($"Publication image '{asset.FileName}' could not be normalized for rendering.");
-        var png = encoded.ToArray();
-        if (png.Length > 20_000_000)
-            throw new InvalidOperationException($"Publication image '{asset.FileName}' is larger than 20 MB after PNG normalization.");
         return new PressStagedAsset(
             asset.Id,
-            $"assets/{asset.Id:N}.png",
-            png,
-            Convert.ToHexStringLower(SHA256.HashData(png)),
-            bitmap.Width,
-            bitmap.Height,
+            $"assets/{asset.Id:N}{(contentType == "image/jpeg" ? ".jpg" : ".png")}",
+            contentType,
+            asset.Data,
+            Convert.ToHexStringLower(SHA256.HashData(asset.Data)),
+            width,
+            height,
             asset.AltText);
+    }
+
+    private static (int Width, int Height) ReadRasterDimensions(byte[] data, string contentType)
+    {
+        if (contentType == "image/png"
+            && data.Length >= 24
+            && data.AsSpan(0, 8).SequenceEqual("\x89PNG\r\n\x1a\n"u8))
+        {
+            return (
+                System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(16, 4)),
+                System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(20, 4)));
+        }
+        if (contentType == "image/jpeg" && data.Length >= 4 && data[0] == 0xff && data[1] == 0xd8)
+        {
+            var offset = 2;
+            while (offset + 9 < data.Length)
+            {
+                if (data[offset++] != 0xff) continue;
+                while (offset < data.Length && data[offset] == 0xff) offset++;
+                if (offset >= data.Length) break;
+                var marker = data[offset++];
+                if (marker is 0xd8 or 0xd9) continue;
+                if (offset + 2 > data.Length) break;
+                var segmentLength = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(offset, 2));
+                if (segmentLength < 2 || offset + segmentLength > data.Length) break;
+                if (marker is >= 0xc0 and <= 0xc3 or >= 0xc5 and <= 0xc7 or >= 0xc9 and <= 0xcb or >= 0xcd and <= 0xcf)
+                {
+                    return (
+                        System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(offset + 5, 2)),
+                        System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(offset + 3, 2)));
+                }
+                offset += segmentLength;
+            }
+        }
+        throw new InvalidOperationException("Publication image headers are invalid or unsupported.");
     }
 
     private async Task<PressResponse> InvokeAsync(
@@ -953,6 +1059,14 @@ public sealed class PublicationRenderProcessor(
             if (!IsContainedBy(inputRoot, path))
                 throw new InvalidOperationException("A staged Press asset escaped the bounded input directory.");
             await File.WriteAllBytesAsync(path, asset.Data, cancellationToken);
+        }
+        Directory.CreateDirectory(Path.Combine(inputRoot, "fonts"));
+        foreach (var font in request.Fonts)
+        {
+            var path = Path.GetFullPath(Path.Combine(inputRoot, font.RelativePath));
+            if (!IsContainedBy(inputRoot, path))
+                throw new InvalidOperationException("A staged Press font escaped the bounded input directory.");
+            await File.WriteAllBytesAsync(path, font.Data, cancellationToken);
         }
         await File.WriteAllBytesAsync(
             Path.Combine(inputRoot, "request.json"),
@@ -1022,6 +1136,12 @@ public sealed class PublicationRenderProcessor(
         block.HeadingLevel,
         assetId = block.ImageId,
         caption = string.Concat(block.Content.Select(inline => inline.Text)),
+        block.Decorative,
+        block.AltText,
+        language = block.Language,
+        accessibilityRole = block.AccessibilityRole.ToString(),
+        presentation = block.FigurePresentation,
+        pageCompositionId = block.PageCompositionId,
         content = block.Content.Select(inline => new
         {
             type = inline.Type.ToString(),
@@ -1038,6 +1158,7 @@ public sealed class PublicationRenderProcessor(
     {
         "interior-pdf" => PublicationArtifactKind.InteriorPdf,
         "cover-pdf" => PublicationArtifactKind.CoverPdf,
+        "book-pdf" => PublicationArtifactKind.BookPdf,
         _ => throw new InvalidOperationException($"Unsupported renderer artifact kind '{kind}'."),
     };
 
@@ -1102,11 +1223,25 @@ public sealed class PublicationRenderProcessor(
     internal sealed record PressStagedAsset(
         Guid Id,
         string RelativePath,
+        string ContentType,
         byte[] Data,
         string Sha256,
         int WidthPixels,
         int HeightPixels,
         string AltText);
 
-    private sealed record PressPreparedRequest(object Payload, IReadOnlyList<PressStagedAsset> Assets);
+    private sealed record PressStagedFont(
+        string Id,
+        string FamilyKey,
+        int Weight,
+        bool Italic,
+        string RelativePath,
+        string MediaType,
+        byte[] Data,
+        string Sha256);
+
+    private sealed record PressPreparedRequest(
+        object Payload,
+        IReadOnlyList<PressStagedAsset> Assets,
+        IReadOnlyList<PressStagedFont> Fonts);
 }

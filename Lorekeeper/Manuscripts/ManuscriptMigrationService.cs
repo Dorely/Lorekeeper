@@ -37,6 +37,7 @@ public sealed class ManuscriptMigrationService(
 {
     public const string MigrationName = "structured-manuscript-v1";
     public const string SchemaV2MigrationName = "semantic-manuscript-v2";
+    public const string SchemaV3MigrationName = "semantic-manuscript-v3";
     public const string SchemaV2EfMigrationId = "20260730180725_SemanticManuscriptV2";
     private const int MaxAutomaticBackups = 5;
     private readonly string _connectionString = SqliteConnectionSettings.BuildConnectionString(configuration);
@@ -99,9 +100,9 @@ public sealed class ManuscriptMigrationService(
 
             if (await ContainsSchemaV1ManuscriptsAsync(cancellationToken))
             {
-                activeMigrationName = SchemaV2MigrationName;
+                activeMigrationName = SchemaV3MigrationName;
                 activeSourceVersion = 1;
-                activeTargetVersion = 2;
+                activeTargetVersion = ManuscriptDocument.CurrentSchemaVersion;
                 await UpgradeSchemaV1Async(backupPath ?? string.Empty, cancellationToken);
             }
 
@@ -832,8 +833,31 @@ public sealed class ManuscriptMigrationService(
             legacy.Images,
             legacy.TextElements.Select(element => element.ToCurrent()).ToList());
         return JsonSerializer.Serialize(
-            ChapterVisuals.ChapterTextLayoutSynchronizer.AttachReferences(current, manuscript),
+            AttachLegacyPageReferences(current, manuscript),
             ManuscriptCodec.JsonOptions);
+    }
+
+    private static PicturePageLayout AttachLegacyPageReferences(
+        PicturePageLayout layout,
+        ManuscriptDocument manuscript)
+    {
+        var blockCursor = 0;
+        var mapped = new List<PicturePageTextElement>(layout.TextElements.Count);
+        foreach (var element in layout.TextElements.OrderBy(element => element.ReadingOrder))
+        {
+            var blockCount = string.IsNullOrWhiteSpace(ManuscriptCodec.NormalizePlainText(element.Text))
+                ? 0
+                : ManuscriptCodec.FromPlainText(Guid.Empty, element.Text).Content.Count;
+            var references = manuscript.Content.Skip(blockCursor).Take(blockCount)
+                .Select(block => new ManuscriptRangeReference(block.Id)).ToList();
+            if (references.Count != blockCount)
+                throw new InvalidDataException($"Designed page text element {element.Id:N} could not be mapped to manuscript blocks.");
+            blockCursor += blockCount;
+            mapped.Add(element with { ContentReferences = references });
+        }
+        if (blockCursor != manuscript.Content.Count)
+            throw new InvalidDataException("Designed page text references do not cover the full manuscript.");
+        return layout with { TextElements = mapped };
     }
 
     internal static string MigrateLegacyIllustrations(
@@ -894,27 +918,27 @@ public sealed class ManuscriptMigrationService(
                     SELECT 1 FROM Chapters
                     WHERE CASE WHEN json_valid(ManuscriptJson) = 1
                         THEN COALESCE(json_extract(ManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2)
+                        ELSE 0 END NOT IN (1, 2, 3)
                        OR lower(COALESCE(json_extract(ManuscriptJson, '$.manuscriptId'), '')) != lower(Id)
                        OR COALESCE(json_extract(ManuscriptJson, '$.revision'), -1) != ManuscriptRevision)
                 OR EXISTS (
                     SELECT 1 FROM ContestBatches
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                             THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                            ELSE 0 END NOT IN (1, 2)
+                            ELSE 0 END NOT IN (1, 2, 3)
                        OR CASE WHEN json_valid(AcceptedManuscriptJson) = 1
                             THEN COALESCE(json_extract(AcceptedManuscriptJson, '$.schemaVersion'), 0)
-                            ELSE 0 END NOT IN (1, 2))
+                            ELSE 0 END NOT IN (1, 2, 3))
                 OR EXISTS (
                     SELECT 1 FROM ContestCandidates
                     WHERE CASE WHEN json_valid(ProposedManuscriptJson) = 1
                         THEN COALESCE(json_extract(ProposedManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2))
+                        ELSE 0 END NOT IN (1, 2, 3))
                 OR EXISTS (
                     SELECT 1 FROM EditorRevisionSessions
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                         THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2))
+                        ELSE 0 END NOT IN (1, 2, 3))
             THEN 1 ELSE 0 END;
             """;
         if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1)
@@ -984,11 +1008,11 @@ public sealed class ManuscriptMigrationService(
                     RevisionSessionCount, SourceHash, TargetHash, ValidationReportJson,
                     ErrorDetail, StartedAt, CompletedAt)
                 VALUES (
-                    $id, $name, 1, 2, 'Transform', 'Running',
+                    $id, $name, 1, 3, 'Transform', 'Running',
                     $backup, 0, 0, 0, 0, '', '', '{}', NULL, $startedAt, NULL);
                 """;
             insertJournal.Parameters.AddWithValue("$id", journalId.ToString());
-            insertJournal.Parameters.AddWithValue("$name", SchemaV2MigrationName);
+            insertJournal.Parameters.AddWithValue("$name", SchemaV3MigrationName);
             insertJournal.Parameters.AddWithValue("$backup", backupPath);
             insertJournal.Parameters.AddWithValue("$startedAt", startedAt);
             if (await insertJournal.ExecuteNonQueryAsync(cancellationToken) != 1)

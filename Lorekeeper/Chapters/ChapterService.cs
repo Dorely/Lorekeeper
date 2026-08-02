@@ -1,7 +1,6 @@
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Context;
-using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Graph;
 using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
@@ -26,6 +25,7 @@ public class ChapterService(
     IVectorIndexWorkCoordinator indexWork,
     AppDbContext db,
     IManuscriptStyleService manuscriptStyles,
+    IChapterSemanticProjectionService semanticProjection,
     IProjectMutationCoordinator projectMutations,
     ILogger<ChapterService> logger) : IChapterService, IManuscriptService
 {
@@ -142,7 +142,7 @@ public class ChapterService(
         CancellationToken cancellationToken = default)
     {
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken);
-        return chapter is null ? null : Snapshot(chapter);
+        return chapter is null ? null : await SnapshotAsync(chapter, cancellationToken);
     }
 
     public async Task<ManuscriptMutationResult> ReplaceDocumentAsync(
@@ -199,6 +199,28 @@ public class ChapterService(
             cancellationToken);
     }
 
+    public async Task<ManuscriptMutationResult> ApplyPersistedUnderProjectMutationLeaseAsync(
+        Guid chapterId,
+        long expectedRevision,
+        IReadOnlyList<ManuscriptOperation> operations,
+        CancellationToken cancellationToken = default)
+    {
+        var chapter = await RequireRevisionAsync(chapterId, expectedRevision, cancellationToken);
+        var source = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+        var (document, changed) = ManuscriptOperations.Apply(source, operations);
+        return await PersistManuscriptUnderLeaseAsync(chapter, document, changed, cancellationToken);
+    }
+
+    public async Task RefreshDerivedStateAsync(
+        Guid chapterId,
+        CancellationToken cancellationToken = default)
+    {
+        var chapter = await repo.ReloadFromStoreAsync(chapterId, cancellationToken)
+            ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
+        await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
+        await TryReindexBodyAsync(chapter.Id, cancellationToken);
+    }
+
     public async Task ValidateDocumentReferencesAsync(
         Guid chapterId,
         ManuscriptDocument document,
@@ -249,34 +271,11 @@ public class ChapterService(
         IReadOnlyList<string> changedBlockIds,
         CancellationToken cancellationToken)
     {
-        ChapterTextLayoutSynchronizer.ValidateIllustrationReferences(chapter, document);
-        await ValidateFigureAssetsAsync(chapter.ProjectId, document, cancellationToken);
-        await ValidateStyleReferencesAsync(chapter.ProjectId, document, null, cancellationToken);
-        chapter.ManuscriptJson = ManuscriptCodec.Serialize(document);
-        chapter.ManuscriptRevision = document.Revision;
-        chapter.UpdatedAt = DateTime.UtcNow;
-        chapter.VectorIndexState = VectorIndexState.Stale;
-        ChapterTextLayoutSynchronizer.SynchronizeFromManuscript(chapter, document);
-        repo.Update(chapter);
-
-        var project = await projects.GetByIdAsync(chapter.ProjectId, cancellationToken);
-        if (project is not null)
-        {
-            project.UpdatedAt = DateTime.UtcNow;
-            projects.Update(project);
-        }
-
-        try
-        {
-            await repo.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            var current = await repo.ReloadFromStoreAsync(chapter.Id, cancellationToken);
-            throw new ManuscriptRevisionConflictException(
-                checked(document.Revision - 1),
-                current?.ManuscriptRevision ?? document.Revision);
-        }
+        var result = await PersistManuscriptUnderLeaseAsync(
+            chapter,
+            document,
+            changedBlockIds,
+            cancellationToken);
         try
         {
             await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
@@ -301,7 +300,55 @@ public class ChapterService(
                 chapter.Id,
                 chapter.ManuscriptRevision);
         }
-        return new ManuscriptMutationResult(Snapshot(chapter), changedBlockIds);
+        return result;
+    }
+
+    private async Task<ManuscriptMutationResult> PersistManuscriptUnderLeaseAsync(
+        Chapter chapter,
+        ManuscriptDocument document,
+        IReadOnlyList<string> changedBlockIds,
+        CancellationToken cancellationToken)
+    {
+        await ValidateFigureAssetsAsync(chapter.ProjectId, document, cancellationToken);
+        await ValidateStyleReferencesAsync(chapter.ProjectId, document, null, cancellationToken);
+        await ValidateDesignedPageReferencesAsync(chapter, document, cancellationToken);
+        var previous = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+        var removedCompositionIds = DesignedPageIds(previous).Except(DesignedPageIds(document)).ToList();
+        chapter.ManuscriptJson = ManuscriptCodec.Serialize(document);
+        chapter.ManuscriptRevision = document.Revision;
+        chapter.UpdatedAt = DateTime.UtcNow;
+        chapter.VectorIndexState = VectorIndexState.Stale;
+        repo.Update(chapter);
+
+        var project = await projects.GetByIdAsync(chapter.ProjectId, cancellationToken);
+        if (project is not null)
+        {
+            project.UpdatedAt = DateTime.UtcNow;
+            projects.Update(project);
+        }
+
+        if (removedCompositionIds.Count > 0)
+        {
+            var removed = await db.PageCompositions
+                .Where(composition => composition.ProjectId == chapter.ProjectId
+                    && composition.ChapterId == chapter.Id
+                    && removedCompositionIds.Contains(composition.Id))
+                .ToListAsync(cancellationToken);
+            db.PageCompositions.RemoveRange(removed);
+        }
+
+        try
+        {
+            await repo.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            var current = await repo.ReloadFromStoreAsync(chapter.Id, cancellationToken);
+            throw new ManuscriptRevisionConflictException(
+                checked(document.Revision - 1),
+                current?.ManuscriptRevision ?? document.Revision);
+        }
+        return new ManuscriptMutationResult(await SnapshotAsync(chapter, cancellationToken), changedBlockIds);
     }
 
     private async Task ValidateFigureAssetsAsync(
@@ -314,17 +361,55 @@ public class ChapterService(
             .Select(block => block.ImageId!.Value)
             .Distinct()
             .ToList();
-        if (imageIds.Count == 0)
-            return;
-        var foundCount = await db.PublishAssets
-            .AsNoTracking()
-            .CountAsync(image => image.ProjectId == projectId && imageIds.Contains(image.Id), cancellationToken);
-        if (foundCount != imageIds.Count)
+        if (imageIds.Count > 0)
         {
-            throw new InvalidOperationException(
-                "One or more figure images were not found in this project.");
+            var foundCount = await db.PublishAssets
+                .AsNoTracking()
+                .CountAsync(image => image.ProjectId == projectId
+                    && imageIds.Contains(image.Id)
+                    && (image.ContentType == "image/png" || image.ContentType == "image/jpeg"), cancellationToken);
+            if (foundCount != imageIds.Count)
+            {
+                throw new InvalidOperationException(
+                    "One or more figure images were not found in this project or are not publication-compatible PNG/JPEG assets.");
+            }
         }
+        var editionIds = document.Content
+            .Where(block => block.Type == ManuscriptBlockType.Figure
+                && block.FigurePresentation?.LayoutTargetEditionId is not null)
+            .Select(block => block.FigurePresentation!.LayoutTargetEditionId!.Value)
+            .Distinct()
+            .ToList();
+        if (editionIds.Count > 0
+            && await db.PublicationEditions.AsNoTracking().CountAsync(
+                edition => edition.ProjectId == projectId && editionIds.Contains(edition.Id),
+                cancellationToken) != editionIds.Count)
+            throw new InvalidOperationException("One or more Figure layout targets do not identify a publication edition in this project.");
     }
+
+    private async Task ValidateDesignedPageReferencesAsync(
+        Chapter chapter,
+        ManuscriptDocument document,
+        CancellationToken cancellationToken)
+    {
+        var ids = DesignedPageIds(document);
+        if (ids.Count != document.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage))
+            throw new InvalidDataException("Each Designed Page composition may be referenced exactly once in its chapter.");
+        if (ids.Count == 0)
+            return;
+        var found = await db.PageCompositions.AsNoTracking()
+            .CountAsync(composition => composition.ProjectId == chapter.ProjectId
+                && composition.ChapterId == chapter.Id
+                && ids.Contains(composition.Id), cancellationToken);
+        if (found != ids.Count)
+            throw new InvalidDataException("Every Designed Page must reference a composition owned by this chapter and project.");
+    }
+
+    private static HashSet<Guid> DesignedPageIds(ManuscriptDocument document) =>
+        document.Content
+            .Where(block => block.Type == ManuscriptBlockType.DesignedPage)
+            .Select(block => block.PageCompositionId!.Value)
+            .ToHashSet();
 
     private async Task ValidateStyleReferencesAsync(
         Guid projectId,
@@ -337,13 +422,13 @@ public class ChapterService(
         ManuscriptStyleService.ValidateDocumentReferences(document, styles);
     }
 
-    private static ManuscriptSnapshot Snapshot(Chapter chapter)
+    private async Task<ManuscriptSnapshot> SnapshotAsync(Chapter chapter, CancellationToken cancellationToken)
     {
         var document = ManuscriptCodec.Deserialize(
             chapter.ManuscriptJson,
             chapter.Id,
             chapter.ManuscriptRevision);
-        var plainText = ManuscriptCodec.ProjectPlainText(document);
+        var plainText = await semanticProjection.ExpandPlainTextAsync(chapter, cancellationToken);
         return new ManuscriptSnapshot(
             chapter.Id,
             chapter.ManuscriptRevision,
@@ -351,6 +436,7 @@ public class ChapterService(
             plainText,
             document);
     }
+
 
     private async Task TryReindexBodyAsync(Guid chapterId, CancellationToken cancellationToken)
     {
@@ -440,7 +526,8 @@ public class ChapterService(
             await vectors.DeleteBySourceAsync("chapter", sourceId, scopeKey, cancellationToken);
             await projectSearch.DeleteBySourceAsync(ProjectSearchSourceTypes.Chapter, sourceId, scopeKey, cancellationToken);
 
-            var searchText = BuildChapterSearchText(chapter);
+            var expandedText = await semanticProjection.ExpandPlainTextAsync(chapter, cancellationToken);
+            var searchText = BuildChapterSearchText(chapter, expandedText);
             var searchChunks = chunker.Chunk(searchText);
             await projectSearch.StoreManyAsync(searchChunks.Select(chunk => new ProjectSearchIndexChunk(
                 chunk.Content,
@@ -466,7 +553,7 @@ public class ChapterService(
                 return;
             }
 
-            var chunks = chunker.Chunk(chapter.PlainText);
+            var chunks = chunker.Chunk(expandedText);
             if (chunks.Count > 0)
             {
                 var contents = chunks.Select(c => c.Content).ToList();
@@ -515,7 +602,7 @@ public class ChapterService(
         }
     }
 
-    private static string BuildChapterSearchText(Chapter chapter)
+    private static string BuildChapterSearchText(Chapter chapter, string expandedText)
     {
         var parts = new List<string>
         {
@@ -524,8 +611,8 @@ public class ChapterService(
         };
         if (!string.IsNullOrWhiteSpace(chapter.Synopsis))
             parts.Add($"Synopsis: {chapter.Synopsis}");
-        if (!string.IsNullOrWhiteSpace(chapter.PlainText))
-            parts.Add($"Body: {chapter.PlainText}");
+        if (!string.IsNullOrWhiteSpace(expandedText))
+            parts.Add($"Body: {expandedText}");
         return string.Join('\n', parts);
     }
 }

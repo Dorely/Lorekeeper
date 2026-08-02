@@ -17,6 +17,7 @@ public enum PublicationArtifactKind
 {
     InteriorPdf,
     CoverPdf,
+    BookPdf,
     Epub,
     FrontCoverImage,
     Manifest,
@@ -32,6 +33,7 @@ public class PublicationRenderJob
     public PublicationEdition Edition { get; set; } = null!;
     public PublicationRenderStatus Status { get; set; } = PublicationRenderStatus.Queued;
     public string SourceFingerprint { get; set; } = string.Empty;
+    public string PaginationFingerprint { get; set; } = string.Empty;
     public string RendererVersion { get; set; } = string.Empty;
     public string ProfileId { get; set; } = string.Empty;
     public string DiagnosticsJson { get; set; } = "[]";
@@ -63,6 +65,7 @@ public class PublicationArtifact
     public long ByteLength { get; set; }
     public int? PageCount { get; set; }
     public string SourceFingerprint { get; set; } = string.Empty;
+    public string PaginationFingerprint { get; set; } = string.Empty;
     public string RendererVersion { get; set; } = string.Empty;
     public string ProfileId { get; set; } = string.Empty;
     public bool IsLegacy { get; set; }

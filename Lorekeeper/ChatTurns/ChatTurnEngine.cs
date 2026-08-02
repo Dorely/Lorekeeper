@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Lorekeeper.Llm;
 using Microsoft.Extensions.AI;
 
@@ -37,7 +39,59 @@ public sealed record ChatToolCallManifest(
     string CallId,
     string Name,
     string ArgumentsJson,
-    int? TextOffset = null);
+    int? TextOffset = null)
+{
+    private static readonly HashSet<string> StagedPayloadTools = new(StringComparer.Ordinal)
+    {
+        "stage_page_composition",
+        "stage_cover_composition",
+        "stage_publication_composition",
+        "stage_publication_cover_composition",
+        "stage_page_composition_semantic",
+        "stage_page_composition_workspace",
+        "stage_publication_composition_semantic",
+        "stage_publication_composition_workspace",
+        "stage_outline_page_composition",
+        "stage_outline_composition_semantic",
+        "stage_outline_composition_workspace",
+        "stage_outline_cover_composition",
+    };
+
+    public static ChatToolCallManifest From(ChatPendingToolCall call) =>
+        new(call.CallId, call.Name, CompactPersistedArguments(call.Name, call.ArgumentsJson), call.TextOffset);
+
+    public static string CompactPersistedArguments(string toolName, string argumentsJson)
+    {
+        if (!StagedPayloadTools.Contains(toolName))
+            return argumentsJson;
+
+        try
+        {
+            using var document = JsonDocument.Parse(argumentsJson);
+            var root = document.RootElement;
+            var summary = new Dictionary<string, object?>
+            {
+                ["payloadSha256"] = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(argumentsJson))),
+                ["payloadOmitted"] = true,
+            };
+            foreach (var name in new[] { "variantId", "compositionId", "editionId", "expectedRevision" })
+            {
+                if (root.TryGetProperty(name, out var value))
+                    summary[name] = value.Clone();
+            }
+            return JsonSerializer.Serialize(summary);
+        }
+        catch (JsonException)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                payloadSha256 = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(argumentsJson))),
+                payloadOmitted = true,
+                malformed = true,
+            });
+        }
+    }
+}
 
 public sealed record ChatToolInvocationOutcome(string Result, string? Error, bool Cancelled);
 

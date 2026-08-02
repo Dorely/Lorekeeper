@@ -4,7 +4,7 @@ namespace Lorekeeper.Manuscripts;
 
 public sealed record ManuscriptDocument
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     [JsonRequired]
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
@@ -29,6 +29,11 @@ public sealed record ManuscriptBlock
     public Guid? ImageId { get; init; }
     [JsonRequired]
     public string? AltText { get; init; }
+    public bool Decorative { get; init; }
+    public string? Language { get; init; }
+    public FigureAccessibilityRole? AccessibilityRole { get; init; }
+    public FigurePresentation? FigurePresentation { get; init; }
+    public Guid? PageCompositionId { get; init; }
     [JsonRequired]
     public List<ManuscriptInline> Content { get; init; } = [];
 }
@@ -57,6 +62,79 @@ public enum ManuscriptBlockType
     BlockQuote,
     ListItem,
     Figure,
+    DesignedPage,
+}
+
+public sealed record FigurePresentation
+{
+    public FigurePlacementIntent Placement { get; init; } = FigurePlacementIntent.Centered;
+    public double WidthPercent { get; init; } = 100;
+    public FigureAlignment Alignment { get; init; } = FigureAlignment.Center;
+    public FigureTextWrap TextWrap { get; init; } = FigureTextWrap.None;
+    public FigureImageFit Fit { get; init; } = FigureImageFit.Contain;
+    public double FocalXPercent { get; init; } = 50;
+    public double FocalYPercent { get; init; } = 50;
+    public double SpacingBeforePoints { get; init; } = 6;
+    public double SpacingAfterPoints { get; init; } = 6;
+    public bool StartOnNewPage { get; init; }
+    public bool KeepWithCaption { get; init; } = true;
+    public FigureCaptionPlacement CaptionPlacement { get; init; } = FigureCaptionPlacement.Below;
+    public Guid? LayoutTargetEditionId { get; init; }
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<FigureAccessibilityRole>))]
+public enum FigureAccessibilityRole
+{
+    Figure,
+    Illustration,
+    Diagram,
+    Map,
+    Photograph,
+    Ornament,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<FigurePlacementIntent>))]
+public enum FigurePlacementIntent
+{
+    Inline,
+    Centered,
+    Float,
+    FullWidth,
+    FullBleed,
+    DedicatedPage,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<FigureAlignment>))]
+public enum FigureAlignment
+{
+    Start,
+    Center,
+    End,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<FigureTextWrap>))]
+public enum FigureTextWrap
+{
+    None,
+    Start,
+    End,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<FigureImageFit>))]
+public enum FigureImageFit
+{
+    Contain,
+    Cover,
+    Fill,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<FigureCaptionPlacement>))]
+public enum FigureCaptionPlacement
+{
+    Below,
+    Above,
+    Overlay,
+    Hidden,
 }
 
 public enum ManuscriptInlineType
@@ -89,6 +167,7 @@ public static class ManuscriptStyleRoles
     public const string BlockQuote = "block-quote";
     public const string ListItem = "list-item";
     public const string FigureCaption = "figure-caption";
+    public const string DesignedPage = "designed-page";
 }
 
 public sealed record ManuscriptSnapshot(
@@ -117,6 +196,7 @@ public sealed record ManuscriptRangeReference(
 [JsonDerivedType(typeof(SetManuscriptBlockType), "setBlockType")]
 [JsonDerivedType(typeof(SetManuscriptBlockStyle), "setBlockStyle")]
 [JsonDerivedType(typeof(SetManuscriptInlineMark), "setInlineMark")]
+[JsonDerivedType(typeof(SetFigurePresentation), "setFigurePresentation")]
 public abstract record ManuscriptOperation;
 
 public sealed record InsertManuscriptBlock(
@@ -126,7 +206,12 @@ public sealed record InsertManuscriptBlock(
     string? StyleRole = null,
     Guid? ImageId = null,
     string? AltText = null,
-    int? HeadingLevel = null) : ManuscriptOperation;
+    int? HeadingLevel = null,
+    bool Decorative = false,
+    FigurePresentation? FigurePresentation = null,
+    Guid? PageCompositionId = null,
+    string? Language = null,
+    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure) : ManuscriptOperation;
 
 public sealed record ReplaceManuscriptBlockText(
     string BlockId,
@@ -153,7 +238,12 @@ public sealed record SetManuscriptBlockType(
     string? StyleRole = null,
     Guid? ImageId = null,
     string? AltText = null,
-    int? HeadingLevel = null) : ManuscriptOperation;
+    int? HeadingLevel = null,
+    bool Decorative = false,
+    FigurePresentation? FigurePresentation = null,
+    Guid? PageCompositionId = null,
+    string? Language = null,
+    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure) : ManuscriptOperation;
 
 public sealed record SetManuscriptBlockStyle(
     string BlockId,
@@ -166,6 +256,15 @@ public sealed record SetManuscriptInlineMark(
     ManuscriptMarkType Mark,
     bool Enabled,
     string? Value = null) : ManuscriptOperation;
+
+public sealed record SetFigurePresentation(
+    string BlockId,
+    Guid ImageId,
+    string? AltText,
+    bool Decorative,
+    string? Language,
+    FigurePresentation Presentation,
+    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure) : ManuscriptOperation;
 
 public sealed class ManuscriptRevisionConflictException(long expected, long actual)
     : InvalidOperationException($"Manuscript revision conflict: expected {expected}, current revision is {actual}.")

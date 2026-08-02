@@ -1,6 +1,6 @@
 [package]
 name = "lorekeeper-press"
-version = "1.0.1"
+version = "2.0.0"
 edition = "2024"
 publish = false
 
@@ -18,6 +18,8 @@ sha2 = "=0.11.0"
 subsetter = "=0.2.6"
 unicode-linebreak = "=0.1.5"
 unicode-segmentation = "=1.13.3"
+zune-jpeg = { version = "=0.5.15", default-features = false, features = ["std"] }
+zune-core = { version = "=0.5.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tempfile = "=3.23.0"

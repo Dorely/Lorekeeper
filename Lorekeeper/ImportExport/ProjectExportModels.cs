@@ -19,7 +19,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 13;
+    public const int CurrentFormatVersion = 14;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -31,6 +31,7 @@ public sealed record ProjectExportDocument
     public List<ProjectExportImage> Images { get; init; } = [];
     public List<ProjectExportEntityVisualExample> EntityVisualExamples { get; init; } = [];
     public List<ProjectExportPublicationEdition> PublicationEditions { get; init; } = [];
+    public List<ProjectExportPageComposition> PageCompositions { get; init; } = [];
     [JsonPropertyName("publishProfiles")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<ProjectExportLegacyPublishProfile>? LegacyPublishProfiles { get; init; }
@@ -59,6 +60,10 @@ public sealed record ProjectExportProject(
     public string EffectiveProjectGuidance =>
         !string.IsNullOrWhiteSpace(ProjectGuidance) ? ProjectGuidance : LegacySystemPrompt ?? string.Empty;
 }
+
+// Read-only v13 import boundary. Current exports never populate these values.
+public enum PrintPicturePageSpreadMode { WholeSpread, SidewaysWholeSpread, SplitLeaves }
+public enum EpubPicturePageSpreadMode { RequestLandscape, SidewaysPortrait }
 
 public sealed record ProjectExportBookBrief(
     BookKind BookKind,
@@ -119,7 +124,9 @@ public sealed record ProjectExportImage(
 public sealed record ProjectExportFontFamily(
     Guid Id,
     string Name,
-    List<ProjectExportFontFace> Faces);
+    List<ProjectExportFontFace> Faces,
+    bool EmbeddingRightsConfirmed = false,
+    string RightsDeclaration = "");
 
 public sealed record ProjectExportFontFace(
     Guid Id,
@@ -166,25 +173,30 @@ public sealed record ProjectExportPublicationEdition(
     bool NumberActs,
     bool NumberChapters,
     PublishTitlePageMode TitlePageMode,
-    PrintPicturePageSpreadMode PrintPicturePageSpreadMode,
-    EpubPicturePageSpreadMode EpubPicturePageSpreadMode,
     double PageWidthInches,
     double PageHeightInches,
     double PageMarginInches,
     double BodyFontSizePoints,
     double BodyLineHeight,
     Guid? SelectedCoverImageId,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    Guid? SelectedCoverChapterId,
     PublicationBinding Binding,
     PublicationPaper Paper,
     PublicationInk Ink,
     bool Bleed,
+    bool AllowDesignedPageOverrides,
     List<ProjectExportEditionOutlineItem> OutlineItems,
     List<ProjectExportPublicationMatter> Matter,
     List<ProjectExportEditionStyleMapping> StyleMappings,
     List<ProjectExportPublicationImagePlacement> ImagePlacements,
-    ProjectExportCoverDesign? CoverDesign);
+    ProjectExportCoverDesign? CoverDesign)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public PrintPicturePageSpreadMode PrintPicturePageSpreadMode { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public EpubPicturePageSpreadMode EpubPicturePageSpreadMode { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? SelectedCoverChapterId { get; init; }
+}
 
 public sealed record ProjectExportCoverDesign(
     string Title,
@@ -196,6 +208,7 @@ public sealed record ProjectExportCoverDesign(
     PublicationBarcodeMode BarcodeMode,
     double ImageFocalXPercent,
     double ImageFocalYPercent,
+    string CompositionSceneJson,
     long Revision);
 
 public sealed record ProjectExportEditionOutlineItem(
@@ -229,7 +242,12 @@ public sealed record ProjectExportPublicationImagePlacement(
     Guid TargetId,
     PublicationImagePlacementKind PlacementKind,
     string Caption,
-    int SortOrder);
+    int SortOrder,
+    FigurePresentation? Presentation = null,
+    string AltText = "",
+    bool Decorative = false,
+    string Language = "en",
+    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure);
 
 public sealed record ProjectExportLegacyPublishProfile(
     Guid Id,
@@ -281,12 +299,30 @@ public sealed record ProjectExportChapter
     public string? Body { get; init; }
     public string Synopsis { get; init; } = string.Empty;
     public int Order { get; init; }
-    public ChapterVisualMode VisualMode { get; init; } = ChapterVisualMode.Prose;
-    public ChapterPageLayoutKind PageLayoutKind { get; init; } = ChapterPageLayoutKind.SinglePortrait;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public ChapterVisualMode VisualMode { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public ChapterPageLayoutKind PageLayoutKind { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string PageLayoutJson { get; init; } = string.Empty;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string IllustrationLayoutJson { get; init; } = string.Empty;
     public List<Guid> ExplicitImageContextImageIds { get; init; } = [];
 }
+
+public sealed record ProjectExportPageComposition(
+    Guid Id,
+    Guid ChapterId,
+    string Name,
+    string SemanticManuscriptJson,
+    long Revision,
+    List<ProjectExportPageCompositionVariant> Variants);
+
+public sealed record ProjectExportPageCompositionVariant(
+    Guid Id,
+    string GeometryKey,
+    string SceneJson,
+    long Revision);
 
 public sealed record ProjectExportNode(
     string NodeType,

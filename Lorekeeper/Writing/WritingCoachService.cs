@@ -234,11 +234,7 @@ public sealed class WritingCoachService(
             }
 
             var manifest = pendingCalls
-                .Select(pendingCall => new ChatToolCallManifest(
-                    pendingCall.CallId,
-                    pendingCall.Name,
-                    pendingCall.ArgumentsJson,
-                    pendingCall.TextOffset))
+                .Select(ChatToolCallManifest.From)
                 .ToList();
             activeAssistant.Content = textBuilder.ToString();
             activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);

@@ -80,6 +80,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<ProjectFontFamily> ProjectFontFamilies => Set<ProjectFontFamily>();
     public DbSet<ProjectFontFace> ProjectFontFaces => Set<ProjectFontFace>();
     public DbSet<ManuscriptStyleDefinition> ManuscriptStyleDefinitions => Set<ManuscriptStyleDefinition>();
+    public DbSet<PageComposition> PageCompositions => Set<PageComposition>();
+    public DbSet<PageCompositionVariant> PageCompositionVariants => Set<PageCompositionVariant>();
+    public DbSet<CompositionMutationStage> CompositionMutationStages => Set<CompositionMutationStage>();
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
         SaveChangesWithLockRetryAsync(acceptAllChangesOnSuccess: true, cancellationToken);
@@ -171,8 +174,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasIndex(e => new { e.ProjectId, e.Order });
             entity.HasIndex(e => new { e.ActId, e.Order });
             entity.Property(e => e.VectorIndexState).HasConversion<string>();
-            entity.Property(e => e.VisualMode).HasConversion<string>();
-            entity.Property(e => e.PageLayoutKind).HasConversion<string>();
             entity.Property(e => e.ManuscriptRevision).IsConcurrencyToken();
 
             entity.HasOne(e => e.Project)
@@ -227,6 +228,40 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Conversation)
                 .WithMany(c => c.Messages)
                 .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PageComposition>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.ChapterId, e.UpdatedAt });
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Project)
+                .WithMany(e => e.PageCompositions)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Chapter)
+                .WithMany(e => e.PageCompositions)
+                .HasForeignKey(e => e.ChapterId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PageCompositionVariant>(entity =>
+        {
+            entity.HasIndex(e => new { e.CompositionId, e.GeometryKey }).IsUnique();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Composition)
+                .WithMany(e => e.Variants)
+                .HasForeignKey(e => e.CompositionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CompositionMutationStage>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.ConversationId, e.ExpiresAt });
+            entity.HasIndex(e => e.PayloadSha256);
+            entity.HasOne(e => e.Project)
+                .WithMany(e => e.CompositionMutationStages)
+                .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -784,8 +819,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.Property(e => e.Paper).HasConversion<string>();
             entity.Property(e => e.Ink).HasConversion<string>();
             entity.Property(e => e.TitlePageMode).HasConversion<string>();
-            entity.Property(e => e.PrintPicturePageSpreadMode).HasConversion<string>();
-            entity.Property(e => e.EpubPicturePageSpreadMode).HasConversion<string>();
             entity.Property(e => e.Revision).IsConcurrencyToken();
 
             entity.HasOne(e => e.Project)
@@ -971,6 +1004,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasIndex(e => e.AssetId);
             entity.Property(e => e.TargetKind).HasConversion<string>();
             entity.Property(e => e.PlacementKind).HasConversion<string>();
+            entity.Property(e => e.AccessibilityRole).HasConversion<string>();
 
             entity.HasOne(e => e.Edition)
                 .WithMany(e => e.ImagePlacements)

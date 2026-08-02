@@ -1,13 +1,13 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Lorekeeper.ChapterVisuals;
 using Lorekeeper.Chapters;
+using Lorekeeper.Composition;
 using Lorekeeper.EntityVisuals;
-using Lorekeeper.Fonts;
 using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Llm;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence.Repositories;
@@ -28,8 +28,9 @@ public sealed class ContextBuilder(
     IIngestRepository ingest,
     IProjectImageService images,
     IEntityVisualExampleService entityVisualExamples,
-    IChapterVisualService chapterVisuals,
-    IProjectFontService projectFonts,
+    IManuscriptService manuscripts,
+    IChapterSemanticProjectionService semanticProjection,
+    ICompositionService compositions,
     IEmbeddingService embeddings,
     IBookBriefService bookBriefs,
     ISystemPromptComposer systemPrompts,
@@ -86,7 +87,7 @@ public sealed class ContextBuilder(
                 Key: EditorContextKeys.CurrentChapter,
                 Kind: ContextItemKind.CurrentChapter,
                 Label: $"Current Chapter — {currentChapter.Title} (line-numbered)",
-                Body: BuildCurrentChapterBlock(currentChapter),
+                Body: await BuildCurrentChapterBlockAsync(currentChapter, cancellationToken),
                 IsEnabled: IsIncluded(preferenceMap, ContextItemKind.CurrentChapter, EditorContextKeys.CurrentChapter, defaultIncluded: true),
                 IsRemovable: true,
                 IsProtected: true));
@@ -453,23 +454,18 @@ public sealed class ContextBuilder(
         return items;
     }
 
-    private static string BuildCurrentChapterBlock(Chapter chapter)
+    private async Task<string> BuildCurrentChapterBlockAsync(Chapter chapter, CancellationToken cancellationToken)
     {
+        var snapshot = await manuscripts.GetManuscriptAsync(chapter.Id, cancellationToken);
+        var plainText = snapshot?.PlainText ?? chapter.PlainText;
         var body = new StringBuilder();
         body.Append("Chapter id: ").AppendLine(chapter.Id.ToString());
         body.Append("Title: ").AppendLine(chapter.Title);
-        body.Append("Active visual mode: ").AppendLine(chapter.VisualMode.ToString());
-        body.Append("Editing contract: ").AppendLine(chapter.VisualMode switch
-        {
-            ChapterVisualMode.Prose => "This is a prose chapter. Edit it through semantic manuscript operations. It has no active visual layout; do not generate Picture Page art or change its mode unless the user explicitly requests that.",
-            ChapterVisualMode.IllustratedProse => "Edit semantic manuscript blocks through revision-checked operations. Images, when requested, use anchors resolved to stable block IDs.",
-            ChapterVisualMode.PicturePage => "Text is managed through Picture Page text boxes backed by stable manuscript references and visual layout tools.",
-            _ => "Respect the active visual mode before choosing editing tools.",
-        });
+        body.AppendLine("Editing contract: This format-neutral chapter contains semantic text blocks, flowing Figures, and Designed Pages. Use revision-checked manuscript operations and geometry-keyed composition variants.");
         body.AppendLine("Body (line-numbered):");
-        body.Append(string.IsNullOrWhiteSpace(chapter.PlainText)
+        body.Append(string.IsNullOrWhiteSpace(plainText)
             ? "(empty)"
-            : ChapterFormatting.WithLineNumbers(chapter.PlainText));
+            : ChapterFormatting.WithLineNumbers(plainText));
         return body.ToString();
     }
 
@@ -479,34 +475,44 @@ public sealed class ContextBuilder(
         IReadOnlyDictionary<string, EditorContextPreference> preferenceMap,
         CancellationToken cancellationToken)
     {
-        var state = await chapterVisuals.GetAsync(chapterId, cancellationToken);
-        if (state is null) return null;
-
-        var hasVisuals = state.VisualMode == ChapterVisualMode.PicturePage
-            || state.VisualMode == ChapterVisualMode.IllustratedProse
-                && state.IllustrationLayout.Images.Count > 0;
-        if (!hasVisuals) return null;
-
-        var imageNames = (await images.ListAsync(projectId, cancellationToken))
-            .ToDictionary(image => image.Id, image => image.FileName);
-        var fontCatalog = await projectFonts.ListAsync(projectId, cancellationToken);
-        var fontNames = fontCatalog.ToDictionary(font => font.Key, font => font.Name, StringComparer.OrdinalIgnoreCase);
-        var manifest = new StringBuilder(chapterVisuals.BuildManifest(
-            state,
-            imageNames,
-            fontNames,
-            includePicturePageGenerationGuidance: false));
-        manifest.AppendLine("Available PicturePage font faces:");
-        foreach (var font in fontCatalog)
+        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, cancellationToken);
+        if (snapshot is null) return null;
+        var visualBlocks = snapshot.Document.Content
+            .Where(block => block.Type is ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage)
+            .ToList();
+        if (visualBlocks.Count == 0) return null;
+        var manifest = new StringBuilder();
+        manifest.Append("Manuscript revision: ").AppendLine(snapshot.Revision.ToString());
+        manifest.Append("Figures: ").AppendLine(visualBlocks.Count(block => block.Type == ManuscriptBlockType.Figure).ToString());
+        manifest.Append("Designed Pages: ").AppendLine(visualBlocks.Count(block => block.Type == ManuscriptBlockType.DesignedPage).ToString());
+        foreach (var block in visualBlocks.Take(24))
         {
-            manifest.Append("- ").Append(font.Name).Append(" (").Append(font.Key).Append("): ")
-                .AppendLine(string.Join(", ", font.Faces.Select(face => $"{face.Weight}{(face.Italic ? " italic" : string.Empty)}")));
+            manifest.Append("- ").Append(block.Type).Append(" block ").Append(block.Id);
+            if (block.ImageId is { } imageId) manifest.Append(" image=").Append(imageId);
+            if (block.PageCompositionId is { } compositionId)
+            {
+                var composition = await compositions.GetAsync(projectId, compositionId, cancellationToken);
+                manifest.Append(" composition=").Append(compositionId)
+                    .Append(" variants=").Append(composition?.Variants.Count ?? 0);
+                if (composition is not null)
+                {
+                    var semanticText = ManuscriptCodec.ProjectPlainText(
+                        ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision));
+                    if (!string.IsNullOrWhiteSpace(semanticText))
+                        manifest.AppendLine().Append("  semantic reading order: ")
+                            .Append(semanticText.Length <= 2_000 ? semanticText : semanticText[..2_000] + "…");
+                }
+            }
+            if (block.Type == ManuscriptBlockType.Figure)
+                manifest.Append(" placement=").Append(block.FigurePresentation?.Placement.ToString() ?? "Centered")
+                    .Append(" accessibility=").Append(block.Decorative ? "decorative" : string.IsNullOrWhiteSpace(block.AltText) ? "missing-alt-decision" : "described");
+            manifest.AppendLine();
         }
         var key = EditorContextKeys.ChapterVisualLayout(chapterId);
         return new ContextItem(
             Key: key,
             Kind: ContextItemKind.ChapterVisualLayout,
-            Label: "Current Chapter Visual Layout",
+            Label: "Current Manuscript Visuals",
             Body: manifest.ToString(),
             IsEnabled: IsIncluded(preferenceMap, ContextItemKind.ChapterVisualLayout, key, defaultIncluded: true),
             IsRemovable: true,
@@ -619,14 +625,12 @@ public sealed class ContextBuilder(
         var chapter = await chapters.GetAsync(chapterId, cancellationToken);
         if (chapter is null || chapter.ProjectId != projectId) return null;
 
+        var plainText = await semanticProjection.ExpandPlainTextAsync(chapter, cancellationToken);
         var body = new StringBuilder();
         body.Append("Title: ").AppendLine(chapter.Title);
         AppendOptionalIndented(body, "Synopsis", chapter.Synopsis, 0);
-        body.Append("Visual mode: ").AppendLine(chapter.VisualMode.ToString());
-        if (chapter.VisualMode != ChapterVisualMode.Prose)
-            body.Append("Page layout: ").AppendLine(chapter.PageLayoutKind.ToString());
         body.AppendLine("Body (line-numbered):");
-        body.AppendLine(string.IsNullOrWhiteSpace(chapter.PlainText) ? "(empty)" : ChapterFormatting.WithLineNumbers(chapter.PlainText));
+        body.AppendLine(string.IsNullOrWhiteSpace(plainText) ? "(empty)" : ChapterFormatting.WithLineNumbers(plainText));
 
         return new ContextItem(
             Key: EditorContextKeys.ChapterReference(chapter.Id),
@@ -866,10 +870,6 @@ public sealed class ContextBuilder(
             var beats = await entities.ListAsync(chapter.ProjectId, EntityTypeService.EventNodeType, chapter.Id, cancellationToken);
             sb.Append("  Chapter ").Append(chapter.Order + 1).Append(": ").Append(chapter.Title);
             sb.Append(" [id: ").Append(chapter.Id).Append(']');
-            sb.Append(" [visual: ").Append(chapter.VisualMode);
-            if (chapter.VisualMode != ChapterVisualMode.Prose)
-                sb.Append("; pageLayout: ").Append(chapter.PageLayoutKind);
-            sb.Append(']');
             if (chapter.Id == currentChapterId)
                 sb.Append(" (current)");
             sb.AppendLine();

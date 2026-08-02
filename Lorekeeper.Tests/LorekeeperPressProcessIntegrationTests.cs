@@ -72,7 +72,7 @@ public sealed class LorekeeperPressProcessIntegrationTests
         {
             await File.WriteAllBytesAsync(Path.Combine(jobRoot, "input", "assets", "pixel.png"), PixelPng);
             var request = JsonNode.Parse(await File.ReadAllTextAsync(
-                Path.Combine(repositoryRoot, "Lorekeeper.Press", "fixtures", "full-model-v3.json")))!;
+                Path.Combine(repositoryRoot, "Lorekeeper.Press", "fixtures", "full-model-v4.json")))!;
             request["jobId"] = jobId.ToString("N");
             request["profile"] = "kdp-paperback-v1";
             request["assets"]![0]!["byteLength"] = PixelPng.LongLength;
