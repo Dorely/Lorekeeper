@@ -140,6 +140,16 @@ before disposing its async enumerator, so a terminal job cannot end the parent
 turn with a concurrent-disposal `NotSupportedException`. Tool contracts,
 prompts, persistence, review UI, and approval behavior must evolve together.
 
+Editor review routing follows the fidelity of the proposed manuscript change.
+Only chapters whose current and proposed manuscripts are plain body paragraphs
+and scene breaks use the line-oriented Review tab. Figure, Designed Page,
+semantic-style, inline-formatting, or other structured manuscript changes remain
+in the pending-edits modal, which shows body text plus separate structure and
+visual-block diffs. Focused Figure tools obey the same Review-edits staging
+boundary as the general manuscript preview/apply protocol; staged visual reads
+resolve against the projected manuscript revision until the user keeps or
+rejects the grouped change.
+
 ### Ingest, Research, and Background Work
 
 Ingest preprocesses text, EPUB, PDF, image, and webpage material into durable

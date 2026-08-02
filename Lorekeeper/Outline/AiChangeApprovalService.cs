@@ -439,6 +439,8 @@ public sealed class AiChangeApprovalService(
             }
             case "apply_manuscript_operations":
             case "apply_assigned_manuscript_operations":
+            case "insert_figure":
+            case "patch_figure":
             {
                 var before = ReadOptional<ChapterManuscriptChange>(change.BeforeJson);
                 var after = ReadRequired<ChapterManuscriptChange>(afterJson);

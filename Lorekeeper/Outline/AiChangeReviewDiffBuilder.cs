@@ -16,6 +16,29 @@ public static class AiChangeReviewDiffBuilder
         PropertyNameCaseInsensitive = true,
     };
 
+    public static bool IsChapterManuscriptChangeFor(AiChange change, Guid chapterId)
+    {
+        if (!string.Equals(change.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return ReadChapterManuscriptChange(change.BeforeJson)?.Id == chapterId
+            || ReadChapterManuscriptChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
+    }
+
+    public static bool CanUseChapterLineReview(AiChange change)
+    {
+        if (!string.Equals(change.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var before = ReadChapterManuscriptChange(change.BeforeJson);
+        var after = ReadChapterManuscriptChange(AiChangeReviewDrafts.EffectiveAfterJson(change));
+        return before is not null
+            && after is not null
+            && before.Id == after.Id
+            && ManuscriptCodec.IsPlainTextOnly(before.Manuscript)
+            && ManuscriptCodec.IsPlainTextOnly(after.Manuscript);
+    }
+
     public static bool TryBuild(IReadOnlyList<AiChange> changes, out ReviewDiff diff)
     {
         diff = null!;
@@ -240,6 +263,12 @@ public static class AiChangeReviewDiffBuilder
                 FormatManuscriptStructure(before.Manuscript),
                 FormatManuscriptStructure(after.Manuscript),
                 ownerChangeId: null);
+            AddOrUpdateField(
+                fields,
+                "Figures and designed pages",
+                FormatManuscriptVisualBlocks(before.Manuscript),
+                FormatManuscriptVisualBlocks(after.Manuscript),
+                ownerChangeId: null);
             return true;
         }
 
@@ -406,6 +435,12 @@ public static class AiChangeReviewDiffBuilder
                 FormatManuscriptStructure(before.Manuscript),
                 FormatManuscriptStructure(after.Manuscript),
                 OwnerChangeId: null),
+            new DiffFieldInput(
+                "Visuals",
+                "Figures and designed pages",
+                FormatManuscriptVisualBlocks(before.Manuscript),
+                FormatManuscriptVisualBlocks(after.Manuscript),
+                OwnerChangeId: null),
         ];
 
     private static string FormatManuscriptStructure(ManuscriptDocument manuscript)
@@ -462,6 +497,51 @@ public static class AiChangeReviewDiffBuilder
         return builder.ToString().TrimEnd();
     }
 
+    private static string FormatManuscriptVisualBlocks(ManuscriptDocument manuscript)
+    {
+        var builder = new StringBuilder();
+        for (var blockIndex = 0; blockIndex < manuscript.Content.Count; blockIndex++)
+        {
+            var block = manuscript.Content[blockIndex];
+            if (block.Type == ManuscriptBlockType.Figure)
+            {
+                builder
+                    .Append("Block ")
+                    .Append(blockIndex + 1)
+                    .Append(": Figure id=")
+                    .Append(block.Id)
+                    .Append("; image-id=")
+                    .Append(block.ImageId)
+                    .Append("; caption=")
+                    .Append(JsonSerializer.Serialize(ManuscriptCodec.Text(block)))
+                    .Append("; decorative=")
+                    .Append(block.Decorative)
+                    .Append("; alt=")
+                    .Append(JsonSerializer.Serialize(block.AltText))
+                    .Append("; language=")
+                    .Append(JsonSerializer.Serialize(block.Language))
+                    .Append("; accessibility-role=")
+                    .Append(block.AccessibilityRole)
+                    .Append("; presentation=")
+                    .Append(JsonSerializer.Serialize(block.FigurePresentation, ManuscriptCodec.JsonOptions))
+                    .AppendLine();
+            }
+            else if (block.Type == ManuscriptBlockType.DesignedPage)
+            {
+                builder
+                    .Append("Block ")
+                    .Append(blockIndex + 1)
+                    .Append(": DesignedPage id=")
+                    .Append(block.Id)
+                    .Append("; composition-id=")
+                    .Append(block.PageCompositionId)
+                    .AppendLine();
+            }
+        }
+
+        return builder.Length == 0 ? "(none)" : builder.ToString().TrimEnd();
+    }
+
     private static string GetPropertyValue(Dictionary<string, string?>? properties, string propertyName, out bool exists)
     {
         if (properties is not null && properties.TryGetValue(propertyName, out var value))
@@ -477,6 +557,20 @@ public static class AiChangeReviewDiffBuilder
     private static T? ReadOptional<T>(string json)
         where T : class =>
         TryReadChange<T>(json, out var value) ? value : null;
+
+    private static ChapterManuscriptChange? ReadChapterManuscriptChange(string json)
+    {
+        if (!TryReadChange<ChapterManuscriptChange>(json, out var change)) return null;
+        try
+        {
+            _ = change.Manuscript;
+            return change;
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidDataException or ArgumentException)
+        {
+            return null;
+        }
+    }
 
     private static bool TryReadChange<T>(string json, out T value)
         where T : class

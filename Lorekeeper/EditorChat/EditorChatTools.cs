@@ -1410,7 +1410,11 @@ public sealed class EditorChatTools(
         var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken);
         if (snapshot is null)
             return JsonSerializer.Serialize(new { ok = false, code = "NOT_FOUND", summary = "Manuscript was not found." });
-        var visuals = snapshot.Document.Content.Where(block => block.Type is ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage).ToList();
+        var document = ctx.ReviewEdits
+            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
+                ? staged
+                : snapshot.Document;
+        var visuals = document.Content.Where(block => block.Type is ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage).ToList();
         start = Math.Clamp(start, 0, visuals.Count);
         count = Math.Clamp(count, 1, 50);
         var page = visuals.Skip(start).Take(count).Select(block => new
@@ -1431,7 +1435,7 @@ public sealed class EditorChatTools(
         {
             ok = true,
             targetId = chapterId,
-            revision = snapshot.Revision,
+            revision = document.Revision,
             summary = $"{visuals.Count} manuscript visual block(s).",
             counts = new { figures = visuals.Count(block => block.Type == ManuscriptBlockType.Figure), designedPages = visuals.Count(block => block.Type == ManuscriptBlockType.DesignedPage), diagnostics = diagnostics.Count },
             items = page,
@@ -1471,7 +1475,8 @@ public sealed class EditorChatTools(
         {
             _ = await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken)
                 ?? throw new KeyNotFoundException("Project image was not found.");
-            var result = await manuscripts.ApplyAsync(
+            return await ApplyFocusedManuscriptOperationsAsync(
+                ctx,
                 chapterId,
                 expectedRevision,
                 [new InsertManuscriptBlock(
@@ -1485,15 +1490,14 @@ public sealed class EditorChatTools(
                     FigurePresentation: presentation,
                     Language: language,
                     AccessibilityRole: accessibilityRole)],
-                ctx.TurnCancellationToken);
-            ctx.OnMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = chapterId, revision = result.Snapshot.Revision, changedIds = result.ChangedBlockIds, summary = "Figure inserted.", mutation = new { kind = "manuscript", id = chapterId } });
+                "Insert manuscript Figure",
+                "Figure inserted.");
         }
         catch (ManuscriptRevisionConflictException ex)
         {
             return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = chapterId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact manuscript visuals and retry against the current revision." });
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException or InvalidDataException)
         {
             return JsonSerializer.Serialize(new { ok = false, code = "FIGURE_REJECTED", targetId = chapterId, summary = ex.Message });
         }
@@ -1522,18 +1526,98 @@ public sealed class EditorChatTools(
             };
             if (caption is not null)
                 operations.Insert(0, new ReplaceManuscriptBlockText(blockId, caption));
-            var result = await manuscripts.ApplyAsync(chapterId, expectedRevision, operations, ctx.TurnCancellationToken);
-            ctx.OnMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = chapterId, revision = result.Snapshot.Revision, changedIds = result.ChangedBlockIds, summary = "Figure updated.", mutation = new { kind = "manuscript", id = chapterId, selectId = blockId } });
+            return await ApplyFocusedManuscriptOperationsAsync(
+                ctx,
+                chapterId,
+                expectedRevision,
+                operations,
+                "Update manuscript Figure",
+                "Figure updated.",
+                blockId);
         }
         catch (ManuscriptRevisionConflictException ex)
         {
             return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = chapterId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact manuscript visuals and retry against the current revision." });
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException or InvalidDataException)
         {
             return JsonSerializer.Serialize(new { ok = false, code = "FIGURE_REJECTED", targetId = chapterId, summary = ex.Message });
         }
+    }
+
+    private async Task<string> ApplyFocusedManuscriptOperationsAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        long expectedRevision,
+        IReadOnlyList<ManuscriptOperation> operations,
+        string reviewSummary,
+        string resultSummary,
+        string? selectId = null)
+    {
+        var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken)
+            ?? throw new KeyNotFoundException("Chapter was not found.");
+        if (chapter.ProjectId != ctx.ProjectId)
+            throw new KeyNotFoundException("Chapter was not found in this project.");
+
+        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
+            ?? throw new KeyNotFoundException("Manuscript was not found.");
+        var source = ctx.ReviewEdits
+            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
+                ? staged
+                : snapshot.Document;
+        if (source.Revision != expectedRevision)
+            throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
+
+        var applied = ManuscriptOperations.Apply(source, operations);
+        var styleCatalog = ctx.ReviewEdits && ctx.EditorStaging is not null
+            ? await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
+                manuscriptStyles,
+                ctx.TurnCancellationToken)
+            : null;
+        await manuscripts.ValidateDocumentReferencesAsync(
+            chapterId,
+            applied.Document,
+            styleCatalog,
+            ctx.TurnCancellationToken);
+
+        if (ctx.ReviewEdits && ctx.EditorStaging is not null)
+        {
+            var stagedResult = JsonSerializer.Serialize(new
+            {
+                ok = true,
+                staged = true,
+                targetId = chapterId,
+                revision = applied.Document.Revision,
+                changedIds = applied.ChangedBlockIds,
+                summary = resultSummary,
+                selectId,
+            });
+            await ctx.EditorStaging.StageChapterManuscriptEditAsync(
+                chapter,
+                source,
+                applied.Document,
+                reviewSummary,
+                stagedResult,
+                ctx.TurnCancellationToken);
+            return stagedResult;
+        }
+
+        var result = await manuscripts.ReplaceDocumentAsync(
+            chapterId,
+            expectedRevision,
+            applied.Document,
+            ctx.TurnCancellationToken);
+        ctx.OnMutated();
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            targetId = chapterId,
+            revision = result.Snapshot.Revision,
+            changedIds = applied.ChangedBlockIds,
+            summary = resultSummary,
+            selectId,
+            mutation = new { kind = "manuscript", id = chapterId, selectId },
+        });
     }
 
     private async Task<string> PatchCompositionElementAsync(EditorChatContext ctx, Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch)

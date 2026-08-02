@@ -1,4 +1,3 @@
-@using System.Text.Json
 @using Lorekeeper.ChatTurns
 @using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.Chapters
@@ -700,12 +699,12 @@
         _pendingBatches = (await Chat.ListPendingChangesAsync(ProjectId, cancellationToken)).ToList();
         if (openIfPending && PendingChangeCount > 0)
         {
-            var hasActiveChapterManuscriptChanges = HasActiveChapterBodyPendingChanges();
-            var hasOtherPendingChanges = HasOtherPendingChanges(hasActiveChapterManuscriptChanges);
-            if (routeActiveChapterBodyToParent && hasActiveChapterManuscriptChanges && OnActiveChapterManuscriptChangesReady.HasDelegate)
+            var routeActiveChapterToLineReview = ShouldRouteActiveChapterToLineReview();
+            var hasModalPendingChanges = HasModalPendingChanges(routeActiveChapterToLineReview);
+            if (routeActiveChapterBodyToParent && routeActiveChapterToLineReview && OnActiveChapterManuscriptChangesReady.HasDelegate)
                 await OnActiveChapterManuscriptChangesReady.InvokeAsync();
 
-            if (!routeActiveChapterBodyToParent || hasOtherPendingChanges || !hasActiveChapterManuscriptChanges)
+            if (!routeActiveChapterBodyToParent || hasModalPendingChanges || !routeActiveChapterToLineReview)
             {
                 _showPendingChanges = true;
             }
@@ -845,53 +844,28 @@
     private bool IsWorkingProvider(int providerId) =>
         _providers.Any(provider => provider.Id == providerId);
 
-    private bool HasActiveChapterBodyPendingChanges() =>
-        CurrentChapterId is { } chapterId
-        && _pendingBatches
-            .SelectMany(batch => batch.Changes)
-            .Any(change => change.Status == AiChangeStatus.Pending && IsChapterManuscriptChangeFor(change, chapterId));
-
-    private bool HasOtherPendingChanges(bool hasActiveChapterManuscriptChanges)
+    private bool ShouldRouteActiveChapterToLineReview()
     {
-        if (!hasActiveChapterManuscriptChanges)
-            return PendingChangeCount > 0;
-        if (CurrentChapterId is not { } chapterId)
-            return PendingChangeCount > 0;
+        if (CurrentChapterId is not { } chapterId) return false;
+
+        var activeChapterChanges = _pendingBatches
+            .SelectMany(batch => batch.Changes)
+            .Where(change => change.Status == AiChangeStatus.Pending && AiChangeReviewDiffBuilder.IsChapterManuscriptChangeFor(change, chapterId))
+            .ToList();
+        return activeChapterChanges.Count > 0
+            && activeChapterChanges.All(AiChangeReviewDiffBuilder.CanUseChapterLineReview);
+    }
+
+    private bool HasModalPendingChanges(bool routeActiveChapterToLineReview)
+    {
+        if (CurrentChapterId is not { } chapterId) return PendingChangeCount > 0;
 
         return _pendingBatches
             .SelectMany(batch => batch.Changes)
-            .Any(change => change.Status == AiChangeStatus.Pending && !IsChapterManuscriptChangeFor(change, chapterId));
+            .Any(change => change.Status == AiChangeStatus.Pending
+                && (!routeActiveChapterToLineReview
+                    || !AiChangeReviewDiffBuilder.IsChapterManuscriptChangeFor(change, chapterId)));
     }
-
-    private static bool IsChapterManuscriptChangeFor(AiChange change, Guid chapterId)
-    {
-        if (!string.Equals(change.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return ReadChapterManuscriptChange(change.BeforeJson)?.Id == chapterId
-            || ReadChapterManuscriptChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
-    }
-
-    private static ChapterManuscriptChange? ReadChapterManuscriptChange(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json) || json == "null") return null;
-
-        try
-        {
-            return JsonSerializer.Deserialize<ChapterManuscriptChange>(json, ChangePayloadJsonOptions);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
 
     private void RebuildRenderable(DateTime? excludeMessagesCreatedAtOrAfter = null)
     {
