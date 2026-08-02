@@ -184,7 +184,7 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int blockIndex, Guid imageId, string caption, string? altText, bool decorative, string? language, FigureAccessibilityRole accessibilityRole, FigurePresentation presentation, long expectedRevision) => InsertFigureAsync(context, chapterId, blockIndex, imageId, caption, altText, decorative, language, accessibilityRole, presentation, expectedRevision),
                 name: "insert_outline_figure",
-                description: "Insert a concrete flowing Figure placeholder into a format-neutral chapter after the user approves the visual recommendation. Uses a project image, exact revision, accessibility decision, and block-level presentation; it does not classify the chapter."),
+                description: "Insert a concrete flowing Figure into a format-neutral chapter when requested. Uses a project image, exact revision, accessibility decision, and block-level presentation; it does not classify the chapter."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string blockId, Guid imageId, string? caption, string? altText, bool decorative, string? language, FigureAccessibilityRole accessibilityRole, FigurePresentation presentation, long expectedRevision) => PatchFigureAsync(context, chapterId, blockId, imageId, caption, altText, decorative, language, accessibilityRole, presentation, expectedRevision),
@@ -194,31 +194,31 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int blockIndex, string name, Guid? editionId, long expectedRevision) => InsertDesignedPageAsync(context, chapterId, blockIndex, name, editionId, expectedRevision),
                 name: "insert_outline_designed_page",
-                description: "Atomically insert a Designed Page block and owned semantic composition after the user approves a concrete page/spread plan. Pass an edition to seed its exact geometry variant, or null when geometry remains intentionally undecided."),
+                description: "Atomically insert a requested Designed Page block and owned semantic composition. Pass an edition to seed its exact geometry variant, or null when geometry remains intentionally undecided."),
 
             AIFunctionFactory.Create(
                 method: (Guid compositionId, Guid variantId, int semanticStart = 0, int semanticCount = 20, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) => ReadPageCompositionAsync(context, compositionId, variantId, semanticStart, semanticCount, objectStart, objectCount, structureStart, structureCount),
                 name: "read_outline_page_composition",
-                description: "Read one selected approved variant losslessly in bounded object pages, including complete surface, layers, styles, guides, object fields, semantic excerpts, and revisions."),
+                description: "Read one selected current variant losslessly in bounded object pages, including complete surface, layers, styles, guides, object fields, semantic excerpts, and revisions."),
 
             AIFunctionFactory.Create(
                 method: (Guid compositionId, Guid editionId) => GetOrCreateCompositionVariantAsync(context, compositionId, editionId),
                 name: "get_or_create_outline_composition_variant",
-                description: "Get or create the exact geometry variant for an approved Designed Page and edition."),
+                description: "Get or create the exact geometry variant for a Designed Page and edition."),
 
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCompositionElementAsync(context, variantId, expectedRevision, targetKind, targetId, patch),
                 name: "patch_outline_composition_element",
-                description: "Revision-check patch one stable object, guide, layer, or style with only approved changed fields. Preserve unrelated scene state; use full-scene staging for structural edits."),
+                description: "Revision-check patch one stable object, guide, layer, or style with only the requested changed fields. Preserve unrelated scene state; use full-scene staging for structural edits."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, CompositionScene scene) => StageCompositionAsync(context, variantId, expectedRevision, scene),
                 name: "stage_outline_page_composition",
-                description: "Submit an approved complete scene once and receive a compact, one-use stage ID without echoed payload."),
+                description: "Submit a complete requested scene once and receive a compact, one-use stage ID without echoed payload."),
 
             AIFunctionFactory.Create(
                 method: (Guid stageId, long expectedRevision) => ApplyCompositionStageAsync(context, stageId, expectedRevision),
                 name: "apply_outline_page_composition_stage",
-                description: "Apply a staged approved scene by one-use stage ID and exact revision without repeating its payload."),
+                description: "Apply a staged scene by one-use stage ID and exact revision without repeating its payload."),
 
             AIFunctionFactory.Create(
                 method: (Guid compositionId, long expectedRevision, ManuscriptOperationInput[] operations) => StageCompositionSemanticAsync(context, compositionId, expectedRevision, operations),
@@ -246,32 +246,32 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: (Guid editionId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCoverCompositionElementAsync(context, editionId, expectedRevision, targetKind, targetId, patch),
                 name: "patch_outline_cover_element",
-                description: "Revision-check patch one stable cover object, guide, layer, or style with only approved changed fields. Preserve unrelated cover state."),
+                description: "Revision-check patch one stable cover object, guide, layer, or style with only the requested changed fields. Preserve unrelated cover state."),
             AIFunctionFactory.Create(
                 method: (Guid editionId, long expectedRevision, CompositionScene scene) => StageCoverCompositionAsync(context, editionId, expectedRevision, scene),
                 name: "stage_outline_cover_composition",
-                description: "Stage one approved format-aware cover scene without echoing the complete payload."),
+                description: "Stage one requested format-aware cover scene without echoing the complete payload."),
 
             AIFunctionFactory.Create(
                 method: (Guid stageId, long expectedRevision) => ApplyCoverCompositionStageAsync(context, stageId, expectedRevision),
                 name: "apply_outline_cover_composition_stage",
-                description: "Apply an approved one-use cover stage by ID and exact revision."),
+                description: "Apply a one-use cover stage by ID and exact revision."),
 
             AIFunctionFactory.Create(
                 method: (Guid editionId, string targetKind, Guid targetId, Guid? variantId = null) => ReadLayoutGenerationTargetAsync(context, editionId, targetKind, targetId, variantId),
                 name: "read_outline_generation_target",
-                description: "Resolve optional composition guidance and reserved regions for an approved concrete Figure placement, page surface/frame, or cover surface/frame. Page targets require the exact selected composition variantId. The target does not restrict later placement of other source-image shapes."),
+                description: "Resolve optional composition guidance and reserved regions for a concrete Figure placement, page surface/frame, or cover surface/frame. Page targets require the exact selected composition variantId. The target does not restrict later placement of other source-image shapes."),
 
             AIFunctionFactory.Create(
                 method: (Guid editionId, Guid variantId) => ValidateCompositionAsync(context, editionId, variantId),
                 name: "validate_outline_page_composition",
-                description: "Validate an approved Designed Page variant for geometry, semantic coverage, reading order, accessibility, overflow, image DPI, font readiness, and edition compatibility. Returns compact prioritized diagnostics."),
+                description: "Validate a selected Designed Page variant for geometry, semantic coverage, reading order, accessibility, overflow, image DPI, font readiness, and edition compatibility. Returns compact prioritized diagnostics."),
 
             AIFunctionFactory.Create(
                 method: (Guid editionId, string targetKind, Guid targetId, ImageGenerationBrief brief, Guid? variantId = null, ImageReferenceUse[]? references = null, string? altText = null) =>
                     QueueLayoutBoundImageAsync(context, editionId, targetKind, targetId, variantId, brief, references, altText, cancellationToken),
                 name: "generate_outline_layout_image",
-                description: "Queue one image-library generation composed for an approved concrete Figure placement, page frame/surface, or cover frame/surface. Page targets require the exact selected composition variantId. Lorekeeper supplies physical guidance and reserved regions; the returned raster is preserved uncropped and is never placed automatically."),
+                description: "Queue one requested image-library generation composed for a concrete Figure placement, page frame/surface, or cover frame/surface. Page targets require the exact selected composition variantId. Lorekeeper supplies physical guidance and reserved regions; the returned raster is preserved uncropped and is never placed automatically."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int? startLine = null, int? endLine = null) => ReadChapterAsync(context, chapterId, startLine, endLine),
@@ -1111,7 +1111,7 @@ public sealed class OutlineCollaborationTools(
     private async Task<string> PatchCoverCompositionElementAsync(OutlineCollaborationContext ctx, Guid editionId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch)
     {
         try { var cover = await covers.PatchElementAsync(ctx.ProjectId, editionId, expectedRevision, targetKind, targetId, patch); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId, revision = cover.Revision, changedIds = new[] { targetId }, summary = $"Patched cover {targetKind} {targetId:N}.", mutation = new { kind = "cover", id = editionId } }); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = ex is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PATCH_REJECTED", targetId, summary = ex.Message, recovery = "Reread the cover and retry only the approved fields." }); }
+        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = ex is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PATCH_REJECTED", targetId, summary = ex.Message, recovery = "Reread the cover and retry only the requested fields." }); }
     }
 
     private async Task<string> StageCoverCompositionAsync(OutlineCollaborationContext ctx, Guid editionId, long expectedRevision, CompositionScene scene)

@@ -37,10 +37,10 @@ public sealed class BookFormatGuidanceService : IBookFormatGuidanceService
                 new("illustrated-book", "Illustrated-book rhythm", "Balance flowing Figures, plates, captions, color and bleed strategy, Designed Pages, spreads, and a viable reflow adaptation for EPUB."),
             BookKind.Poetry =>
                 new("poetry", "Poetry integrity", "Preserve poem boundaries, stanza and intentional line breaks, whitespace, recto starts, ornamental pages, and an explicit logical reading order."),
-            _ => new("hybrid", "Hybrid format", "Combine the conventions supported by the Book Brief and ask a focused question where genre or reading behavior materially changes structure."),
+            _ => new("hybrid", "Hybrid format", "Combine the conventions supported by the Book Brief. A broadly compatible treatment keeps flowing content adaptable while reserving designed structure for moments whose spatial relationship is intrinsic."),
         };
         if (brief.BookKind is BookKind.Unspecified or BookKind.Other && string.IsNullOrWhiteSpace(brief.Genre))
-            yield return new("format-uncertainty", "Format uncertainty", "Ask one focused question about genre, reader behavior, or intended product only when the answer would materially change structure or visual treatment. Do not force a template.");
+            yield return new("format-uncertainty", "Format uncertainty", "Prefer reversible structure that adapts across likely genres and products. Identify only uncertainties that materially change structure or visual treatment, and do not force a template.");
         else if (!string.IsNullOrWhiteSpace(brief.Genre))
             yield return new("genre", "Genre and subgenre", $"Use the stated genre/subgenre '{Compact(brief.Genre)}' as supporting context, not a stereotype. Prefer the Book Brief and explicit direction where conventions conflict.");
         if (!string.IsNullOrWhiteSpace(brief.TargetAudience)

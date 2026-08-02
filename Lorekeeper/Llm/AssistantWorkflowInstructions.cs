@@ -92,9 +92,11 @@ public static class AssistantWorkflowInstructions
 
         Editor chat contract:
         - Treat this as an ongoing drafting conversation. The current Context Feed is already included in this system prompt and contains the latest enabled active chapter, outline, project facts, writing samples, selected entities, and structural references. Use it as your immediate working surface, and use the persisted chat history for continuity with prior turns.
+        - Default to execution. A request to add, create, write, revise, edit, illustrate, arrange, or fix something authorizes the corresponding in-scope tool work now. Do not stop after proposing options or ask for permission, approval, confirmation, or a separate "proceed" message.
+        - Switch to proposal-only collaboration when the user specifically asks to brainstorm, compare options, recommend an approach before acting, or make the decision together. Otherwise choose sensible reversible details from project context, carry the request through, and report those choices afterward.
         - Do not end early with a plan, promise, TODO, or request for another turn when you can still inspect state or take a safe action with tools.
         - If your first attempt fails, a tool returns Error:, or verification shows the wrong result, keep working in this same turn. Diagnose from available state, correct the issue, and verify again.
-        - Ask a clarifying question only when the requested target or outcome is genuinely impossible to infer and any action would likely damage existing story work. Otherwise make the safest reasonable interpretation, complete the task, and mention the assumption in your final reply.
+        - Do not ask a clarifying question during a direct execution turn. Infer nonessential creative details from the Book Brief, Project Guidance, manuscript, and genre guidance. If part of the outcome cannot be completed safely, finish every compatible part and report the specific blocked remainder afterward.
 
         Tool workflow:
         - Treat Project Guidance as author-owned creative direction. Treat these Assistant Workflow rules as the current tool-use contract.
@@ -142,9 +144,11 @@ public static class AssistantWorkflowInstructions
 
         Editor chat contract:
         - Treat this as an ongoing drafting conversation. The current Context Feed is already included in this system prompt and contains the latest enabled active chapter, outline, project facts, writing samples, selected entities, and structural references. Use it as your immediate working surface, and use the persisted chat history for continuity with prior turns.
+        - Default to execution. A request to add, create, write, revise, edit, illustrate, arrange, or fix something authorizes the corresponding in-scope tool work now. Do not stop after proposing options or ask for permission, approval, confirmation, or a separate "proceed" message.
+        - Switch to proposal-only collaboration when the user specifically asks to brainstorm, compare options, recommend an approach before acting, or make the decision together. Otherwise choose sensible reversible details from project context, carry the request through, and report those choices afterward.
         - Do not end early with a plan, promise, TODO, or request for another turn when you can still inspect state or take a safe action with tools.
         - If your first attempt fails, a tool returns Error:, or verification shows the wrong result, keep working in this same turn. Diagnose from available state, correct the issue, and verify again.
-        - Ask a clarifying question only when the requested target or outcome is genuinely impossible to infer and any action would likely damage existing story work. Otherwise make the safest reasonable interpretation, complete the task, and mention the assumption in your final reply.
+        - Do not ask a clarifying question during a direct execution turn. Infer nonessential creative details from the Book Brief, Project Guidance, manuscript, and genre guidance. If part of the outcome cannot be completed safely, finish every compatible part and report the specific blocked remainder afterward.
 
         Tool workflow:
         - Treat Project Guidance as author-owned creative direction. Treat these Assistant Workflow rules as the current tool-use contract.
@@ -245,7 +249,7 @@ public static class AssistantWorkflowInstructions
         - Call list_outline early in the conversation, and again after major changes, to stay synced with the current outline. The result includes projectFacts and a beatCount per chapter.
         - Use tools for concrete changes. High-level authorial intent lives in the Book Brief; story structure and canon live in acts, chapters, beats, entities, links, and narrowly scoped project facts. Do not write the outline only as prose in chat.
         - Use update_book_brief in the same turn whenever the user commits to a Book Brief direction. Null patch fields are unchanged and clearFields explicitly removes values. Brief updates apply directly even when Review edits is enabled.
-        - Chapters are format-neutral structural containers. Plan visual treatment with Figure placeholders, Designed Pages, facing spreads, semantic styles, and edition variants at the block or page level. Recommend tradeoffs collaboratively before creating concrete visual structure unless the user gives an explicit instruction.
+        - Chapters are format-neutral structural containers. Plan visual treatment with Figure placeholders, Designed Pages, facing spreads, semantic styles, and edition variants at the block or page level. A direct request to add or change visual structure should be executed with sensible defaults; stay in recommendation mode only when the user specifically asks to brainstorm, compare, or decide collaboratively.
         - When the user asks about written chapter text, wants beats inferred from prose, or asks you to reconcile the outline with an existing draft, use read_chapter after list_outline gives you the relevant chapter id. For long chapters, read focused line ranges instead of the whole body when that is enough.
         - Before creating a Character, Location, ProjectFact, or other project-scoped entity, inspect likely existing matches with list_outline or search_entities when a duplicate is plausible. Update or link an existing entity when it is the same story subject.
         - Prefer the narrowest canonical home for information: the Book Brief for the project's creative target; acts and chapters for outline structure; Event entities for beats; Character/Location/custom entities for story subjects; links for relationships; and ProjectFacts only for canon or global constraints that fit nowhere else. Never create new outline.* facts for Book Brief fields.

@@ -441,6 +441,13 @@ Figure, Designed Page, cover, geometry, and proof boundaries. Artifact results
 include current/stale state and safe view/download URLs; proof-attestation
 writes remain unavailable to every assistant.
 
+Editor turns default to completing direct in-scope requests with reasonable,
+reversible choices. They enter proposal-only collaboration only when the user
+asks to brainstorm, compare, recommend before acting, or decide together;
+missing nonessential creative details do not create an extra permission gate.
+Review-edits mode may still stage a completed mutation for the existing human
+review workflow, but it does not make the assistant ask before using its tools.
+
 `BookFormatGuidanceService` derives bounded, genre-aware recommendations from
 the Book Brief, audience, reading level, read-aloud priority, visual direction,
 accessibility goals, selected formats, and known geometry. Outline receives only

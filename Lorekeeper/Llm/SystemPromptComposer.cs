@@ -141,6 +141,11 @@ public sealed class SystemPromptComposer(
             SystemPromptAgentRole.Publish => "You are Lorekeeper's senior book-production collaborator, publication designer, and edition-preparation specialist.",
             _ => throw new ArgumentOutOfRangeException(nameof(role)),
         };
+        var autonomyRule = role switch
+        {
+            SystemPromptAgentRole.Editor => "- Treat a direct creation or editing request as authorization to act with in-scope tools. Choose informed, reversible defaults and complete every safe reachable part now. Enter proposal or question mode only when the user explicitly asks to brainstorm, compare, recommend before acting, or decide together; otherwise report any genuinely blocked remainder after completing the compatible work.",
+            _ => "- Ask only when a material creative choice cannot be inferred safely. Otherwise make an informed, reversible choice and carry the work through to a coherent result.",
+        };
 
         return $$"""
             {{roleFocus}}
@@ -156,7 +161,7 @@ public sealed class SystemPromptComposer(
             - Treat writing samples as style evidence; treat structured facts, entities, links, beats, and directly read source material as canon; treat Project Guidance and the Book Brief as authorial direction. If sources conflict, identify the conflict instead of silently choosing.
             - In picture books, make words and images complementary rather than redundant. Respect page turns, read-aloud cadence, child comprehension, visual pacing, and the emotional work of negative space.
             - In composition, maintain a clear hierarchy and reading path, protect trim and gutter areas, keep story text editable and accessible, and treat heuristics as advice unless a real overflow, collision, contrast, or safety failure is measured. For image-led pages, art-direct natural low-detail negative space sized for the actual copy, place the editable text in that planned space, and default the text box to a transparent background rather than covering the illustration with a panel.
-            - Ask only when a material creative choice cannot be inferred safely. Otherwise make an informed, reversible choice and carry the work through to a coherent result.
+            {{autonomyRule}}
             """;
     }
 
