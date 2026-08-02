@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Runtime.ExceptionServices;
 using Lorekeeper.Chapters;
 using Lorekeeper.Composition;
@@ -31,6 +32,7 @@ public sealed class AiChangeApprovalService(
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() },
     };
 
     public async Task<IReadOnlyList<AiChangeBatch>> ListPendingBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
@@ -484,15 +486,40 @@ public sealed class AiChangeApprovalService(
                     throw new InvalidOperationException("The reviewed Designed Page structure no longer matches its staged creation request.");
                 }
 
-                await compositions.CreateDesignedPageAsync(
-                    projectId,
-                    after.Id,
-                    arguments.BlockIndex,
-                    arguments.Name,
-                    arguments.EditionId,
-                    before.Revision,
-                    new DesignedPageIdentity(compositionId, added.Id),
-                    cancellationToken);
+                if (arguments.EditionId is Guid editionId)
+                {
+                    await compositions.CreateDesignedPageAsync(
+                        projectId,
+                        after.Id,
+                        arguments.BlockIndex,
+                        arguments.Name,
+                        editionId,
+                        before.Revision,
+                        new DesignedPageIdentity(compositionId, added.Id),
+                        new DesignedPageInitialContent
+                        {
+                            LayoutMode = arguments.LayoutMode,
+                            ImageId = arguments.ImageId,
+                            AltText = arguments.AltText ?? string.Empty,
+                            Decorative = arguments.Decorative,
+                            ImageFit = arguments.ImageFit,
+                            FocalXPercent = arguments.FocalXPercent,
+                            FocalYPercent = arguments.FocalYPercent,
+                        },
+                        cancellationToken);
+                }
+                else
+                {
+                    await compositions.CreateDesignedPageAsync(
+                        projectId,
+                        after.Id,
+                        arguments.BlockIndex,
+                        arguments.Name,
+                        null,
+                        before.Revision,
+                        new DesignedPageIdentity(compositionId, added.Id),
+                        cancellationToken);
+                }
                 break;
             }
             case "apply_manuscript_operations":
@@ -1202,12 +1229,21 @@ public sealed class AiChangeApprovalService(
     private static ChapterManuscriptChange Change(Chapter chapter) =>
         new(chapter.Id, chapter.Title, chapter.ManuscriptRevision, chapter.ManuscriptJson);
 
-    private sealed record DesignedPageToolArguments(
-        Guid ChapterId,
-        int BlockIndex,
-        string Name,
-        Guid? EditionId,
-        long ExpectedRevision);
+    private sealed record DesignedPageToolArguments
+    {
+        public Guid ChapterId { get; init; }
+        public int BlockIndex { get; init; }
+        public string Name { get; init; } = "Designed page";
+        public Guid? EditionId { get; init; }
+        public long ExpectedRevision { get; init; }
+        public DesignedPageLayoutMode LayoutMode { get; init; } = DesignedPageLayoutMode.SinglePage;
+        public Guid? ImageId { get; init; }
+        public string? AltText { get; init; }
+        public bool Decorative { get; init; }
+        public FigureImageFit ImageFit { get; init; } = FigureImageFit.Cover;
+        public double FocalXPercent { get; init; } = 50;
+        public double FocalYPercent { get; init; } = 50;
+    }
 
     private sealed record ChapterBodyReviewLineTarget(
         Guid ChangeId,

@@ -181,7 +181,7 @@
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware chapter workspace with keyed semantic editor, serialized refresh coordination, resizable Chat/Memory columns, Designed Page workspace, and persistent AI/Contest review entry points. |
-| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, semantic Figure insertion/inspection/presentation/accessibility controls, paste diagnostics, and JavaScript lifetime ownership. |
+| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, semantic Figure controls, and discoverable Designed Page cards with live names, surface/status summaries, artwork thumbnails, and editor actions. |
 | `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Named paragraph/character style manager with revision-aware create/edit/delete controls and stable semantic roles. |
 | `DesignedPageWorkspace.razor` (+ `.razor.css`) | Exact-geometry page/spread scene editor with mode thumbnails, direct move/resize/rotate, semantic bindings, image/text/shape objects, layers, groups, styles, reading order, user guides/snapping, overflow/unplaced diagnostics, generation targets, and revision-safe save. |
 | `CoverCompositionWorkspace.razor` (+ `.razor.css`) | Format-aware print-wrap/digital-front scene editor with direct move/resize/rotate, canonical copy bindings, project images/fonts, layers/groups/styles, safety/barcode overlays, generation targets, and revision-safe save. |
@@ -571,7 +571,7 @@
 | File | Description |
 |------|-------------|
 | `IImagesChatService.cs` / `ImagesChatService.cs` | Images adapter over the shared chat engine with image/layout guidance, automatic and attached visual context, persisted transcript visuals, and queued generation/edit tools. |
-| `ImagesChatTools.cs` | Images tools for grounded reads, explicit canonical-reference mutations/single-subject crops, unattached structured generation/editing, ordered inputs, masks, geometry, and chapter placement context. |
+| `ImagesChatTools.cs` | Images tools for grounded reads, canonical-reference mutations/crops, generation/editing, masks, geometry, chapter placement, and atomic Designed Page creation with initial artwork. |
 | `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, cancellation and owned image jobs, current tool metadata, visible/model-only images, and mutation signaling. |
 | `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
 | `ImagesChatTurnRunner.cs` | Background turn runner for Images Chat: executes scoped chat turns outside component lifetime and replays buffered live updates to reopened panels. |
@@ -580,7 +580,7 @@
 
 | File | Description |
 |------|-------------|
-| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service, scene validation/staging, exact geometry fingerprints, and named geometry-bound image-generation descriptors. |
+| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service, atomic initial page/spread artwork seeding, scene validation/staging, exact geometry fingerprints, and named geometry-bound image-generation descriptors. |
 | `CompositionAgentPayloads.cs` | Lossless bounded assistant reads and compact revision-safe patch envelopes for semantic fragments, scene objects, layers, styles, and guides. |
 | `CompositionSceneResolver.cs` | Shared deterministic group flattener and PDF/X overlap validator used by export and geometry-target consumers so group transforms, opacity, visibility, locks, and z-order have runtime meaning. |
 | `CoverCompositionFactory.cs` | Seeds and reflows shared structured cover scenes across front-only digital and page-count-derived print-wrap geometry. |
@@ -649,7 +649,7 @@
 |------|-------------|
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt`, keeps Act graph nodes/structural edges synchronized, and updates targeted act context vectors on mutations. |
 | `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Outline adapter whose prompt includes Project Guidance, Book Brief, selected edition formats, and concise genre guidance while maintaining staged structural changes. |
-| `OutlineCollaborationTools.cs` | Format-neutral Outline tools for Book Brief, paginated genre guidance, acts/chapters/entities, optional Figure/Designed Page placeholders, geometry-bound generation, and canonical visuals. |
+| `OutlineCollaborationTools.cs` | Format-neutral Outline tools for Book Brief, genre guidance, acts/chapters/entities, Figures, review-safe complete Designed Page/page-spread creation, geometry-bound generation, and canonical visuals. |
 | `BookFormatGuidanceService.cs` | Compact/paginated fiction, nonfiction, picture-book, illustrated-book, poetry, hybrid, audience, extent, accessibility, constraint, and selected-format recommendations. |
 | `OutlineVisualMetrics.cs` | Shared compact Figure, Designed Page/spread, and layout-diagnostic summaries for format-neutral Outline context and tool results. |
 | `OutlineMutationPayloads.cs` | Shared compact entity/endpoint envelopes used by direct and staged outline mutation tools without serializing full knowledge or relationship traversals. |

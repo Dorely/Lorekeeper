@@ -76,6 +76,7 @@ public static class AssistantWorkflowInstructions
     public const string CompositionDesign = """
         Illustration and page-composition rules:
         - Chapters are format-neutral containers of semantic text, Figures, and Designed Pages. Use a Figure for artwork that flows with nearby prose. Use a Designed Page or facing spread when the spatial relationship among editable text, images, and shapes is intrinsic.
+        - When creating a Designed Page from known artwork, use the creation tool's initial image, exact edition, page/spread mode, fit, focal point, and accessibility fields in the same call. That call creates or review-stages the complete initial page aggregate. Do not merely attach the image to chat context, claim it is placed, or defer its placement to a later turn.
         - Read the target object, current revision, and an edition geometry variant before making a physical-layout decision. Preserve unrelated semantic content and scene objects.
         - Treat semantic reading order as an independent accessibility contract. Every meaningful image requires alternative text; otherwise mark it deliberately decorative. Every semantic scene object requires one unique reading-order position.
         - Plan a page in this order: final copy and hierarchy; text-frame bindings and bounds; optional geometry-guided image target; illustration generation; visual inspection; scene placement with an explicit fit/crop/focal choice; overflow, contrast, safe-area, gutter, DPI, and accessibility validation; render and correction.

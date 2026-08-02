@@ -136,10 +136,35 @@ public sealed class ImagesChatTools(
                 description: "Revision-check replace or reformat one existing Figure while preserving unrelated manuscript blocks."),
 
             AIFunctionFactory.Create(
-                method: (Guid chapterId, long expectedRevision, int blockIndex, string name, Guid? editionId = null) =>
-                    CreateDesignedPageAsync(context, chapterId, expectedRevision, blockIndex, name, editionId),
+                method: (
+                    Guid chapterId,
+                    long expectedRevision,
+                    int blockIndex,
+                    string name,
+                    Guid editionId,
+                    DesignedPageLayoutMode layoutMode = DesignedPageLayoutMode.SinglePage,
+                    Guid? imageId = null,
+                    string? altText = null,
+                    bool decorative = false,
+                    FigureImageFit imageFit = FigureImageFit.Cover,
+                    double focalXPercent = 50,
+                    double focalYPercent = 50) =>
+                    CreateDesignedPageAsync(
+                        context,
+                        chapterId,
+                        expectedRevision,
+                        blockIndex,
+                        name,
+                        editionId,
+                        layoutMode,
+                        imageId,
+                        altText,
+                        decorative,
+                        imageFit,
+                        focalXPercent,
+                        focalYPercent),
                 name: "create_designed_page",
-                description: "Insert a Designed Page into a format-neutral chapter and optionally seed its exact edition-geometry variant."),
+                description: "Atomically insert a complete Designed Page with exact edition geometry, single-page or facing-spread layout, and optional existing project artwork placed with explicit fit, focal point, and accessibility settings."),
 
             AIFunctionFactory.Create(
                 method: (Guid compositionId, Guid editionId) => GetOrCreateCompositionVariantAsync(context, compositionId, editionId),
@@ -603,13 +628,37 @@ public sealed class ImagesChatTools(
         long expectedRevision,
         int blockIndex,
         string name,
-        Guid? editionId)
+        Guid editionId,
+        DesignedPageLayoutMode layoutMode,
+        Guid? imageId,
+        string? altText,
+        bool decorative,
+        FigureImageFit imageFit,
+        double focalXPercent,
+        double focalYPercent)
     {
         try
         {
-            var result = await compositions.CreateDesignedPageAsync(ctx.ProjectId, chapterId, blockIndex, name, editionId, expectedRevision, ctx.TurnCancellationToken);
+            var result = await compositions.CreateDesignedPageAsync(
+                ctx.ProjectId,
+                chapterId,
+                blockIndex,
+                name,
+                editionId,
+                expectedRevision,
+                new DesignedPageInitialContent
+                {
+                    LayoutMode = layoutMode,
+                    ImageId = imageId,
+                    AltText = altText ?? string.Empty,
+                    Decorative = decorative,
+                    ImageFit = imageFit,
+                    FocalXPercent = focalXPercent,
+                    FocalYPercent = focalYPercent,
+                },
+                ctx.TurnCancellationToken);
             ctx.MarkMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Manuscript.Revision, changedIds = new[] { result.BlockId }, variantId = result.Variant?.Id, summary = "Designed Page inserted.", mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant?.Id } }, JsonOptions);
+            return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Manuscript.Revision, changedIds = new[] { result.BlockId }, variantId = result.Variant?.Id, initialImageId = imageId, layoutMode, summary = imageId is null ? "Designed Page inserted." : "Designed Page and initial artwork inserted.", mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant?.Id } }, JsonOptions);
         }
         catch (ManuscriptRevisionConflictException ex)
         {

@@ -115,22 +115,79 @@
 
 .semantic-editor ::deep .semantic-prosemirror .semantic-designed-page {
     display: grid;
-    min-height: 8rem;
+    grid-template-columns: minmax(7rem, 10rem) minmax(0, 1fr) auto;
+    min-height: 7rem;
     margin: 1.25rem 0;
-    padding: 1.5rem;
-    place-content: center;
-    border: 1px dashed var(--lk-border-strong, #8a93a6);
+    padding: .75rem;
+    gap: 1rem;
+    align-items: center;
+    border: 1px solid var(--lk-border-strong, #8a93a6);
     border-radius: .65rem;
     background: linear-gradient(135deg, rgba(92, 124, 165, .10), rgba(92, 124, 165, .03));
-    text-align: center;
+    text-align: left;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .semantic-designed-page-preview {
+    display: grid;
+    width: 100%;
+    height: 5.5rem;
+    place-items: center;
+    border-radius: .4rem;
+    background: rgba(92, 124, 165, .1);
+    object-fit: cover;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .semantic-designed-page-preview--empty {
+    color: var(--lk-text-muted, #596274);
+    font-family: system-ui, sans-serif;
+    font-size: .72rem;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .semantic-designed-page-details {
+    display: grid;
+    min-width: 0;
+    gap: .25rem;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .semantic-designed-page-details strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .semantic-designed-page-meta {
+    display: block;
+    color: var(--lk-text-muted, #596274);
+    font-family: system-ui, sans-serif;
+    font-size: .78rem;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .semantic-designed-page-open {
+    padding: .45rem .7rem;
+    border: 1px solid var(--accent, #4667c8);
+    border-radius: .4rem;
+    color: var(--accent, #4667c8);
+    background: var(--bs-body-bg, #fff);
+    font-family: system-ui, sans-serif;
+    font-size: .78rem;
+    font-weight: 700;
     cursor: pointer;
 }
 
-.semantic-editor ::deep .semantic-prosemirror .semantic-designed-page span {
-    display: block;
-    margin-top: .35rem;
-    color: var(--lk-text-muted, #596274);
-    font-size: .78rem;
+.semantic-editor ::deep .semantic-prosemirror .semantic-designed-page-open:hover,
+.semantic-editor ::deep .semantic-prosemirror .semantic-designed-page-open:focus-visible {
+    color: #fff;
+    background: var(--accent, #4667c8);
+}
+
+@media (max-width: 640px) {
+    .semantic-editor ::deep .semantic-prosemirror .semantic-designed-page {
+        grid-template-columns: 6rem minmax(0, 1fr);
+    }
+
+    .semantic-editor ::deep .semantic-prosemirror .semantic-designed-page-open {
+        grid-column: 1 / -1;
+    }
 }
 
 .semantic-editor ::deep .semantic-prosemirror h1 {

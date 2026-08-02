@@ -148,9 +148,13 @@ in the pending-edits modal, which shows body text plus separate structure and
 visual-block diffs. Focused Figure tools and Designed Page insertion obey the
 same Review-edits staging boundary as the general manuscript preview/apply
 protocol. A staged Designed Page preallocates its composition and manuscript
-block IDs, then creates both atomically only when the reviewed structural change
-is kept. Staged visual reads resolve against the projected manuscript revision
-until the user keeps or rejects the grouped change.
+block IDs and retains its selected edition, page/spread mode, initial project
+artwork, fit, focal point, and accessibility decision in the reviewed tool
+payload. Keeping the change creates the manuscript block, composition, exact
+geometry variant, and initial image object in one transaction; approval never
+depends on a later assistant turn to finish the page. Staged visual reads resolve
+against the projected manuscript revision until the user keeps or rejects the
+grouped change.
 
 ### Ingest, Research, and Background Work
 
@@ -223,7 +227,10 @@ Assistant surfaces expose a compact edition-geometry discovery tool containing
 stable edition IDs, physical dimensions, margins, bleed, and override policy so
 agents can select an existing target rather than inventing or omitting known
 geometry.
-The Designed Page workspace provides page/spread mode thumbnails, direct pointer
+The manuscript editor represents a Designed Page with its composition name,
+page/spread mode, layout status, first-image thumbnail when present, and an
+explicit editor action rather than exposing the storage identifier. The Designed
+Page workspace provides page/spread mode thumbnails, direct pointer
 move/resize/rotate, objects, layers, styles, semantic content, reading-order
 reordering, persisted user guides/snapping, crop/focal behavior, and overflow/unplaced-content
 diagnostics with revision-aware save and undo/redo.

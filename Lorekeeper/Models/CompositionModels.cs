@@ -57,6 +57,17 @@ public sealed record CompositionScene
     public IReadOnlyList<CompositionObject> Objects { get; init; } = [];
 }
 
+public sealed record DesignedPageInitialContent
+{
+    public DesignedPageLayoutMode LayoutMode { get; init; } = DesignedPageLayoutMode.SinglePage;
+    public Guid? ImageId { get; init; }
+    public string AltText { get; init; } = string.Empty;
+    public bool Decorative { get; init; }
+    public FigureImageFit ImageFit { get; init; } = FigureImageFit.Cover;
+    public double FocalXPercent { get; init; } = 50;
+    public double FocalYPercent { get; init; } = 50;
+}
+
 public sealed record CompositionGuide(Guid Id, CompositionGuideAxis Axis, double PositionPercent);
 
 public sealed record CompositionSurface
@@ -153,6 +164,8 @@ public sealed record CompositionBounds
 
 [JsonConverter(typeof(JsonStringEnumConverter<CompositionSurfaceKind>))]
 public enum CompositionSurfaceKind { SinglePage, FacingSpread, IndependentPage }
+[JsonConverter(typeof(JsonStringEnumConverter<DesignedPageLayoutMode>))]
+public enum DesignedPageLayoutMode { SinglePage, FacingSpread }
 [JsonConverter(typeof(JsonStringEnumConverter<CompositionOutputPageMode>))]
 public enum CompositionOutputPageMode { EditionLeaves, SingleSurface }
 [JsonConverter(typeof(JsonStringEnumConverter<CompositionObjectKind>))]

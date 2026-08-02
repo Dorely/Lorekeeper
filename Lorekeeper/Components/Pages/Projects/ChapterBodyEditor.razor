@@ -1,5 +1,7 @@
 @using Microsoft.JSInterop
 @using Lorekeeper.Images
+@using Lorekeeper.Models
+@using Lorekeeper.Composition
 @using System.Text.Json
 @implements IAsyncDisposable
 @inject IJSRuntime JS
@@ -74,6 +76,9 @@
                 var imagesJson = JsonSerializer.Serialize(
                     (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg"),
                     ManuscriptCodec.JsonOptions);
+                var compositionsJson = JsonSerializer.Serialize(
+                    await LoadDesignedPageSummariesAsync(),
+                    ManuscriptCodec.JsonOptions);
                 var editionsJson = JsonSerializer.Serialize(
                     await Editions.ListAsync(ProjectId),
                     ManuscriptCodec.JsonOptions);
@@ -102,7 +107,8 @@
                     InitialManuscriptJson,
                     stylesJson,
                     imagesJson,
-                    editionsJson);
+                    editionsJson,
+                    compositionsJson);
                 if (_disposed || _disposing)
                 {
                     if (handle is not null)
@@ -148,11 +154,83 @@
             id = result.Composition.Id,
             result.Composition.Name,
             manuscriptJson = ManuscriptCodec.Serialize(result.Manuscript.Document),
+            summary = BuildDesignedPageSummary(result.Composition),
         };
     }
 
     [JSInvokable]
     public Task OnOpenDesignedPage(Guid compositionId) => OpenDesignedPage.InvokeAsync(compositionId);
+
+    private async Task<IReadOnlyList<DesignedPageEditorSummary>> LoadDesignedPageSummariesAsync()
+    {
+        var document = ManuscriptCodec.Deserialize(InitialManuscriptJson);
+        var summaries = new List<DesignedPageEditorSummary>();
+        foreach (var compositionId in document.Content
+            .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId is not null)
+            .Select(block => block.PageCompositionId!.Value)
+            .Distinct())
+        {
+            if (await Compositions.GetAsync(ProjectId, compositionId) is { } composition)
+                summaries.Add(BuildDesignedPageSummary(composition));
+        }
+        return summaries;
+    }
+
+    private DesignedPageEditorSummary BuildDesignedPageSummary(PageComposition composition)
+    {
+        CompositionScene? selectedScene = null;
+        foreach (var variant in composition.Variants.OrderByDescending(item => item.UpdatedAt))
+        {
+            CompositionScene? scene;
+            try
+            {
+                scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+            if (scene is null)
+                continue;
+            selectedScene ??= scene;
+            if (scene.Objects.Count > 0)
+            {
+                selectedScene = scene;
+                break;
+            }
+        }
+
+        var firstImageId = selectedScene?.Objects
+            .Where(item => item.Visible && item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
+            .OrderBy(item => item.ZIndex)
+            .Select(item => item.ImageId)
+            .FirstOrDefault();
+        var previewUrl = firstImageId is Guid imageId
+            ? $"/projects/{ProjectId:N}/images/{imageId:N}/content?maxEdge=720"
+            : null;
+        var surfaceLabel = selectedScene?.Surface.Kind switch
+        {
+            CompositionSurfaceKind.FacingSpread => "Facing spread",
+            CompositionSurfaceKind.IndependentPage => "Independent page",
+            CompositionSurfaceKind.SinglePage => "Single page",
+            _ => "Geometry not configured",
+        };
+        var imageCount = selectedScene?.Objects.Count(item => item.Visible && item.Kind == CompositionObjectKind.Image) ?? 0;
+        var objectCount = selectedScene?.Objects.Count(item => item.Visible) ?? 0;
+        var status = selectedScene is null
+            ? "No layout variant"
+            : objectCount == 0
+                ? "Empty layout"
+                : imageCount == 1 && objectCount == 1
+                    ? "1 image"
+                    : $"{objectCount} objects · {imageCount} images";
+        return new DesignedPageEditorSummary(
+            composition.Id,
+            composition.Name,
+            surfaceLabel,
+            status,
+            previewUrl);
+    }
 
     [JSInvokable]
     public Task OnGenerateFigure(string blockId, Guid editionId)
@@ -292,4 +370,11 @@
         long Revision,
         bool Conflict = false,
         string? CurrentManuscriptJson = null);
+
+    private sealed record DesignedPageEditorSummary(
+        Guid Id,
+        string Name,
+        string SurfaceLabel,
+        string Status,
+        string? PreviewUrl);
 }

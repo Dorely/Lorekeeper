@@ -14,6 +14,8 @@ public interface ICompositionService
 {
     Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, Guid? editionId, long expectedRevision, CancellationToken cancellationToken = default);
     Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, Guid? editionId, long expectedRevision, DesignedPageIdentity identity, CancellationToken cancellationToken = default);
+    Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, Guid editionId, long expectedRevision, DesignedPageInitialContent initialContent, CancellationToken cancellationToken = default);
+    Task<DesignedPageCreationResult> CreateDesignedPageAsync(Guid projectId, Guid chapterId, int blockIndex, string name, Guid editionId, long expectedRevision, DesignedPageIdentity identity, DesignedPageInitialContent initialContent, CancellationToken cancellationToken = default);
     Task<PageComposition?> GetAsync(Guid projectId, Guid compositionId, CancellationToken cancellationToken = default);
     Task<PageCompositionVariant> GetOrCreateVariantAsync(Guid projectId, Guid compositionId, Guid editionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PageCompositionVariant>> ListVariantsAsync(Guid projectId, Guid compositionId, Guid editionId, CancellationToken cancellationToken = default);
@@ -57,6 +59,7 @@ public sealed class CompositionService(
             editionId,
             expectedRevision,
             identity: null,
+            initialContent: null,
             cancellationToken);
 
     public async Task<DesignedPageCreationResult> CreateDesignedPageAsync(
@@ -76,6 +79,48 @@ public sealed class CompositionService(
             editionId,
             expectedRevision,
             identity,
+            initialContent: null,
+            cancellationToken);
+
+    public async Task<DesignedPageCreationResult> CreateDesignedPageAsync(
+        Guid projectId,
+        Guid chapterId,
+        int blockIndex,
+        string name,
+        Guid editionId,
+        long expectedRevision,
+        DesignedPageInitialContent initialContent,
+        CancellationToken cancellationToken = default) =>
+        await CreateDesignedPageCoreAsync(
+            projectId,
+            chapterId,
+            blockIndex,
+            name,
+            editionId,
+            expectedRevision,
+            identity: null,
+            initialContent,
+            cancellationToken);
+
+    public async Task<DesignedPageCreationResult> CreateDesignedPageAsync(
+        Guid projectId,
+        Guid chapterId,
+        int blockIndex,
+        string name,
+        Guid editionId,
+        long expectedRevision,
+        DesignedPageIdentity identity,
+        DesignedPageInitialContent initialContent,
+        CancellationToken cancellationToken = default) =>
+        await CreateDesignedPageCoreAsync(
+            projectId,
+            chapterId,
+            blockIndex,
+            name,
+            editionId,
+            expectedRevision,
+            identity,
+            initialContent,
             cancellationToken);
 
     private async Task<DesignedPageCreationResult> CreateDesignedPageCoreAsync(
@@ -86,6 +131,7 @@ public sealed class CompositionService(
         Guid? editionId,
         long expectedRevision,
         DesignedPageIdentity? identity,
+        DesignedPageInitialContent? initialContent,
         CancellationToken cancellationToken)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
@@ -108,12 +154,13 @@ public sealed class CompositionService(
         {
             var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(item => item.Id == selectedEditionId && item.ProjectId == projectId, cancellationToken)
                 ?? throw new KeyNotFoundException("Edition was not found in this project.");
+            var scene = await CreateInitialPageSceneAsync(projectId, edition, initialContent, cancellationToken);
             variant = new PageCompositionVariant
             {
                 Composition = composition,
                 CompositionId = composition.Id,
-                GeometryKey = GeometryKey(edition),
-                SceneJson = JsonSerializer.Serialize(CreatePageScene(edition), JsonOptions),
+                GeometryKey = GeometryKey(edition, scene),
+                SceneJson = SerializeAndValidate(scene, composition.SemanticManuscriptJson),
             };
             db.PageCompositionVariants.Add(variant);
         }
@@ -132,6 +179,57 @@ public sealed class CompositionService(
         await transaction.CommitAsync(cancellationToken);
         await manuscripts.RefreshDerivedStateAsync(chapterId, cancellationToken);
         return new DesignedPageCreationResult(composition, variant, manuscript.Snapshot, manuscript.ChangedBlockIds.Single());
+    }
+
+    private async Task<CompositionScene> CreateInitialPageSceneAsync(
+        Guid projectId,
+        PublicationEdition edition,
+        DesignedPageInitialContent? initialContent,
+        CancellationToken cancellationToken)
+    {
+        var layoutMode = initialContent?.LayoutMode ?? DesignedPageLayoutMode.SinglePage;
+        var scene = CreatePageScene(edition, layoutMode);
+        if (initialContent?.ImageId is not Guid imageId)
+            return scene;
+
+        var image = await db.PublishAssets.AsNoTracking().SingleOrDefaultAsync(
+            item => item.Id == imageId
+                && item.ProjectId == projectId
+                && (item.ContentType == "image/png" || item.ContentType == "image/jpeg"),
+            cancellationToken) ?? throw new KeyNotFoundException("The initial Designed Page artwork was not found in this project.");
+        var altText = initialContent.Decorative
+            ? string.Empty
+            : string.IsNullOrWhiteSpace(initialContent.AltText)
+                ? image.AltText.Trim()
+                : initialContent.AltText.Trim();
+        var layer = scene.Layers.Single();
+        scene = scene with
+        {
+            Objects =
+            [
+                new CompositionObject
+                {
+                    Id = Guid.NewGuid(),
+                    LayerId = layer.Id,
+                    Kind = CompositionObjectKind.Image,
+                    Name = image.FileName,
+                    ImageId = image.Id,
+                    ImageFit = initialContent.ImageFit,
+                    FocalXPercent = Math.Clamp(initialContent.FocalXPercent, 0, 100),
+                    FocalYPercent = Math.Clamp(initialContent.FocalYPercent, 0, 100),
+                    AltText = altText,
+                    Decorative = initialContent.Decorative,
+                    AccessibilityDecisionPending = !initialContent.Decorative && string.IsNullOrWhiteSpace(altText),
+                    SemanticRole = initialContent.Decorative
+                        ? CompositionSemanticRole.Artifact
+                        : CompositionSemanticRole.Figure,
+                    ReadingOrder = initialContent.Decorative ? null : 1,
+                },
+            ],
+        };
+        await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
+        ValidateVariantGeometry(edition, scene);
+        return scene;
     }
 
     public async Task<PageComposition?> GetAsync(
@@ -1412,11 +1510,16 @@ public sealed class CompositionService(
     private static string GeometryCanonical(PublicationEdition edition) => FormattableString.Invariant(
         $"{edition.Format}|{edition.PageWidthInches:F4}|{edition.PageHeightInches:F4}|{edition.PageMarginInches:F4}|{edition.Bleed}|{edition.Binding}|{edition.VendorProfileVersion}");
 
-    public static CompositionScene CreatePageScene(PublicationEdition edition) => new()
+    public static CompositionScene CreatePageScene(
+        PublicationEdition edition,
+        DesignedPageLayoutMode layoutMode = DesignedPageLayoutMode.SinglePage) => new()
     {
         Surface = new CompositionSurface
         {
-            WidthPoints = edition.PageWidthInches * 72,
+            Kind = layoutMode == DesignedPageLayoutMode.FacingSpread
+                ? CompositionSurfaceKind.FacingSpread
+                : CompositionSurfaceKind.SinglePage,
+            WidthPoints = edition.PageWidthInches * 72 * (layoutMode == DesignedPageLayoutMode.FacingSpread ? 2 : 1),
             HeightPoints = edition.PageHeightInches * 72,
             BleedPoints = edition.Bleed ? 9 : 0,
             SafeInsetPoints = edition.PageMarginInches * 72,

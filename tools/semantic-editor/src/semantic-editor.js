@@ -93,8 +93,41 @@ const blockAttrs = {
     language: {default: null},
     accessibilityRole: {default: null},
     presentation: {default: null},
-    pageCompositionId: {default: null}
+    pageCompositionId: {default: null},
+    compositionName: {default: null},
+    compositionSurfaceLabel: {default: null},
+    compositionStatus: {default: null},
+    compositionPreviewUrl: {default: null}
 };
+
+function designedPageDom(node) {
+    const compositionId = node.attrs.pageCompositionId;
+    const preview = node.attrs.compositionPreviewUrl
+        ? ["img", {
+            class: "semantic-designed-page-preview",
+            src: node.attrs.compositionPreviewUrl,
+            alt: "",
+            draggable: "false"
+        }]
+        : ["span", {class: "semantic-designed-page-preview semantic-designed-page-preview--empty"}, "No preview yet"];
+    return ["section", {
+        class: "semantic-designed-page",
+        "data-block-id": node.attrs.id,
+        "data-style-role": "designed-page",
+        "data-page-composition-id": compositionId
+    },
+    preview,
+    ["span", {class: "semantic-designed-page-details"},
+        ["strong", node.attrs.compositionName || "Designed page"],
+        ["span", {class: "semantic-designed-page-meta"},
+            `${node.attrs.compositionSurfaceLabel || "Geometry not configured"} · ${node.attrs.compositionStatus || "Open to configure"}`]],
+    ["button", {
+        type: "button",
+        class: "semantic-designed-page-open",
+        "data-open-page-composition": compositionId,
+        "aria-label": `Open ${node.attrs.compositionName || "Designed page"} editor`
+    }, "Edit page"]];
+}
 
 const schema = new Schema({
     nodes: {
@@ -207,12 +240,7 @@ const schema = new Schema({
                     pageCompositionId: element.dataset.pageCompositionId
                 })
             }],
-            toDOM: node => ["section", {
-                class: "semantic-designed-page",
-                "data-block-id": node.attrs.id,
-                "data-style-role": "designed-page",
-                "data-page-composition-id": node.attrs.pageCompositionId
-            }, ["strong", "Designed page"], ["span", `Composition ${node.attrs.pageCompositionId}`]]
+            toDOM: designedPageDom
         }
     },
     marks: {
@@ -316,6 +344,10 @@ function documentFromDomain(document) {
             ,accessibilityRole: block.accessibilityRole || (nodeName === "figure" ? "figure" : null)
             ,presentation: block.figurePresentation || null
             ,pageCompositionId: block.pageCompositionId || null
+            ,compositionName: block.compositionName || null
+            ,compositionSurfaceLabel: block.compositionSurfaceLabel || null
+            ,compositionStatus: block.compositionStatus || null
+            ,compositionPreviewUrl: block.compositionPreviewUrl || null
         };
         if (nodeName === "heading")
             attrs.level = block.headingLevel || 2;
@@ -832,7 +864,7 @@ async function insertDesignedPage(view, dotNetRef, getRevision, flush, replaceDo
         blockIndex,
         getRevision());
     if (!composition?.id || !composition?.manuscriptJson) return;
-    replaceDocument(composition.manuscriptJson);
+    replaceDocument(composition.manuscriptJson, composition.summary);
     view.focus();
 }
 
@@ -1178,7 +1210,20 @@ function hydrateFigureImageUrls(document, imageById) {
     return document;
 }
 
-export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]") {
+function hydrateDesignedPageSummaries(document, compositionById) {
+    for (const block of document.content || []) {
+        const summary = block.type === "designedPage"
+            ? compositionById.get(String(block.pageCompositionId).toLowerCase())
+            : null;
+        block.compositionName = summary?.name ?? null;
+        block.compositionSurfaceLabel = summary?.surfaceLabel ?? null;
+        block.compositionStatus = summary?.status ?? null;
+        block.compositionPreviewUrl = summary?.previewUrl ?? null;
+    }
+    return document;
+}
+
+export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]") {
     if (!root || typeof root.replaceChildren !== "function" || root.isConnected === false)
         return null;
 
@@ -1186,7 +1231,9 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     const namedStyles = JSON.parse(stylesJson);
     const projectImages = JSON.parse(imagesJson);
     const editionTargets = JSON.parse(editionsJson);
+    const pageCompositions = JSON.parse(compositionsJson);
     const imageById = new Map(projectImages.map(image => [String(image.id).toLowerCase(), image]));
+    const compositionById = new Map(pageCompositions.map(composition => [String(composition.id).toLowerCase(), composition]));
     const paragraphRoles = new Set([
         ...builtInParagraphRoles,
         ...namedStyles
@@ -1198,6 +1245,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             .filter(style => style.kind === "character")
             .map(style => style.semanticRole));
     hydrateFigureImageUrls(initial, imageById);
+    hydrateDesignedPageSummaries(initial, compositionById);
     let manuscriptId = initial.manuscriptId;
     let revision = initial.revision;
     let timer = null;
@@ -1281,8 +1329,12 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         timer = setTimeout(() => { void saveNow(); }, debounceMs);
     };
 
-    const replaceDocument = json => {
-        const incoming = hydrateFigureImageUrls(JSON.parse(json), imageById);
+    const replaceDocument = (json, compositionSummary = null) => {
+        if (compositionSummary?.id)
+            compositionById.set(String(compositionSummary.id).toLowerCase(), compositionSummary);
+        const incoming = hydrateDesignedPageSummaries(
+            hydrateFigureImageUrls(JSON.parse(json), imageById),
+            compositionById);
         manuscriptId = incoming.manuscriptId;
         revision = incoming.revision;
         changeGeneration = 0;
@@ -1331,6 +1383,15 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             updateStatus();
         },
         handleDOMEvents: {
+            click(_view, event) {
+                const button = event.target instanceof Element
+                    ? event.target.closest("[data-open-page-composition]")
+                    : null;
+                if (!button?.dataset.openPageComposition) return false;
+                event.preventDefault();
+                void dotNetRef.invokeMethodAsync("OnOpenDesignedPage", button.dataset.openPageComposition);
+                return true;
+            },
             dblclick(_view, event) {
                 const element = event.target instanceof Element
                     ? event.target.closest("[data-page-composition-id]")

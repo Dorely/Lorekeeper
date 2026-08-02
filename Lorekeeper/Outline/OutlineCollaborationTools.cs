@@ -206,9 +206,35 @@ public sealed class OutlineCollaborationTools(
                 description: "Patch one existing Figure's optional caption, image, accessibility decision, language, role, and presentation atomically with an exact manuscript revision. Null caption preserves existing copy."),
 
             AIFunctionFactory.Create(
-                method: (Guid chapterId, int blockIndex, string name, Guid? editionId, long expectedRevision) => InsertDesignedPageAsync(context, chapterId, blockIndex, name, editionId, expectedRevision),
+                method: (
+                    Guid chapterId,
+                    int blockIndex,
+                    string name,
+                    Guid? editionId,
+                    long expectedRevision,
+                    DesignedPageLayoutMode layoutMode = DesignedPageLayoutMode.SinglePage,
+                    Guid? imageId = null,
+                    string? altText = null,
+                    bool decorative = false,
+                    FigureImageFit imageFit = FigureImageFit.Cover,
+                    double focalXPercent = 50,
+                    double focalYPercent = 50) =>
+                    InsertDesignedPageAsync(
+                        context,
+                        chapterId,
+                        blockIndex,
+                        name,
+                        editionId,
+                        expectedRevision,
+                        layoutMode,
+                        imageId,
+                        altText,
+                        decorative,
+                        imageFit,
+                        focalXPercent,
+                        focalYPercent),
                 name: "insert_outline_designed_page",
-                description: "Insert a requested Designed Page block and its owned semantic composition. Read layout editions first and pass the intended edition ID to seed exact geometry; use null only when geometry is deliberately undecided. In Review Edits mode the structural insertion is staged for human review before its composition can be configured."),
+                description: "Create one complete Designed Page aggregate: manuscript block, exact edition geometry, single-page or facing-spread surface, and optional existing project artwork placed edge-to-edge with fit/focal/accessibility settings. Read layout editions first. When the user identifies artwork, pass its image ID in this call instead of merely adding it to context. Review Edits stages this complete setup and approval applies it atomically; no follow-up configuration turn is required."),
 
             AIFunctionFactory.Create(
                 method: () => ListLayoutEditionsAsync(context),
@@ -1102,13 +1128,46 @@ public sealed class OutlineCollaborationTools(
         int blockIndex,
         string name,
         Guid? editionId,
-        long expectedRevision)
+        long expectedRevision,
+        DesignedPageLayoutMode layoutMode,
+        Guid? imageId,
+        string? altText,
+        bool decorative,
+        FigureImageFit imageFit,
+        double focalXPercent,
+        double focalYPercent)
     {
         var chapter = await chapters.GetAsync(chapterId);
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return JsonSerializer.Serialize(new { ok = false, code = "CHAPTER_NOT_FOUND", targetId = chapterId, summary = "Chapter was not found in this project." });
         try
         {
+            if ((imageId is not null || layoutMode == DesignedPageLayoutMode.FacingSpread) && editionId is null)
+            {
+                return JsonSerializer.Serialize(new
+                {
+                    ok = false,
+                    code = "EDITION_REQUIRED",
+                    targetId = chapterId,
+                    summary = "Illustrated and facing-spread Designed Pages require a current layout edition so their complete geometry can be created.",
+                    recovery = "Call list_layout_editions and retry with a compatible editionId.",
+                });
+            }
+            var initialImage = imageId is Guid selectedImageId
+                ? await projectImages.GetAsync(ctx.ProjectId, selectedImageId)
+                : null;
+            if (imageId is Guid missingImageId && initialImage is null)
+                return JsonSerializer.Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = missingImageId, summary = "Project image was not found." });
+            var initialContent = new DesignedPageInitialContent
+            {
+                LayoutMode = layoutMode,
+                ImageId = imageId,
+                AltText = altText ?? string.Empty,
+                Decorative = decorative,
+                ImageFit = imageFit,
+                FocalXPercent = focalXPercent,
+                FocalYPercent = focalYPercent,
+            };
             if (ctx.ManuscriptStaging is not null)
             {
                 var source = ctx.ManuscriptStaging.TryGetChapterManuscriptDraft(chapterId, out var draft)
@@ -1139,23 +1198,43 @@ public sealed class OutlineCollaborationTools(
                     requiresReview = true,
                     targetId = identity.CompositionId,
                     revision = applied.Document.Revision,
-                    summary = "Designed Page insertion is ready for review.",
+                    summary = imageId is null
+                        ? $"{layoutMode} Designed Page is ready for review."
+                        : $"{layoutMode} Designed Page with its initial artwork is ready for review.",
                     changedIds = applied.ChangedBlockIds,
                     variantId = (Guid?)null,
-                    nextAction = "After approval, read the created geometry variant before configuring the page.",
+                    initialImageId = imageId,
+                    layoutMode = layoutMode.ToString(),
+                    nextAction = "Approval creates the reviewed page structure, geometry, and initial artwork atomically.",
                 });
                 await ctx.ManuscriptStaging.StageChapterManuscriptEditAsync(
                     chapter,
                     source,
                     applied.Document,
-                    $"Insert Designed Page '{(string.IsNullOrWhiteSpace(name) ? "Designed page" : name.Trim())}'",
+                    $"Insert {LayoutLabel(layoutMode)} Designed Page '{(string.IsNullOrWhiteSpace(name) ? "Designed page" : name.Trim())}'"
+                        + (initialImage is null ? string.Empty : $" with artwork '{initialImage.FileName}'"),
                     stagedResult);
                 return stagedResult;
             }
 
-            var result = await compositions.CreateDesignedPageAsync(ctx.ProjectId, chapterId, blockIndex, name, editionId, expectedRevision);
+            var result = editionId is Guid layoutEditionId
+                ? await compositions.CreateDesignedPageAsync(
+                    ctx.ProjectId,
+                    chapterId,
+                    blockIndex,
+                    name,
+                    layoutEditionId,
+                    expectedRevision,
+                    initialContent)
+                : await compositions.CreateDesignedPageAsync(
+                    ctx.ProjectId,
+                    chapterId,
+                    blockIndex,
+                    name,
+                    editionId,
+                    expectedRevision);
             ctx.OnMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Manuscript.Revision, summary = "Inserted one Designed Page with a separately owned semantic composition.", changedIds = new[] { result.BlockId }, variantId = result.Variant?.Id, mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant?.Id } });
+            return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Manuscript.Revision, summary = imageId is null ? "Inserted one Designed Page." : "Inserted one Designed Page with its initial artwork.", changedIds = new[] { result.BlockId }, variantId = result.Variant?.Id, initialImageId = imageId, layoutMode = layoutMode.ToString(), mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant?.Id } });
         }
         catch (ManuscriptRevisionConflictException ex)
         {
@@ -1163,6 +1242,12 @@ public sealed class OutlineCollaborationTools(
         }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "INVALID_COMPOSITION", targetId = chapterId, summary = ex.Message }); }
     }
+
+    private static string LayoutLabel(DesignedPageLayoutMode layoutMode) => layoutMode switch
+    {
+        DesignedPageLayoutMode.FacingSpread => "facing-spread",
+        _ => "single-page",
+    };
 
     private async Task<string> ReadPageCompositionAsync(OutlineCollaborationContext ctx, Guid compositionId, Guid variantId, int semanticStart, int semanticCount, int objectStart, int objectCount, int structureStart, int structureCount)
     {
