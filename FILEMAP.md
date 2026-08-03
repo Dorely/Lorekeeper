@@ -88,7 +88,7 @@
 | File | Description |
 |------|-------------|
 | `package.json` / `package-lock.json` | Exact-pinned ProseMirror and esbuild dependency graph plus deterministic test/build commands. |
-| `src/semantic-editor.js` | Owned ProseMirror schema/adapter, disconnect-safe host attachment, bounded toolbar overlays, sticky Figure controls, autosave queue, paste diagnostics, outline, counts, and find/replace behavior. |
+| `src/semantic-editor.js` | Owned ProseMirror schema/adapter, disconnect-safe host attachment, direct Figure selection, non-overlapping bounded toolbar overlays, sticky Figure controls, autosave queue, paste diagnostics, outline, counts, and find/replace behavior. |
 | `test/semantic-editor.test.js` | Node/jsdom fixtures for round-trip fidelity, stable IDs, accessibility/read-only state, save draining, conflicts, paste, links, and marked-text find. |
 | `THIRD_PARTY_NOTICES.md` | Runtime/build dependency inventory and MIT notice for the semantic-editor bundle. |
 

@@ -721,6 +721,7 @@ test("Advanced controls remain inside the editor at either toolbar edge", () => 
     document.body.append(root);
     const handle = attach(root, {async invokeMethodAsync() {}}, 10_000, JSON.stringify(manuscript()));
     const toolbar = root.querySelector(".semantic-editor-toolbar");
+    const chrome = root.querySelector(".semantic-editor-chrome");
     const details = root.querySelector(".semantic-editor-advanced");
     const summary = details.querySelector("summary");
     const controls = details.querySelector(".semantic-editor-advanced-controls");
@@ -732,6 +733,10 @@ test("Advanced controls remain inside the editor at either toolbar edge", () => 
         left: 30, right: 930, top: 0, bottom: 80, width: 900, height: 80,
         x: 30, y: 0, toJSON() { return this; }
     });
+    chrome.getBoundingClientRect = () => ({
+        left: 30, right: 930, top: 0, bottom: 220, width: 900, height: 220,
+        x: 30, y: 0, toJSON() { return this; }
+    });
 
     summary.getBoundingClientRect = () => ({
         left: -80, right: 0, top: 40, bottom: 72, width: 80, height: 32,
@@ -741,6 +746,7 @@ test("Advanced controls remain inside the editor at either toolbar edge", () => 
     details.dispatchEvent(new window.Event("toggle"));
     assert.equal(controls.style.left, "8px");
     assert.equal(controls.style.width, "672px");
+    assert.equal(controls.style.top, "226px");
 
     summary.getBoundingClientRect = () => ({
         left: 900, right: 980, top: 40, bottom: 72, width: 80, height: 32,

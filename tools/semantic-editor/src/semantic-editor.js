@@ -1,5 +1,5 @@
 import {DOMParser as ProseMirrorDOMParser, Fragment, Schema, Slice} from "prosemirror-model";
-import {EditorState, Plugin, PluginKey, TextSelection} from "prosemirror-state";
+import {EditorState, NodeSelection, Plugin, PluginKey, TextSelection} from "prosemirror-state";
 import {EditorView} from "prosemirror-view";
 import {baseKeymap, chainCommands, createParagraphNear, liftEmptyBlock, newlineInCode, toggleMark} from "prosemirror-commands";
 import {history, redo, undo} from "prosemirror-history";
@@ -859,6 +859,22 @@ function selectedFigure(view) {
         : null;
 }
 
+function selectFigureFromElement(view, element) {
+    const figure = element.closest("figure[data-block-id]");
+    const blockId = figure?.dataset.blockId;
+    if (!blockId) return false;
+    let position = null;
+    view.state.doc.descendants((node, nodePosition) => {
+        if (node.type.name !== "figure" || node.attrs.id !== blockId) return true;
+        position = nodePosition;
+        return false;
+    });
+    if (position === null) return false;
+    view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, position)));
+    view.focus();
+    return true;
+}
+
 function buildFigureInspector(view, projectImages) {
     const panel = document.createElement("section");
     panel.className = "semantic-figure-inspector";
@@ -941,7 +957,7 @@ function buildFigureInspector(view, projectImages) {
             language: fields.get("language").value.trim() || null,
             accessibilityRole: fields.get("accessibilityRole").value,
             presentation
-        }).scrollIntoView());
+        }));
     };
     for (const input of fields.values()) input.addEventListener("change", apply);
     panel.append(heading, controls);
@@ -1519,6 +1535,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     let readOnly = false;
     let conflictDraftJson = null;
     const conflictStorageKey = `lorekeeper.manuscript-conflict.${manuscriptId}`;
+    let positionAdvancedControls = () => {};
     const applyEffectiveReadOnly = () => {
         readOnly = requestedReadOnly || conflictDraftJson !== null;
         if (!view) return;
@@ -1648,13 +1665,18 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             findPanel.update();
             outline.update();
             figureInspector.update();
+            positionAdvancedControls();
             updateStatus();
         },
         handleDOMEvents: {
             click(_view, event) {
-                const button = event.target instanceof Element
-                    ? event.target.closest("[data-open-page-composition]")
-                    : null;
+                if (!(event.target instanceof Element)) return false;
+                const figureImage = event.target.closest("figure[data-block-id] img");
+                if (figureImage) {
+                    event.preventDefault();
+                    return selectFigureFromElement(view, figureImage);
+                }
+                const button = event.target.closest("[data-open-page-composition]");
                 if (!button?.dataset.openPageComposition) return false;
                 event.preventDefault();
                 void dotNetRef.invokeMethodAsync("OnOpenDesignedPage", button.dataset.openPageComposition);
@@ -1841,10 +1863,11 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         button("Clear paragraph", "Clear direct paragraph formatting", () => clearParagraphPresentation(view))
     );
     advancedDetails.append(advancedSummary, advancedControls);
-    const positionAdvancedControls = () => {
+    positionAdvancedControls = () => {
         if (!advancedDetails.open) return;
         const anchor = advancedSummary.getBoundingClientRect();
         const toolbarBounds = toolbar.getBoundingClientRect();
+        const chromeBounds = editorChrome.getBoundingClientRect();
         const editorBounds = root.getBoundingClientRect();
         const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
         const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
@@ -1852,11 +1875,12 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         const rightBoundary = Math.min(viewportWidth - 12, editorBounds.right - 8);
         const width = Math.max(0, Math.min(672, rightBoundary - leftBoundary));
         const viewportLeft = Math.max(leftBoundary, Math.min(anchor.left, rightBoundary - width));
-        const availableHeight = Math.max(96, viewportHeight - anchor.bottom - 18);
+        const controlsTop = Math.max(anchor.bottom, chromeBounds.bottom) + 6;
+        const availableHeight = Math.max(96, viewportHeight - controlsTop - 12);
         advancedControls.style.width = `${width}px`;
         advancedControls.style.maxHeight = `${Math.min(288, availableHeight)}px`;
         advancedControls.style.left = `${viewportLeft - toolbarBounds.left}px`;
-        advancedControls.style.top = `${anchor.bottom - toolbarBounds.top + 6}px`;
+        advancedControls.style.top = `${controlsTop - toolbarBounds.top}px`;
     };
     advancedDetails.addEventListener("toggle", positionAdvancedControls);
     window.addEventListener("resize", positionAdvancedControls);

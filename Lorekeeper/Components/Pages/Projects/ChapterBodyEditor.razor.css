@@ -224,6 +224,7 @@
     object-fit: contain;
     user-select: none;
     -webkit-user-drag: none;
+    cursor: pointer;
 }
 
 .semantic-editor ::deep .semantic-prosemirror figure figcaption {
