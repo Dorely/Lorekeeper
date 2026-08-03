@@ -994,7 +994,18 @@ public sealed class PublicationRenderProcessor(
             "image/jpeg" or "image/jpg" => "image/jpeg",
             _ => throw new InvalidOperationException($"Publication image '{asset.FileName}' must be PNG or JPEG."),
         };
-        var (width, height) = ReadRasterDimensions(asset.Data, contentType);
+        int width;
+        int height;
+        try
+        {
+            (width, height) = ReadRasterDimensions(asset.Data, contentType);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new InvalidOperationException(
+                $"Publication image '{asset.FileName}' ({asset.Id:N}) does not contain valid {contentType} data.",
+                exception);
+        }
         if (width <= 0 || height <= 0 || (long)width * height > 16_000_000)
         {
             throw new InvalidOperationException($"Publication image '{asset.FileName}' dimensions exceed the renderer limit.");
@@ -1012,9 +1023,10 @@ public sealed class PublicationRenderProcessor(
 
     private static (int Width, int Height) ReadRasterDimensions(byte[] data, string contentType)
     {
+        ReadOnlySpan<byte> pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
         if (contentType == "image/png"
             && data.Length >= 24
-            && data.AsSpan(0, 8).SequenceEqual("\x89PNG\r\n\x1a\n"u8))
+            && data.AsSpan(0, 8).SequenceEqual(pngSignature))
         {
             return (
                 System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(16, 4)),
