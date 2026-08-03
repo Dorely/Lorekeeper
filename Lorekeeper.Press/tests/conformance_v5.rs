@@ -1646,6 +1646,39 @@ fn layout_trace_preserves_shaped_advances_offsets_and_global_chapter_numbering()
 }
 
 #[test]
+fn browser_preview_reports_pending_image_accessibility_without_weakening_render_validation() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["layoutTraceMode"] = json!("browser-preview");
+    let image = &mut job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0]["variants"]
+        [0]["scene"]["objects"][0];
+    image["accessibilityDecisionPending"] = json!(true);
+    image["altText"] = Value::Null;
+    image["decorative"] = json!(false);
+    job.write_request();
+
+    let layout = job.layout();
+    assert!(
+        layout.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&layout.stdout),
+        stderr(&layout)
+    );
+    let layout_response = response(&layout);
+    assert!(has_diagnostic(
+        &layout_response,
+        "PRESS_ALT_DECISION_REQUIRED"
+    ));
+    assert_eq!(layout_response["diagnostics"][0]["severity"], "warning");
+
+    let render = job.render();
+    assert!(!render.status.success());
+    assert!(has_diagnostic(
+        &response(&render),
+        "PRESS_ALT_DECISION_REQUIRED"
+    ));
+}
+
+#[test]
 fn browser_preview_layout_trace_omits_unused_glyph_payloads() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     job.request["layoutTraceMode"] = Value::String("browser-preview".to_owned());

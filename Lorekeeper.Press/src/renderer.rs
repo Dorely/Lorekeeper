@@ -38,7 +38,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     ensure_output_is_safe(job_root)?;
     ensure_not_cancelled(job_root)?;
 
-    let mut layout = paginate_with_cancellation(request, Some(job_root))?;
+    let mut layout = paginate_with_cancellation(request, Some(job_root), false)?;
     if layout.pages.len() > MAX_PAGES {
         return Err(Box::new(RenderResponse::failed(
             "failed",
@@ -209,7 +209,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         .iter()
         .map(|item| item.effective_dpi)
         .reduce(f32::min);
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = layout.diagnostics.clone();
     let required_dpi = required_effective_dpi(&request.profile);
     if minimum_effective_dpi.is_some_and(|dpi| dpi < required_dpi) {
         diagnostics.push(Diagnostic::warning(
@@ -334,8 +334,8 @@ pub fn trace(job_root: &Path) -> RenderResult<()> {
 
 fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     validate_request(request, job_root)?;
-    let layout = paginate(request)?;
     let browser_preview = request.layout_trace_mode.as_deref() == Some("browser-preview");
+    let layout = paginate_with_cancellation(request, None, browser_preview)?;
     let fonts = if browser_preview {
         None
     } else {
@@ -430,6 +430,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             "pages": pages,
             "pageMap": layout.page_map,
             "features": layout.features,
+            "diagnostics": layout.diagnostics,
         }))
         .expect("serialize layout trace")
     );
@@ -1029,13 +1030,15 @@ fn pdf_failure(diagnostic: Diagnostic) -> Box<RenderResponse> {
     ))
 }
 
+#[cfg(test)]
 fn paginate(request: &RenderRequest) -> RenderResult<LayoutDocument> {
-    paginate_with_cancellation(request, None)
+    paginate_with_cancellation(request, None, false)
 }
 
 fn paginate_with_cancellation(
     request: &RenderRequest,
     job_root: Option<&Path>,
+    allow_pending_accessibility: bool,
 ) -> RenderResult<LayoutDocument> {
     let trim = &request.trim;
     if !(3.5..=12.0).contains(&trim.width_inches)
@@ -1053,6 +1056,7 @@ fn paginate_with_cancellation(
         );
     }
     let mut pages = Vec::new();
+    let mut diagnostics = Vec::new();
     let mut page_map = Vec::new();
     let mut body_start_page = None;
     let document = &request.document;
@@ -1290,6 +1294,8 @@ fn paginate_with_cancellation(
                                     .get("allowDesignedPageOverrides")
                                     .and_then(Value::as_bool)
                                     .unwrap_or(false),
+                                allow_pending_accessibility,
+                                &mut diagnostics,
                             )
                             .map_err(|diagnostic| {
                                 Box::new(RenderResponse::failed("rejected", diagnostic))
@@ -1581,6 +1587,7 @@ fn paginate_with_cancellation(
         pages,
         page_map,
         features: features.into_iter().collect(),
+        diagnostics,
         toc_converged,
     })
 }
@@ -1840,6 +1847,8 @@ fn designed_page(
     composition: &Value,
     document: &Value,
     trim: &crate::model::Trim,
+    allow_pending_accessibility: bool,
+    diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<LayoutPage, Diagnostic> {
     let variant = composition
         .get("variants")
@@ -1994,13 +2003,16 @@ fn designed_page(
                     .and_then(Value::as_bool)
                     .unwrap_or(false)
                 {
-                    return Err(Diagnostic::error(
-                        "PRESS_ALT_DECISION_REQUIRED",
-                        format!(
-                            "Image object '{}' requires alternative text or an explicit decorative decision.",
-                            string(&item, "id")
-                        ),
-                    ));
+                    let message = format!(
+                        "Image object '{}' requires alternative text or an explicit decorative decision before publishing.",
+                        string(&item, "id")
+                    );
+                    if allow_pending_accessibility {
+                        diagnostics
+                            .push(Diagnostic::warning("PRESS_ALT_DECISION_REQUIRED", message));
+                    } else {
+                        return Err(Diagnostic::error("PRESS_ALT_DECISION_REQUIRED", message));
+                    }
                 }
                 let asset_id = string(&item, "imageId");
                 if !asset_id.is_empty() {
@@ -2755,8 +2767,16 @@ fn designed_pages(
     trim: &crate::model::Trim,
     digital: bool,
     allow_independent_page: bool,
+    allow_pending_accessibility: bool,
+    diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Vec<LayoutPage>, Diagnostic> {
-    let page = designed_page(composition, document, trim)?;
+    let page = designed_page(
+        composition,
+        document,
+        trim,
+        allow_pending_accessibility,
+        diagnostics,
+    )?;
     let trim_width = trim.width_inches * 72.0;
     let trim_height = trim.height_inches * 72.0;
     let width = page.width_points.unwrap_or(trim_width);
@@ -4916,7 +4936,14 @@ fn cover_scene_layout(
         "semanticBlocks": [],
         "variants": [{ "scene": scene }]
     });
-    let mut page = designed_page(&composition, &request.document, &request.trim)?;
+    let mut diagnostics = Vec::new();
+    let mut page = designed_page(
+        &composition,
+        &request.document,
+        &request.trim,
+        false,
+        &mut diagnostics,
+    )?;
     page.kind = PageKind::Cover;
     page.width_points = Some(width);
     page.height_points = Some(height);
@@ -5838,8 +5865,14 @@ mod tests {
                 ]
             }}]
         });
-        let page = designed_page(&composition, &serde_json::json!({}), &standard_trim())
-            .expect("designed page");
+        let page = designed_page(
+            &composition,
+            &serde_json::json!({}),
+            &standard_trim(),
+            false,
+            &mut Vec::new(),
+        )
+        .expect("designed page");
         assert_eq!(
             page.paint_order,
             vec![LayoutPaint::Shape(0), LayoutPaint::Line(0)]
@@ -5864,8 +5897,14 @@ mod tests {
                 ]
             }}]
         });
-        let page = designed_page(&composition, &serde_json::json!({}), &standard_trim())
-            .expect("spread page");
+        let page = designed_page(
+            &composition,
+            &serde_json::json!({}),
+            &standard_trim(),
+            false,
+            &mut Vec::new(),
+        )
+        .expect("spread page");
         let leaves = split_facing_spread(page, 432.0);
 
         assert_eq!(
@@ -5901,6 +5940,8 @@ mod tests {
             &standard_trim(),
             false,
             false,
+            false,
+            &mut Vec::new(),
         )
         .expect_err("gutter-crossing text must be blocked");
         assert_eq!(error.code, "PRESS_FACING_SPREAD_TEXT_CROSSES_GUTTER");

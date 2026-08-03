@@ -60,6 +60,9 @@ this feature's authorized checks.
   its own non-overlapping canvas at every display mode and zoom level. Include
   curly apostrophes, quotation marks, dashes, and accented Latin text and
   confirm the preview preserves those characters exactly.
+- Preview a Designed Page image before assigning alternative text or marking it
+  decorative. Confirm Read renders the page with a visible accessibility note,
+  while publication validation still blocks output until the decision is made.
 - Confirm Read leaves selected side panes mounted and never displays the
   read-only editing surface as a preview.
 

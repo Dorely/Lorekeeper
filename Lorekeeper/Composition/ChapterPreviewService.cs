@@ -362,7 +362,10 @@ public sealed class ChapterPreviewService(
             var result = new ChapterPreviewResult(
                 pages,
                 cacheKey,
-                [],
+                (response.Diagnostics ?? []).Select(diagnostic => new ChapterPreviewDiagnostic(
+                    diagnostic.Severity,
+                    diagnostic.Code,
+                    diagnostic.Message)).ToArray(),
                 previewFonts.Select((font, index) => new ChapterPreviewFont(
                     $"Custom{index}", font.Id, font.Weight, font.Italic, font.ContentType)).ToArray());
             Cache[cacheKey] = result;
@@ -483,7 +486,8 @@ public sealed class ChapterPreviewService(
         catch (NotSupportedException) { }
     }
 
-    private sealed record LayoutResponse(int ProtocolVersion, string JobId, LayoutPage[] Pages, LayoutPageMap[] PageMap);
+    private sealed record LayoutResponse(int ProtocolVersion, string JobId, LayoutPage[] Pages, LayoutPageMap[] PageMap, LayoutDiagnostic[]? Diagnostics);
+    private sealed record LayoutDiagnostic(string Severity, string Code, string Message);
     private sealed record LayoutPage(string Kind, double WidthPoints, double HeightPoints, string? PageLabel, string? Bookmark, LayoutPaint[] PaintOrder, LayoutLine[] Lines, LayoutImage[] Images, LayoutShape[] Shapes);
     private sealed record LayoutPaint(string Kind, int Index);
     private sealed record LayoutLine(string Text, double Size, double X, double Y, double WordSpacing, double CharacterSpacing, double RotationDegrees, double? RotationOriginX, double? RotationOriginY, double Opacity, double[]? FillRgb, string? SemanticRole, int? LinkPage, LayoutRun[] Runs);

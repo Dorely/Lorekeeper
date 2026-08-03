@@ -487,5 +487,6 @@ pub struct LayoutDocument {
     pub pages: Vec<LayoutPage>,
     pub page_map: Vec<PageMapEntry>,
     pub features: Vec<String>,
+    pub diagnostics: Vec<Diagnostic>,
     pub toc_converged: bool,
 }

@@ -60,6 +60,15 @@
     }
     else
     {
+        @if (_result.Diagnostics.Count > 0)
+        {
+            <div class="chapter-preview-diagnostics" role="status">
+                @foreach (var diagnostic in _result.Diagnostics)
+                {
+                    <p><strong>Preview note:</strong> @diagnostic.Message</p>
+                }
+            </div>
+        }
         <div class="chapter-preview-scroll @(_facing ? "facing" : "single") @($"fit-{_fit}")">
             @foreach (var page in _result.Pages)
             {

@@ -355,6 +355,10 @@ type, byte length, dimensions where applicable, rights state, and SHA-256.
 The `layout` command defaults to its full glyph-evidence trace for conformance
 work; app previews explicitly request `layoutTraceMode: browser-preview`, which
 retains page paint order and typographic runs while omitting unused glyph arrays.
+That authoring trace renders images whose accessibility decision is still
+pending and returns a visible warning; `render` continues to reject the same
+scene until every meaningful image has alternative text or is deliberately
+marked decorative.
 Absolute paths, traversal, links/reparse points, undeclared or changed bytes,
 corrupt assets, restricted/unsupported fonts, existing output, and cancellation
 fail before promotion. The renderer writes a fresh staging directory,
