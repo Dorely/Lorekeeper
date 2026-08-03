@@ -849,7 +849,9 @@ fn validate_inline_languages(value: &Value) -> Result<(), Diagnostic> {
             }
         }
         Value::Object(values) => {
-            if let Some(language) = values.get("language").and_then(Value::as_str) {
+            if let Some(language) = values.get("language").and_then(Value::as_str)
+                && !language.trim().is_empty()
+            {
                 assert_supported_language(language)?;
             }
             if values
@@ -857,9 +859,10 @@ fn validate_inline_languages(value: &Value) -> Result<(), Diagnostic> {
                 .and_then(Value::as_str)
                 .is_some_and(|kind| kind.eq_ignore_ascii_case("Language"))
             {
-                assert_supported_language(
-                    values.get("value").and_then(Value::as_str).unwrap_or(""),
-                )?;
+                let language = values.get("value").and_then(Value::as_str).unwrap_or("");
+                if !language.trim().is_empty() {
+                    assert_supported_language(language)?;
+                }
             }
             for child in values.values() {
                 validate_inline_languages(child)?;

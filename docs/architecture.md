@@ -245,8 +245,12 @@ contextual Pages mode in the same center column. The workspace provides direct
 pointer move/resize/rotate, atomic image placement with required fit, crop
 repositioning, layers, styles, semantic bindings, reading order, computed
 trim/safe/gutter/center/bleed overlays, diagnostics, revision-aware save, and
-undo/redo. Rectangle, ellipse, and line tools live under Advanced; custom guides
-and SVG/path tooling are not runtime capabilities.
+undo/redo. Its center is reserved for the largest practical canvas: page/spread
+choice and the computed-overlay toggle are the only controls above it, while
+creation, selection, history, zoom, layers, objects, bindings, and properties
+share one independently scrolling right sidebar. Rectangle, ellipse, and line
+tools live under Advanced; custom guides and SVG/path tooling are not runtime
+capabilities.
 
 `LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for a
 project page, Figure, page surface/frame, or publication cover surface/frame.

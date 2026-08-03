@@ -389,7 +389,7 @@ public sealed class ChapterPreviewService(
         caption = ManuscriptCodec.Text(block),
         block.Decorative,
         block.AltText,
-        block.Language,
+        language = string.IsNullOrWhiteSpace(block.Language) ? null : block.Language.Trim(),
         accessibilityRole = block.AccessibilityRole.ToString(),
         presentation = block.FigurePresentation,
         paragraphPresentation = block.ParagraphPresentation,
@@ -398,7 +398,13 @@ public sealed class ChapterPreviewService(
         {
             type = inline.Type.ToString(),
             inline.Text,
-            marks = inline.Marks.Select(mark => new { type = mark.Type.ToString(), mark.Value }).ToArray(),
+            marks = inline.Marks
+                .Where(mark => mark.Type != ManuscriptMarkType.Language || !string.IsNullOrWhiteSpace(mark.Value))
+                .Select(mark => new
+                {
+                    type = mark.Type.ToString(),
+                    value = mark.Type == ManuscriptMarkType.Language ? mark.Value?.Trim() : mark.Value,
+                }).ToArray(),
         }).ToArray(),
     };
 

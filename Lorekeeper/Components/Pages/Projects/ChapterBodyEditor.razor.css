@@ -43,10 +43,8 @@
 }
 
 .semantic-editor ::deep .semantic-editor-advanced-controls {
-    position: absolute;
-    z-index: 10;
-    top: calc(100% + .35rem);
-    right: 0;
+    position: fixed;
+    z-index: 1000;
     display: flex;
     width: min(42rem, calc(100vw - 3rem));
     max-height: 18rem;

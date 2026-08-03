@@ -484,7 +484,7 @@ pub fn assert_supported_language(language: &str) -> Result<(), Diagnostic> {
         return Err(Diagnostic::error(
             "PRESS_LANGUAGE_UNSUPPORTED",
             format!(
-                "Lorekeeper Press 1.0 supports English/Latin left-to-right text; '{language}' is unsupported."
+                "Lorekeeper Press currently supports English/Latin left-to-right text; '{language}' is unsupported."
             ),
         ));
     }

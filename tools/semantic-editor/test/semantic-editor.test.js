@@ -603,6 +603,132 @@ test("reset Book Text Style preserves block type", async () => {
     dom.window.close();
 });
 
+test("figure insertion resolves project image IDs without casing assumptions", async () => {
+    const dom = installDom();
+    const imageId = "29FD4930-0048-45A1-A2D6-3951DAA5A1D9";
+    const answers = ["Map caption", "A route map", "contain"];
+    window.prompt = () => answers.shift();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const saves = [];
+    const handle = attach(root, {
+        async invokeMethodAsync(name, _revision, json) {
+            if (name === "OnDocumentDebounced") saves.push(JSON.parse(json));
+            return {saved: true, revision: 5};
+        }
+    }, 10_000, JSON.stringify(manuscript()), "[]", JSON.stringify([{
+        id: imageId,
+        fileName: "map.png",
+        altText: "A route map",
+        previewUrl: "/media/map"
+    }]));
+
+    const select = root.querySelector("select[aria-label='Insert project image as figure']");
+    select.value = imageId;
+    select.dispatchEvent(new window.Event("change", {bubbles: true}));
+    await handle.flush();
+
+    assert.equal(saves.at(-1).content[0].type, "figure");
+    assert.equal(saves.at(-1).content[0].imageId.toLowerCase(), imageId.toLowerCase());
+    handle.dispose();
+    dom.window.close();
+});
+
+test("Designed Page insertion opens the new page workspace", async () => {
+    const dom = installDom();
+    window.prompt = () => "Opening spread";
+    const root = document.createElement("div");
+    document.body.append(root);
+    const calls = [];
+    const compositionId = "e7b913f2-9f4d-4012-8cb6-a93045eed82d";
+    const created = manuscript([{
+        id: "page",
+        type: "designedPage",
+        styleRole: "designed-page",
+        headingLevel: null,
+        imageId: null,
+        altText: null,
+        pageCompositionId: compositionId,
+        content: []
+    }]);
+    const handle = attach(root, {
+        async invokeMethodAsync(name, ...args) {
+            calls.push([name, ...args]);
+            if (name === "OnCreateDesignedPage") {
+                return {
+                    id: compositionId,
+                    manuscriptJson: JSON.stringify(created),
+                    summary: {id: compositionId, name: "Opening spread"}
+                };
+            }
+            return null;
+        }
+    }, 10_000, JSON.stringify(manuscript()));
+
+    root.querySelector("button[aria-label='Insert a designed page at the current manuscript position']").click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    assert.ok(calls.some(call => call[0] === "OnCreateDesignedPage"));
+    assert.ok(calls.some(call => call[0] === "OnOpenDesignedPage" && call[1] === compositionId));
+    handle.dispose();
+    dom.window.close();
+});
+
+test("List toolbar button toggles a list item back to body text", async () => {
+    const dom = installDom();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const saves = [];
+    const handle = attach(root, {
+        async invokeMethodAsync(name, _revision, json) {
+            if (name === "OnDocumentDebounced") saves.push(JSON.parse(json));
+            return {saved: true, revision: 5};
+        }
+    }, 10_000, JSON.stringify(manuscript()));
+    const list = root.querySelector("button[aria-label='Toggle list formatting']");
+
+    list.click();
+    await handle.flush();
+    assert.equal(saves.at(-1).content[0].type, "listItem");
+
+    list.click();
+    await handle.flush();
+    assert.equal(saves.at(-1).content[0].type, "paragraph");
+    assert.equal(saves.at(-1).content[0].styleRole, "body");
+    handle.dispose();
+    dom.window.close();
+});
+
+test("Advanced controls remain inside the viewport at either toolbar edge", () => {
+    const dom = installDom();
+    Object.defineProperty(window, "innerWidth", {value: 800, configurable: true});
+    Object.defineProperty(window, "innerHeight", {value: 600, configurable: true});
+    const root = document.createElement("div");
+    document.body.append(root);
+    const handle = attach(root, {async invokeMethodAsync() {}}, 10_000, JSON.stringify(manuscript()));
+    const details = root.querySelector(".semantic-editor-advanced");
+    const summary = details.querySelector("summary");
+    const controls = details.querySelector(".semantic-editor-advanced-controls");
+
+    summary.getBoundingClientRect = () => ({
+        left: -80, right: 0, top: 40, bottom: 72, width: 80, height: 32,
+        x: -80, y: 40, toJSON() { return this; }
+    });
+    details.open = true;
+    details.dispatchEvent(new window.Event("toggle"));
+    assert.equal(controls.style.left, "12px");
+    assert.equal(controls.style.width, "672px");
+
+    summary.getBoundingClientRect = () => ({
+        left: 760, right: 840, top: 40, bottom: 72, width: 80, height: 32,
+        x: 760, y: 40, toJSON() { return this; }
+    });
+    details.dispatchEvent(new window.Event("toggle"));
+    assert.equal(controls.style.left, "116px");
+    handle.dispose();
+    dom.window.close();
+});
+
 test("editorial counts exclude scene-break markers and preserve block separators", () => {
     installDom();
     const doc = semanticEditorTesting.documentFromDomain(manuscript([

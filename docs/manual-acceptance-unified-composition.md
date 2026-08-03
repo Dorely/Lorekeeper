@@ -45,6 +45,10 @@ this feature's authorized checks.
   spacing, keep-with-next, and start-on-new-page. Confirm inline emphasis survives
   Book Text Style changes and clearing paragraph formatting removes only direct
   paragraph presentation.
+- Open Advanced at both edges of the editor and confirm its panel remains fully
+  inside the viewport. Insert a project image through the Figure picker, insert
+  a Designed Page and confirm Pages opens immediately, then click List twice and
+  confirm the block returns to ordinary body text.
 - Switch to Read with unsaved edits and confirm it flushes, lays out the current
   chapter through Press, and displays actual lines, captions, images, Designed
   Pages, boxes, labels, and parity. Exercise single/facing display, fit page,
@@ -60,6 +64,9 @@ this feature's authorized checks.
   mode/page switches, autosave, and revision conflicts.
 - Confirm a new page uses project page setup and an existing page retains its
   authored geometry after project setup changes.
+- Confirm the canvas has no left sidebar, all creation/selection/layer/content
+  controls live in one scrolling right sidebar, and only page/spread selection
+  plus the computed guide toggle appear above the canvas.
 - Add an existing image only after choosing `Contain` or `Cover`. Confirm native
   browser dragging is suppressed, frame drag/resize works, Cover crop
   repositioning pans the raster, and pointer-up saves. Exercise replace image,

@@ -703,6 +703,14 @@ function clearParagraphPresentation(view) {
     updateParagraphPresentation(view, () => ({}));
 }
 
+function toggleListFormatting(view) {
+    const selectedBlock = view.state.selection.$from.parent;
+    if (selectedBlock.type.name === "list_item")
+        applyBlock(view, "paragraph", "body", 2);
+    else
+        applyBlock(view, "list_item", "list-item", 2);
+}
+
 function insertSceneBreak(view) {
     const node = schema.nodes.scene_break.create({id: newBlockId(), styleRole: "scene-break"});
     view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
@@ -956,14 +964,20 @@ async function insertDesignedPage(view, dotNetRef, getRevision, flush, replaceDo
     if (!await flush()) return;
     const resolved = view.state.selection.$from;
     const blockIndex = resolved.index(0) + (resolved.parentOffset > 0 ? 1 : 0);
-    const composition = await dotNetRef.invokeMethodAsync(
-        "OnCreateDesignedPage",
-        name || "Designed page",
-        blockIndex,
-        getRevision());
-    if (!composition?.id || !composition?.manuscriptJson) return;
-    replaceDocument(composition.manuscriptJson, composition.summary);
-    view.focus();
+    try {
+        const composition = await dotNetRef.invokeMethodAsync(
+            "OnCreateDesignedPage",
+            name || "Designed page",
+            blockIndex,
+            getRevision());
+        if (!composition?.id || !composition?.manuscriptJson)
+            throw new Error("The application returned no Designed Page.");
+        replaceDocument(composition.manuscriptJson, composition.summary);
+        await dotNetRef.invokeMethodAsync("OnOpenDesignedPage", composition.id);
+    } catch {
+        window.alert("The Designed Page could not be created. Reload the chapter and try again.");
+        view.focus();
+    }
 }
 
 function textBlockMatches(doc, search) {
@@ -1573,7 +1587,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             "Insert project image as figure",
             [["", "Insert figure"]].concat(
                 projectImages.map(image => [image.id, image.fileName])),
-            value => setFigureImage(view, imageById.get(value))),
+            value => setFigureImage(view, imageById.get(String(value).toLowerCase()))),
         button("Figure alt", "Edit selected figure alternative text", () => editFigureAltText(view)),
         button("Figure layout", "Edit selected figure placement, width, and crop behavior", () =>
             editFigurePresentation(view)),
@@ -1647,14 +1661,14 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         button("Justify", "Justify paragraph", () => setParagraphAlignment(view, "justify")),
         button("Indent +", "Increase paragraph indent (Tab)", () => changeParagraphIndent(view, 1.5)),
         button("Indent -", "Decrease paragraph indent (Shift+Tab)", () => changeParagraphIndent(view, -1.5)),
-        button("List", "Format as a list item", () => applyBlock(view, "list_item", "list-item", 2))
+        button("List", "Toggle list formatting", () => toggleListFormatting(view))
     );
     const primaryTitles = new Set([
         "Bold (Ctrl+B)", "Italic (Ctrl+I)", "Underline", "Add or remove link",
         "Insert a designed page at the current manuscript position", "Undo (Ctrl+Z)",
         "Redo (Ctrl+Y)", "Find and replace", "Align paragraph left", "Center paragraph",
         "Align paragraph right", "Justify paragraph", "Increase paragraph indent (Tab)",
-        "Decrease paragraph indent (Shift+Tab)", "Format as a list item"
+        "Decrease paragraph indent (Shift+Tab)", "Toggle list formatting"
     ]);
     const primarySelects = new Set(["Block style", "Insert project image as figure"]);
     const advancedDetails = document.createElement("details");
@@ -1673,6 +1687,24 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         button("Clear paragraph", "Clear direct paragraph formatting", () => clearParagraphPresentation(view))
     );
     advancedDetails.append(advancedSummary, advancedControls);
+    const positionAdvancedControls = () => {
+        if (!advancedDetails.open) return;
+        const anchor = advancedSummary.getBoundingClientRect();
+        const viewportWidth = Math.max(320, window.innerWidth || document.documentElement.clientWidth);
+        const viewportHeight = Math.max(320, window.innerHeight || document.documentElement.clientHeight);
+        const width = Math.min(672, viewportWidth - 24);
+        const left = Math.max(12, Math.min(anchor.left, viewportWidth - width - 12));
+        const preferredTop = anchor.bottom + 6;
+        const top = preferredTop + 288 <= viewportHeight
+            ? preferredTop
+            : Math.max(12, anchor.top - 294);
+        advancedControls.style.width = `${width}px`;
+        advancedControls.style.left = `${left}px`;
+        advancedControls.style.top = `${top}px`;
+    };
+    advancedDetails.addEventListener("toggle", positionAdvancedControls);
+    window.addEventListener("resize", positionAdvancedControls);
+    window.addEventListener("scroll", positionAdvancedControls, true);
     toolbar.append(advancedDetails);
     root.append(findPanel.panel, outline.panel);
     updateStatus();
@@ -1721,6 +1753,8 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         focus() { view.focus(); },
         dispose() {
             if (timer) clearTimeout(timer);
+            window.removeEventListener("resize", positionAdvancedControls);
+            window.removeEventListener("scroll", positionAdvancedControls, true);
             view.destroy();
             root.replaceChildren();
         }
@@ -1746,5 +1780,6 @@ export const semanticEditorTesting = {
     replaceAllInDocument,
     canonicalPlainText,
     editorialText,
-    selectedFigure
+    selectedFigure,
+    toggleListFormatting
 };

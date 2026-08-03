@@ -357,7 +357,7 @@ public sealed class PublicationPackageService(
         ValidateLanguageScope(document, coverDesign, matter, items);
         if (!string.Equals(edition.Language, "en", StringComparison.OrdinalIgnoreCase)
             && !edition.Language.StartsWith("en-", StringComparison.OrdinalIgnoreCase))
-            items.Add(Error("LANGUAGE_SCOPE_UNSUPPORTED", "Lorekeeper Press 1.0 supports English/Latin left-to-right publishing only."));
+            items.Add(Error("LANGUAGE_SCOPE_UNSUPPORTED", "Lorekeeper Press currently supports English/Latin left-to-right publishing only."));
         items.Add(new(
             "info",
             "LOREKEEPER_VALIDATED_SCOPE",

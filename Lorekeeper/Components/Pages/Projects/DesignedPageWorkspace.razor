@@ -12,15 +12,6 @@
 
 <section class="composition-workspace" aria-label="Designed page workspace" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
-    <header>
-        <div>
-            <strong>@(_composition?.Name ?? "Designed page")</strong>
-            <small>@(_scene is null ? "Loading page" : $"{_scene.Surface.Kind} · {_scene.Surface.WidthPoints / 72:0.##} × {_scene.Surface.HeightPoints / 72:0.##} in")</small>
-        </div>
-        <button type="button" class="btn btn-sm btn-primary" disabled="@(!_dirty)" @onclick="SaveAsync">Save</button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseAsync">Back to manuscript</button>
-    </header>
-
     @if (!string.IsNullOrWhiteSpace(_error))
     {
         <div class="alert alert-danger">@_error</div>
@@ -32,57 +23,6 @@
     else
     {
         <div class="composition-main">
-            <aside class="composition-layers">
-                <div class="composition-heading-row"><h3>Layers</h3><button type="button" @onclick="AddLayer">Add</button></div>
-                @foreach (var layer in _layers.OrderByDescending(layer => layer.Order))
-                {
-                    <div class="composition-layer-row @(layer.Id == _selectedLayerId ? "selected" : null)">
-                        <button type="button" @onclick="() => _selectedLayerId = layer.Id">@layer.Name</button>
-                        <button type="button" title="Toggle visibility" @onclick="() => ToggleLayerVisibility(layer)">@(layer.Visible ? "Eye" : "Hidden")</button>
-                        <button type="button" title="Toggle lock" @onclick="() => ToggleLayerLock(layer)">@(layer.Locked ? "Locked" : "Open")</button>
-                    </div>
-                }
-                <h3>Objects</h3>
-                <details class="composition-advanced">
-                    <summary>Advanced objects</summary>
-                    <div class="composition-add-row">
-                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Rectangle)">Rectangle</button>
-                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Ellipse)">Ellipse</button>
-                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Line)">Line</button>
-                    </div>
-                </details>
-                @foreach (var item in _objects.OrderByDescending(item => item.ZIndex))
-                {
-                    <div class="composition-object-row @(item.Id == _selectedId ? "selected" : null)">
-                        <input type="checkbox" title="Select for grouping" checked="@_groupSelection.Contains(item.Id)" @onchange="e => ToggleGroupSelection(item.Id, (bool)e.Value!)" />
-                        <button type="button" @onclick="() => _selectedId = item.Id"><span>@item.Kind</span><small>@(string.IsNullOrWhiteSpace(item.Name) ? item.Id.ToString("N")[..8] : item.Name)</small></button>
-                    </div>
-                }
-                <div class="composition-add-row"><button type="button" disabled="@(_groupSelection.Count < 2)" @onclick="GroupSelected">Group selected</button><button type="button" disabled="@(_groupSelection.Count == 0)" @onclick="UngroupSelected">Ungroup</button></div>
-                <h3>Reading order</h3>
-                @foreach (var item in _objects.Where(item => item.ReadingOrder is not null).OrderBy(item => item.ReadingOrder))
-                {
-                    <div class="reading-row"><span>@item.ReadingOrder</span> @item.SemanticRole <button type="button" @onclick="() => MoveReadingOrder(item, -1)">Up</button><button type="button" @onclick="() => MoveReadingOrder(item, 1)">Down</button></div>
-                }
-                <h3>Semantic content</h3>
-                <p class="composition-hint">Text lives here once. Frames bind to these stable blocks.</p>
-                <div class="composition-add-row">
-                    <button type="button" @onclick="() => AddSemanticBlock(ManuscriptBlockType.Paragraph)">Paragraph</button>
-                    <button type="button" @onclick="() => AddSemanticBlock(ManuscriptBlockType.Heading)">Heading</button>
-                    <button type="button" @onclick="() => AddSemanticBlock(ManuscriptBlockType.BlockQuote)">Caption</button>
-                </div>
-                @foreach (var block in _semanticBlocks)
-                {
-                    <button type="button" class="composition-content-row @(block.Id == _selectedSemanticId ? "selected" : null)" @onclick="() => SelectSemantic(block)">
-                        <span>@block.Type</span><small>@ShortText(block)</small><em>@PlacementStatus(block.Id)</em>
-                    </button>
-                }
-                @if (UnplacedCount > 0)
-                {
-                    <p class="composition-unplaced" role="status">@UnplacedCount unplaced content block@(UnplacedCount == 1 ? string.Empty : "s") must be bound before output.</p>
-                }
-            </aside>
-
             <section class="composition-stage-shell">
                 <nav class="composition-page-strip" aria-label="Page and spread mode">
                     <button type="button" class="@SurfaceClass(CompositionSurfaceKind.SinglePage)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.SinglePage)"><span class="page-thumb single"></span>Single page</button>
@@ -91,51 +31,19 @@
                     {
                         <button type="button" class="@SurfaceClass(CompositionSurfaceKind.IndependentPage)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.IndependentPage)"><span class="page-thumb custom"></span>Digital override</button>
                     }
-                    @foreach (var candidate in _variants)
-                    {
-                        <button type="button" class="@(candidate.Id == _variant?.Id ? "selected" : null)" title="Select saved exact-geometry variant" @onclick="() => SelectVariantAsync(candidate.Id)">@VariantLabel(candidate)</button>
-                    }
+                    <label class="composition-guide-toggle"><input type="checkbox" @bind="_showGuides" /> Guides</label>
                 </nav>
-                <div class="composition-toolbar">
-                    <button type="button" class="selected" title="Select and move objects on the canvas">Select</button>
-                    <button type="button" @onclick="AddTextObject">@(_selectedSemanticId is null ? "Add text" : "Add and bind text")</button>
-                    <select class="form-select form-select-sm" aria-label="Project image to add" @bind="_newImageId">
-                        <option value="">Choose image</option>
-                        @foreach (var image in _images) { <option value="@image.Id">@image.FileName</option> }
-                    </select>
-                    <select class="form-select form-select-sm" aria-label="New image fit" @bind="_newImageFit">
-                        <option value="@FigureImageFit.Contain">Show whole image</option>
-                        <option value="@FigureImageFit.Cover">Fill frame</option>
-                    </select>
-                    <button type="button" disabled="@(_newImageId is null)" @onclick="AddImageObject">Add image</button>
-                    <button type="button" @onclick="Undo" disabled="@(_undo.Count == 0)">Undo</button>
-                    <button type="button" @onclick="Redo" disabled="@(_redo.Count == 0)">Redo</button>
-                    @if (Selected is { } toolbarSelection)
-                    {
-                        <button type="button" @onclick="() => ChangeZOrder(toolbarSelection, -1)" title="Send backward">Backward</button>
-                        <button type="button" @onclick="() => ChangeZOrder(toolbarSelection, 1)" title="Bring forward">Forward</button>
-                        @if (toolbarSelection.Kind == CompositionObjectKind.Image && toolbarSelection.ImageFit == FigureImageFit.Cover)
-                        {
-                            <button type="button" class="@(_cropReposition ? "selected" : null)" @onclick="() => _cropReposition = !_cropReposition">@(_cropReposition ? "Finish crop" : "Reposition crop")</button>
-                        }
-                        <button type="button" class="danger" @onclick="() => Delete(toolbarSelection.Id)">Delete</button>
-                    }
-                    <button type="button" @onclick="() => _zoom = Math.Max(.25, _zoom - .1)">-</button>
-                    <span>@Math.Round(_zoom * 100)%</span>
-                    <button type="button" @onclick="() => _zoom = Math.Min(2, _zoom + .1)">+</button>
-                    <label><input type="checkbox" @bind="_showGuides" /> Page guides</label>
-                </div>
                 <div class="composition-stage" style="@StageStyle()" @ref="_stageElement" @onpointermove="ContinueTransform" @onpointerup="EndTransform" @onpointercancel="EndTransform">
                     @if (_showGuides)
                     {
                         <div class="composition-ruler composition-ruler-x"></div><div class="composition-ruler composition-ruler-y"></div>
                         <div class="composition-guide composition-guide-y" style="left:50%"></div>
                         <div class="composition-guide composition-guide-x" style="top:50%"></div>
-                    }
-                    <div class="composition-safe"></div>
-                    @if (_scene.Surface.Kind == CompositionSurfaceKind.FacingSpread)
-                    {
-                        <div class="composition-gutter"></div>
+                        <div class="composition-safe"></div>
+                        @if (_scene.Surface.Kind == CompositionSurfaceKind.FacingSpread)
+                        {
+                            <div class="composition-gutter"></div>
+                        }
                     }
                     @foreach (var item in _objects.Where(item => item.LayerId != Guid.Empty && IsVisible(item)))
                     {
@@ -177,6 +85,59 @@
             </section>
 
             <aside class="composition-inspector">
+                <div class="composition-sidebar-header">
+                    <div>
+                        <strong>@(_composition?.Name ?? "Designed page")</strong>
+                        <small>@($"{_scene.Surface.WidthPoints / 72:0.##} × {_scene.Surface.HeightPoints / 72:0.##} in")</small>
+                    </div>
+                    <div class="composition-action-row">
+                        <button type="button" class="btn btn-sm btn-primary" disabled="@(!_dirty)" @onclick="SaveAsync">Save</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseAsync">Back</button>
+                    </div>
+                </div>
+
+                <h3>Add content</h3>
+                <button type="button" @onclick="AddTextObject">@(_selectedSemanticId is null ? "Add text frame" : "Add frame for selected text")</button>
+                <div class="composition-image-add">
+                    <label>Project image<select aria-label="Project image to add" @bind="_newImageId">
+                        <option value="">Choose image</option>
+                        @foreach (var image in _images) { <option value="@image.Id">@image.FileName</option> }
+                    </select></label>
+                    <label>Fit<select aria-label="New image fit" @bind="_newImageFit">
+                        <option value="@FigureImageFit.Contain">Show whole image</option>
+                        <option value="@FigureImageFit.Cover">Fill frame</option>
+                    </select></label>
+                    <button type="button" disabled="@(_newImageId is null)" @onclick="AddImageObject">Add image</button>
+                </div>
+                <details class="composition-advanced">
+                    <summary>Advanced objects</summary>
+                    <div class="composition-add-row">
+                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Rectangle)">Rectangle</button>
+                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Ellipse)">Ellipse</button>
+                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Line)">Line</button>
+                    </div>
+                </details>
+
+                <h3>History and view</h3>
+                <div class="composition-action-row">
+                    <button type="button" @onclick="Undo" disabled="@(_undo.Count == 0)">Undo</button>
+                    <button type="button" @onclick="Redo" disabled="@(_redo.Count == 0)">Redo</button>
+                    <button type="button" title="Zoom out" @onclick="() => _zoom = Math.Max(.25, _zoom - .1)">−</button>
+                    <span class="composition-zoom-value">@Math.Round(_zoom * 100)%</span>
+                    <button type="button" title="Zoom in" @onclick="() => _zoom = Math.Min(2, _zoom + .1)">+</button>
+                </div>
+                @if (Selected is { } sidebarSelection)
+                {
+                    <div class="composition-action-row">
+                        <button type="button" @onclick="() => ChangeZOrder(sidebarSelection, -1)">Send backward</button>
+                        <button type="button" @onclick="() => ChangeZOrder(sidebarSelection, 1)">Bring forward</button>
+                        @if (sidebarSelection.Kind == CompositionObjectKind.Image && sidebarSelection.ImageFit == FigureImageFit.Cover)
+                        {
+                            <button type="button" class="@(_cropReposition ? "selected" : null)" @onclick="() => _cropReposition = !_cropReposition">@(_cropReposition ? "Finish crop" : "Reposition crop")</button>
+                        }
+                    </div>
+                }
+
                 <h3>Inspector</h3>
                 @if (Selected is { } selected)
                 {
@@ -257,6 +218,50 @@
                         <button type="button" class="danger" @onclick="() => Delete(selected.Id)">Delete</button>
                     </div>
                 }
+                <div class="composition-heading-row"><h3>Layers</h3><button type="button" @onclick="AddLayer">Add layer</button></div>
+                @foreach (var layer in _layers.OrderByDescending(layer => layer.Order))
+                {
+                    <div class="composition-layer-row @(layer.Id == _selectedLayerId ? "selected" : null)">
+                        <button type="button" @onclick="() => _selectedLayerId = layer.Id">@layer.Name</button>
+                        <button type="button" title="Toggle visibility" @onclick="() => ToggleLayerVisibility(layer)">@(layer.Visible ? "Eye" : "Hidden")</button>
+                        <button type="button" title="Toggle lock" @onclick="() => ToggleLayerLock(layer)">@(layer.Locked ? "Locked" : "Open")</button>
+                    </div>
+                }
+
+                <h3>Objects</h3>
+                @foreach (var item in _objects.OrderByDescending(item => item.ZIndex))
+                {
+                    <div class="composition-object-row @(item.Id == _selectedId ? "selected" : null)">
+                        <input type="checkbox" title="Select for grouping" checked="@_groupSelection.Contains(item.Id)" @onchange="e => ToggleGroupSelection(item.Id, (bool)e.Value!)" />
+                        <button type="button" @onclick="() => _selectedId = item.Id"><span>@item.Kind</span><small>@(string.IsNullOrWhiteSpace(item.Name) ? item.Id.ToString("N")[..8] : item.Name)</small></button>
+                    </div>
+                }
+                <div class="composition-add-row"><button type="button" disabled="@(_groupSelection.Count < 2)" @onclick="GroupSelected">Group selected</button><button type="button" disabled="@(_groupSelection.Count == 0)" @onclick="UngroupSelected">Ungroup</button></div>
+
+                <h3>Reading order</h3>
+                @foreach (var item in _objects.Where(item => item.ReadingOrder is not null).OrderBy(item => item.ReadingOrder))
+                {
+                    <div class="reading-row"><span>@item.ReadingOrder</span> @item.SemanticRole <button type="button" @onclick="() => MoveReadingOrder(item, -1)">Up</button><button type="button" @onclick="() => MoveReadingOrder(item, 1)">Down</button></div>
+                }
+
+                <h3>Semantic content</h3>
+                <p class="composition-hint">Text lives here once. Frames bind to these stable blocks.</p>
+                <div class="composition-add-row">
+                    <button type="button" @onclick="() => AddSemanticBlock(ManuscriptBlockType.Paragraph)">Paragraph</button>
+                    <button type="button" @onclick="() => AddSemanticBlock(ManuscriptBlockType.Heading)">Heading</button>
+                    <button type="button" @onclick="() => AddSemanticBlock(ManuscriptBlockType.BlockQuote)">Caption</button>
+                </div>
+                @foreach (var block in _semanticBlocks)
+                {
+                    <button type="button" class="composition-content-row @(block.Id == _selectedSemanticId ? "selected" : null)" @onclick="() => SelectSemantic(block)">
+                        <span>@block.Type</span><small>@ShortText(block)</small><em>@PlacementStatus(block.Id)</em>
+                    </button>
+                }
+                @if (UnplacedCount > 0)
+                {
+                    <p class="composition-unplaced" role="status">@UnplacedCount unplaced content block@(UnplacedCount == 1 ? string.Empty : "s") must be bound before output.</p>
+                }
+
                 @if (SelectedSemantic is { } semantic)
                 {
                     <h3>Content editor</h3>
@@ -282,8 +287,13 @@
                     </fieldset>
                     <button type="button" class="danger" @onclick="() => DeleteSemanticBlock(semantic.Id)" disabled="@IsReferenced(semantic.Id)">Delete unplaced block</button>
                 }
-                <h3>Surface</h3>
-                <label>Page mode<select value="@_scene.Surface.Kind" @onchange="ChangeSurfaceKind"><option value="SinglePage">Single page</option><option value="FacingSpread">Facing spread</option>@if (_scene.Surface.AllowIndependentPdfPage) { <option value="IndependentPage">Independent Digital PDF page</option> }</select></label>
+                <h3>Saved layouts</h3>
+                <div class="composition-variant-list">
+                    @foreach (var candidate in _variants)
+                    {
+                        <button type="button" class="@(candidate.Id == _variant?.Id ? "selected" : null)" title="Select saved exact-geometry layout" @onclick="() => SelectVariantAsync(candidate.Id)">@VariantLabel(candidate)</button>
+                    }
+                </div>
                 @if (_scene.Surface.Kind == CompositionSurfaceKind.IndependentPage)
                 {
                     <div class="composition-grid-2">
@@ -310,7 +320,6 @@
     private List<CompositionObject> _objects = [];
     private List<CompositionLayer> _layers = [];
     private List<CompositionObjectStyle> _styles = [];
-    private List<CompositionGuide> _guides = [];
     private List<ManuscriptBlock> _semanticBlocks = [];
     private CompositionEditionGeometry? _authoringGeometry;
     private IReadOnlyList<ProjectImageView> _images = [];
@@ -407,7 +416,6 @@
         _objects = _scene.Objects.ToList();
         _layers = _scene.Layers.ToList();
         _styles = _scene.Styles.ToList();
-        _guides = [];
         _selectedLayerId = _layers.OrderByDescending(layer => layer.Order).FirstOrDefault()?.Id;
         _groupSelection.Clear();
         _undo.Clear();
@@ -430,7 +438,6 @@
         _objects = _scene.Objects.ToList();
         _layers = _scene.Layers.ToList();
         _styles = _scene.Styles.ToList();
-        _guides = [];
         _selectedId = _objects.FirstOrDefault()?.Id;
         _undo.Clear();
         _redo.Clear();
@@ -787,8 +794,8 @@
         Patch(item with { ZIndex = target });
     }
     private void Delete(Guid id) { if (_objects.FirstOrDefault(item => item.Id == id)?.Kind == CompositionObjectKind.Group) { _groupSelection.Clear(); _groupSelection.Add(id); UngroupSelected(); return; } Snapshot(); _objects.RemoveAll(item => item.Id == id); _selectedId = null; _dirty = true; }
-    private WorkspaceSnapshot Capture() => new(_objects.ToList(), _layers.ToList(), _styles.ToList(), _guides.ToList(), _semanticBlocks.ToList(), _scene!.Surface);
-    private void Restore(WorkspaceSnapshot snapshot) { _objects = snapshot.Objects; _layers = snapshot.Layers; _styles = snapshot.Styles; _guides = snapshot.Guides; _semanticBlocks = snapshot.SemanticBlocks; _scene = _scene! with { Surface = snapshot.Surface }; _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id; _selectedLayerId = _layers.FirstOrDefault(item => item.Id == _selectedLayerId)?.Id ?? _layers.FirstOrDefault()?.Id; }
+    private WorkspaceSnapshot Capture() => new(_objects.ToList(), _layers.ToList(), _styles.ToList(), _semanticBlocks.ToList(), _scene!.Surface);
+    private void Restore(WorkspaceSnapshot snapshot) { _objects = snapshot.Objects; _layers = snapshot.Layers; _styles = snapshot.Styles; _semanticBlocks = snapshot.SemanticBlocks; _scene = _scene! with { Surface = snapshot.Surface }; _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id; _selectedLayerId = _layers.FirstOrDefault(item => item.Id == _selectedLayerId)?.Id ?? _layers.FirstOrDefault()?.Id; }
     private void Snapshot() { if (_scene is null) return; _undo.Push(Capture()); _redo.Clear(); }
     private void Undo() { if (_undo.Count == 0) return; _redo.Push(Capture()); Restore(_undo.Pop()); _dirty = true; }
     private void Redo() { if (_redo.Count == 0) return; _undo.Push(Capture()); Restore(_redo.Pop()); _dirty = true; }
@@ -896,12 +903,6 @@
     private static string ColorValue(string value) => value.StartsWith('#') && value.Length == 7 ? value : "#000000";
     private static string Color(ChangeEventArgs e) => e.Value?.ToString() ?? "#000000";
 
-    private void ChangeSurfaceKind(ChangeEventArgs e)
-    {
-        if (_scene is null || !Enum.TryParse<CompositionSurfaceKind>(e.Value?.ToString(), out var kind)) return;
-        SetSurfaceKind(kind);
-    }
-
     private string SurfaceClass(CompositionSurfaceKind kind) => _scene?.Surface.Kind == kind ? "selected" : string.Empty;
 
     private void SetSurfaceKind(CompositionSurfaceKind kind)
@@ -971,7 +972,6 @@
         List<CompositionObject> Objects,
         List<CompositionLayer> Layers,
         List<CompositionObjectStyle> Styles,
-        List<CompositionGuide> Guides,
         List<ManuscriptBlock> SemanticBlocks,
         CompositionSurface Surface);
 

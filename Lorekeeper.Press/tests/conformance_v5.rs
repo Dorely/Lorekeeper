@@ -1883,6 +1883,25 @@ fn unsupported_inline_language_fails_without_artifacts() {
 }
 
 #[test]
+fn blank_optional_languages_inherit_the_document_language() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["document"]["sections"][0]["chapters"][0]["blocks"][0]["language"] =
+        Value::String(String::new());
+    job.request["document"]["sections"][0]["chapters"][0]["blocks"][1]["content"][0]["marks"] =
+        json!([{ "type": "Language", "value": "" }]);
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    assert_eq!(response(&output)["status"], "completed");
+}
+
+#[test]
 fn traversal_and_hash_mismatch_are_rejected_before_output() {
     let mut traversal = PreparedJob::new("kdp-paperback-v1");
     traversal.request["assets"][0]["relativePath"] = Value::String("../outside.png".to_owned());
