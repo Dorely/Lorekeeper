@@ -12,10 +12,17 @@
     display: none;
 }
 
-.semantic-editor ::deep .semantic-editor-toolbar {
+.semantic-editor ::deep .semantic-editor-chrome {
     position: sticky;
     z-index: 4;
     top: 0;
+    background: var(--bs-body-bg, #fff);
+    box-shadow: 0 .15rem .45rem rgb(15 23 42 / 7%);
+}
+
+.semantic-editor ::deep .semantic-editor-toolbar {
+    position: relative;
+    z-index: 1;
     display: flex;
     flex-wrap: wrap;
     gap: 0.3rem;
@@ -110,7 +117,7 @@
 }
 
 .semantic-editor ::deep .semantic-editor-advanced {
-    position: relative;
+    position: static;
 }
 
 .semantic-editor ::deep .semantic-editor-advanced > summary {
@@ -126,7 +133,7 @@
 }
 
 .semantic-editor ::deep .semantic-editor-advanced-controls {
-    position: fixed;
+    position: absolute;
     z-index: 1000;
     display: flex;
     width: min(42rem, calc(100vw - 3rem));
@@ -418,10 +425,84 @@
     color: var(--bs-warning-text-emphasis, #664d03);
 }
 
-.semantic-editor :deep(.semantic-figure-inspector) { margin: .35rem 0; padding: .65rem; border: 1px solid var(--lk-border, #ccd2dd); border-radius: .55rem; background: var(--lk-surface-subtle, #f7f8fb); }
-.semantic-editor :deep(.semantic-figure-controls) { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .5rem; margin-top: .45rem; }
-.semantic-editor :deep(.semantic-figure-controls label) { display: grid; gap: .18rem; color: var(--lk-muted, #667085); font-size: .72rem; }
-.semantic-editor :deep(.semantic-figure-controls input),.semantic-editor :deep(.semantic-figure-controls select),.semantic-editor :deep(.semantic-figure-controls textarea) { min-width: 0; padding: .3rem .4rem; border: 1px solid var(--lk-border, #ccd2dd); border-radius: .35rem; background: white; color: inherit; }
+.semantic-editor ::deep .semantic-figure-inspector {
+    max-height: min(18rem, calc(100vh - 10rem));
+    padding: .65rem .7rem .75rem;
+    overflow: auto;
+    border-bottom: 1px solid var(--lk-border, #ccd2dd);
+    background: var(--lk-surface-subtle, #f7f8fb);
+}
+
+.semantic-editor ::deep .semantic-figure-inspector[hidden] {
+    display: none;
+}
+
+.semantic-editor ::deep .semantic-figure-inspector > strong {
+    display: block;
+    color: var(--bs-body-color, #212529);
+    font-size: .82rem;
+}
+
+.semantic-editor ::deep .semantic-figure-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    gap: .55rem;
+    margin-top: .5rem;
+}
+
+.semantic-editor ::deep .semantic-figure-field {
+    display: grid;
+    min-width: 0;
+    gap: .22rem;
+    color: var(--bs-secondary-color, #667085);
+    font-size: .72rem;
+    font-weight: 650;
+}
+
+.semantic-editor ::deep .semantic-figure-field--wide {
+    grid-column: span 2;
+}
+
+.semantic-editor ::deep .semantic-figure-field--check {
+    display: flex;
+    min-height: 2rem;
+    gap: .4rem;
+    align-items: center;
+    align-self: end;
+}
+
+.semantic-editor ::deep .semantic-figure-controls input:not([type="checkbox"]),
+.semantic-editor ::deep .semantic-figure-controls select,
+.semantic-editor ::deep .semantic-figure-controls textarea {
+    width: 100%;
+    min-width: 0;
+    padding: .38rem .45rem;
+    border: 1px solid var(--lk-border, #ccd2dd);
+    border-radius: .35rem;
+    background: var(--bs-body-bg, #fff);
+    color: var(--bs-body-color, #212529);
+    font-family: inherit;
+    font-size: .82rem;
+    font-weight: 400;
+}
+
+.semantic-editor ::deep .semantic-figure-controls textarea {
+    resize: vertical;
+}
+
+.semantic-editor ::deep .semantic-figure-controls input:focus-visible,
+.semantic-editor ::deep .semantic-figure-controls select:focus-visible,
+.semantic-editor ::deep .semantic-figure-controls textarea:focus-visible {
+    border-color: var(--bs-primary, #0d6efd);
+    outline: 2px solid color-mix(in srgb, var(--bs-primary, #0d6efd) 30%, transparent);
+    outline-offset: 1px;
+}
+
+@media (max-width: 640px) {
+    .semantic-editor ::deep .semantic-figure-field--wide {
+        grid-column: auto;
+    }
+}
 
 .chapter-edit-surface--locked ::deep .semantic-prosemirror {
     cursor: not-allowed;

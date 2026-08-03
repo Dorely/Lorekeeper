@@ -713,16 +713,25 @@ test("List toolbar button toggles a list item back to body text", async () => {
     dom.window.close();
 });
 
-test("Advanced controls remain inside the viewport at either toolbar edge", () => {
+test("Advanced controls remain inside the editor at either toolbar edge", () => {
     const dom = installDom();
-    Object.defineProperty(window, "innerWidth", {value: 800, configurable: true});
+    Object.defineProperty(window, "innerWidth", {value: 1000, configurable: true});
     Object.defineProperty(window, "innerHeight", {value: 600, configurable: true});
     const root = document.createElement("div");
     document.body.append(root);
     const handle = attach(root, {async invokeMethodAsync() {}}, 10_000, JSON.stringify(manuscript()));
+    const toolbar = root.querySelector(".semantic-editor-toolbar");
     const details = root.querySelector(".semantic-editor-advanced");
     const summary = details.querySelector("summary");
     const controls = details.querySelector(".semantic-editor-advanced-controls");
+    root.getBoundingClientRect = () => ({
+        left: 30, right: 930, top: 0, bottom: 600, width: 900, height: 600,
+        x: 30, y: 0, toJSON() { return this; }
+    });
+    toolbar.getBoundingClientRect = () => ({
+        left: 30, right: 930, top: 0, bottom: 80, width: 900, height: 80,
+        x: 30, y: 0, toJSON() { return this; }
+    });
 
     summary.getBoundingClientRect = () => ({
         left: -80, right: 0, top: 40, bottom: 72, width: 80, height: 32,
@@ -730,15 +739,15 @@ test("Advanced controls remain inside the viewport at either toolbar edge", () =
     });
     details.open = true;
     details.dispatchEvent(new window.Event("toggle"));
-    assert.equal(controls.style.left, "12px");
+    assert.equal(controls.style.left, "8px");
     assert.equal(controls.style.width, "672px");
 
     summary.getBoundingClientRect = () => ({
-        left: 760, right: 840, top: 40, bottom: 72, width: 80, height: 32,
-        x: 760, y: 40, toJSON() { return this; }
+        left: 900, right: 980, top: 40, bottom: 72, width: 80, height: 32,
+        x: 900, y: 40, toJSON() { return this; }
     });
     details.dispatchEvent(new window.Event("toggle"));
-    assert.equal(controls.style.left, "116px");
+    assert.equal(controls.style.left, "220px");
     handle.dispose();
     dom.window.close();
 });

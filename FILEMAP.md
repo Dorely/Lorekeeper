@@ -88,7 +88,7 @@
 | File | Description |
 |------|-------------|
 | `package.json` / `package-lock.json` | Exact-pinned ProseMirror and esbuild dependency graph plus deterministic test/build commands. |
-| `src/semantic-editor.js` | Owned ProseMirror schema/adapter, disconnect-safe host attachment, toolbar, autosave queue, paste diagnostics, outline, counts, and find/replace behavior. |
+| `src/semantic-editor.js` | Owned ProseMirror schema/adapter, disconnect-safe host attachment, bounded toolbar overlays, sticky Figure controls, autosave queue, paste diagnostics, outline, counts, and find/replace behavior. |
 | `test/semantic-editor.test.js` | Node/jsdom fixtures for round-trip fidelity, stable IDs, accessibility/read-only state, save draining, conflicts, paste, links, and marked-text find. |
 | `THIRD_PARTY_NOTICES.md` | Runtime/build dependency inventory and MIT notice for the semantic-editor bundle. |
 
@@ -181,7 +181,7 @@
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with keyed semantic editor, serialized refresh coordination, resizable Chat/Memory columns, and persistent AI/Contest review entry points. |
-| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, Electron-safe Figure/Designed Page setup forms, and discoverable Designed Page cards with live names, surface/status summaries, artwork thumbnails, and editor actions. |
+| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, sticky styled Figure controls, bounded toolbar overlays, Electron-safe Figure/Designed Page setup forms, and discoverable Designed Page cards with live names, surface/status summaries, artwork thumbnails, and editor actions. |
 | `ChapterReadPreview.razor` (+ `.razor.css`) | Press-backed current-chapter page preview with flush-before-layout, single/facing display, fit/zoom controls, project page setup, images, labels, links, visible authoring warnings, and retryable failures. |
 | `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Named paragraph/character style manager with revision-aware create/edit/delete controls and stable semantic roles. |
 | `DesignedPageWorkspace.razor` (+ `.razor.css`) | Contextual exact-geometry page/spread scene editor with a canvas-first center, compact page/guide strip, unified scrolling right controls, atomic image/fit placement, direct frame/crop manipulation, semantic bindings, layers, advanced vector primitives, diagnostics, undo/redo, and revision-safe save. |

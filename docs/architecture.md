@@ -246,7 +246,11 @@ leaving the UI indefinitely busy. It supports single/facing display,
 fit-page/fit-width, zoom, and project page setup; it never substitutes a
 read-only ProseMirror view. Figure and Designed Page insertion use editor-owned
 forms rather than native browser prompts so the workflows behave consistently
-in the Electron host. Preview canvases receive server-computed, valid CSS
+in the Electron host. The primary toolbar and selected-Figure inspector share
+a sticky editor header, keeping the styled Figure controls visible while the
+manuscript scrolls. Advanced controls are bounded and positioned relative to
+that header and the editor viewport, so they cannot create horizontal overflow.
+Preview canvases receive server-computed, valid CSS
 lengths for their selected fit and zoom, and participate in normal flex/grid
 flow so every Press page occupies a distinct canvas. When composition creation
 advances the manuscript outside ordinary editor autosave, Pages navigation

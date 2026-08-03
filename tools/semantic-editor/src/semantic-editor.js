@@ -870,14 +870,19 @@ function buildFigureInspector(view, projectImages) {
     const fields = new Map();
     const field = (name, label, kind, options = []) => {
         const wrapper = document.createElement("label");
-        wrapper.textContent = label;
+        wrapper.className = "semantic-figure-field";
+        if (kind === "checkbox")
+            wrapper.classList.add("semantic-figure-field--check");
+        const labelText = document.createElement("span");
+        labelText.textContent = label;
         const input = kind === "select" ? document.createElement("select") : document.createElement("input");
         if (kind !== "select") input.type = kind;
         for (const [value, text] of options) {
             const option = document.createElement("option");
             option.value = value; option.textContent = text; input.append(option);
         }
-        wrapper.append(input); controls.append(wrapper); fields.set(name, input); return input;
+        wrapper.append(...(kind === "checkbox" ? [input, labelText] : [labelText, input]));
+        controls.append(wrapper); fields.set(name, input); return input;
     };
     field("imageId", "Project image", "select", projectImages.map(image => [image.id, image.fileName]));
     field("placement", "Placement", "select", [["inline", "Inline"], ["centered", "Centered"], ["float", "Floated"], ["fullWidth", "Full width"], ["fullBleed", "Full bleed"], ["dedicatedPage", "Dedicated page"]]);
@@ -891,8 +896,10 @@ function buildFigureInspector(view, projectImages) {
     field("captionPlacement", "Caption", "select", [["below", "Below"], ["above", "Above"], ["overlay", "Overlay"], ["hidden", "Hidden"]]);
     field("startOnNewPage", "Start on new page", "checkbox");
     field("keepWithCaption", "Keep with caption", "checkbox");
-    const alt = document.createElement("label"); alt.textContent = "Alternative text";
-    const altInput = document.createElement("textarea"); altInput.rows = 2; alt.append(altInput); controls.append(alt); fields.set("altText", altInput);
+    const alt = document.createElement("label");
+    alt.className = "semantic-figure-field semantic-figure-field--wide";
+    const altLabel = document.createElement("span"); altLabel.textContent = "Alternative text";
+    const altInput = document.createElement("textarea"); altInput.rows = 2; alt.append(altLabel, altInput); controls.append(alt); fields.set("altText", altInput);
     field("decorative", "Decorative image", "checkbox");
     field("language", "Language", "text");
     field("accessibilityRole", "Semantic role", "select", [["figure", "Figure"], ["illustration", "Illustration"], ["diagram", "Diagram"], ["map", "Map"], ["photograph", "Photograph"], ["ornament", "Ornament"]]);
@@ -1525,12 +1532,15 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     toolbar.className = "semantic-editor-toolbar";
     toolbar.setAttribute("role", "toolbar");
     toolbar.setAttribute("aria-label", "Manuscript formatting");
+    const editorChrome = document.createElement("div");
+    editorChrome.className = "semantic-editor-chrome";
+    editorChrome.append(toolbar);
     const surface = document.createElement("div");
     surface.className = "semantic-editor-surface";
     const status = document.createElement("div");
     status.className = "semantic-editor-status";
     status.setAttribute("aria-live", "polite");
-    root.replaceChildren(toolbar, surface, status);
+    root.replaceChildren(editorChrome, surface, status);
     installNamedStyleRules(root, namedStyles);
 
     let view;
@@ -1684,7 +1694,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     const findPanel = buildFindPanel(view);
     const outline = buildOutline(view);
     const figureInspector = buildFigureInspector(view, projectImages);
-    root.insertBefore(figureInspector.panel, surface);
+    editorChrome.append(figureInspector.panel);
     figureInspector.update();
     const updateStatus = () => {
         const text = editorialText(view.state.doc, manuscriptId, revision);
@@ -1834,21 +1844,22 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     const positionAdvancedControls = () => {
         if (!advancedDetails.open) return;
         const anchor = advancedSummary.getBoundingClientRect();
-        const viewportWidth = Math.max(320, window.innerWidth || document.documentElement.clientWidth);
-        const viewportHeight = Math.max(320, window.innerHeight || document.documentElement.clientHeight);
-        const width = Math.min(672, viewportWidth - 24);
-        const left = Math.max(12, Math.min(anchor.left, viewportWidth - width - 12));
-        const preferredTop = anchor.bottom + 6;
-        const top = preferredTop + 288 <= viewportHeight
-            ? preferredTop
-            : Math.max(12, anchor.top - 294);
+        const toolbarBounds = toolbar.getBoundingClientRect();
+        const editorBounds = root.getBoundingClientRect();
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+        const leftBoundary = Math.max(12, editorBounds.left + 8);
+        const rightBoundary = Math.min(viewportWidth - 12, editorBounds.right - 8);
+        const width = Math.max(0, Math.min(672, rightBoundary - leftBoundary));
+        const viewportLeft = Math.max(leftBoundary, Math.min(anchor.left, rightBoundary - width));
+        const availableHeight = Math.max(96, viewportHeight - anchor.bottom - 18);
         advancedControls.style.width = `${width}px`;
-        advancedControls.style.left = `${left}px`;
-        advancedControls.style.top = `${top}px`;
+        advancedControls.style.maxHeight = `${Math.min(288, availableHeight)}px`;
+        advancedControls.style.left = `${viewportLeft - toolbarBounds.left}px`;
+        advancedControls.style.top = `${anchor.bottom - toolbarBounds.top + 6}px`;
     };
     advancedDetails.addEventListener("toggle", positionAdvancedControls);
     window.addEventListener("resize", positionAdvancedControls);
-    window.addEventListener("scroll", positionAdvancedControls, true);
     toolbar.append(advancedDetails);
     root.append(findPanel.panel, outline.panel);
     updateStatus();
@@ -1898,7 +1909,6 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         dispose() {
             if (timer) clearTimeout(timer);
             window.removeEventListener("resize", positionAdvancedControls);
-            window.removeEventListener("scroll", positionAdvancedControls, true);
             view.destroy();
             root.replaceChildren();
         }

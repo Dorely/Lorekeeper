@@ -46,11 +46,13 @@ this feature's authorized checks.
   Book Text Style changes and clearing paragraph formatting removes only direct
   paragraph presentation.
 - Open Advanced at both edges of the editor and confirm its panel remains fully
-  inside the viewport. Insert a project image through the Figure picker, insert
-  a Designed Page and confirm Pages opens immediately, then click List twice and
-  confirm the block returns to ordinary body text. Confirm Figure and Designed
-  Page setup use in-app forms in Electron and never depend on native browser
-  prompt dialogs.
+  inside the editor without horizontal scrolling or position drift. Select a
+  Figure, scroll the manuscript, and confirm its styled layout/accessibility
+  controls remain visible beneath the toolbar. Insert a project image through
+  the Figure picker, insert a Designed Page and confirm Pages opens immediately,
+  then click List twice and confirm the block returns to ordinary body text.
+  Confirm Figure and Designed Page setup use in-app forms in Electron and never
+  depend on native browser prompt dialogs.
 - Switch to Read with unsaved edits and confirm it flushes, lays out the current
   chapter through Press, and displays actual lines, captions, images, Designed
   Pages, boxes, labels, and parity. Exercise single/facing display, fit page,
