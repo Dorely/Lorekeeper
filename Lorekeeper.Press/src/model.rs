@@ -42,6 +42,8 @@ pub struct RenderRequest {
     pub job_id: String,
     pub profile: String,
     pub ink: String,
+    #[serde(default)]
+    pub layout_trace_mode: Option<String>,
     pub document: Value,
     pub trim: Trim,
     pub cover: Option<Cover>,

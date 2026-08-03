@@ -606,8 +606,7 @@ test("reset Book Text Style preserves block type", async () => {
 test("figure insertion resolves project image IDs without casing assumptions", async () => {
     const dom = installDom();
     const imageId = "29FD4930-0048-45A1-A2D6-3951DAA5A1D9";
-    const answers = ["Map caption", "A route map", "contain"];
-    window.prompt = () => answers.shift();
+    window.prompt = () => { throw new Error("native prompts are unavailable in Electron"); };
     const root = document.createElement("div");
     document.body.append(root);
     const saves = [];
@@ -626,17 +625,25 @@ test("figure insertion resolves project image IDs without casing assumptions", a
     const select = root.querySelector("select[aria-label='Insert project image as figure']");
     select.value = imageId;
     select.dispatchEvent(new window.Event("change", {bubbles: true}));
+    const dialog = root.querySelector("form[aria-label='Insert figure']");
+    assert.ok(dialog);
+    dialog.elements.caption.value = "Map caption";
+    dialog.elements.altText.value = "A route map";
+    dialog.elements.fit.value = "contain";
+    dialog.querySelector("button[aria-label='Insert figure']").click();
+    await new Promise(resolve => setTimeout(resolve, 0));
     await handle.flush();
 
     assert.equal(saves.at(-1).content[0].type, "figure");
     assert.equal(saves.at(-1).content[0].imageId.toLowerCase(), imageId.toLowerCase());
+    assert.equal(saves.at(-1).content[0].content[0].text, "Map caption");
     handle.dispose();
     dom.window.close();
 });
 
 test("Designed Page insertion opens the new page workspace", async () => {
     const dom = installDom();
-    window.prompt = () => "Opening spread";
+    window.prompt = () => { throw new Error("native prompts are unavailable in Electron"); };
     const root = document.createElement("div");
     document.body.append(root);
     const calls = [];
@@ -666,9 +673,16 @@ test("Designed Page insertion opens the new page workspace", async () => {
     }, 10_000, JSON.stringify(manuscript()));
 
     root.querySelector("button[aria-label='Insert a designed page at the current manuscript position']").click();
+    const dialog = root.querySelector("form[aria-label='Insert Designed Page']");
+    assert.ok(dialog);
+    dialog.elements.name.value = "Opening spread";
+    dialog.elements.layoutMode.value = "FacingSpread";
+    dialog.querySelector("button[aria-label='Create page']").click();
     await new Promise(resolve => setTimeout(resolve, 0));
 
-    assert.ok(calls.some(call => call[0] === "OnCreateDesignedPage"));
+    assert.ok(calls.some(call => call[0] === "OnCreateDesignedPage"
+        && call[1] === "Opening spread"
+        && call[2] === "FacingSpread"));
     assert.ok(calls.some(call => call[0] === "OnOpenDesignedPage" && call[1] === compositionId));
     handle.dispose();
     dom.window.close();

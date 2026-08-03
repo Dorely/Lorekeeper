@@ -97,7 +97,7 @@
 | File | Description |
 |------|-------------|
 | `Cargo.toml` / `Cargo.lock` / `rust-toolchain.toml` | Rust 1.97.1 crate with exact permissive serialization, shaping, subsetting, line-breaking, hyphenation, image/color, PDF-writing, hashing, and inspection dependencies. |
-| `src/main.rs` / `src/lib.rs` | Native `describe`, structured chapter-layout trace, and bounded protocol-v5 render CLI plus the independently testable library surface. |
+| `src/main.rs` / `src/lib.rs` | Native `describe`, full conformance and compact browser chapter-layout traces, and bounded protocol-v5 render CLI plus the independently testable library surface. |
 | `src/model.rs` | Protocol-v5 image/font requests, diagnostics, artifacts, validation evidence, structured page-paint layout, accessibility, and page-map contracts. |
 | `src/renderer.rs` | Contained staging, validation, deterministic pagination, flowing Figures, structured page/cover composition, Digital PDF assembly, barcodes, atomic promotion, and evidence. |
 | `src/font.rs` | Bundled/project TTF and TrueType/CFF OTF validation, shaping, subsetting, widths, embedding, and multi-codepoint ToUnicode mapping. |
@@ -181,7 +181,7 @@
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with keyed semantic editor, serialized refresh coordination, resizable Chat/Memory columns, and persistent AI/Contest review entry points. |
-| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, semantic Figure controls, and discoverable Designed Page cards with live names, surface/status summaries, artwork thumbnails, and editor actions. |
+| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, Electron-safe Figure/Designed Page setup forms, and discoverable Designed Page cards with live names, surface/status summaries, artwork thumbnails, and editor actions. |
 | `ChapterReadPreview.razor` (+ `.razor.css`) | Press-backed current-chapter page preview with flush-before-layout, single/facing display, fit/zoom controls, project page setup, images, labels, links, and retryable diagnostics. |
 | `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Named paragraph/character style manager with revision-aware create/edit/delete controls and stable semantic roles. |
 | `DesignedPageWorkspace.razor` (+ `.razor.css`) | Contextual exact-geometry page/spread scene editor with a canvas-first center, compact page/guide strip, unified scrolling right controls, atomic image/fit placement, direct frame/crop manipulation, semantic bindings, layers, advanced vector primitives, diagnostics, undo/redo, and revision-safe save. |
@@ -584,7 +584,7 @@
 |------|-------------|
 | `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service, active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
 | `ProjectPageSetupService.cs` | Revision-aware project authoring page setup presets/custom geometry used by Read preview, new Designed Pages, Figures, and generation targets without publication editions. |
-| `ChapterPreviewService.cs` | Cached Press layout-command adapter that compiles preceding structure, stages declared project images/fonts, and returns the current chapter's structured page-paint response. |
+| `ChapterPreviewService.cs` | Cached, cancellable Press layout-command adapter that stages the selected chapter's declared images/fonts and returns a compact structured page-paint response without glyph-level conformance payloads. |
 | `CompositionAgentPayloads.cs` | Lossless bounded assistant reads and compact revision-safe patch envelopes for semantic fragments, scene objects, layers, and styles. |
 | `CompositionSceneResolver.cs` | Shared deterministic group flattener and PDF/X overlap validator used by export and geometry-target consumers so group transforms, opacity, visibility, locks, and z-order have runtime meaning. |
 | `CoverCompositionFactory.cs` | Seeds and reflows shared structured cover scenes across front-only digital and page-count-derived print-wrap geometry. |

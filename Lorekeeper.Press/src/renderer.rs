@@ -335,10 +335,20 @@ pub fn trace(job_root: &Path) -> RenderResult<()> {
 fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     validate_request(request, job_root)?;
     let layout = paginate(request)?;
-    let fonts = subset_for_layout(&layout.pages)
-        .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
-    let pages = layout.pages.iter().map(|page| {
-        let lines = page.lines.iter().map(|line| {
+    let browser_preview = request.layout_trace_mode.as_deref() == Some("browser-preview");
+    let fonts = if browser_preview {
+        None
+    } else {
+        Some(
+            subset_for_layout(&layout.pages)
+                .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?,
+        )
+    };
+    let pages = layout
+        .pages
+        .iter()
+        .map(|page| {
+            let lines = page.lines.iter().map(|line| {
             let fallback;
             let runs = if line.runs.is_empty() {
                 fallback = vec![LayoutRun {
@@ -348,17 +358,22 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 fallback.as_slice()
             } else { line.runs.as_slice() };
             let runs = runs.iter().map(|run| {
-                let size = line.size * run.size_scale;
-                let glyphs = fonts.get(&run.face).map_or_else(Vec::new, |font| font.shape(&run.text, size));
-                serde_json::json!({
+                let mut value = serde_json::json!({
                     "text": run.text,
                     "face": run.face,
                     "underline": run.underline,
                     "strikethrough": run.strikethrough,
                     "baselineShiftEm": run.baseline_shift_em,
                     "sizeScale": run.size_scale,
-                    "glyphs": glyphs,
-                })
+                });
+                if let Some(fonts) = fonts.as_ref() {
+                    let size = line.size * run.size_scale;
+                    let glyphs = fonts
+                        .get(&run.face)
+                        .map_or_else(Vec::new, |font| font.shape(&run.text, size));
+                    value["glyphs"] = serde_json::json!(glyphs);
+                }
+                value
             }).collect::<Vec<_>>();
             serde_json::json!({ "text": line.text, "size": line.size, "x": line.x, "y": line.y,
                 "wordSpacing": line.word_spacing, "characterSpacing": line.character_spacing,
@@ -372,24 +387,40 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 "semanticId": line.semantic_id, "semanticParentId": line.semantic_parent_id,
                 "linkPage": line.link_page, "runs": runs })
         }).collect::<Vec<_>>();
-        let kind = match page.kind { PageKind::Designed => "DesignedPage", PageKind::Body => "Body", PageKind::Blank => "Blank", PageKind::Cover => "Cover" };
-        let paint_order = page.paint_order.iter().map(|paint| match paint {
-            LayoutPaint::Shape(index) => serde_json::json!({ "kind": "shape", "index": index }),
-            LayoutPaint::Image(index) => serde_json::json!({ "kind": "image", "index": index }),
-            LayoutPaint::Line(index) => serde_json::json!({ "kind": "line", "index": index }),
-        }).collect::<Vec<_>>();
-        serde_json::json!({
-            "kind": kind,
-            "widthPoints": page.width_points.unwrap_or(request.trim.width_inches * 72.0),
-            "heightPoints": page.height_points.unwrap_or(request.trim.height_inches * 72.0),
-            "pageLabel": page.page_label,
-            "bookmark": page.bookmark,
-            "paintOrder": paint_order,
-            "lines": lines,
-            "images": page.images,
-            "shapes": page.shapes,
+            let kind = match page.kind {
+                PageKind::Designed => "DesignedPage",
+                PageKind::Body => "Body",
+                PageKind::Blank => "Blank",
+                PageKind::Cover => "Cover",
+            };
+            let paint_order = page
+                .paint_order
+                .iter()
+                .map(|paint| match paint {
+                    LayoutPaint::Shape(index) => {
+                        serde_json::json!({ "kind": "shape", "index": index })
+                    }
+                    LayoutPaint::Image(index) => {
+                        serde_json::json!({ "kind": "image", "index": index })
+                    }
+                    LayoutPaint::Line(index) => {
+                        serde_json::json!({ "kind": "line", "index": index })
+                    }
+                })
+                .collect::<Vec<_>>();
+            serde_json::json!({
+                "kind": kind,
+                "widthPoints": page.width_points.unwrap_or(request.trim.width_inches * 72.0),
+                "heightPoints": page.height_points.unwrap_or(request.trim.height_inches * 72.0),
+                "pageLabel": page.page_label,
+                "bookmark": page.bookmark,
+                "paintOrder": paint_order,
+                "lines": lines,
+                "images": page.images,
+                "shapes": page.shapes,
+            })
         })
-    }).collect::<Vec<_>>();
+        .collect::<Vec<_>>();
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
@@ -534,6 +565,16 @@ fn validate_request(
         return reject(
             "PRESS_INK_UNSUPPORTED",
             format!("The ink intent '{}' is unsupported.", request.ink),
+        );
+    }
+    if request
+        .layout_trace_mode
+        .as_deref()
+        .is_some_and(|mode| mode != "browser-preview")
+    {
+        return reject(
+            "PRESS_LAYOUT_TRACE_MODE_UNSUPPORTED",
+            "The requested layout trace mode is unsupported.",
         );
     }
     let language = request
@@ -5343,6 +5384,7 @@ mod tests {
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v1".to_owned(),
             ink: "BlackAndWhite".to_owned(),
+            layout_trace_mode: None,
             document: serde_json::json!({
                 "title": "Long contents",
                 "author": "Author",
@@ -5927,6 +5969,7 @@ mod tests {
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v1".to_owned(),
             ink: "BlackAndWhite".to_owned(),
+            layout_trace_mode: None,
             document,
             trim: standard_trim(),
             cover: None,

@@ -118,15 +118,10 @@ public sealed class ChapterPreviewService(
             ?? new ProjectPageSetup { ProjectId = projectId };
         var acts = await db.Acts.AsNoTracking().Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.Order).ThenBy(item => item.Id).ToListAsync(cancellationToken);
-        var actOrder = acts.Select((act, index) => (act.Id, index)).ToDictionary(item => item.Id, item => item.index);
-        var chapters = await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId)
-            .ToListAsync(cancellationToken);
-        chapters = chapters.OrderBy(item => item.ActId is Guid actId && actOrder.TryGetValue(actId, out var order) ? order : int.MaxValue)
-            .ThenBy(item => item.Order).ThenBy(item => item.Id).ToList();
-        var targetIndex = chapters.FindIndex(item => item.Id == chapterId);
-        if (targetIndex < 0)
-            throw new KeyNotFoundException("Chapter was not found in this project.");
-        chapters = chapters.Take(targetIndex + 1).ToList();
+        var chapter = await db.Chapters.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == chapterId && item.ProjectId == projectId, cancellationToken)
+            ?? throw new KeyNotFoundException("Chapter was not found in this project.");
+        var chapters = new List<Chapter> { chapter };
 
         var documents = chapters.ToDictionary(
             chapter => chapter.Id,
@@ -280,6 +275,7 @@ public sealed class ChapterPreviewService(
                 jobId = jobId.ToString("N"),
                 profile = "generic-digital-pdf-v1",
                 ink = "Color",
+                layoutTraceMode = "browser-preview",
                 document = new
                 {
                     title = project.Name,
@@ -342,7 +338,15 @@ public sealed class ChapterPreviewService(
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
             var stdoutTask = ReadBoundedAsync(process.StandardOutput, 16 * 1024 * 1024, linked.Token);
             var stderrTask = ReadBoundedAsync(process.StandardError, 64 * 1024, linked.Token);
-            await process.WaitForExitAsync(linked.Token);
+            try
+            {
+                await process.WaitForExitAsync(linked.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                TryTerminate(process);
+                throw;
+            }
             var stdout = await stdoutTask;
             var stderr = await stderrTask;
             if (process.ExitCode != 0)
@@ -466,6 +470,18 @@ public sealed class ChapterPreviewService(
     }
 
     private static string Limit(string value) => value.Length <= 2000 ? value : value[..2000];
+
+    private static void TryTerminate(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (InvalidOperationException) { }
+        catch (System.ComponentModel.Win32Exception) { }
+        catch (NotSupportedException) { }
+    }
 
     private sealed record LayoutResponse(int ProtocolVersion, string JobId, LayoutPage[] Pages, LayoutPageMap[] PageMap);
     private sealed record LayoutPage(string Kind, double WidthPoints, double HeightPoints, string? PageLabel, string? Bookmark, LayoutPaint[] PaintOrder, LayoutLine[] Lines, LayoutImage[] Images, LayoutShape[] Shapes);

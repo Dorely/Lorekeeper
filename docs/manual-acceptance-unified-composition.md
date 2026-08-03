@@ -48,11 +48,15 @@ this feature's authorized checks.
 - Open Advanced at both edges of the editor and confirm its panel remains fully
   inside the viewport. Insert a project image through the Figure picker, insert
   a Designed Page and confirm Pages opens immediately, then click List twice and
-  confirm the block returns to ordinary body text.
+  confirm the block returns to ordinary body text. Confirm Figure and Designed
+  Page setup use in-app forms in Electron and never depend on native browser
+  prompt dialogs.
 - Switch to Read with unsaved edits and confirm it flushes, lays out the current
   chapter through Press, and displays actual lines, captions, images, Designed
   Pages, boxes, labels, and parity. Exercise single/facing display, fit page,
-  fit width, zoom, presets, custom page setup, failure diagnostics, and retry.
+  fit width, zoom, presets, custom page setup, failure diagnostics, retry, and
+  switching away during typesetting. Confirm cancellation never leaves a Press
+  process or a permanently spinning preview.
 - Confirm Read leaves selected side panes mounted and never displays the
   read-only editing surface as a preview.
 

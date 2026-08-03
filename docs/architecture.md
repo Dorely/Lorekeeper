@@ -237,9 +237,16 @@ variant for review, but it never rewrites the authoring layout.
 The chapter center column has Edit, Read, Pages, and Review modes. Read flushes
 pending manuscript edits and uses `IChapterPreviewService` plus the Press layout
 command to render the current chapter as clean page canvases with real line
-breaks, images, captions, Designed Pages, page parity, labels, links, and boxes.
-It supports single/facing display, fit-page/fit-width, zoom, and project page
-setup; it never substitutes a read-only ProseMirror view. A Designed Page atom
+breaks, images, captions, Designed Pages, recto parity, labels, links, and boxes.
+The preview request contains only the selected chapter and asks Press for its
+compact browser trace, which preserves paint and text-run data but omits
+glyph-level evidence used only by renderer conformance inspection. Preview work
+is cancellable on mode changes and produces a retryable timeout instead of
+leaving the UI indefinitely busy. It supports single/facing display,
+fit-page/fit-width, zoom, and project page setup; it never substitutes a
+read-only ProseMirror view. Figure and Designed Page insertion use editor-owned
+forms rather than native browser prompts so the workflows behave consistently
+in the Electron host. A Designed Page atom
 shows its name, mode, status, and artwork preview, and selecting it opens the
 contextual Pages mode in the same center column. The workspace provides direct
 pointer move/resize/rotate, atomic image placement with required fit, crop
@@ -337,6 +344,9 @@ a human proof attestation.
 Protocol v5 stages `input/request.json` plus declared PNG/JPEG assets and
 approved project TTF/OTF fonts in a bounded job root. Declarations carry media
 type, byte length, dimensions where applicable, rights state, and SHA-256.
+The `layout` command defaults to its full glyph-evidence trace for conformance
+work; app previews explicitly request `layoutTraceMode: browser-preview`, which
+retains page paint order and typographic runs while omitting unused glyph arrays.
 Absolute paths, traversal, links/reparse points, undeclared or changed bytes,
 corrupt assets, restricted/unsupported fonts, existing output, and cancellation
 fail before promotion. The renderer writes a fresh staging directory,

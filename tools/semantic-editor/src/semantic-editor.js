@@ -523,6 +523,116 @@ function selectControl(label, options, onChange) {
     return wrapper;
 }
 
+function showEditorNotice(root, message) {
+    root.querySelector(".semantic-editor-action-notice")?.remove();
+    const notice = document.createElement("div");
+    notice.className = "semantic-editor-action-notice";
+    notice.setAttribute("role", "alert");
+    const text = document.createElement("span");
+    text.textContent = message;
+    const dismiss = button("Dismiss", "Dismiss message", () => notice.remove());
+    notice.append(text, dismiss);
+    root.prepend(notice);
+}
+
+function showEditorForm(root, {title, description, submitLabel, fields, validate}) {
+    return new Promise(resolve => {
+        const backdrop = document.createElement("div");
+        backdrop.className = "semantic-editor-dialog-backdrop";
+        const form = document.createElement("form");
+        form.className = "semantic-editor-dialog";
+        form.setAttribute("role", "dialog");
+        form.setAttribute("aria-modal", "true");
+        form.setAttribute("aria-label", title);
+        const heading = document.createElement("h2");
+        heading.textContent = title;
+        form.append(heading);
+        if (description) {
+            const copy = document.createElement("p");
+            copy.textContent = description;
+            form.append(copy);
+        }
+        const controls = new Map();
+        for (const field of fields) {
+            const wrapper = document.createElement("label");
+            wrapper.className = field.type === "checkbox" ? "semantic-editor-dialog-check" : "";
+            const label = document.createElement("span");
+            label.textContent = field.label;
+            let control;
+            if (field.type === "select") {
+                control = document.createElement("select");
+                for (const [value, text] of field.options ?? []) {
+                    const option = document.createElement("option");
+                    option.value = value;
+                    option.textContent = text;
+                    control.append(option);
+                }
+                control.value = field.value ?? "";
+            } else if (field.type === "textarea") {
+                control = document.createElement("textarea");
+                control.rows = field.rows ?? 3;
+                control.value = field.value ?? "";
+            } else {
+                control = document.createElement("input");
+                control.type = field.type ?? "text";
+                if (field.type === "checkbox") control.checked = !!field.value;
+                else control.value = field.value ?? "";
+            }
+            control.name = field.name;
+            if (field.required) control.required = true;
+            if (field.type === "checkbox") wrapper.append(control, label);
+            else wrapper.append(label, control);
+            controls.set(field.name, control);
+            form.append(wrapper);
+        }
+        const error = document.createElement("p");
+        error.className = "semantic-editor-dialog-error";
+        error.hidden = true;
+        error.setAttribute("role", "alert");
+        const actions = document.createElement("div");
+        actions.className = "semantic-editor-dialog-actions";
+        const cancel = button("Cancel", "Cancel", () => close(null));
+        const submit = button(submitLabel, submitLabel, () => form.requestSubmit());
+        submit.classList.add("semantic-editor-button--primary");
+        actions.append(cancel, submit);
+        form.append(error, actions);
+        backdrop.append(form);
+        root.append(backdrop);
+
+        let settled = false;
+        const close = value => {
+            if (settled) return;
+            settled = true;
+            backdrop.remove();
+            resolve(value);
+        };
+        form.addEventListener("submit", event => {
+            event.preventDefault();
+            const values = Object.fromEntries([...controls].map(([name, control]) => [
+                name,
+                control.type === "checkbox" ? control.checked : control.value
+            ]));
+            const validationError = validate?.(values);
+            if (validationError) {
+                error.textContent = validationError;
+                error.hidden = false;
+                return;
+            }
+            close(values);
+        });
+        backdrop.addEventListener("mousedown", event => {
+            if (event.target === backdrop) close(null);
+        });
+        form.addEventListener("keydown", event => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                close(null);
+            }
+        });
+        queueMicrotask(() => controls.values().next().value?.focus());
+    });
+}
+
 function applyBlock(view, nodeName, styleRole, level = 2) {
     const type = schema.nodes[nodeName];
     if (!type) return;
@@ -740,36 +850,6 @@ const defaultFigurePresentation = Object.freeze({
     captionPlacement: "below"
 });
 
-function insertFigure(view, image) {
-    if (!image?.id) return;
-    const caption = window.prompt("Figure caption", "") ?? "";
-    const altText = window.prompt(
-        "Alternative text",
-        image.altText || "")?.trim();
-    const decorative = !altText && window.confirm("Mark this image decorative? Decorative images are skipped by assistive technology.");
-    if (!altText && !decorative) return;
-    const fit = window.prompt("Image fit: contain shows the whole image; cover fills the frame", "contain")?.trim().toLowerCase();
-    if (!new Set(["contain", "cover"]).has(fit)) {
-        if (fit !== undefined) window.alert("Choose contain or cover.");
-        return;
-    }
-    const content = caption
-        ? schema.text(caption)
-        : null;
-    const node = schema.nodes.figure.create({
-        id: newBlockId(),
-        styleRole: "figure-caption",
-        imageId: image.id,
-        altText,
-        imageUrl: image.previewUrl,
-        decorative,
-        accessibilityRole: "figure",
-        presentation: {...defaultFigurePresentation, fit}
-    }, content);
-    view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
-    view.focus();
-}
-
 function selectedFigure(view) {
     const {$from} = view.state.selection;
     if (view.state.selection.node?.type?.name === "figure")
@@ -877,28 +957,71 @@ function buildFigureInspector(view, projectImages) {
     };
 }
 
-function setFigureImage(view, image) {
+async function setFigureImage(view, image, root) {
     if (!image?.id) return;
     const selected = selectedFigure(view);
+    const currentPresentation = {
+        ...defaultFigurePresentation,
+        ...(selected?.node.attrs.presentation || {})
+    };
+    const fields = [];
     if (!selected) {
-        insertFigure(view, image);
-        return;
+        fields.push({name: "caption", label: "Caption", type: "textarea", rows: 2, value: ""});
     }
-    const altText = window.prompt(
-        "Alternative text",
-        selected.node.attrs.altText || image.altText || "")?.trim();
-    const decorative = !altText && window.confirm("Mark this image decorative?");
-    if (!altText && !decorative) return;
-    view.dispatch(view.state.tr.setNodeMarkup(
-        selected.position,
-        undefined,
+    fields.push(
         {
-            ...selected.node.attrs,
+            name: "altText",
+            label: "Alternative text",
+            type: "textarea",
+            value: selected?.node.attrs.altText || image.altText || ""
+        },
+        {name: "decorative", label: "This image is decorative", type: "checkbox", value: selected?.node.attrs.decorative || false},
+        {
+            name: "fit",
+            label: "Image fit",
+            type: "select",
+            value: currentPresentation.fit,
+            options: [["contain", "Show the whole image"], ["cover", "Fill the frame"]]
+        }
+    );
+    const values = await showEditorForm(root, {
+        title: selected ? "Replace figure image" : "Insert figure",
+        description: "Choose how the image is placed. You can change its layout and caption later.",
+        submitLabel: selected ? "Replace image" : "Insert figure",
+        fields,
+        validate: value => !value.decorative && !value.altText.trim()
+            ? "Add alternative text or mark the image decorative."
+            : null
+    });
+    if (!values) return;
+    const altText = values.altText.trim();
+    const presentation = {...currentPresentation, fit: values.fit};
+    if (!selected) {
+        const content = values.caption.trim() ? schema.text(values.caption.trim()) : null;
+        const node = schema.nodes.figure.create({
+            id: newBlockId(),
+            styleRole: "figure-caption",
             imageId: image.id,
+            altText: values.decorative ? null : altText,
             imageUrl: image.previewUrl,
-            altText: decorative ? null : altText,
-            decorative
-        }).scrollIntoView());
+            decorative: values.decorative,
+            accessibilityRole: "figure",
+            presentation
+        }, content);
+        view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
+    } else {
+        view.dispatch(view.state.tr.setNodeMarkup(
+            selected.position,
+            undefined,
+            {
+                ...selected.node.attrs,
+                imageId: image.id,
+                imageUrl: image.previewUrl,
+                altText: values.decorative ? null : altText,
+                decorative: values.decorative,
+                presentation
+            }).scrollIntoView());
+    }
     view.focus();
 }
 
@@ -958,24 +1081,45 @@ function editFigurePresentation(view) {
     view.focus();
 }
 
-async function insertDesignedPage(view, dotNetRef, getRevision, flush, replaceDocument) {
-    const name = window.prompt("Designed page name", "Designed page")?.trim();
-    if (name === undefined) return;
-    if (!await flush()) return;
+async function insertDesignedPage(view, dotNetRef, getRevision, flush, replaceDocument, root) {
+    const values = await showEditorForm(root, {
+        title: "Insert Designed Page",
+        description: "Choose the authoring layout. Publication compatibility is checked later in Publish.",
+        submitLabel: "Create page",
+        fields: [
+            {name: "name", label: "Page name", type: "text", value: "Designed page", required: true},
+            {
+                name: "layoutMode",
+                label: "Layout",
+                type: "select",
+                value: "SinglePage",
+                options: [["SinglePage", "Single page"], ["FacingSpread", "Facing spread"]]
+            }
+        ],
+        validate: value => !value.name.trim() ? "Enter a page name." : null
+    });
+    if (!values) return;
+    if (!await flush()) {
+        showEditorNotice(root, "The current chapter could not be saved, so the Designed Page was not created.");
+        return;
+    }
     const resolved = view.state.selection.$from;
     const blockIndex = resolved.index(0) + (resolved.parentOffset > 0 ? 1 : 0);
     try {
         const composition = await dotNetRef.invokeMethodAsync(
             "OnCreateDesignedPage",
-            name || "Designed page",
+            values.name.trim(),
+            values.layoutMode,
             blockIndex,
             getRevision());
         if (!composition?.id || !composition?.manuscriptJson)
             throw new Error("The application returned no Designed Page.");
         replaceDocument(composition.manuscriptJson, composition.summary);
         await dotNetRef.invokeMethodAsync("OnOpenDesignedPage", composition.id);
-    } catch {
-        window.alert("The Designed Page could not be created. Reload the chapter and try again.");
+    } catch (error) {
+        showEditorNotice(
+            root,
+            error?.message || "The Designed Page could not be created. Reload the chapter and try again.");
         view.focus();
     }
 }
@@ -1587,12 +1731,12 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             "Insert project image as figure",
             [["", "Insert figure"]].concat(
                 projectImages.map(image => [image.id, image.fileName])),
-            value => setFigureImage(view, imageById.get(String(value).toLowerCase()))),
+            value => void setFigureImage(view, imageById.get(String(value).toLowerCase()), root)),
         button("Figure alt", "Edit selected figure alternative text", () => editFigureAltText(view)),
         button("Figure layout", "Edit selected figure placement, width, and crop behavior", () =>
             editFigurePresentation(view)),
         button("Designed page", "Insert a designed page at the current manuscript position", () =>
-            void insertDesignedPage(view, dotNetRef, () => revision, saveNow, replaceDocument)),
+            void insertDesignedPage(view, dotNetRef, () => revision, saveNow, replaceDocument, root)),
         button("Figure to text", "Convert selected figure to a paragraph", () =>
             applyBlock(view, "paragraph", "body", 2)),
         button("B", "Bold (Ctrl+B)", () => applyMark(view, "strong")),

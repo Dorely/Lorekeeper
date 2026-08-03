@@ -131,14 +131,21 @@
     }
 
     [JSInvokable]
-    public async Task<object> OnCreateDesignedPage(string name, int blockIndex, long expectedRevision)
+    public async Task<object> OnCreateDesignedPage(
+        string name,
+        string layoutMode,
+        int blockIndex,
+        long expectedRevision)
     {
+        if (!Enum.TryParse<DesignedPageLayoutMode>(layoutMode, ignoreCase: true, out var parsedLayoutMode))
+            throw new ArgumentException("Choose a supported Designed Page layout.", nameof(layoutMode));
         var result = await Compositions.CreateDesignedPageAsync(
             ProjectId,
             ChapterId,
             blockIndex,
             name,
-            expectedRevision);
+            expectedRevision,
+            new DesignedPageInitialContent { LayoutMode = parsedLayoutMode });
         return new
         {
             id = result.Composition.Id,

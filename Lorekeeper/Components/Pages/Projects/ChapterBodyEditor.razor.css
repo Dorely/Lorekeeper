@@ -26,6 +26,89 @@
     backdrop-filter: blur(10px);
 }
 
+.semantic-editor ::deep .semantic-editor-dialog-backdrop {
+    position: fixed;
+    z-index: 1100;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgb(15 23 42 / 42%);
+}
+
+.semantic-editor ::deep .semantic-editor-dialog {
+    display: grid;
+    width: min(30rem, calc(100vw - 2rem));
+    max-height: calc(100vh - 2rem);
+    gap: .75rem;
+    padding: 1rem;
+    overflow: auto;
+    border: 1px solid var(--bs-border-color, #ced4da);
+    border-radius: .75rem;
+    background: var(--bs-body-bg, #fff);
+    box-shadow: 0 1.25rem 3rem rgb(0 0 0 / 24%);
+}
+
+.semantic-editor ::deep .semantic-editor-dialog h2,
+.semantic-editor ::deep .semantic-editor-dialog p {
+    margin: 0;
+}
+
+.semantic-editor ::deep .semantic-editor-dialog > label:not(.semantic-editor-dialog-check) {
+    display: grid;
+    gap: .3rem;
+    font-size: .82rem;
+    font-weight: 700;
+}
+
+.semantic-editor ::deep .semantic-editor-dialog input:not([type="checkbox"]),
+.semantic-editor ::deep .semantic-editor-dialog textarea,
+.semantic-editor ::deep .semantic-editor-dialog select {
+    width: 100%;
+    padding: .45rem .55rem;
+    border: 1px solid var(--bs-border-color, #ced4da);
+    border-radius: .35rem;
+    background: var(--bs-body-bg, #fff);
+    color: var(--bs-body-color, #212529);
+}
+
+.semantic-editor ::deep .semantic-editor-dialog-check,
+.semantic-editor ::deep .semantic-editor-dialog-actions {
+    display: flex;
+    gap: .5rem;
+    align-items: center;
+}
+
+.semantic-editor ::deep .semantic-editor-dialog-actions {
+    justify-content: flex-end;
+}
+
+.semantic-editor ::deep .semantic-editor-button--primary {
+    border-color: var(--bs-primary, #0d6efd);
+    background: var(--bs-primary, #0d6efd);
+    color: white;
+}
+
+.semantic-editor ::deep .semantic-editor-dialog-error {
+    color: var(--bs-danger, #dc3545);
+    font-size: .82rem;
+}
+
+.semantic-editor ::deep .semantic-editor-action-notice {
+    position: sticky;
+    z-index: 6;
+    top: 0;
+    display: flex;
+    justify-content: space-between;
+    gap: .75rem;
+    align-items: center;
+    padding: .55rem .7rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--bs-danger, #dc3545) 40%, transparent);
+    background: color-mix(in srgb, var(--bs-danger, #dc3545) 10%, var(--bs-body-bg, #fff));
+    color: var(--bs-danger-text-emphasis, #842029);
+    font-size: .82rem;
+}
+
 .semantic-editor ::deep .semantic-editor-advanced {
     position: relative;
 }

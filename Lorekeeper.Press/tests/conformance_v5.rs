@@ -1646,6 +1646,24 @@ fn layout_trace_preserves_shaped_advances_offsets_and_global_chapter_numbering()
 }
 
 #[test]
+fn browser_preview_layout_trace_omits_unused_glyph_payloads() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["layoutTraceMode"] = Value::String("browser-preview".to_owned());
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let runs = trace["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+        .flat_map(|line| line["runs"].as_array().into_iter().flatten())
+        .collect::<Vec<_>>();
+    assert!(!runs.is_empty());
+    assert!(runs.iter().all(|run| run.get("glyphs").is_none()));
+}
+
+#[test]
 fn emitted_pdf_text_matrices_match_harfrust_layout_positions() {
     let mut job = PreparedJob::new("kdp-paperback-v1");
     job.request["cover"] = Value::Null;

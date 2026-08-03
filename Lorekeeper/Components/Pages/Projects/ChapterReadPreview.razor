@@ -1,5 +1,6 @@
 @using Lorekeeper.Composition
 @using Lorekeeper.Models
+@implements IAsyncDisposable
 @inject IChapterPreviewService Preview
 @inject IProjectPageSetupService PageSetups
 
@@ -109,6 +110,9 @@
     private double _setupMargin = .75;
     private double _setupFontSize = 12;
     private double _setupLineHeight = 1.55;
+    private CancellationTokenSource? _loadCancellation;
+    private long _loadGeneration;
+    private bool _disposed;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -124,11 +128,38 @@
 
     private async Task LoadAsync()
     {
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
+        _loadCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        var cancellation = _loadCancellation;
+        var generation = ++_loadGeneration;
         _loading = true;
         _error = null;
-        try { _result = await Preview.LayoutAsync(ProjectId, ChapterId); }
-        catch (Exception exception) { _result = null; _error = exception.Message; }
-        finally { _loading = false; }
+        try
+        {
+            _result = await Preview.LayoutAsync(ProjectId, ChapterId, cancellation.Token);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            if (!_disposed && generation == _loadGeneration)
+            {
+                _result = null;
+                _error = "Chapter preview took too long. Retry after closing other active renders.";
+            }
+        }
+        catch (Exception exception)
+        {
+            if (!_disposed && generation == _loadGeneration)
+            {
+                _result = null;
+                _error = exception.Message;
+            }
+        }
+        finally
+        {
+            if (!_disposed && generation == _loadGeneration)
+                _loading = false;
+        }
     }
 
     private async Task ChangePresetAsync(ChangeEventArgs e)
@@ -239,4 +270,13 @@
         }
     };
     private string RunStyle(ChapterPreviewRun run) => $"font-family:{FontFamily(run.Face)};font-weight:{FontWeight(run.Face)};font-style:{FontStyle(run.Face)};font-size:{run.SizeScale:R}em;vertical-align:{run.BaselineShiftEm:R}em;text-decoration:{(run.Underline && run.Strikethrough ? "underline line-through" : run.Underline ? "underline" : run.Strikethrough ? "line-through" : "none")}";
+
+    public ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
+        _loadCancellation = null;
+        return ValueTask.CompletedTask;
+    }
 }
