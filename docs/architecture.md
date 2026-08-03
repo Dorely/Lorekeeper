@@ -262,7 +262,10 @@ choice and the computed-overlay toggle are the only controls above it, while
 creation, selection, history, zoom, layers, objects, bindings, and properties
 share one independently scrolling right sidebar. Rectangle, ellipse, and line
 tools live under Advanced; custom guides and SVG/path tooling are not runtime
-capabilities.
+capabilities. Page saves are serialized per mounted workspace. Each save uses
+an immutable scene/semantic snapshot, adopts the returned revisions before the
+next queued save, and clears the dirty state only when no newer local mutation
+occurred while persistence was in flight.
 
 `LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for a
 project page, Figure, page surface/frame, or publication cover surface/frame.
@@ -387,7 +390,10 @@ and verifies every returned length/hash before persistence. Protocol-v5
 requests are serialized as BOM-free UTF-8 JSON; the owned renderer also
 tolerates an optional UTF-8 BOM for compatibility and binds every post-parse
 terminal response to the parsed job identity before the app accepts its
-diagnostics or artifacts. Project-scoped range endpoints serve actual
+diagnostics or artifacts. Redirected renderer stdout and stderr are decoded
+explicitly as UTF-8 on every platform so punctuation and non-ASCII Latin text
+survive layout traces and diagnostics independently of the host console code
+page. Project-scoped range endpoints serve actual
 PDF/package bytes only after recomputing
 their stored length and SHA-256; corrupt rows fail closed before an ETag or body
 is returned. Source-fingerprint mismatch marks otherwise valid immutable

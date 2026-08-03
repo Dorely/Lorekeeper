@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -110,6 +111,8 @@ public sealed class PublicationRenderTests
             Assert.Equal(runtimeRoot, start.WorkingDirectory);
             Assert.Equal(new[] { "render", "--job-root", Path.GetFullPath(output) }, start.ArgumentList);
             Assert.False(start.RedirectStandardInput);
+            Assert.Equal(Encoding.UTF8, start.StandardOutputEncoding);
+            Assert.Equal(Encoding.UTF8, start.StandardErrorEncoding);
             Assert.DoesNotContain(start.Environment.Keys, key => key.Contains("PYTHON", StringComparison.OrdinalIgnoreCase));
             Assert.Equal("2.0.0", runtime.GetDescription().RendererVersion);
 

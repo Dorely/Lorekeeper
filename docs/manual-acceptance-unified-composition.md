@@ -57,7 +57,9 @@ this feature's authorized checks.
   fit width, zoom, presets, custom page setup, failure diagnostics, retry, and
   switching away during typesetting. Confirm cancellation never leaves a Press
   process or a permanently spinning preview. Confirm every returned page has
-  its own non-overlapping canvas at every display mode and zoom level.
+  its own non-overlapping canvas at every display mode and zoom level. Include
+  curly apostrophes, quotation marks, dashes, and accented Latin text and
+  confirm the preview preserves those characters exactly.
 - Confirm Read leaves selected side panes mounted and never displays the
   read-only editing surface as a preview.
 
@@ -67,7 +69,10 @@ this feature's authorized checks.
   center column switches to Pages while assistant/context panes remain mounted.
   Confirm a newly created page can open immediately without reloading the chapter.
   Exercise zero-, one-, and multiple-page selection plus previous/next movement,
-  mode/page switches, autosave, and revision conflicts.
+  mode/page switches, autosave, and revision conflicts. Rapidly drag and resize,
+  then press Save or switch pages while pointer-up autosave is still completing;
+  confirm saves serialize, retain the newest edit, and do not conflict with
+  their own returned revisions.
 - Confirm a new page uses project page setup and an existing page retains its
   authored geometry after project setup changes.
 - Confirm the canvas has no left sidebar, all creation/selection/layer/content

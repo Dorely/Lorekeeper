@@ -338,7 +338,9 @@
     private int _markEnd;
     private ManuscriptMarkType _markType = ManuscriptMarkType.Emphasis;
     private string _markValue = string.Empty;
+    private readonly SemaphoreSlim _saveGate = new(1, 1);
     private bool _dirty;
+    private long _changeVersion;
     private double _zoom = .8;
     private bool _showGuides = true;
     private bool _cropReposition;
@@ -468,7 +470,7 @@
             AccessibilityDecisionPending = kind == CompositionObjectKind.Image,
             SemanticRole = kind == CompositionObjectKind.Image ? CompositionSemanticRole.Figure : kind == CompositionObjectKind.Text ? CompositionSemanticRole.Paragraph : CompositionSemanticRole.Artifact,
         };
-        _objects.Add(item); _selectedId = item.Id; _dirty = true;
+        _objects.Add(item); _selectedId = item.Id; MarkDirty();
     }
 
     private void AddImageObject()
@@ -498,7 +500,7 @@
         _objects.Add(item);
         _selectedId = item.Id;
         _newImageId = null;
-        _dirty = true;
+        MarkDirty();
         _error = null;
     }
 
@@ -540,7 +542,7 @@
         _selectedSemanticId = id;
         _markStart = 0;
         _markEnd = 0;
-        _dirty = true;
+        MarkDirty();
     }
 
     private void SelectSemantic(ManuscriptBlock block)
@@ -590,7 +592,7 @@
                     enabled,
                     enabled && MarkNeedsValue(_markType) ? _markValue.Trim() : null)]);
             _semanticBlocks = updated.Content;
-            _dirty = true;
+            MarkDirty();
             _error = null;
         }
         catch (Exception exception)
@@ -631,7 +633,7 @@
         if (index < 0) return;
         Snapshot();
         _semanticBlocks[index] = block with { Content = ReplaceTextPreservingMarks(block.Content, text.Replace("\r\n", "\n").Replace('\r', '\n')) };
-        _dirty = true;
+        MarkDirty();
     }
 
     private void ChangeSemanticType(ManuscriptBlock block, ChangeEventArgs e)
@@ -652,7 +654,7 @@
             },
             HeadingLevel = type == ManuscriptBlockType.Heading ? 2 : null,
         };
-        _dirty = true;
+        MarkDirty();
     }
 
     private void DeleteSemanticBlock(string id)
@@ -661,7 +663,7 @@
         Snapshot();
         _semanticBlocks.RemoveAll(item => item.Id == id);
         _selectedSemanticId = null;
-        _dirty = true;
+        MarkDirty();
     }
 
     private void BindTextBlock(CompositionObject item, ChangeEventArgs e)
@@ -721,11 +723,11 @@
     {
         Snapshot();
         var layer = new CompositionLayer(Guid.NewGuid(), $"Layer {_layers.Count + 1}", _layers.Select(item => item.Order).DefaultIfEmpty(-1).Max() + 1);
-        _layers.Add(layer); _selectedLayerId = layer.Id; _dirty = true;
+        _layers.Add(layer); _selectedLayerId = layer.Id; MarkDirty();
     }
-    private void ToggleLayerVisibility(CompositionLayer layer) { var index = _layers.FindIndex(item => item.Id == layer.Id); if (index >= 0) { Snapshot(); _layers[index] = layer with { Visible = !layer.Visible }; _dirty = true; } }
-    private void ToggleLayerLock(CompositionLayer layer) { var index = _layers.FindIndex(item => item.Id == layer.Id); if (index >= 0) { Snapshot(); _layers[index] = layer with { Locked = !layer.Locked }; _dirty = true; } }
-    private void MoveToLayer(CompositionObject item, ChangeEventArgs e) { if (!Guid.TryParse(e.Value?.ToString(), out var layerId)) return; if (item.Kind == CompositionObjectKind.Group) { Snapshot(); _objects = _objects.Select(candidate => candidate.Id == item.Id || candidate.GroupId == item.Id ? candidate with { LayerId = layerId } : candidate).ToList(); _dirty = true; } else Patch(item with { LayerId = layerId }); }
+    private void ToggleLayerVisibility(CompositionLayer layer) { var index = _layers.FindIndex(item => item.Id == layer.Id); if (index >= 0) { Snapshot(); _layers[index] = layer with { Visible = !layer.Visible }; MarkDirty(); } }
+    private void ToggleLayerLock(CompositionLayer layer) { var index = _layers.FindIndex(item => item.Id == layer.Id); if (index >= 0) { Snapshot(); _layers[index] = layer with { Locked = !layer.Locked }; MarkDirty(); } }
+    private void MoveToLayer(CompositionObject item, ChangeEventArgs e) { if (!Guid.TryParse(e.Value?.ToString(), out var layerId)) return; if (item.Kind == CompositionObjectKind.Group) { Snapshot(); _objects = _objects.Select(candidate => candidate.Id == item.Id || candidate.GroupId == item.Id ? candidate with { LayerId = layerId } : candidate).ToList(); MarkDirty(); } else Patch(item with { LayerId = layerId }); }
     private void SetObjectStyle(CompositionObject item, ChangeEventArgs e) => Patch(item with { StyleId = Guid.TryParse(e.Value?.ToString(), out var styleId) ? styleId : null });
     private CompositionObject Resolved(CompositionObject item)
     {
@@ -737,9 +739,9 @@
         Snapshot();
         var resolved = Resolved(item);
         var style = new CompositionObjectStyle { Id = Guid.NewGuid(), Name = $"Style {_styles.Count + 1}", FontFamilyKey = resolved.FontFamilyKey, FontWeight = resolved.FontWeight, Italic = resolved.Italic, FontSizePoints = resolved.FontSizePoints, LineHeight = resolved.LineHeight, LetterSpacingEm = resolved.LetterSpacingEm, FillColor = resolved.FillColor, BackgroundColor = resolved.BackgroundColor, BackgroundOpacity = resolved.BackgroundOpacity, StrokeColor = resolved.StrokeColor, StrokeWidthPoints = resolved.StrokeWidthPoints, TextAlignment = resolved.TextAlignment, VerticalAlignment = resolved.VerticalAlignment, TextShadow = resolved.TextShadow };
-        _styles.Add(style); var index = _objects.FindIndex(candidate => candidate.Id == item.Id); if (index >= 0) _objects[index] = item with { StyleId = style.Id }; _dirty = true;
+        _styles.Add(style); var index = _objects.FindIndex(candidate => candidate.Id == item.Id); if (index >= 0) _objects[index] = item with { StyleId = style.Id }; MarkDirty();
     }
-    private void DeleteStyle(Guid styleId) { Snapshot(); _styles.RemoveAll(style => style.Id == styleId); _objects = _objects.Select(item => item.StyleId == styleId ? item with { StyleId = null } : item).ToList(); _dirty = true; }
+    private void DeleteStyle(Guid styleId) { Snapshot(); _styles.RemoveAll(style => style.Id == styleId); _objects = _objects.Select(item => item.StyleId == styleId ? item with { StyleId = null } : item).ToList(); MarkDirty(); }
     private void SetAltText(CompositionObject item, string altText) { altText = altText.Trim(); Patch(item with { AltText = altText, Decorative = false, AccessibilityDecisionPending = altText.Length == 0, SemanticRole = CompositionSemanticRole.Figure, ReadingOrder = item.ReadingOrder ?? NextReadingOrder() }); }
     private void SetDecorative(CompositionObject item, bool decorative) => Patch(item with { Decorative = decorative, AltText = decorative ? string.Empty : item.AltText, AccessibilityDecisionPending = !decorative && string.IsNullOrWhiteSpace(item.AltText), SemanticRole = decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure, ReadingOrder = decorative ? null : item.ReadingOrder ?? NextReadingOrder() });
     private int NextReadingOrder() => _objects.Where(o => o.ReadingOrder is not null).Select(o => o.ReadingOrder!.Value).DefaultIfEmpty().Max() + 1;
@@ -754,7 +756,7 @@
         var width = Math.Max(.01, right - left); var height = Math.Max(.01, bottom - top); var groupId = Guid.NewGuid(); var layerId = selected[0].LayerId;
         _objects = _objects.Select(item => _groupSelection.Contains(item.Id) ? item with { GroupId = groupId, LayerId = layerId, Bounds = new CompositionBounds { XPercent = (item.Bounds.XPercent - left) / width * 100, YPercent = (item.Bounds.YPercent - top) / height * 100, WidthPercent = item.Bounds.WidthPercent / width * 100, HeightPercent = item.Bounds.HeightPercent / height * 100 } } : item).ToList();
         _objects.Add(new CompositionObject { Id = groupId, LayerId = layerId, Kind = CompositionObjectKind.Group, Name = "Group", Bounds = new CompositionBounds { XPercent = left, YPercent = top, WidthPercent = width, HeightPercent = height }, Decorative = true, SemanticRole = CompositionSemanticRole.Artifact, ZIndex = selected.Min(item => item.ZIndex) });
-        _groupSelection.Clear(); _selectedId = groupId; _dirty = true;
+        _groupSelection.Clear(); _selectedId = groupId; MarkDirty();
     }
     private void UngroupSelected()
     {
@@ -768,14 +770,14 @@
             _objects = _objects.Select(item => item.GroupId == groupId ? item with { GroupId = null, Bounds = EffectiveBounds(item, group), RotationDegrees = item.RotationDegrees + group.RotationDegrees, Opacity = item.Opacity * group.Opacity } : item).ToList();
             _objects.RemoveAll(item => item.Id == groupId);
         }
-        _groupSelection.Clear(); _selectedId = null; _dirty = true;
+        _groupSelection.Clear(); _selectedId = null; MarkDirty();
     }
 
     private void Patch(CompositionObject item)
     {
         Snapshot();
         var index = _objects.FindIndex(candidate => candidate.Id == item.Id);
-        if (index >= 0) { _objects[index] = item; _dirty = true; }
+        if (index >= 0) { _objects[index] = item; MarkDirty(); }
     }
 
     private void PatchBounds(CompositionObject item, double? x = null, double? y = null, double? width = null, double? height = null) =>
@@ -793,41 +795,62 @@
         if (target == item.ZIndex) return;
         Patch(item with { ZIndex = target });
     }
-    private void Delete(Guid id) { if (_objects.FirstOrDefault(item => item.Id == id)?.Kind == CompositionObjectKind.Group) { _groupSelection.Clear(); _groupSelection.Add(id); UngroupSelected(); return; } Snapshot(); _objects.RemoveAll(item => item.Id == id); _selectedId = null; _dirty = true; }
+    private void Delete(Guid id) { if (_objects.FirstOrDefault(item => item.Id == id)?.Kind == CompositionObjectKind.Group) { _groupSelection.Clear(); _groupSelection.Add(id); UngroupSelected(); return; } Snapshot(); _objects.RemoveAll(item => item.Id == id); _selectedId = null; MarkDirty(); }
     private WorkspaceSnapshot Capture() => new(_objects.ToList(), _layers.ToList(), _styles.ToList(), _semanticBlocks.ToList(), _scene!.Surface);
     private void Restore(WorkspaceSnapshot snapshot) { _objects = snapshot.Objects; _layers = snapshot.Layers; _styles = snapshot.Styles; _semanticBlocks = snapshot.SemanticBlocks; _scene = _scene! with { Surface = snapshot.Surface }; _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id; _selectedLayerId = _layers.FirstOrDefault(item => item.Id == _selectedLayerId)?.Id ?? _layers.FirstOrDefault()?.Id; }
     private void Snapshot() { if (_scene is null) return; _undo.Push(Capture()); _redo.Clear(); }
-    private void Undo() { if (_undo.Count == 0) return; _redo.Push(Capture()); Restore(_undo.Pop()); _dirty = true; }
-    private void Redo() { if (_redo.Count == 0) return; _undo.Push(Capture()); Restore(_redo.Pop()); _dirty = true; }
+    private void Undo() { if (_undo.Count == 0) return; _redo.Push(Capture()); Restore(_undo.Pop()); MarkDirty(); }
+    private void Redo() { if (_redo.Count == 0) return; _undo.Push(Capture()); Restore(_redo.Pop()); MarkDirty(); }
     private static double Number(ChangeEventArgs e) => double.TryParse(e.Value?.ToString(), out var value) ? value : 0;
     private static int? NullableInt(ChangeEventArgs e) => int.TryParse(e.Value?.ToString(), out var value) ? value : null;
 
+    private void MarkDirty()
+    {
+        _dirty = true;
+        _changeVersion++;
+    }
+
     private async Task SaveAsync()
     {
-        if (_scene is null || _variant is null) return;
+        await _saveGate.WaitAsync();
         try
         {
+            if (!_dirty || _scene is null || _variant is null)
+                return;
+            var changeVersion = _changeVersion;
             var scene = _scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Guides = [], Objects = _objects.ToList() };
+            var semanticBlocks = _semanticBlocks.ToList();
             var saved = await Compositions.SaveWorkspaceAsync(
                 ProjectId,
                 _composition!.Id,
                 _composition.Revision,
-                _semanticBlocks,
+                semanticBlocks,
                 _variant.Id,
                 _variant.Revision,
                 scene);
             _composition = saved.Composition;
             _variant = saved.Variant;
             _variants = await Compositions.ListVariantsAsync(ProjectId, _composition.Id);
-            _scene = scene; _dirty = false; _error = null;
+            if (_changeVersion == changeVersion)
+            {
+                _scene = scene;
+                _dirty = false;
+            }
+            _error = null;
         }
         catch (Exception exception) { _error = exception.Message; }
+        finally { _saveGate.Release(); }
     }
 
     public async Task<bool> FlushAsync()
     {
-        if (_dirty)
+        while (_dirty)
+        {
+            var changeVersion = _changeVersion;
             await SaveAsync();
+            if (!string.IsNullOrWhiteSpace(_error) || (_dirty && _changeVersion == changeVersion))
+                break;
+        }
         return !_dirty;
     }
 
@@ -898,7 +921,7 @@
     }
     private CompositionBounds EffectiveBounds(CompositionObject item, CompositionObject group) =>
         CompositionSceneResolver.ResolveBounds(_scene!.Surface, item.Bounds, group.Bounds, group.RotationDegrees);
-    private void MoveReadingOrder(CompositionObject item, int delta) { var ordered = _objects.Where(candidate => candidate.ReadingOrder is not null).OrderBy(candidate => candidate.ReadingOrder).ToList(); var index = ordered.FindIndex(candidate => candidate.Id == item.Id); var target = index + delta; if (index < 0 || target < 0 || target >= ordered.Count) return; Snapshot(); var other = ordered[target]; var order = item.ReadingOrder; _objects = _objects.Select(candidate => candidate.Id == item.Id ? candidate with { ReadingOrder = other.ReadingOrder } : candidate.Id == other.Id ? candidate with { ReadingOrder = order } : candidate).ToList(); _dirty = true; }
+    private void MoveReadingOrder(CompositionObject item, int delta) { var ordered = _objects.Where(candidate => candidate.ReadingOrder is not null).OrderBy(candidate => candidate.ReadingOrder).ToList(); var index = ordered.FindIndex(candidate => candidate.Id == item.Id); var target = index + delta; if (index < 0 || target < 0 || target >= ordered.Count) return; Snapshot(); var other = ordered[target]; var order = item.ReadingOrder; _objects = _objects.Select(candidate => candidate.Id == item.Id ? candidate with { ReadingOrder = other.ReadingOrder } : candidate.Id == other.Id ? candidate with { ReadingOrder = order } : candidate).ToList(); MarkDirty(); }
     private bool TextOverflows(CompositionObject item) { var text = string.IsNullOrWhiteSpace(item.TextBinding) ? ManuscriptRangeResolver.ResolveText(new ManuscriptDocument { ManuscriptId = CompositionId, Content = _semanticBlocks }, item.ContentReferences) : item.TextBinding; var resolved = Resolved(item); var widthPoints = _scene!.Surface.WidthPoints * item.Bounds.WidthPercent / 100; var heightPoints = _scene.Surface.HeightPoints * item.Bounds.HeightPercent / 100; var charsPerLine = Math.Max(1, (int)(widthPoints / Math.Max(1, resolved.FontSizePoints * .55))); var lines = Math.Max(1, (int)Math.Ceiling((double)text.Length / charsPerLine)); return lines * resolved.FontSizePoints * resolved.LineHeight > heightPoints; }
     private static string ColorValue(string value) => value.StartsWith('#') && value.Length == 7 ? value : "#000000";
     private static string Color(ChangeEventArgs e) => e.Value?.ToString() ?? "#000000";
@@ -930,7 +953,7 @@
                     : CompositionOutputPageMode.EditionLeaves,
             },
         };
-        _dirty = true;
+        MarkDirty();
     }
 
     private void ChangeIndependentDimension(ChangeEventArgs e, bool width)
@@ -946,7 +969,7 @@
         {
             Surface = current with { WidthPoints = targetWidth, HeightPoints = targetHeight },
         };
-        _dirty = true;
+        MarkDirty();
     }
 
     private void RemapSurfaceContents(double sourceWidth, double sourceHeight, double targetWidth, double targetHeight)
@@ -1017,7 +1040,7 @@
             _ => item,
         };
         _objects[index] = item;
-        _dirty = true;
+        MarkDirty();
     }
 
     private static double RotationDelta(PointerEventArgs e, TransformState state)
