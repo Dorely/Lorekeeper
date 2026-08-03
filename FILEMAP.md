@@ -102,7 +102,7 @@
 | `src/renderer.rs` | Contained staging, validation, deterministic pagination, flowing Figures, structured page/cover composition, accessibility-warning browser traces, strict Digital PDF/PDF rendering, barcodes, atomic promotion, and evidence. |
 | `src/font.rs` | Bundled/project TTF and TrueType/CFF OTF validation, shaping, subsetting, widths, embedding, and multi-codepoint ToUnicode mapping. |
 | `src/image.rs` | Bounded PNG/JPEG decoding, alpha flattening, grayscale/registered-profile CMYK conversion, crop-position handling, and total-ink enforcement. |
-| `src/pdf.rs` | Owned deterministic PDF 1.7/PDF 1.3 writer for mixed page boxes, tagged structure, bookmarks/links, ordered vector scenes, PDF 1.7 opacity, bounded PDF/X opacity flattening, fonts, images, output intent, and barcodes. |
+| `src/pdf.rs` | Owned deterministic PDF 1.7/PDF 1.3 writer for mixed page boxes, collision-safe page-scoped tagged structure, bookmarks/links, ordered vector scenes, PDF 1.7 opacity, bounded PDF/X opacity flattening, fonts, images, output intent, and barcodes. |
 | `src/inspect.rs` | Separate `lopdf` post-write inspection for geometry, fonts, XObject colors, output intent, transparency, encryption, annotations/actions, and tagged-PDF parent-tree/MCID integrity. |
 | `assets/` | Approved OFL font notices plus the registered CGATS21 CRPC1 CMYK profile, source, fingerprint, and redistribution record. |
 | `fixtures/full-model-v4.json` | Canonical complete publication-model protocol fixture used by black-box conformance tests. |
@@ -612,7 +612,7 @@
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration, shared active-turn streaming/reconnection, collaborative prompt policy, tool activity, and structured mutation notices. |
 | `PublicationPdfActionState.cs` | Deterministic NotGenerated/Rendering/Invalid/Stale/Validated/Legacy selector for paperback interior/cover or one Digital PDF Book artifact. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
-| `PublicationRenderService.cs` | Persisted/recoverable queue, BOM-free protocol-v5 declared image/font staging, native lifecycle, hash-verified paperback/Book PDF artifacts, semantic page maps, legacy/stale derivation, and comparison. |
+| `PublicationRenderService.cs` | Persisted/recoverable queue, BOM-free protocol-v5 declared image/font staging from effective manuscript/page/cover scenes, native lifecycle, hash-verified paperback/Book PDF artifacts, semantic page maps, legacy/stale derivation, and comparison. |
 | `PublicationCoverService.cs` | Revisioned format-aware structured cover aggregate, canonical copy bindings, print-wrap/digital-front geometry reflow, ISBN/vendor/spine diagnostics, and acknowledgement invalidation. |
 | `PublicationPackageService.cs` | Versioned fail-closed Lorekeeper validation preflight, product-form-specific deterministic package assembly, manifests, reports, provenance, legacy guards, and exact-package proof records. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying every included ordered semantic-matter document into edition-scoped TXT, Markdown, EPUB, and contained press output with reciprocal product-form guards. |

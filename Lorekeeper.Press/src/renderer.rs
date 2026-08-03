@@ -596,12 +596,16 @@ fn validate_request(
         );
     }
     if let Some(cover) = &request.cover {
-        if !matches!(
-            cover.barcode_mode.as_str(),
-            "LorekeeperBarcode" | "VendorOverlay"
-        ) || request.profile == "ingram-paperback-pdfx1a-v1"
-            && cover.barcode_mode == "VendorOverlay"
-        {
+        let barcode_mode_is_valid = if request.profile == "generic-digital-pdf-v1" {
+            cover.barcode_mode == "None"
+        } else {
+            matches!(
+                cover.barcode_mode.as_str(),
+                "LorekeeperBarcode" | "VendorOverlay"
+            ) && !(request.profile == "ingram-paperback-pdfx1a-v1"
+                && cover.barcode_mode == "VendorOverlay")
+        };
+        if !barcode_mode_is_valid {
             return reject(
                 "PRESS_BARCODE_MODE_INVALID",
                 "The barcode mode is unsupported for the selected profile.",

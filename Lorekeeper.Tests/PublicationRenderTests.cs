@@ -465,6 +465,7 @@ public sealed class PublicationRenderTests
                     publishing ?? new BlockingPublishService(),
                     null!,
                     null!,
+                    null!,
                     new FixedPressRuntime(),
                     Options.Create(new PublicationPressOptions())));
             var provider = services.BuildServiceProvider();

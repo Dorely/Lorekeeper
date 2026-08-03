@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Lorekeeper.Composition;
+using Lorekeeper.Fonts;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -553,6 +554,7 @@ public sealed class PublicationRenderProcessor(
     IPublishService publishing,
     IPublicationEditionService editions,
     IPublicationCoverService covers,
+    IProjectFontService projectFonts,
     IPublicationPressRuntime pressRuntime,
     IOptions<PublicationPressOptions> options)
 {
@@ -794,8 +796,43 @@ public sealed class PublicationRenderProcessor(
             .Where(key => !string.IsNullOrWhiteSpace(key))
             .Select(key => key!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var stagedFonts = document.Fonts
+        var fontDocuments = document.Fonts
             .Where(font => usedFontKeys.Contains(font.FamilyKey))
+            .ToList();
+        var availableFamilyKeys = fontDocuments
+            .Select(font => font.FamilyKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var familyKey in usedFontKeys.Where(key => !availableFamilyKeys.Contains(key)).Order())
+        {
+            var family = PublicationBuiltInFonts.Find(familyKey);
+            if (family is null)
+                continue;
+            var familyId = DeterministicFontId(family.Key);
+            foreach (var faceView in family.Faces)
+            {
+                var face = await projectFonts.ResolveFaceAsync(
+                    document.ProjectId,
+                    family.Key,
+                    faceView.Weight,
+                    faceView.Italic,
+                    requireExact: true,
+                    cancellationToken)
+                    ?? throw new InvalidOperationException(
+                        $"Bundled publication font '{family.Name}' is missing {faceView.SubfamilyName}.");
+                fontDocuments.Add(new PublishFontDocument(
+                    family.Key,
+                    familyId,
+                    family.Name,
+                    DeterministicFontId($"{family.Key}|{face.Weight}|{face.Italic}"),
+                    face.FileName,
+                    face.ContentType,
+                    face.Weight,
+                    face.Italic,
+                    face.Data));
+            }
+            availableFamilyKeys.Add(family.Key);
+        }
+        var stagedFonts = fontDocuments
             .OrderBy(font => font.FamilyKey, StringComparer.Ordinal)
             .ThenBy(font => font.Weight)
             .ThenBy(font => font.Italic)
@@ -805,7 +842,7 @@ public sealed class PublicationRenderProcessor(
         var stagedFamilyKeys = stagedFonts.Select(font => font.FamilyKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var missingFontKeys = usedFontKeys.Where(key => !stagedFamilyKeys.Contains(key)).Order().ToArray();
         if (missingFontKeys.Length > 0)
-            throw new InvalidOperationException($"Publication styles reference unavailable project fonts: {string.Join(", ", missingFontKeys)}.");
+            throw new InvalidOperationException($"Publication content references unavailable fonts: {string.Join(", ", missingFontKeys)}.");
         var sections = document.Sections.Select(section => new
         {
             id = section.ActId,
@@ -983,6 +1020,9 @@ public sealed class PublicationRenderProcessor(
             face.Data,
             Convert.ToHexStringLower(SHA256.HashData(face.Data)));
     }
+
+    private static Guid DeterministicFontId(string value) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
 
     internal static PressStagedAsset StageAsset(PublishAssetDocument asset)
     {

@@ -2106,6 +2106,9 @@ impl PreparedJob {
             serde_json::from_slice(include_bytes!("../fixtures/full-model-v5.json"))
                 .expect("canonical request");
         request["profile"] = Value::String(profile.to_owned());
+        if profile == "generic-digital-pdf-v1" {
+            request["cover"]["barcodeMode"] = json!("None");
+        }
         request["assets"][0]["byteLength"] = json!(PIXEL_PNG.len());
         request["assets"][0]["sha256"] = Value::String(hex_hash(PIXEL_PNG));
         let job = Self { root, request };

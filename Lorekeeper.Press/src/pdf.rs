@@ -39,6 +39,12 @@ struct TagElement {
 }
 
 const ICC_PROFILE: &[u8] = include_bytes!("../assets/profiles/CGATS21_CRPC1.icc");
+const PAGE_TAG_OBJECT_BASE: i32 = 100_000;
+const PAGE_TAG_OBJECT_STRIDE: i32 = 4_000;
+const PAGE_TAG_ITEM_LIMIT: usize = 1_000;
+const LIST_PARENT_OFFSET: i32 = 1_000;
+const TOC_PARENT_OFFSET: i32 = 2_000;
+const ANNOTATION_OFFSET: i32 = 3_000;
 
 #[derive(Debug, Clone)]
 pub struct PdfOptions {
@@ -202,6 +208,17 @@ where
     }
     let pages = pages.as_slice();
     let images = &images;
+    if options.tagged
+        && pages.iter().any(|page| {
+            page.images.len().saturating_add(page.lines.len()) >= PAGE_TAG_ITEM_LIMIT
+                || page.lines.len() >= PAGE_TAG_ITEM_LIMIT
+        })
+    {
+        return Err(Diagnostic::error(
+            "PRESS_PAGE_OBJECT_LIMIT",
+            "A page contains too many semantic or linked objects for deterministic PDF tagging.",
+        ));
+    }
     let mut pdf = Pdf::new();
     pdf.set_version(1, if options.pdf_x { 3 } else { 7 });
     let catalog_id = Ref::new(1);
@@ -287,7 +304,16 @@ where
     let opacity_references = opacity_values
         .into_iter()
         .enumerate()
-        .map(|(index, opacity)| (opacity, Ref::new(600_000 + index as i32)))
+        .map(|(index, opacity)| {
+            (
+                opacity,
+                Ref::new(
+                    PAGE_TAG_OBJECT_BASE
+                        + pages.len() as i32 * PAGE_TAG_OBJECT_STRIDE
+                        + index as i32,
+                ),
+            )
+        })
         .collect::<BTreeMap<_, _>>();
     for (opacity, reference) in &opacity_references {
         let alpha = f32::from(*opacity) / 1_000.0;
@@ -365,7 +391,9 @@ where
                 }
             }
         }
-        root.parent_tree_next_key(pages.len() as i32 + pages.len() as i32 * 10_000 + 10_000);
+        root.parent_tree_next_key(
+            pages.len() as i32 + pages.len() as i32 * PAGE_TAG_ITEM_LIMIT as i32,
+        );
         root.finish();
         let mut document = pdf.struct_element(document_struct_id);
         document.kind(StructRole::Document).parent(struct_root_id);
@@ -495,9 +523,7 @@ where
                 .iter()
                 .enumerate()
                 .filter(|(_, line)| line.link_page.is_some())
-                .map(|(line_index, _)| {
-                    Ref::new(500_000 + index as i32 * 10_000 + line_index as i32)
-                })
+                .map(|(line_index, _)| annotation_ref(index, line_index))
                 .collect::<Vec<_>>();
             if !annotations.is_empty() {
                 page.annotations(annotations);
@@ -559,7 +585,7 @@ where
                         "A table-of-contents link targets a missing page.",
                     ));
                 };
-                let annotation_id = Ref::new(500_000 + index as i32 * 10_000 + line_index as i32);
+                let annotation_id = annotation_ref(index, line_index);
                 let mut annotation = pdf.annotation(annotation_id);
                 annotation
                     .subtype(AnnotationType::Link)
@@ -1195,9 +1221,7 @@ fn page_tags(page_index: usize, page: &LayoutPage) -> PageTags {
             let mcid = next_mcid;
             next_mcid += 1;
             let reading_order = line.reading_order.unwrap_or(10_000 + mcid);
-            let annotation_ref = line
-                .link_page
-                .map(|_| Ref::new(500_000 + page_index as i32 * 10_000 + index as i32));
+            let annotation_ref = line.link_page.map(|_| annotation_ref(page_index, index));
             let source_semantic_id = line
                 .semantic_id
                 .clone()
@@ -1267,7 +1291,7 @@ fn page_tags(page_index: usize, page: &LayoutPage) -> PageTags {
             .min()
             .unwrap_or_default();
         elements.push(TagElement {
-            reference: Ref::new(400_000 + page_index as i32 * 10_000 + parent_index as i32),
+            reference: page_scoped_ref(page_index, LIST_PARENT_OFFSET, parent_index),
             mcids: Vec::new(),
             role: StructRole::L,
             alt_text: None,
@@ -1297,7 +1321,7 @@ fn page_tags(page_index: usize, page: &LayoutPage) -> PageTags {
             .min()
             .unwrap_or_default();
         elements.push(TagElement {
-            reference: Ref::new(450_000 + page_index as i32 * 10_000 + parent_index as i32),
+            reference: page_scoped_ref(page_index, TOC_PARENT_OFFSET, parent_index),
             mcids: Vec::new(),
             role: StructRole::TOCI,
             alt_text: None,
@@ -1358,10 +1382,10 @@ fn image_struct_role(role: Option<&str>) -> StructRole {
     StructRole::Figure
 }
 
-fn annotation_parent_key(page_count: usize, page_index: usize, annotation_ref: Ref) -> i32 {
+fn annotation_parent_key(page_count: usize, page_index: usize, annotation_reference: Ref) -> i32 {
     page_count as i32
-        + page_index as i32 * 10_000
-        + (annotation_ref.get() - (500_000 + page_index as i32 * 10_000))
+        + page_index as i32 * PAGE_TAG_ITEM_LIMIT as i32
+        + (annotation_reference.get() - annotation_ref(page_index, 0).get())
 }
 
 fn struct_role(role: LayoutSemanticRole) -> StructRole {
@@ -1377,7 +1401,20 @@ fn struct_role(role: LayoutSemanticRole) -> StructRole {
 }
 
 fn tag_ref(page_index: usize, mcid: i32) -> Ref {
-    Ref::new(100_000 + page_index as i32 * 10_000 + mcid)
+    page_scoped_ref(page_index, 0, mcid as usize)
+}
+
+fn annotation_ref(page_index: usize, line_index: usize) -> Ref {
+    page_scoped_ref(page_index, ANNOTATION_OFFSET, line_index)
+}
+
+fn page_scoped_ref(page_index: usize, offset: i32, item_index: usize) -> Ref {
+    Ref::new(
+        PAGE_TAG_OBJECT_BASE
+            + page_index as i32 * PAGE_TAG_OBJECT_STRIDE
+            + offset
+            + item_index as i32,
+    )
 }
 
 fn opacity_key(opacity: f32) -> u16 {
@@ -1718,4 +1755,31 @@ fn compress(bytes: &[u8]) -> Result<Vec<u8>, Diagnostic> {
     encoder
         .finish()
         .map_err(|error| Diagnostic::error("PRESS_COMPRESSION_FAILED", error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    #[test]
+    fn page_scoped_pdf_object_references_remain_unique_across_long_books() {
+        let page_count = 300;
+        let mut references = BTreeSet::new();
+        for page_index in 0..page_count {
+            for item_index in 0..100 {
+                assert!(references.insert(tag_ref(page_index, item_index).get()));
+                assert!(references.insert(
+                    page_scoped_ref(page_index, LIST_PARENT_OFFSET, item_index as usize).get()
+                ));
+                assert!(references.insert(
+                    page_scoped_ref(page_index, TOC_PARENT_OFFSET, item_index as usize).get()
+                ));
+                assert!(references.insert(annotation_ref(page_index, item_index as usize).get()));
+            }
+        }
+        let opacity_base = PAGE_TAG_OBJECT_BASE + page_count as i32 * PAGE_TAG_OBJECT_STRIDE;
+        assert!(references.iter().all(|reference| *reference < opacity_base));
+    }
 }

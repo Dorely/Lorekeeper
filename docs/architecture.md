@@ -342,6 +342,10 @@ bleed, and captions, structured Designed Pages and cover scenes, reusable
 styles, vector shapes, logical reading order, page-size overrides for eligible
 Digital PDFs, full-wrap cover geometry, EAN-13 bars, and PDF serialization.
 Structured text remains text in the output rather than a rasterized page image.
+Digital covers declare no barcode mode; print-only Lorekeeper and vendor-overlay
+barcode modes are rejected for the Digital PDF profile. PDF structure,
+annotation, and parent objects use disjoint page-scoped reference ranges so
+long tagged books cannot reuse an indirect object ID across pages.
 Group containers resolve into child geometry, rotation, opacity, visibility,
 locks, and z-order in canvases, export, generation targets, and Press rather
 than acting as editor-only metadata.
@@ -384,7 +388,10 @@ while free-standing library generation may also use WebP.
 The structured-manuscript, publication-edition, and owned press-runtime
 boundaries are implemented. `PublicationRenderService` persists edition-scoped
 queue state, immutable artifact bytes/hashes, renderer/profile provenance,
-diagnostics, and stable block-to-page mappings. `PublicationRenderWorker`
+diagnostics, and stable block-to-page mappings. Render request assembly resolves
+font families from the effective manuscript, Designed Page, and cover scenes;
+this includes an unsaved seeded cover scene, so every referenced bundled font
+is staged even when that scene has not yet been persisted. `PublicationRenderWorker`
 recovers interrupted jobs and owns cancellation; `PublicationRenderProcessor`
 contains the child process, while `PublicationPressRuntime` resolves only a
 relative directory beneath the stable binary installation root
