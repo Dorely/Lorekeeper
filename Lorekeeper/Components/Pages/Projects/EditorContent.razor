@@ -875,6 +875,9 @@ else
     private DesignedPageWorkspace? _designedPageWorkspace;
     private async Task OpenDesignedPage(Guid compositionId)
     {
+        if (!DesignedPageIds.Contains(compositionId)
+            && !await ReconcileCurrentChapterAsync(refreshContextSurfaces: false))
+            return;
         _openCompositionId = compositionId;
         await SetModeAsync(EditorMode.Pages);
     }

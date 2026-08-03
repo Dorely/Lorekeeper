@@ -60,7 +60,7 @@
     }
     else
     {
-        <div class="chapter-preview-scroll @(_facing ? "facing" : "single") @($"fit-{_fit}")" style="--preview-zoom:@_zoom.ToString(System.Globalization.CultureInfo.InvariantCulture)">
+        <div class="chapter-preview-scroll @(_facing ? "facing" : "single") @($"fit-{_fit}")">
             @foreach (var page in _result.Pages)
             {
                 <article id="@($"page-{page.PhysicalPage}")" class="chapter-preview-page" style="@PageStyle(page)" aria-label="Page @(page.PageLabel ?? page.PhysicalPage.ToString())">
@@ -205,7 +205,15 @@
     private static string ButtonClass(bool active) => active ? "btn-primary" : "btn-outline-secondary";
     private void ChangeFit(ChangeEventArgs e) { _fit = e.Value?.ToString() ?? "page"; if (_fit != "zoom") _zoom = 1; }
     private void ChangeZoom(double amount) { _fit = "zoom"; _zoom = Math.Clamp(_zoom + amount, .35, 2.5); }
-    private string PageStyle(ChapterPreviewPage page) => $"--page-ratio:{page.WidthPoints / page.HeightPoints:R};--page-width:{page.WidthPoints:R};--page-height:{page.HeightPoints:R}";
+    private string PageStyle(ChapterPreviewPage page)
+    {
+        var ratio = page.WidthPoints / page.HeightPoints;
+        var fitWidthVh = 64 * ratio * _zoom;
+        var facingWidthVh = 62 * ratio * _zoom;
+        var fitMaximumPercent = 90 * _zoom;
+        var fullWidthPercent = 100 * _zoom;
+        return FormattableString.Invariant($"--page-ratio:{ratio:R};--page-width:{page.WidthPoints:R};--page-height:{page.HeightPoints:R};--page-fit-width:{fitWidthVh:R}vh;--page-facing-width:{facingWidthVh:R}vh;--page-fit-maximum:{fitMaximumPercent:R}%;--page-full-width:{fullWidthPercent:R}%");
+    }
     private static string Percent(double value, double total) => (value / total * 100).ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "%";
     private static string Color(double[]? rgb) => rgb is { Length: >= 3 } ? $"rgb({rgb[0] * 255:0} {rgb[1] * 255:0} {rgb[2] * 255:0})" : "transparent";
     private static string ShapeStyle(ChapterPreviewPage page, ChapterPreviewShape shape) => $"left:{Percent(shape.X, page.WidthPoints)};bottom:{Percent(shape.Y, page.HeightPoints)};width:{Percent(shape.Width, page.WidthPoints)};height:{Percent(shape.Height, page.HeightPoints)};z-index:{shape.ZIndex};opacity:{shape.Opacity:R};transform:rotate({shape.RotationDegrees:R}deg);background:{Color(shape.FillRgb)};border:{shape.StrokeWidth / page.WidthPoints * 100:R}cqw solid {Color(shape.StrokeRgb)}";

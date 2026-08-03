@@ -56,7 +56,8 @@ this feature's authorized checks.
   Pages, boxes, labels, and parity. Exercise single/facing display, fit page,
   fit width, zoom, presets, custom page setup, failure diagnostics, retry, and
   switching away during typesetting. Confirm cancellation never leaves a Press
-  process or a permanently spinning preview.
+  process or a permanently spinning preview. Confirm every returned page has
+  its own non-overlapping canvas at every display mode and zoom level.
 - Confirm Read leaves selected side panes mounted and never displays the
   read-only editing surface as a preview.
 
@@ -64,6 +65,7 @@ this feature's authorized checks.
 
 - Insert a Designed Page between ordinary blocks, click its atom, and confirm the
   center column switches to Pages while assistant/context panes remain mounted.
+  Confirm a newly created page can open immediately without reloading the chapter.
   Exercise zero-, one-, and multiple-page selection plus previous/next movement,
   mode/page switches, autosave, and revision conflicts.
 - Confirm a new page uses project page setup and an existing page retains its

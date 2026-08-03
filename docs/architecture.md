@@ -246,7 +246,12 @@ leaving the UI indefinitely busy. It supports single/facing display,
 fit-page/fit-width, zoom, and project page setup; it never substitutes a
 read-only ProseMirror view. Figure and Designed Page insertion use editor-owned
 forms rather than native browser prompts so the workflows behave consistently
-in the Electron host. A Designed Page atom
+in the Electron host. Preview canvases receive server-computed, valid CSS
+lengths for their selected fit and zoom, and participate in normal flex/grid
+flow so every Press page occupies a distinct canvas. When composition creation
+advances the manuscript outside ordinary editor autosave, Pages navigation
+reconciles the parent chapter snapshot before evaluating its available page
+IDs. A Designed Page atom
 shows its name, mode, status, and artwork preview, and selecting it opens the
 contextual Pages mode in the same center column. The workspace provides direct
 pointer move/resize/rotate, atomic image placement with required fit, crop
