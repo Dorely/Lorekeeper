@@ -83,6 +83,22 @@ else
     </div>
 }
 
+@if (_previewArtifact is { } previewArtifact && Project is not null)
+{
+    <div class="publish-modal-backdrop" role="presentation" @onclick="ClosePdfPreview">
+        <section class="publish-modal pdf-preview-modal" role="dialog" aria-modal="true" aria-labelledby="reading-pdf-preview-title" @onclick:stopPropagation="true">
+            <header>
+                <div><span class="eyebrow">Private review copy</span><h2 id="reading-pdf-preview-title">Reading PDF preview</h2></div>
+                <div class="button-row">
+                    <a class="btn btn-sm btn-outline-primary" href="@DownloadUrl(previewArtifact.Id)" download="@previewArtifact.FileName">Save reading PDF</a>
+                    <button class="btn-close" aria-label="Close reading PDF preview" @onclick="ClosePdfPreview"></button>
+                </div>
+            </header>
+            <iframe src="@ViewUrl(previewArtifact.Id)" title="Core Book reading PDF preview"></iframe>
+        </section>
+    </div>
+}
+
 @if (_coverEditorOpen && Project is not null)
 {
     <CoverCompositionWorkspace ProjectId="Project.Id"
@@ -117,6 +133,7 @@ else
     private bool _busy;
     private bool _addReleaseOpen;
     private bool _coverEditorOpen;
+    private PublicationArtifactView? _previewArtifact;
     private bool _coreDirty;
     private bool _coreOutlineDirty;
     private bool _releaseDirty;
@@ -151,6 +168,7 @@ else
     private async Task LoadCoreAsync()
     {
         if (Project is null) return;
+        _previewArtifact = null;
         _loading = true; _error = null;
         try
         {
@@ -184,6 +202,7 @@ else
     {
         if (Project is null) return;
         await SavePendingAsync();
+        _previewArtifact = null;
         _loading = true; _error = null;
         try
         {
@@ -213,7 +232,7 @@ else
             <div><span class="eyebrow">Private review copy</span><h1>Core Book</h1><p>Shared book details, content, design, and cover. Publication releases inherit these values live.</p></div>
             <div class="primary-action"><button class="btn btn-primary" disabled="@(_busy || HasActivePreparation)" @onclick="PrepareCoreAsync">@PreparationButton("Prepare reading PDF")</button><small>A tagged review PDF—not a publication product.</small></div>
             @PreparationStatus()
-            @ArtifactDownloads([PublicationArtifactKind.ReadingPdf])
+            @CoreDownloads()
         </section>
 
         <section class="workspace-card"><header><div><span class="step">01</span><div><h2>Book details</h2><p>Enter these once. Releases use them unless customized.</p></div></div><button class="btn btn-sm btn-primary" disabled="@((!_coreDirty && !_coreOutlineDirty) || _busy)" @onclick="SaveCoreAsync">Save changes</button></header>
@@ -269,7 +288,6 @@ else
 
         <section class="workspace-card split"><div><span class="eyebrow">Book design</span><h2>Page and text defaults</h2><p>@_core!.PageSetup.PageWidthInches × @_core.PageSetup.PageHeightInches in pages · @_core.PageSetup.PageMarginInches in margins · @_core.PageSetup.BodyFontSizePoints pt body text</p><p class="muted">Managed by Project Page Setup and Book Text Styles. Print releases check compatibility when prepared.</p></div><div><span class="eyebrow">Core cover</span><h2>Reusable front cover</h2><p>The front cover flows into EPUB and PDF releases and becomes the front panel of paperback covers.</p><div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="OpenCoreCoverAsync">Edit Core cover</button><span class="status-pill">Revision @_core.CoverRevision</span></div></div></section>
 
-        <section class="workspace-card compact"><header><div><span class="step">04</span><div><h2>Other exports</h2><p>Portable text copies of the Core Book.</p></div></div></header><div class="button-row"><button class="btn btn-outline-primary" @onclick="() => ExportCoreAsync(PublishExportFormat.Markdown)">Download Markdown</button><button class="btn btn-outline-primary" @onclick="() => ExportCoreAsync(PublishExportFormat.PlainText)">Download plain text</button></div></section>
     </div>;
 
     private RenderFragment ReleaseView() => @<div class="workspace-stack">
@@ -354,6 +372,16 @@ else
     {
         <div class="downloads">@foreach (var artifact in _artifacts.Where(item => Kinds.Contains(item.Kind) && !item.IsLegacy && !item.IsStale).GroupBy(item => item.Kind).Select(group => group.First())){<a class="btn btn-sm btn-outline-primary" href="@DownloadUrl(artifact.Id)" download="@artifact.FileName">@DownloadLabel(artifact.Kind)</a>}</div>
     }</text>;
+
+    private RenderFragment CoreDownloads() => @<div class="downloads core-downloads">
+        @if (CurrentArtifact(PublicationArtifactKind.ReadingPdf) is { } readingPdf)
+        {
+            <a class="btn btn-sm btn-outline-primary" href="@DownloadUrl(readingPdf.Id)" download="@readingPdf.FileName">Save reading PDF</a>
+            <button class="btn btn-sm btn-outline-primary" @onclick="() => _previewArtifact = readingPdf">Preview PDF</button>
+        }
+        <button class="btn btn-sm btn-outline-primary" @onclick="() => ExportCoreAsync(PublishExportFormat.Markdown)">Download Markdown</button>
+        <button class="btn btn-sm btn-outline-primary" @onclick="() => ExportCoreAsync(PublishExportFormat.PlainText)">Download plain text</button>
+    </div>;
 
     private void BeginCoreMatterEdit(PublicationMatterView item)
     {
@@ -755,6 +783,9 @@ else
     private void ChooseFormat(PublicationEditionFormat format) { _newFormat = format; _newReleaseName = ReleaseTypeLabel(format); if (format != PublicationEditionFormat.Paperback) _newVendor = PublicationVendor.Generic; }
     private string PreparationButton(string idle) => _preparations.FirstOrDefault()?.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing ? "Preparing…" : idle;
     private bool HasActivePreparation => _preparations.FirstOrDefault()?.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing;
+    private PublicationArtifactView? CurrentArtifact(PublicationArtifactKind kind) => _artifacts.FirstOrDefault(item => item.Kind == kind && !item.IsLegacy && !item.IsStale);
+    private void ClosePdfPreview() => _previewArtifact = null;
+    private string ViewUrl(Guid artifactId) => $"/projects/{Project!.Id:N}/publish/artifacts/{artifactId:N}";
     private string DownloadUrl(Guid artifactId) => $"/projects/{Project!.Id:N}/publish/artifacts/{artifactId:N}/download";
     private static string DownloadLabel(PublicationArtifactKind kind) => kind switch { PublicationArtifactKind.ReadingPdf => "Save reading PDF", PublicationArtifactKind.InteriorPdf => "Save interior PDF", PublicationArtifactKind.CoverPdf => "Save cover PDF", PublicationArtifactKind.BookPdf => "Save book PDF", PublicationArtifactKind.Epub => "Save EPUB", PublicationArtifactKind.PublicationPackage => "Save package", _ => $"Save {kind}" };
     private static IReadOnlyList<PublicationArtifactKind> ReleaseArtifactKinds(PublicationEditionFormat format) => format switch { PublicationEditionFormat.Paperback => [PublicationArtifactKind.InteriorPdf, PublicationArtifactKind.CoverPdf, PublicationArtifactKind.PublicationPackage], PublicationEditionFormat.Epub => [PublicationArtifactKind.Epub, PublicationArtifactKind.PublicationPackage], _ => [PublicationArtifactKind.BookPdf, PublicationArtifactKind.PublicationPackage] };

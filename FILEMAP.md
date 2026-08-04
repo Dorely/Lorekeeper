@@ -232,7 +232,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Two-column Core Book/release workspace with assistant, target chips/add-release flow, live inheritance/override controls, format-gated settings, Core reading copy, one-action preparation, blockers, and immutable downloads. |
+| `PublishContent.razor` (+ `.razor.css`) | Two-column Core Book/release workspace with assistant, target chips/add-release flow, live inheritance/override controls, format-gated settings, in-app Core PDF preview, one-action preparation, blockers, and immutable downloads. |
 | `PublishChatPanel.razor` (+ `.razor.css`) | Publish adapter over shared `ChatSurface` with persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/

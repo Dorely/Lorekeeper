@@ -53,7 +53,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   releases inherit Core values live and store only explicit field or collection
   overrides; ISBN, destination, proof, package, and product settings remain
   release-specific. No release or ISBN is created automatically.
-- A Core reading PDF for private review and sharing, plus one-action preparation
+- An in-app preview and immutable download for the Core reading PDF used for
+  private review and sharing, plus one-action preparation
   jobs that compile, render, validate, and store or package the selected Core or
   release target. Paperback presets cover KDP, IngramSpark, and other printers;
   EPUB and PDF ebook workspaces expose only relevant controls. The full-height

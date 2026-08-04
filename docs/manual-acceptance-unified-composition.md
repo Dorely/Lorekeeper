@@ -10,7 +10,9 @@ the live test project; terminate the browser host after the run.
   shared details/content/matter/design/cover remain usable, and no release or
   ISBN is created implicitly.
 - Supply title, author, and language, choose **Prepare reading PDF**, reconnect
-  after navigation, and download the current immutable private reading copy.
+  after navigation, preview the current PDF in-app, and download the immutable
+  private reading copy. Confirm the Markdown and plain-text downloads sit beside
+  the reading-PDF actions rather than in a separate section.
   Confirm it is never labeled publishable, packaged, vendor-validated, or ISBN
   bearing.
 - Create Paperback (KDP, IngramSpark, and Other printer where applicable), EPUB
