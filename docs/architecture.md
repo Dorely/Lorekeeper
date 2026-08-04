@@ -219,6 +219,14 @@ and page starts. Text-bearing blocks can carry sparse overrides of those
 properties; direct overrides take precedence over Book Text Styles and built-in
 defaults. The semantic editor, EPUB formatter, chapter preview, and publication
 PDF renderer resolve the same style properties.
+The primary editor toolbar keeps a saved-style picker beside focused apply-to-
+paragraph and apply-to-chapter actions. Saving the current paragraph as a style
+flushes it first, extracts inherited style properties plus sparse presentation
+overrides server-side, creates one reusable definition, and applies its stable
+role back to that paragraph. Editor assistants use the same extraction policy
+and a compact style-ID application tool; chapter-wide styling never requires a
+model to emit or receive one operation per block. Applying a saved style clears
+direct paragraph presentation while preserving inline content marks.
 `IManuscriptService` is the only runtime manuscript write boundary. Its EF
 optimistic-concurrency token and the project-scoped in-process/file mutation
 lease prevent simultaneous editors, imports, image deletion, and assistants

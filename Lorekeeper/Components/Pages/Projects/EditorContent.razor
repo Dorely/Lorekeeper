@@ -181,8 +181,8 @@ else
             @if (_mode == EditorMode.Edit)
             {
                 <details class="manuscript-style-details">
-                    <summary>Book Text Styles</summary>
-                    <ManuscriptStylesPanel @key="_styleCatalogVersion"
+                    <summary>Manage Book Text Styles</summary>
+                    <ManuscriptStylesPanel @key="_stylePanelVersion"
                                            ProjectId="Project.Id"
                                            BeforeChange="FlushAsync"
                                            Changed="OnManuscriptStylesChangedAsync" />
@@ -200,6 +200,7 @@ else
                                        IsVisible="@(_mode == EditorMode.Edit)"
                                        IsReadOnly="EditorReadOnly"
                                        OpenDesignedPage="OpenDesignedPage"
+                                       StyleCatalogChanged="OnEditorStyleCatalogChanged"
                                        SaveAsync="SaveDocumentAsync" />
                 }
 
@@ -813,6 +814,7 @@ else
     private ChapterBodyEditor? _bodyEditor;
     private EditorDocumentState? _editorDocument;
     private long _styleCatalogVersion;
+    private long _stylePanelVersion;
     private Guid? _openCompositionId;
     private long _previewRefreshSignal;
 
@@ -1425,7 +1427,10 @@ else
         if (!await FlushAsync())
             return;
         _styleCatalogVersion++;
+        _stylePanelVersion++;
     }
+
+    private void OnEditorStyleCatalogChanged() => _stylePanelVersion++;
 
     private string ModeButtonClass(EditorMode mode) =>
         _mode == mode
@@ -3007,6 +3012,7 @@ else
         finally
         {
             _styleCatalogVersion++;
+            _stylePanelVersion++;
             _chapterLocked = false;
             try
             {
@@ -3066,6 +3072,7 @@ else
         finally
         {
             _styleCatalogVersion++;
+            _stylePanelVersion++;
             StateHasChanged();
         }
     }

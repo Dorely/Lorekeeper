@@ -46,6 +46,23 @@ public sealed class ManuscriptStyleService(
         ],
         StringComparer.OrdinalIgnoreCase);
 
+    public static string RoleFromName(string name)
+    {
+        var normalized = string.Join(
+            '-',
+            name.Trim().ToLowerInvariant().Split(
+                [' ', '_', '-', '.', '/', '\\'],
+                StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => new string(part.Where(char.IsLetterOrDigit).ToArray()))
+                .Where(part => part.Length > 0));
+        if (string.IsNullOrWhiteSpace(normalized) || !char.IsLetter(normalized[0]))
+            normalized = $"style-{normalized}";
+        normalized = normalized.Length <= 72 ? normalized : normalized[..72];
+        return ManuscriptSemanticRoles.IsValid(normalized)
+            ? normalized
+            : ManuscriptSemanticRoles.NormalizeLegacy($"style-{name}");
+    }
+
     public async Task<IReadOnlyList<ManuscriptStyleView>> ListAsync(
         Guid projectId,
         CancellationToken cancellationToken = default) =>

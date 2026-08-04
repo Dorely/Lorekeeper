@@ -161,7 +161,7 @@ public sealed class EditorChatTools(
                 name: "read_manuscript",
                 description:
                     "Read bounded semantic manuscript blocks with stable block IDs, inline marks, style roles, source hash, and the current revision token. " +
-                    "Use this before any manuscript mutation, pass the returned revision and operations once to preview_manuscript_operations, then pass only its previewId to apply_manuscript_operations."),
+                    "Use this before manuscript mutations. For prose/content changes, pass the returned revision and operations once to preview_manuscript_operations, then pass only its previewId to apply_manuscript_operations. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
@@ -176,7 +176,7 @@ public sealed class EditorChatTools(
                     manuscriptPreviews.PreviewAsync(context, chapterId, expectedRevision, operations),
                 name: "preview_manuscript_operations",
                 description:
-                    "Validate and stage semantic insert, replace, delete, move, split, merge, block-type, block-style, and inline-mark operations without saving. " +
+                    "Validate and stage semantic insert, replace, delete, move, split, merge, block-type, focused block-style, and inline-mark operations without saving. Use apply_manuscript_style for chapter-wide or repeated reusable styling. " +
                     "Submit the operation payload here exactly once. Returns a compact opaque previewId, changed stable block IDs, projected counts, hashes, and next revision; it does not echo the manuscript. Stale revisions fail closed."),
 
             AIFunctionFactory.Create(
@@ -256,10 +256,9 @@ public sealed class EditorChatTools(
                 description: "Revision-check replace or reformat one stable Figure while preserving every unrelated manuscript block. Omit caption to preserve it."),
             AIFunctionFactory.Create(
                 method: (
-                    Guid? styleId,
                     string name,
                     string kind,
-                    string semanticRole,
+                    Guid? styleId = null,
                     long? expectedRevision = null,
                     string? fontFamilyKey = null,
                     double? fontSizePoints = null,
@@ -280,7 +279,6 @@ public sealed class EditorChatTools(
                         styleId,
                         name,
                         kind,
-                        semanticRole,
                         expectedRevision,
                         fontFamilyKey,
                         fontSizePoints,
@@ -298,8 +296,19 @@ public sealed class EditorChatTools(
                         startOnNewPage),
                 name: "upsert_manuscript_style",
                 description:
-                    "Create or revision-check update a named paragraph or character style through the shared style service. Paragraph styles can define spacing, alignment, whole-paragraph and first-line or hanging indents, and page-start behavior. "
-                    + "Use list_manuscript_styles first; updates require styleId and expectedRevision."),
+                    "Create or revision-check update a reusable paragraph or character Book Text Style from a compact definition. Lorekeeper owns the internal semantic key. Paragraph styles can define font treatment, spacing, alignment, whole-paragraph and first-line or hanging indents, and page-start behavior. Use list_manuscript_styles first; updates require styleId and expectedRevision."),
+            AIFunctionFactory.Create(
+                method: (Guid chapterId, long expectedRevision, string blockId, string name) =>
+                    CreateParagraphStyleFromBlockAsync(context, chapterId, expectedRevision, blockId, name),
+                name: "create_paragraph_style_from_block",
+                description:
+                    "Create a reusable paragraph Book Text Style by extracting one styled paragraph, heading, block quote, or list item. Reads the existing style plus direct paragraph formatting server-side, so do not resend text, marks, or formatting. The source chapter revision must be current."),
+            AIFunctionFactory.Create(
+                method: (Guid styleId, Guid chapterId, long expectedRevision, string[]? blockIds = null) =>
+                    ApplyManuscriptStyleAsync(context, styleId, chapterId, expectedRevision, blockIds),
+                name: "apply_manuscript_style",
+                description:
+                    "Apply one saved paragraph Book Text Style without sending per-block style operations. Omit blockIds to style every paragraph, heading, block quote, and list item in the chapter; provide stable block IDs for a focused application. Direct paragraph overrides are cleared so the saved style controls appearance. Figures, Designed Pages, and scene breaks are preserved. Use one compact call per chapter."),
             AIFunctionFactory.Create(
                 method: (Guid styleId, long expectedRevision) =>
                     DeleteManuscriptStyleAsync(context, styleId, expectedRevision),
@@ -466,7 +475,6 @@ public sealed class EditorChatTools(
         Guid? styleId,
         string name,
         string kind,
-        string semanticRole,
         long? expectedRevision,
         string? fontFamilyKey,
         double? fontSizePoints,
@@ -485,13 +493,18 @@ public sealed class EditorChatTools(
     {
         if (!Enum.TryParse<ManuscriptStyleKind>(kind, ignoreCase: true, out var parsedKind))
             throw new InvalidOperationException("Style kind must be Paragraph or Character.");
+        var styles = await CurrentManuscriptStylesAsync(ctx);
+        var current = styleId is Guid currentId
+            ? styles.FirstOrDefault(style => style.Id == currentId)
+                ?? throw new InvalidOperationException("The Book Text Style was not found.")
+            : null;
         var stagedStyleId = styleId
             ?? (ctx.ReviewEdits && ctx.EditorStaging is not null ? Guid.NewGuid() : null);
         var input = new ManuscriptStyleInput(
                 stagedStyleId,
                 name,
                 parsedKind,
-                semanticRole,
+                current?.SemanticRole ?? ManuscriptStyleService.RoleFromName(name),
                 new ManuscriptStyleProperties(
                     fontFamilyKey,
                     fontSizePoints,
@@ -508,21 +521,131 @@ public sealed class EditorChatTools(
                     firstLineIndentEm,
                     startOnNewPage),
                 expectedRevision);
+        return await UpsertManuscriptStyleInputAsync(ctx, input, current, styles);
+    }
+
+    private async Task<string> CreateParagraphStyleFromBlockAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        long expectedRevision,
+        string blockId,
+        string name)
+    {
+        var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken)
+            ?? throw new InvalidOperationException("The chapter was not found.");
+        if (chapter.ProjectId != ctx.ProjectId)
+            throw new InvalidOperationException("The chapter was not found in this project.");
+        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
+            ?? throw new InvalidOperationException("The chapter manuscript was not found.");
+        var source = ctx.ReviewEdits
+            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
+                ? staged
+                : snapshot.Document;
+        if (source.Revision != expectedRevision)
+            throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
+        var block = source.Content.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, blockId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException("The source paragraph was not found.");
+        var styles = await CurrentManuscriptStylesAsync(ctx);
+        var input = new ManuscriptStyleInput(
+            ctx.ReviewEdits && ctx.EditorStaging is not null ? Guid.NewGuid() : null,
+            name,
+            ManuscriptStyleKind.Paragraph,
+            ManuscriptStyleService.RoleFromName(name),
+            ManuscriptStyleTemplateExtractor.Extract(block, styles));
+        return await UpsertManuscriptStyleInputAsync(ctx, input, null, styles);
+    }
+
+    private async Task<string> ApplyManuscriptStyleAsync(
+        EditorChatContext ctx,
+        Guid styleId,
+        Guid chapterId,
+        long expectedRevision,
+        string[]? blockIds)
+    {
+        try
+        {
+            var style = (await CurrentManuscriptStylesAsync(ctx)).FirstOrDefault(candidate => candidate.Id == styleId)
+                ?? throw new InvalidOperationException("The Book Text Style was not found.");
+            if (style.Kind != ManuscriptStyleKind.Paragraph)
+                throw new InvalidOperationException("Choose a paragraph Book Text Style for manuscript blocks.");
+            var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
+                ?? throw new InvalidOperationException("The chapter manuscript was not found.");
+            var source = ctx.ReviewEdits
+                && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
+                    ? staged
+                    : snapshot.Document;
+            if (source.Revision != expectedRevision)
+                throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
+            var operations = ManuscriptStyleTemplateExtractor.BuildApplyOperations(
+                source,
+                style.SemanticRole,
+                blockIds);
+            var affectedCount = operations.Count / 2;
+            return await ApplyFocusedManuscriptOperationsAsync(
+                ctx,
+                chapterId,
+                expectedRevision,
+                operations,
+                $"Apply Book Text Style {style.Name}",
+                $"Applied '{style.Name}' to {affectedCount} paragraph(s).",
+                changedIdLimit: 8);
+        }
+        catch (ManuscriptRevisionConflictException exception)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                code = "REVISION_CONFLICT",
+                targetId = chapterId,
+                currentRevision = exception.ActualRevision,
+                summary = exception.Message,
+                recovery = "Reread the compact manuscript and retry with the current revision; do not resend per-block style operations.",
+            });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                code = "STYLE_APPLICATION_REJECTED",
+                targetId = chapterId,
+                summary = exception.Message,
+            });
+        }
+    }
+
+    private async Task<IReadOnlyList<ManuscriptStyleView>> CurrentManuscriptStylesAsync(EditorChatContext ctx) =>
+        ctx.ReviewEdits && ctx.EditorStaging is not null
+            ? await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
+                manuscriptStyles,
+                ctx.TurnCancellationToken)
+            : await manuscriptStyles.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
+
+    private async Task<string> UpsertManuscriptStyleInputAsync(
+        EditorChatContext ctx,
+        ManuscriptStyleInput input,
+        ManuscriptStyleView? current,
+        IReadOnlyList<ManuscriptStyleView> styles)
+    {
         if (ctx.ReviewEdits && ctx.EditorStaging is not null)
         {
-            var draftStyles = await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
-                manuscriptStyles,
-                ctx.TurnCancellationToken);
-            var before = styleId is null
-                ? null
-                : draftStyles.FirstOrDefault(style => style.Id == styleId)
-                    ?? throw new InvalidOperationException("The Book Text Style was not found.");
-            var preview = ManuscriptStyleService.PreviewUpsert(draftStyles, input);
+            var preview = ManuscriptStyleService.PreviewUpsert(styles, input);
             var payload = JsonSerializer.Serialize(
-                new { staged = true, style = preview },
+                new
+                {
+                    ok = true,
+                    staged = true,
+                    targetId = preview.Id,
+                    revision = preview.Revision,
+                    preview.Name,
+                    kind = preview.Kind.ToString(),
+                    summary = $"Saved Book Text Style '{preview.Name}'.",
+                    mutation = new { kind = "manuscriptStyles" },
+                },
                 ManuscriptCodec.JsonOptions);
             await ctx.EditorStaging.StageManuscriptStyleChangeAsync(
-                before,
+                current,
                 input,
                 preview,
                 $"Upsert Book Text Style {preview.Name}",
@@ -535,7 +658,16 @@ public sealed class EditorChatTools(
             input,
             ctx.TurnCancellationToken);
         ctx.OnMutated();
-        return JsonSerializer.Serialize(new { style }, ManuscriptCodec.JsonOptions);
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            targetId = style.Id,
+            revision = style.Revision,
+            style.Name,
+            kind = style.Kind.ToString(),
+            summary = $"Saved Book Text Style '{style.Name}'.",
+            mutation = new { kind = "manuscriptStyles" },
+        }, ManuscriptCodec.JsonOptions);
     }
 
     private async Task<string> DeleteManuscriptStyleAsync(
@@ -1647,7 +1779,8 @@ public sealed class EditorChatTools(
         IReadOnlyList<ManuscriptOperation> operations,
         string reviewSummary,
         string resultSummary,
-        string? selectId = null)
+        string? selectId = null,
+        int? changedIdLimit = null)
     {
         var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken)
             ?? throw new KeyNotFoundException("Chapter was not found.");
@@ -1664,6 +1797,9 @@ public sealed class EditorChatTools(
             throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
 
         var applied = ManuscriptOperations.Apply(source, operations);
+        var returnedChangedIds = changedIdLimit is int limit
+            ? applied.ChangedBlockIds.Take(limit).ToList()
+            : applied.ChangedBlockIds;
         var styleCatalog = ctx.ReviewEdits && ctx.EditorStaging is not null
             ? await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
                 manuscriptStyles,
@@ -1683,7 +1819,8 @@ public sealed class EditorChatTools(
                 staged = true,
                 targetId = chapterId,
                 revision = applied.Document.Revision,
-                changedIds = applied.ChangedBlockIds,
+                changedIds = returnedChangedIds,
+                changedBlockCount = applied.ChangedBlockIds.Count,
                 summary = resultSummary,
                 selectId,
             });
@@ -1708,7 +1845,8 @@ public sealed class EditorChatTools(
             ok = true,
             targetId = chapterId,
             revision = result.Snapshot.Revision,
-            changedIds = applied.ChangedBlockIds,
+            changedIds = returnedChangedIds,
+            changedBlockCount = applied.ChangedBlockIds.Count,
             summary = resultSummary,
             selectId,
             mutation = new { kind = "manuscript", id = chapterId, selectId },

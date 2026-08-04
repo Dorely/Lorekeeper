@@ -10,7 +10,19 @@
     {
         <div class="alert alert-danger" role="alert">@_error</div>
     }
-    <div class="manuscript-style-form">
+    <header class="manuscript-styles-header">
+        <div>
+            <strong>Reusable text styles</strong>
+            <p>Format a paragraph in the editor and use <em>Save paragraph as style</em> for the fastest workflow. Create from scratch here when you need exact values.</p>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="StartNew">
+            Create from scratch
+        </button>
+    </header>
+    @if (_showForm)
+    {
+    <div class="manuscript-style-form-card">
+        <div class="manuscript-style-form">
         <label>Name <input class="form-control" @bind="_name" /></label>
         <label>
             Kind
@@ -37,10 +49,14 @@
         <label>Font size (pt) <input class="form-control" type="number" min="1" max="288" step="0.5" @bind="_fontSizePoints" /></label>
         <label>Weight <input class="form-control" type="number" min="100" max="900" step="100" @bind="_fontWeight" /></label>
         <label>Line height <input class="form-control" type="number" min="0.1" max="5" step="0.05" @bind="_lineHeight" /></label>
-        <label><input type="checkbox" @bind="_italic" /> Italic</label>
-        <label><input type="checkbox" @bind="_smallCaps" /> Small caps</label>
+        <label class="manuscript-style-check"><input type="checkbox" @bind="_italic" /> Italic</label>
+        <label class="manuscript-style-check"><input type="checkbox" @bind="_smallCaps" /> Small caps</label>
+        </div>
         @if (_kind == ManuscriptStyleKind.Paragraph)
         {
+            <details class="manuscript-style-advanced">
+                <summary>Paragraph spacing, indentation, and pagination</summary>
+                <div class="manuscript-style-form">
             <label>Space before (pt) <input class="form-control" type="number" min="0" max="288" step="0.5" @bind="_spaceBeforePoints" /></label>
             <label>Space after (pt) <input class="form-control" type="number" min="0" max="288" step="0.5" @bind="_spaceAfterPoints" /></label>
             <label>Left indent (em) <input class="form-control" type="number" min="0" max="12" step="0.1" @bind="_leftIndentEm" /></label>
@@ -58,31 +74,36 @@
             </label>
             <label><input type="checkbox" @bind="_keepWithNext" /> Keep with next in paginated output</label>
             <label><input type="checkbox" @bind="_startOnNewPage" /> Start on a new page</label>
+                </div>
+            </details>
         }
-        <button type="button" class="btn btn-sm btn-primary" @onclick="SaveAsync">
-            @(_editingId is null ? "Add book style" : "Save book style")
-        </button>
-        @if (_editingId is not null)
-        {
+        <div class="manuscript-style-actions">
+            <button type="button" class="btn btn-sm btn-primary" @onclick="SaveAsync">
+                @(_editingId is null ? "Create style" : "Save changes")
+            </button>
             <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ResetForm">Cancel</button>
-        }
+        </div>
     </div>
-    <table class="table table-sm">
-        <thead><tr><th>Style</th><th>Applies to</th><th></th></tr></thead>
-        <tbody>
-            @foreach (var style in _styles)
-            {
-                <tr @key="style.Id">
-                    <td>@style.Name</td>
-                    <td>@(style.Kind == ManuscriptStyleKind.Paragraph ? "Paragraphs" : "Selected text")</td>
-                    <td>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => Edit(style)">Edit</button>
-                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(style)">Delete</button>
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
+    }
+    @if (_styles.Count == 0)
+    {
+        <p class="manuscript-styles-empty">No saved styles yet. Style a paragraph once, then save it from the editor toolbar.</p>
+    }
+    else
+    {
+        <div class="manuscript-style-list">
+        @foreach (var style in _styles)
+        {
+            <article class="manuscript-style-card" @key="style.Id">
+                <div><strong>@style.Name</strong><span>@StyleSummary(style)</span></div>
+                <div class="manuscript-style-actions">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => Edit(style)">Edit</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(style)">Delete</button>
+                </div>
+            </article>
+        }
+        </div>
+    }
 </div>
 
 @code {
@@ -113,6 +134,7 @@
     private double? _firstLineIndentEm;
     private bool _startOnNewPage;
     private string? _error;
+    private bool _showForm;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -139,7 +161,7 @@
                     _editingId,
                     _name,
                     _kind,
-                    string.IsNullOrWhiteSpace(_semanticRole) ? RoleFromName(_name) : _semanticRole,
+                    string.IsNullOrWhiteSpace(_semanticRole) ? ManuscriptStyleService.RoleFromName(_name) : _semanticRole,
                     new ManuscriptStyleProperties(
                         _fontFamilyKey,
                         _fontSizePoints,
@@ -168,6 +190,7 @@
 
     private void Edit(ManuscriptStyleView style)
     {
+        _showForm = true;
         _editingId = style.Id;
         _expectedRevision = style.Revision;
         _name = style.Name;
@@ -220,6 +243,7 @@
 
     private void ResetForm()
     {
+        _showForm = false;
         _editingId = null;
         _expectedRevision = null;
         _name = string.Empty;
@@ -241,17 +265,21 @@
         _startOnNewPage = false;
     }
 
-    private static string RoleFromName(string name)
+    private void StartNew()
     {
-        var normalized = string.Join(
-            '-',
-            name.Trim().ToLowerInvariant().Split(
-                [' ', '_', '-', '.', '/', '\\'],
-                StringSplitOptions.RemoveEmptyEntries)
-                .Select(part => new string(part.Where(char.IsLetterOrDigit).ToArray()))
-                .Where(part => part.Length > 0));
-        if (string.IsNullOrWhiteSpace(normalized) || !char.IsLetter(normalized[0]))
-            normalized = $"style-{normalized}";
-        return normalized.Length <= 72 ? normalized : normalized[..72];
+        ResetForm();
+        _showForm = true;
+    }
+
+    private static string StyleSummary(ManuscriptStyleView style)
+    {
+        var details = new List<string>
+        {
+            style.Kind == ManuscriptStyleKind.Paragraph ? "Paragraph style" : "Selected-text style",
+        };
+        if (style.Definition.FontFamilyKey is { } family) details.Add(family);
+        if (style.Definition.FontSizePoints is { } size) details.Add($"{size:0.#} pt");
+        if (style.Definition.TextAlign is { } alignment) details.Add(alignment);
+        return string.Join(" · ", details);
     }
 }

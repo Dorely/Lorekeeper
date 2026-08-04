@@ -6,6 +6,7 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject IManuscriptStyleService Styles
+@inject IManuscriptService Manuscripts
 @inject IProjectImageService Images
 @inject Lorekeeper.Composition.ICompositionService Compositions
 
@@ -42,6 +43,7 @@
     [Parameter] public bool IsVisible { get; set; } = true;
     [Parameter] public bool IsReadOnly { get; set; }
     [Parameter] public EventCallback<Guid> OpenDesignedPage { get; set; }
+    [Parameter] public EventCallback StyleCatalogChanged { get; set; }
     [Parameter, EditorRequired]
     public Func<Guid, long, string, Task<SemanticEditorSaveResult>> SaveAsync { get; set; } = null!;
 
@@ -157,6 +159,42 @@
 
     [JSInvokable]
     public Task OnOpenDesignedPage(Guid compositionId) => OpenDesignedPage.InvokeAsync(compositionId);
+
+    [JSInvokable]
+    public async Task<object> OnCreateParagraphStyleFromBlock(
+        string name,
+        string blockId,
+        long expectedRevision)
+    {
+        var snapshot = await Manuscripts.GetManuscriptAsync(ChapterId)
+            ?? throw new InvalidOperationException("The chapter manuscript was not found.");
+        if (snapshot.Revision != expectedRevision)
+            throw new ManuscriptRevisionConflictException(expectedRevision, snapshot.Revision);
+        var block = snapshot.Document.Content.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, blockId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException("The selected paragraph was not found.");
+        var definition = ManuscriptStyleTemplateExtractor.Extract(
+            block,
+            await Styles.ListAsync(ProjectId));
+        var style = await Styles.UpsertAsync(
+            ProjectId,
+            new ManuscriptStyleInput(
+                null,
+                name,
+                ManuscriptStyleKind.Paragraph,
+                ManuscriptStyleService.RoleFromName(name),
+                definition));
+        await StyleCatalogChanged.InvokeAsync();
+        return new
+        {
+            style.Id,
+            style.Name,
+            kind = style.Kind.ToString().ToLowerInvariant(),
+            style.SemanticRole,
+            style.Definition,
+            style.Revision,
+        };
+    }
 
     private async Task<IReadOnlyList<DesignedPageEditorSummary>> LoadDesignedPageSummariesAsync()
     {

@@ -99,6 +99,17 @@ the live test project; terminate the browser host after the run.
   first-line indentation, and justification. Confirm Edit, Read, Core reading
   PDF, release PDF, and EPUB apply the same values, and confirm changing the
   style makes existing PDF artifacts stale.
+- Format one paragraph directly, choose **Save paragraph as style**, and confirm
+  the new style is applied to that paragraph and appears in the saved-style
+  picker without remounting the editor. Apply it to another selected paragraph,
+  then use **Apply to chapter** and confirm headings, block quotes, list items,
+  and ordinary paragraphs change while Figures, Designed Pages, and scene
+  breaks remain intact. Confirm direct paragraph overrides are cleared but
+  inline emphasis remains.
+- Ask Editor to extract a style from one stable block and apply it across a
+  chapter. Confirm the transcript contains compact create/apply calls rather
+  than one `setBlockStyle` operation per paragraph, and that Review edits stages
+  the style before the dependent manuscript change.
 - Open Advanced at both edges of the editor and confirm its panel remains fully
   inside the editor without horizontal scrolling or position drift. Select a
   Figure by clicking its artwork, scroll the manuscript, and confirm its styled

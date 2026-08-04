@@ -25,7 +25,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   intentional line breaks, scene
   breaks, quotations, list items, project-image figures with alt text and
   captions, Book Text Styles with reusable alignment, indentation, spacing, and
-  pagination, sparse per-paragraph overrides, rich inline marks, undo/redo,
+  pagination, one-click paragraph/chapter application, capture-from-paragraph,
+  compact assistant style tools, sparse per-paragraph overrides, rich inline marks, undo/redo,
   normalized paste, find/replace, and
   outline navigation. Manual edits and AI
   assistants share one revision-checked manuscript boundary; HTML is not

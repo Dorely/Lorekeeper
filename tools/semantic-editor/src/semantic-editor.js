@@ -500,7 +500,7 @@ function button(label, title, action) {
     return element;
 }
 
-function selectControl(label, options, onChange) {
+function selectControl(label, options, onChange, resetAfterChange = true) {
     const wrapper = document.createElement("label");
     wrapper.className = "semantic-editor-select-label";
     const text = document.createElement("span");
@@ -516,8 +516,8 @@ function selectControl(label, options, onChange) {
         select.append(option);
     }
     select.addEventListener("change", () => {
-        onChange(select.value);
-        select.value = "";
+        const requestedReset = onChange(select.value);
+        if (resetAfterChange || requestedReset === true) select.value = "";
     });
     wrapper.append(text, select);
     return wrapper;
@@ -725,13 +725,86 @@ function resetBlockRole(view) {
         transaction = transaction.setNodeMarkup(
             position,
             undefined,
-            {...node.attrs, id: node.attrs.id || newBlockId(), styleRole: role},
+            {...node.attrs, id: node.attrs.id || newBlockId(), styleRole: role, paragraphPresentation: null},
             node.marks);
         changed = true;
         return false;
     });
     if (changed) view.dispatch(transaction.scrollIntoView());
     view.focus();
+}
+
+const paragraphStyleNodeNames = new Set(["paragraph", "heading", "blockquote", "list_item"]);
+
+function selectedParagraphPositions(view) {
+    const {selection, doc} = view.state;
+    if (selection.empty) {
+        for (let depth = selection.$from.depth; depth > 0; depth--) {
+            const node = selection.$from.node(depth);
+            if (paragraphStyleNodeNames.has(node.type.name))
+                return [selection.$from.before(depth)];
+        }
+        return [];
+    }
+
+    const positions = [];
+    doc.nodesBetween(selection.from, selection.to, (node, position) => {
+        if (!paragraphStyleNodeNames.has(node.type.name)) return true;
+        positions.push(position);
+        return false;
+    });
+    return positions;
+}
+
+function chapterParagraphPositions(view) {
+    const positions = [];
+    view.state.doc.descendants((node, position) => {
+        if (!paragraphStyleNodeNames.has(node.type.name)) return true;
+        positions.push(position);
+        return false;
+    });
+    return positions;
+}
+
+function applyParagraphStyleAtPositions(view, positions, styleRole) {
+    if (!styleRole || positions.length === 0) return false;
+    let transaction = view.state.tr;
+    for (const position of positions) {
+        const node = transaction.doc.nodeAt(position);
+        if (!node || !paragraphStyleNodeNames.has(node.type.name)) continue;
+        transaction = transaction.setNodeMarkup(position, undefined, {
+            ...node.attrs,
+            id: node.attrs.id || newBlockId(),
+            styleRole,
+            paragraphPresentation: null
+        }, node.marks);
+    }
+    if (!transaction.docChanged) return false;
+    view.dispatch(transaction.scrollIntoView());
+    view.focus();
+    return true;
+}
+
+function applyParagraphStyle(view, styleRole, wholeChapter = false) {
+    const positions = wholeChapter ? chapterParagraphPositions(view) : selectedParagraphPositions(view);
+    return applyParagraphStyleAtPositions(view, positions, styleRole);
+}
+
+function selectedParagraphIdentity(view) {
+    const position = selectedParagraphPositions(view)[0];
+    if (!Number.isInteger(position)) return null;
+    const node = view.state.doc.nodeAt(position);
+    return node?.attrs?.id ? {blockId: node.attrs.id, position} : null;
+}
+
+function blockPositionById(doc, blockId) {
+    let found = null;
+    doc.descendants((node, position) => {
+        if (node.attrs?.id !== blockId) return true;
+        found = position;
+        return false;
+    });
+    return found;
 }
 
 function applyMark(view, markName, value = null) {
@@ -1431,40 +1504,46 @@ function sanitizeHtmlForPaste(html, styles = [], images = []) {
 
 function installNamedStyleRules(root, styles) {
     const styleElement = document.createElement("style");
-    const fontFamilies = {
-        serif: "Georgia, 'Times New Roman', serif",
-        sans: "Arial, Helvetica, sans-serif",
-        mono: "'Courier New', Courier, monospace"
+    styleElement.dataset.bookTextStyles = "true";
+    const update = currentStyles => {
+        styleElement.textContent = "";
+        const fontFamilies = {
+            serif: "Georgia, 'Times New Roman', serif",
+            sans: "Arial, Helvetica, sans-serif",
+            mono: "'Courier New', Courier, monospace"
+        };
+        for (const style of currentStyles) {
+            const definition = style.definition || {};
+            const selector = style.kind === "character"
+                ? `.semantic-editor.semantic-editor .semantic-prosemirror span[data-character-style=${JSON.stringify(style.semanticRole)} i]`
+                : `.semantic-editor.semantic-editor .semantic-prosemirror [data-style-role=${JSON.stringify(style.semanticRole)} i]`;
+            const declarations = [];
+            const family = fontFamilies[definition.fontFamilyKey?.toLowerCase()];
+            if (family) declarations.push(`font-family:${family}`);
+            if (definition.fontSizePoints) declarations.push(`font-size:${definition.fontSizePoints}pt`);
+            if (definition.fontWeight) declarations.push(`font-weight:${definition.fontWeight}`);
+            if (definition.italic === true) declarations.push("font-style:italic");
+            if (definition.smallCaps === true) declarations.push("font-variant-caps:small-caps");
+            if (definition.lineHeight) declarations.push(`line-height:${definition.lineHeight}`);
+            if (definition.spaceBeforePoints !== null && definition.spaceBeforePoints !== undefined)
+                declarations.push(`margin-top:${definition.spaceBeforePoints}pt`);
+            if (definition.spaceAfterPoints !== null && definition.spaceAfterPoints !== undefined)
+                declarations.push(`margin-bottom:${definition.spaceAfterPoints}pt`);
+            if (definition.leftIndentEm !== null && definition.leftIndentEm !== undefined)
+                declarations.push(`margin-left:${definition.leftIndentEm}em`);
+            if (definition.rightIndentEm !== null && definition.rightIndentEm !== undefined)
+                declarations.push(`margin-right:${definition.rightIndentEm}em`);
+            if (definition.firstLineIndentEm !== null && definition.firstLineIndentEm !== undefined)
+                declarations.push(`text-indent:${definition.firstLineIndentEm}em`);
+            if (["left", "right", "center", "justify"].includes(definition.textAlign?.toLowerCase()))
+                declarations.push(`text-align:${definition.textAlign.toLowerCase()}`);
+            if (declarations.length > 0)
+                styleElement.textContent += `${selector}{${declarations.join(";")}}\n`;
+        }
     };
-    for (const style of styles) {
-        const definition = style.definition || {};
-        const selector = style.kind === "character"
-            ? `.semantic-editor.semantic-editor .semantic-prosemirror span[data-character-style=${JSON.stringify(style.semanticRole)} i]`
-            : `.semantic-editor.semantic-editor .semantic-prosemirror [data-style-role=${JSON.stringify(style.semanticRole)} i]`;
-        const declarations = [];
-        const family = fontFamilies[definition.fontFamilyKey?.toLowerCase()];
-        if (family) declarations.push(`font-family:${family}`);
-        if (definition.fontSizePoints) declarations.push(`font-size:${definition.fontSizePoints}pt`);
-        if (definition.fontWeight) declarations.push(`font-weight:${definition.fontWeight}`);
-        if (definition.italic === true) declarations.push("font-style:italic");
-        if (definition.smallCaps === true) declarations.push("font-variant-caps:small-caps");
-        if (definition.lineHeight) declarations.push(`line-height:${definition.lineHeight}`);
-        if (definition.spaceBeforePoints !== null && definition.spaceBeforePoints !== undefined)
-            declarations.push(`margin-top:${definition.spaceBeforePoints}pt`);
-        if (definition.spaceAfterPoints !== null && definition.spaceAfterPoints !== undefined)
-            declarations.push(`margin-bottom:${definition.spaceAfterPoints}pt`);
-        if (definition.leftIndentEm !== null && definition.leftIndentEm !== undefined)
-            declarations.push(`margin-left:${definition.leftIndentEm}em`);
-        if (definition.rightIndentEm !== null && definition.rightIndentEm !== undefined)
-            declarations.push(`margin-right:${definition.rightIndentEm}em`);
-        if (definition.firstLineIndentEm !== null && definition.firstLineIndentEm !== undefined)
-            declarations.push(`text-indent:${definition.firstLineIndentEm}em`);
-        if (["left", "right", "center", "justify"].includes(definition.textAlign?.toLowerCase()))
-            declarations.push(`text-align:${definition.textAlign.toLowerCase()}`);
-        if (declarations.length > 0)
-            styleElement.textContent += `${selector}{${declarations.join(";")}}\n`;
-    }
+    update(styles);
     root.append(styleElement);
+    return {update};
 }
 
 function canonicalPlainText(doc, manuscriptId, revision) {
@@ -1564,7 +1643,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     status.className = "semantic-editor-status";
     status.setAttribute("aria-live", "polite");
     root.replaceChildren(editorChrome, surface, status);
-    installNamedStyleRules(root, namedStyles);
+    const namedStyleRules = installNamedStyleRules(root, namedStyles);
 
     let view;
     const saveNow = () => {
@@ -1730,6 +1809,90 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         status.textContent = `${words.toLocaleString()} words · ${text.length.toLocaleString()} characters · revision ${revision}`;
     };
 
+    let selectedParagraphStyleRole = "";
+    const paragraphStyles = () => namedStyles.filter(style => style.kind === "paragraph");
+    const styleOptions = () => [["", "Choose a saved style"], ["__reset__", "Reset paragraph to built-in style"]].concat(
+        paragraphStyles().map(style => [style.semanticRole, style.name]));
+    const stylePicker = selectControl(
+        "Book Text Style",
+        styleOptions(),
+        value => {
+            if (value === "__reset__") {
+                selectedParagraphStyleRole = "";
+                resetBlockRole(view);
+                return true;
+            }
+            selectedParagraphStyleRole = value;
+        },
+        false);
+    const styleControls = document.createElement("div");
+    styleControls.className = "semantic-editor-style-controls";
+    styleControls.append(
+        stylePicker,
+        button("Apply to paragraph", "Apply the chosen Book Text Style to the current paragraph or selected paragraphs", () => {
+            if (!selectedParagraphStyleRole) {
+                showEditorNotice(root, "Choose a saved Book Text Style first.");
+                return;
+            }
+            if (!applyParagraphStyle(view, selectedParagraphStyleRole))
+                showEditorNotice(root, "Place the cursor in a paragraph, heading, block quote, or list item first.");
+        }),
+        button("Apply to chapter", "Apply the chosen Book Text Style to every text paragraph in this chapter", () => {
+            if (!selectedParagraphStyleRole) {
+                showEditorNotice(root, "Choose a saved Book Text Style first.");
+                return;
+            }
+            if (!applyParagraphStyle(view, selectedParagraphStyleRole, true))
+                showEditorNotice(root, "This chapter has no compatible text paragraphs.");
+        }),
+        button("Save paragraph as style", "Capture the current paragraph formatting as a reusable Book Text Style", async () => {
+            const selected = selectedParagraphIdentity(view);
+            if (!selected) {
+                showEditorNotice(root, "Place the cursor in a paragraph, heading, block quote, or list item first.");
+                return;
+            }
+            const values = await showEditorForm(root, {
+                title: "Save paragraph as style",
+                description: "This captures the paragraph's spacing, alignment, indentation, pagination, inherited font settings, and whole-paragraph bold, italic, or small-caps formatting. Inline emphasis remains content formatting.",
+                submitLabel: "Save style",
+                fields: [{name: "name", label: "Style name", required: true}],
+                validate: value => value.name.trim().length > 80 ? "Use a name of 80 characters or fewer." : null
+            });
+            if (!values) return;
+            if (!await saveNow()) {
+                showEditorNotice(root, "Save the paragraph before creating its style.");
+                return;
+            }
+            try {
+                const style = await dotNetRef.invokeMethodAsync(
+                    "OnCreateParagraphStyleFromBlock",
+                    values.name.trim(),
+                    selected.blockId,
+                    revision);
+                namedStyles.push(style);
+                namedStyles.sort((left, right) => left.name.localeCompare(right.name));
+                paragraphRoles.add(style.semanticRole);
+                namedStyleRules.update(namedStyles);
+                const select = stylePicker.querySelector("select");
+                select.replaceChildren();
+                for (const [value, label] of styleOptions()) {
+                    const option = document.createElement("option");
+                    option.value = value;
+                    option.textContent = label;
+                    select.append(option);
+                }
+                select.value = style.semanticRole;
+                selectedParagraphStyleRole = style.semanticRole;
+                const position = blockPositionById(view.state.doc, selected.blockId);
+                if (Number.isInteger(position))
+                    applyParagraphStyleAtPositions(view, [position], style.semanticRole);
+                showEditorNotice(root, `Saved and applied “${style.name}”.`);
+            } catch (error) {
+                showEditorNotice(root, error?.message || "The Book Text Style could not be saved.");
+            }
+        })
+    );
+
     toolbar.append(
         selectControl("Block style", [
             ["", "Block style"],
@@ -1756,15 +1919,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         ], value => {
             if (value) applyHeadingLevel(view, Number(value));
         }),
-        selectControl(
-            "Book Text Style",
-            [["", "Book Text Style"], ["__reset__", "Reset to built-in style"]].concat(
-                namedStyles
-                    .filter(style => style.kind === "paragraph")
-                    .map(style => [style.semanticRole, style.name])),
-            value => value === "__reset__"
-                ? resetBlockRole(view)
-                : applyBlockRole(view, value)),
+        styleControls,
         selectControl(
             "Insert project image as figure",
             [["", "Insert figure"]].concat(
@@ -1861,7 +2016,9 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     advancedControls.className = "semantic-editor-advanced-controls";
     for (const control of [...toolbar.children]) {
         const selectLabel = control.querySelector?.("select")?.getAttribute("aria-label");
-        if (primaryTitles.has(control.title) || primarySelects.has(selectLabel)) continue;
+        if (control.classList.contains("semantic-editor-style-controls")
+            || primaryTitles.has(control.title)
+            || primarySelects.has(selectLabel)) continue;
         advancedControls.append(control);
     }
     advancedControls.append(

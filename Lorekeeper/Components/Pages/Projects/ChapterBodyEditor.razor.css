@@ -157,6 +157,28 @@
     background: var(--bs-body-bg, #fff);
 }
 
+.semantic-editor ::deep .semantic-editor-style-controls {
+    display: flex;
+    min-width: 0;
+    gap: .3rem;
+    align-items: center;
+    padding: .2rem;
+    border: 1px solid color-mix(in srgb, var(--bs-primary, #0d6efd) 20%, var(--bs-border-color, #ced4da));
+    border-radius: .45rem;
+    background: color-mix(in srgb, var(--bs-primary, #0d6efd) 4%, var(--bs-body-bg, #fff));
+}
+
+.semantic-editor ::deep .semantic-editor-style-controls .semantic-editor-select {
+    max-width: 13rem;
+}
+
+@media (max-width: 780px) {
+    .semantic-editor ::deep .semantic-editor-style-controls {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+}
+
 .semantic-editor ::deep .semantic-editor-button {
     padding: 0.25rem 0.55rem;
     font-weight: 600;

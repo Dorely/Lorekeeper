@@ -4,6 +4,35 @@
     padding: .75rem 0;
 }
 
+.manuscript-styles-header,
+.manuscript-style-card,
+.manuscript-style-actions {
+    display: flex;
+    gap: .65rem;
+    align-items: center;
+}
+
+.manuscript-styles-header,
+.manuscript-style-card {
+    justify-content: space-between;
+}
+
+.manuscript-styles-header p,
+.manuscript-styles-empty {
+    margin: .15rem 0 0;
+    color: var(--lk-text-muted, #667085);
+    font-size: .8rem;
+}
+
+.manuscript-style-form-card {
+    display: grid;
+    gap: .75rem;
+    padding: .8rem;
+    border: 1px solid var(--lk-border, #d0d5dd);
+    border-radius: .6rem;
+    background: var(--lk-surface-subtle, #f8f9fb);
+}
+
 .manuscript-style-form {
     display: flex;
     flex-wrap: wrap;
@@ -23,4 +52,36 @@
     min-width: auto;
     align-items: center;
     gap: .35rem;
+}
+
+.manuscript-style-advanced > summary {
+    cursor: pointer;
+    font-size: .82rem;
+    font-weight: 700;
+}
+
+.manuscript-style-advanced .manuscript-style-form {
+    margin-top: .65rem;
+}
+
+.manuscript-style-list {
+    display: grid;
+    gap: .45rem;
+}
+
+.manuscript-style-card {
+    padding: .55rem .65rem;
+    border: 1px solid var(--lk-border, #d0d5dd);
+    border-radius: .5rem;
+    background: var(--bs-body-bg, #fff);
+}
+
+.manuscript-style-card > div:first-child {
+    display: grid;
+    gap: .1rem;
+}
+
+.manuscript-style-card span {
+    color: var(--lk-text-muted, #667085);
+    font-size: .75rem;
 }

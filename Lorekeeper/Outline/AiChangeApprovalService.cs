@@ -515,6 +515,7 @@ public sealed class AiChangeApprovalService(
                 break;
             }
             case "apply_manuscript_operations":
+            case "apply_manuscript_style":
             case "apply_assigned_manuscript_operations":
             case "insert_manuscript_figure":
             case "patch_manuscript_figure":
@@ -538,6 +539,7 @@ public sealed class AiChangeApprovalService(
                 break;
             }
             case "upsert_manuscript_style":
+            case "create_paragraph_style_from_block":
             {
                 var staged = ReadRequired<ManuscriptStyleChange>(afterJson);
                 var input = staged.After
