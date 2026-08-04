@@ -117,6 +117,10 @@ restore it on that assistant message; this is required by providers such as
 Gemini that validate thought signatures on the immediate tool-result round.
 Persisted cross-turn history remains text-only and does not persist or replay
 provider tool protocol metadata.
+Feature adapters must accept any valid JSON shape returned by a read-only tool.
+Post-tool mutation projection inspects only object envelopes that can carry a
+mutation notice; array or scalar read results continue the turn without a
+workspace refresh rather than being treated as malformed mutations.
 `ChatTurnRuntime` and the singleton feature turn runners keep active turns alive
 across component disposal, buffer updates for reopened panels, and preserve
 explicit Stop as the cancellation path. Do not move active-turn ownership into a

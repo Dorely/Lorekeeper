@@ -1010,6 +1010,8 @@ public sealed class EditorChatService(
         {
             using var resultDocument = JsonDocument.Parse(resultJson);
             var root = resultDocument.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return null;
             if (root.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.False)
                 return null;
             if (toolName is "generate_project_image" or "edit_project_image" or "wait_project_image_job")
@@ -1072,24 +1074,31 @@ public sealed class EditorChatService(
     }
 
     private static Guid? ReadGuid(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var property)
+        element.ValueKind == JsonValueKind.Object
+        && element.TryGetProperty(propertyName, out var property)
         && property.ValueKind == JsonValueKind.String
         && Guid.TryParse(property.GetString(), out var value)
             ? value
             : null;
 
     private static string? ReadString(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+        element.ValueKind == JsonValueKind.Object
+        && element.TryGetProperty(propertyName, out var property)
+        && property.ValueKind == JsonValueKind.String
             ? property.GetString()
             : null;
 
     private static long? ReadLong(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var property) && property.TryGetInt64(out var value)
+        element.ValueKind == JsonValueKind.Object
+        && element.TryGetProperty(propertyName, out var property)
+        && property.TryGetInt64(out var value)
             ? value
             : null;
 
     private static IReadOnlyList<string> ReadStrings(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Array
+        element.ValueKind == JsonValueKind.Object
+        && element.TryGetProperty(propertyName, out var property)
+        && property.ValueKind == JsonValueKind.Array
             ? property.EnumerateArray().Select(item => item.ToString()).ToList()
             : [];
 
@@ -1117,7 +1126,9 @@ public sealed class EditorChatService(
         try
         {
             using var document = JsonDocument.Parse(result);
-            if (document.RootElement.TryGetProperty("jobId", out var jobId)
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("jobId", out var jobId)
+                && jobId.ValueKind == JsonValueKind.String
                 && Guid.TryParse(jobId.GetString(), out var parsed))
             {
                 return parsed;
